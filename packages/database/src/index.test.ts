@@ -92,6 +92,76 @@ describe("@hikat/database schema and operations", () => {
     expect(user?.role).toBe("ADMIN")
   })
 
+  it("enforces database-level CHECK constraint on users.role (rejects invalid roles via raw SQL)", () => {
+    const { sqlite } = setupTestDb()
+    const now = new Date().toISOString()
+
+    // PLAYER -> allowed
+    expect(() => {
+      sqlite
+        .prepare(
+          "INSERT INTO users (id, role, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run("u-sql-player", "PLAYER", "Player 1", now, now)
+    }).not.toThrow()
+
+    // ADMIN -> allowed
+    expect(() => {
+      sqlite
+        .prepare(
+          "INSERT INTO users (id, role, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run("u-sql-admin", "ADMIN", "Admin 1", now, now)
+    }).not.toThrow()
+
+    // Invalid role (e.g. MODERATOR, OWNER, SUPERADMIN, random string) -> rejected by SQLite CHECK constraint
+    expect(() => {
+      sqlite
+        .prepare(
+          "INSERT INTO users (id, role, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run("u-sql-invalid", "MODERATOR", "Hacker", now, now)
+    }).toThrow(/CHECK constraint failed/i)
+  })
+
+  it("enforces database-level CHECK constraint on external_accounts.provider (rejects invalid providers via raw SQL)", () => {
+    const { sqlite } = setupTestDb()
+    const now = new Date().toISOString()
+
+    sqlite
+      .prepare(
+        "INSERT INTO users (id, role, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run("u-parent", "PLAYER", "User", now, now)
+
+    // GOOGLE -> allowed
+    expect(() => {
+      sqlite
+        .prepare(
+          "INSERT INTO external_accounts (id, user_id, provider, provider_subject, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run("ea-g", "u-parent", "GOOGLE", "sub-g-1", now, now)
+    }).not.toThrow()
+
+    // DISCORD -> allowed
+    expect(() => {
+      sqlite
+        .prepare(
+          "INSERT INTO external_accounts (id, user_id, provider, provider_subject, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run("ea-d", "u-parent", "DISCORD", "sub-d-1", now, now)
+    }).not.toThrow()
+
+    // Invalid provider (e.g. GITHUB, TWITTER, FACEBOOK, random) -> rejected by SQLite CHECK constraint
+    expect(() => {
+      sqlite
+        .prepare(
+          "INSERT INTO external_accounts (id, user_id, provider, provider_subject, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run("ea-inv", "u-parent", "GITHUB", "sub-gh-1", now, now)
+    }).toThrow(/CHECK constraint failed/i)
+  })
+
   it("enforces unique (provider, provider_subject) constraint on external_accounts", () => {
     const { db } = setupTestDb()
 

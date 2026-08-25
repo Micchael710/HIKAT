@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "50c270af-e4b1-4f22-a03f-2c6e83f3cbcd",
+  "id": "5a811939-b252-4fd1-92fe-bfa739c01318",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "users": {
@@ -48,7 +48,12 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "users_role_check": {
+          "name": "users_role_check",
+          "value": "\"users\".\"role\" IN ('PLAYER', 'ADMIN')"
+        }
+      }
     },
     "external_accounts": {
       "name": "external_accounts",
@@ -151,7 +156,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "external_accounts_provider_check": {
+          "name": "external_accounts_provider_check",
+          "value": "\"external_accounts\".\"provider\" IN ('GOOGLE', 'DISCORD')"
+        }
+      }
     },
     "sessions": {
       "name": "sessions",

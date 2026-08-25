@@ -15,18 +15,25 @@ HiKAT strictly distinguishes between structured relational data and binary blob 
 ┌───────────────────────────────┐
 │     Cloudflare R2 (Objects)   │  Binary / Blob assets:
 │     Bucket: hikat-r2          │  - Custom skin textures (.png)
-│                               │  - Cape textures (.png)
+│     Binding: ASSETS           │  - Cape textures (.png)
 │                               │  - Modpack archives (.zip)
 │                               │  - Launcher distribution artifacts
 └───────────────────────────────┘
 ```
 
-## Cloudflare D1 Configuration
+## Cloudflare Resources & Worker Bindings
 
+### 1. Cloudflare D1 (Structured Relational Storage)
 - **Database Name:** `hikat-d1`
 - **Database ID:** `a2410123-4e73-4c0f-9263-412fa06d7bdc`
-- **Worker Binding:** `DB`
+- **Binding Mapping:** `DB -> hikat-d1` (configured in `services/backend/wrangler.jsonc` & `services/auth/wrangler.jsonc`)
 - **ORM:** Drizzle ORM (`drizzle-orm/d1`)
+
+### 2. Cloudflare R2 (Object / Asset Storage)
+- **Bucket Name:** `hikat-r2`
+- **Binding Mapping:** `ASSETS -> hikat-r2` (configured in `services/backend/wrangler.jsonc`)
+- **Location:** `ENAM` (Eastern North America)
+- **Usage:** Server-side asset operations (skin textures, capes, modpack files, artifacts). Auth service does not access R2.
 
 ## Single Source of Truth
 
@@ -39,12 +46,14 @@ The database package `@hikat/database` (`packages/database`) is the single sourc
 
 1. **`users`**
    - Identity foundation for HiKAT players and administrators.
-   - Columns: `id` (PK), `role` (enum: `PLAYER` | `ADMIN`, default: `PLAYER`), `display_name` (nullable text), `created_at` (text, ISO-8601), `updated_at` (text, ISO-8601).
+   - Columns: `id` (PK), `role` (text, default: `PLAYER`), `display_name` (nullable text), `created_at` (text, ISO-8601), `updated_at` (text, ISO-8601).
+   - SQL CHECK Constraint: `CONSTRAINT "users_role_check" CHECK("users"."role" IN ('PLAYER', 'ADMIN'))`.
    - Roles: strictly `PLAYER` and `ADMIN`.
 
 2. **`external_accounts`**
    - Links external OAuth identity providers (Google, Discord) to HiKAT users.
-   - Columns: `id` (PK), `user_id` (FK -> `users.id` ON DELETE CASCADE), `provider` (enum: `GOOGLE` | `DISCORD`), `provider_subject` (text), `email` (nullable text), `display_name` (nullable text), `avatar_url` (nullable text), `created_at` (text, ISO-8601), `updated_at` (text, ISO-8601).
+   - Columns: `id` (PK), `user_id` (FK -> `users.id` ON DELETE CASCADE), `provider` (text), `provider_subject` (text), `email` (nullable text), `display_name` (nullable text), `avatar_url` (nullable text), `created_at` (text, ISO-8601), `updated_at` (text, ISO-8601).
+   - SQL CHECK Constraint: `CONSTRAINT "external_accounts_provider_check" CHECK("external_accounts"."provider" IN ('GOOGLE', 'DISCORD'))`.
    - Unique Constraint: `(provider, provider_subject)` prevents account collisions.
    - Index: `user_id`.
 

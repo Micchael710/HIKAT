@@ -11,5 +11,11 @@
       "database_id": "a2410123-4e73-4c0f-9263-412fa06d7bdc",
       "migrations_dir": "../../packages/database/migrations"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "hikat-r2"
+    }
   ]
 }

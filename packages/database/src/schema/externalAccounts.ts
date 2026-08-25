@@ -1,4 +1,5 @@
-import { sqliteTable, text, index, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text, index, uniqueIndex, check } from "drizzle-orm/sqlite-core"
+import { sql } from "drizzle-orm"
 import { ALLOWED_AUTH_PROVIDERS } from "@hikat/shared"
 import { users } from "./users"
 
@@ -27,6 +28,10 @@ export const externalAccounts = sqliteTable(
       table.providerSubject,
     ),
     index("external_accounts_user_id_idx").on(table.userId),
+    check(
+      "external_accounts_provider_check",
+      sql`${table.provider} IN ('GOOGLE', 'DISCORD')`,
+    ),
   ],
 )
 

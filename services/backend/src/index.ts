@@ -6,6 +6,7 @@ import { createDatabase, Database } from "@hikat/database"
 export interface Env {
   ENVIRONMENT?: string
   DB?: D1Database
+  ASSETS?: R2Bucket
 }
 
 export interface GraphQLContext {

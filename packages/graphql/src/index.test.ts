@@ -81,9 +81,11 @@ describe("@hikat/graphql foundation & contracts", () => {
     it("throws on invalid serialization input", () => {
       expect(() => DateTimeScalar.serialize("invalid-date-string")).toThrow()
       expect(() => DateTimeScalar.serialize(null)).toThrow()
+      expect(() => DateTimeScalar.serialize(123456789)).toThrow()
+      expect(() => DateTimeScalar.serialize(new Date("invalid"))).toThrow()
     })
 
-    it("parses valid value and literal", () => {
+    it("parses valid ISO-8601 string value and literal", () => {
       const isoStr = "2026-08-25T16:00:00.000Z"
       expect(DateTimeScalar.parseValue(isoStr)).toBe(isoStr)
       expect(
@@ -91,9 +93,28 @@ describe("@hikat/graphql foundation & contracts", () => {
       ).toBe(isoStr)
     })
 
-    it("throws on invalid parse literal", () => {
+    it("rejects non-string and non-ISO format inputs in parseValue", () => {
+      // Rejects numbers (unix timestamps not allowed as input)
+      expect(() => DateTimeScalar.parseValue(1756137600000)).toThrow()
+      // Rejects non-ISO string formats
+      expect(() => DateTimeScalar.parseValue("2026/08/25")).toThrow()
+      expect(() => DateTimeScalar.parseValue("August 25, 2026")).toThrow()
+      expect(() => DateTimeScalar.parseValue("invalid-string")).toThrow()
+      // Rejects booleans and objects
+      expect(() => DateTimeScalar.parseValue(true)).toThrow()
+      expect(() => DateTimeScalar.parseValue({})).toThrow()
+      expect(() => DateTimeScalar.parseValue(null)).toThrow()
+    })
+
+    it("throws on non-string parse literal AST kinds", () => {
       expect(() =>
         DateTimeScalar.parseLiteral({ kind: Kind.INT, value: "12345" }, {}),
+      ).toThrow()
+      expect(() =>
+        DateTimeScalar.parseLiteral({ kind: Kind.FLOAT, value: "123.45" }, {}),
+      ).toThrow()
+      expect(() =>
+        DateTimeScalar.parseLiteral({ kind: Kind.BOOLEAN, value: true }, {}),
       ).toThrow()
     })
   })
