@@ -24,4 +24,5 @@ else
     JAVACMD=java
 fi
 
+cd "$APP_HOME" || exit 1
 exec "$JAVACMD" "-Dorg.gradle.appname=gradlew" -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
