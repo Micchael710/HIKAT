@@ -1,25 +1,36 @@
 # HiKAT Minecraft Subsystem
 
-## Component Matrix
+## Components & Responsibilities
 
-| Subproject   | Target Framework | Runtime Version       | Deployment Target      | Purpose                                  |
-| ------------ | ---------------- | --------------------- | ---------------------- | ---------------------------------------- |
-| `client-mod` | NeoForge         | Minecraft Java 1.21.1 | Launcher Game Client   | Session validation & in-game telemetry   |
-| `server-mod` | NeoForge         | Minecraft Java 1.21.1 | Pterodactyl Game Nodes | In-game authorization & status reporting |
-| `gateway`    | Velocity Proxy   | Java 21               | Fly.io Edge            | Low-latency routing & packet inspection  |
+### 1. `client-mod` (NeoForge 1.21.1)
+- **Responsabilidad principal**: Mínima autenticación HiKAT en el cliente del juego.
+- **Flujo**: Recibe y presenta la credencial corta de juego (Game JWT) proporcionada de forma segura por el Launcher durante la conexión al servidor.
+- **Límites de diseño**:
+  - **NO** GraphQL.
+  - **NO** telemetría HiKAT.
+  - **NO** Wake-on-LAN (WoL).
+  - **NO** server ping.
+  - **NO** Fly.io.
+  - **NO** Pterodactyl.
+  - **NO** server routing.
 
-## Network Flow
+### 2. `server-mod` (NeoForge 1.21.1)
+- **Responsabilidad principal**: Validación de la credencial de juego durante el handshake de conexión del jugador.
+- **Verificación**: Valida criptográficamente la firma asimétrica del token (Game JWT), expiración, audience (`hikat-game-server`) e identidad del jugador.
+- **Límites de diseño**:
+  - **NO** debe convertirse en un sistema general de status/telemetría salvo que un requisito futuro explícito lo documente.
 
-```text
-Player Launcher
-      │ (Launches Minecraft + client-mod)
-      ▼
-Velocity Gateway (Fly.io) ──[ Authenticates Player ]
-      │
-      ▼
-Dedicated Server (Ubuntu / Pterodactyl + server-mod)
-```
+### 3. `gateway` (Velocity en Fly.io)
+- **Dominio de entrada**: `mc.hikat...` actúa como el punto de entrada público para los jugadores.
+- **Gestión de estado y disponibilidad**: Comprueba la disponibilidad del servidor de juego en `play.hikat...`.
+- **Sala de espera / Cola**: Mantiene al jugador conectado y esperando en un lobby liviano cuando el servidor no está listo.
+- **Encendido bajo demanda**:
+  - Puede realizar Wake-on-LAN (WoL) cuando el host dedicado está apagado.
+  - Puede solicitar al Backend Worker que inicie el servidor de Minecraft cuando el host está encendido pero el proceso de Minecraft está detenido.
+- **Transferencia**:
+  - Cuando `play.hikat...` está listo, transfiere al jugador utilizando el Minecraft Transfer Packet nativo.
+  - Después de la transferencia, el tráfico de juego fluye directamente al servidor dedicado; Fly.io **NO** transporta la sesión de juego continua.
+  - **NO** es el componente principal responsable de validar el Game JWT (la validación final y definitiva ocurre en el `server-mod`).
 
 ## Tooling
-
-All Minecraft subprojects are built with Gradle 8.10+ and Java 21 toolchains under the `minecraft/` root directory.
+Todos los subproyectos de Minecraft se compilan bajo el multi-proyecto Gradle en `minecraft/` con Gradle Wrapper 8.10.2 y toolchain Java 21.

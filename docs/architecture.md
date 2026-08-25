@@ -2,7 +2,9 @@
 
 ## Overview
 
-HiKAT is an integrated Minecraft ecosystem comprising an Electron/React client launcher, a management backoffice, backend micro-services on Cloudflare Workers, and Minecraft game infrastructure.
+HiKAT es un proyecto pequeño enfocado en simplicidad, robustez y seguridad para una comunidad de Minecraft.
+
+La arquitectura se compone de aplicaciones cliente y componentes de servidor claramente delimitados:
 
 ```text
 HiKATLauncher
@@ -10,38 +12,35 @@ HiKATLauncher
        ├──────────────┐
        │              │
        ↓              ↓
-   Auth Provider   Backend GraphQL
-                      ↑
+Authentication   Backend Worker (GraphQL)
+    Worker            ↑
                       │
 HiKATbackoffice ──────┘
 ```
 
-## Core Components
+## Componentes del Sistema
 
 1. **HiKATLauncher (`HiKATLauncher/`)**:
-   - Desktop application built with Electron, React 19, Vite, and Tailwind CSS.
-   - Handles player login, skin/cape customization, server discovery, news display, and game client launching.
+   - Aplicación de escritorio construida con Electron, React 19, Vite y Tailwind CSS.
+   - Gestiona el inicio de sesión del jugador, selección de cosméticos (skins/capas), visualización de noticias y lanzamiento del cliente Minecraft con inyección de credencial corta.
 
 2. **HiKATbackoffice (`HiKATbackoffice/`)**:
-   - Web application for administrators and community managers.
-   - Built with React, Vite, and Cloudflare Pages.
-   - Interacts exclusively with the HiKAT Backend GraphQL API.
+   - Panel de administración web para gestión de noticias, modpacks y estado del servidor.
+   - Interactúa exclusivamente con el Backend Worker vía GraphQL.
 
-3. **Backend Service (`services/backend/`)**:
-   - Cloudflare Worker hosting the primary GraphQL API using GraphQL Yoga.
-   - Central application layer enforcing authorization, business rules, and integrating with Cloudflare D1, R2, Pterodactyl, Modrinth, and CurseForge.
+3. **Backend Worker (`services/backend/`)**:
+   - Cloudflare Worker que aloja la API principal de HiKAT utilizando GraphQL Yoga.
+   - Capa central de aplicación que aplica autorización, reglas de negocio y conecta con Cloudflare D1, R2 y servicios de soporte.
 
-4. **Authentication Service (`services/auth/`)**:
-   - Dedicated Cloudflare Worker handling OAuth / OIDC flows (Google, Discord) and issuing signed player tokens.
+4. **Authentication Worker (`services/auth/`)**:
+   - Cloudflare Worker dedicado para autenticación OAuth (Google, Discord) y emisión de tokens asimétricos para sesiones y juego.
 
-5. **Minecraft Services (`minecraft/`)**:
-   - `client-mod`: Client authentication and integration mod (NeoForge 1.21.1).
-   - `server-mod`: Server verification mod (NeoForge 1.21.1).
-   - `gateway`: Velocity Proxy on Fly.io managing player routing and connection security.
+5. **Minecraft / Velocity Gateway (`minecraft/`)**:
+   - `client-mod`: Mod ligero (NeoForge 1.21.1) para presentar la credencial de juego entregada por el Launcher.
+   - `server-mod`: Mod/componente de servidor (NeoForge 1.21.1) para validar la firma y vigencia del Game JWT.
+   - `gateway`: Velocity Proxy en Fly.io para recepción en `mc.hikat...`, gestión de sala de espera, encendido bajo demanda (WoL / backend start) y transferencia transparente a `play.hikat...`.
 
-## Storage & External Integrations
+## Almacenamiento y Persistencia
 
-- **Cloudflare D1**: Persistent structured data storage (users, server records, news, modpacks).
-- **Cloudflare R2**: Object storage for binary assets (skins, capes, modpack archives).
-- **Pterodactyl / Ubuntu Nodes**: Dedicated game server execution.
-- **Modrinth & CurseForge**: Modpack metadata and distribution.
+- **Cloudflare D1**: Base de datos relacional para datos estructurados (usuarios, noticias, registros de modpacks).
+- **Cloudflare R2**: Almacenamiento de objetos para archivos binarios (texturas de skins/capas y paquetes de juego).

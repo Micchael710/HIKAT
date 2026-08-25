@@ -1,43 +1,59 @@
-import React from "react";
-import { ThemeMode } from "../../types";
-import { useTranslation } from "../../context/LanguageContext";
+import React from "react"
+
+import { ThemeMode } from "../../types"
+
+import { useTranslation } from "../../context/LanguageContext"
 
 interface CommunityHubGridProps {
-  theme?: ThemeMode;
-  discordUrl?: string;
-  websiteUrl?: string;
+  theme?: ThemeMode
+
+  discordUrl?: string
+
+  websiteUrl?: string
 }
 
 export default function CommunityHubGrid({
   theme = "dark",
+
   discordUrl = import.meta.env.VITE_DISCORD_URL || "https://discord.gg",
+
   websiteUrl = import.meta.env.VITE_WEBSITE_URL || "#web",
 }: CommunityHubGridProps) {
-  const { t } = useTranslation();
-  const isDark = theme === "dark";
+  const { t } = useTranslation()
+
+  const isDark = theme === "dark"
 
   const handleOpenLink = (
     e: React.MouseEvent<HTMLAnchorElement>,
+
     url: string,
   ) => {
     if (url.startsWith("#")) {
-      e.preventDefault();
-      return;
+      e.preventDefault()
+
+      return
     }
+
     if (window.electronAPI?.openExternal && url.startsWith("http")) {
-      e.preventDefault();
-      window.electronAPI.openExternal(url);
+      e.preventDefault()
+
+      window.electronAPI.openExternal(url)
     }
-  };
+  }
 
   return (
     <div
       style={{
         display: "flex",
+
         flexDirection: "column",
+
         gap: 24,
+
         paddingTop: 48,
+
         paddingBottom: 24,
+
         borderTop: isDark
           ? "1px solid rgba(255, 255, 255, 0.08)"
           : "1px solid rgba(0, 0, 0, 0.08)",
@@ -48,9 +64,13 @@ export default function CommunityHubGrid({
         <div
           style={{
             fontSize: 28,
+
             fontWeight: 800,
+
             color: isDark ? "white" : "#111822",
+
             letterSpacing: "-0.02em",
+
             marginBottom: 8,
           }}
         >
@@ -59,8 +79,11 @@ export default function CommunityHubGrid({
         <div
           style={{
             fontSize: 17,
+
             fontWeight: 400,
+
             color: isDark ? "#8899aa" : "#556677",
+
             lineHeight: 1.55,
           }}
         >
@@ -75,13 +98,21 @@ export default function CommunityHubGrid({
           className="settings-card community-hub-card"
           style={{
             display: "grid",
+
             gridTemplateColumns: "1.2fr 0.8fr",
+
             gap: 28,
+
             padding: "48px 46px 44px 46px",
+
             alignItems: "center",
+
             minHeight: 460,
+
             cursor: "default",
+
             ["--card-border-color" as any]: "#5865F2",
+
             ["--card-glow-color" as any]: "rgba(88, 101, 242, 0.32)",
           }}
         >
@@ -89,9 +120,13 @@ export default function CommunityHubGrid({
           <div
             style={{
               display: "flex",
+
               flexDirection: "column",
+
               justifyContent: "space-between",
+
               height: "100%",
+
               minHeight: 360,
             }}
           >
@@ -100,14 +135,21 @@ export default function CommunityHubGrid({
               <div
                 style={{
                   display: "inline-flex",
+
                   alignItems: "center",
+
                   gap: 9,
+
                   marginBottom: 18,
+
                   background: isDark
                     ? "rgba(88, 101, 242, 0.16)"
                     : "rgba(88, 101, 242, 0.1)",
+
                   padding: "6px 14px",
+
                   borderRadius: 10,
+
                   border: "1.5px solid rgba(88, 101, 242, 0.35)",
                 }}
               >
@@ -117,9 +159,13 @@ export default function CommunityHubGrid({
                 <span
                   style={{
                     fontSize: 13.5,
+
                     fontWeight: 800,
+
                     textTransform: "uppercase",
+
                     letterSpacing: "0.09em",
+
                     color: "#5865F2",
                   }}
                 >
@@ -130,9 +176,13 @@ export default function CommunityHubGrid({
               <div
                 style={{
                   fontSize: 30,
+
                   fontWeight: 800,
+
                   color: isDark ? "white" : "#111822",
+
                   marginBottom: 22,
+
                   letterSpacing: "-0.025em",
                 }}
               >
@@ -143,33 +193,49 @@ export default function CommunityHubGrid({
               <div
                 style={{
                   display: "flex",
+
                   flexDirection: "column",
+
                   gap: 16,
+
                   marginBottom: 36,
                 }}
               >
                 <div
                   style={{
                     display: "flex",
+
                     alignItems: "center",
+
                     gap: 14,
+
                     fontSize: 16.5,
+
                     color: isDark ? "#a8bccf" : "#475569",
+
                     fontWeight: 500,
                   }}
                 >
                   <div
                     style={{
                       width: 26,
+
                       height: 26,
+
                       borderRadius: 8,
+
                       background: isDark
                         ? "rgba(88, 101, 242, 0.2)"
                         : "rgba(88, 101, 242, 0.12)",
+
                       color: "#5865F2",
+
                       display: "flex",
+
                       alignItems: "center",
+
                       justifyContent: "center",
+
                       flexShrink: 0,
                     }}
                   >
@@ -192,25 +258,38 @@ export default function CommunityHubGrid({
                 <div
                   style={{
                     display: "flex",
+
                     alignItems: "center",
+
                     gap: 14,
+
                     fontSize: 16.5,
+
                     color: isDark ? "#a8bccf" : "#475569",
+
                     fontWeight: 500,
                   }}
                 >
                   <div
                     style={{
                       width: 26,
+
                       height: 26,
+
                       borderRadius: 8,
+
                       background: isDark
                         ? "rgba(88, 101, 242, 0.2)"
                         : "rgba(88, 101, 242, 0.12)",
+
                       color: "#5865F2",
+
                       display: "flex",
+
                       alignItems: "center",
+
                       justifyContent: "center",
+
                       flexShrink: 0,
                     }}
                   >
@@ -234,25 +313,38 @@ export default function CommunityHubGrid({
                 <div
                   style={{
                     display: "flex",
+
                     alignItems: "center",
+
                     gap: 14,
+
                     fontSize: 16.5,
+
                     color: isDark ? "#a8bccf" : "#475569",
+
                     fontWeight: 500,
                   }}
                 >
                   <div
                     style={{
                       width: 26,
+
                       height: 26,
+
                       borderRadius: 8,
+
                       background: isDark
                         ? "rgba(88, 101, 242, 0.2)"
                         : "rgba(88, 101, 242, 0.12)",
+
                       color: "#5865F2",
+
                       display: "flex",
+
                       alignItems: "center",
+
                       justifyContent: "center",
+
                       flexShrink: 0,
                     }}
                   >
@@ -283,16 +375,27 @@ export default function CommunityHubGrid({
               className="launcher-btn-secondary"
               style={{
                 display: "inline-flex",
+
                 alignItems: "center",
+
                 justifyContent: "center",
+
                 gap: 12,
+
                 padding: "0 32px",
+
                 height: 52,
+
                 borderRadius: 16,
+
                 fontSize: 16,
+
                 fontWeight: 700,
+
                 textDecoration: "none",
+
                 cursor: "pointer",
+
                 width: "fit-content",
               }}
             >
@@ -318,9 +421,13 @@ export default function CommunityHubGrid({
           <div
             style={{
               display: "flex",
+
               alignItems: "center",
+
               justifyContent: "center",
+
               height: "100%",
+
               minHeight: 280,
             }}
           >
@@ -328,9 +435,13 @@ export default function CommunityHubGrid({
               className="floating-smooth-element"
               style={{
                 color: "#5865F2",
+
                 filter: "drop-shadow(0 20px 48px rgba(88, 101, 242, 0.45))",
+
                 display: "flex",
+
                 alignItems: "center",
+
                 justifyContent: "center",
               }}
             >
@@ -346,13 +457,21 @@ export default function CommunityHubGrid({
           className="settings-card community-hub-card"
           style={{
             display: "grid",
+
             gridTemplateColumns: "1.2fr 0.8fr",
+
             gap: 28,
+
             padding: "48px 46px 44px 46px",
+
             alignItems: "center",
+
             minHeight: 460,
+
             cursor: "default",
+
             ["--card-border-color" as any]: "#efc436",
+
             ["--card-glow-color" as any]: "rgba(239, 196, 54, 0.32)",
           }}
         >
@@ -360,9 +479,13 @@ export default function CommunityHubGrid({
           <div
             style={{
               display: "flex",
+
               flexDirection: "column",
+
               justifyContent: "space-between",
+
               height: "100%",
+
               minHeight: 360,
             }}
           >
@@ -371,14 +494,21 @@ export default function CommunityHubGrid({
               <div
                 style={{
                   display: "inline-flex",
+
                   alignItems: "center",
+
                   gap: 9,
+
                   marginBottom: 18,
+
                   background: isDark
                     ? "rgba(239, 196, 54, 0.16)"
                     : "rgba(239, 196, 54, 0.1)",
+
                   padding: "6px 14px",
+
                   borderRadius: 10,
+
                   border: "1.5px solid rgba(239, 196, 54, 0.35)",
                 }}
               >
@@ -399,9 +529,13 @@ export default function CommunityHubGrid({
                 <span
                   style={{
                     fontSize: 13.5,
+
                     fontWeight: 800,
+
                     textTransform: "uppercase",
+
                     letterSpacing: "0.09em",
+
                     color: "#efc436",
                   }}
                 >
@@ -412,9 +546,13 @@ export default function CommunityHubGrid({
               <div
                 style={{
                   fontSize: 30,
+
                   fontWeight: 800,
+
                   color: isDark ? "white" : "#111822",
+
                   marginBottom: 22,
+
                   letterSpacing: "-0.025em",
                 }}
               >
@@ -425,33 +563,49 @@ export default function CommunityHubGrid({
               <div
                 style={{
                   display: "flex",
+
                   flexDirection: "column",
+
                   gap: 16,
+
                   marginBottom: 36,
                 }}
               >
                 <div
                   style={{
                     display: "flex",
+
                     alignItems: "center",
+
                     gap: 14,
+
                     fontSize: 16.5,
+
                     color: isDark ? "#a8bccf" : "#475569",
+
                     fontWeight: 500,
                   }}
                 >
                   <div
                     style={{
                       width: 26,
+
                       height: 26,
+
                       borderRadius: 8,
+
                       background: isDark
                         ? "rgba(239, 196, 54, 0.2)"
                         : "rgba(239, 196, 54, 0.12)",
+
                       color: "#efc436",
+
                       display: "flex",
+
                       alignItems: "center",
+
                       justifyContent: "center",
+
                       flexShrink: 0,
                     }}
                   >
@@ -475,25 +629,38 @@ export default function CommunityHubGrid({
                 <div
                   style={{
                     display: "flex",
+
                     alignItems: "center",
+
                     gap: 14,
+
                     fontSize: 16.5,
+
                     color: isDark ? "#a8bccf" : "#475569",
+
                     fontWeight: 500,
                   }}
                 >
                   <div
                     style={{
                       width: 26,
+
                       height: 26,
+
                       borderRadius: 8,
+
                       background: isDark
                         ? "rgba(239, 196, 54, 0.2)"
                         : "rgba(239, 196, 54, 0.12)",
+
                       color: "#efc436",
+
                       display: "flex",
+
                       alignItems: "center",
+
                       justifyContent: "center",
+
                       flexShrink: 0,
                     }}
                   >
@@ -516,25 +683,38 @@ export default function CommunityHubGrid({
                 <div
                   style={{
                     display: "flex",
+
                     alignItems: "center",
+
                     gap: 14,
+
                     fontSize: 16.5,
+
                     color: isDark ? "#a8bccf" : "#475569",
+
                     fontWeight: 500,
                   }}
                 >
                   <div
                     style={{
                       width: 26,
+
                       height: 26,
+
                       borderRadius: 8,
+
                       background: isDark
                         ? "rgba(239, 196, 54, 0.2)"
                         : "rgba(239, 196, 54, 0.12)",
+
                       color: "#efc436",
+
                       display: "flex",
+
                       alignItems: "center",
+
                       justifyContent: "center",
+
                       flexShrink: 0,
                     }}
                   >
@@ -566,16 +746,27 @@ export default function CommunityHubGrid({
               className="launcher-btn-secondary"
               style={{
                 display: "inline-flex",
+
                 alignItems: "center",
+
                 justifyContent: "center",
+
                 gap: 12,
+
                 padding: "0 32px",
+
                 height: 52,
+
                 borderRadius: 16,
+
                 fontSize: 16,
+
                 fontWeight: 700,
+
                 textDecoration: "none",
+
                 cursor: "pointer",
+
                 width: "fit-content",
               }}
             >
@@ -601,9 +792,13 @@ export default function CommunityHubGrid({
           <div
             style={{
               display: "flex",
+
               alignItems: "center",
+
               justifyContent: "center",
+
               height: "100%",
+
               minHeight: 280,
             }}
           >
@@ -611,9 +806,13 @@ export default function CommunityHubGrid({
               className="floating-smooth-element"
               style={{
                 color: "#efc436",
+
                 filter: "drop-shadow(0 20px 48px rgba(239, 196, 54, 0.45))",
+
                 display: "flex",
+
                 alignItems: "center",
+
                 justifyContent: "center",
               }}
             >
@@ -636,5 +835,5 @@ export default function CommunityHubGrid({
         </div>
       </div>
     </div>
-  );
+  )
 }

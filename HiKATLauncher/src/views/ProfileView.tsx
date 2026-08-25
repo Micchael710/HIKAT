@@ -1,104 +1,142 @@
-import React, { useState, useRef, useEffect } from "react";
-import { ThemeMode, SkinItem } from "../types";
-import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens";
-import MinecraftHead from "../components/minecraft/MinecraftHead";
-import LiveToast from "../components/common/LiveToast";
-import { useTranslation } from "../context/LanguageContext";
+import React, { useState, useRef, useEffect } from "react"
 
-import { authService } from "../services/authService";
+import { ThemeMode, SkinItem } from "../types"
+
+import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens"
+
+import MinecraftHead from "../components/minecraft/MinecraftHead"
+
+import LiveToast from "../components/common/LiveToast"
+
+import { useTranslation } from "../context/LanguageContext"
+
+import { authService } from "../services/authService"
 
 interface ProfileViewProps {
-  username: string;
-  activeSkinData?: SkinItem | null;
-  onBack: () => void;
-  theme?: ThemeMode;
+  username: string
+
+  activeSkinData?: SkinItem | null
+
+  onBack: () => void
+
+  theme?: ThemeMode
 }
 
 export default function ProfileView({
   username,
+
   activeSkinData,
+
   onBack,
+
   theme = "dark",
 }: ProfileViewProps) {
-  const { t } = useTranslation();
-  const cachedUser = authService.getCachedUser();
+  const { t } = useTranslation()
+
+  const cachedUser = authService.getCachedUser()
 
   const [email] = useState(
     cachedUser?.email ||
       `${username.toLowerCase().replace(/\s+/g, "")}@gmail.com`,
-  );
+  )
+
   const [joinDate] = useState(
     cachedUser?.createdAt
       ? new Date(cachedUser.createdAt).toLocaleDateString()
       : "24/11/2025",
-  );
+  )
+
   const [resetState, setResetState] = useState<"idle" | "sending" | "sent">(
     "idle",
-  );
-  const [toastText, setToastText] = useState<string | null>(null);
-  const toastTimeoutRef = useRef<any>(null);
-  const isDark = theme === "dark";
+  )
+
+  const [toastText, setToastText] = useState<string | null>(null)
+
+  const toastTimeoutRef = useRef<any>(null)
+
+  const isDark = theme === "dark"
 
   const showToast = (msg?: string) => {
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-    setToastText(msg || t("settings.toastSaved"));
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
+
+    setToastText(msg || t("settings.toastSaved"))
+
     toastTimeoutRef.current = setTimeout(() => {
-      setToastText(null);
-    }, 2400);
-  };
+      setToastText(null)
+    }, 2400)
+  }
 
   const handleSendResetEmail = async () => {
-    if (resetState === "sending") return;
-    setResetState("sending");
+    if (resetState === "sending") return
+
+    setResetState("sending")
+
     try {
-      const res = await authService.requestPasswordReset(email);
+      const res = await authService.requestPasswordReset(email)
+
       if (res.success) {
-        setResetState("sent");
-        showToast(t("profile.emailSent"));
+        setResetState("sent")
+
+        showToast(t("profile.emailSent"))
       } else {
-        setResetState("sent");
-        showToast(t("profile.emailSent"));
+        setResetState("sent")
+
+        showToast(t("profile.emailSent"))
       }
     } catch (_) {
-      setResetState("sent");
-      showToast(t("profile.emailSent"));
+      setResetState("sent")
+
+      showToast(t("profile.emailSent"))
     }
-    setTimeout(() => setResetState("idle"), 3500);
-  };
+
+    setTimeout(() => setResetState("idle"), 3500)
+  }
 
   const currentAccent = hexToRGB(
     activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8",
-  );
-  const CONTENT_LEFT = 184;
+  )
+
+  const CONTENT_LEFT = 184
 
   /* Smooth delayed mouse-following parallax */
-  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 });
+
+  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
 
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
-      const relX = e.clientX / window.innerWidth - 0.5;
-      const relY = e.clientY / window.innerHeight - 0.5;
+      const relX = e.clientX / window.innerWidth - 0.5
+
+      const relY = e.clientY / window.innerHeight - 0.5
+
       setMouseOffset({
         x: Math.round(relX * 220),
+
         y: Math.round(relY * 150),
-      });
-    };
+      })
+    }
 
     window.addEventListener("mousemove", handleWindowMouseMove, {
       passive: true,
-    });
-    return () => window.removeEventListener("mousemove", handleWindowMouseMove);
-  }, []);
+    })
+
+    return () => window.removeEventListener("mousemove", handleWindowMouseMove)
+  }, [])
 
   return (
     <div
       style={{
         position: "absolute",
+
         left: 0,
+
         top: 0,
+
         width: CANVAS_W,
+
         height: 1080,
+
         background: isDark ? "#090d12" : "#f5f7fa",
+
         overflow: "hidden",
       }}
     >
@@ -106,9 +144,13 @@ export default function ProfileView({
       <div
         style={{
           position: "absolute",
+
           inset: 0,
+
           pointerEvents: "none",
+
           overflow: "hidden",
+
           zIndex: 0,
         }}
       >
@@ -116,9 +158,13 @@ export default function ProfileView({
         <div
           style={{
             position: "absolute",
+
             inset: 0,
+
             transform: `translate3d(${mouseOffset.x}px, ${mouseOffset.y}px, 0)`,
+
             transition: "transform 1.4s cubic-bezier(0.16, 1, 0.3, 1)",
+
             willChange: "transform",
           }}
         >
@@ -126,14 +172,21 @@ export default function ProfileView({
             className="skins-bg-orb-1"
             style={{
               position: "absolute",
+
               top: "-10%",
+
               left: "15%",
+
               width: 850,
+
               height: 850,
+
               background: `radial-gradient(circle, rgba(${currentAccent.r}, ${currentAccent.g}, ${currentAccent.b}, ${
                 isDark ? 0.24 : 0.14
               }) 0%, transparent 68%)`,
+
               filter: "blur(55px)",
+
               transition: "background 0.55s ease",
             }}
           />
@@ -143,9 +196,13 @@ export default function ProfileView({
         <div
           style={{
             position: "absolute",
+
             inset: 0,
+
             transform: `translate3d(${Math.round(mouseOffset.x * 0.45)}px, ${Math.round(mouseOffset.y * 0.45)}px, 0)`,
+
             transition: "transform 1.8s cubic-bezier(0.16, 1, 0.3, 1)",
+
             willChange: "transform",
           }}
         >
@@ -153,14 +210,21 @@ export default function ProfileView({
             className="skins-bg-orb-2"
             style={{
               position: "absolute",
+
               top: "25%",
+
               right: "5%",
+
               width: 900,
+
               height: 900,
+
               background: `radial-gradient(circle, rgba(${currentAccent.r}, ${currentAccent.g}, ${currentAccent.b}, ${
                 isDark ? 0.16 : 0.1
               }) 0%, transparent 68%)`,
+
               filter: "blur(65px)",
+
               transition: "background 0.55s ease",
             }}
           />
@@ -170,9 +234,13 @@ export default function ProfileView({
         <div
           style={{
             position: "absolute",
+
             inset: 0,
+
             transform: `translate3d(${Math.round(mouseOffset.x * 0.25)}px, ${Math.round(mouseOffset.y * 0.25)}px, 0)`,
+
             transition: "transform 2.2s cubic-bezier(0.16, 1, 0.3, 1)",
+
             willChange: "transform",
           }}
         >
@@ -180,14 +248,21 @@ export default function ProfileView({
             className="skins-bg-orb-3"
             style={{
               position: "absolute",
+
               bottom: "-15%",
+
               left: "25%",
+
               width: 800,
+
               height: 800,
+
               background: `radial-gradient(circle, rgba(${currentAccent.r}, ${currentAccent.g}, ${currentAccent.b}, ${
                 isDark ? 0.14 : 0.08
               }) 0%, transparent 70%)`,
+
               filter: "blur(55px)",
+
               transition: "background 0.55s ease",
             }}
           />
@@ -197,14 +272,23 @@ export default function ProfileView({
       <div
         style={{
           position: "absolute",
+
           left: CONTENT_LEFT,
+
           top: 145,
+
           width: CANVAS_W - CONTENT_LEFT - 120,
+
           height: 880,
+
           display: "flex",
+
           flexDirection: "column",
+
           fontFamily: BASE_FONT,
+
           zIndex: 1,
+
           animation: "viewFadeIn 0.24s ease",
         }}
       >
@@ -212,8 +296,11 @@ export default function ProfileView({
         <div
           style={{
             display: "flex",
+
             alignItems: "center",
+
             justifyContent: "space-between",
+
             marginBottom: 24,
           }}
         >
@@ -225,40 +312,58 @@ export default function ProfileView({
               title={t("common.back")}
               style={{
                 width: 44,
+
                 height: 44,
+
                 borderRadius: 14,
+
                 background: isDark ? "#0d1217" : "#ffffff",
+
                 border: isDark
                   ? "1.5px solid rgba(255, 255, 255, 0.1)"
                   : "1.5px solid rgba(0, 0, 0, 0.1)",
+
                 boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
+
                 display: "flex",
+
                 alignItems: "center",
+
                 justifyContent: "center",
+
                 color: isDark ? "#8899aa" : "#556677",
+
                 cursor: "pointer",
+
                 flexShrink: 0,
+
                 transition: "all 0.16s ease",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.color = isDark ? "#ffffff" : "#111822";
+                e.currentTarget.style.color = isDark ? "#ffffff" : "#111822"
+
                 e.currentTarget.style.borderColor = isDark
                   ? "rgba(255, 255, 255, 0.26)"
-                  : "rgba(0, 0, 0, 0.25)";
+                  : "rgba(0, 0, 0, 0.25)"
+
                 e.currentTarget.style.background = isDark
                   ? "#151e26"
-                  : "#f0f3f7";
-                e.currentTarget.style.transform = "translateX(-2px)";
+                  : "#f0f3f7"
+
+                e.currentTarget.style.transform = "translateX(-2px)"
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.color = isDark ? "#8899aa" : "#556677";
+                e.currentTarget.style.color = isDark ? "#8899aa" : "#556677"
+
                 e.currentTarget.style.borderColor = isDark
                   ? "rgba(255, 255, 255, 0.1)"
-                  : "rgba(0, 0, 0, 0.1)";
+                  : "rgba(0, 0, 0, 0.1)"
+
                 e.currentTarget.style.background = isDark
                   ? "#0d1217"
-                  : "#ffffff";
-                e.currentTarget.style.transform = "none";
+                  : "#ffffff"
+
+                e.currentTarget.style.transform = "none"
               }}
             >
               <svg
@@ -280,9 +385,13 @@ export default function ProfileView({
               <div
                 style={{
                   fontSize: 32,
+
                   fontWeight: 800,
+
                   color: isDark ? "white" : "#111822",
+
                   letterSpacing: "-0.02em",
+
                   marginBottom: 2,
                 }}
               >
@@ -291,7 +400,9 @@ export default function ProfileView({
               <div
                 style={{
                   fontSize: 16,
+
                   fontWeight: 400,
+
                   color: isDark ? "#8899aa" : "#556677",
                 }}
               >
@@ -306,12 +417,19 @@ export default function ProfileView({
           className="custom-grid-scroll"
           style={{
             flex: 1,
+
             overflowY: "auto",
+
             maxHeight: 780,
+
             paddingRight: 6,
+
             paddingBottom: 20,
+
             display: "flex",
+
             flexDirection: "column",
+
             gap: 18,
           }}
         >
@@ -320,10 +438,15 @@ export default function ProfileView({
             <div
               style={{
                 fontSize: 13,
+
                 fontWeight: 800,
+
                 letterSpacing: "0.08em",
+
                 textTransform: "uppercase",
+
                 color: isDark ? "#657788" : "#778899",
+
                 marginBottom: 16,
               }}
             >
@@ -334,8 +457,11 @@ export default function ProfileView({
             <div
               style={{
                 display: "flex",
+
                 alignItems: "center",
+
                 gap: 20,
+
                 marginBottom: 20,
               }}
             >
@@ -343,17 +469,27 @@ export default function ProfileView({
               <div
                 style={{
                   width: 72,
+
                   height: 72,
+
                   borderRadius: 18,
+
                   overflow: "hidden",
+
                   border: isDark
                     ? "2px solid rgba(255, 255, 255, 0.14)"
                     : "2px solid rgba(0, 0, 0, 0.1)",
+
                   background: isDark ? "#0d151c" : "#f0f3f7",
+
                   display: "flex",
+
                   alignItems: "center",
+
                   justifyContent: "center",
+
                   flexShrink: 0,
+
                   boxShadow: isDark
                     ? "0 8px 24px rgba(0, 0, 0, 0.45)"
                     : "0 8px 24px rgba(0, 0, 0, 0.1)",
@@ -374,9 +510,13 @@ export default function ProfileView({
                 <div
                   style={{
                     fontSize: 26,
+
                     fontWeight: 800,
+
                     color: isDark ? "white" : "#111822",
+
                     letterSpacing: "-0.02em",
+
                     marginBottom: 2,
                   }}
                 >
@@ -385,7 +525,9 @@ export default function ProfileView({
                 <div
                   style={{
                     fontSize: 15,
+
                     color: isDark ? "#8899aa" : "#556677",
+
                     fontWeight: 500,
                   }}
                 >
@@ -398,7 +540,9 @@ export default function ProfileView({
             <div
               style={{
                 display: "grid",
+
                 gridTemplateColumns: "repeat(3, 1fr)",
+
                 gap: 14,
               }}
             >
@@ -406,22 +550,32 @@ export default function ProfileView({
               <div
                 style={{
                   background: isDark ? "#0d1217" : "#f0f3f7",
+
                   border: isDark
                     ? "1.5px solid rgba(255, 255, 255, 0.06)"
                     : "1.5px solid rgba(0, 0, 0, 0.06)",
+
                   borderRadius: 14,
+
                   padding: "14px 18px",
+
                   display: "flex",
+
                   flexDirection: "column",
+
                   gap: 4,
                 }}
               >
                 <div
                   style={{
                     fontSize: 12,
+
                     fontWeight: 800,
+
                     letterSpacing: "0.08em",
+
                     textTransform: "uppercase",
+
                     color: isDark ? "#657788" : "#778899",
                   }}
                 >
@@ -430,10 +584,15 @@ export default function ProfileView({
                 <div
                   style={{
                     fontSize: 15.5,
+
                     fontWeight: 600,
+
                     color: isDark ? "#8899aa" : "#334455",
+
                     whiteSpace: "nowrap",
+
                     overflow: "hidden",
+
                     textOverflow: "ellipsis",
                   }}
                 >
@@ -445,22 +604,32 @@ export default function ProfileView({
               <div
                 style={{
                   background: isDark ? "#0d1217" : "#f0f3f7",
+
                   border: isDark
                     ? "1.5px solid rgba(255, 255, 255, 0.06)"
                     : "1.5px solid rgba(0, 0, 0, 0.06)",
+
                   borderRadius: 14,
+
                   padding: "14px 18px",
+
                   display: "flex",
+
                   flexDirection: "column",
+
                   gap: 4,
                 }}
               >
                 <div
                   style={{
                     fontSize: 12,
+
                     fontWeight: 800,
+
                     letterSpacing: "0.08em",
+
                     textTransform: "uppercase",
+
                     color: isDark ? "#657788" : "#778899",
                   }}
                 >
@@ -469,10 +638,15 @@ export default function ProfileView({
                 <div
                   style={{
                     fontSize: 15.5,
+
                     fontWeight: 600,
+
                     color: isDark ? "#8899aa" : "#334455",
+
                     whiteSpace: "nowrap",
+
                     overflow: "hidden",
+
                     textOverflow: "ellipsis",
                   }}
                 >
@@ -484,22 +658,32 @@ export default function ProfileView({
               <div
                 style={{
                   background: isDark ? "#0d1217" : "#f0f3f7",
+
                   border: isDark
                     ? "1.5px solid rgba(255, 255, 255, 0.06)"
                     : "1.5px solid rgba(0, 0, 0, 0.06)",
+
                   borderRadius: 14,
+
                   padding: "14px 18px",
+
                   display: "flex",
+
                   flexDirection: "column",
+
                   gap: 4,
                 }}
               >
                 <div
                   style={{
                     fontSize: 12,
+
                     fontWeight: 800,
+
                     letterSpacing: "0.08em",
+
                     textTransform: "uppercase",
+
                     color: isDark ? "#657788" : "#778899",
                   }}
                 >
@@ -508,10 +692,15 @@ export default function ProfileView({
                 <div
                   style={{
                     fontSize: 15.5,
+
                     fontWeight: 600,
+
                     color: isDark ? "#8899aa" : "#334455",
+
                     whiteSpace: "nowrap",
+
                     overflow: "hidden",
+
                     textOverflow: "ellipsis",
                   }}
                 >
@@ -526,10 +715,15 @@ export default function ProfileView({
             <div
               style={{
                 fontSize: 13,
+
                 fontWeight: 800,
+
                 letterSpacing: "0.08em",
+
                 textTransform: "uppercase",
+
                 color: isDark ? "#657788" : "#778899",
+
                 marginBottom: 8,
               }}
             >
@@ -544,8 +738,11 @@ export default function ProfileView({
                 <div
                   style={{
                     fontSize: 17.5,
+
                     fontWeight: 700,
+
                     color: isDark ? "white" : "#111822",
+
                     marginBottom: 3,
                   }}
                 >
@@ -554,7 +751,9 @@ export default function ProfileView({
                 <div
                   style={{
                     fontSize: 15,
+
                     color: isDark ? "#8899aa" : "#556677",
+
                     lineHeight: 1.45,
                   }}
                 >
@@ -569,40 +768,55 @@ export default function ProfileView({
                 disabled={resetState === "sending"}
                 style={{
                   display: "flex",
+
                   alignItems: "center",
+
                   gap: 10,
+
                   padding: "11px 24px",
+
                   borderRadius: 12,
+
                   background: isDark ? "#0d1217" : "#f0f3f7",
+
                   border: isDark
                     ? "1.5px solid rgba(255, 255, 255, 0.12)"
                     : "1.5px solid rgba(0, 0, 0, 0.12)",
+
                   cursor: resetState === "sending" ? "wait" : "pointer",
+
                   color: isDark ? "white" : "#111822",
+
                   fontFamily: BASE_FONT,
+
                   fontSize: 15,
+
                   fontWeight: 700,
+
                   transition: "all 0.16s ease",
+
                   flexShrink: 0,
                 }}
                 onMouseEnter={(e) => {
                   if (resetState !== "sending") {
                     e.currentTarget.style.borderColor = isDark
                       ? "rgba(255, 255, 255, 0.28)"
-                      : "rgba(0, 0, 0, 0.25)";
+                      : "rgba(0, 0, 0, 0.25)"
+
                     e.currentTarget.style.background = isDark
                       ? "#151e26"
-                      : "#e4e8ee";
+                      : "#e4e8ee"
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (resetState !== "sending") {
                     e.currentTarget.style.borderColor = isDark
                       ? "rgba(255, 255, 255, 0.12)"
-                      : "rgba(0, 0, 0, 0.12)";
+                      : "rgba(0, 0, 0, 0.12)"
+
                     e.currentTarget.style.background = isDark
                       ? "#0d1217"
-                      : "#f0f3f7";
+                      : "#f0f3f7"
                   }
                 }}
               >
@@ -667,5 +881,5 @@ export default function ProfileView({
         <LiveToast message={toastText} />
       </div>
     </div>
-  );
+  )
 }

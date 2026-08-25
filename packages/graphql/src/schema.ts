@@ -15,4 +15,4 @@ export const typeDefs = /* GraphQL */ `
     health: HealthStatus!
     version: String!
   }
-`;
+`

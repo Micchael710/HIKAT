@@ -1,303 +1,469 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react"
+
 import {
   SkinViewer,
   WalkingAnimation,
   RunningAnimation,
   IdleAnimation,
-} from "skinview3d";
-import * as THREE from "three";
-import { getNextPose, SKIN_POSES, SkinPose } from "../../utils/poses";
+} from "skinview3d"
 
-export type AnimationType = "pose" | "walk" | "idle" | "run";
+import * as THREE from "three"
+
+import { getNextPose, SKIN_POSES, SkinPose } from "../../utils/poses"
+
+export type AnimationType = "pose" | "walk" | "idle" | "run"
 
 export interface SkinViewer3DProps {
-  skinUrl?: string;
-  capeUrl?: string;
-  model?: "classic" | "slim" | "auto-detect";
-  accentHex?: string;
-  width?: number;
-  height?: number;
-  isDark?: boolean;
-  isCapeMode?: boolean;
-  initialPoseId?: string;
-  onPoseChange?: (pose: SkinPose) => void;
+  skinUrl?: string
+
+  capeUrl?: string
+
+  model?: "classic" | "slim" | "auto-detect"
+
+  accentHex?: string
+
+  width?: number
+
+  height?: number
+
+  isDark?: boolean
+
+  isCapeMode?: boolean
+
+  initialPoseId?: string
+
+  onPoseChange?: (pose: SkinPose) => void
 }
 
 export default function SkinViewer3D({
   skinUrl,
+
   capeUrl,
+
   model = "auto-detect",
+
   accentHex = "#38bdf8",
+
   width = 400,
+
   height = 540,
+
   isDark = true,
+
   isCapeMode = false,
+
   initialPoseId,
+
   onPoseChange,
 }: SkinViewer3DProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const viewerRef = useRef<SkinViewer | null>(null);
-  const topSpotLightRef = useRef<THREE.SpotLight | null>(null);
-  const pedestalMatRef = useRef<THREE.MeshBasicMaterial | null>(null);
-  const shadowLightRef = useRef<THREE.DirectionalLight | null>(null);
-  const lastPoseRef = useRef<string>(initialPoseId || "default");
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  const viewerRef = useRef<SkinViewer | null>(null)
+
+  const topSpotLightRef = useRef<THREE.SpotLight | null>(null)
+
+  const pedestalMatRef = useRef<THREE.MeshBasicMaterial | null>(null)
+
+  const shadowLightRef = useRef<THREE.DirectionalLight | null>(null)
+
+  const lastPoseRef = useRef<string>(initialPoseId || "default")
+
   const [currentPose, setCurrentPose] = useState<SkinPose>(() => {
     return (
       SKIN_POSES.find((p) => p.id === (initialPoseId || "default")) ||
       SKIN_POSES[0]
-    );
-  });
+    )
+  })
+
   // Default animation is "idle" (Respiración)
-  const [activeAnimation, setActiveAnimation] = useState<AnimationType>("idle");
-  const [autoRotate, setAutoRotate] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [hasError, setHasError] = useState<boolean>(false);
+
+  const [activeAnimation, setActiveAnimation] = useState<AnimationType>("idle")
+
+  const [autoRotate, setAutoRotate] = useState<boolean>(false)
+
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+
+  const [hasError, setHasError] = useState<boolean>(false)
 
   // Helper to enable shadow casting on all meshes
+
   const enableShadowCasting = (root: THREE.Object3D) => {
     root.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = false;
+        child.castShadow = true
+
+        child.receiveShadow = false
       }
-    });
-  };
+    })
+  }
 
   // 1. Initialize SkinViewer instance with real-time Three.js Shadows & Ground Floor
+
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const canvas = canvasRef.current
+
+    if (!canvas) return
 
     try {
       const viewer = new SkinViewer({
         canvas,
+
         width,
+
         height,
+
         enableControls: true,
-      });
+      })
 
       // Transparent background
-      viewer.background = null;
+
+      viewer.background = null
 
       // Enable WebGL real-time shadow maps
+
       if (viewer.renderer) {
-        viewer.renderer.shadowMap.enabled = true;
-        viewer.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        viewer.renderer.shadowMap.enabled = true
+
+        viewer.renderer.shadowMap.type = THREE.PCFSoftShadowMap
       }
 
       // Camera calibrated for perfect centering within the stage frame
-      viewer.camera.position.set(0, 10, 52);
-      viewer.camera.lookAt(0, 0, 0);
-      viewer.zoom = 0.84;
-      viewer.adjustCameraDistance();
+
+      viewer.camera.position.set(0, 10, 52)
+
+      viewer.camera.lookAt(0, 0, 0)
+
+      viewer.zoom = 0.84
+
+      viewer.adjustCameraDistance()
 
       // Bounded camera controls: full 360 horizontal rotation, bounded vertically so it NEVER goes below the floor!
+
       if (viewer.controls) {
-        viewer.controls.enablePan = false;
-        viewer.controls.enableRotate = true;
-        viewer.controls.enableZoom = true;
-        viewer.controls.minDistance = 25;
-        viewer.controls.maxDistance = 85;
-        viewer.controls.minPolarAngle = 0.15; // Look from high above
-        viewer.controls.maxPolarAngle = Math.PI / 2 - 0.04; // STOPS right before ground plane! Never clips below!
-        viewer.controls.rotateSpeed = 1.0;
-        viewer.controls.autoRotate = false;
-        viewer.controls.autoRotateSpeed = 2.4;
+        viewer.controls.enablePan = false
+
+        viewer.controls.enableRotate = true
+
+        viewer.controls.enableZoom = true
+
+        viewer.controls.minDistance = 25
+
+        viewer.controls.maxDistance = 85
+
+        viewer.controls.minPolarAngle = 0.15 // Look from high above
+
+        viewer.controls.maxPolarAngle = Math.PI / 2 - 0.04 // STOPS right before ground plane! Never clips below!
+
+        viewer.controls.rotateSpeed = 1.0
+
+        viewer.controls.autoRotate = false
+
+        viewer.controls.autoRotateSpeed = 2.4
       }
 
       // --- 3D Scene Lighting with Real-Time Shadow Projection ---
+
       // A. Directional Shadow-Casting Light (Upper Left-Front, projecting dynamic shadow to bottom-right)
-      const shadowLight = new THREE.DirectionalLight(0xffffff, 0.52);
-      shadowLight.position.set(-14, 40, 22);
-      shadowLight.castShadow = true;
-      shadowLight.shadow.mapSize.width = 1024;
-      shadowLight.shadow.mapSize.height = 1024;
-      shadowLight.shadow.camera.near = 1;
-      shadowLight.shadow.camera.far = 120;
-      shadowLight.shadow.camera.left = -22;
-      shadowLight.shadow.camera.right = 22;
-      shadowLight.shadow.camera.top = 35;
-      shadowLight.shadow.camera.bottom = -25;
-      shadowLight.shadow.bias = -0.0012;
-      shadowLight.shadow.radius = 3.5; // Soft shadow blur
-      viewer.scene.add(shadowLight);
-      shadowLightRef.current = shadowLight;
+
+      const shadowLight = new THREE.DirectionalLight(0xffffff, 0.52)
+
+      shadowLight.position.set(-14, 40, 22)
+
+      shadowLight.castShadow = true
+
+      shadowLight.shadow.mapSize.width = 1024
+
+      shadowLight.shadow.mapSize.height = 1024
+
+      shadowLight.shadow.camera.near = 1
+
+      shadowLight.shadow.camera.far = 120
+
+      shadowLight.shadow.camera.left = -22
+
+      shadowLight.shadow.camera.right = 22
+
+      shadowLight.shadow.camera.top = 35
+
+      shadowLight.shadow.camera.bottom = -25
+
+      shadowLight.shadow.bias = -0.0012
+
+      shadowLight.shadow.radius = 3.5 // Soft shadow blur
+
+      viewer.scene.add(shadowLight)
+
+      shadowLightRef.current = shadowLight
 
       // B. Overhead Dynamic Accent Spotlight
-      const topSpot = new THREE.SpotLight(accentHex, 0.7);
-      topSpot.position.set(0, 32, 10);
-      topSpot.angle = Math.PI / 3.2;
-      topSpot.penumbra = 0.85;
-      topSpot.decay = 1.2;
-      viewer.scene.add(topSpot);
-      topSpotLightRef.current = topSpot;
+
+      const topSpot = new THREE.SpotLight(accentHex, 0.7)
+
+      topSpot.position.set(0, 32, 10)
+
+      topSpot.angle = Math.PI / 3.2
+
+      topSpot.penumbra = 0.85
+
+      topSpot.decay = 1.2
+
+      viewer.scene.add(topSpot)
+
+      topSpotLightRef.current = topSpot
 
       // C. 3D Pedestal on Floor (52x52 circle canvas with radial glow)
-      const pedGeo = new THREE.PlaneGeometry(52, 52);
-      const pedCanvas = document.createElement("canvas");
-      pedCanvas.width = 512;
-      pedCanvas.height = 512;
-      const pedCtx = pedCanvas.getContext("2d");
+
+      const pedGeo = new THREE.PlaneGeometry(52, 52)
+
+      const pedCanvas = document.createElement("canvas")
+
+      pedCanvas.width = 512
+
+      pedCanvas.height = 512
+
+      const pedCtx = pedCanvas.getContext("2d")
+
       if (pedCtx) {
-        const radGrd = pedCtx.createRadialGradient(256, 256, 0, 256, 256, 256);
-        radGrd.addColorStop(0, "rgba(255, 255, 255, 0.55)");
-        radGrd.addColorStop(0.35, "rgba(255, 255, 255, 0.25)");
-        radGrd.addColorStop(0.7, "rgba(255, 255, 255, 0.06)");
-        radGrd.addColorStop(1, "rgba(255, 255, 255, 0)");
-        pedCtx.fillStyle = radGrd;
-        pedCtx.fillRect(0, 0, 512, 512);
+        const radGrd = pedCtx.createRadialGradient(256, 256, 0, 256, 256, 256)
+
+        radGrd.addColorStop(0, "rgba(255, 255, 255, 0.55)")
+
+        radGrd.addColorStop(0.35, "rgba(255, 255, 255, 0.25)")
+
+        radGrd.addColorStop(0.7, "rgba(255, 255, 255, 0.06)")
+
+        radGrd.addColorStop(1, "rgba(255, 255, 255, 0)")
+
+        pedCtx.fillStyle = radGrd
+
+        pedCtx.fillRect(0, 0, 512, 512)
       }
-      const pedTex = new THREE.CanvasTexture(pedCanvas);
+
+      const pedTex = new THREE.CanvasTexture(pedCanvas)
+
       const pedMat = new THREE.MeshBasicMaterial({
         map: pedTex,
+
         color: new THREE.Color(accentHex),
+
         transparent: true,
+
         opacity: isDark ? 0.45 : 0.3,
+
         blending: THREE.AdditiveBlending,
+
         depthWrite: false,
+
         side: THREE.DoubleSide,
-      });
-      const pedMesh = new THREE.Mesh(pedGeo, pedMat);
-      pedMesh.rotation.x = -Math.PI / 2;
-      pedMesh.position.set(0, -16.05, 0);
-      viewer.scene.add(pedMesh);
-      pedestalMatRef.current = pedMat;
+      })
+
+      const pedMesh = new THREE.Mesh(pedGeo, pedMat)
+
+      pedMesh.rotation.x = -Math.PI / 2
+
+      pedMesh.position.set(0, -16.05, 0)
+
+      viewer.scene.add(pedMesh)
+
+      pedestalMatRef.current = pedMat
 
       // D. Real-Time Dynamic Shadow Receiver Plane on the Floor
-      const shadowReceiverGeo = new THREE.PlaneGeometry(64, 64);
+
+      const shadowReceiverGeo = new THREE.PlaneGeometry(64, 64)
+
       const shadowReceiverMat = new THREE.ShadowMaterial({
         opacity: 0.45,
-      });
+      })
+
       const shadowReceiverMesh = new THREE.Mesh(
         shadowReceiverGeo,
+
         shadowReceiverMat,
-      );
-      shadowReceiverMesh.rotation.x = -Math.PI / 2;
-      shadowReceiverMesh.position.set(0, -16.04, 0);
-      shadowReceiverMesh.receiveShadow = true;
-      viewer.scene.add(shadowReceiverMesh);
+      )
+
+      shadowReceiverMesh.rotation.x = -Math.PI / 2
+
+      shadowReceiverMesh.position.set(0, -16.04, 0)
+
+      shadowReceiverMesh.receiveShadow = true
+
+      viewer.scene.add(shadowReceiverMesh)
 
       // E. Soft front fill and ambient illumination
-      const frontFill = new THREE.DirectionalLight(0xffffff, 0.35);
-      frontFill.position.set(12, 14, 30);
-      viewer.scene.add(frontFill);
 
-      const ambient = new THREE.AmbientLight(isDark ? 0xdddddd : 0xffffff, 0.6);
-      viewer.scene.add(ambient);
+      const frontFill = new THREE.DirectionalLight(0xffffff, 0.35)
 
-      enableShadowCasting(viewer.playerObject);
+      frontFill.position.set(12, 14, 30)
 
-      viewerRef.current = viewer;
-      setIsLoading(false);
+      viewer.scene.add(frontFill)
+
+      const ambient = new THREE.AmbientLight(isDark ? 0xdddddd : 0xffffff, 0.6)
+
+      viewer.scene.add(ambient)
+
+      enableShadowCasting(viewer.playerObject)
+
+      viewerRef.current = viewer
+
+      setIsLoading(false)
     } catch (err) {
-      console.error("Failed to initialize SkinViewer3D:", err);
-      setHasError(true);
+      console.error("Failed to initialize SkinViewer3D:", err)
+
+      setHasError(true)
     }
 
     return () => {
       if (viewerRef.current) {
         try {
-          viewerRef.current.dispose();
+          viewerRef.current.dispose()
         } catch (_) {}
-        viewerRef.current = null;
-        topSpotLightRef.current = null;
-        pedestalMatRef.current = null;
-        shadowLightRef.current = null;
+
+        viewerRef.current = null
+
+        topSpotLightRef.current = null
+
+        pedestalMatRef.current = null
+
+        shadowLightRef.current = null
       }
-    };
-  }, [width, height, isDark]);
+    }
+  }, [width, height, isDark])
 
   // 2. Synchronize Top Spotlight & 3D Pedestal with dynamic accent
+
   useEffect(() => {
     if (accentHex) {
       try {
         if (topSpotLightRef.current)
-          topSpotLightRef.current.color.set(accentHex);
-        if (pedestalMatRef.current) pedestalMatRef.current.color.set(accentHex);
+          topSpotLightRef.current.color.set(accentHex)
+
+        if (pedestalMatRef.current) pedestalMatRef.current.color.set(accentHex)
       } catch (_) {}
     }
-  }, [accentHex]);
+  }, [accentHex])
 
   // 3. OrbitControls Auto-rotation: Rotates camera 360 around the stage
+
   useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-    viewer.autoRotate = false;
+    const viewer = viewerRef.current
+
+    if (!viewer) return
+
+    viewer.autoRotate = false
+
     if (viewer.controls) {
-      viewer.controls.autoRotate = autoRotate;
-      viewer.controls.autoRotateSpeed = 2.4;
+      viewer.controls.autoRotate = autoRotate
+
+      viewer.controls.autoRotateSpeed = 2.4
     }
-  }, [autoRotate]);
+  }, [autoRotate])
 
   // 4. Apply Poses / Animations
+
   const applyPoseOrAnimation = useCallback(
     (pose: SkinPose, animType: AnimationType) => {
-      const viewer = viewerRef.current;
-      if (!viewer) return;
+      const viewer = viewerRef.current
+
+      if (!viewer) return
 
       if (animType === "pose") {
-        viewer.animation = null;
-        pose.apply(viewer);
-        enableShadowCasting(viewer.playerObject);
-        viewer.render();
+        viewer.animation = null
+
+        pose.apply(viewer)
+
+        enableShadowCasting(viewer.playerObject)
+
+        viewer.render()
       } else if (animType === "idle") {
-        viewer.animation = null;
-        const anim = new IdleAnimation();
-        anim.speed = 1.0;
-        viewer.animation = anim;
-        enableShadowCasting(viewer.playerObject);
+        viewer.animation = null
+
+        const anim = new IdleAnimation()
+
+        anim.speed = 1.0
+
+        viewer.animation = anim
+
+        enableShadowCasting(viewer.playerObject)
       } else if (animType === "walk") {
-        viewer.animation = null;
-        const anim = new WalkingAnimation();
-        anim.speed = 1.0;
-        anim.headBobbing = true;
-        viewer.animation = anim;
-        enableShadowCasting(viewer.playerObject);
+        viewer.animation = null
+
+        const anim = new WalkingAnimation()
+
+        anim.speed = 1.0
+
+        anim.headBobbing = true
+
+        viewer.animation = anim
+
+        enableShadowCasting(viewer.playerObject)
       } else if (animType === "run") {
-        viewer.animation = null;
-        const anim = new RunningAnimation();
-        anim.speed = 1.2;
-        viewer.animation = anim;
-        enableShadowCasting(viewer.playerObject);
+        viewer.animation = null
+
+        const anim = new RunningAnimation()
+
+        anim.speed = 1.2
+
+        viewer.animation = anim
+
+        enableShadowCasting(viewer.playerObject)
       }
     },
+
     [],
-  );
+  )
 
   // 5. Select Next Pose in Ordered Sequence
+
   const triggerNextPose = useCallback(() => {
-    const nextPose = getNextPose(lastPoseRef.current, isCapeMode);
-    lastPoseRef.current = nextPose.id;
-    setCurrentPose(nextPose);
-    setActiveAnimation("pose");
-    applyPoseOrAnimation(nextPose, "pose");
-    if (onPoseChange) onPoseChange(nextPose);
-  }, [isCapeMode, applyPoseOrAnimation, onPoseChange]);
+    const nextPose = getNextPose(lastPoseRef.current, isCapeMode)
+
+    lastPoseRef.current = nextPose.id
+
+    setCurrentPose(nextPose)
+
+    setActiveAnimation("pose")
+
+    applyPoseOrAnimation(nextPose, "pose")
+
+    if (onPoseChange) onPoseChange(nextPose)
+  }, [isCapeMode, applyPoseOrAnimation, onPoseChange])
 
   // 6. Reset Camera View
+
   const handleResetCamera = useCallback(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-    viewer.camera.position.set(0, 10, 52);
-    viewer.camera.lookAt(0, 0, 0);
-    viewer.zoom = 0.84;
-    viewer.adjustCameraDistance();
+    const viewer = viewerRef.current
+
+    if (!viewer) return
+
+    viewer.camera.position.set(0, 10, 52)
+
+    viewer.camera.lookAt(0, 0, 0)
+
+    viewer.zoom = 0.84
+
+    viewer.adjustCameraDistance()
+
     if (viewer.controls) {
-      viewer.controls.reset();
-      viewer.controls.autoRotate = autoRotate;
+      viewer.controls.reset()
+
+      viewer.controls.autoRotate = autoRotate
     }
-    applyPoseOrAnimation(currentPose, activeAnimation);
-  }, [currentPose, activeAnimation, autoRotate, applyPoseOrAnimation]);
+
+    applyPoseOrAnimation(currentPose, activeAnimation)
+  }, [currentPose, activeAnimation, autoRotate, applyPoseOrAnimation])
 
   // 7. Load Skin & Cape Textures whenever inputs change
-  useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
 
-    let isMounted = true;
+  useEffect(() => {
+    const viewer = viewerRef.current
+
+    if (!viewer) return
+
+    let isMounted = true
 
     const loadTextures = async () => {
-      setIsLoading(true);
+      setIsLoading(true)
+
       try {
         if (skinUrl) {
           await viewer.loadSkin(skinUrl, {
@@ -307,58 +473,69 @@ export default function SkinViewer3D({
                 : model === "slim"
                   ? "slim"
                   : "default",
-          });
+          })
+
           if (viewer.playerObject) {
-            viewer.playerObject.visible = true;
+            viewer.playerObject.visible = true
+
             if (viewer.playerObject.skin) {
-              viewer.playerObject.skin.visible = true;
+              viewer.playerObject.skin.visible = true
             }
           }
         }
 
         if (capeUrl && capeUrl.trim().length > 0 && capeUrl !== "none") {
-          await viewer.loadCape(capeUrl);
-          viewer.playerObject.backEquipment = "cape";
+          await viewer.loadCape(capeUrl)
+
+          viewer.playerObject.backEquipment = "cape"
         } else {
-          viewer.resetCape();
-          viewer.playerObject.backEquipment = null;
+          viewer.resetCape()
+
+          viewer.playerObject.backEquipment = null
         }
 
-        if (!isMounted) return;
+        if (!isMounted) return
 
-        enableShadowCasting(viewer.playerObject);
+        enableShadowCasting(viewer.playerObject)
 
         // Apply active pose or animation (defaults to idle / Respiración)
+
         if (activeAnimation === "pose") {
-          currentPose.apply(viewer);
+          currentPose.apply(viewer)
         } else {
-          applyPoseOrAnimation(currentPose, activeAnimation);
+          applyPoseOrAnimation(currentPose, activeAnimation)
         }
 
-        viewer.render();
+        viewer.render()
       } catch (err) {
-        console.error("Error loading 3D skin/cape textures:", err);
+        console.error("Error loading 3D skin/cape textures:", err)
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) setIsLoading(false)
       }
-    };
+    }
 
-    loadTextures();
+    loadTextures()
 
     return () => {
-      isMounted = false;
-    };
-  }, [skinUrl, capeUrl, model, isCapeMode, applyPoseOrAnimation, onPoseChange]);
+      isMounted = false
+    }
+  }, [skinUrl, capeUrl, model, isCapeMode, applyPoseOrAnimation, onPoseChange])
 
   return (
     <div
       style={{
         position: "relative",
+
         width,
+
         height,
+
         display: "flex",
+
         alignItems: "center",
+
         justifyContent: "center",
+
         userSelect: "none",
       }}
     >
@@ -368,11 +545,17 @@ export default function SkinViewer3D({
         height={height}
         style={{
           width: "100%",
+
           height: "100%",
+
           display: "block",
+
           outline: "none",
+
           cursor: "grab",
+
           transition: "opacity 0.25s ease",
+
           opacity: isLoading ? 0.4 : 1,
         }}
       />
@@ -381,13 +564,21 @@ export default function SkinViewer3D({
       <div
         style={{
           position: "absolute",
+
           bottom: 16,
+
           left: 16,
+
           right: 16,
+
           display: "flex",
+
           alignItems: "center",
+
           justifyContent: "space-between",
+
           zIndex: 10,
+
           pointerEvents: "auto",
         }}
       >
@@ -400,22 +591,35 @@ export default function SkinViewer3D({
             title="Cambiar a la siguiente pose en orden"
             style={{
               display: "flex",
+
               alignItems: "center",
+
               gap: 6,
+
               padding: "7px 13px",
+
               background: isDark
                 ? "rgba(18, 26, 36, 0.85)"
                 : "rgba(255, 255, 255, 0.9)",
+
               border: isDark
                 ? "1px solid rgba(255, 255, 255, 0.12)"
                 : "1px solid rgba(0, 0, 0, 0.12)",
+
               borderRadius: 10,
+
               color: isDark ? "#ffffff" : "#111827",
+
               fontSize: 12,
+
               fontWeight: 700,
+
               cursor: "pointer",
+
               backdropFilter: "blur(12px)",
+
               transition: "all 0.15s ease",
+
               boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
             }}
           >
@@ -441,35 +645,55 @@ export default function SkinViewer3D({
             onClick={() => {
               const animCycle: AnimationType[] = [
                 "idle",
+
                 "walk",
+
                 "run",
+
                 "pose",
-              ];
+              ]
+
               const nextIdx =
-                (animCycle.indexOf(activeAnimation) + 1) % animCycle.length;
-              const nextAnim = animCycle[nextIdx];
-              setActiveAnimation(nextAnim);
-              applyPoseOrAnimation(currentPose, nextAnim);
+                (animCycle.indexOf(activeAnimation) + 1) % animCycle.length
+
+              const nextAnim = animCycle[nextIdx]
+
+              setActiveAnimation(nextAnim)
+
+              applyPoseOrAnimation(currentPose, nextAnim)
             }}
             title="Cambiar animación en vivo"
             style={{
               display: "flex",
+
               alignItems: "center",
+
               gap: 6,
+
               padding: "7px 13px",
+
               background: isDark
                 ? "rgba(18, 26, 36, 0.85)"
                 : "rgba(255, 255, 255, 0.9)",
+
               border: isDark
                 ? "1px solid rgba(255, 255, 255, 0.12)"
                 : "1px solid rgba(0, 0, 0, 0.12)",
+
               borderRadius: 10,
+
               color: isDark ? "#ffffff" : "#111827",
+
               fontSize: 12,
+
               fontWeight: 700,
+
               cursor: "pointer",
+
               backdropFilter: "blur(12px)",
+
               transition: "all 0.15s ease",
+
               boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
             }}
           >
@@ -506,23 +730,35 @@ export default function SkinViewer3D({
             title={autoRotate ? "Detener giro 360°" : "Iniciar giro 360°"}
             style={{
               width: 32,
+
               height: 32,
+
               display: "flex",
+
               alignItems: "center",
+
               justifyContent: "center",
+
               background: autoRotate
                 ? `rgba(${accentHex}, 0.35)`
                 : isDark
                   ? "rgba(18, 26, 36, 0.85)"
                   : "rgba(255, 255, 255, 0.9)",
+
               border: isDark
                 ? "1px solid rgba(255, 255, 255, 0.12)"
                 : "1px solid rgba(0, 0, 0, 0.12)",
+
               borderRadius: 10,
+
               color: isDark ? "#ffffff" : "#111827",
+
               cursor: "pointer",
+
               backdropFilter: "blur(12px)",
+
               transition: "all 0.15s ease",
+
               boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
             }}
           >
@@ -547,21 +783,33 @@ export default function SkinViewer3D({
             title="Centrar y reiniciar cámara"
             style={{
               width: 32,
+
               height: 32,
+
               display: "flex",
+
               alignItems: "center",
+
               justifyContent: "center",
+
               background: isDark
                 ? "rgba(18, 26, 36, 0.85)"
                 : "rgba(255, 255, 255, 0.9)",
+
               border: isDark
                 ? "1px solid rgba(255, 255, 255, 0.12)"
                 : "1px solid rgba(0, 0, 0, 0.12)",
+
               borderRadius: 10,
+
               color: isDark ? "#ffffff" : "#111827",
+
               cursor: "pointer",
+
               backdropFilter: "blur(12px)",
+
               transition: "all 0.15s ease",
+
               boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
             }}
           >
@@ -582,5 +830,5 @@ export default function SkinViewer3D({
         </div>
       </div>
     </div>
-  );
+  )
 }

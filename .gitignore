@@ -35,6 +35,8 @@ pnpm-debug.log*
 .gradle/
 *.class
 *.jar
+!gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.jar
 *.war
 *.ear
 

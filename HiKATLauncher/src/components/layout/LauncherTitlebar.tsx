@@ -1,21 +1,29 @@
-import React, { useState } from "react";
-import { ThemeMode } from "../../types";
+import React, { useState } from "react"
+
+import { ThemeMode } from "../../types"
 
 interface LauncherTitlebarProps {
-  theme?: ThemeMode;
-  onMinimize?: () => void;
-  onMaximize?: () => void;
-  onClose?: () => void;
+  theme?: ThemeMode
+
+  onMinimize?: () => void
+
+  onMaximize?: () => void
+
+  onClose?: () => void
 }
 
 export default function LauncherTitlebar({
   theme = "dark",
+
   onMinimize,
+
   onMaximize,
+
   onClose,
 }: LauncherTitlebarProps) {
-  const [isMaximized, setIsMaximized] = useState(false);
-  const isDark = theme === "dark";
+  const [isMaximized, setIsMaximized] = useState(false)
+
+  const isDark = theme === "dark"
 
   React.useEffect(() => {
     if (
@@ -24,38 +32,40 @@ export default function LauncherTitlebar({
     ) {
       const cleanup = (window as any).electronAPI.onMaximizeChange(
         (maxState: boolean) => {
-          setIsMaximized(maxState);
+          setIsMaximized(maxState)
         },
-      );
-      (window as any).electronAPI.isMaximized?.().then?.((res: boolean) => {
-        if (typeof res === "boolean") setIsMaximized(res);
-      });
-      return cleanup;
+      )
+
+      ;(window as any).electronAPI.isMaximized?.().then?.((res: boolean) => {
+        if (typeof res === "boolean") setIsMaximized(res)
+      })
+
+      return cleanup
     }
-  }, []);
+  }, [])
 
   const handleMinimize = () => {
-    if (onMinimize) onMinimize();
+    if (onMinimize) onMinimize()
     else if ((window as any).electronAPI) {
-      (window as any).electronAPI?.minimizeWindow?.();
+      ;(window as any).electronAPI?.minimizeWindow?.()
     }
-  };
+  }
 
   const handleMaximize = () => {
-    if (onMaximize) onMaximize();
+    if (onMaximize) onMaximize()
     else if ((window as any).electronAPI) {
-      (window as any).electronAPI?.maximizeWindow?.();
+      ;(window as any).electronAPI?.maximizeWindow?.()
     } else {
-      setIsMaximized((v) => !v);
+      setIsMaximized((v) => !v)
     }
-  };
+  }
 
   const handleClose = () => {
-    if (onClose) onClose();
+    if (onClose) onClose()
     else if ((window as any).electronAPI) {
-      (window as any).electronAPI?.closeWindow?.();
+      ;(window as any).electronAPI?.closeWindow?.()
     }
-  };
+  }
 
   return (
     <>
@@ -64,12 +74,19 @@ export default function LauncherTitlebar({
         style={
           {
             position: "absolute",
+
             top: 0,
+
             left: 0,
+
             right: 0,
+
             height: 38,
+
             zIndex: 9990,
+
             WebkitAppRegion: "drag",
+
             pointerEvents: "auto",
           } as React.CSSProperties
         }
@@ -80,13 +97,21 @@ export default function LauncherTitlebar({
         style={
           {
             position: "absolute",
+
             top: 0,
+
             right: 0,
+
             height: 36,
+
             display: "flex",
+
             alignItems: "stretch",
+
             zIndex: 9999,
+
             pointerEvents: "auto",
+
             WebkitAppRegion: "no-drag",
           } as React.CSSProperties
         }
@@ -98,28 +123,40 @@ export default function LauncherTitlebar({
           title="Minimizar"
           style={{
             width: 44,
+
             height: "100%",
+
             background: "transparent",
+
             border: "none",
+
             color: isDark ? "rgba(255, 255, 255, 0.75)" : "rgba(0, 0, 0, 0.65)",
+
             display: "flex",
+
             alignItems: "center",
+
             justifyContent: "center",
+
             cursor: "pointer",
+
             transition: "background 0.14s ease, color 0.14s ease",
+
             padding: 0,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = isDark
               ? "rgba(255, 255, 255, 0.12)"
-              : "rgba(0, 0, 0, 0.08)";
-            e.currentTarget.style.color = isDark ? "#ffffff" : "#000000";
+              : "rgba(0, 0, 0, 0.08)"
+
+            e.currentTarget.style.color = isDark ? "#ffffff" : "#000000"
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.background = "transparent"
+
             e.currentTarget.style.color = isDark
               ? "rgba(255, 255, 255, 0.75)"
-              : "rgba(0, 0, 0, 0.65)";
+              : "rgba(0, 0, 0, 0.65)"
           }}
         >
           <svg
@@ -148,32 +185,45 @@ export default function LauncherTitlebar({
           title={isMaximized ? "Modo ventana" : "Maximizar"}
           style={{
             width: 44,
+
             height: "100%",
+
             background: "transparent",
+
             border: "none",
+
             color: isDark ? "rgba(255, 255, 255, 0.75)" : "rgba(0, 0, 0, 0.65)",
+
             display: "flex",
+
             alignItems: "center",
+
             justifyContent: "center",
+
             cursor: "pointer",
+
             transition: "background 0.14s ease, color 0.14s ease",
+
             padding: 0,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = isDark
               ? "rgba(255, 255, 255, 0.12)"
-              : "rgba(0, 0, 0, 0.08)";
-            e.currentTarget.style.color = isDark ? "#ffffff" : "#000000";
+              : "rgba(0, 0, 0, 0.08)"
+
+            e.currentTarget.style.color = isDark ? "#ffffff" : "#000000"
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.background = "transparent"
+
             e.currentTarget.style.color = isDark
               ? "rgba(255, 255, 255, 0.75)"
-              : "rgba(0, 0, 0, 0.65)";
+              : "rgba(0, 0, 0, 0.65)"
           }}
         >
           {isMaximized ? (
             /* Crisp Restore / Modo Ventana Icon */
+
             <svg
               width={12}
               height={12}
@@ -200,6 +250,7 @@ export default function LauncherTitlebar({
             </svg>
           ) : (
             /* Crisp Maximize Icon */
+
             <svg
               width={12}
               height={12}
@@ -227,26 +278,38 @@ export default function LauncherTitlebar({
           title="Cerrar"
           style={{
             width: 48,
+
             height: "100%",
+
             background: "transparent",
+
             border: "none",
+
             color: isDark ? "rgba(255, 255, 255, 0.75)" : "rgba(0, 0, 0, 0.65)",
+
             display: "flex",
+
             alignItems: "center",
+
             justifyContent: "center",
+
             cursor: "pointer",
+
             transition: "background 0.14s ease, color 0.14s ease",
+
             padding: 0,
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#e11d48";
-            e.currentTarget.style.color = "#ffffff";
+            e.currentTarget.style.background = "#e11d48"
+
+            e.currentTarget.style.color = "#ffffff"
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.background = "transparent"
+
             e.currentTarget.style.color = isDark
               ? "rgba(255, 255, 255, 0.75)"
-              : "rgba(0, 0, 0, 0.65)";
+              : "rgba(0, 0, 0, 0.65)"
           }}
         >
           <svg
@@ -278,5 +341,5 @@ export default function LauncherTitlebar({
         </button>
       </div>
     </>
-  );
+  )
 }

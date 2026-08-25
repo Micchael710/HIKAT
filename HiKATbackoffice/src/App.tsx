@@ -1,5 +1,6 @@
-import React from "react";
-import { HIKAT_APP_NAME, HIKAT_VERSION } from "@hikat/shared";
+import React from "react"
+
+import { HIKAT_APP_NAME, HIKAT_VERSION } from "@hikat/shared"
 
 export function App() {
   return (
@@ -10,7 +11,7 @@ export function App() {
       </p>
       <p>Administration panel will be implemented in subsequent phases.</p>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
