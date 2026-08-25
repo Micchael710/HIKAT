@@ -1,10 +1,8 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Kanit:wght@400;600;800&display=swap");
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Kanit:wght@400;600;800&display=swap');
+@import 'tailwindcss';
 
 /* ── Native Desktop App Protections ── */
-*,
-*::before,
-*::after {
+*, *::before, *::after {
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
@@ -12,8 +10,7 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-input,
-textarea {
+input, textarea {
   -webkit-user-select: text !important;
   -moz-user-select: text !important;
   -ms-user-select: text !important;
@@ -21,9 +18,7 @@ textarea {
   cursor: text;
 }
 
-img,
-svg,
-a {
+img, svg, a {
   -webkit-user-drag: none;
   user-drag: none;
 }
@@ -37,75 +32,55 @@ a {
 }
 
 @font-face {
-  font-family: "Inter:Regular";
-  src: local("Inter Regular"), local("Inter-Regular");
+  font-family: 'Inter:Regular';
+  src: local('Inter Regular'), local('Inter-Regular');
   font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
-  font-family: "Inter:Medium";
-  src: local("Inter Medium"), local("Inter-Medium");
+  font-family: 'Inter:Medium';
+  src: local('Inter Medium'), local('Inter-Medium');
   font-weight: 500;
   font-style: normal;
 }
 
 @font-face {
-  font-family: "Inter:Semi Bold";
-  src: local("Inter SemiBold"), local("Inter-SemiBold");
+  font-family: 'Inter:Semi Bold';
+  src: local('Inter SemiBold'), local('Inter-SemiBold');
   font-weight: 600;
   font-style: normal;
 }
 
 @font-face {
-  font-family: "Inter:Extra Bold";
-  src: local("Inter ExtraBold"), local("Inter-ExtraBold");
+  font-family: 'Inter:Extra Bold';
+  src: local('Inter ExtraBold'), local('Inter-ExtraBold');
   font-weight: 800;
   font-style: normal;
 }
 
 @font-face {
-  font-family: "Kanit:Regular";
-  src: local("Kanit Regular"), local("Kanit-Regular");
+  font-family: 'Kanit:Regular';
+  src: local('Kanit Regular'), local('Kanit-Regular');
   font-weight: 400;
   font-style: normal;
 }
 
 @keyframes viewFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 @keyframes screenFadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 @keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(18px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: translateY(18px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes worldEntrance {
   0% {
@@ -204,62 +179,25 @@ a {
   }
 }
 @keyframes cardSelectPop {
-  0% {
-    transform: scale(0.5);
-    opacity: 0;
-  }
-  70% {
-    transform: scale(1.15);
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+  0%   { transform: scale(0.5); opacity: 0; }
+  70%  { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
 }
 @keyframes slideUpFade {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes dropdownIn {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes breatheGlow {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 1px rgba(120, 175, 200, 0.2),
-      0 4px 18px rgba(0, 0, 0, 0.28);
-  }
-  50% {
-    box-shadow:
-      0 0 0 1px rgba(145, 200, 222, 0.42),
-      0 4px 28px rgba(0, 0, 0, 0.32),
-      0 0 22px rgba(90, 155, 182, 0.15);
-  }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(120,175,200,0.2), 0 4px 18px rgba(0,0,0,0.28); }
+  50%       { box-shadow: 0 0 0 1px rgba(145,200,222,0.42), 0 4px 28px rgba(0,0,0,0.32), 0 0 22px rgba(90,155,182,0.15); }
 }
 @keyframes breatheGlowInput {
-  0%,
-  100% {
-    box-shadow: 0 0 0 2.5px rgba(120, 175, 200, 0.14);
-  }
-  50% {
-    box-shadow:
-      0 0 0 2.5px rgba(145, 200, 222, 0.32),
-      0 0 14px rgba(90, 155, 182, 0.1);
-  }
+  0%, 100% { box-shadow: 0 0 0 2.5px rgba(120,175,200,0.14); }
+  50%       { box-shadow: 0 0 0 2.5px rgba(145,200,222,0.32), 0 0 14px rgba(90,155,182,0.1); }
 }
 
 /* Clean glowing focus on form inputs */
@@ -272,55 +210,41 @@ a {
 /* News card hover: clean border highlight */
 .news-img-card {
   border: 1.5px solid transparent;
-  transition:
-    border-color 0.22s ease,
-    transform 0.22s ease;
+  transition: border-color 0.22s ease, transform 0.22s ease;
 }
 .news-img-card:hover {
-  border-color: rgba(130, 188, 208, 0.45) !important;
+  border-color: rgba(130,188,208,0.45) !important;
 }
 .news-img-card:hover img {
   transform: scale(1.03);
 }
 
 .skin-card-glow {
-  box-shadow:
-    0 0 0 2px rgba(var(--glow-r), var(--glow-g), var(--glow-b), 0.4),
-    0 8px 24px rgba(0, 0, 0, 0.4) !important;
+  box-shadow: 0 0 0 2px rgba(var(--glow-r), var(--glow-g), var(--glow-b), 0.4), 0 8px 24px rgba(0,0,0,0.4) !important;
 }
 
 .news-card-glow {
-  box-shadow:
-    0 0 0 2px rgba(var(--glow-r), var(--glow-g), var(--glow-b), 0.4),
-    0 8px 24px rgba(0, 0, 0, 0.4) !important;
+  box-shadow: 0 0 0 2px rgba(var(--glow-r), var(--glow-g), var(--glow-b), 0.4), 0 8px 24px rgba(0,0,0,0.4) !important;
 }
 
 /* Download button — idle: soft, subtle breathing glow */
 @keyframes breatheGlowAmberPulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 16px -2px rgba(245, 208, 86, 0.25),
-      0 0 6px rgba(239, 196, 54, 0.12);
+  0%, 100% {
+    box-shadow: 0 0 16px -2px rgba(245, 208, 86, 0.25), 0 0 6px rgba(239, 196, 54, 0.12);
   }
   50% {
-    box-shadow:
-      0 0 28px 0px rgba(245, 208, 86, 0.45),
-      0 0 12px rgba(239, 196, 54, 0.25);
+    box-shadow: 0 0 28px 0px rgba(245, 208, 86, 0.45), 0 0 12px rgba(239, 196, 54, 0.25);
   }
 }
 
 .dl-idle-btn {
   position: relative;
-  transition:
-    transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
-    filter 0.3s ease,
-    box-shadow 0.42s ease;
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.3s ease, box-shadow 0.42s ease;
   will-change: transform, box-shadow, filter;
 }
 
 .dl-idle-btn::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
@@ -343,17 +267,12 @@ a {
 /* Launcher downloading progress card style */
 .dl-progress-card {
   position: relative;
-  transition:
-    border-color 0.25s ease,
-    box-shadow 0.3s ease,
-    transform 0.2s ease;
+  transition: border-color 0.25s ease, box-shadow 0.3s ease, transform 0.2s ease;
   user-select: none;
 }
 .dl-progress-card:hover {
   border-color: rgba(239, 196, 54, 0.65) !important;
-  box-shadow:
-    0 10px 36px rgba(0, 0, 0, 0.75),
-    0 0 28px rgba(239, 196, 54, 0.25) !important;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.75), 0 0 28px rgba(239, 196, 54, 0.25) !important;
 }
 
 [data-theme="light"] .dl-progress-card {
@@ -362,9 +281,7 @@ a {
 }
 [data-theme="light"] .dl-progress-card:hover {
   border-color: rgba(239, 196, 54, 0.85) !important;
-  box-shadow:
-    0 8px 28px rgba(0, 0, 0, 0.12),
-    0 0 20px rgba(239, 196, 54, 0.25) !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12), 0 0 20px rgba(239, 196, 54, 0.25) !important;
 }
 
 /* Subtle external cancel button */
@@ -376,11 +293,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition:
-    background 0.2s ease,
-    border-color 0.2s ease,
-    color 0.2s ease,
-    transform 0.18s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.18s ease;
 }
 .dl-cancel-btn:hover {
   background: rgba(255, 255, 255, 0.1);
@@ -403,16 +316,11 @@ a {
 
 /* Profile button — same 3px border and white breathing glow logic as news/skin cards */
 @keyframes breatheGlowProfileWhite {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 3px rgba(255, 255, 255, 0.16),
-      0 0 20px rgba(255, 255, 255, 0.1);
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.16), 0 0 20px rgba(255, 255, 255, 0.1);
   }
   50% {
-    box-shadow:
-      0 0 0 3px rgba(255, 255, 255, 0.38),
-      0 0 32px rgba(255, 255, 255, 0.22);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.38), 0 0 32px rgba(255, 255, 255, 0.22);
   }
 }
 
@@ -442,10 +350,7 @@ a {
 .profile-pill-btn {
   background: #131c23;
   border: 1.5px solid rgba(255, 255, 255, 0.08);
-  transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .profile-pill-btn:hover {
@@ -502,17 +407,14 @@ a {
   border: none;
   background: transparent;
   color: rgba(255, 255, 255, 0.65);
-  font-family: "Inter", sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: -0.01em;
   border-radius: 8px;
   cursor: pointer;
   text-align: left;
-  transition:
-    background 0.16s ease,
-    color 0.16s ease,
-    transform 0.16s ease;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
 .profile-menu-item:hover {
@@ -568,9 +470,7 @@ a {
   background: rgba(255, 255, 255, 0.12);
   border: 1.5px solid rgba(255, 255, 255, 0.16);
   color: white;
-  box-shadow:
-    0 4px 18px rgba(0, 0, 0, 0.35),
-    0 0 12px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35), 0 0 12px rgba(255, 255, 255, 0.06);
 }
 
 [data-theme="light"] .sidebar-nav-btn.is-active {
@@ -593,37 +493,16 @@ a {
 
 /* Atmospheric breathing animation for skins background */
 @keyframes skinsOrbBreathe1 {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-    opacity: 0.4;
-  }
-  50% {
-    transform: translate(35px, 25px) scale(1.15);
-    opacity: 0.75;
-  }
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.4; }
+  50%       { transform: translate(35px, 25px) scale(1.15); opacity: 0.75; }
 }
 @keyframes skinsOrbBreathe2 {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-    opacity: 0.35;
-  }
-  50% {
-    transform: translate(-30px, -20px) scale(1.12);
-    opacity: 0.7;
-  }
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.35; }
+  50%       { transform: translate(-30px, -20px) scale(1.12); opacity: 0.7; }
 }
 @keyframes skinsOrbBreathe3 {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-    opacity: 0.3;
-  }
-  50% {
-    transform: translate(20px, -25px) scale(1.18);
-    opacity: 0.65;
-  }
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.3; }
+  50%       { transform: translate(20px, -25px) scale(1.18); opacity: 0.65; }
 }
 
 .skins-bg-orb-1 {
@@ -641,12 +520,7 @@ a {
   background: #131c23;
   border: 2px solid rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.6);
-  transition:
-    border-color 0.22s ease,
-    background 0.22s ease,
-    color 0.22s ease,
-    transform 0.2s ease,
-    box-shadow 0.22s ease;
+  transition: border-color 0.22s ease, background 0.22s ease, color 0.22s ease, transform 0.2s ease, box-shadow 0.22s ease;
 }
 
 [data-theme="light"] .launcher-btn-secondary {
@@ -674,11 +548,7 @@ a {
   background: linear-gradient(135deg, #1c384e, #295372);
   border: 2px solid rgba(130, 200, 230, 0.5);
   color: white;
-  transition:
-    border-color 0.22s ease,
-    background 0.22s ease,
-    box-shadow 0.25s ease,
-    transform 0.2s ease;
+  transition: border-color 0.22s ease, background 0.22s ease, box-shadow 0.25s ease, transform 0.2s ease;
 }
 .launcher-btn-primary:hover {
   background: linear-gradient(135deg, #234764, #33678e) !important;
@@ -727,10 +597,7 @@ a {
   isolation: isolate;
   transform: translate3d(0, 0, 0);
   will-change: transform;
-  transition:
-    border-color 0.22s ease,
-    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 0.22s ease;
+  transition: border-color 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease;
 }
 
 [data-theme="light"] .news-card-item {
@@ -742,9 +609,7 @@ a {
 .news-card-item:hover {
   transform: translateY(-5px);
   border-color: var(--card-border-color, rgba(255, 255, 255, 0.85)) !important;
-  box-shadow:
-    0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)),
-    0 14px 36px var(--card-glow-color, rgba(255, 255, 255, 0.3)) !important;
+  box-shadow: 0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)), 0 14px 36px var(--card-glow-color, rgba(255, 255, 255, 0.3)) !important;
   animation: newsCardBreathe 2.4s ease-in-out infinite !important;
 }
 
@@ -758,21 +623,14 @@ a {
 
 /* Carousel Navigation Squircle Buttons */
 .carousel-nav-btn {
-  transition:
-    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
-    background 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    color 0.18s ease;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
 }
 
 .carousel-nav-btn:hover {
   transform: translateY(-50%) scale(1.08) !important;
   border-color: rgba(255, 255, 255, 0.45) !important;
   background: rgba(255, 255, 255, 0.24) !important;
-  box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.5),
-    0 0 16px rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 16px rgba(255, 255, 255, 0.12) !important;
 }
 
 .carousel-nav-btn:active {
@@ -787,23 +645,17 @@ a {
 }
 
 @keyframes newsCardBreathe {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)),
-      0 6px 20px var(--card-glow-color, rgba(255, 255, 255, 0.25));
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)), 0 6px 20px var(--card-glow-color, rgba(255, 255, 255, 0.25));
   }
   50% {
-    box-shadow:
-      0 0 0 2.5px var(--card-glow-color, rgba(255, 255, 255, 0.38)),
-      0 8px 26px var(--card-glow-color, rgba(255, 255, 255, 0.35));
+    box-shadow: 0 0 0 2.5px var(--card-glow-color, rgba(255, 255, 255, 0.38)), 0 8px 26px var(--card-glow-color, rgba(255, 255, 255, 0.35));
   }
 }
 
 /* Smooth floating vertical animation */
 @keyframes floatSmooth {
-  0%,
-  100% {
+  0%, 100% {
     transform: translateY(0px);
   }
   50% {
@@ -824,11 +676,7 @@ a {
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  transition:
-    border-color 0.22s ease,
-    background 0.22s ease,
-    transform 0.2s ease,
-    box-shadow 0.22s ease;
+  transition: border-color 0.22s ease, background 0.22s ease, transform 0.2s ease, box-shadow 0.22s ease;
 }
 
 .skin-card-item:not(.is-selected) {
@@ -847,9 +695,7 @@ a {
   transform: translateY(-3px);
   border-color: var(--card-border-color, rgba(255, 255, 255, 0.85)) !important;
   background: #15222b !important;
-  box-shadow:
-    0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)),
-    0 6px 20px var(--card-glow-color, rgba(255, 255, 255, 0.25)) !important;
+  box-shadow: 0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)), 0 6px 20px var(--card-glow-color, rgba(255, 255, 255, 0.25)) !important;
   animation: newsCardBreathe 2.4s ease-in-out infinite !important;
 }
 
@@ -860,9 +706,7 @@ a {
 .skin-card-item.is-selected {
   border: 2.5px solid var(--card-border-color) !important;
   background: #15222b !important;
-  box-shadow:
-    0 0 0 2px var(--card-glow-color),
-    0 6px 20px var(--card-glow-color) !important;
+  box-shadow: 0 0 0 2px var(--card-glow-color), 0 6px 20px var(--card-glow-color) !important;
 }
 
 [data-theme="light"] .skin-card-item.is-selected {
@@ -871,28 +715,20 @@ a {
 
 .skin-card-item.is-selected:hover {
   transform: translateY(-3px);
-  box-shadow:
-    0 0 0 2.5px var(--card-glow-color),
-    0 8px 26px var(--card-glow-color) !important;
+  box-shadow: 0 0 0 2.5px var(--card-glow-color), 0 8px 26px var(--card-glow-color) !important;
 }
 
 /* Community Hub Interactive Cards — Responsive Glowing Border on Hover */
 .community-hub-card {
   position: relative;
   cursor: default;
-  transition:
-    border-color 0.22s ease,
-    background 0.22s ease,
-    transform 0.2s ease,
-    box-shadow 0.22s ease;
+  transition: border-color 0.22s ease, background 0.22s ease, transform 0.2s ease, box-shadow 0.22s ease;
 }
 
 .community-hub-card:hover {
   transform: translateY(-3px);
   border-color: var(--card-border-color, rgba(255, 255, 255, 0.85)) !important;
-  box-shadow:
-    0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)),
-    0 8px 30px var(--card-glow-color, rgba(255, 255, 255, 0.25)) !important;
+  box-shadow: 0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)), 0 8px 30px var(--card-glow-color, rgba(255, 255, 255, 0.25)) !important;
   animation: newsCardBreathe 2.4s ease-in-out infinite !important;
 }
 
@@ -902,12 +738,8 @@ a {
 
 /* ── Settings Screen Clean Minimalist Components ── */
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .settings-card {
@@ -916,10 +748,7 @@ a {
   border-radius: 18px;
   padding: 16px 22px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.22s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.22s ease;
 }
 
 [data-theme="light"] .settings-card {
@@ -960,14 +789,8 @@ a {
 
 /* Toast Notification */
 @keyframes toastSlideIn {
-  from {
-    transform: translateY(16px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 .settings-live-toast {
@@ -1048,15 +871,13 @@ a {
   font-weight: 600;
 }
 
-html,
-body,
-#root {
+html, body, #root {
   width: 100%;
   height: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
-  font-family: "Inter", sans-serif;
+  font-family: 'Inter', sans-serif;
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
 }

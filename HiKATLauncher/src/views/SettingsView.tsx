@@ -1,23 +1,16 @@
 import React, { useState, useRef, useEffect } from "react"
-
 import { ThemeMode, SettingsTab } from "../types"
-
 import { IconMoon, IconSun } from "../theme/icons"
-
 import { CANVAS_W, BASE_FONT } from "../theme/tokens"
-
 import LauncherToggle from "../components/common/LauncherToggle"
-
 import LauncherSelect from "../components/common/LauncherSelect"
-
 import LiveToast from "../components/common/LiveToast"
-
+import { gameService } from "../services/gameService"
 import {
   useTranslation,
   getTranslation,
   LanguageCode,
 } from "../context/LanguageContext"
-
 import {
   STORAGE_KEYS,
   getStoredBoolean,
@@ -28,177 +21,190 @@ import {
 
 interface SettingsViewProps {
   theme?: ThemeMode
-
   setTheme?: (t: ThemeMode) => void
 }
 
 export default function SettingsView({
   theme = "dark",
-
   setTheme,
 }: SettingsViewProps) {
   const { t, language, setLanguage } = useTranslation()
-
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
 
   const [startWithSystem, setStartWithSystemState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, true),
   )
-
   const [minimizeToTray, setMinimizeToTrayState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, true),
   )
-
   const [autoUpdates, setAutoUpdatesState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true),
   )
-
   const [notifications, setNotificationsState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.NOTIFICATIONS, true),
   )
-
   const isDark = theme === "dark"
 
-  // Detect client system RAM via deviceMemory Web API
-
-  const [systemTotalRAM] = useState<number>(() => {
+  // Detect client system RAM with fallback to Node.js memory IPC
+  const [systemTotalRAM, setSystemTotalRAM] = useState<number>(() => {
     if (typeof navigator !== "undefined" && "deviceMemory" in navigator) {
       const devMem = (navigator as any).deviceMemory
-
       if (typeof devMem === "number" && devMem > 0) {
         return Math.max(4, Math.round(devMem))
       }
     }
-
     return 16
   })
 
   // Game & Performance State
-
   const [ramGB, setRamGBState] = useState<number>(() => {
     const defaultVal = 8
-
-    const detected =
-      typeof navigator !== "undefined" &&
-      "deviceMemory" in navigator &&
-      (navigator as any).deviceMemory
-        ? Math.min(
-            defaultVal,
-
-            Math.max(4, Math.round((navigator as any).deviceMemory)),
-          )
-        : defaultVal
-
-    return getStoredNumber(STORAGE_KEYS.RAM_GB, detected)
+    return getStoredNumber(STORAGE_KEYS.RAM_GB, defaultVal)
   })
 
   const [dedicatedGPU, setDedicatedGPUState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
   )
 
-  const setStartWithSystem = (v: boolean) => {
+  // Sync settings with Electron process and OS on mount
+  useEffect(() => {
+    let isMounted = true
+
+    if (window.electronAPI?.getMemory) {
+      window.electronAPI
+        .getMemory()
+        .then((info) => {
+          if (isMounted && info?.totalGb) {
+            setSystemTotalRAM(info.totalGb)
+          }
+        })
+        .catch(() => {})
+    }
+
+    if (window.electronAPI?.getStartWithSystem) {
+      window.electronAPI
+        .getStartWithSystem()
+        .then((realState) => {
+          if (isMounted && typeof realState === "boolean") {
+            setStartWithSystemState(realState)
+            setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, realState)
+          }
+        })
+        .catch(() => {})
+    }
+
+    if (window.electronAPI?.setMinimizeToTray) {
+      window.electronAPI.setMinimizeToTray(minimizeToTray)
+    }
+
+    if (window.electronAPI?.setDedicatedGpu) {
+      window.electronAPI.setDedicatedGpu(dedicatedGPU)
+    }
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const setStartWithSystem = async (v: boolean) => {
     setStartWithSystemState(v)
-
     setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, v)
-
-    window.electronAPI?.setStartWithSystem?.(v)
+    try {
+      const res = await window.electronAPI?.setStartWithSystem?.(v)
+      if (typeof res === "boolean") {
+        setStartWithSystemState(res)
+        setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, res)
+      }
+    } catch (_) {}
   }
 
-  const setMinimizeToTray = (v: boolean) => {
+  const setMinimizeToTray = async (v: boolean) => {
     setMinimizeToTrayState(v)
-
     setStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, v)
-
-    window.electronAPI?.setMinimizeToTray?.(v)
+    try {
+      await window.electronAPI?.setMinimizeToTray?.(v)
+    } catch (_) {}
   }
 
   const setAutoUpdates = (v: boolean) => {
     setAutoUpdatesState(v)
-
     setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, v)
-
     window.electronAPI?.setAutoUpdates?.(v)
   }
 
   const setNotifications = (v: boolean) => {
     setNotificationsState(v)
-
     setStoredBoolean(STORAGE_KEYS.NOTIFICATIONS, v)
-
     window.electronAPI?.setNotifications?.(v)
   }
 
   const setDedicatedGPU = (v: boolean) => {
     setDedicatedGPUState(v)
-
     setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, v)
-
     window.electronAPI?.setDedicatedGpu?.(v)
   }
 
   const setRamGB = (v: number) => {
     setRamGBState(v)
-
     setStoredNumber(STORAGE_KEYS.RAM_GB, v)
-
     window.electronAPI?.setRamAllocation?.(v)
   }
 
   // Maintenance state
-
   const [repairState, setRepairState] = useState<"idle" | "scanning" | "done">(
     "idle",
   )
-
-  const [toastText, setToastText] = useState<string | null>(null)
-
+  const [toastState, setToastState] = useState<{
+    message: string | null
+    type: "success" | "error" | "info"
+  }>({
+    message: null,
+    type: "success",
+  })
   const toastTimeoutRef = useRef<any>(null)
 
-  const notifySaved = (customMsg?: string) => {
+  const notifySaved = (customMsg?: string, type: "success" | "error" | "info" = "success") => {
     const msg = customMsg || t("settings.toastSaved")
-
-    setToastText(msg)
-
+    setToastState({ message: msg, type })
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
-
     toastTimeoutRef.current = setTimeout(() => {
-      setToastText(null)
-    }, 2400)
+      setToastState({ message: null, type: "success" })
+    }, 2800)
   }
 
-  const handleRepair = () => {
+  const handleRepair = async () => {
     if (repairState === "scanning") return
-
     setRepairState("scanning")
-
-    notifySaved(t("settings.repairScanning"))
-
-    window.electronAPI?.repairGame?.()
-
-    setTimeout(() => {
-      setRepairState("done")
-
-      notifySaved(t("settings.repairSuccess"))
-
-      setTimeout(() => setRepairState("idle"), 3500)
-    }, 2800)
+    notifySaved(t("settings.repairScanning"), "info")
+    try {
+      const manifest = await gameService.checkGameManifest()
+      if (manifest?.clientFiles && manifest.clientFiles.length > 0) {
+        await gameService.startSync(manifest.clientFiles, manifest.version)
+        setRepairState("done")
+        notifySaved(t("settings.repairSuccess"), "success")
+        setTimeout(() => setRepairState("idle"), 3500)
+      } else {
+        setRepairState("idle")
+        notifySaved(t("settings.repairNoFiles"), "error")
+      }
+    } catch (err: any) {
+      console.error("Repair error:", err)
+      setRepairState("idle")
+      notifySaved(t("settings.repairError"), "error")
+    }
   }
 
   const CONTENT_LEFT = 184
 
   /* Smooth delayed mouse-following parallax */
-
   const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
 
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
       const relX = e.clientX / window.innerWidth - 0.5
-
       const relY = e.clientY / window.innerHeight - 0.5
-
       setMouseOffset({
         x: Math.round(relX * 220),
-
         y: Math.round(relY * 150),
       })
     }
@@ -206,7 +212,6 @@ export default function SettingsView({
     window.addEventListener("mousemove", handleWindowMouseMove, {
       passive: true,
     })
-
     return () => window.removeEventListener("mousemove", handleWindowMouseMove)
   }, [])
 
@@ -214,17 +219,11 @@ export default function SettingsView({
     <div
       style={{
         position: "absolute",
-
         left: 0,
-
         top: 0,
-
         width: CANVAS_W,
-
         height: 1080,
-
         background: isDark ? "#090d12" : "#f5f7fa",
-
         overflow: "hidden",
       }}
     >
@@ -232,13 +231,9 @@ export default function SettingsView({
       <div
         style={{
           position: "absolute",
-
           inset: 0,
-
           pointerEvents: "none",
-
           overflow: "hidden",
-
           zIndex: 0,
         }}
       >
@@ -246,13 +241,9 @@ export default function SettingsView({
         <div
           style={{
             position: "absolute",
-
             inset: 0,
-
             transform: `translate3d(${mouseOffset.x}px, ${mouseOffset.y}px, 0)`,
-
             transition: "transform 1.4s cubic-bezier(0.16, 1, 0.3, 1)",
-
             willChange: "transform",
           }}
         >
@@ -260,19 +251,13 @@ export default function SettingsView({
             className="skins-bg-orb-1"
             style={{
               position: "absolute",
-
               top: "-10%",
-
               left: "15%",
-
               width: 850,
-
               height: 850,
-
               background: `radial-gradient(circle, rgba(62, 196, 192, ${
                 isDark ? 0.22 : 0.12
               }) 0%, transparent 68%)`,
-
               filter: "blur(55px)",
             }}
           />
@@ -282,13 +267,9 @@ export default function SettingsView({
         <div
           style={{
             position: "absolute",
-
             inset: 0,
-
             transform: `translate3d(${Math.round(mouseOffset.x * 0.45)}px, ${Math.round(mouseOffset.y * 0.45)}px, 0)`,
-
             transition: "transform 1.8s cubic-bezier(0.16, 1, 0.3, 1)",
-
             willChange: "transform",
           }}
         >
@@ -296,19 +277,13 @@ export default function SettingsView({
             className="skins-bg-orb-2"
             style={{
               position: "absolute",
-
               top: "25%",
-
               right: "5%",
-
               width: 900,
-
               height: 900,
-
               background: `radial-gradient(circle, rgba(62, 196, 192, ${
                 isDark ? 0.15 : 0.08
               }) 0%, transparent 68%)`,
-
               filter: "blur(65px)",
             }}
           />
@@ -318,13 +293,9 @@ export default function SettingsView({
         <div
           style={{
             position: "absolute",
-
             inset: 0,
-
             transform: `translate3d(${Math.round(mouseOffset.x * 0.25)}px, ${Math.round(mouseOffset.y * 0.25)}px, 0)`,
-
             transition: "transform 2.2s cubic-bezier(0.16, 1, 0.3, 1)",
-
             willChange: "transform",
           }}
         >
@@ -332,19 +303,13 @@ export default function SettingsView({
             className="skins-bg-orb-3"
             style={{
               position: "absolute",
-
               bottom: "-15%",
-
               left: "25%",
-
               width: 800,
-
               height: 800,
-
               background: `radial-gradient(circle, rgba(62, 196, 192, ${
                 isDark ? 0.12 : 0.06
               }) 0%, transparent 70%)`,
-
               filter: "blur(55px)",
             }}
           />
@@ -355,23 +320,14 @@ export default function SettingsView({
       <div
         style={{
           position: "absolute",
-
           left: CONTENT_LEFT,
-
           top: 145,
-
           width: CANVAS_W - CONTENT_LEFT - 120,
-
           height: 880,
-
           display: "flex",
-
           flexDirection: "column",
-
           fontFamily: BASE_FONT,
-
           zIndex: 1,
-
           animation: "viewFadeIn 0.24s ease",
         }}
       >
@@ -379,11 +335,8 @@ export default function SettingsView({
         <div
           style={{
             display: "flex",
-
             alignItems: "center",
-
             justifyContent: "space-between",
-
             marginBottom: 24,
           }}
         >
@@ -392,13 +345,9 @@ export default function SettingsView({
             <div
               style={{
                 fontSize: 32,
-
                 fontWeight: 800,
-
                 color: isDark ? "white" : "#111822",
-
                 letterSpacing: "-0.02em",
-
                 marginBottom: 4,
               }}
             >
@@ -407,9 +356,7 @@ export default function SettingsView({
             <div
               style={{
                 fontSize: 16,
-
                 fontWeight: 400,
-
                 color: isDark ? "#8899aa" : "#556677",
               }}
             >
@@ -421,17 +368,12 @@ export default function SettingsView({
           <div
             style={{
               display: "flex",
-
               background: isDark ? "#0d1217" : "#e6ebf0",
-
               borderRadius: 14,
-
               padding: 4,
-
               border: isDark
                 ? "1.5px solid rgba(255, 255, 255, 0.08)"
                 : "1.5px solid rgba(0, 0, 0, 0.08)",
-
               gap: 4,
             }}
           >
@@ -440,37 +382,26 @@ export default function SettingsView({
               onClick={() => setActiveTab("general")}
               style={{
                 padding: "10px 28px",
-
                 borderRadius: 10,
-
                 fontFamily: BASE_FONT,
-
                 fontSize: 15.5,
-
                 fontWeight: 700,
-
                 cursor: "pointer",
-
                 display: "flex",
-
                 alignItems: "center",
-
                 gap: 8,
-
                 border:
                   activeTab === "general"
                     ? isDark
                       ? "1.5px solid rgba(255, 255, 255, 0.14)"
                       : "1.5px solid rgba(0, 0, 0, 0.08)"
                     : "1.5px solid transparent",
-
                 background:
                   activeTab === "general"
                     ? isDark
                       ? "#1c2630"
                       : "#ffffff"
                     : "transparent",
-
                 color:
                   activeTab === "general"
                     ? isDark
@@ -479,12 +410,10 @@ export default function SettingsView({
                     : isDark
                       ? "#7a8b9e"
                       : "#667788",
-
                 boxShadow:
                   activeTab === "general" && !isDark
                     ? "0 2px 8px rgba(0, 0, 0, 0.08)"
                     : "none",
-
                 transition: "all 0.16s ease",
               }}
             >
@@ -509,37 +438,26 @@ export default function SettingsView({
               onClick={() => setActiveTab("game")}
               style={{
                 padding: "10px 28px",
-
                 borderRadius: 10,
-
                 fontFamily: BASE_FONT,
-
                 fontSize: 15.5,
-
                 fontWeight: 700,
-
                 cursor: "pointer",
-
                 display: "flex",
-
                 alignItems: "center",
-
                 gap: 8,
-
                 border:
                   activeTab === "game"
                     ? isDark
                       ? "1.5px solid rgba(255, 255, 255, 0.14)"
                       : "1.5px solid rgba(0, 0, 0, 0.08)"
                     : "1.5px solid transparent",
-
                 background:
                   activeTab === "game"
                     ? isDark
                       ? "#1c2630"
                       : "#ffffff"
                     : "transparent",
-
                 color:
                   activeTab === "game"
                     ? isDark
@@ -548,12 +466,10 @@ export default function SettingsView({
                     : isDark
                       ? "#7a8b9e"
                       : "#667788",
-
                 boxShadow:
                   activeTab === "game" && !isDark
                     ? "0 2px 8px rgba(0, 0, 0, 0.08)"
                     : "none",
-
                 transition: "all 0.16s ease",
               }}
             >
@@ -583,13 +499,9 @@ export default function SettingsView({
           className="custom-grid-scroll"
           style={{
             flex: 1,
-
             overflowY: "auto",
-
             maxHeight: 830,
-
             paddingRight: 6,
-
             paddingBottom: 4,
           }}
         >
@@ -598,11 +510,8 @@ export default function SettingsView({
               key="settings-tab-general"
               style={{
                 display: "flex",
-
                 flexDirection: "column",
-
                 gap: 12,
-
                 animation: "tabSlideUpFade 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
               }}
             >
@@ -611,15 +520,10 @@ export default function SettingsView({
                 <div
                   style={{
                     fontSize: 12.5,
-
                     fontWeight: 800,
-
                     letterSpacing: "0.08em",
-
                     textTransform: "uppercase",
-
                     color: isDark ? "#657788" : "#778899",
-
                     marginBottom: 6,
                   }}
                 >
@@ -628,9 +532,7 @@ export default function SettingsView({
                 <div
                   style={{
                     display: "flex",
-
                     alignItems: "center",
-
                     justifyContent: "space-between",
                   }}
                 >
@@ -638,11 +540,8 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 17,
-
                         fontWeight: 700,
-
                         color: isDark ? "white" : "#111822",
-
                         marginBottom: 2,
                       }}
                     >
@@ -651,9 +550,7 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 14.5,
-
                         color: isDark ? "#8899aa" : "#556677",
-
                         lineHeight: 1.45,
                       }}
                     >
@@ -665,17 +562,12 @@ export default function SettingsView({
                   <div
                     style={{
                       display: "inline-flex",
-
                       background: isDark ? "#0d1217" : "#e6ebf0",
-
                       border: isDark
                         ? "1.5px solid rgba(255, 255, 255, 0.08)"
                         : "1.5px solid rgba(0, 0, 0, 0.08)",
-
                       borderRadius: 14,
-
                       padding: 4,
-
                       gap: 4,
                     }}
                   >
@@ -683,36 +575,23 @@ export default function SettingsView({
                       type="button"
                       onClick={() => {
                         setTheme?.("dark")
-
                         notifySaved(t("settings.toastDarkTheme"))
                       }}
                       style={{
                         padding: "8px 20px",
-
                         borderRadius: 10,
-
                         background: isDark ? "#1c2630" : "transparent",
-
                         border: isDark
                           ? "1.5px solid rgba(255, 255, 255, 0.14)"
                           : "1.5px solid transparent",
-
                         color: isDark ? "#ffffff" : "#667788",
-
                         fontSize: 14,
-
                         fontWeight: 700,
-
                         fontFamily: BASE_FONT,
-
                         cursor: "pointer",
-
                         display: "flex",
-
                         alignItems: "center",
-
                         gap: 7,
-
                         transition: "all 0.16s ease",
                       }}
                     >
@@ -724,40 +603,26 @@ export default function SettingsView({
                       type="button"
                       onClick={() => {
                         setTheme?.("light")
-
                         notifySaved(t("settings.toastLightTheme"))
                       }}
                       style={{
                         padding: "8px 20px",
-
                         borderRadius: 10,
-
                         background: !isDark ? "#ffffff" : "transparent",
-
                         border: !isDark
                           ? "1.5px solid rgba(0, 0, 0, 0.08)"
                           : "1.5px solid transparent",
-
                         color: !isDark ? "#111822" : "#7a8b9e",
-
                         boxShadow: !isDark
                           ? "0 2px 8px rgba(0, 0, 0, 0.08)"
                           : "none",
-
                         fontSize: 14,
-
                         fontWeight: 700,
-
                         fontFamily: BASE_FONT,
-
                         cursor: "pointer",
-
                         display: "flex",
-
                         alignItems: "center",
-
                         gap: 7,
-
                         transition: "all 0.16s ease",
                       }}
                     >
@@ -773,15 +638,10 @@ export default function SettingsView({
                 <div
                   style={{
                     fontSize: 12.5,
-
                     fontWeight: 800,
-
                     letterSpacing: "0.08em",
-
                     textTransform: "uppercase",
-
                     color: isDark ? "#657788" : "#778899",
-
                     marginBottom: 6,
                   }}
                 >
@@ -790,9 +650,7 @@ export default function SettingsView({
                 <div
                   style={{
                     display: "flex",
-
                     alignItems: "center",
-
                     justifyContent: "space-between",
                   }}
                 >
@@ -800,11 +658,8 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 17,
-
                         fontWeight: 700,
-
                         color: isDark ? "white" : "#111822",
-
                         marginBottom: 2,
                       }}
                     >
@@ -813,9 +668,7 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 14.5,
-
                         color: isDark ? "#8899aa" : "#556677",
-
                         lineHeight: 1.45,
                       }}
                     >
@@ -827,20 +680,15 @@ export default function SettingsView({
                     theme={theme}
                     onChange={(v) => {
                       const newLang = v as LanguageCode
-
                       setLanguage(newLang)
-
                       notifySaved(
                         getTranslation(newLang, "settings.toastSaved"),
                       )
                     }}
                     options={[
                       { value: "es", label: "Español (Latinoamérica)" },
-
                       { value: "en", label: "English (United States)" },
-
                       { value: "pt", label: "Português (Brasil)" },
-
                       { value: "fr", label: "Français (France)" },
                     ]}
                   />
@@ -852,15 +700,10 @@ export default function SettingsView({
                 <div
                   style={{
                     fontSize: 12.5,
-
                     fontWeight: 800,
-
                     letterSpacing: "0.08em",
-
                     textTransform: "uppercase",
-
                     color: isDark ? "#657788" : "#778899",
-
                     marginBottom: 4,
                   }}
                 >
@@ -873,11 +716,8 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 17,
-
                         fontWeight: 700,
-
                         color: isDark ? "white" : "#111822",
-
                         marginBottom: 2,
                       }}
                     >
@@ -886,9 +726,7 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 14.5,
-
                         color: isDark ? "#8899aa" : "#556677",
-
                         lineHeight: 1.45,
                       }}
                     >
@@ -900,7 +738,6 @@ export default function SettingsView({
                     theme={theme}
                     onChange={(v) => {
                       setStartWithSystem(v)
-
                       notifySaved()
                     }}
                     label={t("settings.startWithSystemTitle")}
@@ -913,11 +750,8 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 17,
-
                         fontWeight: 700,
-
                         color: isDark ? "white" : "#111822",
-
                         marginBottom: 2,
                       }}
                     >
@@ -926,9 +760,7 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 14.5,
-
                         color: isDark ? "#8899aa" : "#556677",
-
                         lineHeight: 1.45,
                       }}
                     >
@@ -940,7 +772,6 @@ export default function SettingsView({
                     theme={theme}
                     onChange={(v) => {
                       setMinimizeToTray(v)
-
                       notifySaved()
                     }}
                     label={t("settings.minimizeToTrayTitle")}
@@ -953,15 +784,10 @@ export default function SettingsView({
                 <div
                   style={{
                     fontSize: 12.5,
-
                     fontWeight: 800,
-
                     letterSpacing: "0.08em",
-
                     textTransform: "uppercase",
-
                     color: isDark ? "#657788" : "#778899",
-
                     marginBottom: 4,
                   }}
                 >
@@ -974,11 +800,8 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 17,
-
                         fontWeight: 700,
-
                         color: isDark ? "white" : "#111822",
-
                         marginBottom: 2,
                       }}
                     >
@@ -987,9 +810,7 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 14.5,
-
                         color: isDark ? "#8899aa" : "#556677",
-
                         lineHeight: 1.45,
                       }}
                     >
@@ -1001,7 +822,6 @@ export default function SettingsView({
                     theme={theme}
                     onChange={(v) => {
                       setAutoUpdates(v)
-
                       notifySaved()
                     }}
                     label={t("settings.autoUpdatesTitle")}
@@ -1014,11 +834,8 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 17,
-
                         fontWeight: 700,
-
                         color: isDark ? "white" : "#111822",
-
                         marginBottom: 2,
                       }}
                     >
@@ -1027,9 +844,7 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 14.5,
-
                         color: isDark ? "#8899aa" : "#556677",
-
                         lineHeight: 1.45,
                       }}
                     >
@@ -1041,7 +856,6 @@ export default function SettingsView({
                     theme={theme}
                     onChange={(v) => {
                       setNotifications(v)
-
                       notifySaved()
                     }}
                     label={t("settings.notificationsTitle")}
@@ -1054,11 +868,8 @@ export default function SettingsView({
               key="settings-tab-game"
               style={{
                 display: "flex",
-
                 flexDirection: "column",
-
                 gap: 12,
-
                 animation: "tabSlideUpFade 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
               }}
             >
@@ -1067,15 +878,10 @@ export default function SettingsView({
                 <div
                   style={{
                     fontSize: 12.5,
-
                     fontWeight: 800,
-
                     letterSpacing: "0.08em",
-
                     textTransform: "uppercase",
-
                     color: isDark ? "#657788" : "#778899",
-
                     marginBottom: 6,
                   }}
                 >
@@ -1086,7 +892,6 @@ export default function SettingsView({
                 <div
                   style={{
                     padding: "8px 0 14px",
-
                     borderBottom: isDark
                       ? "1px solid rgba(255, 255, 255, 0.05)"
                       : "1px solid rgba(0, 0, 0, 0.06)",
@@ -1095,11 +900,8 @@ export default function SettingsView({
                   <div
                     style={{
                       display: "flex",
-
                       alignItems: "center",
-
                       justifyContent: "space-between",
-
                       marginBottom: 4,
                     }}
                   >
@@ -1107,11 +909,8 @@ export default function SettingsView({
                       <div
                         style={{
                           fontSize: 17,
-
                           fontWeight: 700,
-
                           color: isDark ? "white" : "#111822",
-
                           marginBottom: 2,
                         }}
                       >
@@ -1120,9 +919,7 @@ export default function SettingsView({
                       <div
                         style={{
                           fontSize: 14.5,
-
                           color: isDark ? "#8899aa" : "#556677",
-
                           lineHeight: 1.45,
                         }}
                       >
@@ -1134,28 +931,20 @@ export default function SettingsView({
                     <div
                       style={{
                         display: "flex",
-
                         alignItems: "center",
-
                         gap: 6,
-
                         background: isDark ? "#0d1217" : "#f0f3f7",
-
                         border: isDark
                           ? "1.5px solid rgba(255, 255, 255, 0.12)"
                           : "1.5px solid rgba(0, 0, 0, 0.1)",
-
                         borderRadius: 10,
-
                         padding: "5px 14px",
                       }}
                     >
                       <span
                         style={{
                           fontSize: 15.5,
-
                           fontWeight: 800,
-
                           color: "#3ec4c0",
                         }}
                       >
@@ -1164,9 +953,7 @@ export default function SettingsView({
                       <span
                         style={{
                           fontSize: 13.5,
-
                           fontWeight: 700,
-
                           color: isDark
                             ? "rgba(255, 255, 255, 0.7)"
                             : "#556677",
@@ -1181,22 +968,16 @@ export default function SettingsView({
                   <div
                     style={{
                       marginTop: 12,
-
                       display: "flex",
-
                       alignItems: "center",
-
                       gap: 14,
                     }}
                   >
                     <span
                       style={{
                         fontSize: 13.5,
-
                         fontWeight: 700,
-
                         color: isDark ? "#7a8b9e" : "#778899",
-
                         minWidth: 36,
                       }}
                     >
@@ -1210,13 +991,11 @@ export default function SettingsView({
                       value={ramGB}
                       onChange={(e) => {
                         setRamGB(Number(e.target.value))
-
                         notifySaved()
                       }}
                       className="settings-ram-slider"
                       style={{
                         flex: 1,
-
                         background: `linear-gradient(to right, #3ec4c0 0%, #3ec4c0 ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
                           isDark
                             ? "rgba(255, 255, 255, 0.1)"
@@ -1231,13 +1010,9 @@ export default function SettingsView({
                     <span
                       style={{
                         fontSize: 13.5,
-
                         fontWeight: 700,
-
                         color: isDark ? "#7a8b9e" : "#778899",
-
                         minWidth: 44,
-
                         textAlign: "right",
                       }}
                     >
@@ -1251,9 +1026,7 @@ export default function SettingsView({
                   className="settings-row"
                   style={{
                     borderBottom: "none",
-
                     paddingBottom: 0,
-
                     paddingTop: 14,
                   }}
                 >
@@ -1261,20 +1034,15 @@ export default function SettingsView({
                     <div
                       style={{
                         display: "flex",
-
                         alignItems: "center",
-
                         gap: 8,
-
                         marginBottom: 2,
                       }}
                     >
                       <span
                         style={{
                           fontSize: 17,
-
                           fontWeight: 700,
-
                           color: isDark ? "white" : "#111822",
                         }}
                       >
@@ -1283,15 +1051,10 @@ export default function SettingsView({
                       <span
                         style={{
                           fontSize: 11.5,
-
                           fontWeight: 800,
-
                           color: "#3ec4c0",
-
                           background: "rgba(62, 196, 192, 0.12)",
-
                           padding: "2px 8px",
-
                           borderRadius: 6,
                         }}
                       >
@@ -1301,9 +1064,7 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 14.5,
-
                         color: isDark ? "#8899aa" : "#556677",
-
                         lineHeight: 1.45,
                       }}
                     >
@@ -1315,7 +1076,6 @@ export default function SettingsView({
                     theme={theme}
                     onChange={(v) => {
                       setDedicatedGPU(v)
-
                       notifySaved()
                     }}
                     label={t("settings.gpuTitle")}
@@ -1328,15 +1088,10 @@ export default function SettingsView({
                 <div
                   style={{
                     fontSize: 12.5,
-
                     fontWeight: 800,
-
                     letterSpacing: "0.08em",
-
                     textTransform: "uppercase",
-
                     color: isDark ? "#657788" : "#778899",
-
                     marginBottom: 6,
                   }}
                 >
@@ -1347,9 +1102,7 @@ export default function SettingsView({
                   className="settings-row"
                   style={{
                     borderBottom: "none",
-
                     paddingBottom: 0,
-
                     paddingTop: 6,
                   }}
                 >
@@ -1357,11 +1110,8 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 17,
-
                         fontWeight: 700,
-
                         color: isDark ? "white" : "#111822",
-
                         marginBottom: 2,
                       }}
                     >
@@ -1370,9 +1120,7 @@ export default function SettingsView({
                     <div
                       style={{
                         fontSize: 14.5,
-
                         color: isDark ? "#8899aa" : "#556677",
-
                         lineHeight: 1.45,
                       }}
                     >
@@ -1386,33 +1134,20 @@ export default function SettingsView({
                     disabled={repairState === "scanning"}
                     style={{
                       display: "flex",
-
                       alignItems: "center",
-
                       gap: 10,
-
                       padding: "10px 22px",
-
                       borderRadius: 12,
-
                       background: isDark ? "#0d1217" : "#f0f3f7",
-
                       border: isDark
                         ? "1.5px solid rgba(255, 255, 255, 0.12)"
                         : "1.5px solid rgba(0, 0, 0, 0.12)",
-
                       cursor: repairState === "scanning" ? "wait" : "pointer",
-
                       color: isDark ? "white" : "#111822",
-
                       fontFamily: BASE_FONT,
-
                       fontSize: 14.5,
-
                       fontWeight: 700,
-
                       transition: "all 0.16s ease",
-
                       flexShrink: 0,
                     }}
                     onMouseEnter={(e) => {
@@ -1420,7 +1155,6 @@ export default function SettingsView({
                         e.currentTarget.style.borderColor = isDark
                           ? "rgba(255, 255, 255, 0.28)"
                           : "rgba(0, 0, 0, 0.25)"
-
                         e.currentTarget.style.background = isDark
                           ? "#151e26"
                           : "#e4e8ee"
@@ -1431,7 +1165,6 @@ export default function SettingsView({
                         e.currentTarget.style.borderColor = isDark
                           ? "rgba(255, 255, 255, 0.12)"
                           : "rgba(0, 0, 0, 0.12)"
-
                         e.currentTarget.style.background = isDark
                           ? "#0d1217"
                           : "#f0f3f7"
@@ -1441,23 +1174,15 @@ export default function SettingsView({
                     <div
                       style={{
                         width: 22,
-
                         height: 22,
-
                         borderRadius: 6,
-
                         background: isDark
                           ? "rgba(255, 255, 255, 0.06)"
                           : "rgba(0, 0, 0, 0.06)",
-
                         color: "#3ec4c0",
-
                         display: "flex",
-
                         alignItems: "center",
-
                         justifyContent: "center",
-
                         flexShrink: 0,
                       }}
                     >
@@ -1517,7 +1242,7 @@ export default function SettingsView({
         </div>
 
         {/* ── Real-time Auto-Save Toast ── */}
-        <LiveToast message={toastText} />
+        <LiveToast message={toastState.message} type={toastState.type} />
       </div>
     </div>
   )

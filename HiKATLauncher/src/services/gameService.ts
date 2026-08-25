@@ -1,66 +1,125 @@
-import { apiClient } from "./apiClient"
+import { graphqlClient, apiClient } from "./apiClient"
+import type { PublishedModpack, ClientFile, SyncPlanCheckResult } from "../vite-env"
 
 export type GameButtonState = "unavailable" | "download" | "update" | "play" | "downloading" | "paused"
 
 export interface GameManifest {
   version: string
-
-  latestVersion: string
-
+  minecraftVersion: string
+  neoForgeVersion: string
   totalSizeGB: number
-
   hasUpdate: boolean
-
-  downloadUrl?: string
-
+  clientFiles: ClientFile[]
   installed: boolean
 }
 
-export interface DownloadProgressPayload {
-  progress: number // 0 to 100
-
-  downloadedGB: number
-
-  totalGB: number
-
-  speedMBs: number
-
-  remainingMinutes: number
-}
+export const GET_PUBLISHED_MODPACK_QUERY = `
+  query GetPublishedModpack {
+    publishedModpack {
+      version
+      minecraftVersion
+      neoForgeVersion
+      mandatory
+      clientFiles {
+        path
+        sha256
+        sizeBytes
+        downloadUrl
+        policy
+      }
+    }
+  }
+`
 
 export const gameService = {
   /**
-   * Check game version, local installation status and available updates from Backend / Manifest.
-   * Returns null if server is unreachable and no local installation exists.
+   * Check published modpack state from GraphQL Backend, with fallback to cached/REST manifest.
    */
-
   async checkGameManifest(): Promise<GameManifest | null> {
-    const res = await apiClient<GameManifest>("/game/manifest")
+    // 1. Attempt GraphQL Query
+    const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack }>(GET_PUBLISHED_MODPACK_QUERY)
 
-    if (res.success && res.data) {
-      try {
-        localStorage.setItem("hikat_game_manifest", JSON.stringify(res.data))
-      } catch (_) {}
+    let modpack: PublishedModpack | null = null
 
-      return res.data
+    if (gqlRes.success && gqlRes.data?.publishedModpack) {
+      modpack = gqlRes.data.publishedModpack
+    } else {
+      // REST endpoint fallback
+      const restRes = await apiClient<PublishedModpack | GameManifest>("/game/manifest")
+      if (restRes.success && restRes.data) {
+        const raw = restRes.data as any
+        modpack = {
+          version: raw.version || "1.0.0",
+          minecraftVersion: raw.minecraftVersion || "1.21.1",
+          neoForgeVersion: raw.neoForgeVersion || "21.1.65",
+          clientFiles: Array.isArray(raw.clientFiles) ? raw.clientFiles : [],
+        }
+      }
     }
 
+    if (modpack) {
+      try {
+        localStorage.setItem("hikat_game_manifest", JSON.stringify(modpack))
+      } catch (_) {}
+
+      const totalBytes = (modpack.clientFiles || []).reduce(
+        (sum, file) => sum + (Number(file.sizeBytes) || 0),
+        0,
+      )
+      const totalSizeGB = Number((totalBytes / 1024 / 1024 / 1024).toFixed(2))
+
+      // Check plan with Electron engine if available
+      let hasUpdate = false
+      let isInstalled = gameService.isGameInstalled()
+
+      if (window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
+        try {
+          const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
+            clientFiles: modpack.clientFiles,
+            modpackVersion: modpack.version,
+          })
+          if (planCheck.success) {
+            hasUpdate = planCheck.needsUpdate
+            if (!hasUpdate && modpack.clientFiles.length > 0) {
+              isInstalled = true
+              gameService.setGameInstalled(true)
+            }
+          }
+        } catch (_) {}
+      }
+
+      return {
+        version: modpack.version,
+        minecraftVersion: modpack.minecraftVersion || "1.21.1",
+        neoForgeVersion: modpack.neoForgeVersion || "21.1.65",
+        totalSizeGB,
+        hasUpdate,
+        clientFiles: modpack.clientFiles,
+        installed: isInstalled,
+      }
+    }
+
+    // Try loading cached manifest if offline
     try {
       const cached = localStorage.getItem("hikat_game_manifest")
-
       if (cached) {
         const parsed = JSON.parse(cached)
-
-        if (parsed && typeof parsed === "object") return parsed
+        if (parsed && typeof parsed === "object") {
+          return {
+            version: parsed.version || "1.0.0",
+            minecraftVersion: parsed.minecraftVersion || "1.21.1",
+            neoForgeVersion: parsed.neoForgeVersion || "21.1.65",
+            totalSizeGB: 0,
+            hasUpdate: false,
+            clientFiles: parsed.clientFiles || [],
+            installed: gameService.isGameInstalled(),
+          }
+        }
       }
     } catch (_) {}
 
     return null
   },
-
-  /**
-   * Check if local client has game files installed
-   */
 
   isGameInstalled(): boolean {
     try {
@@ -79,14 +138,25 @@ export const gameService = {
   uninstallGame(): void {
     try {
       localStorage.removeItem("hikat_game_installed")
-
       localStorage.removeItem("hikat_game_manifest")
     } catch (_) {}
-
-    window.electronAPI?.uninstallGame?.()
   },
 
-  repairGame(): void {
-    window.electronAPI?.repairGame?.()
+  async startSync(clientFiles: ClientFile[], modpackVersion: string) {
+    if (window.electronAPI?.startSync) {
+      return await window.electronAPI.startSync({ clientFiles, modpackVersion })
+    }
+  },
+
+  async cancelSync() {
+    if (window.electronAPI?.cancelSync) {
+      return await window.electronAPI.cancelSync()
+    }
+  },
+
+  async launchGame(options: { playerName?: string; ramGB?: number; neoForgeVersion?: string }) {
+    if (window.electronAPI?.launchGame) {
+      return await window.electronAPI.launchGame(options)
+    }
   },
 }

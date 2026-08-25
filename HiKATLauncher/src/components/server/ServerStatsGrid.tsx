@@ -1,39 +1,27 @@
 import React, { useState, useEffect } from "react"
-
 import { ThemeMode, ServerSpecs } from "../../types"
-
 import { useTranslation } from "../../context/LanguageContext"
-
 import { serverService } from "../../services/serverService"
 
 interface ServerStatsGridProps {
   theme?: ThemeMode
-
   stats?: Partial<ServerSpecs>
 }
 
 export default function ServerStatsGrid({
   theme = "dark",
-
   stats,
 }: ServerStatsGridProps) {
   const { t } = useTranslation()
-
   const isDark = theme === "dark"
 
   const [serverData, setServerData] = useState<{
     online: boolean
-
     playersOnline: number
-
     maxPlayers: number
-
     latencyMs: number
-
     playtimeHours: number | null
-
     unlockedAchievements: number | null
-
     totalAchievements: number | null
   }>(() => {
     if (stats) {
@@ -41,118 +29,77 @@ export default function ServerStatsGrid({
         online:
           stats.status === "online" ||
           (stats.playersOnline !== undefined && stats.playersOnline > 0),
-
         playersOnline: stats.playersOnline ?? 0,
-
         maxPlayers: stats.maxPlayers ?? 0,
-
         latencyMs: stats.latencyMs ?? 0,
-
         playtimeHours: stats.totalPlaytimeHours ?? null,
-
         unlockedAchievements: stats.unlockedAchievements ?? null,
-
         totalAchievements: stats.totalAchievements ?? 52,
       }
     }
-
     try {
       const cached = localStorage.getItem("hikat_cached_server_status")
-
       if (cached) {
         const parsed = JSON.parse(cached)
-
         if (parsed && typeof parsed === "object") {
           return {
             online: Boolean(parsed.online),
-
             playersOnline: parsed.playersOnline ?? 0,
-
             maxPlayers: parsed.maxPlayers ?? 0,
-
             latencyMs: parsed.latencyMs ?? 0,
-
             playtimeHours: null,
-
             unlockedAchievements: null,
-
             totalAchievements: 52,
           }
         }
       }
     } catch (_) {}
-
     return {
       online: false,
-
       playersOnline: 0,
-
       maxPlayers: 0,
-
       latencyMs: 0,
-
       playtimeHours: null,
-
       unlockedAchievements: null,
-
       totalAchievements: 52,
     }
   })
 
   useEffect(() => {
     if (stats) return
-
     let isMounted = true
-
     serverService
-
       .getServerStatus()
-
       .then((res) => {
         if (!isMounted) return
-
         if (res && res.online) {
           setServerData((prev) => ({
             ...prev,
-
             online: true,
-
-            playersOnline: res.playersOnline ?? prev.playersOnline,
-
-            maxPlayers: res.maxPlayers ?? prev.maxPlayers,
-
-            latencyMs: res.latencyMs ?? prev.latencyMs,
+            playersOnline: res.playersOnline,
+            maxPlayers: res.maxPlayers,
+            latencyMs: res.latencyMs,
           }))
         } else {
           setServerData((prev) => ({ ...prev, online: false }))
         }
       })
-
       .catch(() => {
         if (!isMounted) return
-
         setServerData((prev) => ({ ...prev, online: false }))
       })
-
     return () => {
       isMounted = false
     }
   }, [stats])
 
   const serverName = stats?.name ?? "Apparatia"
-
   const isOnline = serverData.online
-
   const playersOnline = serverData.playersOnline
-
   const maxPlayers = serverData.maxPlayers
-
   const latency = serverData.latencyMs
-
   const playtime = serverData.playtimeHours
-
   const achievements = serverData.unlockedAchievements
-
   const totalAchievements = serverData.totalAchievements ?? 52
 
   return (
@@ -162,13 +109,9 @@ export default function ServerStatsGrid({
         <div
           style={{
             fontSize: 28,
-
             fontWeight: 800,
-
             color: isDark ? "white" : "#111822",
-
             letterSpacing: "-0.02em",
-
             marginBottom: 8,
           }}
         >
@@ -177,11 +120,8 @@ export default function ServerStatsGrid({
         <div
           style={{
             fontSize: 17,
-
             fontWeight: 400,
-
             color: isDark ? "#8899aa" : "#556677",
-
             lineHeight: 1.55,
           }}
         >
@@ -193,11 +133,8 @@ export default function ServerStatsGrid({
       <div
         style={{
           flex: 1,
-
           display: "grid",
-
           gridTemplateColumns: "1.3fr 1fr 1fr",
-
           gap: 18,
         }}
       >
@@ -206,9 +143,7 @@ export default function ServerStatsGrid({
           className="settings-card"
           style={{
             display: "flex",
-
             flexDirection: "column",
-
             justifyContent: "space-between",
           }}
         >
@@ -217,11 +152,8 @@ export default function ServerStatsGrid({
               <div
                 style={{
                   fontSize: 22,
-
                   fontWeight: 800,
-
                   color: isDark ? "white" : "#111822",
-
                   marginBottom: 4,
                 }}
               >
@@ -230,9 +162,7 @@ export default function ServerStatsGrid({
               <div
                 style={{
                   fontSize: 14.5,
-
                   fontWeight: 600,
-
                   color: isOnline ? "#22c55e" : isDark ? "#f87171" : "#dc2626",
                 }}
               >
@@ -247,15 +177,10 @@ export default function ServerStatsGrid({
               <div
                 style={{
                   fontSize: 13.5,
-
                   fontWeight: 800,
-
                   textTransform: "uppercase",
-
                   letterSpacing: "0.08em",
-
                   color: isDark ? "#657788" : "#778899",
-
                   marginBottom: isOnline ? 8 : 4,
                 }}
               >
@@ -266,18 +191,14 @@ export default function ServerStatsGrid({
                   <div
                     style={{
                       display: "flex",
-
                       justifyContent: "flex-end",
-
                       marginBottom: 8,
                     }}
                   >
                     <span
                       style={{
                         fontSize: 17,
-
                         fontWeight: 700,
-
                         color: isDark ? "white" : "#111822",
                       }}
                     >
@@ -285,7 +206,6 @@ export default function ServerStatsGrid({
                       <span
                         style={{
                           color: isDark ? "#8899aa" : "#556677",
-
                           fontWeight: 500,
                         }}
                       >
@@ -296,28 +216,21 @@ export default function ServerStatsGrid({
                   <div
                     style={{
                       height: 7,
-
                       width: "100%",
-
                       background: isDark ? "#0d1217" : "#e6ebf0",
-
                       borderRadius: 4,
-
                       overflow: "hidden",
                     }}
                   >
                     <div
                       style={{
                         height: "100%",
-
                         width:
                           maxPlayers > 0
                             ? `${Math.min(100, (playersOnline / maxPlayers) * 100)}%`
                             : "0%",
-
                         background:
                           "linear-gradient(90deg, #efc436 0%, #f59e0b 100%)",
-
                         borderRadius: 4,
                       }}
                     />
@@ -327,22 +240,16 @@ export default function ServerStatsGrid({
                 <div
                   style={{
                     display: "flex",
-
                     alignItems: "baseline",
-
                     gap: 8,
-
                     marginTop: 4,
                   }}
                 >
                   <span
                     style={{
                       fontSize: 34,
-
                       fontWeight: 800,
-
                       color: isDark ? "#556677" : "#8899aa",
-
                       letterSpacing: "-0.03em",
                     }}
                   >
@@ -351,9 +258,7 @@ export default function ServerStatsGrid({
                   <span
                     style={{
                       fontSize: 13.5,
-
                       fontWeight: 600,
-
                       color: isDark ? "#657788" : "#8899aa",
                     }}
                   >
@@ -368,19 +273,12 @@ export default function ServerStatsGrid({
           <div
             style={{
               display: "flex",
-
               alignItems: "center",
-
               gap: 7,
-
               color: isDark ? "#8899aa" : "#556677",
-
               fontSize: 15.5,
-
               fontWeight: 600,
-
               paddingTop: 14,
-
               borderTop: isDark
                 ? "1px solid rgba(255, 255, 255, 0.06)"
                 : "1px solid rgba(0, 0, 0, 0.06)",
@@ -422,35 +320,24 @@ export default function ServerStatsGrid({
           className="settings-card"
           style={{
             display: "flex",
-
             flexDirection: "column",
-
             justifyContent: "space-between",
           }}
         >
           <div
             style={{
               width: 44,
-
               height: 44,
-
               borderRadius: 14,
-
               background: isDark ? "#0d1217" : "#f0f3f7",
-
               border: isDark
                 ? "1.5px solid rgba(255, 255, 255, 0.08)"
                 : "1.5px solid rgba(0, 0, 0, 0.08)",
-
               color:
                 playtime !== null ? "#efc436" : isDark ? "#556677" : "#99aabb",
-
               display: "flex",
-
               alignItems: "center",
-
               justifyContent: "center",
-
               marginBottom: 16,
             }}
           >
@@ -473,15 +360,10 @@ export default function ServerStatsGrid({
             <div
               style={{
                 fontSize: 13.5,
-
                 fontWeight: 800,
-
                 textTransform: "uppercase",
-
                 letterSpacing: "0.08em",
-
                 color: isDark ? "#657788" : "#778899",
-
                 marginBottom: 4,
               }}
             >
@@ -492,11 +374,8 @@ export default function ServerStatsGrid({
                 <span
                   style={{
                     fontSize: 36,
-
                     fontWeight: 800,
-
                     color: isDark ? "white" : "#111822",
-
                     letterSpacing: "-0.03em",
                   }}
                 >
@@ -505,9 +384,7 @@ export default function ServerStatsGrid({
                 <span
                   style={{
                     fontSize: 17,
-
                     fontWeight: 600,
-
                     color: isDark ? "#8899aa" : "#556677",
                   }}
                 >
@@ -519,11 +396,8 @@ export default function ServerStatsGrid({
                 <span
                   style={{
                     fontSize: 34,
-
                     fontWeight: 800,
-
                     color: isDark ? "#556677" : "#8899aa",
-
                     letterSpacing: "-0.03em",
                   }}
                 >
@@ -532,9 +406,7 @@ export default function ServerStatsGrid({
                 <span
                   style={{
                     fontSize: 13.5,
-
                     fontWeight: 600,
-
                     color: isDark ? "#657788" : "#8899aa",
                   }}
                 >
@@ -550,39 +422,28 @@ export default function ServerStatsGrid({
           className="settings-card"
           style={{
             display: "flex",
-
             flexDirection: "column",
-
             justifyContent: "space-between",
           }}
         >
           <div
             style={{
               width: 44,
-
               height: 44,
-
               borderRadius: 14,
-
               background: isDark ? "#0d1217" : "#f0f3f7",
-
               border: isDark
                 ? "1.5px solid rgba(255, 255, 255, 0.08)"
                 : "1.5px solid rgba(0, 0, 0, 0.08)",
-
               color:
                 achievements !== null
                   ? "#efc436"
                   : isDark
                     ? "#556677"
                     : "#99aabb",
-
               display: "flex",
-
               alignItems: "center",
-
               justifyContent: "center",
-
               marginBottom: 16,
             }}
           >
@@ -605,15 +466,10 @@ export default function ServerStatsGrid({
             <div
               style={{
                 fontSize: 13.5,
-
                 fontWeight: 800,
-
                 textTransform: "uppercase",
-
                 letterSpacing: "0.08em",
-
                 color: isDark ? "#657788" : "#778899",
-
                 marginBottom: 4,
               }}
             >
@@ -624,22 +480,16 @@ export default function ServerStatsGrid({
                 <div
                   style={{
                     display: "flex",
-
                     alignItems: "baseline",
-
                     gap: 7,
-
                     marginBottom: 12,
                   }}
                 >
                   <span
                     style={{
                       fontSize: 36,
-
                       fontWeight: 800,
-
                       color: isDark ? "white" : "#111822",
-
                       letterSpacing: "-0.03em",
                     }}
                   >
@@ -648,9 +498,7 @@ export default function ServerStatsGrid({
                   <span
                     style={{
                       fontSize: 17,
-
                       fontWeight: 600,
-
                       color: isDark ? "#8899aa" : "#556677",
                     }}
                   >
@@ -660,28 +508,21 @@ export default function ServerStatsGrid({
                 <div
                   style={{
                     height: 7,
-
                     width: "100%",
-
                     background: isDark ? "#0d1217" : "#e6ebf0",
-
                     borderRadius: 4,
-
                     overflow: "hidden",
                   }}
                 >
                   <div
                     style={{
                       height: "100%",
-
                       width:
                         totalAchievements > 0
                           ? `${(achievements / totalAchievements) * 100}%`
                           : "0%",
-
                       background:
                         "linear-gradient(90deg, #efc436 0%, #f59e0b 100%)",
-
                       borderRadius: 4,
                     }}
                   />
@@ -691,20 +532,15 @@ export default function ServerStatsGrid({
               <div
                 style={{
                   display: "flex",
-
                   alignItems: "baseline",
-
                   gap: 8,
                 }}
               >
                 <span
                   style={{
                     fontSize: 34,
-
                     fontWeight: 800,
-
                     color: isDark ? "#556677" : "#8899aa",
-
                     letterSpacing: "-0.03em",
                   }}
                 >
@@ -713,9 +549,7 @@ export default function ServerStatsGrid({
                 <span
                   style={{
                     fontSize: 13.5,
-
                     fontWeight: 600,
-
                     color: isDark ? "#657788" : "#8899aa",
                   }}
                 >

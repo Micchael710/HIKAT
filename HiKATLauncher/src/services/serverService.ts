@@ -1,5 +1,4 @@
 import { apiClient, ApiResponse } from "./apiClient"
-
 import { ServerStatus, PlayerStats } from "../types"
 
 export const serverService = {
@@ -7,7 +6,6 @@ export const serverService = {
    * Fetch live Minecraft server ping status & player count.
    * Returns null if unreachable and no cache exists.
    */
-
   async getServerStatus(): Promise<ServerStatus | null> {
     const res = await apiClient<ServerStatus>("/server/status")
 
@@ -15,20 +13,16 @@ export const serverService = {
       try {
         localStorage.setItem(
           "hikat_cached_server_status",
-
           JSON.stringify(res.data),
         )
       } catch (_) {}
-
       return res.data
     }
 
     try {
       const cached = localStorage.getItem("hikat_cached_server_status")
-
       if (cached) {
         const parsed = JSON.parse(cached)
-
         if (parsed && typeof parsed === "object") return parsed
       }
     } catch (_) {}
@@ -40,10 +34,8 @@ export const serverService = {
    * Fetch user gameplay stats (playtime, achievements, rank).
    * Returns null if unreachable and no cache exists.
    */
-
   async getPlayerStats(username?: string): Promise<PlayerStats | null> {
     const user = username || "player"
-
     const res = await apiClient<PlayerStats>(
       `/players/${encodeURIComponent(user)}/stats`,
     )
@@ -52,20 +44,16 @@ export const serverService = {
       try {
         localStorage.setItem(
           `hikat_user_${user}_stats`,
-
           JSON.stringify(res.data),
         )
       } catch (_) {}
-
       return res.data
     }
 
     try {
       const cached = localStorage.getItem(`hikat_user_${user}_stats`)
-
       if (cached) {
         const parsed = JSON.parse(cached)
-
         if (parsed && typeof parsed === "object") return parsed
       }
     } catch (_) {}

@@ -1,119 +1,92 @@
 import React, { useState, useEffect, useRef } from "react"
-
 import { ThemeMode } from "../../types"
-
 import {
   IconDownload,
   IconPlay,
   IconPause,
   IconResume,
 } from "../../theme/icons"
-
 import { BASE_FONT } from "../../theme/tokens"
-
 import { useTranslation } from "../../context/LanguageContext"
-
 import {
   gameService,
   GameButtonState,
   GameManifest,
 } from "../../services/gameService"
-
 import LiveToast from "../common/LiveToast"
 
 interface DownloadPlayButtonProps {
   left: number
-
   top: number
-
   theme?: ThemeMode
-
   onPlay?: () => void
 }
 
 export default function DownloadPlayButton({
   left,
-
   top,
-
   theme = "dark",
-
   onPlay,
 }: DownloadPlayButtonProps) {
   const { t } = useTranslation()
-
   const [status, setStatus] = useState<GameButtonState>(() => {
     if (gameService.isGameInstalled()) return "play"
-
     return "unavailable"
   })
 
   const [manifest, setManifest] = useState<GameManifest | null>(null)
-
   const [progress, setProgress] = useState(0)
-
   const [speed, setSpeed] = useState(0)
-
   const [totalGB, setTotalGB] = useState(28.8)
-
   const [downloadedGB, setDownloadedGB] = useState(0)
-
   const [timeRemainingMin, setTimeRemainingMin] = useState(0)
-
   const [isHovered, setIsHovered] = useState(false)
-
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
-
+  const [toastState, setToastState] = useState<{
+    message: string | null
+    type: "success" | "error" | "info"
+  }>({
+    message: null,
+    type: "success",
+  })
   const menuRef = useRef<HTMLDivElement>(null)
-
   const toastTimeoutRef = useRef<any>(null)
-
   const isDark = theme === "dark"
 
-  const showToast = (msg: string) => {
+  const showToast = (
+    msg: string,
+    type: "success" | "error" | "info" = "success",
+  ) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
-
-    setToastMessage(msg)
-
+    setToastState({ message: msg, type })
     toastTimeoutRef.current = setTimeout(() => {
-      setToastMessage(null)
-    }, 2400)
+      setToastState({ message: null, type: "success" })
+    }, 2800)
   }
 
   // Close options menu on click outside
-
   useEffect(() => {
     if (!isMenuOpen) return
-
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setIsMenuOpen(false)
       }
     }
-
     window.addEventListener("mousedown", handleClickOutside)
-
     return () => window.removeEventListener("mousedown", handleClickOutside)
   }, [isMenuOpen])
 
   // Check manifest and server availability on mount
-
   useEffect(() => {
     let isMounted = true
-
     gameService.checkGameManifest().then((res) => {
       if (!isMounted) return
-
       setManifest(res)
-
       if (res) {
         if (res.totalSizeGB) setTotalGB(res.totalSizeGB)
-
         if (res.installed || gameService.isGameInstalled()) {
           setStatus(res.hasUpdate ? "update" : "play")
-        } else if (res.downloadUrl || res.latestVersion) {
+        } else if ((res.clientFiles && res.clientFiles.length > 0) || res.version) {
           setStatus("download")
         } else {
           setStatus("unavailable")
@@ -126,33 +99,24 @@ export default function DownloadPlayButton({
         }
       }
     })
-
     return () => {
       isMounted = false
     }
   }, [])
 
   // Listen to IPC download progress events if running in Electron
-
   useEffect(() => {
     const unsub = window.electronAPI?.onDownloadProgress?.((data) => {
       setProgress(data.progress)
-
       setSpeed(data.speedMBs)
-
       setDownloadedGB(data.downloadedGB)
-
       if (data.totalGB) setTotalGB(data.totalGB)
-
       setTimeRemainingMin(data.remainingMinutes)
-
       if (data.progress >= 100) {
         gameService.setGameInstalled(true)
-
         setStatus("play")
       }
     })
-
     return () => {
       unsub?.()
     }
@@ -161,97 +125,116 @@ export default function DownloadPlayButton({
   const isExpanded = status === "downloading" || status === "paused"
 
   const cancel = () => {
-    window.electronAPI?.cancelDownload?.()
-
+    gameService.cancelSync()
     setStatus(
       manifest?.hasUpdate
         ? "update"
-        : manifest?.downloadUrl
+        : manifest?.clientFiles && manifest.clientFiles.length > 0
           ? "download"
           : "unavailable",
     )
-
     setProgress(0)
-
     setSpeed(0)
-
     setIsHovered(false)
   }
 
   const togglePauseResume = () => {
     if (status === "downloading") {
-      window.electronAPI?.pauseDownload?.()
-
+      gameService.cancelSync()
       setStatus("paused")
     } else if (status === "paused") {
-      window.electronAPI?.resumeDownload?.()
-
-      setStatus("downloading")
+      if (manifest?.clientFiles) {
+        setStatus("downloading")
+        gameService.startSync(manifest.clientFiles, manifest.version)
+      }
     }
   }
 
-  const handleClick = () => {
+  const handleClick = async () => {
     if (status === "unavailable") {
       return
     }
-
     if (status === "download" || status === "update") {
+      if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
+        showToast(t("playButton.noClientFiles"), "error")
+        return
+      }
       setStatus("downloading")
-
-      window.electronAPI?.startDownload?.(manifest)
+      try {
+        await gameService.startSync(manifest.clientFiles, manifest.version)
+        gameService.setGameInstalled(true)
+        setStatus("play")
+        showToast(t("playButton.syncSuccess"), "success")
+      } catch (err: any) {
+        console.error("Sync error:", err)
+        setStatus(manifest.hasUpdate ? "update" : "download")
+        showToast(t("playButton.syncError"), "error")
+      }
     } else if (status === "play") {
-      window.electronAPI?.launchGame?.({
-        version: manifest?.version || "1.20.1",
-      })
+      const ramGB = Number(localStorage.getItem("hikat_ram_gb")) || 4
+      let playerName = "Player"
+      try {
+        const userRaw = localStorage.getItem("hikat_user_data")
+        if (userRaw) {
+          const parsed = JSON.parse(userRaw)
+          if (parsed?.username) playerName = parsed.username
+        }
+      } catch (_) {}
 
-      if (onPlay) onPlay()
+      try {
+        await gameService.launchGame({
+          playerName,
+          ramGB,
+          neoForgeVersion: manifest?.neoForgeVersion,
+        })
+        if (onPlay) onPlay()
+      } catch (err: any) {
+        console.error("Launch error:", err)
+        showToast(t("playButton.launchError"), "error")
+      }
     }
   }
 
-  const handleVerifyInstallation = () => {
+  const handleVerifyInstallation = async () => {
     setIsMenuOpen(false)
-
-    gameService.repairGame()
-
-    showToast(t("playButton.verifying"))
-
-    setTimeout(() => {
-      showToast(t("playButton.verifySuccess"))
-    }, 2200)
+    if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
+      showToast(t("playButton.verifyError"), "error")
+      return
+    }
+    showToast(t("playButton.verifying"), "info")
+    setStatus("downloading")
+    try {
+      await gameService.startSync(manifest.clientFiles, manifest.version)
+      gameService.setGameInstalled(true)
+      setStatus("play")
+      showToast(t("playButton.verifySuccess"), "success")
+    } catch (err: any) {
+      showToast(t("playButton.verifyError"), "error")
+      setStatus("play")
+    }
   }
 
   const handleUninstallGame = () => {
     setIsMenuOpen(false)
-
     gameService.uninstallGame()
-
-    setStatus(manifest?.downloadUrl ? "download" : "unavailable")
-
-    showToast(t("playButton.uninstallSuccess"))
+    setStatus(manifest?.clientFiles && manifest.clientFiles.length > 0 ? "download" : "unavailable")
+    showToast(t("playButton.uninstallSuccess"), "success")
   }
 
   /* ── IDLE / UNAVAILABLE / DOWNLOAD / UPDATE / PLAY ── */
-
   if (!isExpanded) {
     const isUnavailable = status === "unavailable"
-
     const isUpdate = status === "update"
-
     const isPlay = status === "play"
 
     return (
       <div
         style={{
           position: "absolute",
-
           left,
-
           top,
-
           display: "flex",
-
           alignItems: "center",
-
           gap: 12,
         }}
       >
@@ -261,37 +244,24 @@ export default function DownloadPlayButton({
           className={isUnavailable ? "" : "dl-idle-btn"}
           style={{
             width: 272,
-
             height: 76,
-
             borderRadius: 24,
-
             background: isUnavailable
               ? isDark
                 ? "linear-gradient(135deg, rgba(239, 196, 54, 0.22), rgba(255, 230, 146, 0.22))"
                 : "linear-gradient(135deg, rgba(239, 196, 54, 0.35), rgba(255, 230, 146, 0.35))"
               : "linear-gradient(135deg, #efc436, #ffe692)",
-
             boxShadow: isUnavailable
               ? "none"
               : "0 0 28px -6px rgba(245, 208, 86, 0.45)",
-
             border: "none",
-
             cursor: isUnavailable ? "not-allowed" : "pointer",
-
             opacity: isUnavailable ? 0.65 : 1,
-
             display: "flex",
-
             alignItems: "center",
-
             justifyContent: "center",
-
             gap: 12,
-
             transition: "all 0.25s ease",
-
             userSelect: "none",
           }}
           onClick={handleClick}
@@ -300,17 +270,11 @@ export default function DownloadPlayButton({
           <span
             style={{
               color: "white",
-
               fontFamily: BASE_FONT,
-
               fontWeight: 800,
-
               fontSize: isUnavailable ? 19 : 23,
-
               letterSpacing: ".06em",
-
               textShadow: "0 1px 6px rgba(0,0,0,0.35)",
-
               textTransform: "uppercase",
             }}
           >
@@ -334,31 +298,19 @@ export default function DownloadPlayButton({
               className="dl-cancel-btn"
               style={{
                 width: 76,
-
                 height: 76,
-
                 borderRadius: 24,
-
                 flexShrink: 0,
-
                 background: isDark ? "rgba(255, 255, 255, 0.05)" : "#ffffff",
-
                 border: isDark
                   ? "1px solid rgba(255, 255, 255, 0.12)"
                   : "1px solid rgba(0, 0, 0, 0.12)",
-
                 color: isDark ? "rgba(255, 255, 255, 0.65)" : "#556677",
-
                 boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
-
                 cursor: "pointer",
-
                 display: "flex",
-
                 alignItems: "center",
-
                 justifyContent: "center",
-
                 transition: "all 0.18s ease",
               }}
             >
@@ -369,7 +321,6 @@ export default function DownloadPlayButton({
                 fill="currentColor"
                 style={{
                   transform: isMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
-
                   transition: "transform 0.22s ease",
                 }}
               >
@@ -382,42 +333,26 @@ export default function DownloadPlayButton({
               <div
                 style={{
                   position: "absolute",
-
                   left: "calc(100% + 12px)",
-
                   top: "50%",
-
                   transform: "translateY(-50%)",
-
                   width: 220,
-
                   borderRadius: 18,
-
                   padding: "12px 10px",
-
                   background: isDark ? "#11181f" : "#ffffff",
-
                   border: isDark
                     ? "2px solid rgba(255, 255, 255, 0.12)"
                     : "1.5px solid rgba(0, 0, 0, 0.1)",
-
                   boxShadow: isDark
                     ? "0 16px 40px rgba(0, 0, 0, 0.75)"
                     : "0 16px 40px rgba(0, 0, 0, 0.15)",
-
                   zIndex: 100,
-
                   display: "flex",
-
                   flexDirection: "column",
-
                   gap: 4,
-
                   animation:
                     "optionsMenuFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards",
-
                   transformOrigin: "left center",
-
                   userSelect: "none",
                 }}
               >
@@ -428,15 +363,10 @@ export default function DownloadPlayButton({
                   className="profile-menu-item"
                   style={{
                     padding: "9px 12px",
-
                     fontSize: 14.5,
-
                     fontWeight: 700,
-
                     color: isDark ? "rgba(255,255,255,0.75)" : "#111822",
-
                     textAlign: "left",
-
                     width: "100%",
                   }}
                 >
@@ -450,13 +380,9 @@ export default function DownloadPlayButton({
                   className="profile-menu-item is-danger"
                   style={{
                     padding: "9px 12px",
-
                     fontSize: 14.5,
-
                     fontWeight: 700,
-
                     textAlign: "left",
-
                     width: "100%",
                   }}
                 >
@@ -467,30 +393,23 @@ export default function DownloadPlayButton({
           </div>
         )}
 
-        <LiveToast message={toastMessage} />
+        <LiveToast message={toastState.message} type={toastState.type} />
       </div>
     )
   }
 
   /* ── DOWNLOADING / PAUSED (Progress card) ── */
-
   const dlGB = downloadedGB > 0 ? downloadedGB : (totalGB * progress) / 100
-
   const isUpdating = manifest?.hasUpdate
 
   return (
     <div
       style={{
         position: "absolute",
-
         left,
-
         top,
-
         display: "flex",
-
         alignItems: "center",
-
         gap: 12,
       }}
     >
@@ -502,11 +421,8 @@ export default function DownloadPlayButton({
         onMouseLeave={() => setIsHovered(false)}
         style={{
           width: 272,
-
           height: 76,
-
           borderRadius: 24,
-
           background: isDark
             ? status === "paused"
               ? "#182026"
@@ -514,29 +430,19 @@ export default function DownloadPlayButton({
             : status === "paused"
               ? "#e9eff5"
               : "#ffffff",
-
           border: isDark
             ? "2.5px solid rgba(255, 255, 255, 0.12)"
             : "2.5px solid rgba(0, 0, 0, 0.1)",
-
           cursor: "pointer",
-
           position: "relative",
-
           overflow: "hidden",
-
           display: "flex",
-
           flexDirection: "column",
-
           justifyContent: "space-between",
-
           padding: "12px 18px",
-
           boxShadow: isDark
             ? "0 12px 32px rgba(0, 0, 0, 0.45)"
             : "0 8px 24px rgba(0, 0, 0, 0.08)",
-
           userSelect: "none",
         }}
       >
@@ -544,15 +450,10 @@ export default function DownloadPlayButton({
         <div
           style={{
             position: "absolute",
-
             left: 0,
-
             top: 0,
-
             bottom: 0,
-
             width: `${progress}%`,
-
             background: isDark
               ? status === "paused"
                 ? "linear-gradient(90deg, rgba(239, 196, 54, 0.15), rgba(239, 196, 54, 0.28))"
@@ -560,9 +461,7 @@ export default function DownloadPlayButton({
               : status === "paused"
                 ? "linear-gradient(90deg, rgba(239, 196, 54, 0.22), rgba(239, 196, 54, 0.38))"
                 : "linear-gradient(90deg, rgba(239, 196, 54, 0.32), rgba(239, 196, 54, 0.6))",
-
             transition: "width 0.15s ease",
-
             pointerEvents: "none",
           }}
         />
@@ -571,13 +470,9 @@ export default function DownloadPlayButton({
         <div
           style={{
             display: "flex",
-
             alignItems: "center",
-
             justifyContent: "space-between",
-
             position: "relative",
-
             zIndex: 2,
           }}
         >
@@ -588,15 +483,10 @@ export default function DownloadPlayButton({
             <span
               style={{
                 color: isDark ? "#efc436" : "#92400e",
-
                 fontFamily: BASE_FONT,
-
                 fontWeight: 800,
-
                 fontSize: 13.5,
-
                 letterSpacing: "0.08em",
-
                 textTransform: "uppercase",
               }}
             >
@@ -613,11 +503,8 @@ export default function DownloadPlayButton({
           <span
             style={{
               color: isDark ? "white" : "#111822",
-
               fontFamily: BASE_FONT,
-
               fontWeight: 800,
-
               fontSize: 18,
             }}
           >
@@ -629,13 +516,9 @@ export default function DownloadPlayButton({
         <div
           style={{
             display: "flex",
-
             alignItems: "center",
-
             justifyContent: "space-between",
-
             position: "relative",
-
             zIndex: 2,
           }}
         >
@@ -643,11 +526,8 @@ export default function DownloadPlayButton({
             <div
               style={{
                 display: "flex",
-
                 alignItems: "center",
-
                 gap: 6,
-
                 color: isDark ? "rgba(255, 255, 255, 0.9)" : "#111822",
               }}
             >
@@ -658,11 +538,8 @@ export default function DownloadPlayButton({
               <span
                 style={{
                   fontFamily: BASE_FONT,
-
                   fontWeight: 800,
-
                   fontSize: 13,
-
                   letterSpacing: "0.05em",
                 }}
               >
@@ -673,11 +550,8 @@ export default function DownloadPlayButton({
             <span
               style={{
                 color: isDark ? "rgba(255,255,255,.6)" : "#475569",
-
                 fontFamily: BASE_FONT,
-
                 fontWeight: 700,
-
                 fontSize: 13,
               }}
             >
@@ -688,11 +562,8 @@ export default function DownloadPlayButton({
           <span
             style={{
               color: isDark ? "rgba(255,255,255,.6)" : "#475569",
-
               fontFamily: BASE_FONT,
-
               fontWeight: 700,
-
               fontSize: 13,
             }}
           >
@@ -709,29 +580,18 @@ export default function DownloadPlayButton({
         className="dl-cancel-btn"
         style={{
           width: 76,
-
           height: 76,
-
           borderRadius: 24,
-
           flexShrink: 0,
-
           background: isDark ? "rgba(255, 255, 255, 0.05)" : "#ffffff",
-
           border: isDark
             ? "1px solid rgba(255, 255, 255, 0.12)"
             : "1px solid rgba(0, 0, 0, 0.12)",
-
           color: isDark ? "rgba(255, 255, 255, 0.45)" : "#556677",
-
           boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
-
           cursor: "pointer",
-
           display: "flex",
-
           alignItems: "center",
-
           justifyContent: "center",
         }}
       >
@@ -748,7 +608,7 @@ export default function DownloadPlayButton({
         </svg>
       </button>
 
-      <LiveToast message={toastMessage} />
+      <LiveToast message={toastState.message} type={toastState.type} />
     </div>
   )
 }

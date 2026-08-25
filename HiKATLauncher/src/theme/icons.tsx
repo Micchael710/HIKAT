@@ -1,12 +1,6 @@
 import React from "react"
 
-export const IconHome = ({
-  size = 26,
-}: {
-  active?: boolean
-
-  size?: number
-}) => (
+export const IconHome = ({ size = 26 }: { active?: boolean; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
     <path d="M10.8 2.5a1.8 1.8 0 0 1 2.4 0l7.2 6.1c.6.5.9 1.2.9 2v9.6a1.8 1.8 0 0 1-1.8 1.8h-4.2a1.2 1.2 0 0 1-1.2-1.2v-4.6a1.2 1.2 0 0 0-1.2-1.2h-1.8a1.2 1.2 0 0 0-1.2 1.2v4.6a1.2 1.2 0 0 1-1.2 1.2H4.5A1.8 1.8 0 0 1 2.7 20.2v-9.6c0-.8.3-1.5.9-2l7.2-6.1z" />
   </svg>
@@ -16,7 +10,6 @@ export const IconShirt = ({
   size = 26,
 }: {
   active?: boolean
-
   size?: number
 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
@@ -28,7 +21,6 @@ export const IconSettings = ({
   size = 26,
 }: {
   active?: boolean
-
   size?: number
 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
@@ -172,11 +164,9 @@ export const IconPlay = ({ size = 36 }: { size?: number }) => (
 
 export const IconResume = ({
   size = 14,
-
   color = "white",
 }: {
   size?: number
-
   color?: string
 }) => (
   <svg
@@ -193,11 +183,9 @@ export const IconResume = ({
 
 export const IconPause = ({
   size = 14,
-
   color = "#efc436",
 }: {
   size?: number
-
   color?: string
 }) => (
   <svg

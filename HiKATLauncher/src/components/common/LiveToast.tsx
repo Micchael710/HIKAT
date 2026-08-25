@@ -2,24 +2,19 @@ import React from "react"
 
 export interface LiveToastProps {
   message: string | null
-
   type?: "success" | "error" | "info"
-
   accentColor?: string
 }
 
 export default function LiveToast({
   message,
-
   type = "success",
-
   accentColor,
 }: LiveToastProps) {
   if (!message) return null
 
   const isError = type === "error"
-
-  const strokeColor = isError ? "#ef4444" : accentColor || "#3ec4c0"
+  const strokeColor = isError ? "#ef4444" : (accentColor || "#3ec4c0")
 
   return (
     <div
@@ -30,7 +25,6 @@ export default function LiveToast({
           : accentColor
             ? accentColor
             : undefined,
-
         boxShadow: isError
           ? "0 16px 40px rgba(0, 0, 0, 0.75), 0 0 20px rgba(239, 68, 68, 0.25)"
           : accentColor

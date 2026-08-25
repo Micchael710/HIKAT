@@ -4,19 +4,12 @@ import { IconHome, IconShirt, IconSettings } from "../../theme/icons"
 import { getThemeTokens } from "../../theme/tokens"
 import { useTranslation } from "../../context/LanguageContext"
 
-export interface SkinAccent {
-  r: number
-  g: number
-  b: number
-  css: string
-}
-
 interface LauncherSidebarProps {
   view: LauncherView
   setView: (view: LauncherView) => void
   s: number
   theme: ThemeMode
-  activeSkinAccent: SkinAccent
+  activeSkinAccent: { r: number; g: number; b: number; css: string }
 }
 
 export default function LauncherSidebar({

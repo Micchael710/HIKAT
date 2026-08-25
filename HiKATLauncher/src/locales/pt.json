@@ -61,9 +61,14 @@
     "options": "Opções do jogo",
     "verifyInstallation": "Verificar instalação",
     "uninstallGame": "Desinstalar jogo",
-    "verifying": "Verificando instalação...",
-    "verifySuccess": "Instalação verificada com sucesso",
-    "uninstallSuccess": "Jogo desinstalado com sucesso"
+    "verifying": "Verificando os arquivos do jogo...",
+    "verifySuccess": "Arquivos do jogo verificados com sucesso",
+    "verifyError": "Não foi possível verificar o jogo. Tente novamente mais tarde.",
+    "uninstallSuccess": "Jogo desinstalado com sucesso",
+    "noClientFiles": "Os arquivos do jogo não estão disponíveis no momento.",
+    "syncError": "Não foi possível concluir o download. Verifique sua conexão com a internet.",
+    "syncSuccess": "Download concluído com sucesso",
+    "launchError": "Não foi possível iniciar o jogo. Tente reparar a instalação nas Configurações."
   },
   "home": {
     "heroSubtitle": "Domine este vasto mundo através da engenharia, cruze os céus, navegue pelos mares e crie uma revolução industrial.",
@@ -150,19 +155,21 @@
     "maintenance": "Ferramentas e Manutenção",
     "toolsMaintenance": "Ferramentas e Manutenção",
     "repairTitle": "Reparar instalação",
-    "repairDesc": "Verifica e repara automaticamente dependências, bibliotecas e mods do cliente.",
+    "repairDesc": "Verifica e repara automaticamente os arquivos do jogo.",
     "repairBtn": "Reparar instalação",
-    "repairScanning": "Verificando arquivos e mods do cliente...",
-    "repairSuccess": "Instalação reparada e otimizada com sucesso!",
+    "repairScanning": "Verificando arquivos do jogo...",
+    "repairSuccess": "Jogo reparado e otimizado com sucesso",
+    "repairError": "Não foi possível reparar o jogo. Tente novamente mais tarde.",
+    "repairNoFiles": "Nenhum arquivo do jogo encontrado para verificar.",
     "repairInstall": "Reparar instalação",
-    "repairInstallDesc": "Verifica e repara automaticamente dependências, bibliotecas e mods do cliente.",
+    "repairInstallDesc": "Verifica e repara automaticamente os arquivos do jogo.",
     "verifying": "Verificando...",
-    "verifiedSuccess": "Instalação verificada",
+    "verifiedSuccess": "Jogo verificado com sucesso",
     "toastSaved": "Alterações aplicadas com sucesso",
     "toastDarkTheme": "Tema escuro ativado",
     "toastLightTheme": "Tema claro ativado",
-    "toastScanning": "Verificando arquivos e mods do cliente...",
-    "toastRepaired": "Instalação reparada e otimizada com sucesso!"
+    "toastScanning": "Verificando arquivos do jogo...",
+    "toastRepaired": "Jogo reparado e otimizado com sucesso"
   },
   "skins": {
     "title": "Skins e Capas",
@@ -181,7 +188,30 @@
     "invalidSkinType": "Formato incorreto. A skin deve ser uma imagem PNG (.png).",
     "invalidCapeDimensions": "A imagem não parece uma capa de Minecraft. Use um arquivo de capa válido.",
     "invalidCapeType": "Formato incorreto. A capa deve ser uma imagem PNG (.png).",
-    "fileTooLarge": "O arquivo é muito grande. O tamanho máximo é 5MB."
+    "fileTooLarge": "O arquivo é muito grande. O tamanho máximo é 5MB.",
+    "poses": {
+      "default": "Padrão",
+      "heroic": "Heroica",
+      "action_walk": "Aventura",
+      "wave_greeting": "Aceno",
+      "confident_akimbo": "Confiante",
+      "thinker": "Pensativo",
+      "battle_ready": "Em Guarda",
+      "relaxed_casual": "Relaxado",
+      "cape_showcase": "Exibição de Capa"
+    },
+    "animations": {
+      "idle": "Respiração",
+      "walk": "Caminhando",
+      "run": "Correndo",
+      "pose": "Pose Fixa"
+    },
+    "controls": {
+      "changePose": "Mudar pose",
+      "changeAnimation": "Mudar animação",
+      "toggleRotate": "Giro 360°",
+      "resetCamera": "Redefinir câmera"
+    }
   },
   "profile": {
     "title": "Meu Perfil",
@@ -193,7 +223,8 @@
     "security": "Segurança e Acesso",
     "resetPassword": "Redefinir senha",
     "resetPasswordDesc": "Envia um link seguro de recuperação para o seu e-mail para alterar a senha.",
-    "sendResetEmail": "Enviar e-mail de redefinição",
-    "emailSent": "E-mail enviado"
+    "sendResetEmail": "Enviar email de redefinição",
+    "emailSent": "Email enviado",
+    "emailError": "Não foi possível enviar o email de recuperação. Tente novamente mais tarde."
   }
 }

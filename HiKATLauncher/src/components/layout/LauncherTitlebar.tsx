@@ -1,28 +1,20 @@
 import React, { useState } from "react"
-
 import { ThemeMode } from "../../types"
 
 interface LauncherTitlebarProps {
   theme?: ThemeMode
-
   onMinimize?: () => void
-
   onMaximize?: () => void
-
   onClose?: () => void
 }
 
 export default function LauncherTitlebar({
   theme = "dark",
-
   onMinimize,
-
   onMaximize,
-
   onClose,
 }: LauncherTitlebarProps) {
   const [isMaximized, setIsMaximized] = useState(false)
-
   const isDark = theme === "dark"
 
   React.useEffect(() => {
@@ -35,11 +27,9 @@ export default function LauncherTitlebar({
           setIsMaximized(maxState)
         },
       )
-
       ;(window as any).electronAPI.isMaximized?.().then?.((res: boolean) => {
         if (typeof res === "boolean") setIsMaximized(res)
       })
-
       return cleanup
     }
   }, [])
@@ -71,50 +61,31 @@ export default function LauncherTitlebar({
     <>
       {/* Invisible Top Drag Region for Frameless Window */}
       <div
-        style={
-          {
-            position: "absolute",
-
-            top: 0,
-
-            left: 0,
-
-            right: 0,
-
-            height: 38,
-
-            zIndex: 9990,
-
-            WebkitAppRegion: "drag",
-
-            pointerEvents: "auto",
-          } as React.CSSProperties
-        }
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 38,
+          zIndex: 9990,
+          WebkitAppRegion: "drag" as any,
+          pointerEvents: "auto",
+        }}
       />
 
       {/* Top-Right Window Action Buttons Overlay (Corner Flush) */}
       <div
-        style={
-          {
-            position: "absolute",
-
-            top: 0,
-
-            right: 0,
-
-            height: 36,
-
-            display: "flex",
-
-            alignItems: "stretch",
-
-            zIndex: 9999,
-
-            pointerEvents: "auto",
-
-            WebkitAppRegion: "no-drag",
-          } as React.CSSProperties
-        }
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          height: 36,
+          display: "flex",
+          alignItems: "stretch",
+          zIndex: 9999,
+          pointerEvents: "auto",
+          WebkitAppRegion: "no-drag" as any,
+        }}
       >
         {/* Minimize */}
         <button
@@ -123,37 +94,25 @@ export default function LauncherTitlebar({
           title="Minimizar"
           style={{
             width: 44,
-
             height: "100%",
-
             background: "transparent",
-
             border: "none",
-
             color: isDark ? "rgba(255, 255, 255, 0.75)" : "rgba(0, 0, 0, 0.65)",
-
             display: "flex",
-
             alignItems: "center",
-
             justifyContent: "center",
-
             cursor: "pointer",
-
             transition: "background 0.14s ease, color 0.14s ease",
-
             padding: 0,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = isDark
               ? "rgba(255, 255, 255, 0.12)"
               : "rgba(0, 0, 0, 0.08)"
-
             e.currentTarget.style.color = isDark ? "#ffffff" : "#000000"
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = "transparent"
-
             e.currentTarget.style.color = isDark
               ? "rgba(255, 255, 255, 0.75)"
               : "rgba(0, 0, 0, 0.65)"
@@ -185,37 +144,25 @@ export default function LauncherTitlebar({
           title={isMaximized ? "Modo ventana" : "Maximizar"}
           style={{
             width: 44,
-
             height: "100%",
-
             background: "transparent",
-
             border: "none",
-
             color: isDark ? "rgba(255, 255, 255, 0.75)" : "rgba(0, 0, 0, 0.65)",
-
             display: "flex",
-
             alignItems: "center",
-
             justifyContent: "center",
-
             cursor: "pointer",
-
             transition: "background 0.14s ease, color 0.14s ease",
-
             padding: 0,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = isDark
               ? "rgba(255, 255, 255, 0.12)"
               : "rgba(0, 0, 0, 0.08)"
-
             e.currentTarget.style.color = isDark ? "#ffffff" : "#000000"
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = "transparent"
-
             e.currentTarget.style.color = isDark
               ? "rgba(255, 255, 255, 0.75)"
               : "rgba(0, 0, 0, 0.65)"
@@ -223,7 +170,6 @@ export default function LauncherTitlebar({
         >
           {isMaximized ? (
             /* Crisp Restore / Modo Ventana Icon */
-
             <svg
               width={12}
               height={12}
@@ -250,7 +196,6 @@ export default function LauncherTitlebar({
             </svg>
           ) : (
             /* Crisp Maximize Icon */
-
             <svg
               width={12}
               height={12}
@@ -278,35 +223,23 @@ export default function LauncherTitlebar({
           title="Cerrar"
           style={{
             width: 48,
-
             height: "100%",
-
             background: "transparent",
-
             border: "none",
-
             color: isDark ? "rgba(255, 255, 255, 0.75)" : "rgba(0, 0, 0, 0.65)",
-
             display: "flex",
-
             alignItems: "center",
-
             justifyContent: "center",
-
             cursor: "pointer",
-
             transition: "background 0.14s ease, color 0.14s ease",
-
             padding: 0,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = "#e11d48"
-
             e.currentTarget.style.color = "#ffffff"
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = "transparent"
-
             e.currentTarget.style.color = isDark
               ? "rgba(255, 255, 255, 0.75)"
               : "rgba(0, 0, 0, 0.65)"
