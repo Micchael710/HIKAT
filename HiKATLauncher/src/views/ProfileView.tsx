@@ -35,16 +35,25 @@ export default function ProfileView({
   const [resetState, setResetState] = useState<"idle" | "sending" | "sent">(
     "idle",
   )
-  const [toastText, setToastText] = useState<string | null>(null)
+  const [toastState, setToastState] = useState<{
+    message: string | null
+    type: "success" | "error" | "info"
+  }>({
+    message: null,
+    type: "success",
+  })
   const toastTimeoutRef = useRef<any>(null)
   const isDark = theme === "dark"
 
-  const showToast = (msg?: string) => {
+  const showToast = (
+    msg?: string,
+    type: "success" | "error" | "info" = "success",
+  ) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
-    setToastText(msg || t("settings.toastSaved"))
+    setToastState({ message: msg || t("settings.toastSaved"), type })
     toastTimeoutRef.current = setTimeout(() => {
-      setToastText(null)
-    }, 2400)
+      setToastState({ message: null, type: "success" })
+    }, 2800)
   }
 
   const handleSendResetEmail = async () => {
@@ -54,14 +63,14 @@ export default function ProfileView({
       const res = await authService.requestPasswordReset(email)
       if (res.success) {
         setResetState("sent")
-        showToast(t("profile.emailSent"))
+        showToast(t("profile.emailSent"), "success")
       } else {
-        setResetState("sent")
-        showToast(t("profile.emailSent"))
+        setResetState("idle")
+        showToast(res.message || t("profile.emailError"), "error")
       }
     } catch (_) {
-      setResetState("sent")
-      showToast(t("profile.emailSent"))
+      setResetState("idle")
+      showToast(t("profile.emailError"), "error")
     }
     setTimeout(() => setResetState("idle"), 3500)
   }
@@ -662,7 +671,7 @@ export default function ProfileView({
         </div>
 
         {/* ── Real-time Toast ── */}
-        <LiveToast message={toastText} />
+        <LiveToast message={toastState.message} type={toastState.type} />
       </div>
     </div>
   )

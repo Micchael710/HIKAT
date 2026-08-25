@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from "react"
 import { SkinViewer, WalkingAnimation, RunningAnimation, IdleAnimation } from "skinview3d"
 import * as THREE from "three"
-import { getNextPose, SKIN_POSES, SkinPose } from "../../utils/poses"
+import { getNextPose, resetPlayerJoints, SKIN_POSES, SkinPose } from "../../utils/poses"
+import { useTranslation } from "../../context/LanguageContext"
 
 export type AnimationType = "pose" | "walk" | "idle" | "run"
 
@@ -30,6 +31,7 @@ export default function SkinViewer3D({
   initialPoseId,
   onPoseChange,
 }: SkinViewer3DProps) {
+  const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const viewerRef = useRef<SkinViewer | null>(null)
   const topSpotLightRef = useRef<THREE.SpotLight | null>(null)
@@ -85,6 +87,7 @@ export default function SkinViewer3D({
 
       // Bounded camera controls: full 360 horizontal rotation, bounded vertically so it NEVER goes below the floor!
       if (viewer.controls) {
+        viewer.controls.target.set(0, 0, 0)
         viewer.controls.enablePan = false
         viewer.controls.enableRotate = true
         viewer.controls.enableZoom = true
@@ -95,6 +98,7 @@ export default function SkinViewer3D({
         viewer.controls.rotateSpeed = 1.0
         viewer.controls.autoRotate = false
         viewer.controls.autoRotateSpeed = 2.4
+        viewer.controls.saveState() // Save calibrated neutral state
       }
 
       // --- 3D Scene Lighting with Real-Time Shadow Projection ---
@@ -230,12 +234,14 @@ export default function SkinViewer3D({
         viewer.render()
       } else if (animType === "idle") {
         viewer.animation = null
+        resetPlayerJoints(viewer)
         const anim = new IdleAnimation()
         anim.speed = 1.0
         viewer.animation = anim
         enableShadowCasting(viewer.playerObject)
       } else if (animType === "walk") {
         viewer.animation = null
+        resetPlayerJoints(viewer)
         const anim = new WalkingAnimation()
         anim.speed = 1.0
         anim.headBobbing = true
@@ -243,6 +249,7 @@ export default function SkinViewer3D({
         enableShadowCasting(viewer.playerObject)
       } else if (animType === "run") {
         viewer.animation = null
+        resetPlayerJoints(viewer)
         const anim = new RunningAnimation()
         anim.speed = 1.2
         viewer.animation = anim
@@ -266,16 +273,25 @@ export default function SkinViewer3D({
   const handleResetCamera = useCallback(() => {
     const viewer = viewerRef.current
     if (!viewer) return
+
+    if (viewer.controls) {
+      viewer.controls.reset()
+      viewer.controls.target.set(0, 0, 0)
+      viewer.controls.autoRotate = autoRotate
+    }
+
     viewer.camera.position.set(0, 10, 52)
     viewer.camera.lookAt(0, 0, 0)
     viewer.zoom = 0.84
     viewer.adjustCameraDistance()
+
     if (viewer.controls) {
-      viewer.controls.reset()
-      viewer.controls.autoRotate = autoRotate
+      viewer.controls.target.set(0, 0, 0)
+      viewer.controls.update()
     }
-    applyPoseOrAnimation(currentPose, activeAnimation)
-  }, [currentPose, activeAnimation, autoRotate, applyPoseOrAnimation])
+
+    viewer.render()
+  }, [autoRotate])
 
   // 7. Load Skin & Cape Textures whenever inputs change
   useEffect(() => {
@@ -302,6 +318,12 @@ export default function SkinViewer3D({
         if (capeUrl && capeUrl.trim().length > 0 && capeUrl !== "none") {
           await viewer.loadCape(capeUrl)
           viewer.playerObject.backEquipment = "cape"
+          try {
+            viewer.playerObject.cape.rotation.y = Math.PI
+            if (viewer.playerObject.cape.children && viewer.playerObject.cape.children[0]) {
+              viewer.playerObject.cape.children[0].position.z = 0.5
+            }
+          } catch (_) {}
         } else {
           viewer.resetCape()
           viewer.playerObject.backEquipment = null
@@ -380,7 +402,7 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={triggerNextPose}
-            title="Cambiar a la siguiente pose en orden"
+            title={t("skins.controls.changePose", "Cambiar pose")}
             style={{
               display: "flex",
               alignItems: "center",
@@ -411,7 +433,7 @@ export default function SkinViewer3D({
               <circle cx="12" cy="4" r="2" />
               <path d="M12 6v7m0 0l-3 7m3-7l3 7M7 10l5 1 5-1" />
             </svg>
-            <span>{currentPose.name}</span>
+            <span>{t(`skins.poses.${currentPose.id}`) || currentPose.name}</span>
           </button>
 
           {/* Animation Mode Toggle */}
@@ -424,7 +446,7 @@ export default function SkinViewer3D({
               setActiveAnimation(nextAnim)
               applyPoseOrAnimation(currentPose, nextAnim)
             }}
-            title="Cambiar animación en vivo"
+            title={t("skins.controls.changeAnimation", "Cambiar animación")}
             style={{
               display: "flex",
               alignItems: "center",
@@ -455,13 +477,14 @@ export default function SkinViewer3D({
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
             <span>
-              {activeAnimation === "idle"
-                ? "Respiración"
-                : activeAnimation === "walk"
-                  ? "Caminando"
-                  : activeAnimation === "run"
-                    ? "Corriendo"
-                    : "Pose Fija"}
+              {t(`skins.animations.${activeAnimation}`) ||
+                (activeAnimation === "idle"
+                  ? "Respiración"
+                  : activeAnimation === "walk"
+                    ? "Caminando"
+                    : activeAnimation === "run"
+                      ? "Corriendo"
+                      : "Pose Fija")}
             </span>
           </button>
         </div>
@@ -472,7 +495,7 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={() => setAutoRotate(!autoRotate)}
-            title={autoRotate ? "Detener giro 360°" : "Iniciar giro 360°"}
+            title={t("skins.controls.toggleRotate", "Giro 360°")}
             style={{
               width: 32,
               height: 32,
@@ -511,7 +534,7 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={handleResetCamera}
-            title="Centrar y reiniciar cámara"
+            title={t("skins.controls.resetCamera", "Reiniciar cámara")}
             style={{
               width: 32,
               height: 32,

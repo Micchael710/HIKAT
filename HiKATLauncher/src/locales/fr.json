@@ -61,9 +61,14 @@
     "options": "Options du jeu",
     "verifyInstallation": "Vérifier l'installation",
     "uninstallGame": "Désinstaller le jeu",
-    "verifying": "Vérification de l'installation...",
-    "verifySuccess": "Installation vérifiée avec succès",
-    "uninstallSuccess": "Jeu désinstallé avec succès"
+    "verifying": "Vérification des fichiers du jeu...",
+    "verifySuccess": "Fichiers du jeu vérifiés avec succès",
+    "verifyError": "Impossible de vérifier le jeu. Veuillez réessayer plus tard.",
+    "uninstallSuccess": "Jeu désinstallé avec succès",
+    "noClientFiles": "Les fichiers du jeu ne sont pas disponibles pour le moment.",
+    "syncError": "Impossible de terminer le téléchargement. Veuillez vérifier votre connexion Internet.",
+    "syncSuccess": "Téléchargement terminé avec succès",
+    "launchError": "Impossible de lancer le jeu. Essayez de réparer l'installation dans les Paramètres."
   },
   "home": {
     "heroSubtitle": "Maîtrisez ce vaste monde grâce à l'ingénierie, sillonnez les cieux, naviguez sur les mers et créez une révolution industrielle.",
@@ -150,19 +155,21 @@
     "maintenance": "Outils et Maintenance",
     "toolsMaintenance": "Outils et Maintenance",
     "repairTitle": "Réparer l'installation",
-    "repairDesc": "Vérifie et répare automatiquement les dépendances, les bibliothèques et les mods du client.",
+    "repairDesc": "Vérifie et répare automatiquement les fichiers du jeu.",
     "repairBtn": "Réparer l'installation",
-    "repairScanning": "Vérification des fichiers et des mods du client...",
-    "repairSuccess": "Installation réparée et optimisée avec succès !",
+    "repairScanning": "Vérification des fichiers du jeu...",
+    "repairSuccess": "Jeu réparé et optimisé avec succès",
+    "repairError": "Impossible de réparer le jeu. Veuillez réessayer plus tard.",
+    "repairNoFiles": "Aucun fichier du jeu trouvé à vérifier.",
     "repairInstall": "Réparer l'installation",
-    "repairInstallDesc": "Vérifie et répare automatiquement les dépendances, les bibliothèques et les mods du client.",
+    "repairInstallDesc": "Vérifie et répare automatiquement les fichiers du jeu.",
     "verifying": "Vérification...",
-    "verifiedSuccess": "Installation vérifiée",
+    "verifiedSuccess": "Jeu vérifié avec succès",
     "toastSaved": "Modifications appliquées avec succès",
     "toastDarkTheme": "Thème sombre activé",
     "toastLightTheme": "Thème clair activé",
-    "toastScanning": "Vérification des fichiers et des mods du client...",
-    "toastRepaired": "Installation réparée et optimisée avec succès !"
+    "toastScanning": "Vérification des fichiers du jeu...",
+    "toastRepaired": "Jeu réparé et optimisé avec succès"
   },
   "skins": {
     "title": "Skins et Capes",
@@ -181,7 +188,30 @@
     "invalidSkinType": "Format incorrect. Le skin doit être une image PNG (.png).",
     "invalidCapeDimensions": "L'image ne ressemble pas à une cape Minecraft. Veuillez utiliser un fichier de cape valide.",
     "invalidCapeType": "Format incorrect. La cape doit être une image PNG (.png).",
-    "fileTooLarge": "Fichier trop volumineux. La taille maximale est de 5 Mo."
+    "fileTooLarge": "Fichier trop volumineux. La taille maximale est de 5 Mo.",
+    "poses": {
+      "default": "Par défaut",
+      "heroic": "Héroïque",
+      "action_walk": "Aventure",
+      "wave_greeting": "Salutation",
+      "confident_akimbo": "Confiant",
+      "thinker": "Pensif",
+      "battle_ready": "En Garde",
+      "relaxed_casual": "Détendu",
+      "cape_showcase": "Vitrine de Cape"
+    },
+    "animations": {
+      "idle": "Respiration",
+      "walk": "Marche",
+      "run": "Course",
+      "pose": "Pose Fixe"
+    },
+    "controls": {
+      "changePose": "Changer de pose",
+      "changeAnimation": "Changer d animation",
+      "toggleRotate": "Rotation 360°",
+      "resetCamera": "Réinitialiser la caméra"
+    }
   },
   "profile": {
     "title": "Mon Profil",
@@ -193,7 +223,8 @@
     "security": "Sécurité et Accès",
     "resetPassword": "Réinitialiser le mot de passe",
     "resetPasswordDesc": "Envoie un lien de récupération sécurisé à votre adresse e-mail pour modifier le mot de passe.",
-    "sendResetEmail": "Envoyer l'e-mail de réinitialisation",
-    "emailSent": "E-mail envoyé"
+    "sendResetEmail": "Envoyer l'email de réinitialisation",
+    "emailSent": "Email envoyé",
+    "emailError": "Impossible d'envoyer l'email de réinitialisation. Veuillez réessayer plus tard."
   }
 }

@@ -639,113 +639,61 @@ export default function SkinsView({
                   justifyContent: "center",
                 }}
               >
-                {skinType === "skin" ? (
-                  hasSelectedSkin ? (
-                    <SkinViewer3D
-                      skinUrl={previewSkin.customImgUrl || previewSkin.skinUrl}
-                      capeUrl={
-                        hasSelectedCape
-                          ? previewCape.customImgUrl || previewCape.capeUrl
-                          : undefined
-                      }
-                      model={previewSkin.model || "auto-detect"}
-                      accentHex={accentHex}
-                      width={414}
-                      height={554}
-                      isDark={isDark}
-                      isCapeMode={false}
-                    />
-                  ) : (
-                    /* Elongated Minecraft character limbs with dashed border on stage */
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 14,
-                      }}
-                    >
-                      <svg
-                        width="130"
-                        height="220"
-                        viewBox="0 0 100 170"
-                        fill="none"
-                        stroke={isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"}
-                        strokeWidth="2.4"
-                        strokeDasharray="4 3"
-                        strokeLinejoin="round"
-                      >
-                        {/* Head */}
-                        <rect x="30" y="4" width="40" height="38" rx="5" />
-                        {/* Left Arm */}
-                        <rect x="8" y="46" width="18" height="56" rx="5" />
-                        {/* Torso */}
-                        <rect x="30" y="46" width="40" height="56" rx="5" />
-                        {/* Right Arm */}
-                        <rect x="74" y="46" width="18" height="56" rx="5" />
-                        {/* Left Leg */}
-                        <rect x="30" y="106" width="18" height="58" rx="5" />
-                        {/* Right Leg */}
-                        <rect x="52" y="106" width="18" height="58" rx="5" />
-                        {/* Center X */}
-                        <line x1="44" y1="68" x2="56" y2="80" strokeDasharray="none" strokeWidth="2.2" strokeLinecap="round" />
-                        <line x1="56" y1="68" x2="44" y2="80" strokeDasharray="none" strokeWidth="2.2" strokeLinecap="round" />
-                      </svg>
-                      <span
-                        style={{
-                          color: isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)",
-                          fontWeight: 600,
-                          fontSize: 16,
-                        }}
-                      >
-                        {t("skins.noSkin")}
-                      </span>
-                    </div>
-                  )
-                ) : hasSelectedCape ? (
+                {hasSelectedSkin || hasSelectedCape ? (
                   <SkinViewer3D
                     skinUrl={
                       hasSelectedSkin
                         ? previewSkin.customImgUrl || previewSkin.skinUrl
                         : undefined
                     }
-                    capeUrl={previewCape.customImgUrl || previewCape.capeUrl}
+                    capeUrl={
+                      hasSelectedCape
+                        ? previewCape.customImgUrl || previewCape.capeUrl
+                        : undefined
+                    }
                     model={previewSkin?.model || "auto-detect"}
                     accentHex={accentHex}
                     width={414}
                     height={554}
                     isDark={isDark}
-                    isCapeMode={true}
+                    isCapeMode={skinType === "capa" && hasSelectedCape}
                   />
                 ) : (
-                  /* Dashed Cape Box for "Sin Capa" */
+                  /* Elongated Minecraft character limbs with dashed border on stage */
                   <div
                     style={{
-                      width: 140,
-                      height: 195,
-                      borderRadius: 14,
-                      border: isDark
-                        ? "2.5px dashed rgba(255,255,255,0.22)"
-                        : "2.5px dashed rgba(0,0,0,0.22)",
                       display: "flex",
+                      flexDirection: "column",
                       alignItems: "center",
                       justifyContent: "center",
-                      flexDirection: "column",
-                      gap: 8,
+                      gap: 14,
                     }}
                   >
                     <svg
-                      width={24}
-                      height={24}
-                      viewBox="0 0 18 18"
+                      width="130"
+                      height="220"
+                      viewBox="0 0 100 170"
                       fill="none"
                       stroke={isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"}
-                      strokeWidth="2"
-                      strokeLinecap="round"
+                      strokeWidth="2.4"
+                      strokeDasharray="4 3"
+                      strokeLinejoin="round"
                     >
-                      <line x1="4" y1="4" x2="14" y2="14" />
-                      <line x1="14" y1="4" x2="4" y2="14" />
+                      {/* Head */}
+                      <rect x="30" y="4" width="40" height="38" rx="5" />
+                      {/* Left Arm */}
+                      <rect x="8" y="46" width="18" height="56" rx="5" />
+                      {/* Torso */}
+                      <rect x="30" y="46" width="40" height="56" rx="5" />
+                      {/* Right Arm */}
+                      <rect x="74" y="46" width="18" height="56" rx="5" />
+                      {/* Left Leg */}
+                      <rect x="30" y="106" width="18" height="58" rx="5" />
+                      {/* Right Leg */}
+                      <rect x="52" y="106" width="18" height="58" rx="5" />
+                      {/* Center X */}
+                      <line x1="44" y1="68" x2="56" y2="80" strokeDasharray="none" strokeWidth="2.2" strokeLinecap="round" />
+                      <line x1="56" y1="68" x2="44" y2="80" strokeDasharray="none" strokeWidth="2.2" strokeLinecap="round" />
                     </svg>
                     <span
                       style={{
@@ -754,7 +702,7 @@ export default function SkinsView({
                         fontSize: 16,
                       }}
                     >
-                      {t("skins.noCape")}
+                      {t("skins.noSkin")}
                     </span>
                   </div>
                 )}
@@ -936,8 +884,8 @@ export default function SkinsView({
                             <SkinCardPreview
                               skinUrl={item.customImgUrl || item.skinUrl}
                               alt={item.name}
-                              width={95}
-                              height={190}
+                              width={110}
+                              height={185}
                             />
                           )
                         ) : isNone || (!item.customImgUrl && !item.capeUrl) ? (

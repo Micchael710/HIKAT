@@ -1,22 +1,42 @@
-const { app, BrowserWindow, ipcMain, screen, nativeImage, shell } = require("electron")
+const { app, BrowserWindow, ipcMain, screen, nativeImage, shell, Tray, Menu } = require("electron")
 const path = require("path")
 const http = require("http")
 const fs = require("fs")
+const os = require("os")
+const { executeSync, generateSyncPlan } = require("./client-files-sync.cjs")
+const { GameLauncher } = require("./game-launcher.cjs")
+const { setJavaGpuPreference } = require("./gpu-manager.cjs")
 
-// Configure clean dedicated user data path to avoid Windows cache permissions warnings
+// Single instance lock to prevent duplicate launcher instances and focus existing instance
+const singleInstanceLock = app.requestSingleInstanceLock()
+
+if (!singleInstanceLock) {
+  app.quit()
+  process.exit(0)
+}
+
+const appDataRoot = path.join(app.getPath("appData"), "HiKAT")
 try {
-  app.setPath("userData", path.join(app.getPath("appData"), "hikat-launcher"))
+  app.setPath("userData", path.join(appDataRoot, "launcher"))
 } catch (_) {}
+
+const instanceRoot = path.join(appDataRoot, "game files")
+const gameLauncher = new GameLauncher(app, { instanceRoot })
+let activeSyncCancelSignal = null
 
 let mainWindow = null
 let splashWindow = null
+let tray = null
+let isQuitRequested = false
+let minimizeToTrayEnabled = true
+let dedicatedGpuEnabled = true
 
-// Official Windows application icon
 function getLauncherIcon() {
   try {
     const iconFile = "logo-windows.png"
 
     const candidatePaths = [
+      path.join(__dirname, iconFile),
       path.join(__dirname, "../public", iconFile),
       path.join(__dirname, "../src/assets/branding", iconFile),
       path.join(__dirname, "../dist/assets", iconFile),
@@ -24,7 +44,7 @@ function getLauncherIcon() {
     ]
 
     for (const candidate of candidatePaths) {
-      if (fs.existsSync(candidate)) {
+      if (candidate && fs.existsSync(candidate)) {
         return nativeImage.createFromPath(candidate)
       }
     }
@@ -37,10 +57,6 @@ function getOptimalWindowSize() {
     const primaryDisplay = screen.getPrimaryDisplay()
     const { width: screenW, height: screenH } = primaryDisplay.workAreaSize
 
-    // Standard desktop launcher default resolutions:
-    // - On 1080p, 2K, 4K: 1600x900 (fits ~83% of screen, looks grand & comfortable)
-    // - On 1366x768 / 1440x900 laptops: 1280x720
-    // - On small displays: 1024x576
     if (screenW >= 1680 && screenH >= 950) {
       return { width: 1600, height: 900 }
     } else if (screenW >= 1360 && screenH >= 760) {
@@ -58,15 +74,11 @@ function getOptimalSplashSize() {
     const primaryDisplay = screen.getPrimaryDisplay()
     const { width: screenW, height: screenH } = primaryDisplay.workAreaSize
 
-    // Scale splash size according to display resolution with ample transparent margins for glowing beam
     if (screenW >= 1680 && screenH >= 950) {
-      // 1080p, 2K, 4K displays
       return { width: 820, height: 520 }
     } else if (screenW >= 1360 && screenH >= 760) {
-      // 1366x768 / 1440x900 laptops
       return { width: 740, height: 470 }
     } else {
-      // Small displays
       return { width: 660, height: 420 }
     }
   } catch (_) {
@@ -133,6 +145,74 @@ function createSplashWindow() {
   })
 }
 
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (!mainWindow.isVisible()) {
+    mainWindow.show()
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.focus()
+}
+
+function ensureTray() {
+  if (tray && !tray.isDestroyed()) {
+    return tray
+  }
+  const trayIcon = getLauncherIcon()
+  if (!trayIcon) {
+    return null
+  }
+  try {
+    tray = new Tray(trayIcon)
+    tray.setToolTip("HiKAT Launcher")
+    tray.on("double-click", () => {
+      focusMainWindow()
+    })
+    updateTrayMenu()
+    return tray
+  } catch (err) {
+    console.warn("Failed to create system tray icon:", err)
+    return null
+  }
+}
+
+function updateTrayMenu() {
+  if (!tray || tray.isDestroyed()) {
+    return
+  }
+  const template = [
+    {
+      label: "Mostrar HiKAT Launcher",
+      click: () => {
+        focusMainWindow()
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Salir",
+      click: () => {
+        isQuitRequested = true
+        app.quit()
+      },
+    },
+  ]
+  tray.setContextMenu(Menu.buildFromTemplate(template))
+}
+
+function destroyTray() {
+  if (tray && !tray.isDestroyed()) {
+    try {
+      tray.destroy()
+    } catch (_) {}
+    tray = null
+  }
+}
+
 async function createWindow() {
   const { width: defaultWidth, height: defaultHeight } = getOptimalWindowSize()
   const appIcon = getLauncherIcon()
@@ -160,10 +240,8 @@ async function createWindow() {
     },
   })
 
-  // Lock zoom levels and prevent accidental browser scaling
   mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
 
-  // Safely open external links in default system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http://") || url.startsWith("https://")) {
       shell.openExternal(url)
@@ -180,10 +258,24 @@ async function createWindow() {
     }
   })
 
+  mainWindow.on("close", (event) => {
+    if (isQuitRequested) {
+      return
+    }
+    if (minimizeToTrayEnabled) {
+      event.preventDefault()
+      ensureTray()
+      mainWindow.hide()
+    }
+  })
+
+  mainWindow.on("closed", () => {
+    mainWindow = null
+  })
+
   const distPath = path.join(__dirname, "../dist/index.html")
   const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:8443"
 
-  // Check if live Vite server is reachable
   const isServerLive = await checkServer(devUrl, 600)
 
   if (isServerLive) {
@@ -192,13 +284,17 @@ async function createWindow() {
     mainWindow.loadFile(distPath)
   }
 
-  // Backup fallback if loadURL ever fails
   mainWindow.webContents.on("did-fail-load", () => {
     mainWindow.loadFile(distPath)
   })
 
+  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const levelName = level === 3 ? "ERROR" : level === 2 ? "WARN" : "INFO"
+    console.log(`[Renderer ${levelName}] ${message} (${path.basename(sourceId || "")}:${line})`)
+  })
+
   const startTime = Date.now()
-  const MIN_SPLASH_TIME = 3800 // Smooth 3.8s display time for perimeter glowing beam animation
+  const MIN_SPLASH_TIME = 3800
 
   mainWindow.once("ready-to-show", () => {
     const elapsed = Date.now() - startTime
@@ -225,6 +321,11 @@ async function createWindow() {
     mainWindow.webContents.send("window-maximize-changed", false)
   })
 }
+
+// Second instance handler (when user launches launcher while already running)
+app.on("second-instance", () => {
+  focusMainWindow()
+})
 
 // IPC Handlers for custom titlebar controls
 ipcMain.on("window-minimize", () => {
@@ -255,39 +356,85 @@ ipcMain.handle("window-is-maximized", () => {
   return mainWindow ? mainWindow.isMaximized() : false
 })
 
-// IPC Handlers for Global Settings (Backend Integration with Security Validation)
+// IPC Handlers for System Information
+ipcMain.handle("system:get-memory", async () => {
+  try {
+    const totalBytes = os.totalmem()
+    const totalGb = Math.max(1, Math.floor(totalBytes / 1024 / 1024 / 1024))
+    return { totalGb }
+  } catch (_) {
+    return { totalGb: 16 }
+  }
+})
+
+// IPC Handlers for Global Settings
+ipcMain.handle("get-start-with-system", async () => {
+  try {
+    const settings = app.getLoginItemSettings()
+    return Boolean(settings.openAtLogin)
+  } catch (_) {
+    return false
+  }
+})
+
+ipcMain.handle("setting-start-with-system", async (_event, enabled) => {
+  try {
+    app.setLoginItemSettings({ openAtLogin: Boolean(enabled) })
+    return Boolean(app.getLoginItemSettings().openAtLogin)
+  } catch (_) {
+    return Boolean(enabled)
+  }
+})
+
 ipcMain.on("setting-start-with-system", (_event, enabled) => {
   try {
     app.setLoginItemSettings({ openAtLogin: Boolean(enabled) })
   } catch (_) {}
 })
 
+ipcMain.handle("get-minimize-to-tray", async () => {
+  return minimizeToTrayEnabled
+})
+
+ipcMain.handle("setting-minimize-to-tray", async (_event, enabled) => {
+  minimizeToTrayEnabled = Boolean(enabled)
+  if (minimizeToTrayEnabled) {
+    ensureTray()
+  } else {
+    destroyTray()
+    if (mainWindow && !mainWindow.isVisible()) {
+      mainWindow.show()
+    }
+  }
+  return minimizeToTrayEnabled
+})
+
 ipcMain.on("setting-minimize-to-tray", (_event, enabled) => {
-  // Stored safely as boolean for tray integration
-  const safeEnabled = Boolean(enabled)
+  minimizeToTrayEnabled = Boolean(enabled)
+  if (minimizeToTrayEnabled) {
+    ensureTray()
+  } else {
+    destroyTray()
+    if (mainWindow && !mainWindow.isVisible()) {
+      mainWindow.show()
+    }
+  }
 })
 
-ipcMain.on("setting-auto-updates", (_event, enabled) => {
-  // Auto-updater channel safely boolean
-  const safeEnabled = Boolean(enabled)
+ipcMain.handle("setting-dedicated-gpu", async (_event, enabled) => {
+  dedicatedGpuEnabled = Boolean(enabled)
+  return dedicatedGpuEnabled
 })
 
-ipcMain.on("setting-notifications", (_event, enabled) => {
-  // Notifications channel safely boolean
-  const safeEnabled = Boolean(enabled)
+ipcMain.on("setting-dedicated-gpu", (_event, enabled) => {
+  dedicatedGpuEnabled = Boolean(enabled)
 })
 
 ipcMain.on("setting-ram-allocation", (_event, ramGB) => {
-  // Enforce integer boundaries between 1 and 64 GB for Minecraft JVM args (-Xmx{ramGB}G)
   const num = Number(ramGB)
   if (!isNaN(num)) {
     const safeRam = Math.min(Math.max(Math.round(num), 1), 64)
   }
-})
-
-ipcMain.on("setting-dedicated-gpu", (_event, enabled) => {
-  // Dedicated GPU flags safely boolean
-  const safeEnabled = Boolean(enabled)
 })
 
 ipcMain.on("open-external", (_event, url) => {
@@ -295,7 +442,6 @@ ipcMain.on("open-external", (_event, url) => {
     const cleanUrl = url.trim()
     try {
       const parsed = new URL(cleanUrl)
-      // Strictly allow only http and https web schemes
       if (parsed.protocol === "http:" || parsed.protocol === "https:") {
         shell.openExternal(cleanUrl)
       }
@@ -303,39 +449,79 @@ ipcMain.on("open-external", (_event, url) => {
   }
 })
 
-// Game Download & Execution Handlers (with Command Injection Prevention)
-ipcMain.on("game-start-download", (_event, manifest) => {
-  // Start background download worker with validated manifest URLs
-  if (manifest && typeof manifest === "object") {
-    const cleanVersion = String(manifest.version || "").replace(/[^a-zA-Z0-9._-]/g, "")
+// Game Download, Verification & Launch IPC Bridges
+ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
+  try {
+    const clientFiles = Array.isArray(payload.clientFiles) ? payload.clientFiles : []
+    const modpackVersion = String(payload.modpackVersion || "1.0.0")
+    const plan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+    return {
+      success: true,
+      filesToDownload: plan.toDownload.length,
+      filesToPrune: plan.toPrune.length,
+      totalDownloadBytes: plan.totalDownloadBytes,
+      needsUpdate: plan.toDownload.length > 0 || plan.toPrune.length > 0,
+    }
+  } catch (err) {
+    console.error("[Main] Failed to generate sync plan:", err)
+    return { success: false, error: err.message }
   }
 })
 
-ipcMain.on("game-pause-download", () => {
-  // Pause active stream
+ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
+  const clientFiles = Array.isArray(payload.clientFiles) ? payload.clientFiles : []
+  const modpackVersion = String(payload.modpackVersion || "1.0.0")
+
+  activeSyncCancelSignal = { isCancelled: false }
+
+  const onProgress = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("game-download-progress", data)
+    }
+  }
+
+  try {
+    const result = await executeSync({
+      instanceRoot,
+      clientFiles,
+      modpackVersion,
+      onProgress,
+      cancelSignal: activeSyncCancelSignal,
+    })
+    return { success: true, ...result }
+  } catch (err) {
+    console.error("[Main] Sync execution failed:", err)
+    throw err
+  } finally {
+    activeSyncCancelSignal = null
+  }
 })
 
-ipcMain.on("game-resume-download", () => {
-  // Resume active stream
+ipcMain.handle("game-cancel-sync", async () => {
+  if (activeSyncCancelSignal) {
+    activeSyncCancelSignal.isCancelled = true
+  }
+  return true
 })
 
-ipcMain.on("game-cancel-download", () => {
-  // Cancel and cleanup temp files
+ipcMain.handle("game-launch", async (_event, options = {}) => {
+  try {
+    return await gameLauncher.launch({
+      playerName: options.playerName || "Player",
+      ramGB: options.ramGB || 4,
+      neoForgeVersion: options.neoForgeVersion,
+      dedicatedGpu: dedicatedGpuEnabled,
+      customJavaPath: options.customJavaPath,
+      customArgs: options.customArgs || [],
+    })
+  } catch (err) {
+    console.error("[Main] Launch failed:", err)
+    throw err
+  }
 })
 
-ipcMain.on("game-repair-installation", () => {
-  // Verify MD5/SHA hashes of local modpack files against remote manifest
-})
-
-ipcMain.on("game-uninstall", () => {
-  // Delete game files, local modpack folders and cleanup
-})
-
-ipcMain.on("game-launch", (_event, options) => {
-  // Sanitize launch options to prevent JVM argument command injection
-  const safeVersion = String(options?.version || "1.20.1").replace(/[^a-zA-Z0-9._-]/g, "")
-  const safeRam = Math.min(Math.max(Number(options?.ramGB) || 4, 1), 64)
-  // Clean, isolated Java process parameters without raw shell execution
+ipcMain.handle("game-get-status", async () => {
+  return gameLauncher.getLaunchStatus()
 })
 
 app.whenReady().then(() => {
@@ -343,11 +529,24 @@ app.whenReady().then(() => {
   createWindow()
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+    } else {
+      focusMainWindow()
+    }
   })
 })
 
+app.on("before-quit", () => {
+  isQuitRequested = true
+})
+
 app.on("window-all-closed", () => {
+  if (minimizeToTrayEnabled) {
+    ensureTray()
+    return
+  }
+  destroyTray()
   if (process.platform !== "darwin") {
     app.quit()
   }

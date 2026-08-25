@@ -5,6 +5,7 @@ import { CANVAS_W, BASE_FONT } from "../theme/tokens"
 import LauncherToggle from "../components/common/LauncherToggle"
 import LauncherSelect from "../components/common/LauncherSelect"
 import LiveToast from "../components/common/LiveToast"
+import { gameService } from "../services/gameService"
 import {
   useTranslation,
   getTranslation,
@@ -44,8 +45,8 @@ export default function SettingsView({
   )
   const isDark = theme === "dark"
 
-  // Detect client system RAM via deviceMemory Web API
-  const [systemTotalRAM] = useState<number>(() => {
+  // Detect client system RAM with fallback to Node.js memory IPC
+  const [systemTotalRAM, setSystemTotalRAM] = useState<number>(() => {
     if (typeof navigator !== "undefined" && "deviceMemory" in navigator) {
       const devMem = (navigator as any).deviceMemory
       if (typeof devMem === "number" && devMem > 0) {
@@ -58,32 +59,71 @@ export default function SettingsView({
   // Game & Performance State
   const [ramGB, setRamGBState] = useState<number>(() => {
     const defaultVal = 8
-    const detected =
-      typeof navigator !== "undefined" &&
-      "deviceMemory" in navigator &&
-      (navigator as any).deviceMemory
-        ? Math.min(
-            defaultVal,
-            Math.max(4, Math.round((navigator as any).deviceMemory)),
-          )
-        : defaultVal
-    return getStoredNumber(STORAGE_KEYS.RAM_GB, detected)
+    return getStoredNumber(STORAGE_KEYS.RAM_GB, defaultVal)
   })
 
   const [dedicatedGPU, setDedicatedGPUState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
   )
 
-  const setStartWithSystem = (v: boolean) => {
+  // Sync settings with Electron process and OS on mount
+  useEffect(() => {
+    let isMounted = true
+
+    if (window.electronAPI?.getMemory) {
+      window.electronAPI
+        .getMemory()
+        .then((info) => {
+          if (isMounted && info?.totalGb) {
+            setSystemTotalRAM(info.totalGb)
+          }
+        })
+        .catch(() => {})
+    }
+
+    if (window.electronAPI?.getStartWithSystem) {
+      window.electronAPI
+        .getStartWithSystem()
+        .then((realState) => {
+          if (isMounted && typeof realState === "boolean") {
+            setStartWithSystemState(realState)
+            setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, realState)
+          }
+        })
+        .catch(() => {})
+    }
+
+    if (window.electronAPI?.setMinimizeToTray) {
+      window.electronAPI.setMinimizeToTray(minimizeToTray)
+    }
+
+    if (window.electronAPI?.setDedicatedGpu) {
+      window.electronAPI.setDedicatedGpu(dedicatedGPU)
+    }
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const setStartWithSystem = async (v: boolean) => {
     setStartWithSystemState(v)
     setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, v)
-    window.electronAPI?.setStartWithSystem?.(v)
+    try {
+      const res = await window.electronAPI?.setStartWithSystem?.(v)
+      if (typeof res === "boolean") {
+        setStartWithSystemState(res)
+        setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, res)
+      }
+    } catch (_) {}
   }
 
-  const setMinimizeToTray = (v: boolean) => {
+  const setMinimizeToTray = async (v: boolean) => {
     setMinimizeToTrayState(v)
     setStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, v)
-    window.electronAPI?.setMinimizeToTray?.(v)
+    try {
+      await window.electronAPI?.setMinimizeToTray?.(v)
+    } catch (_) {}
   }
 
   const setAutoUpdates = (v: boolean) => {
@@ -114,28 +154,44 @@ export default function SettingsView({
   const [repairState, setRepairState] = useState<"idle" | "scanning" | "done">(
     "idle",
   )
-  const [toastText, setToastText] = useState<string | null>(null)
+  const [toastState, setToastState] = useState<{
+    message: string | null
+    type: "success" | "error" | "info"
+  }>({
+    message: null,
+    type: "success",
+  })
   const toastTimeoutRef = useRef<any>(null)
 
-  const notifySaved = (customMsg?: string) => {
+  const notifySaved = (customMsg?: string, type: "success" | "error" | "info" = "success") => {
     const msg = customMsg || t("settings.toastSaved")
-    setToastText(msg)
+    setToastState({ message: msg, type })
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
     toastTimeoutRef.current = setTimeout(() => {
-      setToastText(null)
-    }, 2400)
+      setToastState({ message: null, type: "success" })
+    }, 2800)
   }
 
-  const handleRepair = () => {
+  const handleRepair = async () => {
     if (repairState === "scanning") return
     setRepairState("scanning")
-    notifySaved(t("settings.repairScanning"))
-    window.electronAPI?.repairGame?.()
-    setTimeout(() => {
-      setRepairState("done")
-      notifySaved(t("settings.repairSuccess"))
-      setTimeout(() => setRepairState("idle"), 3500)
-    }, 2800)
+    notifySaved(t("settings.repairScanning"), "info")
+    try {
+      const manifest = await gameService.checkGameManifest()
+      if (manifest?.clientFiles && manifest.clientFiles.length > 0) {
+        await gameService.startSync(manifest.clientFiles, manifest.version)
+        setRepairState("done")
+        notifySaved(t("settings.repairSuccess"), "success")
+        setTimeout(() => setRepairState("idle"), 3500)
+      } else {
+        setRepairState("idle")
+        notifySaved(t("settings.repairNoFiles"), "error")
+      }
+    } catch (err: any) {
+      console.error("Repair error:", err)
+      setRepairState("idle")
+      notifySaved(t("settings.repairError"), "error")
+    }
   }
 
   const CONTENT_LEFT = 184
@@ -1186,7 +1242,7 @@ export default function SettingsView({
         </div>
 
         {/* ── Real-time Auto-Save Toast ── */}
-        <LiveToast message={toastText} />
+        <LiveToast message={toastState.message} type={toastState.type} />
       </div>
     </div>
   )

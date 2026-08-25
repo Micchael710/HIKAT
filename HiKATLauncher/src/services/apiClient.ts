@@ -43,7 +43,7 @@ export async function apiClient<T = any>(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
-    ...options.headers as Record<string, string>,
+    ...(options.headers as Record<string, string>),
   }
 
   if (token) {
@@ -92,5 +92,42 @@ export async function apiClient<T = any>(
         : "No se pudo conectar con el servidor (Modo sin conexión)",
       error: err?.message || "Network request failed",
     }
+  }
+}
+
+/**
+ * GraphQL Client helper for Backend queries and mutations
+ */
+export async function graphqlClient<T = any>(
+  query: string,
+  variables: Record<string, any> = {},
+  timeoutMs = 15000,
+): Promise<{ success: boolean; data?: T; error?: string }> {
+  const res = await apiClient<{ data?: T; errors?: Array<{ message: string }> }>(
+    "/graphql",
+    {
+      method: "POST",
+      body: JSON.stringify({ query, variables }),
+    },
+    timeoutMs,
+  )
+
+  if (res.success && res.data) {
+    if (res.data.errors && res.data.errors.length > 0) {
+      return {
+        success: false,
+        error: res.data.errors[0]?.message || "GraphQL query error",
+      }
+    }
+    const resultData = res.data.data !== undefined ? res.data.data : (res.data as unknown as T)
+    return {
+      success: true,
+      data: resultData,
+    }
+  }
+
+  return {
+    success: false,
+    error: res.message || res.error || "GraphQL query failed",
   }
 }

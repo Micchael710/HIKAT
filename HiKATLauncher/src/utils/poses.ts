@@ -7,13 +7,16 @@ export interface SkinPose {
   apply: (viewer: SkinViewer) => void
 }
 
-const resetPlayerJoints = (viewer: SkinViewer) => {
+export const resetPlayerJoints = (viewer: SkinViewer) => {
   try {
     const player = viewer.playerObject
     player.rotation.set(0, 0, 0)
     player.position.set(0, 0, 0)
     player.skin.resetJoints()
-    player.cape.rotation.set(0.1, 0, 0)
+    player.cape.rotation.set(0.1, Math.PI, 0)
+    if (player.cape.children && player.cape.children[0]) {
+      player.cape.children[0].position.z = 0.5
+    }
   } catch (_) {}
 }
 
@@ -28,13 +31,13 @@ export const SKIN_POSES: SkinPose[] = [
     apply: (viewer: SkinViewer) => {
       resetPlayerJoints(viewer)
       const player = viewer.playerObject
-      player.rotation.set(0, 0.25, 0)
+      player.rotation.set(0, 0, 0)
       player.skin.head.rotation.set(0, 0, 0)
-      player.skin.leftArm.rotation.set(0, 0, 0.05)
-      player.skin.rightArm.rotation.set(0, 0, -0.05)
+      player.skin.leftArm.rotation.set(0, 0, 0)
+      player.skin.rightArm.rotation.set(0, 0, 0)
       player.skin.leftLeg.rotation.set(0, 0, 0)
       player.skin.rightLeg.rotation.set(0, 0, 0)
-      player.cape.rotation.set(0.12, 0, 0)
+      player.cape.rotation.set(0.12, Math.PI, 0)
     },
   },
   {
@@ -49,7 +52,7 @@ export const SKIN_POSES: SkinPose[] = [
       player.skin.rightArm.rotation.set(-0.15, 0, -0.2)
       player.skin.leftLeg.rotation.set(-0.06, 0, 0.06)
       player.skin.rightLeg.rotation.set(0.06, 0, -0.06)
-      player.cape.rotation.set(0.22, 0, 0)
+      player.cape.rotation.set(0.22, Math.PI, 0)
     },
   },
   {
@@ -64,7 +67,7 @@ export const SKIN_POSES: SkinPose[] = [
       player.skin.rightArm.rotation.set(-0.55, 0, -0.15)
       player.skin.leftLeg.rotation.set(-0.45, 0, 0.05)
       player.skin.rightLeg.rotation.set(0.45, 0, -0.05)
-      player.cape.rotation.set(0.35, 0, 0)
+      player.cape.rotation.set(0.35, Math.PI, 0)
     },
   },
   {
@@ -79,7 +82,7 @@ export const SKIN_POSES: SkinPose[] = [
       player.skin.leftArm.rotation.set(0.1, 0, 0.2)
       player.skin.leftLeg.rotation.set(0, 0, 0.05)
       player.skin.rightLeg.rotation.set(0, 0, -0.05)
-      player.cape.rotation.set(0.18, 0, 0)
+      player.cape.rotation.set(0.18, Math.PI, 0)
     },
   },
   {
@@ -95,7 +98,7 @@ export const SKIN_POSES: SkinPose[] = [
       player.skin.leftArm.rotation.set(0.3, 0.15, 0.55)
       player.skin.leftLeg.rotation.set(-0.06, 0, 0.08)
       player.skin.rightLeg.rotation.set(0.06, 0, -0.08)
-      player.cape.rotation.set(0.25, 0, 0)
+      player.cape.rotation.set(0.25, Math.PI, 0)
     },
   },
   {
@@ -110,7 +113,7 @@ export const SKIN_POSES: SkinPose[] = [
       player.skin.leftArm.rotation.set(-0.3, 0.25, 0.4)
       player.skin.leftLeg.rotation.set(-0.08, 0, 0.05)
       player.skin.rightLeg.rotation.set(0.12, 0, -0.05)
-      player.cape.rotation.set(0.2, 0, 0)
+      player.cape.rotation.set(0.2, Math.PI, 0)
     },
   },
   {
@@ -125,7 +128,7 @@ export const SKIN_POSES: SkinPose[] = [
       player.skin.leftArm.rotation.set(-0.5, 0.35, 0.25)
       player.skin.rightLeg.rotation.set(0.3, 0, -0.08)
       player.skin.leftLeg.rotation.set(-0.25, 0, 0.08)
-      player.cape.rotation.set(0.3, 0, 0)
+      player.cape.rotation.set(0.3, Math.PI, 0)
     },
   },
   {
@@ -140,7 +143,7 @@ export const SKIN_POSES: SkinPose[] = [
       player.skin.rightArm.rotation.set(-0.2, 0, -0.25)
       player.skin.leftLeg.rotation.set(-0.05, 0, 0.06)
       player.skin.rightLeg.rotation.set(-0.06, 0, -0.06)
-      player.cape.rotation.set(0.22, 0, 0)
+      player.cape.rotation.set(0.22, Math.PI, 0)
     },
   },
   {
@@ -156,7 +159,7 @@ export const SKIN_POSES: SkinPose[] = [
       player.skin.rightArm.rotation.set(-0.25, 0, -0.3)
       player.skin.leftLeg.rotation.set(-0.05, 0, 0.06)
       player.skin.rightLeg.rotation.set(-0.06, 0, -0.06)
-      player.cape.rotation.set(0.38, 0, 0)
+      player.cape.rotation.set(0.38, Math.PI, 0)
     },
   },
 ]

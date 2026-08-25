@@ -42,17 +42,26 @@ export default function DownloadPlayButton({
   const [timeRemainingMin, setTimeRemainingMin] = useState(0)
   const [isHovered, setIsHovered] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [toastState, setToastState] = useState<{
+    message: string | null
+    type: "success" | "error" | "info"
+  }>({
+    message: null,
+    type: "success",
+  })
   const menuRef = useRef<HTMLDivElement>(null)
   const toastTimeoutRef = useRef<any>(null)
   const isDark = theme === "dark"
 
-  const showToast = (msg: string) => {
+  const showToast = (
+    msg: string,
+    type: "success" | "error" | "info" = "success",
+  ) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
-    setToastMessage(msg)
+    setToastState({ message: msg, type })
     toastTimeoutRef.current = setTimeout(() => {
-      setToastMessage(null)
-    }, 2400)
+      setToastState({ message: null, type: "success" })
+    }, 2800)
   }
 
   // Close options menu on click outside
@@ -77,7 +86,7 @@ export default function DownloadPlayButton({
         if (res.totalSizeGB) setTotalGB(res.totalSizeGB)
         if (res.installed || gameService.isGameInstalled()) {
           setStatus(res.hasUpdate ? "update" : "play")
-        } else if (res.downloadUrl || res.latestVersion) {
+        } else if ((res.clientFiles && res.clientFiles.length > 0) || res.version) {
           setStatus("download")
         } else {
           setStatus("unavailable")
@@ -116,11 +125,11 @@ export default function DownloadPlayButton({
   const isExpanded = status === "downloading" || status === "paused"
 
   const cancel = () => {
-    window.electronAPI?.cancelDownload?.()
+    gameService.cancelSync()
     setStatus(
       manifest?.hasUpdate
         ? "update"
-        : manifest?.downloadUrl
+        : manifest?.clientFiles && manifest.clientFiles.length > 0
           ? "download"
           : "unavailable",
     )
@@ -131,43 +140,85 @@ export default function DownloadPlayButton({
 
   const togglePauseResume = () => {
     if (status === "downloading") {
-      window.electronAPI?.pauseDownload?.()
+      gameService.cancelSync()
       setStatus("paused")
     } else if (status === "paused") {
-      window.electronAPI?.resumeDownload?.()
-      setStatus("downloading")
+      if (manifest?.clientFiles) {
+        setStatus("downloading")
+        gameService.startSync(manifest.clientFiles, manifest.version)
+      }
     }
   }
 
-  const handleClick = () => {
+  const handleClick = async () => {
     if (status === "unavailable") {
       return
     }
     if (status === "download" || status === "update") {
+      if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
+        showToast(t("playButton.noClientFiles"), "error")
+        return
+      }
       setStatus("downloading")
-      window.electronAPI?.startDownload?.(manifest)
+      try {
+        await gameService.startSync(manifest.clientFiles, manifest.version)
+        gameService.setGameInstalled(true)
+        setStatus("play")
+        showToast(t("playButton.syncSuccess"), "success")
+      } catch (err: any) {
+        console.error("Sync error:", err)
+        setStatus(manifest.hasUpdate ? "update" : "download")
+        showToast(t("playButton.syncError"), "error")
+      }
     } else if (status === "play") {
-      window.electronAPI?.launchGame?.({
-        version: manifest?.version || "1.20.1",
-      })
-      if (onPlay) onPlay()
+      const ramGB = Number(localStorage.getItem("hikat_ram_gb")) || 4
+      let playerName = "Player"
+      try {
+        const userRaw = localStorage.getItem("hikat_user_data")
+        if (userRaw) {
+          const parsed = JSON.parse(userRaw)
+          if (parsed?.username) playerName = parsed.username
+        }
+      } catch (_) {}
+
+      try {
+        await gameService.launchGame({
+          playerName,
+          ramGB,
+          neoForgeVersion: manifest?.neoForgeVersion,
+        })
+        if (onPlay) onPlay()
+      } catch (err: any) {
+        console.error("Launch error:", err)
+        showToast(t("playButton.launchError"), "error")
+      }
     }
   }
 
-  const handleVerifyInstallation = () => {
+  const handleVerifyInstallation = async () => {
     setIsMenuOpen(false)
-    gameService.repairGame()
-    showToast(t("playButton.verifying"))
-    setTimeout(() => {
-      showToast(t("playButton.verifySuccess"))
-    }, 2200)
+    if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
+      showToast(t("playButton.verifyError"), "error")
+      return
+    }
+    showToast(t("playButton.verifying"), "info")
+    setStatus("downloading")
+    try {
+      await gameService.startSync(manifest.clientFiles, manifest.version)
+      gameService.setGameInstalled(true)
+      setStatus("play")
+      showToast(t("playButton.verifySuccess"), "success")
+    } catch (err: any) {
+      showToast(t("playButton.verifyError"), "error")
+      setStatus("play")
+    }
   }
 
   const handleUninstallGame = () => {
     setIsMenuOpen(false)
     gameService.uninstallGame()
-    setStatus(manifest?.downloadUrl ? "download" : "unavailable")
-    showToast(t("playButton.uninstallSuccess"))
+    setStatus(manifest?.clientFiles && manifest.clientFiles.length > 0 ? "download" : "unavailable")
+    showToast(t("playButton.uninstallSuccess"), "success")
   }
 
   /* ── IDLE / UNAVAILABLE / DOWNLOAD / UPDATE / PLAY ── */
@@ -342,7 +393,7 @@ export default function DownloadPlayButton({
           </div>
         )}
 
-        <LiveToast message={toastMessage} />
+        <LiveToast message={toastState.message} type={toastState.type} />
       </div>
     )
   }
@@ -557,7 +608,7 @@ export default function DownloadPlayButton({
         </svg>
       </button>
 
-      <LiveToast message={toastMessage} />
+      <LiveToast message={toastState.message} type={toastState.type} />
     </div>
   )
 }

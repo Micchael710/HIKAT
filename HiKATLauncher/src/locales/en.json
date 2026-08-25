@@ -61,9 +61,14 @@
     "options": "Game options",
     "verifyInstallation": "Verify installation",
     "uninstallGame": "Uninstall game",
-    "verifying": "Verifying installation...",
-    "verifySuccess": "Installation verified successfully",
-    "uninstallSuccess": "Game uninstalled successfully"
+    "verifying": "Verifying game files...",
+    "verifySuccess": "Game files verified successfully",
+    "verifyError": "Could not verify the game. Please try again later.",
+    "uninstallSuccess": "Game uninstalled successfully",
+    "noClientFiles": "Game files are not available at this moment.",
+    "syncError": "Could not complete the download. Please check your internet connection.",
+    "syncSuccess": "Download completed successfully",
+    "launchError": "Could not launch the game. Try repairing the installation in Settings."
   },
   "home": {
     "heroSubtitle": "Master this vast world through engineering, soar through the skies, sail the seas and create an industrial revolution.",
@@ -150,19 +155,21 @@
     "maintenance": "Tools & Maintenance",
     "toolsMaintenance": "Tools & Maintenance",
     "repairTitle": "Repair installation",
-    "repairDesc": "Automatically checks and repairs dependencies, libraries, and client mods.",
+    "repairDesc": "Automatically checks and repairs game files.",
     "repairBtn": "Repair installation",
-    "repairScanning": "Checking client files and mods...",
-    "repairSuccess": "Installation successfully repaired and optimized!",
+    "repairScanning": "Checking game files...",
+    "repairSuccess": "Game successfully repaired and optimized",
+    "repairError": "Could not repair the game. Please try again later.",
+    "repairNoFiles": "No game files found to verify.",
     "repairInstall": "Repair installation",
-    "repairInstallDesc": "Automatically checks and repairs dependencies, libraries, and client mods.",
+    "repairInstallDesc": "Automatically checks and repairs game files.",
     "verifying": "Verifying...",
-    "verifiedSuccess": "Installation verified",
+    "verifiedSuccess": "Game verified successfully",
     "toastSaved": "Changes applied successfully",
     "toastDarkTheme": "Dark theme activated",
     "toastLightTheme": "Light theme activated",
-    "toastScanning": "Checking client files and mods...",
-    "toastRepaired": "Installation successfully repaired and optimized!"
+    "toastScanning": "Checking game files...",
+    "toastRepaired": "Game successfully repaired and optimized"
   },
   "skins": {
     "title": "Skins & Capes",
@@ -181,7 +188,30 @@
     "invalidSkinType": "Incorrect format. The skin must be a PNG image (.png).",
     "invalidCapeDimensions": "The image doesn't look like a Minecraft cape. Please use a valid cape file.",
     "invalidCapeType": "Incorrect format. The cape must be a PNG image (.png).",
-    "fileTooLarge": "File is too large. Maximum allowed size is 5MB."
+    "fileTooLarge": "File is too large. Maximum allowed size is 5MB.",
+    "poses": {
+      "default": "Default",
+      "heroic": "Heroic",
+      "action_walk": "Adventure",
+      "wave_greeting": "Wave",
+      "confident_akimbo": "Confident",
+      "thinker": "Thinker",
+      "battle_ready": "Battle Ready",
+      "relaxed_casual": "Relaxed",
+      "cape_showcase": "Cape Showcase"
+    },
+    "animations": {
+      "idle": "Breathing",
+      "walk": "Walking",
+      "run": "Running",
+      "pose": "Fixed Pose"
+    },
+    "controls": {
+      "changePose": "Change pose",
+      "changeAnimation": "Change animation",
+      "toggleRotate": "360° Rotation",
+      "resetCamera": "Reset camera"
+    }
   },
   "profile": {
     "title": "My Profile",
@@ -193,7 +223,8 @@
     "security": "Security & Access",
     "resetPassword": "Reset password",
     "resetPasswordDesc": "Send a secure recovery link to your email address to change the password.",
-    "sendResetEmail": "Send password reset email",
-    "emailSent": "Email sent"
+    "sendResetEmail": "Send reset email",
+    "emailSent": "Email sent",
+    "emailError": "Could not send password reset email. Please try again later."
   }
 }
