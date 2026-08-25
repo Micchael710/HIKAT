@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron")
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   minimizeWindow: () => ipcRenderer.send("window-minimize"),
@@ -6,9 +6,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   closeWindow: () => ipcRenderer.send("window-close"),
   isMaximized: () => ipcRenderer.invoke("window-is-maximized"),
   onMaximizeChange: (callback) => {
-    const handler = (_event, isMax) => callback(isMax)
-    ipcRenderer.on("window-maximize-changed", handler)
-    return () => ipcRenderer.removeListener("window-maximize-changed", handler)
+    const handler = (_event, isMax) => callback(isMax);
+    ipcRenderer.on("window-maximize-changed", handler);
+    return () => ipcRenderer.removeListener("window-maximize-changed", handler);
   },
   // Global settings bridge to Backend
   setStartWithSystem: (enabled) =>
@@ -34,8 +34,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   repairGame: () => ipcRenderer.send("game-repair-installation"),
   uninstallGame: () => ipcRenderer.send("game-uninstall"),
   onDownloadProgress: (callback) => {
-    const handler = (_event, data) => callback(data)
-    ipcRenderer.on("game-download-progress", handler)
-    return () => ipcRenderer.removeListener("game-download-progress", handler)
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("game-download-progress", handler);
+    return () => ipcRenderer.removeListener("game-download-progress", handler);
   },
-})
+});

@@ -1,15 +1,15 @@
-import React, { useState, useRef, useEffect } from "react"
-import { ThemeMode, SkinItem } from "../../types"
-import MinecraftHead from "../minecraft/MinecraftHead"
-import { useTranslation } from "../../context/LanguageContext"
+import React, { useState, useRef, useEffect } from "react";
+import { ThemeMode, SkinItem } from "../../types";
+import MinecraftHead from "../minecraft/MinecraftHead";
+import { useTranslation } from "../../context/LanguageContext";
 
 interface UserProfileCardProps {
-  username: string
-  activeSkinData?: SkinItem | null
-  s: number
-  onLogout: () => void
-  onOpenProfile: () => void
-  theme?: ThemeMode
+  username: string;
+  activeSkinData?: SkinItem | null;
+  s: number;
+  onLogout: () => void;
+  onOpenProfile: () => void;
+  theme?: ThemeMode;
 }
 
 export default function UserProfileCard({
@@ -20,25 +20,25 @@ export default function UserProfileCard({
   onOpenProfile,
   theme = "dark",
 }: UserProfileCardProps) {
-  const { t } = useTranslation()
-  const [isOpen, setIsOpen] = useState(false)
-  const cardRef = useRef<HTMLDivElement>(null)
-  const isDark = theme === "dark"
+  const { t } = useTranslation();
+  const [isOpen, setIsOpen] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const isDark = theme === "dark";
 
   // Close on outside click
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-        setIsOpen(false)
+        setIsOpen(false);
       }
-    }
-    window.addEventListener("mousedown", handleClickOutside)
-    return () => window.removeEventListener("mousedown", handleClickOutside)
-  }, [isOpen])
+    };
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
 
-  const smallAvatarSize = Math.round(38 * s)
-  const largeAvatarSize = Math.round(52 * s)
+  const smallAvatarSize = Math.round(38 * s);
+  const largeAvatarSize = Math.round(52 * s);
 
   return (
     <div ref={cardRef} style={{ position: "relative", pointerEvents: "auto" }}>
@@ -81,7 +81,9 @@ export default function UserProfileCard({
             <MinecraftHead
               skinId={activeSkinData?.id}
               skinColor={activeSkinData?.skin}
-              customImgUrl={activeSkinData?.customImgUrl || activeSkinData?.skinUrl}
+              customImgUrl={
+                activeSkinData?.customImgUrl || activeSkinData?.skinUrl
+              }
               size={smallAvatarSize}
             />
           </div>
@@ -157,7 +159,9 @@ export default function UserProfileCard({
                 <MinecraftHead
                   skinId={activeSkinData?.id}
                   skinColor={activeSkinData?.skin}
-                  customImgUrl={activeSkinData?.customImgUrl || activeSkinData?.skinUrl}
+                  customImgUrl={
+                    activeSkinData?.customImgUrl || activeSkinData?.skinUrl
+                  }
                   size={largeAvatarSize}
                 />
               </div>
@@ -223,8 +227,8 @@ export default function UserProfileCard({
           >
             <button
               onClick={() => {
-                setIsOpen(false)
-                onOpenProfile()
+                setIsOpen(false);
+                onOpenProfile();
               }}
               className="profile-menu-item"
               style={{
@@ -239,8 +243,8 @@ export default function UserProfileCard({
 
             <button
               onClick={() => {
-                setIsOpen(false)
-                onLogout()
+                setIsOpen(false);
+                onLogout();
               }}
               className="profile-menu-item is-danger"
               style={{
@@ -255,5 +259,5 @@ export default function UserProfileCard({
         </div>
       )}
     </div>
-  )
+  );
 }

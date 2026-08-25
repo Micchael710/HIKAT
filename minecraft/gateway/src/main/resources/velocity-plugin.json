@@ -1,0 +1,8 @@
+{
+  "id": "hikat-gateway",
+  "name": "HiKAT Gateway",
+  "version": "0.1.0",
+  "description": "HiKAT Velocity Proxy Gateway Integration",
+  "authors": ["HiKAT Team"],
+  "main": "com.hikat.minecraft.gateway.HiKATGatewayPlugin"
+}

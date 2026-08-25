@@ -5,6 +5,7 @@
 ---
 
 ## 📑 Tabla de Contenidos
+
 1. [Arquitectura del Sistema](#-arquitectura-del-sistema)
 2. [Contrato de Endpoints REST (Backend)](#-contrato-de-endpoints-rest-backend)
 3. [Contrato del Puente IPC de Electron (`window.electronAPI`)](#-contrato-del-puente-ipc-de-electron-windowelectronapi)
@@ -49,7 +50,9 @@ El cliente HTTP (`src/services/apiClient.ts`) apunta a la variable de entorno `V
 ### 1. Autenticación (`/auth`)
 
 #### `POST /auth/login`
+
 Inicia sesión con usuario o correo y contraseña.
+
 - **Request Body**:
   ```json
   {
@@ -80,7 +83,9 @@ Inicia sesión con usuario o correo y contraseña.
 - **Errores**: `401 Unauthorized` (credenciales inválidas), `429 Too Many Requests` (rate limiting).
 
 #### `POST /auth/register`
+
 Crea una nueva cuenta de jugador.
+
 - **Request Body**:
   ```json
   {
@@ -107,7 +112,9 @@ Crea una nueva cuenta de jugador.
 - **Errores**: `409 Conflict` (usuario o correo ya registrado), `422 Unprocessable Entity`.
 
 #### `POST /auth/reset-password`
+
 Solicita un correo electrónico con token de recuperación de contraseña.
+
 - **Request Body**:
   ```json
   {
@@ -128,7 +135,9 @@ Solicita un correo electrónico con token de recuperación de contraseña.
 ### 2. Noticias y Novedades (`/news`)
 
 #### `GET /news`
+
 Obtiene las publicaciones oficiales del Backoffice para el carrusel y modal.
+
 - **Response Success (`200 OK`)**:
   ```json
   {
@@ -153,7 +162,9 @@ Obtiene las publicaciones oficiales del Backoffice para el carrusel y modal.
 ### 3. Estado del Servidor y Jugadores (`/server` y `/players`)
 
 #### `GET /server/status`
+
 Estado en vivo del servidor de Minecraft (Ping y jugadores concurrentes).
+
 - **Response Success (`200 OK`)**:
   ```json
   {
@@ -169,7 +180,9 @@ Estado en vivo del servidor de Minecraft (Ping y jugadores concurrentes).
   ```
 
 #### `GET /players/:username/stats`
+
 Estadísticas del perfil de usuario y logros.
+
 - **Response Success (`200 OK`)**:
   ```json
   {
@@ -188,7 +201,9 @@ Estadísticas del perfil de usuario y logros.
 ### 4. Manifiesto del Juego y Descargas (`/game`)
 
 #### `GET /game/manifest`
+
 Consulta el estado de la versión del modpack y URLs de descarga.
+
 - **Response Success (`200 OK`)**:
   ```json
   {
@@ -209,7 +224,9 @@ Consulta el estado de la versión del modpack y URLs de descarga.
 ### 5. Skins y Capas (`/skins`)
 
 #### `POST /skins/upload`
+
 Sube una nueva textura de skin o capa para el usuario autenticado (compatible con texturas estándar y HD).
+
 - **Request (Multipart/Form-Data)**:
   - `skin`: Archivo PNG de textura (estándar / HD).
   - `model`: `"classic"` (brazo 4px) o `"slim"` (brazo 3px).
@@ -226,7 +243,9 @@ Sube una nueva textura de skin o capa para el usuario autenticado (compatible co
   ```
 
 #### `GET /skins/user/:id`
+
 Obtiene las URLs de las texturas activas de skin y capa de un jugador.
+
 - **Response Success (`200 OK`)**:
   ```json
   {
@@ -256,28 +275,28 @@ Obtiene las URLs de las texturas activas de skin y capa de un jugador.
 
 El frontend consume la API nativa de Electron a través de [`electron/preload.cjs`](electron/preload.cjs) tipada en [`src/vite-env.d.ts`](src/vite-env.d.ts):
 
-| Canal IPC | Tipo | Payload | Descripción |
-|---|---|---|---|
-| `window-minimize` | `send` | — | Minimiza la ventana a la barra de tareas. |
-| `window-maximize` | `send` | — | Alterna entre tamaño estándar y pantalla completa / grande. |
-| `window-close` | `send` | — | Cierra la ventana o minimiza a la bandeja del sistema (Tray). |
-| `window-is-maximized` | `invoke` | — | Devuelve `Promise<boolean>` indicando si la ventana está maximizada. |
-| `window-maximize-changed` | `event` | `(isMax: boolean) => void` | Notifica cambios de estado de maximización. |
-| `open-external` | `send` | `url: string` | Abre enlaces en el navegador predeterminado (solo `http:` y `https:`). |
-| `setting-start-with-system` | `send` | `enabled: boolean` | Configura el inicio automático con Windows (`app.setLoginItemSettings`). |
-| `setting-minimize-to-tray` | `send` | `enabled: boolean` | Habilita minimizar a la bandeja al presionar cerrar. |
-| `setting-auto-updates` | `send` | `enabled: boolean` | Activa la descarga automática de parches en segundo plano. |
-| `setting-notifications` | `send` | `enabled: boolean` | Activa las notificaciones nativas de Windows. |
-| `setting-ram-allocation` | `send` | `ramGB: number` | Asigna memoria RAM (1-64 GB) al proceso Java de Minecraft (`-Xmx{ramGB}G`). |
-| `setting-dedicated-gpu` | `send` | `enabled: boolean` | Fuerza el renderizado con GPU dedicada (NVIDIA / AMD). |
-| `game-start-download` | `send` | `manifest?: GameManifest` | Inicia el trabajador de descarga en segundo plano de mods y assets. |
-| `game-pause-download` | `send` | — | Pausa la descarga activa. |
-| `game-resume-download` | `send` | — | Reanuda la descarga pausada. |
-| `game-cancel-download` | `send` | — | Cancela y limpia archivos temporales. |
-| `game-repair-installation` | `send` | — | Verifica la integridad SHA/MD5 de los mods locales contra el manifiesto. |
-| `game-uninstall` | `send` | — | Desinstala el juego y elimina archivos locales del modpack. |
-| `game-launch` | `send` | `options?: { version?: string }` | Ejecuta el proceso de Minecraft con los argumentos Java y token de sesión. |
-| `game-download-progress` | `event` | `(data: DownloadProgressPayload) => void` | Emite `{ progress, downloadedGB, totalGB, speedMBs, remainingMinutes }`. |
+| Canal IPC                   | Tipo     | Payload                                   | Descripción                                                                 |
+| --------------------------- | -------- | ----------------------------------------- | --------------------------------------------------------------------------- |
+| `window-minimize`           | `send`   | —                                         | Minimiza la ventana a la barra de tareas.                                   |
+| `window-maximize`           | `send`   | —                                         | Alterna entre tamaño estándar y pantalla completa / grande.                 |
+| `window-close`              | `send`   | —                                         | Cierra la ventana o minimiza a la bandeja del sistema (Tray).               |
+| `window-is-maximized`       | `invoke` | —                                         | Devuelve `Promise<boolean>` indicando si la ventana está maximizada.        |
+| `window-maximize-changed`   | `event`  | `(isMax: boolean) => void`                | Notifica cambios de estado de maximización.                                 |
+| `open-external`             | `send`   | `url: string`                             | Abre enlaces en el navegador predeterminado (solo `http:` y `https:`).      |
+| `setting-start-with-system` | `send`   | `enabled: boolean`                        | Configura el inicio automático con Windows (`app.setLoginItemSettings`).    |
+| `setting-minimize-to-tray`  | `send`   | `enabled: boolean`                        | Habilita minimizar a la bandeja al presionar cerrar.                        |
+| `setting-auto-updates`      | `send`   | `enabled: boolean`                        | Activa la descarga automática de parches en segundo plano.                  |
+| `setting-notifications`     | `send`   | `enabled: boolean`                        | Activa las notificaciones nativas de Windows.                               |
+| `setting-ram-allocation`    | `send`   | `ramGB: number`                           | Asigna memoria RAM (1-64 GB) al proceso Java de Minecraft (`-Xmx{ramGB}G`). |
+| `setting-dedicated-gpu`     | `send`   | `enabled: boolean`                        | Fuerza el renderizado con GPU dedicada (NVIDIA / AMD).                      |
+| `game-start-download`       | `send`   | `manifest?: GameManifest`                 | Inicia el trabajador de descarga en segundo plano de mods y assets.         |
+| `game-pause-download`       | `send`   | —                                         | Pausa la descarga activa.                                                   |
+| `game-resume-download`      | `send`   | —                                         | Reanuda la descarga pausada.                                                |
+| `game-cancel-download`      | `send`   | —                                         | Cancela y limpia archivos temporales.                                       |
+| `game-repair-installation`  | `send`   | —                                         | Verifica la integridad SHA/MD5 de los mods locales contra el manifiesto.    |
+| `game-uninstall`            | `send`   | —                                         | Desinstala el juego y elimina archivos locales del modpack.                 |
+| `game-launch`               | `send`   | `options?: { version?: string }`          | Ejecuta el proceso de Minecraft con los argumentos Java y token de sesión.  |
+| `game-download-progress`    | `event`  | `(data: DownloadProgressPayload) => void` | Emite `{ progress, downloadedGB, totalGB, speedMBs, remainingMinutes }`.    |
 
 ---
 
@@ -285,14 +304,14 @@ El frontend consume la API nativa de Electron a través de [`electron/preload.cj
 
 Todas las entradas de usuario, enlaces externos y parámetros de la JVM están protegidos por el módulo [`src/utils/security.ts`](src/utils/security.ts):
 
-* **SQL Injection (SQLi)**: Neutralización de palabras clave maliciosas (`UNION SELECT`, `INSERT INTO`, `DROP TABLE`, `DELETE FROM`, `xp_cmdshell`, `;`, `--`, `/*`).
-* **Cross-Site Scripting (XSS)**: Desinfección de etiquetas `<script>`, `<img onerror>`, protocolos `javascript:` y `vbscript:`.
-* **Minecraft Username Standards**: Whitelist estricta `^[a-zA-Z0-9_]{3,16}$` con truncado automático en 16 caracteres.
-* **Email RFC 5322**: Validación estricta y límite de 254 caracteres.
-* **URL Sanitization**: Solo se permite abrir enlaces externos con protocolos `http://` y `https://`.
-* **RAM Boundaries**: Límites estrictos entre 1 GB y 64 GB.
-* **Content Security Policy (CSP)**: Implementado en [`index.html`](index.html) para prevenir ejecución de scripts de orígenes desconocidos.
-* **Protecciones de Escritorio**: Bloqueo de selección de texto (`user-select: none`), menú contextual (clic derecho) anulado, arrastre fantasma de imágenes deshabilitado y atajos de recarga web bloqueados (manteniendo `F12` activo para desarrollo).
+- **SQL Injection (SQLi)**: Neutralización de palabras clave maliciosas (`UNION SELECT`, `INSERT INTO`, `DROP TABLE`, `DELETE FROM`, `xp_cmdshell`, `;`, `--`, `/*`).
+- **Cross-Site Scripting (XSS)**: Desinfección de etiquetas `<script>`, `<img onerror>`, protocolos `javascript:` y `vbscript:`.
+- **Minecraft Username Standards**: Whitelist estricta `^[a-zA-Z0-9_]{3,16}$` con truncado automático en 16 caracteres.
+- **Email RFC 5322**: Validación estricta y límite de 254 caracteres.
+- **URL Sanitization**: Solo se permite abrir enlaces externos con protocolos `http://` y `https://`.
+- **RAM Boundaries**: Límites estrictos entre 1 GB y 64 GB.
+- **Content Security Policy (CSP)**: Implementado en [`index.html`](index.html) para prevenir ejecución de scripts de orígenes desconocidos.
+- **Protecciones de Escritorio**: Bloqueo de selección de texto (`user-select: none`), menú contextual (clic derecho) anulado, arrastre fantasma de imágenes deshabilitado y atajos de recarga web bloqueados (manteniendo `F12` activo para desarrollo).
 
 ---
 
@@ -300,19 +319,19 @@ Todas las entradas de usuario, enlaces externos y parámetros de la JVM están p
 
 Persistidas de forma inmediata mediante [`src/utils/settingsStorage.ts`](src/utils/settingsStorage.ts):
 
-| Clave `localStorage` | Tipo | Valor Inicial | Descripción |
-| :--- | :--- | :--- | :--- |
-| `hikat_theme` | `"dark"` \| `"light"` | `"dark"` | Tema de color de la interfaz. |
-| `hikat_language` | `"es"` \| `"en"` \| `"pt"` \| `"fr"` | `"es"` | Idioma de la interfaz y textos. |
-| `hikat_start_with_system` | `boolean` | `true` | Inicio automático con Windows. |
-| `hikat_minimize_to_tray` | `boolean` | `true` | Minimizar a la bandeja del sistema al cerrar. |
-| `hikat_auto_updates` | `boolean` | `true` | Actualizaciones en segundo plano. |
-| `hikat_notifications` | `boolean` | `true` | Notificaciones de eventos y descargas. |
-| `hikat_ram_gb` | `number` | `8` | RAM asignada al juego (GB). |
-| `hikat_dedicated_gpu` | `boolean` | `true` | Forzar GPU dedicada para Minecraft. |
-| `hikat_auth_token` | `string` | `null` | Token JWT de sesión activa. |
-| `hikat_last_user` | `JSON (UserProfile)` | `null` | Perfil del usuario en caché local. |
-| `hikat_game_installed` | `"true"` \| `"false"` | `"false"` | Indicador de juego instalado localmente. |
+| Clave `localStorage`      | Tipo                                 | Valor Inicial | Descripción                                   |
+| :------------------------ | :----------------------------------- | :------------ | :-------------------------------------------- |
+| `hikat_theme`             | `"dark"` \| `"light"`                | `"dark"`      | Tema de color de la interfaz.                 |
+| `hikat_language`          | `"es"` \| `"en"` \| `"pt"` \| `"fr"` | `"es"`        | Idioma de la interfaz y textos.               |
+| `hikat_start_with_system` | `boolean`                            | `true`        | Inicio automático con Windows.                |
+| `hikat_minimize_to_tray`  | `boolean`                            | `true`        | Minimizar a la bandeja del sistema al cerrar. |
+| `hikat_auto_updates`      | `boolean`                            | `true`        | Actualizaciones en segundo plano.             |
+| `hikat_notifications`     | `boolean`                            | `true`        | Notificaciones de eventos y descargas.        |
+| `hikat_ram_gb`            | `number`                             | `8`           | RAM asignada al juego (GB).                   |
+| `hikat_dedicated_gpu`     | `boolean`                            | `true`        | Forzar GPU dedicada para Minecraft.           |
+| `hikat_auth_token`        | `string`                             | `null`        | Token JWT de sesión activa.                   |
+| `hikat_last_user`         | `JSON (UserProfile)`                 | `null`        | Perfil del usuario en caché local.            |
+| `hikat_game_installed`    | `"true"` \| `"false"`                | `"false"`     | Indicador de juego instalado localmente.      |
 
 ---
 
@@ -355,7 +374,9 @@ BYEKATLAUNCHER/
 ## 🚀 Guía de Desarrollo y Despliegue
 
 ### 1. Variables de Entorno (`.env`)
+
 Copia `.env.example` a `.env` y configura la URL de tu API:
+
 ```env
 VITE_API_URL=https://api.apparatia.net/api/v1
 VITE_SERVER_IP=play.apparatia.net

@@ -1,9 +1,9 @@
-import React from "react"
+import React from "react";
 
 export interface LiveToastProps {
-  message: string | null
-  type?: "success" | "error" | "info"
-  accentColor?: string
+  message: string | null;
+  type?: "success" | "error" | "info";
+  accentColor?: string;
 }
 
 export default function LiveToast({
@@ -11,10 +11,10 @@ export default function LiveToast({
   type = "success",
   accentColor,
 }: LiveToastProps) {
-  if (!message) return null
+  if (!message) return null;
 
-  const isError = type === "error"
-  const strokeColor = isError ? "#ef4444" : (accentColor || "#3ec4c0")
+  const isError = type === "error";
+  const strokeColor = isError ? "#ef4444" : accentColor || "#3ec4c0";
 
   return (
     <div
@@ -63,5 +63,5 @@ export default function LiveToast({
       )}
       <span>{message}</span>
     </div>
-  )
+  );
 }

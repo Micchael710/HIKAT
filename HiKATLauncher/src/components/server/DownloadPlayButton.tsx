@@ -1,25 +1,25 @@
-import React, { useState, useEffect, useRef } from "react"
-import { ThemeMode } from "../../types"
+import React, { useState, useEffect, useRef } from "react";
+import { ThemeMode } from "../../types";
 import {
   IconDownload,
   IconPlay,
   IconPause,
   IconResume,
-} from "../../theme/icons"
-import { BASE_FONT } from "../../theme/tokens"
-import { useTranslation } from "../../context/LanguageContext"
+} from "../../theme/icons";
+import { BASE_FONT } from "../../theme/tokens";
+import { useTranslation } from "../../context/LanguageContext";
 import {
   gameService,
   GameButtonState,
   GameManifest,
-} from "../../services/gameService"
-import LiveToast from "../common/LiveToast"
+} from "../../services/gameService";
+import LiveToast from "../common/LiveToast";
 
 interface DownloadPlayButtonProps {
-  left: number
-  top: number
-  theme?: ThemeMode
-  onPlay?: () => void
+  left: number;
+  top: number;
+  theme?: ThemeMode;
+  onPlay?: () => void;
 }
 
 export default function DownloadPlayButton({
@@ -28,153 +28,153 @@ export default function DownloadPlayButton({
   theme = "dark",
   onPlay,
 }: DownloadPlayButtonProps) {
-  const { t } = useTranslation()
+  const { t } = useTranslation();
   const [status, setStatus] = useState<GameButtonState>(() => {
-    if (gameService.isGameInstalled()) return "play"
-    return "unavailable"
-  })
+    if (gameService.isGameInstalled()) return "play";
+    return "unavailable";
+  });
 
-  const [manifest, setManifest] = useState<GameManifest | null>(null)
-  const [progress, setProgress] = useState(0)
-  const [speed, setSpeed] = useState(0)
-  const [totalGB, setTotalGB] = useState(28.8)
-  const [downloadedGB, setDownloadedGB] = useState(0)
-  const [timeRemainingMin, setTimeRemainingMin] = useState(0)
-  const [isHovered, setIsHovered] = useState(false)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const toastTimeoutRef = useRef<any>(null)
-  const isDark = theme === "dark"
+  const [manifest, setManifest] = useState<GameManifest | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [speed, setSpeed] = useState(0);
+  const [totalGB, setTotalGB] = useState(28.8);
+  const [downloadedGB, setDownloadedGB] = useState(0);
+  const [timeRemainingMin, setTimeRemainingMin] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const toastTimeoutRef = useRef<any>(null);
+  const isDark = theme === "dark";
 
   const showToast = (msg: string) => {
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
-    setToastMessage(msg)
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToastMessage(msg);
     toastTimeoutRef.current = setTimeout(() => {
-      setToastMessage(null)
-    }, 2400)
-  }
+      setToastMessage(null);
+    }, 2400);
+  };
 
   // Close options menu on click outside
   useEffect(() => {
-    if (!isMenuOpen) return
+    if (!isMenuOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setIsMenuOpen(false)
+        setIsMenuOpen(false);
       }
-    }
-    window.addEventListener("mousedown", handleClickOutside)
-    return () => window.removeEventListener("mousedown", handleClickOutside)
-  }, [isMenuOpen])
+    };
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, [isMenuOpen]);
 
   // Check manifest and server availability on mount
   useEffect(() => {
-    let isMounted = true
+    let isMounted = true;
     gameService.checkGameManifest().then((res) => {
-      if (!isMounted) return
-      setManifest(res)
+      if (!isMounted) return;
+      setManifest(res);
       if (res) {
-        if (res.totalSizeGB) setTotalGB(res.totalSizeGB)
+        if (res.totalSizeGB) setTotalGB(res.totalSizeGB);
         if (res.installed || gameService.isGameInstalled()) {
-          setStatus(res.hasUpdate ? "update" : "play")
+          setStatus(res.hasUpdate ? "update" : "play");
         } else if (res.downloadUrl || res.latestVersion) {
-          setStatus("download")
+          setStatus("download");
         } else {
-          setStatus("unavailable")
+          setStatus("unavailable");
         }
       } else {
         if (gameService.isGameInstalled()) {
-          setStatus("play")
+          setStatus("play");
         } else {
-          setStatus("unavailable")
+          setStatus("unavailable");
         }
       }
-    })
+    });
     return () => {
-      isMounted = false
-    }
-  }, [])
+      isMounted = false;
+    };
+  }, []);
 
   // Listen to IPC download progress events if running in Electron
   useEffect(() => {
     const unsub = window.electronAPI?.onDownloadProgress?.((data) => {
-      setProgress(data.progress)
-      setSpeed(data.speedMBs)
-      setDownloadedGB(data.downloadedGB)
-      if (data.totalGB) setTotalGB(data.totalGB)
-      setTimeRemainingMin(data.remainingMinutes)
+      setProgress(data.progress);
+      setSpeed(data.speedMBs);
+      setDownloadedGB(data.downloadedGB);
+      if (data.totalGB) setTotalGB(data.totalGB);
+      setTimeRemainingMin(data.remainingMinutes);
       if (data.progress >= 100) {
-        gameService.setGameInstalled(true)
-        setStatus("play")
+        gameService.setGameInstalled(true);
+        setStatus("play");
       }
-    })
+    });
     return () => {
-      unsub?.()
-    }
-  }, [])
+      unsub?.();
+    };
+  }, []);
 
-  const isExpanded = status === "downloading" || status === "paused"
+  const isExpanded = status === "downloading" || status === "paused";
 
   const cancel = () => {
-    window.electronAPI?.cancelDownload?.()
+    window.electronAPI?.cancelDownload?.();
     setStatus(
       manifest?.hasUpdate
         ? "update"
         : manifest?.downloadUrl
           ? "download"
           : "unavailable",
-    )
-    setProgress(0)
-    setSpeed(0)
-    setIsHovered(false)
-  }
+    );
+    setProgress(0);
+    setSpeed(0);
+    setIsHovered(false);
+  };
 
   const togglePauseResume = () => {
     if (status === "downloading") {
-      window.electronAPI?.pauseDownload?.()
-      setStatus("paused")
+      window.electronAPI?.pauseDownload?.();
+      setStatus("paused");
     } else if (status === "paused") {
-      window.electronAPI?.resumeDownload?.()
-      setStatus("downloading")
+      window.electronAPI?.resumeDownload?.();
+      setStatus("downloading");
     }
-  }
+  };
 
   const handleClick = () => {
     if (status === "unavailable") {
-      return
+      return;
     }
     if (status === "download" || status === "update") {
-      setStatus("downloading")
-      window.electronAPI?.startDownload?.(manifest)
+      setStatus("downloading");
+      window.electronAPI?.startDownload?.(manifest);
     } else if (status === "play") {
       window.electronAPI?.launchGame?.({
         version: manifest?.version || "1.20.1",
-      })
-      if (onPlay) onPlay()
+      });
+      if (onPlay) onPlay();
     }
-  }
+  };
 
   const handleVerifyInstallation = () => {
-    setIsMenuOpen(false)
-    gameService.repairGame()
-    showToast(t("playButton.verifying"))
+    setIsMenuOpen(false);
+    gameService.repairGame();
+    showToast(t("playButton.verifying"));
     setTimeout(() => {
-      showToast(t("playButton.verifySuccess"))
-    }, 2200)
-  }
+      showToast(t("playButton.verifySuccess"));
+    }, 2200);
+  };
 
   const handleUninstallGame = () => {
-    setIsMenuOpen(false)
-    gameService.uninstallGame()
-    setStatus(manifest?.downloadUrl ? "download" : "unavailable")
-    showToast(t("playButton.uninstallSuccess"))
-  }
+    setIsMenuOpen(false);
+    gameService.uninstallGame();
+    setStatus(manifest?.downloadUrl ? "download" : "unavailable");
+    showToast(t("playButton.uninstallSuccess"));
+  };
 
   /* ── IDLE / UNAVAILABLE / DOWNLOAD / UPDATE / PLAY ── */
   if (!isExpanded) {
-    const isUnavailable = status === "unavailable"
-    const isUpdate = status === "update"
-    const isPlay = status === "play"
+    const isUnavailable = status === "unavailable";
+    const isUpdate = status === "update";
+    const isPlay = status === "play";
 
     return (
       <div
@@ -344,12 +344,12 @@ export default function DownloadPlayButton({
 
         <LiveToast message={toastMessage} />
       </div>
-    )
+    );
   }
 
   /* ── DOWNLOADING / PAUSED (Progress card) ── */
-  const dlGB = downloadedGB > 0 ? downloadedGB : (totalGB * progress) / 100
-  const isUpdating = manifest?.hasUpdate
+  const dlGB = downloadedGB > 0 ? downloadedGB : (totalGB * progress) / 100;
+  const isUpdating = manifest?.hasUpdate;
 
   return (
     <div
@@ -559,5 +559,5 @@ export default function DownloadPlayButton({
 
       <LiveToast message={toastMessage} />
     </div>
-  )
+  );
 }

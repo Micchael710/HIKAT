@@ -1,28 +1,28 @@
-import React, { useState, useEffect } from "react"
-import { ThemeMode, ServerSpecs } from "../../types"
-import { useTranslation } from "../../context/LanguageContext"
-import { serverService } from "../../services/serverService"
+import React, { useState, useEffect } from "react";
+import { ThemeMode, ServerSpecs } from "../../types";
+import { useTranslation } from "../../context/LanguageContext";
+import { serverService } from "../../services/serverService";
 
 interface ServerStatsGridProps {
-  theme?: ThemeMode
-  stats?: Partial<ServerSpecs>
+  theme?: ThemeMode;
+  stats?: Partial<ServerSpecs>;
 }
 
 export default function ServerStatsGrid({
   theme = "dark",
   stats,
 }: ServerStatsGridProps) {
-  const { t } = useTranslation()
-  const isDark = theme === "dark"
+  const { t } = useTranslation();
+  const isDark = theme === "dark";
 
   const [serverData, setServerData] = useState<{
-    online: boolean
-    playersOnline: number
-    maxPlayers: number
-    latencyMs: number
-    playtimeHours: number | null
-    unlockedAchievements: number | null
-    totalAchievements: number | null
+    online: boolean;
+    playersOnline: number;
+    maxPlayers: number;
+    latencyMs: number;
+    playtimeHours: number | null;
+    unlockedAchievements: number | null;
+    totalAchievements: number | null;
   }>(() => {
     if (stats) {
       return {
@@ -35,12 +35,12 @@ export default function ServerStatsGrid({
         playtimeHours: stats.totalPlaytimeHours ?? null,
         unlockedAchievements: stats.unlockedAchievements ?? null,
         totalAchievements: stats.totalAchievements ?? 52,
-      }
+      };
     }
     try {
-      const cached = localStorage.getItem("hikat_cached_server_status")
+      const cached = localStorage.getItem("hikat_cached_server_status");
       if (cached) {
-        const parsed = JSON.parse(cached)
+        const parsed = JSON.parse(cached);
         if (parsed && typeof parsed === "object") {
           return {
             online: Boolean(parsed.online),
@@ -50,7 +50,7 @@ export default function ServerStatsGrid({
             playtimeHours: null,
             unlockedAchievements: null,
             totalAchievements: 52,
-          }
+          };
         }
       }
     } catch (_) {}
@@ -62,45 +62,45 @@ export default function ServerStatsGrid({
       playtimeHours: null,
       unlockedAchievements: null,
       totalAchievements: 52,
-    }
-  })
+    };
+  });
 
   useEffect(() => {
-    if (stats) return
-    let isMounted = true
+    if (stats) return;
+    let isMounted = true;
     serverService
       .getServerStatus()
       .then((res) => {
-        if (!isMounted) return
+        if (!isMounted) return;
         if (res && res.online) {
           setServerData((prev) => ({
             ...prev,
             online: true,
-            playersOnline: res.playersOnline,
-            maxPlayers: res.maxPlayers,
-            latencyMs: res.latencyMs,
-          }))
+            playersOnline: res.playersOnline ?? prev.playersOnline,
+            maxPlayers: res.maxPlayers ?? prev.maxPlayers,
+            latencyMs: res.latencyMs ?? prev.latencyMs,
+          }));
         } else {
-          setServerData((prev) => ({ ...prev, online: false }))
+          setServerData((prev) => ({ ...prev, online: false }));
         }
       })
       .catch(() => {
-        if (!isMounted) return
-        setServerData((prev) => ({ ...prev, online: false }))
-      })
+        if (!isMounted) return;
+        setServerData((prev) => ({ ...prev, online: false }));
+      });
     return () => {
-      isMounted = false
-    }
-  }, [stats])
+      isMounted = false;
+    };
+  }, [stats]);
 
-  const serverName = stats?.name ?? "Apparatia"
-  const isOnline = serverData.online
-  const playersOnline = serverData.playersOnline
-  const maxPlayers = serverData.maxPlayers
-  const latency = serverData.latencyMs
-  const playtime = serverData.playtimeHours
-  const achievements = serverData.unlockedAchievements
-  const totalAchievements = serverData.totalAchievements ?? 52
+  const serverName = stats?.name ?? "Apparatia";
+  const isOnline = serverData.online;
+  const playersOnline = serverData.playersOnline;
+  const maxPlayers = serverData.maxPlayers;
+  const latency = serverData.latencyMs;
+  const playtime = serverData.playtimeHours;
+  const achievements = serverData.unlockedAchievements;
+  const totalAchievements = serverData.totalAchievements ?? 52;
 
   return (
     <div style={{ display: "flex", gap: 48 }}>
@@ -561,5 +561,5 @@ export default function ServerStatsGrid({
         </div>
       </div>
     </div>
-  )
+  );
 }

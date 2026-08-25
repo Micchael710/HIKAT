@@ -1,10 +1,10 @@
-import React, { useEffect } from "react"
-import { ThemeMode, NewsCardItem } from "../../types"
+import React, { useEffect } from "react";
+import { ThemeMode, NewsCardItem } from "../../types";
 
 interface NewsModalProps {
-  card: NewsCardItem
-  onClose: () => void
-  theme?: ThemeMode
+  card: NewsCardItem;
+  onClose: () => void;
+  theme?: ThemeMode;
 }
 
 export default function NewsModal({
@@ -12,15 +12,15 @@ export default function NewsModal({
   onClose,
   theme = "dark",
 }: NewsModalProps) {
-  const isDark = theme === "dark"
+  const isDark = theme === "dark";
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
-    }
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [onClose])
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   return (
     <div
@@ -125,5 +125,5 @@ export default function NewsModal({
         </div>
       </div>
     </div>
-  )
+  );
 }

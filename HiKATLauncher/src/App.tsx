@@ -1,14 +1,14 @@
-import React, { useRef, useEffect } from "react"
-import { useLauncherState } from "./hooks/useLauncherState"
-import { getThemeTokens, CANVAS_W, CANVAS_H } from "./theme/tokens"
-import LauncherTitlebar from "./components/layout/LauncherTitlebar"
-import LauncherSidebar from "./components/layout/LauncherSidebar"
-import UserProfileCard from "./components/layout/UserProfileCard"
-import LoginView from "./views/LoginView"
-import HomeView from "./views/HomeView"
-import SkinsView from "./views/SkinsView"
-import SettingsView from "./views/SettingsView"
-import ProfileView from "./views/ProfileView"
+import React, { useRef, useEffect } from "react";
+import { useLauncherState } from "./hooks/useLauncherState";
+import { getThemeTokens, CANVAS_W, CANVAS_H } from "./theme/tokens";
+import LauncherTitlebar from "./components/layout/LauncherTitlebar";
+import LauncherSidebar from "./components/layout/LauncherSidebar";
+import UserProfileCard from "./components/layout/UserProfileCard";
+import LoginView from "./views/LoginView";
+import HomeView from "./views/HomeView";
+import SkinsView from "./views/SkinsView";
+import SettingsView from "./views/SettingsView";
+import ProfileView from "./views/ProfileView";
 
 export default function App() {
   const {
@@ -31,49 +31,49 @@ export default function App() {
     scale,
     handleLogin,
     handleLogout,
-  } = useLauncherState()
+  } = useLauncherState();
 
-  const tokens = getThemeTokens(theme)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const tokens = getThemeTokens(theme);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Reset scroll to top (0) whenever switching views (Home, Skins, Settings, Profile)
   useEffect(() => {
     if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = 0
+      scrollContainerRef.current.scrollTop = 0;
     }
-  }, [view])
+  }, [view]);
 
   // Desktop Application Protections (Prevent browser menu, accidental drag-drop, and web shortcuts)
   useEffect(() => {
     // 1. Context Menu: Block browser context menu everywhere except editable text fields
     const handleContextMenu = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
+      const target = e.target as HTMLElement;
       const isInput =
         target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
-        target.isContentEditable
+        target.isContentEditable;
       if (!isInput) {
-        e.preventDefault()
+        e.preventDefault();
       }
-    }
+    };
 
     // 2. Prevent accidental file drops navigating away (allow only in skin dropzones)
     const handleDragOver = (e: DragEvent) => {
-      e.preventDefault()
-    }
+      e.preventDefault();
+    };
     const handleDrop = (e: DragEvent) => {
-      const target = e.target as HTMLElement
+      const target = e.target as HTMLElement;
       if (!target.closest(".skin-dropzone")) {
-        e.preventDefault()
+        e.preventDefault();
       }
-    }
+    };
 
     // 3. Block accidental browser shortcuts while preserving DevTools (F12, Ctrl+Shift+I) for development
     const handleKeyDown = (e: KeyboardEvent) => {
       // Reload shortcuts
       if ((e.ctrlKey && (e.key === "r" || e.key === "R")) || e.key === "F5") {
-        e.preventDefault()
-        return
+        e.preventDefault();
+        return;
       }
       // Search, Print, Source, Zoom
       if (
@@ -88,22 +88,22 @@ export default function App() {
           (e.key === "+" || e.key === "-" || e.key === "=" || e.key === "0")) ||
         e.key === "F3"
       ) {
-        e.preventDefault()
+        e.preventDefault();
       }
-    }
+    };
 
-    window.addEventListener("contextmenu", handleContextMenu)
-    window.addEventListener("dragover", handleDragOver)
-    window.addEventListener("drop", handleDrop)
-    window.addEventListener("keydown", handleKeyDown)
+    window.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener("dragover", handleDragOver);
+    window.addEventListener("drop", handleDrop);
+    window.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      window.removeEventListener("contextmenu", handleContextMenu)
-      window.removeEventListener("dragover", handleDragOver)
-      window.removeEventListener("drop", handleDrop)
-      window.removeEventListener("keydown", handleKeyDown)
-    }
-  }, [])
+      window.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("dragover", handleDragOver);
+      window.removeEventListener("drop", handleDrop);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   if (screen === "login") {
     return (
@@ -120,7 +120,7 @@ export default function App() {
         <LauncherTitlebar theme={theme} />
         <LoginView onLogin={handleLogin} theme={theme} />
       </div>
-    )
+    );
   }
 
   return (
@@ -163,7 +163,7 @@ export default function App() {
         >
           <div
             ref={(el) => {
-              if (el) el.style.zoom = String(scale)
+              if (el) el.style.zoom = String(scale);
             }}
             style={{
               width: CANVAS_W,
@@ -265,5 +265,5 @@ export default function App() {
         </div>
       </div>
     </div>
-  )
+  );
 }

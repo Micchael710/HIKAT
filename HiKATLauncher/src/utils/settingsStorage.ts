@@ -7,41 +7,41 @@ export const STORAGE_KEYS = {
   NOTIFICATIONS: "hikat_notifications",
   RAM_GB: "hikat_ram_gb",
   DEDICATED_GPU: "hikat_dedicated_gpu",
-} as const
+} as const;
 
 export function getStoredBoolean(key: string, defaultValue: boolean): boolean {
-  if (typeof window === "undefined") return defaultValue
+  if (typeof window === "undefined") return defaultValue;
   try {
-    const saved = localStorage.getItem(key)
-    if (saved === null) return defaultValue
-    return saved === "true"
+    const saved = localStorage.getItem(key);
+    if (saved === null) return defaultValue;
+    return saved === "true";
   } catch (_) {
-    return defaultValue
+    return defaultValue;
   }
 }
 
 export function setStoredBoolean(key: string, value: boolean): void {
-  if (typeof window === "undefined") return
+  if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(key, String(value))
+    localStorage.setItem(key, String(value));
   } catch (_) {}
 }
 
 export function getStoredNumber(key: string, defaultValue: number): number {
-  if (typeof window === "undefined") return defaultValue
+  if (typeof window === "undefined") return defaultValue;
   try {
-    const saved = localStorage.getItem(key)
-    if (saved === null) return defaultValue
-    const num = parseInt(saved, 10)
-    return isNaN(num) ? defaultValue : num
+    const saved = localStorage.getItem(key);
+    if (saved === null) return defaultValue;
+    const num = parseInt(saved, 10);
+    return isNaN(num) ? defaultValue : num;
   } catch (_) {
-    return defaultValue
+    return defaultValue;
   }
 }
 
 export function setStoredNumber(key: string, value: number): void {
-  if (typeof window === "undefined") return
+  if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(key, String(value))
+    localStorage.setItem(key, String(value));
   } catch (_) {}
 }

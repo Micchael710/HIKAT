@@ -1,0 +1,25 @@
+{
+  "name": "@hikat/auth-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "HiKAT Authentication Service - Cloudflare Worker shell",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hikat/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250224.0",
+    "@hikat/config": "workspace:*",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0",
+    "wrangler": "^3.114.0"
+  }
+}

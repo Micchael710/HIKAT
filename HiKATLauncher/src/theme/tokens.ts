@@ -1,33 +1,33 @@
-import { ThemeMode } from "../types"
+import { ThemeMode } from "../types";
 import {
   logoWhite,
   logoBlack,
   logoReducedWhite,
   logoReducedBlack,
-} from "../assets"
+} from "../assets";
 
-export const CANVAS_W = 1920
-export const CANVAS_H = 2460
+export const CANVAS_W = 1920;
+export const CANVAS_H = 2460;
 
-export const MIN_WINDOW_W = 1024
-export const MIN_WINDOW_H = 576
-export const DEFAULT_WINDOW_W = 1280
-export const DEFAULT_WINDOW_H = 720
+export const MIN_WINDOW_W = 1024;
+export const MIN_WINDOW_H = 576;
+export const DEFAULT_WINDOW_W = 1280;
+export const DEFAULT_WINDOW_H = 720;
 
-export const BASE_FONT = "Inter, sans-serif"
+export const BASE_FONT = "Inter, sans-serif";
 
 export function hexToRGB(hex: string) {
   if (!hex || !hex.startsWith("#") || hex.length < 7) {
-    return { r: 130, g: 188, b: 208, css: "130, 188, 208" }
+    return { r: 130, g: 188, b: 208, css: "130, 188, 208" };
   }
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return { r, g, b, css: `${r}, ${g}, ${b}` }
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return { r, g, b, css: `${r}, ${g}, ${b}` };
 }
 
 export function getThemeTokens(theme: ThemeMode) {
-  const isDark = theme === "dark"
+  const isDark = theme === "dark";
   return {
     isDark,
     bgBase: isDark ? "#1a2228" : "#eef2f6",
@@ -66,5 +66,5 @@ export function getThemeTokens(theme: ThemeMode) {
     homeBottomCutBg: isDark ? "#090d12" : "#f5f7fa",
     logoReduced: isDark ? logoReducedWhite : logoReducedBlack,
     logoExpanded: isDark ? logoWhite : logoBlack,
-  }
+  };
 }

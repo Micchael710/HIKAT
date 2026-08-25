@@ -1,11 +1,11 @@
-import React from "react"
-import { ThemeMode } from "../../types"
-import { useTranslation } from "../../context/LanguageContext"
+import React from "react";
+import { ThemeMode } from "../../types";
+import { useTranslation } from "../../context/LanguageContext";
 
 interface CommunityHubGridProps {
-  theme?: ThemeMode
-  discordUrl?: string
-  websiteUrl?: string
+  theme?: ThemeMode;
+  discordUrl?: string;
+  websiteUrl?: string;
 }
 
 export default function CommunityHubGrid({
@@ -13,22 +13,22 @@ export default function CommunityHubGrid({
   discordUrl = import.meta.env.VITE_DISCORD_URL || "https://discord.gg",
   websiteUrl = import.meta.env.VITE_WEBSITE_URL || "#web",
 }: CommunityHubGridProps) {
-  const { t } = useTranslation()
-  const isDark = theme === "dark"
+  const { t } = useTranslation();
+  const isDark = theme === "dark";
 
   const handleOpenLink = (
     e: React.MouseEvent<HTMLAnchorElement>,
     url: string,
   ) => {
     if (url.startsWith("#")) {
-      e.preventDefault()
-      return
+      e.preventDefault();
+      return;
     }
     if (window.electronAPI?.openExternal && url.startsWith("http")) {
-      e.preventDefault()
-      window.electronAPI.openExternal(url)
+      e.preventDefault();
+      window.electronAPI.openExternal(url);
     }
-  }
+  };
 
   return (
     <div
@@ -636,5 +636,5 @@ export default function CommunityHubGrid({
         </div>
       </div>
     </div>
-  )
+  );
 }

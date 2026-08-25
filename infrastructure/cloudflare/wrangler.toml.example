@@ -1,0 +1,17 @@
+# Example Cloudflare Wrangler Configuration for HiKAT Services
+
+name = "hikat-backend"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database binding template (to be configured in database shard)
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "hikat-prod-db"
+# database_id = "your-database-id"
+
+# R2 Bucket binding template (to be configured in storage shard)
+# [[r2_buckets]]
+# binding = "STORAGE"
+# bucket_name = "hikat-assets"

@@ -1,17 +1,17 @@
-import React, { useState, useRef, useEffect } from "react"
-import { ThemeMode, NewsCardItem } from "../../types"
-import { getThemeTokens, BASE_FONT } from "../../theme/tokens"
-import { IconChevronLeft, IconChevronRight } from "../../theme/icons"
-import NewsCard from "./NewsCard"
-import NewsModal from "./NewsModal"
-import { newsService } from "../../services/newsService"
-import { useTranslation } from "../../context/LanguageContext"
+import React, { useState, useRef, useEffect } from "react";
+import { ThemeMode, NewsCardItem } from "../../types";
+import { getThemeTokens, BASE_FONT } from "../../theme/tokens";
+import { IconChevronLeft, IconChevronRight } from "../../theme/icons";
+import NewsCard from "./NewsCard";
+import NewsModal from "./NewsModal";
+import { newsService } from "../../services/newsService";
+import { useTranslation } from "../../context/LanguageContext";
 
 interface NewsCarouselProps {
-  canvasLeft: number
-  canvasWidth?: number
-  theme?: ThemeMode
-  news?: NewsCardItem[]
+  canvasLeft: number;
+  canvasWidth?: number;
+  theme?: ThemeMode;
+  news?: NewsCardItem[];
 }
 
 export default function NewsCarousel({
@@ -19,106 +19,106 @@ export default function NewsCarousel({
   theme = "dark",
   news,
 }: NewsCarouselProps) {
-  const { t, language } = useTranslation()
-  const isDark = theme === "dark"
-  const tokens = getThemeTokens(theme)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const isDragging = useRef(false)
-  const startX = useRef(0)
-  const startScroll = useRef(0)
-  const hasDragged = useRef(false)
-  const [openCard, setOpenCard] = useState<NewsCardItem | null>(null)
-  const [canLeft, setCanLeft] = useState(false)
-  const [canRight, setCanRight] = useState(true)
+  const { t, language } = useTranslation();
+  const isDark = theme === "dark";
+  const tokens = getThemeTokens(theme);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const startScroll = useRef(0);
+  const hasDragged = useRef(false);
+  const [openCard, setOpenCard] = useState<NewsCardItem | null>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(true);
 
   const [articles, setArticles] = useState<NewsCardItem[]>(() => {
-    if (news && news.length > 0) return news
+    if (news && news.length > 0) return news;
     // Read from localStorage cache if available
     try {
-      const cached = localStorage.getItem("hikat_cached_news")
+      const cached = localStorage.getItem("hikat_cached_news");
       if (cached) {
-        const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (_) {}
-    return []
-  })
-  const [isLoading, setIsLoading] = useState(false)
+    return [];
+  });
+  const [isLoading, setIsLoading] = useState(false);
 
   const fetchNews = async () => {
     if (news && news.length > 0) {
-      setArticles(news)
-      return
+      setArticles(news);
+      return;
     }
-    setIsLoading(true)
+    setIsLoading(true);
     try {
-      const res = await newsService.getNewsArticles(language)
+      const res = await newsService.getNewsArticles(language);
       if (res.items && res.items.length > 0) {
-        setArticles(res.items)
+        setArticles(res.items);
       } else {
-        setArticles([])
+        setArticles([]);
       }
     } catch (_) {
-      setArticles([])
+      setArticles([]);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
     if (news && news.length > 0) {
-      setArticles(news)
+      setArticles(news);
     } else {
-      fetchNews()
+      fetchNews();
     }
-  }, [news, language])
+  }, [news, language]);
 
-  const CARD_W = 490
-  const CARD_H = 280
-  const GAP = 22
+  const CARD_W = 490;
+  const CARD_H = 280;
+  const GAP = 22;
 
   const check = () => {
-    const el = scrollRef.current
-    if (!el) return
-    setCanLeft(el.scrollLeft > 4)
-    setCanRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 4)
-  }
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 4);
+    setCanRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 4);
+  };
 
   const scroll = (dir: "l" | "r") => {
     scrollRef.current?.scrollBy({
       left: dir === "r" ? CARD_W + GAP : -(CARD_W + GAP),
       behavior: "smooth",
-    })
-  }
+    });
+  };
 
   const onMouseDown = (e: React.MouseEvent) => {
-    isDragging.current = true
-    hasDragged.current = false
-    startX.current = e.pageX
-    startScroll.current = scrollRef.current?.scrollLeft ?? 0
-  }
+    isDragging.current = true;
+    hasDragged.current = false;
+    startX.current = e.pageX;
+    startScroll.current = scrollRef.current?.scrollLeft ?? 0;
+  };
 
   const onMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging.current || !scrollRef.current) return
-    const dx = startX.current - e.pageX
+    if (!isDragging.current || !scrollRef.current) return;
+    const dx = startX.current - e.pageX;
     if (Math.abs(dx) > 6) {
-      hasDragged.current = true
+      hasDragged.current = true;
     }
-    scrollRef.current.scrollLeft = startScroll.current + dx
-  }
+    scrollRef.current.scrollLeft = startScroll.current + dx;
+  };
 
   const stopDrag = () => {
-    if (!isDragging.current) return
-    isDragging.current = false
+    if (!isDragging.current) return;
+    isDragging.current = false;
     setTimeout(() => {
-      hasDragged.current = false
-    }, 60)
-  }
+      hasDragged.current = false;
+    }, 60);
+  };
 
   const handleCardClick = (card: NewsCardItem) => {
-    if (hasDragged.current) return
-    setOpenCard(card)
-  }
+    if (hasDragged.current) return;
+    setOpenCard(card);
+  };
 
   return (
     <>
@@ -375,5 +375,5 @@ export default function NewsCarousel({
         />
       )}
     </>
-  )
+  );
 }

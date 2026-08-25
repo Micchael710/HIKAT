@@ -1,63 +1,63 @@
-import React, { useState, useRef, useEffect } from "react"
-import { ThemeMode, SettingsTab } from "../types"
-import { IconMoon, IconSun } from "../theme/icons"
-import { CANVAS_W, BASE_FONT } from "../theme/tokens"
-import LauncherToggle from "../components/common/LauncherToggle"
-import LauncherSelect from "../components/common/LauncherSelect"
-import LiveToast from "../components/common/LiveToast"
+import React, { useState, useRef, useEffect } from "react";
+import { ThemeMode, SettingsTab } from "../types";
+import { IconMoon, IconSun } from "../theme/icons";
+import { CANVAS_W, BASE_FONT } from "../theme/tokens";
+import LauncherToggle from "../components/common/LauncherToggle";
+import LauncherSelect from "../components/common/LauncherSelect";
+import LiveToast from "../components/common/LiveToast";
 import {
   useTranslation,
   getTranslation,
   LanguageCode,
-} from "../context/LanguageContext"
+} from "../context/LanguageContext";
 import {
   STORAGE_KEYS,
   getStoredBoolean,
   setStoredBoolean,
   getStoredNumber,
   setStoredNumber,
-} from "../utils/settingsStorage"
+} from "../utils/settingsStorage";
 
 interface SettingsViewProps {
-  theme?: ThemeMode
-  setTheme?: (t: ThemeMode) => void
+  theme?: ThemeMode;
+  setTheme?: (t: ThemeMode) => void;
 }
 
 export default function SettingsView({
   theme = "dark",
   setTheme,
 }: SettingsViewProps) {
-  const { t, language, setLanguage } = useTranslation()
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general")
+  const { t, language, setLanguage } = useTranslation();
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
   const [startWithSystem, setStartWithSystemState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, true),
-  )
+  );
   const [minimizeToTray, setMinimizeToTrayState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, true),
-  )
+  );
   const [autoUpdates, setAutoUpdatesState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true),
-  )
+  );
   const [notifications, setNotificationsState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.NOTIFICATIONS, true),
-  )
-  const isDark = theme === "dark"
+  );
+  const isDark = theme === "dark";
 
   // Detect client system RAM via deviceMemory Web API
   const [systemTotalRAM] = useState<number>(() => {
     if (typeof navigator !== "undefined" && "deviceMemory" in navigator) {
-      const devMem = (navigator as any).deviceMemory
+      const devMem = (navigator as any).deviceMemory;
       if (typeof devMem === "number" && devMem > 0) {
-        return Math.max(4, Math.round(devMem))
+        return Math.max(4, Math.round(devMem));
       }
     }
-    return 16
-  })
+    return 16;
+  });
 
   // Game & Performance State
   const [ramGB, setRamGBState] = useState<number>(() => {
-    const defaultVal = 8
+    const defaultVal = 8;
     const detected =
       typeof navigator !== "undefined" &&
       "deviceMemory" in navigator &&
@@ -66,98 +66,98 @@ export default function SettingsView({
             defaultVal,
             Math.max(4, Math.round((navigator as any).deviceMemory)),
           )
-        : defaultVal
-    return getStoredNumber(STORAGE_KEYS.RAM_GB, detected)
-  })
+        : defaultVal;
+    return getStoredNumber(STORAGE_KEYS.RAM_GB, detected);
+  });
 
   const [dedicatedGPU, setDedicatedGPUState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
-  )
+  );
 
   const setStartWithSystem = (v: boolean) => {
-    setStartWithSystemState(v)
-    setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, v)
-    window.electronAPI?.setStartWithSystem?.(v)
-  }
+    setStartWithSystemState(v);
+    setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, v);
+    window.electronAPI?.setStartWithSystem?.(v);
+  };
 
   const setMinimizeToTray = (v: boolean) => {
-    setMinimizeToTrayState(v)
-    setStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, v)
-    window.electronAPI?.setMinimizeToTray?.(v)
-  }
+    setMinimizeToTrayState(v);
+    setStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, v);
+    window.electronAPI?.setMinimizeToTray?.(v);
+  };
 
   const setAutoUpdates = (v: boolean) => {
-    setAutoUpdatesState(v)
-    setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, v)
-    window.electronAPI?.setAutoUpdates?.(v)
-  }
+    setAutoUpdatesState(v);
+    setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, v);
+    window.electronAPI?.setAutoUpdates?.(v);
+  };
 
   const setNotifications = (v: boolean) => {
-    setNotificationsState(v)
-    setStoredBoolean(STORAGE_KEYS.NOTIFICATIONS, v)
-    window.electronAPI?.setNotifications?.(v)
-  }
+    setNotificationsState(v);
+    setStoredBoolean(STORAGE_KEYS.NOTIFICATIONS, v);
+    window.electronAPI?.setNotifications?.(v);
+  };
 
   const setDedicatedGPU = (v: boolean) => {
-    setDedicatedGPUState(v)
-    setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, v)
-    window.electronAPI?.setDedicatedGpu?.(v)
-  }
+    setDedicatedGPUState(v);
+    setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, v);
+    window.electronAPI?.setDedicatedGpu?.(v);
+  };
 
   const setRamGB = (v: number) => {
-    setRamGBState(v)
-    setStoredNumber(STORAGE_KEYS.RAM_GB, v)
-    window.electronAPI?.setRamAllocation?.(v)
-  }
+    setRamGBState(v);
+    setStoredNumber(STORAGE_KEYS.RAM_GB, v);
+    window.electronAPI?.setRamAllocation?.(v);
+  };
 
   // Maintenance state
   const [repairState, setRepairState] = useState<"idle" | "scanning" | "done">(
     "idle",
-  )
-  const [toastText, setToastText] = useState<string | null>(null)
-  const toastTimeoutRef = useRef<any>(null)
+  );
+  const [toastText, setToastText] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
 
   const notifySaved = (customMsg?: string) => {
-    const msg = customMsg || t("settings.toastSaved")
-    setToastText(msg)
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
+    const msg = customMsg || t("settings.toastSaved");
+    setToastText(msg);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     toastTimeoutRef.current = setTimeout(() => {
-      setToastText(null)
-    }, 2400)
-  }
+      setToastText(null);
+    }, 2400);
+  };
 
   const handleRepair = () => {
-    if (repairState === "scanning") return
-    setRepairState("scanning")
-    notifySaved(t("settings.repairScanning"))
-    window.electronAPI?.repairGame?.()
+    if (repairState === "scanning") return;
+    setRepairState("scanning");
+    notifySaved(t("settings.repairScanning"));
+    window.electronAPI?.repairGame?.();
     setTimeout(() => {
-      setRepairState("done")
-      notifySaved(t("settings.repairSuccess"))
-      setTimeout(() => setRepairState("idle"), 3500)
-    }, 2800)
-  }
+      setRepairState("done");
+      notifySaved(t("settings.repairSuccess"));
+      setTimeout(() => setRepairState("idle"), 3500);
+    }, 2800);
+  };
 
-  const CONTENT_LEFT = 184
+  const CONTENT_LEFT = 184;
 
   /* Smooth delayed mouse-following parallax */
-  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
+  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
-      const relX = e.clientX / window.innerWidth - 0.5
-      const relY = e.clientY / window.innerHeight - 0.5
+      const relX = e.clientX / window.innerWidth - 0.5;
+      const relY = e.clientY / window.innerHeight - 0.5;
       setMouseOffset({
         x: Math.round(relX * 220),
         y: Math.round(relY * 150),
-      })
-    }
+      });
+    };
 
     window.addEventListener("mousemove", handleWindowMouseMove, {
       passive: true,
-    })
-    return () => window.removeEventListener("mousemove", handleWindowMouseMove)
-  }, [])
+    });
+    return () => window.removeEventListener("mousemove", handleWindowMouseMove);
+  }, []);
 
   return (
     <div
@@ -518,8 +518,8 @@ export default function SettingsView({
                     <button
                       type="button"
                       onClick={() => {
-                        setTheme?.("dark")
-                        notifySaved(t("settings.toastDarkTheme"))
+                        setTheme?.("dark");
+                        notifySaved(t("settings.toastDarkTheme"));
                       }}
                       style={{
                         padding: "8px 20px",
@@ -546,8 +546,8 @@ export default function SettingsView({
                     <button
                       type="button"
                       onClick={() => {
-                        setTheme?.("light")
-                        notifySaved(t("settings.toastLightTheme"))
+                        setTheme?.("light");
+                        notifySaved(t("settings.toastLightTheme"));
                       }}
                       style={{
                         padding: "8px 20px",
@@ -623,11 +623,11 @@ export default function SettingsView({
                     value={language}
                     theme={theme}
                     onChange={(v) => {
-                      const newLang = v as LanguageCode
-                      setLanguage(newLang)
+                      const newLang = v as LanguageCode;
+                      setLanguage(newLang);
                       notifySaved(
                         getTranslation(newLang, "settings.toastSaved"),
-                      )
+                      );
                     }}
                     options={[
                       { value: "es", label: "Español (Latinoamérica)" },
@@ -681,8 +681,8 @@ export default function SettingsView({
                     checked={startWithSystem}
                     theme={theme}
                     onChange={(v) => {
-                      setStartWithSystem(v)
-                      notifySaved()
+                      setStartWithSystem(v);
+                      notifySaved();
                     }}
                     label={t("settings.startWithSystemTitle")}
                   />
@@ -715,8 +715,8 @@ export default function SettingsView({
                     checked={minimizeToTray}
                     theme={theme}
                     onChange={(v) => {
-                      setMinimizeToTray(v)
-                      notifySaved()
+                      setMinimizeToTray(v);
+                      notifySaved();
                     }}
                     label={t("settings.minimizeToTrayTitle")}
                   />
@@ -765,8 +765,8 @@ export default function SettingsView({
                     checked={autoUpdates}
                     theme={theme}
                     onChange={(v) => {
-                      setAutoUpdates(v)
-                      notifySaved()
+                      setAutoUpdates(v);
+                      notifySaved();
                     }}
                     label={t("settings.autoUpdatesTitle")}
                   />
@@ -799,8 +799,8 @@ export default function SettingsView({
                     checked={notifications}
                     theme={theme}
                     onChange={(v) => {
-                      setNotifications(v)
-                      notifySaved()
+                      setNotifications(v);
+                      notifySaved();
                     }}
                     label={t("settings.notificationsTitle")}
                   />
@@ -934,8 +934,8 @@ export default function SettingsView({
                       step={1}
                       value={ramGB}
                       onChange={(e) => {
-                        setRamGB(Number(e.target.value))
-                        notifySaved()
+                        setRamGB(Number(e.target.value));
+                        notifySaved();
                       }}
                       className="settings-ram-slider"
                       style={{
@@ -1019,8 +1019,8 @@ export default function SettingsView({
                     checked={dedicatedGPU}
                     theme={theme}
                     onChange={(v) => {
-                      setDedicatedGPU(v)
-                      notifySaved()
+                      setDedicatedGPU(v);
+                      notifySaved();
                     }}
                     label={t("settings.gpuTitle")}
                   />
@@ -1098,20 +1098,20 @@ export default function SettingsView({
                       if (repairState !== "scanning") {
                         e.currentTarget.style.borderColor = isDark
                           ? "rgba(255, 255, 255, 0.28)"
-                          : "rgba(0, 0, 0, 0.25)"
+                          : "rgba(0, 0, 0, 0.25)";
                         e.currentTarget.style.background = isDark
                           ? "#151e26"
-                          : "#e4e8ee"
+                          : "#e4e8ee";
                       }
                     }}
                     onMouseLeave={(e) => {
                       if (repairState !== "scanning") {
                         e.currentTarget.style.borderColor = isDark
                           ? "rgba(255, 255, 255, 0.12)"
-                          : "rgba(0, 0, 0, 0.12)"
+                          : "rgba(0, 0, 0, 0.12)";
                         e.currentTarget.style.background = isDark
                           ? "#0d1217"
-                          : "#f0f3f7"
+                          : "#f0f3f7";
                       }
                     }}
                   >
@@ -1189,5 +1189,5 @@ export default function SettingsView({
         <LiveToast message={toastText} />
       </div>
     </div>
-  )
+  );
 }

@@ -1,40 +1,40 @@
-import React, { useState } from "react"
-import { ThemeMode } from "../types"
-import { IconGoogle } from "../theme/icons"
-import { BASE_FONT } from "../theme/tokens"
-import { loginBg, logoReducedWhite, logoReducedBlack } from "../assets"
-import { useTranslation } from "../context/LanguageContext"
+import React, { useState } from "react";
+import { ThemeMode } from "../types";
+import { IconGoogle } from "../theme/icons";
+import { BASE_FONT } from "../theme/tokens";
+import { loginBg, logoReducedWhite, logoReducedBlack } from "../assets";
+import { useTranslation } from "../context/LanguageContext";
 import {
   sanitizeUsername,
   sanitizeEmail,
   sanitizeInput,
-} from "../utils/security"
+} from "../utils/security";
 
-const LAUNCHER_VERSION = "v1.0.0"
+const LAUNCHER_VERSION = "v1.0.0";
 
 interface LoginViewProps {
-  onLogin: (username: string) => void
-  theme?: ThemeMode
+  onLogin: (username: string) => void;
+  theme?: ThemeMode;
 }
 
 export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
-  const { t } = useTranslation()
-  const [tab, setTab] = useState<"login" | "register">("login")
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
-  const [email, setEmail] = useState("")
-  const [keepSession, setKeepSession] = useState(false)
-  const [isEnteringWorld, setIsEnteringWorld] = useState(false)
-  const isDark = theme === "dark"
+  const { t } = useTranslation();
+  const [tab, setTab] = useState<"login" | "register">("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
+  const [keepSession, setKeepSession] = useState(false);
+  const [isEnteringWorld, setIsEnteringWorld] = useState(false);
+  const isDark = theme === "dark";
 
   const handleSubmit = () => {
-    if (isEnteringWorld) return
-    setIsEnteringWorld(true)
-    const cleanName = sanitizeUsername(username.trim()) || t("user.anonymous")
+    if (isEnteringWorld) return;
+    setIsEnteringWorld(true);
+    const cleanName = sanitizeUsername(username.trim()) || t("user.anonymous");
     setTimeout(() => {
-      onLogin(cleanName)
-    }, 420)
-  }
+      onLogin(cleanName);
+    }, 420);
+  };
 
   const inputCss: React.CSSProperties = {
     width: "100%",
@@ -52,7 +52,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
     outline: "none",
     boxSizing: "border-box",
     transition: "border-color 0.18s ease, box-shadow 0.18s ease",
-  }
+  };
 
   const labelCss: React.CSSProperties = {
     display: "block",
@@ -63,7 +63,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
     color: isDark ? "#657788" : "#778899",
     fontFamily: BASE_FONT,
     textTransform: "uppercase",
-  }
+  };
 
   return (
     <div
@@ -189,7 +189,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             }}
           >
             {(["login", "register"] as const).map((tCode) => {
-              const isCurrent = tab === tCode
+              const isCurrent = tab === tCode;
               return (
                 <button
                   key={tCode}
@@ -235,7 +235,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                     ? t("auth.loginTab")
                     : t("auth.registerTab")}
                 </button>
-              )
+              );
             })}
           </div>
 
@@ -269,7 +269,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                 className="launcher-input"
                 style={inputCss}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSubmit()
+                  if (e.key === "Enter") handleSubmit();
                 }}
               />
             </div>
@@ -288,7 +288,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                   className="launcher-input"
                   style={inputCss}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSubmit()
+                    if (e.key === "Enter") handleSubmit();
                   }}
                 />
               </div>
@@ -310,7 +310,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                 className="launcher-input"
                 style={inputCss}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSubmit()
+                  if (e.key === "Enter") handleSubmit();
                 }}
               />
             </div>
@@ -418,16 +418,16 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             }}
             onMouseEnter={(e) => {
               if (!isEnteringWorld) {
-                e.currentTarget.style.transform = "translateY(-2px)"
+                e.currentTarget.style.transform = "translateY(-2px)";
                 e.currentTarget.style.boxShadow =
-                  "0 0 28px rgba(239, 196, 54, 0.55), 0 6px 20px rgba(0, 0, 0, 0.4)"
+                  "0 0 28px rgba(239, 196, 54, 0.55), 0 6px 20px rgba(0, 0, 0, 0.4)";
               }
             }}
             onMouseLeave={(e) => {
               if (!isEnteringWorld) {
-                e.currentTarget.style.transform = "translateY(0)"
+                e.currentTarget.style.transform = "translateY(0)";
                 e.currentTarget.style.boxShadow =
-                  "0 0 20px rgba(239, 196, 54, 0.35)"
+                  "0 0 20px rgba(239, 196, 54, 0.35)";
               }
             }}
           >
@@ -498,20 +498,20 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               if (!isEnteringWorld) {
                 e.currentTarget.style.borderColor = isDark
                   ? "rgba(255, 255, 255, 0.2)"
-                  : "rgba(0, 0, 0, 0.2)"
+                  : "rgba(0, 0, 0, 0.2)";
                 e.currentTarget.style.background = isDark
                   ? "#182430"
-                  : "#e4e8ee"
+                  : "#e4e8ee";
               }
             }}
             onMouseLeave={(e) => {
               if (!isEnteringWorld) {
                 e.currentTarget.style.borderColor = isDark
                   ? "rgba(255, 255, 255, 0.08)"
-                  : "rgba(0, 0, 0, 0.1)"
+                  : "rgba(0, 0, 0, 0.1)";
                 e.currentTarget.style.background = isDark
                   ? "#121a22"
-                  : "#f0f3f7"
+                  : "#f0f3f7";
               }
             }}
           >
@@ -585,5 +585,5 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         />
       </div>
     </div>
-  )
+  );
 }

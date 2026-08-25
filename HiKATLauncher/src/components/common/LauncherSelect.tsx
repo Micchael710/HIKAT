@@ -1,18 +1,18 @@
-import React, { useState, useRef, useEffect } from "react"
-import { ThemeMode } from "../../types"
-import { BASE_FONT } from "../../theme/tokens"
+import React, { useState, useRef, useEffect } from "react";
+import { ThemeMode } from "../../types";
+import { BASE_FONT } from "../../theme/tokens";
 
 export interface LauncherSelectOption {
-  value: string
-  label: string
+  value: string;
+  label: string;
 }
 
 interface LauncherSelectProps {
-  value: string
-  options: LauncherSelectOption[]
-  onChange: (val: string) => void
-  theme?: ThemeMode
-  width?: number | string
+  value: string;
+  options: LauncherSelectOption[];
+  onChange: (val: string) => void;
+  theme?: ThemeMode;
+  width?: number | string;
 }
 
 export default function LauncherSelect({
@@ -22,21 +22,21 @@ export default function LauncherSelect({
   theme = "dark",
   width = 280,
 }: LauncherSelectProps) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const isDark = theme === "dark"
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const isDark = theme === "dark";
 
-  const current = options.find((o) => o.value === value) || options[0]
+  const current = options.find((o) => o.value === value) || options[0];
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
+        setOpen(false);
       }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
     <div ref={ref} style={{ position: "relative", width }}>
@@ -103,14 +103,14 @@ export default function LauncherSelect({
           }}
         >
           {options.map((opt) => {
-            const isSelected = opt.value === value
+            const isSelected = opt.value === value;
             return (
               <button
                 key={opt.value}
                 type="button"
                 onClick={() => {
-                  onChange(opt.value)
-                  setOpen(false)
+                  onChange(opt.value);
+                  setOpen(false);
                 }}
                 style={{
                   width: "100%",
@@ -149,10 +149,10 @@ export default function LauncherSelect({
                   </svg>
                 )}
               </button>
-            )
+            );
           })}
         </div>
       )}
     </div>
-  )
+  );
 }

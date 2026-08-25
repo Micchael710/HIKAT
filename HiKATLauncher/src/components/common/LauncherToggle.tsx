@@ -1,11 +1,11 @@
-import React from "react"
-import { ThemeMode } from "../../types"
+import React from "react";
+import { ThemeMode } from "../../types";
 
 interface LauncherToggleProps {
-  checked: boolean
-  onChange: (val: boolean) => void
-  label?: string
-  theme?: ThemeMode
+  checked: boolean;
+  onChange: (val: boolean) => void;
+  label?: string;
+  theme?: ThemeMode;
 }
 
 export default function LauncherToggle({
@@ -14,7 +14,7 @@ export default function LauncherToggle({
   label,
   theme = "dark",
 }: LauncherToggleProps) {
-  const isDark = theme === "dark"
+  const isDark = theme === "dark";
 
   return (
     <button
@@ -72,5 +72,5 @@ export default function LauncherToggle({
         )}
       </div>
     </button>
-  )
+  );
 }

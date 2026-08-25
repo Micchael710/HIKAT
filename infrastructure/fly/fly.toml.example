@@ -1,0 +1,20 @@
+# Example Fly.io Configuration for HiKAT Velocity Gateway
+
+app = "hikat-gateway"
+primary_region = "mia"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[services]]
+  protocol = "tcp"
+  internal_schema = "tcp"
+
+  [[services.ports]]
+    port = 25565
+    handlers = []
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5s"

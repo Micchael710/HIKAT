@@ -1,0 +1,10 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="Proprietary"
+
+[[mods]]
+modId="hikat_client"
+version="0.1.0"
+displayName="HiKAT Client Mod"
+description="HiKAT Client-side Minecraft Integration and Authentication"
+authors="HiKAT Team"

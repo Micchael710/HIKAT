@@ -1,0 +1,10 @@
+packages:
+  - "HiKATLauncher"
+  - "HiKATbackoffice"
+  - "services/*"
+  - "packages/*"
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true

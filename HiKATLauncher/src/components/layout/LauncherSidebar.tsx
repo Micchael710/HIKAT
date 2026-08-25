@@ -1,15 +1,15 @@
-import React from "react"
-import { ThemeMode, LauncherView } from "../../types"
-import { IconHome, IconShirt, IconSettings } from "../../theme/icons"
-import { getThemeTokens } from "../../theme/tokens"
-import { useTranslation } from "../../context/LanguageContext"
+import React from "react";
+import { ThemeMode, LauncherView } from "../../types";
+import { IconHome, IconShirt, IconSettings } from "../../theme/icons";
+import { getThemeTokens } from "../../theme/tokens";
+import { useTranslation } from "../../context/LanguageContext";
 
 interface LauncherSidebarProps {
-  view: LauncherView
-  setView: (view: LauncherView) => void
-  s: number
-  theme: ThemeMode
-  activeSkinAccent: { r: number; g: number; b: number; css: string }
+  view: LauncherView;
+  setView: (view: LauncherView) => void;
+  s: number;
+  theme: ThemeMode;
+  activeSkinAccent: { r: number; g: number; b: number; css: string };
 }
 
 export default function LauncherSidebar({
@@ -19,12 +19,12 @@ export default function LauncherSidebar({
   theme,
   activeSkinAccent,
 }: LauncherSidebarProps) {
-  const { t } = useTranslation()
-  const tokens = getThemeTokens(theme)
-  const SIDEBAR_CENTER_X = 46
-  const BTN_PX = Math.round(48 * s)
-  const ICON_PX = Math.round(24 * s)
-  const LOGO_SIZE = Math.round(48 * s)
+  const { t } = useTranslation();
+  const tokens = getThemeTokens(theme);
+  const SIDEBAR_CENTER_X = 46;
+  const BTN_PX = Math.round(48 * s);
+  const ICON_PX = Math.round(24 * s);
+  const LOGO_SIZE = Math.round(48 * s);
 
   const navItems = [
     {
@@ -42,7 +42,7 @@ export default function LauncherSidebar({
       viewKey: "settings" as LauncherView,
       label: t("nav.settings"),
     },
-  ]
+  ];
 
   return (
     <>
@@ -65,10 +65,10 @@ export default function LauncherSidebar({
         }}
         onClick={() => setView("home")}
         onMouseEnter={(e) => {
-          e.currentTarget.style.transform = "scale(1.06)"
+          e.currentTarget.style.transform = "scale(1.06)";
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.transform = "scale(1)"
+          e.currentTarget.style.transform = "scale(1)";
         }}
       >
         <img
@@ -101,13 +101,13 @@ export default function LauncherSidebar({
         }}
       >
         {navItems.map(({ icon, viewKey, label }) => {
-          const active = view === viewKey
+          const active = view === viewKey;
           const itemColor =
             icon === "home"
               ? { r: 239, g: 196, b: 54, css: "239, 196, 54" }
               : icon === "shirt"
                 ? activeSkinAccent
-                : { r: 62, g: 196, b: 192, css: "62, 196, 192" }
+                : { r: 62, g: 196, b: 192, css: "62, 196, 192" };
 
           return (
             <div
@@ -174,9 +174,9 @@ export default function LauncherSidebar({
                 )}
               </button>
             </div>
-          )
+          );
         })}
       </div>
     </>
-  )
+  );
 }

@@ -1,22 +1,22 @@
-import React from "react"
-import { ThemeMode } from "../types"
-import { getThemeTokens, CANVAS_W, CANVAS_H } from "../theme/tokens"
-import { heroHomeBg, apparatiaLogo } from "../assets"
-import DownloadPlayButton from "../components/server/DownloadPlayButton"
-import NewsCarousel from "../components/news/NewsCarousel"
-import ServerStatsGrid from "../components/server/ServerStatsGrid"
-import CommunityHubGrid from "../components/server/CommunityHubGrid"
-import { useTranslation } from "../context/LanguageContext"
+import React from "react";
+import { ThemeMode } from "../types";
+import { getThemeTokens, CANVAS_W, CANVAS_H } from "../theme/tokens";
+import { heroHomeBg, apparatiaLogo } from "../assets";
+import DownloadPlayButton from "../components/server/DownloadPlayButton";
+import NewsCarousel from "../components/news/NewsCarousel";
+import ServerStatsGrid from "../components/server/ServerStatsGrid";
+import CommunityHubGrid from "../components/server/CommunityHubGrid";
+import { useTranslation } from "../context/LanguageContext";
 
 interface HomeViewProps {
-  theme?: ThemeMode
-  onPlay?: () => void
+  theme?: ThemeMode;
+  onPlay?: () => void;
 }
 
 export default function HomeView({ theme = "dark", onPlay }: HomeViewProps) {
-  const { t } = useTranslation()
-  const tokens = getThemeTokens(theme)
-  const CONTENT_LEFT = 184
+  const { t } = useTranslation();
+  const tokens = getThemeTokens(theme);
+  const CONTENT_LEFT = 184;
 
   return (
     <div
@@ -198,5 +198,5 @@ export default function HomeView({ theme = "dark", onPlay }: HomeViewProps) {
         <CommunityHubGrid theme={theme} />
       </div>
     </div>
-  )
+  );
 }

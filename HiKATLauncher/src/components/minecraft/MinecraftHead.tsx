@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react";
 
 interface MinecraftHeadProps {
-  skinId?: string
-  skinColor?: string
-  customImgUrl?: string
-  size?: number
+  skinId?: string;
+  skinColor?: string;
+  customImgUrl?: string;
+  size?: number;
 }
 
 /**
@@ -15,46 +15,46 @@ export default function MinecraftHead({
   customImgUrl,
   size = 38,
 }: MinecraftHeadProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const [hasCanvasLoaded, setHasCanvasLoaded] = useState(false)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [hasCanvasLoaded, setHasCanvasLoaded] = useState(false);
 
   useEffect(() => {
     if (!customImgUrl) {
-      setHasCanvasLoaded(false)
-      return
+      setHasCanvasLoaded(false);
+      return;
     }
 
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    const img = new Image()
-    img.crossOrigin = "anonymous"
+    const img = new Image();
+    img.crossOrigin = "anonymous";
 
     img.onload = () => {
       // Internal 8x8 Minecraft Head resolution
-      canvas.width = 8
-      canvas.height = 8
+      canvas.width = 8;
+      canvas.height = 8;
 
-      ctx.clearRect(0, 0, 8, 8)
-      ctx.imageSmoothingEnabled = false
+      ctx.clearRect(0, 0, 8, 8);
+      ctx.imageSmoothingEnabled = false;
 
       // 1. Base Head Face (8, 8, 8, 8)
-      ctx.drawImage(img, 8, 8, 8, 8, 0, 0, 8, 8)
+      ctx.drawImage(img, 8, 8, 8, 8, 0, 0, 8, 8);
 
       // 2. Hat / Hair Overlay (40, 8, 8, 8)
-      ctx.drawImage(img, 40, 8, 8, 8, 0, 0, 8, 8)
+      ctx.drawImage(img, 40, 8, 8, 8, 0, 0, 8, 8);
 
-      setHasCanvasLoaded(true)
-    }
+      setHasCanvasLoaded(true);
+    };
 
     img.onerror = () => {
-      setHasCanvasLoaded(false)
-    }
+      setHasCanvasLoaded(false);
+    };
 
-    img.src = customImgUrl
-  }, [customImgUrl])
+    img.src = customImgUrl;
+  }, [customImgUrl]);
 
   if (customImgUrl) {
     return (
@@ -68,7 +68,7 @@ export default function MinecraftHead({
           borderRadius: "50%",
         }}
       />
-    )
+    );
   }
 
   // Clean Default Steve / User Avatar Fallback
@@ -92,5 +92,5 @@ export default function MinecraftHead({
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
     </svg>
-  )
+  );
 }

@@ -1,29 +1,29 @@
-import React, { useState, useRef, useEffect } from "react"
+import React, { useState, useRef, useEffect } from "react";
 import {
   ThemeMode,
   SkinItem,
   CapeItem,
   DEFAULT_SKINS,
   DEFAULT_CAPES,
-} from "../types"
-import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens"
-import SkinViewer3D from "../components/minecraft/SkinViewer3D"
-import SkinCardPreview from "../components/minecraft/SkinCardPreview"
-import CapeCardPreview from "../components/minecraft/CapeCardPreview"
-import LiveToast from "../components/common/LiveToast"
-import { useTranslation } from "../context/LanguageContext"
+} from "../types";
+import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens";
+import SkinViewer3D from "../components/minecraft/SkinViewer3D";
+import SkinCardPreview from "../components/minecraft/SkinCardPreview";
+import CapeCardPreview from "../components/minecraft/CapeCardPreview";
+import LiveToast from "../components/common/LiveToast";
+import { useTranslation } from "../context/LanguageContext";
 
 interface SkinsViewProps {
-  username: string
-  appliedSkin: string
-  setAppliedSkin: (id: string) => void
-  appliedCape: string
-  setAppliedCape: (id: string) => void
-  customSkins: SkinItem[]
-  setCustomSkins: React.Dispatch<React.SetStateAction<SkinItem[]>>
-  customCapes: CapeItem[]
-  setCustomCapes: React.Dispatch<React.SetStateAction<CapeItem[]>>
-  theme?: ThemeMode
+  username: string;
+  appliedSkin: string;
+  setAppliedSkin: (id: string) => void;
+  appliedCape: string;
+  setAppliedCape: (id: string) => void;
+  customSkins: SkinItem[];
+  setCustomSkins: React.Dispatch<React.SetStateAction<SkinItem[]>>;
+  customCapes: CapeItem[];
+  setCustomCapes: React.Dispatch<React.SetStateAction<CapeItem[]>>;
+  theme?: ThemeMode;
 }
 
 export default function SkinsView({
@@ -38,45 +38,49 @@ export default function SkinsView({
   setCustomCapes,
   theme = "dark",
 }: SkinsViewProps) {
-  const { t } = useTranslation()
-  const [skinType, setSkinType] = useState<"skin" | "capa">("skin")
+  const { t } = useTranslation();
+  const [skinType, setSkinType] = useState<"skin" | "capa">("skin");
   const [toastState, setToastState] = useState<{
-    message: string | null
-    type?: "success" | "error"
-    accentColor?: string
+    message: string | null;
+    type?: "success" | "error";
+    accentColor?: string;
   }>({
     message: null,
-  })
-  const toastTimerRef = useRef<number | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const isDark = theme === "dark"
+  });
+  const toastTimerRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isDark = theme === "dark";
 
-  const allSkins = [...customSkins, ...DEFAULT_SKINS]
-  const allCapes = [...customCapes, ...DEFAULT_CAPES]
-  const items = skinType === "skin" ? allSkins : allCapes
+  const allSkins = [...customSkins, ...DEFAULT_SKINS];
+  const allCapes = [...customCapes, ...DEFAULT_CAPES];
+  const items = skinType === "skin" ? allSkins : allCapes;
 
-  const activeId = skinType === "skin" ? appliedSkin : appliedCape
+  const activeId = skinType === "skin" ? appliedSkin : appliedCape;
   const previewSkin =
-    allSkins.find((sk) => sk.id === appliedSkin) ?? allSkins[0] ?? null
+    allSkins.find((sk) => sk.id === appliedSkin) ?? allSkins[0] ?? null;
   const previewCape =
-    allCapes.find((cp) => cp.id === appliedCape) ?? allCapes[0] ?? null
+    allCapes.find((cp) => cp.id === appliedCape) ?? allCapes[0] ?? null;
 
   const hasSelectedSkin = Boolean(
-    previewSkin && previewSkin.id !== "none" && (previewSkin.customImgUrl || previewSkin.skinUrl),
-  )
+    previewSkin &&
+    previewSkin.id !== "none" &&
+    (previewSkin.customImgUrl || previewSkin.skinUrl),
+  );
   const hasSelectedCape = Boolean(
-    previewCape && previewCape.id !== "none" && (previewCape.customImgUrl || previewCape.capeUrl),
-  )
+    previewCape &&
+    previewCape.id !== "none" &&
+    (previewCape.customImgUrl || previewCape.capeUrl),
+  );
 
   /* Dynamic accent based on the currently selected / previewed skin or cape */
-  const activePreview = skinType === "skin" ? previewSkin : previewCape
+  const activePreview = skinType === "skin" ? previewSkin : previewCape;
   const accentHex =
     activePreview?.accent ||
     (skinType === "skin"
       ? (activePreview as SkinItem)?.shirt
       : (activePreview as CapeItem)?.color) ||
-    "#38bdf8"
-  const currentAccent = hexToRGB(accentHex)
+    "#38bdf8";
+  const currentAccent = hexToRGB(accentHex);
 
   const showToast = (
     msg?: string,
@@ -86,116 +90,128 @@ export default function SkinsView({
     setToastState({
       message: msg || t("settings.toastSaved"),
       type,
-      accentColor: type === "error" ? undefined : (overrideAccent || accentHex),
-    })
-    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current)
+      accentColor: type === "error" ? undefined : overrideAccent || accentHex,
+    });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
-      setToastState({ message: null })
-    }, 2800)
-  }
+      setToastState({ message: null });
+    }, 2800);
+  };
 
-  const CONTENT_LEFT = 184
+  const CONTENT_LEFT = 184;
 
   const handleSelectItem = (id: string) => {
-    const item = items.find((i) => i.id === id)
+    const item = items.find((i) => i.id === id);
     const itemAccent =
       item?.accent ||
       (skinType === "skin"
         ? (item as SkinItem)?.shirt
         : (item as CapeItem)?.color) ||
-      accentHex
+      accentHex;
 
     if (skinType === "skin") {
-      setAppliedSkin(id)
+      setAppliedSkin(id);
     } else {
-      setAppliedCape(id)
+      setAppliedCape(id);
     }
-    showToast(t("settings.toastSaved"), "success", itemAccent)
-  }
+    showToast(t("settings.toastSaved"), "success", itemAccent);
+  };
 
   /* File upload with strict Minecraft dimensions & format validation */
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0];
+    if (!file) return;
 
     // 1. File size limit (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
-      showToast(t("skins.fileTooLarge") || "El archivo es demasiado grande (máximo 5MB).", "error")
-      e.target.value = ""
-      return
+      showToast(
+        t("skins.fileTooLarge") ||
+          "El archivo es demasiado grande (máximo 5MB).",
+        "error",
+      );
+      e.target.value = "";
+      return;
     }
 
     if (skinType === "skin") {
       // 2. Skin Format Check (Must be PNG)
-      if (!file.type.includes("png") && !file.name.toLowerCase().endsWith(".png")) {
-        showToast(t("skins.invalidSkinType") || "El archivo debe ser una imagen en formato PNG (.png).", "error")
-        e.target.value = ""
-        return
+      if (
+        !file.type.includes("png") &&
+        !file.name.toLowerCase().endsWith(".png")
+      ) {
+        showToast(
+          t("skins.invalidSkinType") ||
+            "El archivo debe ser una imagen en formato PNG (.png).",
+          "error",
+        );
+        e.target.value = "";
+        return;
       }
 
-      const reader = new FileReader()
+      const reader = new FileReader();
       reader.onload = (ev) => {
-        const url = ev.target?.result as string
-        if (!url) return
-        const img = new Image()
+        const url = ev.target?.result as string;
+        if (!url) return;
+        const img = new Image();
         img.onload = () => {
-          const { width, height } = img
+          const { width, height } = img;
 
           // 3. Minecraft Skin Dimensions Check:
           // Standard modern: 64x64 or exact HD multiples (128x128, 256x256, 512x512, 1024x1024)
           // Standard legacy: 64x32 or exact HD multiples (128x64, 256x128, 512x256)
-          const isSquare = width === height && width >= 64 && width % 64 === 0
-          const isLegacy = width === height * 2 && width >= 64 && width % 64 === 0
+          const isSquare = width === height && width >= 64 && width % 64 === 0;
+          const isLegacy =
+            width === height * 2 && width >= 64 && width % 64 === 0;
 
           if (!isSquare && !isLegacy) {
             showToast(
               t("skins.invalidSkinDimensions") ||
                 `Dimensiones no válidas (${width}×${height}). Debe ser una skin de Minecraft 64×64 o 64×32.`,
               "error",
-            )
-            return
+            );
+            return;
           }
 
-          let extractedAccent = "#38bdf8"
+          let extractedAccent = "#38bdf8";
           try {
             const W = 48,
-              H = 48
-            const canvas = document.createElement("canvas")
-            canvas.width = W
-            canvas.height = H
-            const ctx = canvas.getContext("2d")
+              H = 48;
+            const canvas = document.createElement("canvas");
+            canvas.width = W;
+            canvas.height = H;
+            const ctx = canvas.getContext("2d");
             if (ctx) {
-              ctx.drawImage(img, 0, 0, W, H)
-              const data = ctx.getImageData(0, 0, W, H).data
-              let bestSaturation = -1
+              ctx.drawImage(img, 0, 0, W, H);
+              const data = ctx.getImageData(0, 0, W, H).data;
+              let bestSaturation = -1;
               let bestR = 56,
                 bestG = 189,
-                bestB = 248
+                bestB = 248;
               for (let i = 0; i < data.length; i += 4) {
                 const r = data[i],
                   g = data[i + 1],
                   b = data[i + 2],
-                  a = data[i + 3]
+                  a = data[i + 3];
                 if (a > 120) {
                   const max = Math.max(r, g, b),
-                    min = Math.min(r, g, b)
-                  const sat = max === 0 ? 0 : (max - min) / max
-                  const lum = (max + min) / 2
+                    min = Math.min(r, g, b);
+                  const sat = max === 0 ? 0 : (max - min) / max;
+                  const lum = (max + min) / 2;
                   if (sat > bestSaturation && lum > 40 && lum < 220) {
-                    bestSaturation = sat
-                    bestR = r
-                    bestG = g
-                    bestB = b
+                    bestSaturation = sat;
+                    bestR = r;
+                    bestG = g;
+                    bestB = b;
                   }
                 }
               }
-              extractedAccent = `#${((1 << 24) + (bestR << 16) + (bestG << 8) + bestB).toString(16).slice(1)}`
+              extractedAccent = `#${((1 << 24) + (bestR << 16) + (bestG << 8) + bestB).toString(16).slice(1)}`;
             }
           } catch (_) {}
 
-          const newId = `custom-${Date.now()}`
+          const newId = `custom-${Date.now()}`;
           const newName =
-            file.name.replace(/\.[^/.]+$/, "").slice(0, 15) || "Personalizada"
+            file.name.replace(/\.[^/.]+$/, "").slice(0, 15) || "Personalizada";
 
           const newSkin: SkinItem = {
             id: newId,
@@ -208,82 +224,89 @@ export default function SkinsView({
             customImgUrl: url,
             skinUrl: url,
             model: "auto-detect",
-          }
-          setCustomSkins((prev) => [newSkin, ...prev])
-          setAppliedSkin(newId)
-          showToast(t("settings.toastSaved"), "success", extractedAccent)
-        }
-        img.src = url
-      }
-      reader.readAsDataURL(file)
-      e.target.value = ""
+          };
+          setCustomSkins((prev) => [newSkin, ...prev]);
+          setAppliedSkin(newId);
+          showToast(t("settings.toastSaved"), "success", extractedAccent);
+        };
+        img.src = url;
+      };
+      reader.readAsDataURL(file);
+      e.target.value = "";
     } else {
       // 1. Cape Format Check (Must be PNG)
-      if (!file.type.includes("png") && !file.name.toLowerCase().endsWith(".png")) {
-        showToast(t("skins.invalidCapeType") || "Formato incorrecto. La capa debe ser una imagen PNG (.png).", "error")
-        e.target.value = ""
-        return
+      if (
+        !file.type.includes("png") &&
+        !file.name.toLowerCase().endsWith(".png")
+      ) {
+        showToast(
+          t("skins.invalidCapeType") ||
+            "Formato incorrecto. La capa debe ser una imagen PNG (.png).",
+          "error",
+        );
+        e.target.value = "";
+        return;
       }
 
-      const reader = new FileReader()
+      const reader = new FileReader();
       reader.onload = (ev) => {
-        const url = ev.target?.result as string
-        if (!url) return
-        const img = new Image()
+        const url = ev.target?.result as string;
+        if (!url) return;
+        const img = new Image();
         img.onload = () => {
-          const { width, height } = img
+          const { width, height } = img;
 
           // 2. Minecraft Cape Dimensions Check (2:1 Ratio: 64x32, 128x64, 256x128, 512x256, etc.)
-          const isStandardCape = width === height * 2 && width >= 64
+          const isStandardCape = width === height * 2 && width >= 64;
 
           if (!isStandardCape) {
             showToast(
               t("skins.invalidCapeDimensions") ||
                 "La imagen no parece una capa de Minecraft. Usa un archivo de capa válido.",
               "error",
-            )
-            return
+            );
+            return;
           }
-          let extractedAccent = "#38bdf8"
+          let extractedAccent = "#38bdf8";
           try {
             const W = 48,
-              H = 48
-            const canvas = document.createElement("canvas")
-            canvas.width = W
-            canvas.height = H
-            const ctx = canvas.getContext("2d")
+              H = 48;
+            const canvas = document.createElement("canvas");
+            canvas.width = W;
+            canvas.height = H;
+            const ctx = canvas.getContext("2d");
             if (ctx) {
-              ctx.drawImage(img, 0, 0, W, H)
-              const data = ctx.getImageData(0, 0, W, H).data
-              let bestSaturation = -1
+              ctx.drawImage(img, 0, 0, W, H);
+              const data = ctx.getImageData(0, 0, W, H).data;
+              let bestSaturation = -1;
               let bestR = 56,
                 bestG = 189,
-                bestB = 248
+                bestB = 248;
               for (let i = 0; i < data.length; i += 4) {
                 const r = data[i],
                   g = data[i + 1],
                   b = data[i + 2],
-                  a = data[i + 3]
+                  a = data[i + 3];
                 if (a > 120) {
                   const max = Math.max(r, g, b),
-                    min = Math.min(r, g, b)
-                  const sat = max === 0 ? 0 : (max - min) / max
-                  const lum = (max + min) / 2
+                    min = Math.min(r, g, b);
+                  const sat = max === 0 ? 0 : (max - min) / max;
+                  const lum = (max + min) / 2;
                   if (sat > bestSaturation && lum > 40 && lum < 220) {
-                    bestSaturation = sat
-                    bestR = r
-                    bestG = g
-                    bestB = b
+                    bestSaturation = sat;
+                    bestR = r;
+                    bestG = g;
+                    bestB = b;
                   }
                 }
               }
-              extractedAccent = `#${((1 << 24) + (bestR << 16) + (bestG << 8) + bestB).toString(16).slice(1)}`
+              extractedAccent = `#${((1 << 24) + (bestR << 16) + (bestG << 8) + bestB).toString(16).slice(1)}`;
             }
           } catch (_) {}
 
-          const newId = `custom-${Date.now()}`
+          const newId = `custom-${Date.now()}`;
           const newName =
-            file.name.replace(/\.[^/.]+$/, "").slice(0, 15) || "Personalizada"
+            file.name.replace(/\.[^/.]+$/, "").slice(0, 15) || "Personalizada";
 
           const newCape: CapeItem = {
             id: newId,
@@ -293,36 +316,36 @@ export default function SkinsView({
             accent: extractedAccent,
             customImgUrl: url,
             capeUrl: url,
-          }
-          setCustomCapes((prev) => [newCape, ...prev])
-          setAppliedCape(newId)
-          showToast(t("settings.toastSaved"), "success", extractedAccent)
-        }
-        img.src = url
-      }
-      reader.readAsDataURL(file)
-      e.target.value = ""
+          };
+          setCustomCapes((prev) => [newCape, ...prev]);
+          setAppliedCape(newId);
+          showToast(t("settings.toastSaved"), "success", extractedAccent);
+        };
+        img.src = url;
+      };
+      reader.readAsDataURL(file);
+      e.target.value = "";
     }
-  }
+  };
 
   /* Smooth delayed mouse-following parallax for the ambient glowing orbs */
-  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
+  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
-      const relX = e.clientX / window.innerWidth - 0.5
-      const relY = e.clientY / window.innerHeight - 0.5
+      const relX = e.clientX / window.innerWidth - 0.5;
+      const relY = e.clientY / window.innerHeight - 0.5;
       setMouseOffset({
         x: Math.round(relX * 220),
         y: Math.round(relY * 150),
-      })
-    }
+      });
+    };
 
     window.addEventListener("mousemove", handleWindowMouseMove, {
       passive: true,
-    })
-    return () => window.removeEventListener("mousemove", handleWindowMouseMove)
-  }, [])
+    });
+    return () => window.removeEventListener("mousemove", handleWindowMouseMove);
+  }, []);
 
   return (
     <div
@@ -503,7 +526,7 @@ export default function SkinsView({
             }}
           >
             {(["skin", "capa"] as const).map((tab) => {
-              const isCurrent = skinType === tab
+              const isCurrent = skinType === tab;
               return (
                 <button
                   key={tab}
@@ -543,7 +566,7 @@ export default function SkinsView({
                 >
                   {tab === "skin" ? t("skins.tabSkins") : t("skins.tabCapes")}
                 </button>
-              )
+              );
             })}
           </div>
 
@@ -671,7 +694,9 @@ export default function SkinsView({
                         height="220"
                         viewBox="0 0 100 170"
                         fill="none"
-                        stroke={isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"}
+                        stroke={
+                          isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"
+                        }
                         strokeWidth="2.4"
                         strokeDasharray="4 3"
                         strokeLinejoin="round"
@@ -689,12 +714,30 @@ export default function SkinsView({
                         {/* Right Leg */}
                         <rect x="52" y="106" width="18" height="58" rx="5" />
                         {/* Center X */}
-                        <line x1="44" y1="68" x2="56" y2="80" strokeDasharray="none" strokeWidth="2.2" strokeLinecap="round" />
-                        <line x1="56" y1="68" x2="44" y2="80" strokeDasharray="none" strokeWidth="2.2" strokeLinecap="round" />
+                        <line
+                          x1="44"
+                          y1="68"
+                          x2="56"
+                          y2="80"
+                          strokeDasharray="none"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                        />
+                        <line
+                          x1="56"
+                          y1="68"
+                          x2="44"
+                          y2="80"
+                          strokeDasharray="none"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                        />
                       </svg>
                       <span
                         style={{
-                          color: isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)",
+                          color: isDark
+                            ? "rgba(255,255,255,0.4)"
+                            : "rgba(0,0,0,0.4)",
                           fontWeight: 600,
                           fontSize: 16,
                         }}
@@ -740,7 +783,9 @@ export default function SkinsView({
                       height={24}
                       viewBox="0 0 18 18"
                       fill="none"
-                      stroke={isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"}
+                      stroke={
+                        isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"
+                      }
                       strokeWidth="2"
                       strokeLinecap="round"
                     >
@@ -749,7 +794,9 @@ export default function SkinsView({
                     </svg>
                     <span
                       style={{
-                        color: isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)",
+                        color: isDark
+                          ? "rgba(255,255,255,0.4)"
+                          : "rgba(0,0,0,0.4)",
                         fontWeight: 600,
                         fontSize: 16,
                       }}
@@ -776,14 +823,19 @@ export default function SkinsView({
                 boxShadow: isDark ? "none" : "0 8px 24px rgba(0,0,0,0.06)",
               }}
             >
-              {([
-                [t("skins.currentSkin"), hasSelectedSkin ? previewSkin.name : t("skins.noSkin")],
+              {(
                 [
-                  t("skins.currentCape"),
-                  hasSelectedCape ? previewCape.name : t("skins.noCape"),
-                ],
-                [t("skins.character"), username],
-              ] as const).map(([lbl, val]) => (
+                  [
+                    t("skins.currentSkin"),
+                    hasSelectedSkin ? previewSkin.name : t("skins.noSkin"),
+                  ],
+                  [
+                    t("skins.currentCape"),
+                    hasSelectedCape ? previewCape.name : t("skins.noCape"),
+                  ],
+                  [t("skins.character"), username],
+                ] as const
+              ).map(([lbl, val]) => (
                 <div
                   key={lbl}
                   style={{
@@ -842,20 +894,20 @@ export default function SkinsView({
               }}
             >
               {items.map((item) => {
-                const isSel = item.id === activeId
-                const isNone = item.id === "none"
+                const isSel = item.id === activeId;
+                const isNone = item.id === "none";
                 const itemAccentHex =
                   item.accent ||
                   (skinType === "skin"
                     ? (item as SkinItem).shirt
                     : (item as CapeItem).color) ||
-                  "#38bdf8"
-                const accent = hexToRGB(itemAccentHex)
+                  "#38bdf8";
+                const accent = hexToRGB(itemAccentHex);
                 const displayName = isNone
                   ? skinType === "skin"
                     ? t("skins.noSkin")
                     : t("skins.noCape")
-                  : item.name
+                  : item.name;
 
                 return (
                   <button
@@ -894,7 +946,9 @@ export default function SkinsView({
 
                       <div style={{ position: "relative", zIndex: 1 }}>
                         {skinType === "skin" ? (
-                          isNone || (!item.customImgUrl && !item.skinUrl) ? (
+                          isNone ||
+                          (!item.customImgUrl &&
+                            !(item as SkinItem).skinUrl) ? (
                             /* Perfectly elongated limbs for "Sin Skin" card */
                             <div
                               style={{
@@ -910,37 +964,97 @@ export default function SkinsView({
                                 height="138"
                                 viewBox="0 0 100 170"
                                 fill="none"
-                                stroke={isDark ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.22)"}
+                                stroke={
+                                  isDark
+                                    ? "rgba(255,255,255,0.22)"
+                                    : "rgba(0,0,0,0.22)"
+                                }
                                 strokeWidth="2.4"
                                 strokeDasharray="4 3"
                                 strokeLinejoin="round"
                               >
                                 {/* Head */}
-                                <rect x="30" y="4" width="40" height="38" rx="5" />
+                                <rect
+                                  x="30"
+                                  y="4"
+                                  width="40"
+                                  height="38"
+                                  rx="5"
+                                />
                                 {/* Left Arm */}
-                                <rect x="8" y="46" width="18" height="56" rx="5" />
+                                <rect
+                                  x="8"
+                                  y="46"
+                                  width="18"
+                                  height="56"
+                                  rx="5"
+                                />
                                 {/* Torso */}
-                                <rect x="30" y="46" width="40" height="56" rx="5" />
+                                <rect
+                                  x="30"
+                                  y="46"
+                                  width="40"
+                                  height="56"
+                                  rx="5"
+                                />
                                 {/* Right Arm */}
-                                <rect x="74" y="46" width="18" height="56" rx="5" />
+                                <rect
+                                  x="74"
+                                  y="46"
+                                  width="18"
+                                  height="56"
+                                  rx="5"
+                                />
                                 {/* Left Leg */}
-                                <rect x="30" y="106" width="18" height="58" rx="5" />
+                                <rect
+                                  x="30"
+                                  y="106"
+                                  width="18"
+                                  height="58"
+                                  rx="5"
+                                />
                                 {/* Right Leg */}
-                                <rect x="52" y="106" width="18" height="58" rx="5" />
+                                <rect
+                                  x="52"
+                                  y="106"
+                                  width="18"
+                                  height="58"
+                                  rx="5"
+                                />
                                 {/* Center X */}
-                                <line x1="44" y1="68" x2="56" y2="80" strokeDasharray="none" strokeWidth="2" strokeLinecap="round" />
-                                <line x1="56" y1="68" x2="44" y2="80" strokeDasharray="none" strokeWidth="2" strokeLinecap="round" />
+                                <line
+                                  x1="44"
+                                  y1="68"
+                                  x2="56"
+                                  y2="80"
+                                  strokeDasharray="none"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                />
+                                <line
+                                  x1="56"
+                                  y1="68"
+                                  x2="44"
+                                  y2="80"
+                                  strokeDasharray="none"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                />
                               </svg>
                             </div>
                           ) : (
                             <SkinCardPreview
-                              skinUrl={item.customImgUrl || item.skinUrl}
+                              skinUrl={
+                                item.customImgUrl || (item as SkinItem).skinUrl
+                              }
                               alt={item.name}
                               width={95}
                               height={190}
                             />
                           )
-                        ) : isNone || (!item.customImgUrl && !item.capeUrl) ? (
+                        ) : isNone ||
+                          (!item.customImgUrl &&
+                            !(item as CapeItem).capeUrl) ? (
                           /* Dashed Card for "Sin Capa" */
                           <div
                             style={{
@@ -981,7 +1095,9 @@ export default function SkinsView({
                           </div>
                         ) : (
                           <CapeCardPreview
-                            capeUrl={item.customImgUrl || item.capeUrl}
+                            capeUrl={
+                              item.customImgUrl || (item as CapeItem).capeUrl
+                            }
                             alt={item.name}
                             width={85}
                             height={136}
@@ -1047,7 +1163,7 @@ export default function SkinsView({
                       )}
                     </div>
                   </button>
-                )
+                );
               })}
             </div>
           </div>
@@ -1055,7 +1171,11 @@ export default function SkinsView({
       </div>
 
       {/* ── Real-time Live Toast notification matching settings & profile ── */}
-      <LiveToast message={toastState.message} type={toastState.type} accentColor={toastState.accentColor} />
+      <LiveToast
+        message={toastState.message}
+        type={toastState.type}
+        accentColor={toastState.accentColor}
+      />
     </div>
-  )
+  );
 }

@@ -1,17 +1,17 @@
-import React, { useState, useRef, useEffect } from "react"
-import { ThemeMode, SkinItem } from "../types"
-import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens"
-import MinecraftHead from "../components/minecraft/MinecraftHead"
-import LiveToast from "../components/common/LiveToast"
-import { useTranslation } from "../context/LanguageContext"
+import React, { useState, useRef, useEffect } from "react";
+import { ThemeMode, SkinItem } from "../types";
+import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens";
+import MinecraftHead from "../components/minecraft/MinecraftHead";
+import LiveToast from "../components/common/LiveToast";
+import { useTranslation } from "../context/LanguageContext";
 
-import { authService } from "../services/authService"
+import { authService } from "../services/authService";
 
 interface ProfileViewProps {
-  username: string
-  activeSkinData?: SkinItem | null
-  onBack: () => void
-  theme?: ThemeMode
+  username: string;
+  activeSkinData?: SkinItem | null;
+  onBack: () => void;
+  theme?: ThemeMode;
 }
 
 export default function ProfileView({
@@ -20,75 +20,75 @@ export default function ProfileView({
   onBack,
   theme = "dark",
 }: ProfileViewProps) {
-  const { t } = useTranslation()
-  const cachedUser = authService.getCachedUser()
+  const { t } = useTranslation();
+  const cachedUser = authService.getCachedUser();
 
   const [email] = useState(
     cachedUser?.email ||
       `${username.toLowerCase().replace(/\s+/g, "")}@gmail.com`,
-  )
+  );
   const [joinDate] = useState(
     cachedUser?.createdAt
       ? new Date(cachedUser.createdAt).toLocaleDateString()
       : "24/11/2025",
-  )
+  );
   const [resetState, setResetState] = useState<"idle" | "sending" | "sent">(
     "idle",
-  )
-  const [toastText, setToastText] = useState<string | null>(null)
-  const toastTimeoutRef = useRef<any>(null)
-  const isDark = theme === "dark"
+  );
+  const [toastText, setToastText] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+  const isDark = theme === "dark";
 
   const showToast = (msg?: string) => {
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
-    setToastText(msg || t("settings.toastSaved"))
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToastText(msg || t("settings.toastSaved"));
     toastTimeoutRef.current = setTimeout(() => {
-      setToastText(null)
-    }, 2400)
-  }
+      setToastText(null);
+    }, 2400);
+  };
 
   const handleSendResetEmail = async () => {
-    if (resetState === "sending") return
-    setResetState("sending")
+    if (resetState === "sending") return;
+    setResetState("sending");
     try {
-      const res = await authService.requestPasswordReset(email)
+      const res = await authService.requestPasswordReset(email);
       if (res.success) {
-        setResetState("sent")
-        showToast(t("profile.emailSent"))
+        setResetState("sent");
+        showToast(t("profile.emailSent"));
       } else {
-        setResetState("sent")
-        showToast(t("profile.emailSent"))
+        setResetState("sent");
+        showToast(t("profile.emailSent"));
       }
     } catch (_) {
-      setResetState("sent")
-      showToast(t("profile.emailSent"))
+      setResetState("sent");
+      showToast(t("profile.emailSent"));
     }
-    setTimeout(() => setResetState("idle"), 3500)
-  }
+    setTimeout(() => setResetState("idle"), 3500);
+  };
 
   const currentAccent = hexToRGB(
     activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8",
-  )
-  const CONTENT_LEFT = 184
+  );
+  const CONTENT_LEFT = 184;
 
   /* Smooth delayed mouse-following parallax */
-  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
+  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
-      const relX = e.clientX / window.innerWidth - 0.5
-      const relY = e.clientY / window.innerHeight - 0.5
+      const relX = e.clientX / window.innerWidth - 0.5;
+      const relY = e.clientY / window.innerHeight - 0.5;
       setMouseOffset({
         x: Math.round(relX * 220),
         y: Math.round(relY * 150),
-      })
-    }
+      });
+    };
 
     window.addEventListener("mousemove", handleWindowMouseMove, {
       passive: true,
-    })
-    return () => window.removeEventListener("mousemove", handleWindowMouseMove)
-  }, [])
+    });
+    return () => window.removeEventListener("mousemove", handleWindowMouseMove);
+  }, []);
 
   return (
     <div
@@ -241,24 +241,24 @@ export default function ProfileView({
                 transition: "all 0.16s ease",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.color = isDark ? "#ffffff" : "#111822"
+                e.currentTarget.style.color = isDark ? "#ffffff" : "#111822";
                 e.currentTarget.style.borderColor = isDark
                   ? "rgba(255, 255, 255, 0.26)"
-                  : "rgba(0, 0, 0, 0.25)"
+                  : "rgba(0, 0, 0, 0.25)";
                 e.currentTarget.style.background = isDark
                   ? "#151e26"
-                  : "#f0f3f7"
-                e.currentTarget.style.transform = "translateX(-2px)"
+                  : "#f0f3f7";
+                e.currentTarget.style.transform = "translateX(-2px)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.color = isDark ? "#8899aa" : "#556677"
+                e.currentTarget.style.color = isDark ? "#8899aa" : "#556677";
                 e.currentTarget.style.borderColor = isDark
                   ? "rgba(255, 255, 255, 0.1)"
-                  : "rgba(0, 0, 0, 0.1)"
+                  : "rgba(0, 0, 0, 0.1)";
                 e.currentTarget.style.background = isDark
                   ? "#0d1217"
-                  : "#ffffff"
-                e.currentTarget.style.transform = "none"
+                  : "#ffffff";
+                e.currentTarget.style.transform = "none";
               }}
             >
               <svg
@@ -362,7 +362,9 @@ export default function ProfileView({
                 <MinecraftHead
                   skinId={activeSkinData?.id}
                   skinColor={activeSkinData?.skin}
-                  customImgUrl={activeSkinData?.customImgUrl || activeSkinData?.skinUrl}
+                  customImgUrl={
+                    activeSkinData?.customImgUrl || activeSkinData?.skinUrl
+                  }
                   size={72}
                 />
               </div>
@@ -587,20 +589,20 @@ export default function ProfileView({
                   if (resetState !== "sending") {
                     e.currentTarget.style.borderColor = isDark
                       ? "rgba(255, 255, 255, 0.28)"
-                      : "rgba(0, 0, 0, 0.25)"
+                      : "rgba(0, 0, 0, 0.25)";
                     e.currentTarget.style.background = isDark
                       ? "#151e26"
-                      : "#e4e8ee"
+                      : "#e4e8ee";
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (resetState !== "sending") {
                     e.currentTarget.style.borderColor = isDark
                       ? "rgba(255, 255, 255, 0.12)"
-                      : "rgba(0, 0, 0, 0.12)"
+                      : "rgba(0, 0, 0, 0.12)";
                     e.currentTarget.style.background = isDark
                       ? "#0d1217"
-                      : "#f0f3f7"
+                      : "#f0f3f7";
                   }
                 }}
               >
@@ -665,5 +667,5 @@ export default function ProfileView({
         <LiveToast message={toastText} />
       </div>
     </div>
-  )
+  );
 }
