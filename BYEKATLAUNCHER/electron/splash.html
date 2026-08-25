@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>HiKAT Loading</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-drag: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      background: transparent !important;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .splash-container {
+      position: relative;
+      width: 680px;
+      height: 390px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent !important;
+      animation: splashFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes splashFadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.94);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    /* Ambient background backlight inside the card */
+    .ambient-glow {
+      position: absolute;
+      width: 480px;
+      height: 260px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(239, 196, 54, 0.25) 0%, rgba(245, 158, 11, 0.08) 45%, transparent 70%);
+      filter: blur(40px);
+      pointer-events: none;
+      z-index: 1;
+      animation: glowPulse 2.4s ease-in-out infinite alternate;
+    }
+
+    @keyframes glowPulse {
+      0% {
+        opacity: 0.5;
+        transform: scale(0.92);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1.15);
+      }
+    }
+
+    /* Animated Glowing Perimeter Beam */
+    .beam-svg {
+      position: absolute;
+      inset: 0;
+      width: 680px;
+      height: 390px;
+      overflow: visible;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .track-rect {
+      fill: #0d1319;
+      stroke: rgba(255, 255, 255, 0.08);
+      stroke-width: 2.8;
+    }
+
+    .traveling-beam {
+      fill: none;
+      stroke: url(#goldBeamGradient);
+      stroke-width: 4.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 380 1680;
+      animation: beamLoop 2.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+      filter: drop-shadow(0 0 10px #efc436) drop-shadow(0 0 22px rgba(245, 158, 11, 0.85));
+    }
+
+    /* Secondary companion beam for rich trailing neon look */
+    .traveling-beam-trail {
+      fill: none;
+      stroke: url(#trailBeamGradient);
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 200 1860;
+      animation: beamLoop 2.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+      filter: blur(1px) drop-shadow(0 0 28px rgba(239, 196, 54, 0.65));
+    }
+
+    @keyframes beamLoop {
+      0% {
+        stroke-dashoffset: 0;
+      }
+      100% {
+        stroke-dashoffset: -2053;
+      }
+    }
+
+    /* Centered HiKAT Logo */
+    .logo-img {
+      position: relative;
+      z-index: 3;
+      max-width: 480px;
+      max-height: 205px;
+      object-fit: contain;
+      mix-blend-mode: screen;
+      animation: logoBreathe 2.4s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+
+    @keyframes logoBreathe {
+      0% {
+        transform: scale(0.98);
+        opacity: 0.92;
+        filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.15));
+      }
+      100% {
+        transform: scale(1.02);
+        opacity: 1;
+        filter: drop-shadow(0 0 26px rgba(239, 196, 54, 0.4));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="splash-container">
+    <div class="ambient-glow"></div>
+
+    <!-- Animated Glowing Perimeter Beam -->
+    <svg class="beam-svg" viewBox="0 0 680 390">
+      <defs>
+        <linearGradient id="goldBeamGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#ffe692" stop-opacity="1" />
+          <stop offset="35%" stop-color="#efc436" stop-opacity="1" />
+          <stop offset="80%" stop-color="#f59e0b" stop-opacity="0.85" />
+          <stop offset="100%" stop-color="#d97706" stop-opacity="0" />
+        </linearGradient>
+
+        <linearGradient id="trailBeamGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9" />
+          <stop offset="60%" stop-color="#efc436" stop-opacity="0.4" />
+          <stop offset="100%" stop-color="transparent" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+
+      <!-- Base Card Track -->
+      <rect class="track-rect" x="4" y="4" width="672" height="382" rx="32" ry="32" />
+
+      <!-- Glowing Neon Beams -->
+      <rect class="traveling-beam-trail" x="4" y="4" width="672" height="382" rx="32" ry="32" />
+      <rect class="traveling-beam" x="4" y="4" width="672" height="382" rx="32" ry="32" />
+    </svg>
+
+    <!-- HiKAT White Logo -->
+    <img src="splash-logo.png" alt="HiKAT" class="logo-img" />
+  </div>
+</body>
+</html>
