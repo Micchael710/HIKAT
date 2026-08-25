@@ -4,4 +4,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2024-11-01",
   "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hikat-d1",
+      "database_id": "a2410123-4e73-4c0f-9263-412fa06d7bdc",
+      "migrations_dir": "../../packages/database/migrations"
+    }
+  ]
 }

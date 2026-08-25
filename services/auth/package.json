@@ -13,7 +13,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hikat/shared": "workspace:*"
+    "@hikat/database": "workspace:*",
+    "@hikat/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",

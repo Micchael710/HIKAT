@@ -23,3 +23,29 @@ HiKATbackoffice ────┘
 3. **Infrastructure Encapsulation**:
    - Clients must never bypass GraphQL to interact directly with D1, R2, Pterodactyl, or external mod APIs.
    - Internal credentials and connection strings are strictly encapsulated inside the backend worker.
+
+## Modular Schema Architecture
+
+Located in `packages/graphql/src/schema/`:
+
+- **`common.ts`**: Common scalars and core enums:
+  - `scalar DateTime`: Validated ISO-8601 UTC date-time string.
+  - `enum Role`: Strictly `PLAYER` and `ADMIN`.
+- **`user.ts`**: Identity contract:
+  - `type User`: Public user identity contract (`id`, `role`, `displayName`, `createdAt`, `updatedAt`). Never exposes sensitive internal data (tokens, hashes, OAuth secrets).
+- **`health.ts`**: Infrastructure health and version queries:
+  - `Query.health`: Service status, service identifier, version, and timestamp.
+  - `Query.version`: HiKAT workspace semantic version.
+
+## Standard Error Codes
+
+HiKAT standardizes GraphQL error extensions using `GraphQLError.extensions.code`:
+
+| Code | Usage |
+| :--- | :--- |
+| `UNAUTHENTICATED` | Missing or invalid authentication credentials |
+| `FORBIDDEN` | Authenticated user lacks required permissions / role |
+| `NOT_FOUND` | Requested entity does not exist |
+| `VALIDATION_ERROR` | Malformed or invalid input payload |
+| `CONFLICT` | Entity conflict (e.g. duplicate unique key) |
+| `INTERNAL_ERROR` | Unhandled server error (sanitized; no SQL internals or secrets exposed) |

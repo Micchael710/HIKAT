@@ -1,0 +1,9 @@
+{
+  "extends": "@hikat/config/tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*"]
+}

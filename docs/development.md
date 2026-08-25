@@ -32,14 +32,24 @@
    pnpm format
    ```
 
+3. **Database Operations (Drizzle & D1 Local)**:
+   ```bash
+   # Generate Drizzle migrations from schema changes
+   pnpm db:generate
+
+   # Apply D1 migrations to local Wrangler SQLite environment
+   pnpm db:migrate:local
+   ```
+
 ## Workspace Structure
 
 - `HiKATLauncher/`: Electron/React desktop launcher.
 - `HiKATbackoffice/`: Management web dashboard.
 - `services/backend/`: GraphQL Cloudflare Worker.
 - `services/auth/`: Authentication Cloudflare Worker.
+- `packages/database/`: Drizzle ORM schema, migrations, and typed D1 database client.
+- `packages/graphql/`: Authoritative modular GraphQL schema, scalars, error codes, and contracts.
 - `packages/shared/`: Shared utilities, constants, and types.
-- `packages/graphql/`: Authoritative GraphQL schema and utilities.
 - `packages/config/`: Shared TypeScript and build configs.
 - `minecraft/`: Gradle multi-project for NeoForge 1.21.1 mods and Velocity gateway.
 - `infrastructure/`: Architecture and infrastructure deployment specs.
