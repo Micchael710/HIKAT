@@ -170,6 +170,24 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(result.data?.version).toBe(HIKAT_VERSION)
     })
 
+    it("allows public queries to succeed even when DB is not available", async () => {
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: "{ health { status } version }",
+        }),
+      })
+      const env: Env = { AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem } // No DB
+      const response = await worker.fetch(request, env)
+
+      expect(response.status).toBe(200)
+      const result = await getJson(response)
+      expect(result.errors).toBeUndefined()
+      expect(result.data?.health?.status).toBe("ok")
+      expect(result.data?.version).toBe(HIKAT_VERSION)
+    })
+
     it("allows public queries to succeed even when an invalid Authorization header is sent", async () => {
       const request = new Request("http://localhost/graphql", {
         method: "POST",
@@ -290,11 +308,11 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       })
     })
 
-    it("returns NOT_FOUND when authenticated user is deleted or missing in D1", async () => {
+    it("fails closed when user is deleted/missing in D1 (returns UNAUTHENTICATED)", async () => {
       const userId = "usr_deleted"
       const sessionId = "ses_ghost"
 
-      // Token generated for non-existent user (and no session in D1)
+      // Token generated for non-existent user
       const token = await createTestAccessToken({
         userId,
         sessionId,
@@ -317,12 +335,11 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const result = await getJson(response)
       expect(result.data?.me).toBeNull()
       expect(result.errors).toBeDefined()
-      // Session missing in D1 -> UNAUTHENTICATED
       expect(result.errors?.[0]?.extensions?.code).toBe("UNAUTHENTICATED")
     })
   })
 
-  describe("3. Administrative Guards & adminStatus Query", () => {
+  describe("3. Administrative Guards & Dynamic D1 Roles", () => {
     it("rejects anonymous callers from adminStatus with UNAUTHENTICATED", async () => {
       const request = new Request("http://localhost/graphql", {
         method: "POST",
@@ -372,6 +389,76 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(result.errors?.[0]?.extensions?.code).toBe("FORBIDDEN")
     })
 
+    it("rejects JWT with ADMIN claim if account was demoted to PLAYER in D1 (FORBIDDEN)", async () => {
+      const userId = "usr_demoted_admin"
+      const sessionId = "ses_demoted_1"
+      // User was demoted in D1 database
+      await seedUserAndSession({
+        userId,
+        role: "PLAYER",
+        sessionId,
+      })
+
+      // Old JWT signed with ADMIN role claim
+      const adminToken = await createTestAccessToken({
+        userId,
+        sessionId,
+        role: "ADMIN",
+      })
+
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          query: "{ adminStatus { ok } }",
+        }),
+      })
+      const env: Env = { DB: testD1, AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem }
+      const response = await worker.fetch(request, env)
+
+      const result = await getJson(response)
+      expect(result.data?.adminStatus).toBeNull()
+      expect(result.errors?.[0]?.extensions?.code).toBe("FORBIDDEN")
+    })
+
+    it("allows JWT with PLAYER claim if account was promoted to ADMIN in D1", async () => {
+      const userId = "usr_promoted_player"
+      const sessionId = "ses_promoted_1"
+      // User is ADMIN in D1 database
+      await seedUserAndSession({
+        userId,
+        role: "ADMIN",
+        sessionId,
+      })
+
+      // Old JWT signed with PLAYER role claim
+      const playerToken = await createTestAccessToken({
+        userId,
+        sessionId,
+        role: "PLAYER",
+      })
+
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${playerToken}`,
+        },
+        body: JSON.stringify({
+          query: "{ adminStatus { ok environment } }",
+        }),
+      })
+      const env: Env = { DB: testD1, AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem }
+      const response = await worker.fetch(request, env)
+
+      const result = await getJson(response)
+      expect(result.errors).toBeUndefined()
+      expect(result.data?.adminStatus?.ok).toBe(true)
+    })
+
     it("allows authenticated ADMIN to execute adminStatus query successfully", async () => {
       const userId = "usr_admin_master"
       const sessionId = "ses_admin_1"
@@ -409,6 +496,32 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(result.data?.adminStatus?.ok).toBe(true)
       expect(result.data?.adminStatus?.environment).toBe("staging")
       expect(result.data?.adminStatus?.serverTime).toBeDefined()
+    })
+
+    it("FAILS CLOSED when DB is unavailable on protected adminStatus query (UNAUTHENTICATED)", async () => {
+      const token = await createTestAccessToken({
+        userId: "usr_admin_nodb",
+        sessionId: "ses_admin_nodb",
+        role: "ADMIN",
+      })
+
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          query: "{ adminStatus { ok } }",
+        }),
+      })
+      // Env without DB binding
+      const env: Env = { AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem }
+      const response = await worker.fetch(request, env)
+
+      const result = await getJson(response)
+      expect(result.data?.adminStatus).toBeNull()
+      expect(result.errors?.[0]?.extensions?.code).toBe("UNAUTHENTICATED")
     })
   })
 
@@ -448,7 +561,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const validToken = await createTestAccessToken({ userId, sessionId, role: "PLAYER" })
       const parts = validToken.split(".")
-      // Tamper signature by modifying characters
       const tamperedToken = `${parts[0]}.${parts[1]}.badSig_${parts[2]?.slice(7)}`
 
       const request = new Request("http://localhost/graphql", {
@@ -472,7 +584,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const sessionId = "ses_expired_jwt"
       await seedUserAndSession({ userId, sessionId })
 
-      // Token expired 10 seconds ago
       const expiredToken = await createTestAccessToken({
         userId,
         sessionId,
@@ -530,7 +641,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const sessionId = "ses_game_jwt"
       await seedUserAndSession({ userId, sessionId })
 
-      // Game JWT targeted specifically for Minecraft Gateway
       const gameToken = await createTestAccessToken({
         userId,
         sessionId,
@@ -560,11 +670,13 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         role: "ADMIN",
         sid: "ses_hs256",
       })
-        .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+        .setProtectedHeader({ alg: "HS256", typ: "JWT", kid: keyId })
         .setSubject("usr_hs256")
         .setIssuer(DEFAULT_AUTH_ISSUER)
         .setAudience(AUTH_AUDIENCE_API)
+        .setIssuedAt()
         .setExpirationTime("15m")
+        .setJti(crypto.randomUUID())
         .sign(symmetricKey)
 
       const request = new Request("http://localhost/graphql", {
@@ -588,7 +700,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const sessionId = "ses_rotated"
       await seedUserAndSession({ userId, sessionId })
 
-      // Create a local JWKS containing both keys
       const jwksMap = new Map<string, jose.CryptoKey>([
         [keyId, publicKey],
         [secondaryKeyId, secondaryPublicKey],
@@ -600,7 +711,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         return key
       }
 
-      // Sign with primary key
       const token1 = await createTestAccessToken({
         userId,
         sessionId,
@@ -609,7 +719,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         kid: keyId,
       })
 
-      // Sign with secondary rotated key
       const token2 = await createTestAccessToken({
         userId,
         sessionId,
@@ -630,7 +739,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
     it("rejects token when session does not exist in D1", async () => {
       const userId = "usr_no_session"
       const sessionId = "ses_ghost"
-      // Seed user but NOT session
       await db.insert(users).values({
         id: userId,
         role: "PLAYER",
@@ -662,13 +770,11 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const userAttacker = "usr_attacker_id"
       const sessionId = "ses_victim_session"
 
-      // Seed victim session belonging to userVictim
       await seedUserAndSession({
         userId: userVictim,
         sessionId,
       })
 
-      // Seed attacker user
       await db.insert(users).values({
         id: userAttacker,
         role: "PLAYER",
@@ -677,7 +783,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         updatedAt: new Date().toISOString(),
       })
 
-      // Attacker issues token with their own sub but victim's sid
       const forgedToken = await createTestAccessToken({
         userId: userAttacker,
         sessionId,
@@ -700,7 +805,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(result.errors?.[0]?.extensions?.code).toBe("UNAUTHENTICATED")
     })
 
-    it("rejects token immediately when session is revoked in D1 (e.g. after logout)", async () => {
+    it("rejects token immediately when session is revoked in D1", async () => {
       const userId = "usr_logged_out"
       const sessionId = "ses_revoked_1"
       await seedUserAndSession({
@@ -823,12 +928,12 @@ describe("HiKAT Backend Core (Shard 03)", () => {
     })
   })
 
-  describe("7. CORS & Preflight Handling", () => {
-    it("handles OPTIONS preflight requests with 204 No Content and appropriate CORS headers", async () => {
+  describe("7. Strict CORS Allowlist & Preflight Handling", () => {
+    it("handles OPTIONS preflight for exact allowed production origins", async () => {
       const request = new Request("http://localhost/graphql", {
         method: "OPTIONS",
         headers: {
-          Origin: "http://localhost:5173",
+          Origin: "https://app.hikat.org",
           "Access-Control-Request-Method": "POST",
           "Access-Control-Request-Headers": "Content-Type, Authorization",
         },
@@ -837,24 +942,84 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const response = await worker.fetch(request, env)
 
       expect(response.status).toBe(204)
-      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173")
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://app.hikat.org")
       expect(response.headers.get("Access-Control-Allow-Methods")).toContain("POST")
     })
 
-    it("appends CORS headers on standard GraphQL POST requests", async () => {
+    it("allows desktop origins like hikat://launcher and hikat://app", async () => {
+      const request = new Request("http://localhost/graphql", {
+        method: "OPTIONS",
+        headers: {
+          Origin: "hikat://launcher",
+        },
+      })
+      const env: Env = { DB: testD1 }
+      const response = await worker.fetch(request, env)
+
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("hikat://launcher")
+    })
+
+    it("rejects open/wildcard custom protocol prefixes like hikat://attacker-site", async () => {
       const request = new Request("http://localhost/graphql", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Origin: "https://app.hikat.org",
+          Origin: "hikat://attacker-site",
         },
         body: JSON.stringify({ query: "{ version }" }),
       })
       const env: Env = { DB: testD1 }
       const response = await worker.fetch(request, env)
 
-      expect(response.status).toBe(200)
-      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://app.hikat.org")
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull()
+    })
+
+    it("rejects localhost in production environment without explicit configuration", async () => {
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "http://localhost:5173",
+        },
+        body: JSON.stringify({ query: "{ version }" }),
+      })
+      const env: Env = { DB: testD1, ENVIRONMENT: "production" }
+      const response = await worker.fetch(request, env)
+
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull()
+    })
+
+    it("allows localhost when environment is explicitly development", async () => {
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "http://localhost:5173",
+        },
+        body: JSON.stringify({ query: "{ version }" }),
+      })
+      const env: Env = { DB: testD1, ENVIRONMENT: "development" }
+      const response = await worker.fetch(request, env)
+
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173")
+    })
+
+    it("allows custom configured origins via CORS_ALLOW_ORIGIN", async () => {
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://custom.client.com",
+        },
+        body: JSON.stringify({ query: "{ version }" }),
+      })
+      const env: Env = {
+        DB: testD1,
+        CORS_ALLOW_ORIGIN: "https://custom.client.com, https://other.com",
+      }
+      const response = await worker.fetch(request, env)
+
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://custom.client.com")
     })
   })
 
@@ -887,7 +1052,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `bearer   ${token}`, // Lowercase 'bearer' with spaces
+          Authorization: `bearer   ${token}`,
         },
         body: JSON.stringify({ query: "{ me { id } }" }),
       })
@@ -900,7 +1065,26 @@ describe("HiKAT Backend Core (Shard 03)", () => {
     })
   })
 
-  describe("9. JWT Claims Integrity & Fallback Verification", () => {
+  describe("9. JWT Header & Claims Hardening", () => {
+    it("rejects token missing kid in protected header", async () => {
+      const token = await new jose.SignJWT({
+        role: "PLAYER",
+        sid: "ses_1",
+      })
+        .setProtectedHeader({ alg: "ES256", typ: "JWT" }) // Missing kid
+        .setSubject("usr_no_kid")
+        .setIssuer(DEFAULT_AUTH_ISSUER)
+        .setAudience(AUTH_AUDIENCE_API)
+        .setIssuedAt()
+        .setExpirationTime("15m")
+        .setJti(crypto.randomUUID())
+        .sign(privateKey)
+
+      await expect(
+        verifyAccessToken(token, { AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem }),
+      ).rejects.toThrow(/missing or invalid key ID/)
+    })
+
     it("rejects token with missing subject (sub)", async () => {
       const token = await new jose.SignJWT({
         role: "PLAYER",
@@ -909,7 +1093,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         .setProtectedHeader({ alg: "ES256", typ: "JWT", kid: keyId })
         .setIssuer(DEFAULT_AUTH_ISSUER)
         .setAudience(AUTH_AUDIENCE_API)
+        .setIssuedAt()
         .setExpirationTime("15m")
+        .setJti(crypto.randomUUID())
         .sign(privateKey)
 
       await expect(
@@ -925,12 +1111,34 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         .setSubject("usr_no_sid")
         .setIssuer(DEFAULT_AUTH_ISSUER)
         .setAudience(AUTH_AUDIENCE_API)
+        .setIssuedAt()
         .setExpirationTime("15m")
+        .setJti(crypto.randomUUID())
         .sign(privateKey)
 
       await expect(
         verifyAccessToken(token, { AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem }),
       ).rejects.toThrow(/missing or invalid session ID/)
+    })
+
+    it("rejects token with missing JWT ID (jti)", async () => {
+      const now = Math.floor(Date.now() / 1000)
+      const token = await new jose.SignJWT({
+        role: "PLAYER",
+        sid: "ses_1",
+      })
+        .setProtectedHeader({ alg: "ES256", typ: "JWT", kid: keyId })
+        .setSubject("usr_no_jti")
+        .setIssuer(DEFAULT_AUTH_ISSUER)
+        .setAudience(AUTH_AUDIENCE_API)
+        .setIssuedAt(now)
+        .setExpirationTime(now + 900)
+        // No jti
+        .sign(privateKey)
+
+      await expect(
+        verifyAccessToken(token, { AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem }),
+      ).rejects.toThrow(/missing or invalid JWT ID/)
     })
 
     it("rejects token with invalid role value", async () => {
@@ -942,7 +1150,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         .setSubject("usr_bad_role")
         .setIssuer(DEFAULT_AUTH_ISSUER)
         .setAudience(AUTH_AUDIENCE_API)
+        .setIssuedAt()
         .setExpirationTime("15m")
+        .setJti(crypto.randomUUID())
         .sign(privateKey)
 
       await expect(
@@ -974,13 +1184,43 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const res2 = await validateSessionInDb(db, "some_uid", "")
       expect(res2.valid).toBe(false)
     })
+  })
 
-    it("handles me query gracefully when DB is not configured", async () => {
-      const token = await createTestAccessToken({
-        userId: "usr_nodb",
-        sessionId: "ses_nodb",
-        role: "PLAYER",
+  describe("11. Production Error Masking (Cloudflare Compatible)", () => {
+    it("masks unexpected errors in production environment without exposing internals", async () => {
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: "{ me { id } }",
+        }),
       })
+      const env: Env = {
+        ENVIRONMENT: "production",
+        AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+        DB: testD1,
+      }
+      const response = await worker.fetch(request, env)
+
+      const result = await getJson(response)
+      expect(result.errors).toBeDefined()
+      expect(result.errors[0].extensions.code).toBe("UNAUTHENTICATED")
+    })
+
+    it("masks unexpected database failures during session check without exposing internals", async () => {
+      const userId = "usr_prod_err"
+      const sessionId = "ses_prod_err"
+      await seedUserAndSession({ userId, sessionId, role: "PLAYER" })
+
+      const token = await createTestAccessToken({ userId, sessionId, role: "PLAYER" })
+
+      // Mock D1 that throws unexpected internal DB engine failure on query
+      const faultyD1 = {
+        ...testD1,
+        prepare: () => {
+          throw new Error("CRITICAL_DATABASE_CORRUPTION_SQLITE_PANIC at /var/internal/db.sqlite")
+        },
+      } as unknown as D1Database
 
       const request = new Request("http://localhost/graphql", {
         method: "POST",
@@ -988,15 +1228,23 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ query: "{ me { id } }" }),
+        body: JSON.stringify({
+          query: "{ me { id } }",
+        }),
       })
-      // Env without DB binding
-      const env: Env = { AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem }
+      const env: Env = {
+        ENVIRONMENT: "production",
+        AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+        DB: faultyD1,
+      }
       const response = await worker.fetch(request, env)
 
       const result = await getJson(response)
-      expect(result.data?.me).toBeNull()
-      expect(result.errors?.[0]?.extensions?.code).toBe("INTERNAL_ERROR")
+      expect(result.errors).toBeDefined()
+      expect(result.errors[0].extensions.code).toBe("UNAUTHENTICATED")
+      // Ensure internal database details and panic stacks are not leaked
+      expect(JSON.stringify(result.errors)).not.toContain("CRITICAL_DATABASE_CORRUPTION")
+      expect(JSON.stringify(result.errors)).not.toContain("/var/internal")
     })
   })
 })

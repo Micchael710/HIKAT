@@ -96,23 +96,50 @@ export async function verifyAccessToken(
       throw new Error("Invalid token signature")
     }
     if (error.name === "JWTClaimValidationFailed") {
-      throw new Error(`Token claim validation failed: ${error.message}`)
+      throw new Error("Token claim validation failed")
     }
-    throw new Error(`Invalid token: ${error.message}`)
+    throw new Error("Invalid authentication token")
   }
 
-  const { payload } = verifyResult
+  const { payload, protectedHeader } = verifyResult
 
+  // 1. Enforce presence and valid type of kid in protected header
+  if (
+    !protectedHeader.kid ||
+    typeof protectedHeader.kid !== "string" ||
+    protectedHeader.kid.trim() === ""
+  ) {
+    throw new Error("Invalid token: missing or invalid key ID (kid) in header")
+  }
+
+  // 2. Enforce subject (sub)
   if (!payload.sub || typeof payload.sub !== "string" || payload.sub.trim() === "") {
     throw new Error("Invalid token: missing or invalid subject claim (sub)")
   }
 
+  // 3. Enforce session ID (sid)
   if (!payload.sid || typeof payload.sid !== "string" || payload.sid.trim() === "") {
     throw new Error("Invalid token: missing or invalid session ID claim (sid)")
   }
 
+  // 4. Enforce role
   if (!payload.role || (payload.role !== "PLAYER" && payload.role !== "ADMIN")) {
     throw new Error("Invalid token: missing or invalid role claim")
+  }
+
+  // 5. Enforce issued at (iat)
+  if (typeof payload.iat !== "number" || isNaN(payload.iat)) {
+    throw new Error("Invalid token: missing or invalid issued at claim (iat)")
+  }
+
+  // 6. Enforce expiration (exp)
+  if (typeof payload.exp !== "number" || isNaN(payload.exp)) {
+    throw new Error("Invalid token: missing or invalid expiration claim (exp)")
+  }
+
+  // 7. Enforce JWT ID (jti)
+  if (!payload.jti || typeof payload.jti !== "string" || payload.jti.trim() === "") {
+    throw new Error("Invalid token: missing or invalid JWT ID claim (jti)")
   }
 
   return {
@@ -122,8 +149,8 @@ export async function verifyAccessToken(
     sid: payload.sid,
     role: payload.role as AppRole,
     displayName: typeof payload.displayName === "string" ? payload.displayName : null,
-    iat: payload.iat as number,
-    exp: payload.exp as number,
-    jti: payload.jti as string,
+    iat: payload.iat,
+    exp: payload.exp,
+    jti: payload.jti,
   }
 }

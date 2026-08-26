@@ -1,16 +1,26 @@
 /**
  * HiKAT Backend CORS Strategy
- * Configures safe CORS headers for Backoffice, Launcher, and local development.
+ * Strict allowlist for Backoffice, Launcher desktop app, and local development.
  */
 
 import type { Env } from "./types"
 
-const DEFAULT_ALLOWED_ORIGINS = [
+const DEFAULT_PRODUCTION_ORIGINS = [
+  "https://app.hikat.org",
+  "https://admin.hikat.org",
+  "hikat://app",
+  "hikat://launcher",
+  "app://localhost",
+  "app://.",
+]
+
+const DEFAULT_DEV_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:3000",
-  "https://app.hikat.org",
-  "https://admin.hikat.org",
+  "http://127.0.0.1:3000",
+  "http://localhost:8787",
+  "http://127.0.0.1:8787",
 ]
 
 export function getCorsHeaders(request: Request, env: Env): HeadersInit {
@@ -18,13 +28,16 @@ export function getCorsHeaders(request: Request, env: Env): HeadersInit {
   let allowOrigin = ""
 
   if (origin) {
-    if (env.CORS_ALLOW_ORIGIN && env.CORS_ALLOW_ORIGIN === origin) {
-      allowOrigin = origin
-    } else if (DEFAULT_ALLOWED_ORIGINS.includes(origin)) {
-      allowOrigin = origin
-    } else if (origin.startsWith("hikat://") || origin.startsWith("app://")) {
-      allowOrigin = origin
-    } else if (env.ENVIRONMENT === "development" && (origin.includes("localhost") || origin.includes("127.0.0.1"))) {
+    const configuredOrigins = env.CORS_ALLOW_ORIGIN
+      ? env.CORS_ALLOW_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+      : []
+
+    const isExplicitlyConfigured = configuredOrigins.includes(origin)
+    const isProductionAllowed = DEFAULT_PRODUCTION_ORIGINS.includes(origin)
+    const isDevAllowed =
+      env.ENVIRONMENT === "development" && DEFAULT_DEV_ORIGINS.includes(origin)
+
+    if (isExplicitlyConfigured || isProductionAllowed || isDevAllowed) {
       allowOrigin = origin
     }
   }

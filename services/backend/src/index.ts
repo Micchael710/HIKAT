@@ -4,10 +4,11 @@
  */
 
 import { createYoga, createSchema } from "graphql-yoga"
-import { typeDefs } from "@hikat/graphql"
+import { GraphQLError } from "graphql"
+import { typeDefs, createGraphQLError } from "@hikat/graphql"
 import { HIKAT_VERSION } from "@hikat/shared"
-import { createDatabase, Database } from "@hikat/database"
-import type { Env, BackendGraphQLContext, AuthenticatedIdentity, AuthState } from "./types"
+import { createDatabase } from "@hikat/database"
+import type { Env, BackendGraphQLContext } from "./types"
 import { createGraphQLContext } from "./context"
 import { resolvers } from "./resolvers"
 import { getCorsHeaders, handleOptionsRequest } from "./cors"
@@ -20,13 +21,41 @@ export * from "./context"
 export * from "./services/userService"
 export * from "./resolvers"
 
+const KNOWN_SAFE_CODES = [
+  "UNAUTHENTICATED",
+  "FORBIDDEN",
+  "NOT_FOUND",
+  "VALIDATION_ERROR",
+  "CONFLICT",
+]
+
 export const yoga = createYoga<BackendGraphQLContext>({
   graphqlEndpoint: "/graphql",
+  cors: false, // Strict CORS handled exclusively by custom handler
   schema: createSchema({
     typeDefs,
     resolvers,
   }),
-  maskedErrors: process.env.NODE_ENV === "production",
+  maskedErrors: {
+    errorMessage: "Internal server error",
+    maskError(error: unknown, message: string, isDev?: boolean) {
+      const orig = (error as any)?.originalError ?? error
+      const code = orig?.extensions?.code ?? (error as any)?.extensions?.code
+
+      if (code && KNOWN_SAFE_CODES.includes(code)) {
+        if (error instanceof GraphQLError) {
+          return error
+        }
+        return createGraphQLError(orig?.message || message, code)
+      }
+
+      const isDevMode = isDev ?? (process.env.NODE_ENV !== "production")
+      if (isDevMode && orig instanceof Error) {
+        return createGraphQLError(orig.message, "INTERNAL_ERROR")
+      }
+      return createGraphQLError(message || "Internal server error", "INTERNAL_ERROR")
+    },
+  },
 })
 
 export default {
@@ -66,6 +95,32 @@ export default {
 
     const response = await yoga.fetch(request, context)
 
+    // Sanitize any unexpected internal errors in production environments
+    let finalBody: BodyInit | null = response.body
+    if (env.ENVIRONMENT === "production" && response.headers.get("Content-Type")?.includes("application/json")) {
+      try {
+        const bodyText = await response.text()
+        const json = JSON.parse(bodyText)
+        if (Array.isArray(json.errors) && json.errors.length > 0) {
+          json.errors = json.errors.map((err: any) => {
+            const code = err.extensions?.code
+            if (code && KNOWN_SAFE_CODES.includes(code)) {
+              return err
+            }
+            return {
+              message: "Internal server error",
+              extensions: { code: "INTERNAL_ERROR" },
+            }
+          })
+          finalBody = JSON.stringify(json)
+        } else {
+          finalBody = bodyText
+        }
+      } catch {
+        finalBody = response.body
+      }
+    }
+
     // Append CORS headers to response
     const corsHeaders = getCorsHeaders(request, env)
     const newHeaders = new Headers(response.headers)
@@ -73,7 +128,7 @@ export default {
       newHeaders.set(key, value)
     }
 
-    return new Response(response.body, {
+    return new Response(finalBody, {
       status: response.status,
       statusText: response.statusText,
       headers: newHeaders,
