@@ -73,7 +73,7 @@ export default function SettingsView({
     if (window.electronAPI?.getMemory) {
       window.electronAPI
         .getMemory()
-        .then((info) => {
+        .then((info: any) => {
           if (isMounted && info?.totalGb) {
             setSystemTotalRAM(info.totalGb)
           }
@@ -84,7 +84,7 @@ export default function SettingsView({
     if (window.electronAPI?.getStartWithSystem) {
       window.electronAPI
         .getStartWithSystem()
-        .then((realState) => {
+        .then((realState: any) => {
           if (isMounted && typeof realState === "boolean") {
             setStartWithSystemState(realState)
             setStoredBoolean(STORAGE_KEYS.START_WITH_SYSTEM, realState)

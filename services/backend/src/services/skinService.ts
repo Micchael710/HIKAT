@@ -23,6 +23,7 @@ import {
   decodeCursor,
   normalizeIsoDateTime,
   MAX_SKIN_SIZE_BYTES,
+  validateMinecraftSkinTexture,
 } from "@hikat/shared"
 
 import type { Env } from "../types"
@@ -35,22 +36,15 @@ import {
 
 export function formatSkinGql(
   skin: schema.Skin,
-
   mediaUrl: string,
 ): SkinGql {
   return {
     id: skin.id,
-
     name: skin.name,
-
     model: skin.model as any,
-
     imageUrl: mediaUrl,
-
     status: skin.status as any,
-
     createdAt: normalizeIsoDateTime(skin.createdAt),
-
     updatedAt: normalizeIsoDateTime(skin.updatedAt),
   }
 }
@@ -69,82 +63,24 @@ export function formatPlayerSkinGql(
   }
 }
 
-
 export function formatAdminPlayerSkinGql(
   playerSkin: schema.PlayerSkin,
-
   userDisplayName: string,
-
   mediaUrl: string,
 ): AdminPlayerSkinGql {
   return {
     id: playerSkin.id,
-
     userId: playerSkin.userId,
-
     userDisplayName: userDisplayName || "Jugador",
-
     model: playerSkin.model as any,
-
     imageUrl: mediaUrl,
-
     createdAt: normalizeIsoDateTime(playerSkin.createdAt),
     updatedAt: normalizeIsoDateTime(playerSkin.updatedAt),
   }
 }
 
-/**
- * Strict Minecraft skin texture dimension validator.
- * Accepts ArrayBuffer or Uint8Array of a PNG image.
- * Reads PNG IHDR chunk (offset 16-24) to extract width and height in Big Endian format.
- * Validates dimensions: either 64x64 (modern standard) or 64x32 (legacy standard).
- */
-export function validateMinecraftSkinTexture(buffer: ArrayBuffer | Uint8Array): {
-  valid: boolean
-  width?: number
-  height?: number
-  reason?: string
-} {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
-  if (bytes.length < 24) {
-    return { valid: false, reason: "Archivo PNG incompleto o dañado." }
-  }
-
-  // PNG magic: 0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A
-  const isPng =
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47 &&
-    bytes[4] === 0x0d &&
-    bytes[5] === 0x0a &&
-    bytes[6] === 0x1a &&
-    bytes[7] === 0x0a
-
-  if (!isPng) {
-    return { valid: false, reason: "El archivo no es una imagen PNG válida." }
-  }
-
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const width = view.getUint32(16, false)
-  const height = view.getUint32(20, false)
-
-  const isClassicOrModern =
-    (width === 64 && height === 64) || (width === 64 && height === 32)
-
-  if (!isClassicOrModern) {
-    return {
-      valid: false,
-      width,
-      height,
-      reason: `Dimensiones de skin inválidas (${width}x${height}). Se requiere PNG de 64x64 o 64x32.`,
-    }
-  }
-
-  return { valid: true, width, height }
-}
-
 // --- Global Skins Management ---
+
 
 
 export async function getAdminSkins(
@@ -665,112 +601,81 @@ export async function setMyPlayerSkin(
   }
 
   const model = input.model === "SLIM" ? "SLIM" : "CLASSIC"
-
   const now = new Date().toISOString()
 
+  // 1. Inspect existing record before upsert to capture oldMediaId for safe post-update cleanup
   const existing = await db
-
     .select()
-
     .from(schema.playerSkins)
-
     .where(eq(schema.playerSkins.userId, userId))
-
     .get()
 
-  if (existing) {
-    const oldMediaId = existing.mediaId
+  const oldMediaId = existing ? existing.mediaId : null
+  const recordId = existing ? existing.id : crypto.randomUUID()
 
-    await db
-
-      .update(schema.playerSkins)
-
-      .set({
-        mediaId: media.id,
-
-        model,
-
-        updatedAt: now,
-      })
-
-      .where(eq(schema.playerSkins.id, existing.id))
-
-    // Clean up old media object if not referenced elsewhere
-
-    if (oldMediaId !== media.id && env.ASSETS) {
-      const otherRef = await db
-
-        .select({ id: schema.skins.id })
-
-        .from(schema.skins)
-
-        .where(eq(schema.skins.mediaId, oldMediaId))
-
-        .get()
-
-      const otherPlayerRef = await db
-
-        .select({ id: schema.playerSkins.id })
-
-        .from(schema.playerSkins)
-
-        .where(
-          and(
-            eq(schema.playerSkins.mediaId, oldMediaId),
-            sql`${schema.playerSkins.id} != ${existing.id}`,
-          ),
-        )
-
-        .get()
-
-      const newsRef = await db
-
-        .select({ id: schema.news.id })
-
-        .from(schema.news)
-
-        .where(eq(schema.news.imageMediaId, oldMediaId))
-
-        .get()
-
-      if (!otherRef && !otherPlayerRef && !newsRef) {
-        try {
-          await deleteMedia(db, env, oldMediaId)
-        } catch {
-          // Non-blocking cleanup
-        }
-      }
-    }
-  } else {
-    const newId = crypto.randomUUID()
-
-    await db.insert(schema.playerSkins).values({
-      id: newId,
-
+  // 2. Concurrency-safe UPSERT using ON CONFLICT(user_id) DO UPDATE
+  await db
+    .insert(schema.playerSkins)
+    .values({
+      id: recordId,
       userId,
-
       model,
-
       mediaId: media.id,
-
       createdAt: now,
-
       updatedAt: now,
     })
+    .onConflictDoUpdate({
+      target: schema.playerSkins.userId,
+      set: {
+        model,
+        mediaId: media.id,
+        updatedAt: now,
+      },
+    })
+
+  // 3. Safe post-success media cleanup: only clean oldMediaId if update succeeded and oldMediaId differs
+  if (oldMediaId && oldMediaId !== media.id && env.ASSETS) {
+    const skinRef = await db
+      .select({ id: schema.skins.id })
+      .from(schema.skins)
+      .where(eq(schema.skins.mediaId, oldMediaId))
+      .get()
+
+    const otherPlayerRef = await db
+      .select({ id: schema.playerSkins.id })
+      .from(schema.playerSkins)
+      .where(
+        and(
+          eq(schema.playerSkins.mediaId, oldMediaId),
+          sql`${schema.playerSkins.userId} != ${userId}`,
+        ),
+      )
+      .get()
+
+    const newsRef = await db
+      .select({ id: schema.news.id })
+      .from(schema.news)
+      .where(eq(schema.news.imageMediaId, oldMediaId))
+      .get()
+
+    if (!skinRef && !otherPlayerRef && !newsRef) {
+      try {
+        await deleteMedia(db, env, oldMediaId)
+      } catch {
+        // Non-blocking cleanup
+      }
+    }
   }
 
   const updated = await db
-
     .select()
-
     .from(schema.playerSkins)
-
     .where(eq(schema.playerSkins.userId, userId))
-
     .get()
 
   return formatPlayerSkinGql(updated!, `/media/content/${media.id}`)
 }
+
 
 /**
  * Deletes the currently authenticated player's personal custom skin.
@@ -1106,45 +1011,37 @@ export async function updateAdminPlayerSkin(
     }
 
     const oldMediaId = existing.mediaId
-
     updates.mediaId = media.id
 
-    // Clean up old media if orphaned
+    // 1. Perform database update first
+    await db
+      .update(schema.playerSkins)
+      .set(updates)
+      .where(eq(schema.playerSkins.id, id))
 
+    // 2. ONLY AFTER successful update, clean up old orphaned media
     if (oldMediaId !== media.id && env.ASSETS) {
       const skinRef = await db
-
         .select({ id: schema.skins.id })
-
         .from(schema.skins)
-
         .where(eq(schema.skins.mediaId, oldMediaId))
-
         .get()
 
       const otherPlayerRef = await db
-
         .select({ id: schema.playerSkins.id })
-
         .from(schema.playerSkins)
-
         .where(
           and(
             eq(schema.playerSkins.mediaId, oldMediaId),
             sql`${schema.playerSkins.id} != ${id}`,
           ),
         )
-
         .get()
 
       const newsRef = await db
-
         .select({ id: schema.news.id })
-
         .from(schema.news)
-
         .where(eq(schema.news.imageMediaId, oldMediaId))
-
         .get()
 
       if (!skinRef && !otherPlayerRef && !newsRef) {
@@ -1155,15 +1052,14 @@ export async function updateAdminPlayerSkin(
         }
       }
     }
+  } else {
+    await db
+      .update(schema.playerSkins)
+      .set(updates)
+      .where(eq(schema.playerSkins.id, id))
   }
 
-  await db
-    .update(schema.playerSkins)
-    .set(updates)
-    .where(eq(schema.playerSkins.id, id))
-
   const updated = await getAdminPlayerSkinById(db, id)
-
   if (!updated) {
     throw createGraphQLError(
       "Error al actualizar la skin del jugador.",
@@ -1173,6 +1069,7 @@ export async function updateAdminPlayerSkin(
 
   return updated
 }
+
 
 /**
  * Deletes a player custom skin from Back Office (ADMIN).

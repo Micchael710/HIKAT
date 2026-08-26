@@ -10,8 +10,11 @@ import {
   contentMedia,
   contentMediaUploadTokens,
   news,
+  skins,
+  playerSkins,
   ContentMedia,
 } from "@hikat/database"
+
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   ALLOWED_VIDEO_MIME_TYPES,
@@ -367,6 +370,35 @@ export async function deleteMedia(
       "CONFLICT",
     )
   }
+
+  // Check if referenced by any global skin
+  const referencingSkin = await db
+    .select({ id: skins.id, name: skins.name })
+    .from(skins)
+    .where(eq(skins.mediaId, mediaId))
+    .get()
+
+  if (referencingSkin) {
+    throw createGraphQLError(
+      `Cannot delete media asset because it is currently in use by skin '${referencingSkin.name}' (${referencingSkin.id})`,
+      "CONFLICT",
+    )
+  }
+
+  // Check if referenced by any player custom skin
+  const referencingPlayerSkin = await db
+    .select({ id: playerSkins.id })
+    .from(playerSkins)
+    .where(eq(playerSkins.mediaId, mediaId))
+    .get()
+
+  if (referencingPlayerSkin) {
+    throw createGraphQLError(
+      "Cannot delete media asset because it is currently in use by a player custom skin",
+      "CONFLICT",
+    )
+  }
+
 
   // Delete from D1
   await db.delete(contentMedia).where(eq(contentMedia.id, mediaId))

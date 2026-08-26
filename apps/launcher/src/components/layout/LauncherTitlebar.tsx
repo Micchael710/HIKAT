@@ -61,32 +61,37 @@ export default function LauncherTitlebar({
     <>
       {/* Invisible Top Drag Region for Frameless Window */}
       <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 38,
-          zIndex: 9990,
-          WebkitAppRegion: "drag" as any,
-          pointerEvents: "auto",
-        }}
+        style={
+          {
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 38,
+            zIndex: 9990,
+            WebkitAppRegion: "drag",
+            pointerEvents: "auto",
+          } as any
+        }
       />
 
       {/* Top-Right Window Action Buttons Overlay (Corner Flush) */}
       <div
-        style={{
-          position: "absolute",
-          top: 0,
-          right: 0,
-          height: 36,
-          display: "flex",
-          alignItems: "stretch",
-          zIndex: 9999,
-          pointerEvents: "auto",
-          WebkitAppRegion: "no-drag" as any,
-        }}
+        style={
+          {
+            position: "absolute",
+            top: 0,
+            right: 0,
+            height: 36,
+            display: "flex",
+            alignItems: "stretch",
+            zIndex: 9999,
+            pointerEvents: "auto",
+            WebkitAppRegion: "no-drag",
+          } as any
+        }
       >
+
         {/* Minimize */}
         <button
           type="button"

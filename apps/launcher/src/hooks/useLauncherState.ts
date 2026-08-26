@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
-
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   ThemeMode,
   LauncherScreen,
@@ -11,214 +10,253 @@ import {
   DEFAULT_SKINS,
   DEFAULT_CAPES,
 } from "../types"
-
 import { CANVAS_W, MIN_WINDOW_W, MIN_WINDOW_H, hexToRGB } from "../theme/tokens"
-
-import { fetchGlobalSkins, fetchMyPlayerSkin } from "../services/skinService"
+import {
+  fetchGlobalSkins,
+  fetchMyPlayerSkin,
+  uploadPlayerSkin,
+  deleteMyPlayerSkin,
+} from "../services/skinService"
+import { authService, UserProfile } from "../services/authService"
 
 export function useLauncherState() {
-  const [screen, setScreen] = useState<LauncherScreen>("login")
+  const [screen, setScreen] = useState<LauncherScreen>(() => {
+    if (typeof window !== "undefined") {
+      const token = authService.getStoredToken()
+      if (token) return "home"
+    }
+    return "login"
+  })
 
-  const [username, setUsername] = useState("Jugador")
+  const [username, setUsername] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const cached = authService.getCachedUser()
+      if (cached) return cached.displayName || cached.username || "Jugador"
+    }
+    return "Jugador"
+  })
 
   const [view, setView] = useState<LauncherView>("home")
 
   /* Theme state with localStorage persistence */
-
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("hikat_theme")
-
       if (saved === "light" || saved === "dark") return saved
     }
-
     return "dark"
   })
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme)
-
     try {
       localStorage.setItem("hikat_theme", theme)
     } catch (_) {}
   }, [theme])
 
-  /* Skins and capes */
-
-  const [appliedSkin, setAppliedSkin] = useState("none")
-
-  const [appliedCape, setAppliedCape] = useState("none")
-
+  /* Skins and Capes Domain State */
+  const [appliedSkin, setAppliedSkin] = useState<string>("player-custom")
+  const [appliedCape, setAppliedCape] = useState<string>("none")
   const [globalSkins, setGlobalSkins] = useState<GlobalSkin[]>([])
-
   const [playerSkin, setPlayerSkin] = useState<PlayerSkin | null>(null)
+  const [skinsLoading, setSkinsLoading] = useState<boolean>(false)
+  const [skinsError, setSkinsError] = useState<string | null>(null)
 
-  const [customSkins, setCustomSkins] = useState<SkinItem[]>([])
-
+  // Capes collection (preserved for capes subsystem)
   const [customCapes, setCustomCapes] = useState<CapeItem[]>([])
 
-  const loadSkins = useCallback(async () => {
+  /**
+   * Loads public global skins catalog (can be called unauthenticated or offline)
+   */
+  const loadGlobalCatalog = useCallback(async () => {
     try {
-      const [globals, mine] = await Promise.all([
-        fetchGlobalSkins(),
-
-        fetchMyPlayerSkin(),
-      ])
-
+      const globals = await fetchGlobalSkins()
       setGlobalSkins(globals)
-
-      setPlayerSkin(mine)
-    } catch {
-      // Graceful offline fallback
+    } catch (err: any) {
+      // Offline fallback
     }
   }, [])
 
-  useEffect(() => {
-    loadSkins()
-  }, [loadSkins])
-
-  // Build combined skin list
-
-  const computedSkins: SkinItem[] = []
-
-  if (playerSkin) {
-    computedSkins.push({
-      id: "player-custom",
-
-      name: "Mi Skin",
-
-      badge: "CUSTOM",
-
-      accent: "#38bdf8",
-
-      customImgUrl: playerSkin.imageUrl,
-
-      skinUrl: playerSkin.imageUrl,
-
-      model: playerSkin.model.toLowerCase() as any,
-    })
-  }
-
-  for (const gs of globalSkins) {
-    computedSkins.push({
-      id: gs.id,
-
-      name: gs.name,
-
-      badge: "OFFICIAL",
-
-      accent: "#6366f1",
-
-      customImgUrl: gs.imageUrl,
-
-      skinUrl: gs.imageUrl,
-
-      model: gs.model.toLowerCase() as any,
-    })
-  }
-
-  for (const cs of customSkins) {
-    if (!computedSkins.some((s) => s.id === cs.id)) {
-      computedSkins.push(cs)
+  /**
+   * Refreshes the authenticated player's personal custom skin
+   */
+  const refreshPlayerSkin = useCallback(async () => {
+    const token = authService.getStoredToken()
+    if (!token) {
+      setPlayerSkin(null)
+      return
     }
-  }
+    try {
+      setSkinsLoading(true)
+      const mine = await fetchMyPlayerSkin()
+      setPlayerSkin(mine)
+      setSkinsError(null)
+    } catch (err: any) {
+      setSkinsError(err?.message || "No se pudo sincronizar la skin del jugador.")
+    } finally {
+      setSkinsLoading(false)
+    }
+  }, [])
 
-  const allSkins = [...computedSkins, ...DEFAULT_SKINS]
+  // Initial load: fetch global catalog on mount, and player skin if authenticated
+  useEffect(() => {
+    loadGlobalCatalog()
+    if (authService.getStoredToken()) {
+      refreshPlayerSkin()
+    }
+  }, [loadGlobalCatalog, refreshPlayerSkin])
 
-  const activeSkinData =
-    allSkins.find((s) => s.id === appliedSkin) ?? allSkins[0]
+  /**
+   * Unified derived skins list:
+   * 1. Player Custom Skin (if uploaded: badge 'CUSTOM')
+   * 2. Backend Global Skins Catalog (badge 'OFFICIAL')
+   * 3. Fallback DEFAULT_SKINS (only used when global catalog is empty, e.g. offline mode)
+   */
+  const allSkins = useMemo<SkinItem[]>(() => {
+    const items: SkinItem[] = []
 
-  const activeSkinAccent = hexToRGB(
-    activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8",
-  )
+    if (playerSkin) {
+      items.push({
+        id: "player-custom",
+        name: "Mi Skin",
+        badge: "CUSTOM",
+        accent: "#38bdf8",
+        customImgUrl: playerSkin.imageUrl,
+        skinUrl: playerSkin.imageUrl,
+        model: (playerSkin.model?.toLowerCase() as any) || "classic",
+      })
+    }
 
-  /* Dynamic Responsive Window Scaling (Supports Min Window Size & Fullscreen) */
+    for (const gs of globalSkins) {
+      items.push({
+        id: gs.id,
+        name: gs.name,
+        badge: "OFFICIAL",
+        accent: "#6366f1",
+        customImgUrl: gs.imageUrl,
+        skinUrl: gs.imageUrl,
+        model: (gs.model?.toLowerCase() as any) || "classic",
+      })
+    }
 
+    // Offline fallback policy: show DEFAULT_SKINS only if no remote skins available
+    if (globalSkins.length === 0 && !playerSkin) {
+      return DEFAULT_SKINS
+    }
+
+    return items
+  }, [playerSkin, globalSkins])
+
+  // Resolve active skin data for 3D preview and player badge
+  const activeSkinData = useMemo(() => {
+    const found = allSkins.find((s) => s.id === appliedSkin)
+    return found || allSkins[0] || DEFAULT_SKINS[0]
+  }, [allSkins, appliedSkin])
+
+  const activeSkinAccent = useMemo(() => {
+    return hexToRGB(
+      activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8",
+    )
+  }, [activeSkinData])
+
+  /* Dynamic Responsive Window Scaling */
   const [scale, setScale] = useState(() => {
     if (typeof window === "undefined") return 1
-
     const width = Math.max(window.innerWidth, MIN_WINDOW_W)
-
     return width / CANVAS_W
   })
 
   useEffect(() => {
     const handleResize = () => {
       const currentW = window.innerWidth
-
-      const currentH = window.innerHeight
-
-      // Calculate responsive scale factor
-
       const s = Math.max(currentW, MIN_WINDOW_W) / CANVAS_W
-
       setScale(s)
     }
-
     handleResize()
-
     window.addEventListener("resize", handleResize)
-
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
-  const handleLogin = (name: string) => {
+  /**
+   * Upload and link a player custom skin with safe replacement
+   */
+  const handleUploadSkin = useCallback(
+    async (file: File, model: "CLASSIC" | "SLIM"): Promise<PlayerSkin> => {
+      const uploaded = await uploadPlayerSkin(file, model)
+      setPlayerSkin(uploaded)
+      setAppliedSkin("player-custom")
+      return uploaded
+    },
+    [],
+  )
+
+  /**
+   * Delete player personal custom skin
+   */
+  const handleDeleteSkin = useCallback(async (): Promise<boolean> => {
+    const res = await deleteMyPlayerSkin()
+    if (res.success) {
+      setPlayerSkin(null)
+      if (appliedSkin === "player-custom") {
+        setAppliedSkin(globalSkins[0]?.id || "none")
+      }
+      return true
+    }
+    return false
+  }, [appliedSkin, globalSkins])
+
+  /**
+   * Handle user login success
+   */
+  const handleLogin = useCallback((name: string) => {
     setUsername(name)
-
     setScreen("home")
-
     setView("home")
-  }
+    refreshPlayerSkin()
+    loadGlobalCatalog()
+  }, [refreshPlayerSkin, loadGlobalCatalog])
 
-  const handleLogout = () => {
+  /**
+   * Handle user logout cleanly
+   */
+  const handleLogout = useCallback(() => {
+    authService.logout()
+    setPlayerSkin(null)
+    setUsername("Jugador")
     setScreen("login")
-
     setView("home")
-  }
+    if (appliedSkin === "player-custom") {
+      setAppliedSkin("none")
+    }
+  }, [appliedSkin])
 
   return {
     screen,
-
     setScreen,
-
     username,
-
     setUsername,
-
     view,
-
     setView,
-
     theme,
-
     setTheme,
-
     appliedSkin,
-
     setAppliedSkin,
-
     appliedCape,
-
     setAppliedCape,
-
-    customSkins,
-
-    setCustomSkins,
-
+    globalSkins,
+    playerSkin,
+    skinsLoading,
+    skinsError,
     customCapes,
-
     setCustomCapes,
-
     allSkins,
-
     activeSkinData,
-
     activeSkinAccent,
-
     scale,
-
+    handleUploadSkin,
+    handleDeleteSkin,
+    refreshPlayerSkin,
     handleLogin,
-
     handleLogout,
   }
 }

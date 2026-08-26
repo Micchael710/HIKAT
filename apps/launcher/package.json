@@ -10,11 +10,14 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "electron": "electron .",
     "desktop": "electron .",
     "format": "oxfmt src"
   },
   "dependencies": {
+    "@hikat/shared": "workspace:*",
     "axios": "^1.19.0",
     "minecraft-launcher-core": "^3.18.2",
     "react": "^19.0.0",
@@ -29,11 +32,11 @@
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.156.0",
     "@vitejs/plugin-react": "^6.0.0",
-
     "electron": "^43.4.1",
     "oxfmt": "^0.2.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "vitest": "^3.0.0"
   }
 }

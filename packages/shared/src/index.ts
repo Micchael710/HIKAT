@@ -492,14 +492,18 @@ export const GAME_CATEGORY_DEFAULT_POLICIES: Record<
 
 /**
  * Validates PNG buffer header magic bytes and IHDR dimensions for Minecraft skins.
- * Supported standard Minecraft skins: 64x64 or 64x32 (or valid HD multiples 128x128, etc.).
+ * Supported standard Minecraft skins: strict 64x64 or 64x32 dimensions.
  */
 export function validateMinecraftSkinTexture(
   buffer: ArrayBuffer | Uint8Array,
-): { valid: boolean; width?: number; height?: number; error?: string } {
+): { valid: boolean; width?: number; height?: number; error?: string; reason?: string } {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
   if (bytes.length < 24) {
-    return { valid: false, error: "El archivo de skin es demasiado pequeño." }
+    return {
+      valid: false,
+      error: "El archivo de skin es demasiado pequeño o está incompleto.",
+      reason: "El archivo de skin es demasiado pequeño o está incompleto.",
+    }
   }
 
   // PNG Magic Bytes: 89 50 4E 47 0D 0A 1A 0A
@@ -516,6 +520,7 @@ export function validateMinecraftSkinTexture(
     return {
       valid: false,
       error: "El archivo no es una imagen PNG válida.",
+      reason: "El archivo no es una imagen PNG válida.",
     }
   }
 
@@ -524,25 +529,23 @@ export function validateMinecraftSkinTexture(
   const width = view.getUint32(16, false)
   const height = view.getUint32(20, false)
 
-  // Minecraft standard dimensions: 64x64, 64x32, or power-of-two HD textures up to 1024x1024
-  const validDimensions =
-    (width === 64 && (height === 64 || height === 32)) ||
-    (width === 128 && (height === 128 || height === 64)) ||
-    (width === 256 && (height === 256 || height === 128)) ||
-    (width === 512 && (height === 512 || height === 256)) ||
-    (width === 1024 && (height === 1024 || height === 512))
+  // Minecraft standard dimensions: strictly 64x64 (modern) or 64x32 (classic)
+  const validDimensions = width === 64 && (height === 64 || height === 32)
 
   if (!validDimensions) {
+    const msg = `Dimensiones de skin inválidas (${width}x${height}). Se requiere PNG de 64x64 o 64x32.`
     return {
       valid: false,
       width,
       height,
-      error: `Dimensiones de skin no válidas (${width}x${height}). Debe ser 64x64 o 64x32 píxeles (o múltiplos HD).`,
+      error: msg,
+      reason: msg,
     }
   }
 
   return { valid: true, width, height }
 }
+
 
 /**
  * Sanitizes a filename to prevent path traversal, control characters, and dangerous symbols.

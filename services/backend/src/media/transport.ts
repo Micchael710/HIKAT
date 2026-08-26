@@ -8,6 +8,8 @@ import {
   ALLOWED_MEDIA_MIME_TYPES,
   MAX_IMAGE_SIZE_BYTES,
   MAX_VIDEO_SIZE_BYTES,
+  MAX_SKIN_SIZE_BYTES,
+  validateMinecraftSkinTexture,
   MediaMimeType,
 } from "@hikat/shared"
 import type { Env, BackendGraphQLContext } from "../types"
@@ -19,7 +21,7 @@ import {
   getContentMediaById,
   formatMediaGql,
 } from "../services/mediaService"
-import { validateMinecraftSkinTexture } from "../services/skinService"
+
 
 
 function jsonResponse(
@@ -438,12 +440,12 @@ export async function handlePlayerSkinUpload(
     }
 
     // 4. Read body stream with limit (1MB max)
-    const MAX_SKIN_BYTES = 1048576
-    const readResult = await readBodyWithLimit(request, MAX_SKIN_BYTES)
+    const readResult = await readBodyWithLimit(request, MAX_SKIN_SIZE_BYTES)
     if (!readResult.success) {
       if (readResult.reason === "TOO_LARGE") {
         return jsonResponse({ error: `El archivo supera el tamaño máximo permitido de 1 MB` }, 413, request, env)
       }
+
       return jsonResponse({ error: "El cuerpo de la petición está vacío" }, 400, request, env)
     }
 

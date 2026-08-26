@@ -66,8 +66,9 @@ export default function ProfileView({
         showToast(t("profile.emailSent"), "success")
       } else {
         setResetState("idle")
-        showToast(res.message || t("profile.emailError"), "error")
+        showToast(res.error || t("profile.emailError"), "error")
       }
+
     } catch (_) {
       setResetState("idle")
       showToast(t("profile.emailError"), "error")

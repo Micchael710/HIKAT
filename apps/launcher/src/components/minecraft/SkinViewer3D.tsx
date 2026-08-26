@@ -402,7 +402,7 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={triggerNextPose}
-            title={t("skins.controls.changePose", "Cambiar pose")}
+            title={t("skins.controls.changePose") || "Cambiar pose"}
             style={{
               display: "flex",
               alignItems: "center",
@@ -446,7 +446,7 @@ export default function SkinViewer3D({
               setActiveAnimation(nextAnim)
               applyPoseOrAnimation(currentPose, nextAnim)
             }}
-            title={t("skins.controls.changeAnimation", "Cambiar animación")}
+            title={t("skins.controls.changeAnimation") || "Cambiar animación"}
             style={{
               display: "flex",
               alignItems: "center",
@@ -495,7 +495,7 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={() => setAutoRotate(!autoRotate)}
-            title={t("skins.controls.toggleRotate", "Giro 360°")}
+            title={t("skins.controls.toggleRotate") || "Giro 360°"}
             style={{
               width: 32,
               height: 32,
@@ -534,7 +534,8 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={handleResetCamera}
-            title={t("skins.controls.resetCamera", "Reiniciar cámara")}
+            title={t("skins.controls.resetCamera") || "Reiniciar cámara"}
+
             style={{
               width: 32,
               height: 32,

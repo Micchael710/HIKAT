@@ -22,8 +22,10 @@ export default function App() {
     setAppliedSkin,
     appliedCape,
     setAppliedCape,
-    customSkins,
-    setCustomSkins,
+    allSkins,
+    playerSkin,
+    handleUploadSkin,
+    handleDeleteSkin,
     customCapes,
     setCustomCapes,
     activeSkinData,
@@ -32,6 +34,7 @@ export default function App() {
     handleLogin,
     handleLogout,
   } = useLauncherState()
+
 
   const tokens = getThemeTokens(theme)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -180,13 +183,16 @@ export default function App() {
                 setAppliedSkin={setAppliedSkin}
                 appliedCape={appliedCape}
                 setAppliedCape={setAppliedCape}
-                customSkins={customSkins}
-                setCustomSkins={setCustomSkins}
+                allSkins={allSkins}
+                playerSkin={playerSkin}
+                onUploadSkin={handleUploadSkin}
+                onDeleteSkin={handleDeleteSkin}
                 customCapes={customCapes}
                 setCustomCapes={setCustomCapes}
                 theme={theme}
               />
             )}
+
             {view === "settings" && (
               <SettingsView theme={theme} setTheme={setTheme} />
             )}

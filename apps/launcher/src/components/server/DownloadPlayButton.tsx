@@ -106,7 +106,7 @@ export default function DownloadPlayButton({
 
   // Listen to IPC download progress events if running in Electron
   useEffect(() => {
-    const unsub = window.electronAPI?.onDownloadProgress?.((data) => {
+    const unsub = window.electronAPI?.onDownloadProgress?.((data: any) => {
       setProgress(data.progress)
       setSpeed(data.speedMBs)
       setDownloadedGB(data.downloadedGB)

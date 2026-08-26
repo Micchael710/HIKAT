@@ -1,13 +1,13 @@
 import { apiClient, ApiResponse } from "./apiClient"
-import { ServerStatus, PlayerStats } from "../types"
+import { ServerStatusResponse, PlayerStats } from "../types"
 
 export const serverService = {
   /**
    * Fetch live Minecraft server ping status & player count.
    * Returns null if unreachable and no cache exists.
    */
-  async getServerStatus(): Promise<ServerStatus | null> {
-    const res = await apiClient<ServerStatus>("/server/status")
+  async getServerStatus(): Promise<ServerStatusResponse | null> {
+    const res = await apiClient<ServerStatusResponse>("/server/status")
 
     if (res.success && res.data) {
       try {

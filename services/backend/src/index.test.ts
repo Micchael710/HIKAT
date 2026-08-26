@@ -7907,8 +7907,280 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       )
 
       const repeatDeleteJson = (await repeatDelete.json()) as any
-
       expect(repeatDeleteJson.data.deleteMyPlayerSkin).toBe(true)
+    })
+
+    it("safely handles concurrent setMyPlayerSkin calls with atomic UPSERT and enforces single row", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const concurrentPlayerId = crypto.randomUUID()
+      const concurrentPlayerSessionId = crypto.randomUUID()
+      const concurrentAdminId = crypto.randomUUID()
+      const concurrentAdminSessionId = crypto.randomUUID()
+
+      await db.insert(users).values([
+        {
+          id: concurrentPlayerId,
+          displayName: "ConcurrentPlayer",
+          role: "PLAYER",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: concurrentAdminId,
+          displayName: "ConcurrentAdmin",
+          role: "ADMIN",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+
+      await db.insert(sessions).values([
+        {
+          id: concurrentPlayerSessionId,
+          userId: concurrentPlayerId,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: concurrentAdminSessionId,
+          userId: concurrentAdminId,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      ])
+
+      const pToken = await createTestAccessToken({
+        userId: concurrentPlayerId,
+        sessionId: concurrentPlayerSessionId,
+        role: "PLAYER",
+        displayName: "ConcurrentPlayer",
+      })
+
+      const aToken = await createTestAccessToken({
+        userId: concurrentAdminId,
+        sessionId: concurrentAdminSessionId,
+        role: "ADMIN",
+        displayName: "ConcurrentAdmin",
+      })
+
+      // Upload texture
+      const ticketRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${pToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation { createPlayerSkinUpload { uploadToken } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const token = ((await ticketRes.json()) as any).data.createPlayerSkinUpload.uploadToken
+      const uploadRes = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "image/png",
+            Authorization: `Bearer ${pToken}`,
+            "X-Upload-Token": token,
+          },
+          body: createMockSkinPng(64, 64) as unknown as BodyInit,
+        }),
+        testEnv,
+      )
+      const media = (await uploadRes.json()) as any
+
+      // Execute 2 concurrent setMyPlayerSkin calls
+      const [res1, res2] = await Promise.all([
+        worker.fetch(
+          new Request("http://localhost/graphql", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${pToken}`,
+            },
+            body: JSON.stringify({
+              query: `mutation SetSkin($input: SetPlayerSkinInput!) {
+                setMyPlayerSkin(input: $input) { id model }
+              }`,
+              variables: { input: { mediaId: media.id, model: "CLASSIC" } },
+            }),
+          }),
+          testEnv,
+        ),
+        worker.fetch(
+          new Request("http://localhost/graphql", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${pToken}`,
+            },
+            body: JSON.stringify({
+              query: `mutation SetSkin($input: SetPlayerSkinInput!) {
+                setMyPlayerSkin(input: $input) { id model }
+              }`,
+              variables: { input: { mediaId: media.id, model: "SLIM" } },
+            }),
+          }),
+          testEnv,
+        ),
+      ])
+
+      const json1 = (await res1.json()) as any
+      const json2 = (await res2.json()) as any
+      expect(json1.errors).toBeUndefined()
+      expect(json2.errors).toBeUndefined()
+
+      // Verify that in D1 there is exactly ONE row for this user
+      const countRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${aToken}`,
+          },
+          body: JSON.stringify({
+            query: `query { adminPlayerSkins(search: "ConcurrentPlayer") { totalCount } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const countJson = (await countRes.json()) as any
+      expect(countJson.data.adminPlayerSkins.totalCount).toBe(1)
+    })
+
+    it("rejects deleteContentMedia with CONFLICT when media is in use by a player skin", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const conflictPlayerId = crypto.randomUUID()
+      const conflictPlayerSessionId = crypto.randomUUID()
+      const conflictAdminId = crypto.randomUUID()
+      const conflictAdminSessionId = crypto.randomUUID()
+
+      await db.insert(users).values([
+        {
+          id: conflictPlayerId,
+          displayName: "ConflictPlayer",
+          role: "PLAYER",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: conflictAdminId,
+          displayName: "ConflictAdmin",
+          role: "ADMIN",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+
+      await db.insert(sessions).values([
+        {
+          id: conflictPlayerSessionId,
+          userId: conflictPlayerId,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: conflictAdminSessionId,
+          userId: conflictAdminId,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      ])
+
+      const pToken = await createTestAccessToken({
+        userId: conflictPlayerId,
+        sessionId: conflictPlayerSessionId,
+        role: "PLAYER",
+        displayName: "ConflictPlayer",
+      })
+
+      const aToken = await createTestAccessToken({
+        userId: conflictAdminId,
+        sessionId: conflictAdminSessionId,
+        role: "ADMIN",
+        displayName: "ConflictAdmin",
+      })
+
+      // Upload texture
+      const ticketRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${pToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation { createPlayerSkinUpload { uploadToken } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const token = ((await ticketRes.json()) as any).data.createPlayerSkinUpload.uploadToken
+      const uploadRes = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "image/png",
+            Authorization: `Bearer ${pToken}`,
+            "X-Upload-Token": token,
+          },
+          body: createMockSkinPng(64, 64) as unknown as BodyInit,
+        }),
+        testEnv,
+      )
+      const media = (await uploadRes.json()) as any
+
+      // Set skin
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${pToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation SetSkin($input: SetPlayerSkinInput!) {
+              setMyPlayerSkin(input: $input) { id }
+            }`,
+            variables: { input: { mediaId: media.id, model: "CLASSIC" } },
+          }),
+        }),
+        testEnv,
+      )
+
+      // Attempt to delete content media using admin token
+      const delRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${aToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation DeleteMedia($id: ID!) {
+              deleteContentMedia(id: $id)
+            }`,
+            variables: { id: media.id },
+          }),
+        }),
+        testEnv,
+      )
+      const delJson = (await delRes.json()) as any
+      expect(delJson.errors).toBeDefined()
+      expect(delJson.errors[0].extensions?.code).toBe("CONFLICT")
     })
   })
 })
+
+
+
+

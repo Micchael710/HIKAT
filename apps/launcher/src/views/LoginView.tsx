@@ -1,6 +1,5 @@
 import React, { useState } from "react"
 import { ThemeMode } from "../types"
-import { IconGoogle } from "../theme/icons"
 import { BASE_FONT } from "../theme/tokens"
 import { loginBg, logoReducedWhite, logoReducedBlack } from "../assets"
 import { useTranslation } from "../context/LanguageContext"
@@ -9,6 +8,7 @@ import {
   sanitizeEmail,
   sanitizeInput,
 } from "../utils/security"
+import { authService } from "../services/authService"
 
 const LAUNCHER_VERSION = "v1.0.0"
 
@@ -23,17 +23,94 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [email, setEmail] = useState("")
-  const [keepSession, setKeepSession] = useState(false)
+  const [keepSession, setKeepSession] = useState(true)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [successNotice, setSuccessNotice] = useState<string | null>(null)
   const [isEnteringWorld, setIsEnteringWorld] = useState(false)
   const isDark = theme === "dark"
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (isEnteringWorld) return
-    setIsEnteringWorld(true)
-    const cleanName = sanitizeUsername(username.trim()) || t("user.anonymous")
-    setTimeout(() => {
-      onLogin(cleanName)
-    }, 420)
+    setErrorMessage(null)
+    setSuccessNotice(null)
+
+    if (tab === "login") {
+      const cleanEmail = sanitizeEmail(email)
+      const cleanPassword = password.trim()
+
+      if (!cleanEmail) {
+        setErrorMessage("Por favor ingresa tu correo electrónico.")
+        return
+      }
+      if (!cleanPassword) {
+        setErrorMessage("Por favor ingresa tu contraseña.")
+        return
+      }
+
+      setIsEnteringWorld(true)
+      const res = await authService.login({
+        email: cleanEmail,
+        password: cleanPassword,
+        keepSession,
+      })
+
+      if (res.success && res.user) {
+        const displayName = res.user.displayName || res.user.username || cleanEmail.split("@")[0]
+        setTimeout(() => {
+          onLogin(displayName)
+        }, 350)
+      } else {
+        setIsEnteringWorld(false)
+        setErrorMessage(res.error || "No se pudo iniciar sesión. Verifica tus credenciales.")
+      }
+    } else {
+      const cleanUsername = sanitizeUsername(username)
+      const cleanEmail = sanitizeEmail(email)
+      const cleanPassword = password.trim()
+
+      if (!cleanUsername) {
+        setErrorMessage("Por favor ingresa un nombre de usuario.")
+        return
+      }
+      if (!cleanEmail) {
+        setErrorMessage("Por favor ingresa tu correo electrónico.")
+        return
+      }
+      if (!cleanPassword || cleanPassword.length < 8) {
+        setErrorMessage("La contraseña debe contener al menos 8 caracteres.")
+        return
+      }
+
+      setIsEnteringWorld(true)
+      const res = await authService.register({
+        username: cleanUsername,
+        email: cleanEmail,
+        password: cleanPassword,
+      })
+
+      if (res.success) {
+        // Automatically attempt login after registration
+        const loginRes = await authService.login({
+          email: cleanEmail,
+          password: cleanPassword,
+          keepSession,
+        })
+
+        if (loginRes.success && loginRes.user) {
+          const displayName = loginRes.user.displayName || cleanUsername
+          setTimeout(() => {
+            onLogin(displayName)
+          }, 350)
+        } else {
+          setIsEnteringWorld(false)
+          setTab("login")
+          setSuccessNotice("¡Cuenta registrada con éxito! Por favor inicia sesión.")
+        }
+      } else {
+        setIsEnteringWorld(false)
+        setErrorMessage(res.error || "Error al registrar la cuenta. Inténtalo de nuevo.")
+      }
+    }
   }
 
   const inputCss: React.CSSProperties = {
@@ -169,10 +246,62 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               }}
             >
               {tab === "login"
-                ? t("auth.loginSubtitle")
-                : t("auth.registerSubtitle")}
+                ? "Inicia sesión con tu cuenta de HiKAT para sincronizar tus skins y partidas."
+                : "Crea tu cuenta para comenzar a jugar y personalizar tu personaje."}
             </div>
           </div>
+
+          {/* Error Banner */}
+          {errorMessage && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                background: isDark ? "rgba(239, 68, 68, 0.14)" : "#fee2e2",
+                border: isDark ? "1px solid rgba(239, 68, 68, 0.35)" : "1px solid #fca5a5",
+                borderRadius: 10,
+                padding: "10px 14px",
+                marginBottom: 14,
+                color: isDark ? "#fca5a5" : "#b91c1c",
+                fontSize: 13,
+                fontWeight: 600,
+                animation: "shakeX 0.25s ease",
+              }}
+            >
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Success Banner */}
+          {successNotice && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                background: isDark ? "rgba(16, 185, 129, 0.14)" : "#d1fae5",
+                border: isDark ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid #6ee7b7",
+                borderRadius: 10,
+                padding: "10px 14px",
+                marginBottom: 14,
+                color: isDark ? "#6ee7b7" : "#047857",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+              <span>{successNotice}</span>
+            </div>
+          )}
 
           {/* Clean Segmented Pill Switcher [ Iniciar Sesión | Registrarse ] */}
           <div
@@ -194,7 +323,11 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                 <button
                   key={tCode}
                   type="button"
-                  onClick={() => setTab(tCode)}
+                  onClick={() => {
+                    setTab(tCode)
+                    setErrorMessage(null)
+                    setSuccessNotice(null)
+                  }}
                   style={{
                     flex: 1,
                     padding: "8px 0",
@@ -248,43 +381,17 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               marginBottom: 14,
             }}
           >
-            <div>
-              <label style={labelCss}>
-                {tab === "login"
-                  ? t("auth.usernameLabel")
-                  : t("auth.usernameRegisterLabel")}
-              </label>
-              <input
-                type="text"
-                value={username}
-                maxLength={16}
-                autoComplete="username"
-                spellCheck={false}
-                placeholder={
-                  tab === "login"
-                    ? t("auth.usernamePlaceholderLogin")
-                    : t("auth.usernamePlaceholderRegister")
-                }
-                onChange={(e) => setUsername(sanitizeUsername(e.target.value))}
-                className="launcher-input"
-                style={inputCss}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSubmit()
-                }}
-              />
-            </div>
-
             {tab === "register" && (
               <div style={{ animation: "slideUpFade 0.18s ease" }}>
-                <label style={labelCss}>{t("auth.emailLabel")}</label>
+                <label style={labelCss}>Nombre de usuario</label>
                 <input
-                  type="email"
-                  value={email}
-                  maxLength={254}
-                  autoComplete="email"
+                  type="text"
+                  value={username}
+                  maxLength={24}
+                  autoComplete="username"
                   spellCheck={false}
-                  placeholder={t("auth.emailPlaceholder")}
-                  onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
+                  placeholder="Tu nombre de jugador"
+                  onChange={(e) => setUsername(sanitizeUsername(e.target.value))}
                   className="launcher-input"
                   style={inputCss}
                   onKeyDown={(e) => {
@@ -295,7 +402,25 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             )}
 
             <div>
-              <label style={labelCss}>{t("auth.passwordLabel")}</label>
+              <label style={labelCss}>Correo electrónico</label>
+              <input
+                type="email"
+                value={email}
+                maxLength={254}
+                autoComplete="email"
+                spellCheck={false}
+                placeholder="jugador@ejemplo.com"
+                onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
+                className="launcher-input"
+                style={inputCss}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSubmit()
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={labelCss}>Contraseña</label>
               <input
                 type="password"
                 value={password}
@@ -303,7 +428,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                 autoComplete={
                   tab === "login" ? "current-password" : "new-password"
                 }
-                placeholder={t("auth.passwordPlaceholder")}
+                placeholder="••••••••••••"
                 onChange={(e) =>
                   setPassword(sanitizeInput(e.target.value, 128))
                 }
@@ -387,7 +512,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             </div>
           )}
 
-          {/* Primary CTA Submit Button with white text & shadow */}
+          {/* Primary CTA Submit Button */}
           <button
             type="button"
             onClick={handleSubmit}
@@ -402,33 +527,18 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               borderRadius: 12,
               background: "linear-gradient(135deg, #efc436 0%, #ffd043 100%)",
               border: "none",
-              color: "white",
+              color: "#090d12",
               fontSize: 15,
               fontWeight: 800,
               fontFamily: BASE_FONT,
               letterSpacing: "0.03em",
               cursor: isEnteringWorld ? "default" : "pointer",
-              textShadow: "0 1px 4px rgba(0,0,0,0.35)",
               boxShadow: isEnteringWorld
                 ? "0 0 32px rgba(239, 196, 54, 0.65)"
                 : "0 0 20px rgba(239, 196, 54, 0.35)",
               transition: "transform 0.18s ease, box-shadow 0.18s ease",
               marginBottom: 10,
               transform: isEnteringWorld ? "scale(0.98)" : "none",
-            }}
-            onMouseEnter={(e) => {
-              if (!isEnteringWorld) {
-                e.currentTarget.style.transform = "translateY(-2px)"
-                e.currentTarget.style.boxShadow =
-                  "0 0 28px rgba(239, 196, 54, 0.55), 0 6px 20px rgba(0, 0, 0, 0.4)"
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isEnteringWorld) {
-                e.currentTarget.style.transform = "translateY(0)"
-                e.currentTarget.style.boxShadow =
-                  "0 0 20px rgba(239, 196, 54, 0.35)"
-              }
             }}
           >
             {isEnteringWorld ? (
@@ -445,142 +555,59 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                 >
                   <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                 </svg>
-                <span>{t("auth.entering")}</span>
+                <span>Conectando...</span>
               </div>
             ) : (
-              <>
-                <span>
-                  {tab === "login"
-                    ? t("auth.continue")
-                    : t("auth.createAccount")}
-                </span>
-                <svg
-                  width={13}
-                  height={13}
-                  viewBox="0 0 20 20"
-                  fill="none"
-                  style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.35))" }}
-                >
-                  <path
-                    d="M6.6875 18.3333L5.20833 16.8542L12.0625 10L5.20833 3.14583L6.6875 1.66667L15.0208 10L6.6875 18.3333Z"
-                    fill="white"
-                  />
-                </svg>
-              </>
+              <span>
+                {tab === "login" ? "Iniciar Sesión" : "Crear Cuenta"}
+              </span>
             )}
-          </button>
-
-          {/* Social Auth (Google) */}
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isEnteringWorld}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              width: "100%",
-              height: 42,
-              borderRadius: 12,
-              background: isDark ? "#121a22" : "#f0f3f7",
-              border: isDark
-                ? "1.5px solid rgba(255, 255, 255, 0.08)"
-                : "1.5px solid rgba(0, 0, 0, 0.1)",
-              color: isDark ? "white" : "#111822",
-              fontSize: 13.5,
-              fontWeight: 600,
-              fontFamily: BASE_FONT,
-              cursor: isEnteringWorld ? "default" : "pointer",
-              transition: "all 0.18s ease",
-            }}
-            onMouseEnter={(e) => {
-              if (!isEnteringWorld) {
-                e.currentTarget.style.borderColor = isDark
-                  ? "rgba(255, 255, 255, 0.2)"
-                  : "rgba(0, 0, 0, 0.2)"
-                e.currentTarget.style.background = isDark
-                  ? "#182430"
-                  : "#e4e8ee"
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isEnteringWorld) {
-                e.currentTarget.style.borderColor = isDark
-                  ? "rgba(255, 255, 255, 0.08)"
-                  : "rgba(0, 0, 0, 0.1)"
-                e.currentTarget.style.background = isDark
-                  ? "#121a22"
-                  : "#f0f3f7"
-              }
-            }}
-          >
-            <IconGoogle size={16} />
-            <span>
-              {tab === "login"
-                ? t("auth.continueGoogle")
-                : t("auth.registerGoogle")}
-            </span>
           </button>
         </div>
 
-        {/* Bottom Footer */}
+        {/* Bottom: Version tag */}
         <div
           style={{
-            paddingTop: 16,
-            borderTop: isDark
-              ? "1px solid rgba(255, 255, 255, 0.06)"
-              : "1px solid rgba(0, 0, 0, 0.06)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            fontSize: 11,
+            color: isDark ? "#4b5563" : "#9ca3af",
+            fontFamily: BASE_FONT,
+            textAlign: "center",
+            paddingTop: 12,
           }}
         >
-          <span
-            style={{
-              fontSize: 11.5,
-              color: isDark ? "#657788" : "#778899",
-              fontFamily: BASE_FONT,
-            }}
-          >
-            HiKAT Launcher
-          </span>
-          <span
-            style={{
-              fontSize: 11.5,
-              color: isDark ? "#657788" : "#778899",
-              fontFamily: BASE_FONT,
-            }}
-          >
-            {LAUNCHER_VERSION}
-          </span>
+          HiKAT Launcher {LAUNCHER_VERSION} • Autenticación segura
         </div>
       </div>
 
-      {/* ── Right Hero Panel ── */}
+      {/* ── Right Splash Image ── */}
       <div
         style={{
           flex: 1,
           height: "100%",
           position: "relative",
           overflow: "hidden",
+          background: isDark ? "#090d12" : "#e2e8f0",
         }}
       >
         <img
           src={loginBg}
-          alt="Apparatia World"
+          alt="HiKAT World"
           style={{
             width: "100%",
             height: "100%",
             objectFit: "cover",
-            objectPosition: "left center",
-            display: "block",
-            transform: isEnteringWorld ? "scale(1.08)" : "scale(1)",
-            filter: isEnteringWorld
-              ? "brightness(1.15) blur(2px)"
-              : "brightness(1) blur(0)",
-            transition:
-              "transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), filter 0.55s ease",
+            filter: isEnteringWorld ? "brightness(1.2) scale(1.05)" : "none",
+            transition: "filter 0.45s ease, transform 0.45s ease",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: isDark
+              ? "linear-gradient(90deg, #090d12 0%, rgba(9, 13, 18, 0.4) 40%, transparent 100%)"
+              : "linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0.4) 40%, transparent 100%)",
+            pointerEvents: "none",
           }}
         />
       </div>
