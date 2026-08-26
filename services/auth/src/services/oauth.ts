@@ -6,6 +6,7 @@ import { eq, and, sql } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   ALLOWED_REDIRECT_URIS,
+  ALLOWED_LINK_REDIRECT_URIS,
   AuthErrorCode,
   ExternalAuthProvider,
 } from "@hikat/shared"
@@ -31,7 +32,7 @@ export interface OAuthFetcher {
 }
 
 /**
- * Validate redirect URI against strict allowed list (no broad wildcards)
+ * Validate redirect URI against strict allowed list for Launcher OAuth (no broad wildcards)
  */
 export function isAllowedRedirectUri(
   uri: string,
@@ -43,6 +44,21 @@ export function isAllowedRedirectUri(
 
   const allowedList = customAllowedList || ALLOWED_REDIRECT_URIS
   return allowedList.includes(uri as (typeof ALLOWED_REDIRECT_URIS)[number])
+}
+
+/**
+ * Validate redirect URI against strict allowed list for Account Linking / Web Portal
+ */
+export function isAllowedLinkRedirectUri(
+  uri: string,
+  customAllowedList?: readonly string[],
+): boolean {
+  if (!uri || typeof uri !== "string") {
+    return false
+  }
+
+  const allowedList = customAllowedList || ALLOWED_LINK_REDIRECT_URIS
+  return allowedList.includes(uri as (typeof ALLOWED_LINK_REDIRECT_URIS)[number])
 }
 
 /**
@@ -85,7 +101,7 @@ export async function createOAuthState(
 }
 
 /**
- * Consume and validate an OAuth State record from D1
+ * Consume and validate an OAuth State record from D1 with strict atomic concurrency protection
  */
 export async function consumeOAuthState(
   db: Database,
@@ -112,17 +128,40 @@ export async function consumeOAuthState(
     throw new Error(AuthErrorCode.INVALID_STATE)
   }
 
-  // Atomically mark state as used
-  await db
-    .update(schema.oauthStates)
-    .set({ usedAt: nowIso })
-    .where(
-      and(
-        eq(schema.oauthStates.id, stateId),
-        sql`${schema.oauthStates.usedAt} IS NULL`,
-      ),
-    )
-    .run()
+  // Atomically mark state as used with concurrency check (changes === 1)
+  const d1 = (db as unknown as { session?: { client?: D1Database } }).session?.client
+
+  if (d1) {
+    const res = await d1
+      .prepare(
+        `UPDATE oauth_states
+         SET used_at = ?
+         WHERE id = ? AND used_at IS NULL AND expires_at > ?`,
+      )
+      .bind(nowIso, stateId, nowIso)
+      .run()
+
+    if (res.meta.changes === 0) {
+      // Another concurrent callback consumed this state first
+      throw new Error(AuthErrorCode.INVALID_STATE)
+    }
+  } else {
+    const res = await db
+      .update(schema.oauthStates)
+      .set({ usedAt: nowIso })
+      .where(
+        and(
+          eq(schema.oauthStates.id, stateId),
+          sql`${schema.oauthStates.usedAt} IS NULL`,
+          sql`${schema.oauthStates.expiresAt} > ${nowIso}`,
+        ),
+      )
+      .run()
+
+    if (res.meta.changes === 0) {
+      throw new Error(AuthErrorCode.INVALID_STATE)
+    }
+  }
 
   return stateRecord
 }

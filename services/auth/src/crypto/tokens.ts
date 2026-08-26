@@ -63,14 +63,11 @@ export async function verifyPkceChallenge(
     return false
   }
 
-  if (method === "plain") {
-    return codeVerifier === codeChallenge
+  // HiKAT strictly enforces PKCE S256 and rejects plain or any other method
+  if (method !== "S256") {
+    return false
   }
 
-  if (method === "S256") {
-    const computedChallenge = await generatePkceChallenge(codeVerifier)
-    return computedChallenge === codeChallenge
-  }
-
-  return false
+  const computedChallenge = await generatePkceChallenge(codeVerifier)
+  return computedChallenge === codeChallenge
 }

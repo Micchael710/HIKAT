@@ -55,8 +55,6 @@ CREATE UNIQUE INDEX `password_reset_tokens_token_hash_idx` ON `password_reset_to
 CREATE INDEX `password_reset_tokens_user_id_idx` ON `password_reset_tokens` (`user_id`);--> statement-breakpoint
 CREATE TABLE `oauth_states` (
 	`id` text PRIMARY KEY NOT NULL,
-	`client_state` text,
-	`session_id` text,
 	`code_challenge` text,
 	`code_challenge_method` text,
 	`flow_type` text NOT NULL,
@@ -66,12 +64,10 @@ CREATE TABLE `oauth_states` (
 	`expires_at` text NOT NULL,
 	`used_at` text,
 	`created_at` text NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`session_id`) REFERENCES `sessions`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `oauth_states_user_id_idx` ON `oauth_states` (`user_id`);--> statement-breakpoint
-CREATE INDEX `oauth_states_session_id_idx` ON `oauth_states` (`session_id`);--> statement-breakpoint
 CREATE TABLE `authorization_codes` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,

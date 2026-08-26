@@ -130,14 +130,16 @@ Launcher (Electron)             HiKAT Auth Service            External Provider 
 
 Para el despliegue final en producción de `services/auth`, se deben aprovisionar externamente las siguientes configuraciones y secrets en Cloudflare (sin incluir credenciales en el repositorio):
 
-### Cloudflare Secrets (`wrangler secret put <KEY>`)
-1. `JWT_PRIVATE_KEY_PEM`: Clave privada ECDSA P-256 en formato PEM para la firma de tokens ES256.
-2. `JWT_KID`: Identificador de clave pública activa (ej. `hikat-key-2026-v1`).
-3. `GOOGLE_CLIENT_ID`: ID de cliente OAuth 2.0 creado en Google Cloud Console.
-4. `GOOGLE_CLIENT_SECRET`: Secreto de cliente OAuth 2.0 de Google.
-5. `DISCORD_CLIENT_ID`: Application ID creada en Discord Developer Portal.
-6. `DISCORD_CLIENT_SECRET`: Client Secret de OAuth2 de Discord.
-7. `RESEND_API_KEY` / `MAILGUN_API_KEY`: API Key del proveedor de correo transaccional para envío de verificaciones y recuperación.
+### Cloudflare Secrets & Environment (`wrangler secret put <KEY>`)
+1. `AUTH_JWT_PRIVATE_KEY_PEM`: Clave privada ECDSA P-256 en formato PEM para la firma de tokens ES256.
+2. `AUTH_JWT_PUBLIC_KEY_PEM`: Clave pública ECDSA P-256 en formato PEM (opcional, calculada a partir de la privada).
+3. `AUTH_JWT_KID`: Identificador de clave activa en JWKS (ej. `hikat-key-2026-v1`).
+4. `AUTH_SERVICE_ENDPOINT`: URL pública del servicio de autenticación (ej. `https://auth.hikat.org`).
+5. `GOOGLE_CLIENT_ID`: ID de cliente OAuth 2.0 creado en Google Cloud Console.
+6. `GOOGLE_CLIENT_SECRET`: Secreto de cliente OAuth 2.0 de Google.
+7. `DISCORD_CLIENT_ID`: Application ID creada en Discord Developer Portal.
+8. `DISCORD_CLIENT_SECRET`: Client Secret de OAuth2 de Discord.
+9. `RESEND_API_KEY`: API Key del proveedor de correo transaccional para envío de verificaciones y recuperación.
 
 ### Configuración en Proveedores Externos
 - **Google Cloud Console**:
@@ -146,3 +148,15 @@ Para el despliegue final en producción de `services/auth`, se deben aprovisiona
 - **Discord Developer Portal**:
   - Redirects: `https://auth.hikat.org/oauth/discord/callback`
   - Scopes: `identify`, `email`
+
+### Allowlists de Redirección Registradas
+- **Launcher OAuth (`ALLOWED_REDIRECT_URIS`)**:
+  - `hikat://auth/callback`
+  - `http://localhost:5173/auth/callback`
+  - `http://127.0.0.1:5173/auth/callback`
+- **Account Linking / Portal (`ALLOWED_LINK_REDIRECT_URIS`)**:
+  - `https://app.hikat.org/settings`
+  - `https://app.hikat.org/account`
+  - `http://localhost:5173/settings`
+  - `http://127.0.0.1:5173/settings`
+  - `hikat://settings/accounts`

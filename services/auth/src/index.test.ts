@@ -1167,5 +1167,72 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       const minRemaining = Math.min(...results.map((r) => r.remaining))
       expect(minRemaining).toBe(10)
     })
+
+    it("ensures consumeOAuthState is strictly atomic under concurrent requests: only 1 succeeds", async () => {
+      const stateId = await createOAuthState(db, {
+        flowType: "LAUNCHER",
+        provider: "GOOGLE",
+        redirectUri: "hikat://auth/callback",
+        codeChallenge: "xyz-challenge",
+      })
+
+      // Execute 2 concurrent consumeOAuthState calls
+      const results = await Promise.allSettled([
+        consumeOAuthState(db, stateId),
+        consumeOAuthState(db, stateId),
+      ])
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled")
+      const rejected = results.filter((r) => r.status === "rejected")
+
+      expect(fulfilled).toHaveLength(1)
+      expect(rejected).toHaveLength(1)
+      const error = (rejected[0] as PromiseRejectedResult).reason as Error
+      expect(error.message).toBe(AuthErrorCode.INVALID_STATE)
+    })
+
+    it("rejects non-S256 PKCE code_challenge_method in /oauth/authorize", async () => {
+      const plainReq = new Request(
+        "http://localhost:8788/oauth/authorize?response_type=code&redirect_uri=hikat://auth/callback&code_challenge=plain-challenge&code_challenge_method=plain&provider=google",
+      )
+      const plainRes = await handleRequest({ request: plainReq, env: {}, db, keyManager, emailService })
+      expect(plainRes.status).toBe(400)
+      const plainData = (await plainRes.json()) as { error: string }
+      expect(plainData.error).toBe(AuthErrorCode.INVALID_PKCE)
+
+      const invalidReq = new Request(
+        "http://localhost:8788/oauth/authorize?response_type=code&redirect_uri=hikat://auth/callback&code_challenge=xyz&code_challenge_method=SHA1&provider=google",
+      )
+      const invalidRes = await handleRequest({ request: invalidReq, env: {}, db, keyManager, emailService })
+      expect(invalidRes.status).toBe(400)
+    })
+
+    it("enforces strict allowlist for /oauth/link/:provider redirect_uri", async () => {
+      await registerWithPassword(db, { email: "link-allowlist@hikat.org", password: "password123" }, emailService)
+      const session = await loginWithPassword(db, { email: "link-allowlist@hikat.org", password: "password123" }, keyManager)
+
+      // 1. Rejects unallowed redirect_uri
+      const invalidReq = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://malicious-phishing.com/steal", {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      const invalidRes = await handleRequest({ request: invalidReq, env: {}, db, keyManager, emailService })
+      expect(invalidRes.status).toBe(400)
+      const invalidData = (await invalidRes.json()) as { error: string }
+      expect(invalidData.error).toBe(AuthErrorCode.INVALID_REDIRECT_URI)
+
+      // 2. Rejects missing redirect_uri
+      const missingReq = new Request("http://localhost:8788/oauth/link/google", {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      const missingRes = await handleRequest({ request: missingReq, env: {}, db, keyManager, emailService })
+      expect(missingRes.status).toBe(400)
+
+      // 3. Accepts registered allowlisted redirect_uri
+      const validReq = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://app.hikat.org/settings", {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      const validRes = await handleRequest({ request: validReq, env: {}, db, keyManager, emailService })
+      expect(validRes.status).toBe(302)
+    })
   })
 })

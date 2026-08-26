@@ -41,6 +41,7 @@ import {
 } from "./services/session"
 import {
   isAllowedRedirectUri,
+  isAllowedLinkRedirectUri,
   createOAuthState,
   consumeOAuthState,
   createAuthorizationCode,
@@ -405,13 +406,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         return errorResponse(AuthErrorCode.INVALID_PKCE, "PKCE code_challenge is required", 400)
       }
 
+      if (codeChallengeMethod !== "S256") {
+        return errorResponse(AuthErrorCode.INVALID_PKCE, "Only PKCE code_challenge_method=S256 is supported", 400)
+      }
+
       // Store Launcher OAuth state and preserve original clientState
       const internalState = await createOAuthState(db, {
         flowType: "LAUNCHER",
         provider,
         redirectUri,
         codeChallenge,
-        codeChallengeMethod,
+        codeChallengeMethod: "S256",
         clientState,
       })
 
@@ -452,7 +457,15 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         return errorResponse(AuthErrorCode.UNAUTHORIZED, "Session expired or revoked", 401)
       }
 
-      const redirectUri = url.searchParams.get("redirect_uri") || `${authServiceUrl}/auth/me/methods`
+      const redirectUri = url.searchParams.get("redirect_uri")
+      if (!redirectUri || !isAllowedLinkRedirectUri(redirectUri)) {
+        return errorResponse(
+          AuthErrorCode.INVALID_REDIRECT_URI,
+          "A registered, valid redirect_uri is required for account linking",
+          400,
+        )
+      }
+
       const clientState = url.searchParams.get("state") || undefined
 
       const internalState = await createOAuthState(db, {

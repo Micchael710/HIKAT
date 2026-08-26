@@ -26,6 +26,14 @@ export const ALLOWED_REDIRECT_URIS = [
   "http://127.0.0.1:5173/auth/callback",
 ] as const
 
+export const ALLOWED_LINK_REDIRECT_URIS = [
+  "https://app.hikat.org/settings",
+  "https://app.hikat.org/account",
+  "http://localhost:5173/settings",
+  "http://127.0.0.1:5173/settings",
+  "hikat://settings/accounts",
+] as const
+
 export interface AccessTokenPayload {
   iss: string
   aud: string
