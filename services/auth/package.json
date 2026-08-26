@@ -15,7 +15,8 @@
   "dependencies": {
     "@hikat/database": "workspace:*",
     "@hikat/shared": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.0.8"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",

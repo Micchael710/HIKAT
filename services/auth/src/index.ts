@@ -1,45 +1,48 @@
-import { HIKAT_VERSION } from "@hikat/shared"
+/**
+ * HiKAT Authentication Worker Entrypoint
+ */
+
 import { createDatabase, Database } from "@hikat/database"
+import { initializeKeyManager, JwtKeyManager } from "./crypto/jwt"
+import { MockEmailService, EmailService } from "./services/email"
+import { handleRequest } from "./routes"
 
 export interface Env {
   ENVIRONMENT?: string
+  AUTH_SERVICE_ENDPOINT?: string
+  GOOGLE_CLIENT_ID?: string
+  GOOGLE_CLIENT_SECRET?: string
+  DISCORD_CLIENT_ID?: string
+  DISCORD_CLIENT_SECRET?: string
+  AUTH_JWT_PRIVATE_KEY_PEM?: string
+  AUTH_JWT_PUBLIC_KEY_PEM?: string
+  AUTH_JWT_KID?: string
   DB?: D1Database
 }
 
-export { createDatabase, type Database }
+let keyManagerCache: JwtKeyManager | null = null
+const defaultEmailService: EmailService = new MockEmailService()
+
+export { createDatabase, type Database, MockEmailService, type EmailService }
 
 export default {
   async fetch(
     request: Request,
     env: Env,
-    ctx: ExecutionContext,
+    _ctx: ExecutionContext,
   ): Promise<Response> {
-    const url = new URL(request.url)
+    const db = env.DB ? createDatabase(env.DB) : undefined
 
-    if (url.pathname === "/health" || url.pathname === "/") {
-      return new Response(
-        JSON.stringify({
-          status: "ok",
-          service: "hikat-auth",
-          version: HIKAT_VERSION,
-          timestamp: new Date().toISOString(),
-        }),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
-      )
+    if (!keyManagerCache) {
+      keyManagerCache = await initializeKeyManager(env)
     }
 
-    return new Response(
-      JSON.stringify({
-        error: "Not Found",
-        message:
-          "HiKAT Auth Worker shell active. Authentication endpoints will be implemented in subsequent phase.",
-      }),
-      {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      },
-    )
+    return handleRequest({
+      request,
+      env,
+      db,
+      keyManager: keyManagerCache,
+      emailService: defaultEmailService,
+    })
   },
 }
