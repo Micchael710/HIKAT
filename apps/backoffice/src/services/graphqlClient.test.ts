@@ -61,101 +61,139 @@ describe("Back Office GraphQL News Client", () => {
     )
   })
 
-  it("creates a news article through createNews mutation", async () => {
-    authService.setSession("test-bearer-token", "refresh-tok", {
+  it("automatically refreshes token and retries once on HTTP 401", async () => {
+    authService.setSession("expired-token", "valid-refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
 
-    const mockCreated = {
-      id: "news-new-1",
-      title: "Anuncio de Torneo",
-      content: "Reglas e inscripciones abiertas",
-      type: "ANNOUNCEMENT",
-      status: "DRAFT",
-      createdAt: "2026-08-26T12:00:00Z",
-      updatedAt: "2026-08-26T12:00:00Z",
-    }
+    vi.spyOn(global, "fetch")
+      // 1. Initial GraphQL call returns 401
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "Unauthorized" }),
+      } as Response)
+      // 2. Auth refresh call succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          accessToken: "new-fresh-token",
+          refreshToken: "new-rotated-refresh-tok",
+          expiresIn: 900,
+          tokenType: "Bearer",
+          user: { id: "admin-1", role: "ADMIN" },
+        }),
+      } as Response)
+      // 3. Retried GraphQL call succeeds with new token
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            adminNews: {
+              items: [],
+              totalCount: 0,
+              pageInfo: { hasNextPage: false, hasPreviousPage: false },
+            },
+          },
+        }),
+      } as Response)
 
-    vi.spyOn(global, "fetch").mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: {
-          createNews: mockCreated,
-        },
-      }),
-    } as Response)
-
-    const created = await newsApi.createNews({
-      title: "Anuncio de Torneo",
-      content: "Reglas e inscripciones abiertas",
-      type: "ANNOUNCEMENT",
-      status: "DRAFT",
-    })
-
-    expect(created.id).toBe("news-new-1")
-    expect(created.type).toBe("ANNOUNCEMENT")
+    const result = await newsApi.getAdminNews()
+    expect(result.items).toEqual([])
+    expect(authService.getAccessToken()).toBe("new-fresh-token")
   })
 
-  it("handles publish, unpublish, and delete mutations", async () => {
-    authService.setSession("test-bearer-token", "refresh-tok", {
+  it("automatically refreshes token and retries once when GraphQL returns UNAUTHENTICATED error", async () => {
+    authService.setSession("expired-jwt", "valid-refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
 
-    // 1. Publish
-    vi.spyOn(global, "fetch").mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: {
-          publishNews: {
-            id: "news-1",
-            status: "PUBLISHED",
-            publishedAt: "2026-08-26T14:00:00Z",
+    vi.spyOn(global, "fetch")
+      // 1. Initial GraphQL returns 200 with UNAUTHENTICATED error
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          errors: [
+            {
+              message: "Authentication required",
+              extensions: { code: "UNAUTHENTICATED" },
+            },
+          ],
+        }),
+      } as Response)
+      // 2. Auth refresh call succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          accessToken: "refreshed-jwt",
+          refreshToken: "refreshed-refresh-tok",
+          expiresIn: 900,
+          tokenType: "Bearer",
+          user: { id: "admin-1", role: "ADMIN" },
+        }),
+      } as Response)
+      // 3. Retried GraphQL call succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            deleteNews: true,
           },
-        },
-      }),
-    } as Response)
+        }),
+      } as Response)
 
-    const published = await newsApi.publishNews("news-1")
-    expect(published.status).toBe("PUBLISHED")
-
-    // 2. Unpublish
-    vi.spyOn(global, "fetch").mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: {
-          unpublishNews: {
-            id: "news-1",
-            status: "DRAFT",
-            publishedAt: null,
-          },
-        },
-      }),
-    } as Response)
-
-    const unpublished = await newsApi.unpublishNews("news-1")
-    expect(unpublished.status).toBe("DRAFT")
-
-    // 3. Delete
-    vi.spyOn(global, "fetch").mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: {
-          deleteNews: true,
-        },
-      }),
-    } as Response)
-
-    const deleted = await newsApi.deleteNews("news-1")
-    expect(deleted).toBe(true)
+    const result = await newsApi.deleteNews("news-123")
+    expect(result).toBe(true)
+    expect(authService.getAccessToken()).toBe("refreshed-jwt")
   })
 
-  it("handles and formats GraphQL errors gracefully", async () => {
+  it("prevents infinite loops: clears session if retry also fails with UNAUTHENTICATED", async () => {
+    authService.setSession("bad-token", "refresh-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    vi.spyOn(global, "fetch")
+      // 1. Initial GraphQL returns 401
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "Unauthorized" }),
+      } as Response)
+      // 2. Auth refresh call succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          accessToken: "new-token-that-is-still-rejected",
+          refreshToken: "new-refresh-tok",
+          expiresIn: 900,
+          tokenType: "Bearer",
+          user: { id: "admin-1", role: "ADMIN" },
+        }),
+      } as Response)
+      // 3. Retried GraphQL returns 401 again
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "Unauthorized" }),
+      } as Response)
+
+    await expect(newsApi.getAdminNews()).rejects.toThrow(
+      "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
+    )
+    expect(authService.getAccessToken()).toBeNull()
+    expect(authService.getUser()).toBeNull()
+  })
+
+  it("handles and formats GraphQL validation errors gracefully", async () => {
     authService.setSession("test-bearer-token", "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",

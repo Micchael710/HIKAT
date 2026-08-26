@@ -15,10 +15,31 @@ export interface AuthErrorResponse {
   message?: string
 }
 
+type SessionListener = (user: AdminUser | null) => void
+
 class AuthService {
   private accessToken: string | null = null
   private refreshToken: string | null = null
   private user: AdminUser | null = null
+  private listeners: Set<SessionListener> = new Set()
+  private refreshPromise: Promise<string | null> | null = null
+
+  public subscribe(listener: SessionListener): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private notify() {
+    for (const listener of this.listeners) {
+      try {
+        listener(this.user)
+      } catch {
+        // Ignore subscriber errors
+      }
+    }
+  }
 
   public getAccessToken(): string | null {
     return this.accessToken
@@ -32,12 +53,14 @@ class AuthService {
     this.accessToken = accessToken
     this.refreshToken = refreshToken
     this.user = user
+    this.notify()
   }
 
   public clearSession() {
     this.accessToken = null
     this.refreshToken = null
     this.user = null
+    this.notify()
   }
 
   public async login(email: string, password: string): Promise<AdminUser> {
@@ -66,6 +89,7 @@ class AuthService {
       if (payload.refreshToken) {
         await this.logoutWithToken(payload.accessToken, payload.refreshToken).catch(() => {})
       }
+      this.clearSession()
       throw new Error("Acceso denegado: Se requiere cuenta con permisos de Administrador")
     }
 
@@ -74,37 +98,49 @@ class AuthService {
   }
 
   public async refresh(): Promise<string | null> {
+    // Avoid concurrent duplicate refresh requests
+    if (this.refreshPromise) {
+      return this.refreshPromise
+    }
+
     if (!this.refreshToken) {
       this.clearSession()
       return null
     }
 
-    try {
-      const res = await fetch(`${AUTH_URL}/auth/refresh`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ refreshToken: this.refreshToken }),
-      })
+    this.refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${AUTH_URL}/auth/refresh`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ refreshToken: this.refreshToken }),
+        })
 
-      if (!res.ok) {
+        if (!res.ok) {
+          this.clearSession()
+          return null
+        }
+
+        const data = (await res.json()) as LoginResponse
+        if (!data.user || data.user.role !== "ADMIN") {
+          this.clearSession()
+          return null
+        }
+
+        // Atomically replace both accessToken and rotated refreshToken in memory
+        this.setSession(data.accessToken, data.refreshToken, data.user)
+        return data.accessToken
+      } catch {
         this.clearSession()
         return null
+      } finally {
+        this.refreshPromise = null
       }
+    })()
 
-      const data = (await res.json()) as LoginResponse
-      if (!data.user || data.user.role !== "ADMIN") {
-        this.clearSession()
-        return null
-      }
-
-      this.setSession(data.accessToken, data.refreshToken, data.user)
-      return data.accessToken
-    } catch {
-      this.clearSession()
-      return null
-    }
+    return this.refreshPromise
   }
 
   public async logout(): Promise<void> {

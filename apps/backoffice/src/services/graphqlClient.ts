@@ -75,6 +75,7 @@ const NEWS_FIELDS = `
 export async function executeGraphQL<T>(
   query: string,
   variables: Record<string, unknown> = {},
+  isRetry: boolean = false,
 ): Promise<T> {
   const token = authService.getAccessToken()
 
@@ -86,47 +87,53 @@ export async function executeGraphQL<T>(
     headers["Authorization"] = `Bearer ${token}`
   }
 
-  const sendRequest = async (authHeader?: string) => {
-    const reqHeaders = { ...headers }
-    if (authHeader) {
-      reqHeaders["Authorization"] = authHeader
-    }
-
-    const res = await fetch(GRAPHQL_ENDPOINT, {
+  let res: Response
+  try {
+    res = await fetch(GRAPHQL_ENDPOINT, {
       method: "POST",
-      headers: reqHeaders,
+      headers,
       body: JSON.stringify({ query, variables }),
     })
-
-    if (!res.ok && res.status === 401) {
-      throw new Error("UNAUTHENTICATED")
-    }
-
-    return res.json()
+  } catch {
+    throw new Error("No se pudo conectar con el servidor.")
   }
 
-  let result
-  try {
-    result = await sendRequest()
-  } catch (err: any) {
-    if (err.message === "UNAUTHENTICATED") {
+  // 1. Handle HTTP 401 Unauthenticated
+  if (res.status === 401) {
+    if (!isRetry) {
       const newToken = await authService.refresh()
       if (newToken) {
-        result = await sendRequest(`Bearer ${newToken}`)
-      } else {
-        throw new Error("Su sesión ha expirado. Por favor inicie sesión nuevamente.")
+        return executeGraphQL<T>(query, variables, true)
       }
-    } else {
-      throw new Error("No se pudo conectar con el servidor.")
     }
+    authService.clearSession()
+    throw new Error("Su sesión ha expirado. Por favor inicie sesión nuevamente.")
   }
 
-  if (result.errors && result.errors.length > 0) {
+  const result = await res.json().catch(() => ({}))
+
+  // 2. Handle GraphQL errors (including extensions.code === "UNAUTHENTICATED")
+  if (result.errors && Array.isArray(result.errors) && result.errors.length > 0) {
+    const hasUnauthenticated = result.errors.some(
+      (e: any) =>
+        e.extensions?.code === "UNAUTHENTICATED" ||
+        e.message === "UNAUTHENTICATED" ||
+        e.message === "Authentication required",
+    )
+
+    if (hasUnauthenticated) {
+      if (!isRetry) {
+        const newToken = await authService.refresh()
+        if (newToken) {
+          return executeGraphQL<T>(query, variables, true)
+        }
+      }
+      authService.clearSession()
+      throw new Error("Su sesión ha expirado. Por favor inicie sesión nuevamente.")
+    }
+
     const firstErr = result.errors[0]
     const code = firstErr.extensions?.code
-    if (code === "UNAUTHENTICATED") {
-      throw new Error("Sesión no autorizada o expirada.")
-    }
     if (code === "FORBIDDEN") {
       throw new Error("No tiene permisos suficientes para realizar esta acción.")
     }
