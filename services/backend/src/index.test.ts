@@ -18,6 +18,8 @@ import {
   news,
   contentMedia,
   contentMediaUploadTokens,
+  gameReleases,
+  gameReleaseFiles,
 } from "@hikat/database"
 
 import { createTestD1 } from "@hikat/database/testUtils"
@@ -51,7 +53,9 @@ import worker, {
   deleteNews,
   createContentMediaUpload,
   deleteMedia,
+  publishGameRelease,
 } from "./index"
+
 
 import { createTestR2Bucket } from "./testUtils/mockR2"
 
@@ -5796,7 +5800,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(v1.status).toBe("ARCHIVED")
       expect(v1.files[0].name).toBe("Mod A")
 
-      // 10. Attempt update/remove on ARCHIVED release files -> rejected
+      // 10. Attempt update and remove on ARCHIVED release files -> rejected (Requirement 2 & 3)
       const updateArchRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
@@ -5810,7 +5814,214 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(((await updateArchRes.json()) as any).errors[0].message).toContain(
         "Solo puedes modificar archivos de una actualización en preparación",
       )
+
+      const removeArchRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { removeGameFile(id: "${fileAId}") }`,
+          }),
+        }),
+        testEnv,
+      )
+      expect(((await removeArchRes.json()) as any).errors[0].message).toContain(
+        "Solo puedes modificar archivos de una actualización en preparación",
+      )
+
+      // Confirm archived file and release remain 100% intact in database (Requirement 2)
+      const historyVerifyRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `query { gameReleaseHistory { version status files { id name } } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const historyVerify = ((await historyVerifyRes.json()) as any).data.gameReleaseHistory
+      const v1Archived = historyVerify.find((r: any) => r.version === "1.0.0")
+      expect(v1Archived.status).toBe("ARCHIVED")
+      expect(v1Archived.files.some((f: any) => f.id === fileAId && f.name === "Mod A")).toBe(true)
+
+      const dbArchivedFile = await db
+        .select()
+        .from(gameReleaseFiles)
+        .where(eq(gameReleaseFiles.id, fileAId))
+        .get()
+      expect(dbArchivedFile).toBeDefined()
+      expect(dbArchivedFile?.name).toBe("Mod A")
     })
+
+    it("exercises db.batch() branch and enforces atomic rollback when batch fails during publication (Shard 06.5B)", async () => {
+      const testEnv = createCoreEnv()
+
+      // 1. Setup Initial State:
+      // - Publish release v1.0.0 with 1 mod
+      // - Prepare draft v1.0.1 with 1 mod
+      const prepRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({ query: "mutation { prepareGameDraft { id version } }" }),
+        }),
+        testEnv,
+      )
+      expect(((await prepRes.json()) as any).errors).toBeUndefined()
+
+      // Upload binary for mod 1
+      const ticketRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-1.jar", sizeBytes: 120 }) { uploadUrl uploadToken } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const { uploadUrl, uploadToken } = ((await ticketRes.json()) as any).data.createGameFileUpload
+      const uploadRes = await worker.fetch(
+        new Request(`http://localhost${uploadUrl}`, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${coreAdminToken}`, "X-Upload-Token": uploadToken },
+          body: new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Array(116).fill(0x00)]),
+        }),
+        testEnv,
+      )
+      const { tokenHash } = (await uploadRes.json()) as any
+
+      // Add to draft and publish v1.0.0
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { addGameFile(input: { name: "Mod 1", category: MOD, tokenHash: "${tokenHash}" }) { id } }`,
+          }),
+        }),
+        testEnv,
+      )
+
+      const pub1Res = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { publishGameRelease(input: { version: "1.0.0", notes: "Initial release" }) { id version status } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const pub1Data = (await pub1Res.json()) as any
+      expect(pub1Data.errors).toBeUndefined()
+      expect(pub1Data.data.publishGameRelease.status).toBe("PUBLISHED")
+      expect(pub1Data.data.publishGameRelease.version).toBe("1.0.0")
+
+      // 2. Prepare next draft for v1.0.1
+      const draft2Res = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({ query: "mutation { prepareGameDraft { id version files { id name } } }" }),
+        }),
+        testEnv,
+      )
+      const draft2Data = (await draft2Res.json()) as any
+      const draft2Id = draft2Data.data.prepareGameDraft.id
+      expect(draft2Data.data.prepareGameDraft.files.length).toBe(1)
+
+      // Confirm baseline state in database before batch test:
+      // Exactly 1 PUBLISHED (v1.0.0), 1 DRAFT (v1.0.1)
+      const releasesBefore = await db.select().from(gameReleases).all()
+      const publishedBefore = releasesBefore.find((r) => r.status === "PUBLISHED")
+      const draftBefore = releasesBefore.find((r) => r.status === "DRAFT")
+      expect(publishedBefore?.version).toBe("1.0.0")
+      expect(draftBefore?.id).toBe(draft2Id)
+
+      // 3. Mock db.batch on the database to SIMULATE a D1 batch failure and explicitly exercise the db.batch() branch
+      const batchError = new Error("D1_ERROR: simulated atomic batch transaction rollback")
+      const batchSpy = vi.fn().mockImplementation(async (queries: any[]) => {
+        // Assert that the batch received exactly 2 statements:
+        // [0]: update gameReleases set status=ARCHIVED where status=PUBLISHED
+        // [1]: update gameReleases set version=1.0.1, status=PUBLISHED where id=draft2Id
+        expect(queries.length).toBe(2)
+        // Simulate atomic rollback - no changes are written to database
+        throw batchError
+      })
+
+      // Attach batch implementation to db
+      ;(db as any).batch = batchSpy
+
+      // Attempt to publish v1.0.1 using publishGameRelease with mock db.batch
+      await expect(
+        publishGameRelease(db, testEnv, { version: "1.0.1", notes: "Failing batch" }, coreAdminId),
+      ).rejects.toThrow("D1_ERROR: simulated atomic batch transaction rollback")
+
+      // Verify db.batch was explicitly invoked
+      expect(batchSpy).toHaveBeenCalledTimes(1)
+
+      // 4. VERIFY OBSERVABLE ATOMIC ROLLBACK PROPERTIES (Requirement 1):
+      // - v1.0.0 MUST STILL BE "PUBLISHED"
+      // - Draft MUST STILL BE "DRAFT"
+      // - NO orphan state (system is NOT left without a published version)
+      // - NO partial publication (draft was NOT marked published, old was NOT archived)
+      const releasesAfterFail = await db.select().from(gameReleases).all()
+      const publishedAfterFail = releasesAfterFail.filter((r) => r.status === "PUBLISHED")
+      const draftAfterFail = releasesAfterFail.filter((r) => r.status === "DRAFT")
+
+      expect(publishedAfterFail.length).toBe(1)
+      expect(publishedAfterFail[0]?.version).toBe("1.0.0")
+      expect(publishedAfterFail[0]?.id).toBe(publishedBefore?.id)
+
+      expect(draftAfterFail.length).toBe(1)
+      expect(draftAfterFail[0]?.id).toBe(draft2Id)
+      expect(draftAfterFail[0]?.status).toBe("DRAFT")
+
+      // 5. Verify the SUCCESS path of db.batch()
+      const successBatchSpy = vi.fn().mockImplementation(async (queries: any[]) => {
+        expect(queries.length).toBe(2)
+        // Execute both queries atomically
+        for (const q of queries) {
+          if (typeof q.execute === "function") {
+            await q.execute()
+          } else {
+            await q
+          }
+        }
+        return []
+      })
+      ;(db as any).batch = successBatchSpy
+
+      const successPub = await publishGameRelease(
+        db,
+        testEnv,
+        { version: "1.0.1", notes: "Successful atomic publication" },
+        coreAdminId,
+      )
+
+      expect(successBatchSpy).toHaveBeenCalledTimes(1)
+      expect(successPub.version).toBe("1.0.1")
+      expect(successPub.status).toBe("PUBLISHED")
+
+      // Verify DB state after successful batch
+      const releasesAfterSuccess = await db.select().from(gameReleases).all()
+      const publishedFinal = releasesAfterSuccess.filter((r) => r.status === "PUBLISHED")
+      const archivedFinal = releasesAfterSuccess.filter((r) => r.status === "ARCHIVED")
+
+      expect(publishedFinal.length).toBe(1)
+      expect(publishedFinal[0]?.version).toBe("1.0.1")
+
+      const v1Archived = archivedFinal.find((r) => r.version === "1.0.0")
+      expect(v1Archived).toBeDefined()
+      expect(v1Archived?.status).toBe("ARCHIVED")
+
+
+      // Clean up mock
+      delete (db as any).batch
+    })
+
   })
 })
 
