@@ -1,32 +1,284 @@
-:root {
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color-scheme: dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #0d1117;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Kanit:wght@400;600;800&display=swap');
+@import 'tailwindcss';
+
+/* ── Native Protections & Typography ── */
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
-body {
+html, body, #root {
+  width: 100%;
+  height: 100%;
   margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+  padding: 0;
+  overflow: hidden;
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+input, textarea, select {
+  font-family: 'Inter', sans-serif;
+}
+
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: none;
+}
+
+/* ── Keyframe Animations (Launcher Visual Language) ── */
+@keyframes viewFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes topLogoSlideDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sidebarNavSlideDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastSlideIn {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes breatheGlowAmberPulse {
+  0%, 100% {
+    box-shadow: 0 0 16px -2px rgba(245, 208, 86, 0.25), 0 0 6px rgba(239, 196, 54, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 28px 0px rgba(245, 208, 86, 0.45), 0 0 12px rgba(239, 196, 54, 0.25);
+  }
+}
+
+@keyframes breatheGlowTealPulse {
+  0%, 100% {
+    box-shadow: 0 0 16px -2px rgba(62, 196, 192, 0.25), 0 0 6px rgba(62, 196, 192, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 28px 0px rgba(62, 196, 192, 0.45), 0 0 12px rgba(62, 196, 192, 0.25);
+  }
+}
+
+@keyframes newsCardBreathe {
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--card-glow-color, rgba(255, 255, 255, 0.2)), 0 6px 20px var(--card-glow-color, rgba(255, 255, 255, 0.25));
+  }
+  50% {
+    box-shadow: 0 0 0 2.5px var(--card-glow-color, rgba(255, 255, 255, 0.38)), 0 8px 26px var(--card-glow-color, rgba(255, 255, 255, 0.35));
+  }
+}
+
+/* Atmospheric ambient breathing orbs */
+@keyframes bgOrb1 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.35; }
+  50%       { transform: translate(25px, 20px) scale(1.1); opacity: 0.6; }
+}
+
+@keyframes bgOrb2 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.3; }
+  50%       { transform: translate(-25px, -15px) scale(1.08); opacity: 0.55; }
+}
+
+.backoffice-bg-orb-1 {
+  animation: bgOrb1 10s ease-in-out infinite alternate;
+}
+
+.backoffice-bg-orb-2 {
+  animation: bgOrb2 12s ease-in-out infinite alternate;
+}
+
+/* ── Common Components (Launcher Identity) ── */
+.launcher-input {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.launcher-input:focus {
+  border-color: rgba(62, 196, 192, 0.7) !important;
+  box-shadow: 0 0 0 3px rgba(62, 196, 192, 0.18) !important;
+  outline: none !important;
+}
+
+.launcher-btn-primary {
+  background: linear-gradient(135deg, #1c384e, #295372);
+  border: 2px solid rgba(130, 200, 230, 0.5);
+  color: white;
+  transition: border-color 0.22s ease, background 0.22s ease, box-shadow 0.25s ease, transform 0.2s ease;
+  cursor: pointer;
+}
+
+.launcher-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #234764, #33678e) !important;
+  border-color: rgba(160, 230, 255, 0.9) !important;
+  box-shadow: 0 0 28px rgba(90, 180, 220, 0.45) !important;
+  transform: translateY(-2px);
+}
+
+.launcher-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.launcher-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.launcher-btn-secondary {
+  background: #131c23;
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, transform 0.18s ease;
+  cursor: pointer;
+}
+
+[data-theme="light"] .launcher-btn-secondary {
+  background: #ffffff;
+  border: 1.5px solid rgba(0, 0, 0, 0.12);
+  color: #556677;
+}
+
+.launcher-btn-secondary:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  background: #18232c !important;
+  color: white !important;
+  transform: translateY(-1px);
+}
+
+[data-theme="light"] .launcher-btn-secondary:hover:not(:disabled) {
+  border-color: rgba(0, 0, 0, 0.3) !important;
+  background: #f0f4f8 !important;
+  color: #111822 !important;
+}
+
+.launcher-btn-danger {
+  background: rgba(255, 60, 40, 0.12);
+  border: 1.5px solid rgba(255, 100, 80, 0.35);
+  color: #ff6b5b;
+  transition: all 0.18s ease;
+  cursor: pointer;
+}
+
+.launcher-btn-danger:hover:not(:disabled) {
+  background: rgba(255, 60, 40, 0.25) !important;
+  border-color: rgba(255, 100, 80, 0.7) !important;
+  color: #ffffff !important;
+  transform: translateY(-1px);
+}
+
+/* Sidebar Navigation Buttons */
+.sidebar-nav-btn {
+  background: transparent;
+  border: 1.5px solid transparent;
+  color: rgba(255, 255, 255, 0.45);
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.18s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+[data-theme="light"] .sidebar-nav-btn {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sidebar-nav-btn:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  transform: scale(1.05);
+}
+
+[data-theme="light"] .sidebar-nav-btn:hover:not(.is-active) {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #111822;
+}
+
+.sidebar-nav-btn.is-active {
+  background: rgba(62, 196, 192, 0.18);
+  border: 1.5px solid rgba(62, 196, 192, 0.5);
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(62, 196, 192, 0.35), 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="light"] .sidebar-nav-btn.is-active {
+  background: rgba(62, 196, 192, 0.14);
+  border: 1.5px solid rgba(62, 196, 192, 0.6);
+  color: #0c6e6b;
+  box-shadow: 0 4px 14px rgba(62, 196, 192, 0.18);
+}
+
+/* Custom Scrollbar */
+.custom-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+[data-theme="light"] .custom-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] .custom-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* Card item hover glow */
+.backoffice-card {
+  position: relative;
+  transition: border-color 0.22s ease, transform 0.2s ease, box-shadow 0.22s ease;
+}
+
+.backoffice-card:hover {
+  border-color: rgba(62, 196, 192, 0.45) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 20px rgba(62, 196, 192, 0.15) !important;
+}
+
+[data-theme="light"] .backoffice-card:hover {
+  border-color: rgba(62, 196, 192, 0.65) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08), 0 0 16px rgba(62, 196, 192, 0.12) !important;
 }

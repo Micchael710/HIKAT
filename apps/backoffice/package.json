@@ -1,7 +1,7 @@
 {
   "name": "hikat-backoffice",
-  "productName": "HiKAT Backoffice",
-  "description": "HiKAT Administration Backoffice",
+  "productName": "HiKAT Back Office",
+  "description": "HiKAT Administration Back Office",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -11,21 +11,26 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "test": "vitest run",
     "format": "oxfmt src"
   },
   "dependencies": {
+    "@hikat/graphql": "workspace:*",
     "@hikat/shared": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@hikat/config": "workspace:*",
+    "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
     "oxfmt": "^0.2.0",
+    "tailwindcss": "^4.0.0",
     "typescript": "^5.7.3",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "vitest": "^3.0.0"
   }
 }
