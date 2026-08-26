@@ -1,6 +1,5 @@
 packages:
-  - "HiKATLauncher"
-  - "HiKATbackoffice"
+  - "apps/*"
   - "services/*"
   - "packages/*"
 
