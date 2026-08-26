@@ -2332,7 +2332,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         expect(res.status).toBe(400)
       })
 
-      it("REJECTS upload if token belongs to a different administrator (403)", async () => {
+      it("REJECTS upload if token belongs to a different administrator (403), and allows legitimate owner to use unburned ticket afterwards (201)", async () => {
         // Admin A generates token
         const ticket = await executeGql(
           `
@@ -2345,8 +2345,8 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         )
         const tokenFromAdminA = ticket.data.createContentMediaUpload.uploadToken
 
-        // Admin B tries to upload using Admin A's token
-        const req = new Request("http://localhost/media/content/upload", {
+        // Admin B tries to upload using Admin A's token -> 403 Forbidden
+        const reqB = new Request("http://localhost/media/content/upload", {
           method: "PUT",
           headers: {
             Authorization: `Bearer ${adminBToken}`,
@@ -2355,8 +2355,119 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
           body: new Uint8Array([1, 2, 3]),
         })
-        const res = await worker.fetch(req, createEnv())
-        expect(res.status).toBe(403)
+        const env = createEnv()
+        const resB = await worker.fetch(reqB, env)
+        expect(resB.status).toBe(403)
+
+        // Legitimate Admin A now uses the exact same token -> 201 Created (verifies token was not burned)
+        const reqA = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": tokenFromAdminA,
+            "Content-Type": "image/png",
+          },
+          body: new Uint8Array([1, 2, 3]),
+        })
+        const resA = await worker.fetch(reqA, env)
+        expect(resA.status).toBe(201)
+      })
+
+      it("enforces ticket-bound max_size_bytes: REJECTS body of 1025 bytes when ticket was requested for 1024 bytes (413) and leaves R2 clean", async () => {
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken maxSizeBytes }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 1024 } },
+          adminToken,
+        )
+        const rawToken = ticket.data.createContentMediaUpload.uploadToken
+        const body1025 = new Uint8Array(1025)
+
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: body1025,
+        })
+
+        const env = createEnv()
+        const res = await worker.fetch(req, env)
+        expect(res.status).toBe(413)
+        expect(testR2._storage.size).toBe(0)
+      })
+
+      it("ALLOWS body of exactly 1024 bytes when ticket was requested for 1024 bytes (201)", async () => {
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken maxSizeBytes }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 1024 } },
+          adminToken,
+        )
+        const rawToken = ticket.data.createContentMediaUpload.uploadToken
+        const body1024 = new Uint8Array(1024)
+
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: body1024,
+        })
+
+        const env = createEnv()
+        const res = await worker.fetch(req, env)
+        expect(res.status).toBe(201)
+        expect(testR2._storage.size).toBe(1)
+      })
+
+      it("REJECTS streamed body without Content-Length that exceeds ticket limit (413) without storing in R2", async () => {
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 500 } },
+          adminToken,
+        )
+        const rawToken = ticket.data.createContentMediaUpload.uploadToken
+
+        // Create stream of 600 bytes without Content-Length
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(300))
+            controller.enqueue(new Uint8Array(300))
+            controller.close()
+          },
+        })
+
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: stream,
+          // @ts-expect-error Node/undici RequestInit extension for ReadableStream body
+          duplex: "half",
+        })
+
+        const env = createEnv()
+        const res = await worker.fetch(req, env)
+        expect(res.status).toBe(413)
+        expect(testR2._storage.size).toBe(0)
       })
 
       it("REJECTS reused upload token on second upload (single-use enforcement: 409)", async () => {

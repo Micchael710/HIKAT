@@ -141,15 +141,18 @@ export async function createContentMediaUpload(
 
 export interface ValidatedUploadToken {
   id: string
+  tokenHash: string
   createdBy: string
   expectedMimeType: string
   maxSizeBytes: number
 }
 
 /**
- * Atomically consumes an upload token and verifies that it belongs to the authenticated ADMIN user.
+ * Non-destructively reads and validates an upload ticket.
+ * Verifies validity, non-expiration, and that the ticket belongs to the authenticated ADMIN.
+ * Does NOT burn or consume the token.
  */
-export async function consumeAndValidateUploadToken(
+export async function getAndValidateUploadToken(
   db: Database,
   rawToken: string,
   authenticatedAdminId: string,
@@ -157,42 +160,6 @@ export async function consumeAndValidateUploadToken(
   const tokenHash = await sha256Hex(rawToken)
   const nowIso = new Date().toISOString()
 
-  // 1. Atomic consumption in D1
-  const updateResult = await db.run(
-    sql`UPDATE content_media_upload_tokens SET used_at = ${nowIso} WHERE token_hash = ${tokenHash} AND used_at IS NULL AND expires_at > ${nowIso}`,
-  )
-
-  const rowsChanged = (updateResult as any).meta?.changes ?? (updateResult as any).changes ?? 0
-  if (rowsChanged === 0) {
-    // Determine exact cause for diagnostics
-    const existing = await db
-      .select()
-      .from(contentMediaUploadTokens)
-      .where(eq(contentMediaUploadTokens.tokenHash, tokenHash))
-      .get()
-
-    if (!existing) {
-      throw createGraphQLError("Invalid upload token", "UNAUTHENTICATED")
-    }
-
-    if (existing.usedAt) {
-      throw createGraphQLError(
-        "Upload token has already been consumed",
-        "CONFLICT",
-      )
-    }
-
-    if (existing.expiresAt <= nowIso) {
-      throw createGraphQLError("Upload token has expired", "UNAUTHENTICATED")
-    }
-
-    throw createGraphQLError(
-      "Upload token is invalid or cannot be consumed",
-      "UNAUTHENTICATED",
-    )
-  }
-
-  // 2. Fetch the consumed token row to verify user ownership
   const tokenRecord = await db
     .select()
     .from(contentMediaUploadTokens)
@@ -200,9 +167,21 @@ export async function consumeAndValidateUploadToken(
     .get()
 
   if (!tokenRecord) {
-    throw createGraphQLError("Upload token record not found", "UNAUTHENTICATED")
+    throw createGraphQLError("Invalid upload token", "UNAUTHENTICATED")
   }
 
+  if (tokenRecord.usedAt) {
+    throw createGraphQLError(
+      "Upload token has already been consumed",
+      "CONFLICT",
+    )
+  }
+
+  if (tokenRecord.expiresAt <= nowIso) {
+    throw createGraphQLError("Upload token has expired", "UNAUTHENTICATED")
+  }
+
+  // Non-destructive owner check: returns 403 without burning the ticket
   if (tokenRecord.createdBy !== authenticatedAdminId) {
     throw createGraphQLError(
       "Upload token does not belong to the authenticated administrator",
@@ -212,10 +191,31 @@ export async function consumeAndValidateUploadToken(
 
   return {
     id: tokenRecord.id,
+    tokenHash: tokenRecord.tokenHash,
     createdBy: tokenRecord.createdBy,
     expectedMimeType: tokenRecord.expectedMimeType,
     maxSizeBytes: tokenRecord.maxSizeBytes,
   }
+}
+
+/**
+ * Atomically consumes an upload token specifically for the authenticated ADMIN owner.
+ * Condition: token_hash, created_by, used_at IS NULL, expires_at > now.
+ */
+export async function consumeUploadTokenAtomically(
+  db: Database,
+  tokenHash: string,
+  authenticatedAdminId: string,
+): Promise<boolean> {
+  const nowIso = new Date().toISOString()
+
+  const updateResult = await db.run(
+    sql`UPDATE content_media_upload_tokens SET used_at = ${nowIso} WHERE token_hash = ${tokenHash} AND created_by = ${authenticatedAdminId} AND used_at IS NULL AND expires_at > ${nowIso}`,
+  )
+
+  const rowsChanged =
+    (updateResult as any).meta?.changes ?? (updateResult as any).changes ?? 0
+  return rowsChanged > 0
 }
 
 /**
