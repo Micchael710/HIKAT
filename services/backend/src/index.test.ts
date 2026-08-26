@@ -4329,7 +4329,8 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       })
 
       it("handles and normalizes 401/403 upstream errors without leaking API key", async () => {
-        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { PterodactylHttpClient, ServerInfrastructureError } = await import("./services/pterodactyl/pterodactylClient")
+        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
           return new Response(JSON.stringify({ errors: [{ code: "Unauthorized" }] }), { status: 401 })
@@ -4342,11 +4343,20 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           fetchFn: mockFetch,
         })
 
-        await expect(client.getServerResources()).rejects.toThrow("Error de autenticación con la infraestructura del servidor.")
+        try {
+          await client.getServerResources()
+          expect.unreachable("should have thrown")
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(ServerInfrastructureError)
+          expect(err.message).toBe(SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED)
+          expect(err.code).toBe(SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+          expect(err.internalMessage).toContain("401")
+        }
       })
 
       it("handles and normalizes 404 upstream errors", async () => {
-        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { PterodactylHttpClient, ServerInfrastructureError } = await import("./services/pterodactyl/pterodactylClient")
+        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
           return new Response(JSON.stringify({ errors: [{ code: "NotFound" }] }), { status: 404 })
@@ -4359,11 +4369,19 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           fetchFn: mockFetch,
         })
 
-        await expect(client.getServerDetails()).rejects.toThrow("Servidor no encontrado en la infraestructura.")
+        try {
+          await client.getServerDetails()
+          expect.unreachable("should have thrown")
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(ServerInfrastructureError)
+          expect(err.message).toBe(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE)
+          expect(err.code).toBe(SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+        }
       })
 
       it("handles and normalizes 429 rate limited upstream error", async () => {
-        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { PterodactylHttpClient, ServerInfrastructureError } = await import("./services/pterodactyl/pterodactylClient")
+        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
           return new Response("Too Many Requests", { status: 429 })
@@ -4376,11 +4394,19 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           fetchFn: mockFetch,
         })
 
-        await expect(client.sendCommand("say hi")).rejects.toThrow("Límite de solicitudes alcanzado. Por favor espera un momento.")
+        try {
+          await client.sendCommand("say hi")
+          expect.unreachable("should have thrown")
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(ServerInfrastructureError)
+          expect(err.message).toBe(SERVER_PUBLIC_MESSAGES.SERVER_RATE_LIMITED)
+          expect(err.code).toBe(SERVER_ERROR_CODES.SERVER_RATE_LIMITED)
+        }
       })
 
       it("handles and normalizes 502/503/504 Wings upstream error", async () => {
         const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { SERVER_PUBLIC_MESSAGES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
           return new Response("502 Bad Gateway from Wings", { status: 502 })
@@ -4393,11 +4419,12 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           fetchFn: mockFetch,
         })
 
-        await expect(client.sendPowerAction("start")).rejects.toThrow("No se pudo conectar con el servidor en este momento.")
+        await expect(client.sendPowerAction("start")).rejects.toThrow(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE)
       })
 
       it("handles AbortError timeout gracefully", async () => {
         const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { SERVER_PUBLIC_MESSAGES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
           const err = new Error("The operation was aborted")
@@ -4412,11 +4439,12 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           fetchFn: mockFetch,
         })
 
-        await expect(client.getServerResources()).rejects.toThrow("Tiempo de espera agotado al conectar con el servidor.")
+        await expect(client.getServerResources()).rejects.toThrow(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE)
       })
 
       it("handles network failure (TypeError) gracefully", async () => {
         const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { SERVER_PUBLIC_MESSAGES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
           throw new TypeError("Failed to fetch")
@@ -4429,9 +4457,10 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           fetchFn: mockFetch,
         })
 
-        await expect(client.getServerResources()).rejects.toThrow("No se pudo conectar con el servidor en este momento.")
+        await expect(client.getServerResources()).rejects.toThrow(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE)
       })
     })
+
     describe("2. Security & Authorization Guards", () => {
       it("REJECTS anonymous requests to serverStatus with UNAUTHENTICATED", async () => {
         const res = await executeGqlServer(`
@@ -4529,7 +4558,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         )
 
         expect(res.errors).toBeDefined()
-        expect(res.errors[0].message).toContain("La integración con el servidor no está configurada.")
+        expect(res.errors[0].message).toContain("El servidor todavía no está configurado.")
         expect(res.errors[0].extensions.code).toBe("SERVER_NOT_CONFIGURED")
       })
 
@@ -4537,6 +4566,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         const { PterodactylHttpClient, ServerInfrastructureError } = await import(
           "./services/pterodactyl/pterodactylClient"
         )
+        const { SERVER_PUBLIC_MESSAGES } = await import("@hikat/shared")
 
         // Non-https in production
         expect(() => {
@@ -4546,7 +4576,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             serverId: "srv",
             isProduction: true,
           })
-        }).toThrow("Pterodactyl debe utilizar HTTPS en entorno de producción.")
+        }).toThrow(SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED)
 
         // Embedded credentials
         expect(() => {
@@ -4556,8 +4586,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             serverId: "srv",
             isProduction: false,
           })
-        }).toThrow("La URL de Pterodactyl no debe contener credenciales embebidas.")
+        }).toThrow(SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED)
       })
+
 
       it("ADMIN queries serverStatus and receives properly formatted metrics and limits", async () => {
         const { getServerStatus } = await import("./services/pterodactyl/serverAdministrationService")
@@ -4664,34 +4695,77 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         expect(suspended.status).toBe("DISCONNECTED")
       })
 
-      it("executes power actions (START, RESTART, STOP) with distributed lock in D1", async () => {
+      it("executes power actions (START, RESTART, STOP) with real state validation and distributed lock in D1", async () => {
         const { executeServerPowerAction } = await import("./services/pterodactyl/serverAdministrationService")
 
         let lastSignal = ""
-        const mockClient = {
-          getServerResources: async () => ({} as any),
-          getServerDetails: async () => ({} as any),
+        const createMockClientWithStatus = (state: string) => ({
+          getServerResources: async () => ({
+            object: "stats" as const,
+            attributes: {
+              current_state: state as any,
+              is_suspended: false,
+              resources: { cpu_absolute: 0, memory_bytes: 0, disk_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 0 },
+            },
+          }),
+          getServerDetails: async () => ({
+            object: "server" as const,
+            attributes: {
+              server_owner: true,
+              identifier: "srv",
+              uuid: "uuid",
+              name: "Server",
+              node: "Node",
+              is_suspended: false,
+              limits: { memory: 0, swap: 0, disk: 0, io: 500, cpu: 0, threads: null },
+            },
+          }),
           sendPowerAction: async (signal: string) => {
             lastSignal = signal
           },
           sendCommand: async () => {},
           getWebsocketCredentials: async () => ({} as any),
-        }
+        })
 
-        // START
-        const startRes = await executeServerPowerAction(createServerEnv(), "START", adminId, mockClient)
+        // 1. If server is already ONLINE, START must be rejected
+        const onlineClient = createMockClientWithStatus("running")
+        await expect(
+          executeServerPowerAction(createServerEnv(), "START", adminId, onlineClient),
+        ).rejects.toThrow("El servidor ya está encendido.")
+
+        // 2. If server is already OFFLINE, STOP and RESTART must be rejected
+        const offlineClient = createMockClientWithStatus("offline")
+        await expect(
+          executeServerPowerAction(createServerEnv(), "STOP", adminId, offlineClient),
+        ).rejects.toThrow("El servidor ya está apagado.")
+        await expect(
+          executeServerPowerAction(createServerEnv(), "RESTART", adminId, offlineClient),
+        ).rejects.toThrow("El servidor ya está apagado.")
+
+        // 3. If server is STARTING, power actions must be rejected
+        const startingClient = createMockClientWithStatus("starting")
+        await expect(
+          executeServerPowerAction(createServerEnv(), "START", adminId, startingClient),
+        ).rejects.toThrow("El servidor se está iniciando. Espera un momento.")
+
+        // 4. If server is STOPPING, power actions must be rejected
+        const stoppingClient = createMockClientWithStatus("stopping")
+        await expect(
+          executeServerPowerAction(createServerEnv(), "STOP", adminId, stoppingClient),
+        ).rejects.toThrow("El servidor se está apagando. Espera un momento.")
+
+        // 5. Valid actions execute successfully
+        const startRes = await executeServerPowerAction(createServerEnv(), "START", adminId, offlineClient)
         expect(startRes.success).toBe(true)
         expect(startRes.status).toBe("STARTING")
         expect(lastSignal).toBe("start")
 
-        // RESTART
-        const restartRes = await executeServerPowerAction(createServerEnv(), "RESTART", adminId, mockClient)
+        const restartRes = await executeServerPowerAction(createServerEnv(), "RESTART", adminId, onlineClient)
         expect(restartRes.success).toBe(true)
         expect(restartRes.status).toBe("STARTING")
         expect(lastSignal).toBe("restart")
 
-        // STOP
-        const stopRes = await executeServerPowerAction(createServerEnv(), "STOP", adminId, mockClient)
+        const stopRes = await executeServerPowerAction(createServerEnv(), "STOP", adminId, onlineClient)
         expect(stopRes.success).toBe(true)
         expect(stopRes.status).toBe("STOPPING")
         expect(lastSignal).toBe("stop")
@@ -4716,14 +4790,14 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         // Attempting another power action while locked must throw SERVER_BUSY
         await expect(executeServerPowerAction(createServerEnv(), "STOP", adminId, mockClient)).rejects.toThrow(
-          "Hay otra acción en curso en el servidor. Por favor espera un momento.",
+          "Hay otra acción en curso. Espera un momento.",
         )
 
         // Clear lock
         await testD1.prepare("DELETE FROM server_power_locks WHERE lock_key = 'main_server_power'").run()
       })
 
-      it("validates console commands and enforces distributed rate limiting in D1", async () => {
+      it("validates console commands and enforces truly atomic rate limiting under 20 concurrent requests", async () => {
         const { executeServerCommand } = await import("./services/pterodactyl/serverAdministrationService")
 
         let sentCommand = ""
@@ -4751,24 +4825,28 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           "El comando excede la longitud máxima permitida",
         )
 
-        // Valid command -> accepted
-        const validRes = await executeServerCommand(createServerEnv(), "say Servidor activo", adminId, mockClient)
-        expect(validRes.success).toBe(true)
-        expect(sentCommand).toBe("say Servidor activo")
+        // Clear rate limit table for clean test
+        await testD1.prepare("DELETE FROM server_command_rate_limits").run()
 
-        // Rate limit: simulate hitting 10 commands
-        await testD1.prepare(`
-          INSERT OR REPLACE INTO server_command_rate_limits (key, count, window_start, reset_at)
-          VALUES (?, 10, ?, ?)
-        `).bind(`cmd_rl:${adminId}`, new Date().toISOString(), new Date(Date.now() + 8000).toISOString()).run()
-
-        // 11th command within window -> rate limited
-        await expect(executeServerCommand(createServerEnv(), "say spam", adminId, mockClient)).rejects.toThrow(
-          "Has enviado demasiados comandos. Espera un momento.",
+        // Launch 20 concurrent commands simultaneously to test atomic race condition resistance
+        const promises = Array.from({ length: 20 }, (_, idx) =>
+          executeServerCommand(createServerEnv(), `say concurrent command ${idx}`, adminId, mockClient)
+            .then(() => ({ success: true, error: null }))
+            .catch((err: any) => ({ success: false, error: err.message })),
         )
+
+        const results = await Promise.all(promises)
+        const succeeded = results.filter((r) => r.success)
+        const rateLimited = results.filter(
+          (r) => !r.success && r.error === "Has enviado demasiados comandos. Espera un momento.",
+        )
+
+        // Exactly MAX_COMMANDS (10) must succeed, and the remaining 10 must be rate limited!
+        expect(succeeded.length).toBe(10)
+        expect(rateLimited.length).toBe(10)
       })
 
-      it("generates single-use console tickets and validates WebSocket connection lifecycle", async () => {
+      it("generates single-use console tickets and enforces mandatory Origin validation on WebSocket", async () => {
         // 1. ADMIN requests console ticket via GraphQL
         const ticketRes = await executeGqlServer(
           `mutation { createServerConsoleTicket { ticket expiresAt } }`,
@@ -4784,7 +4862,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         // 2. Reject POST method
         const reqPost = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
           method: "POST",
-          headers: { Upgrade: "websocket" },
+          headers: { Upgrade: "websocket", Origin: "https://admin.hikat.org" },
         })
         const resPost = await worker.fetch(reqPost, createServerEnv())
         expect(resPost.status).toBe(405)
@@ -4792,6 +4870,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         // 3. Reject missing Upgrade header
         const reqNoUpgrade = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
           method: "GET",
+          headers: { Origin: "https://admin.hikat.org" },
         })
         const resNoUpgrade = await worker.fetch(reqNoUpgrade, createServerEnv())
         expect(resNoUpgrade.status).toBe(426)
@@ -4799,12 +4878,20 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         // 4. Reject access token in query string (enforcing tickets only)
         const reqTokenParam = new Request(`http://localhost/api/server/console/ws?token=${adminToken}`, {
           method: "GET",
-          headers: { Upgrade: "websocket" },
+          headers: { Upgrade: "websocket", Origin: "https://admin.hikat.org" },
         })
         const resTokenParam = await worker.fetch(reqTokenParam, createServerEnv())
         expect(resTokenParam.status).toBe(400)
 
-        // 5. Reject unauthorized origin
+        // 5. Reject missing Origin header (mandatory Origin requirement)
+        const reqNoOrigin = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
+          method: "GET",
+          headers: { Upgrade: "websocket" },
+        })
+        const resNoOrigin = await worker.fetch(reqNoOrigin, createServerEnv())
+        expect(resNoOrigin.status).toBe(403)
+
+        // 6. Reject unauthorized / malicious origin
         const reqBadOrigin = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
           method: "GET",
           headers: { Upgrade: "websocket", Origin: "https://malicious-site.com" },
@@ -4812,7 +4899,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         const resBadOrigin = await worker.fetch(reqBadOrigin, createServerEnv())
         expect(resBadOrigin.status).toBe(403)
 
-        // 6. Connect with valid ticket and allowed origin
+        // 7. Connect with valid ticket and allowed production origin
         const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
           new Response(
             JSON.stringify({
@@ -4831,10 +4918,11 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         expect(resValid.status).toBe(200) // 200 in Node test mock environment
         fetchSpy.mockRestore()
 
-        // 7. Single-use enforcement: re-using the same ticket must fail (401)
+        // 8. Single-use enforcement: re-using the same ticket must fail (401)
         const resReused = await worker.fetch(reqValid, createServerEnv())
         expect(resReused.status).toBe(401)
       })
+
     })
   })
 

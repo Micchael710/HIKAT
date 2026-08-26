@@ -379,7 +379,7 @@ export function formatUptime(uptimeMs: number | null | undefined): string {
   return `${seconds}s`
 }
 
-// --- HiKAT Server Hardening Constants & Helpers (Shard 06A) ---
+// --- HiKAT Server Hardening Constants & Helpers (Shard 06A & 06B) ---
 
 export const SERVER_ERROR_CODES = {
   SERVER_UNAVAILABLE: "SERVER_UNAVAILABLE",
@@ -389,6 +389,18 @@ export const SERVER_ERROR_CODES = {
 } as const
 export type ServerErrorCode = typeof SERVER_ERROR_CODES[keyof typeof SERVER_ERROR_CODES]
 
+export const SERVER_PUBLIC_MESSAGES = {
+  SERVER_NOT_CONFIGURED: "El servidor todavía no está configurado.",
+  SERVER_UNAVAILABLE: "No se pudo conectar con el servidor en este momento.",
+  SERVER_BUSY: "Hay otra acción en curso. Espera un momento.",
+  SERVER_RATE_LIMITED: "Has realizado demasiadas acciones. Espera un momento.",
+  COMMAND_RATE_LIMITED: "Has enviado demasiados comandos. Espera un momento.",
+  SERVER_ALREADY_RUNNING: "El servidor ya está encendido.",
+  SERVER_ALREADY_STOPPED: "El servidor ya está apagado.",
+  SERVER_IS_STARTING: "El servidor se está iniciando. Espera un momento.",
+  SERVER_IS_STOPPING: "El servidor se está apagando. Espera un momento.",
+} as const
+
 export const SERVER_CONSOLE_TICKET_TTL_SECONDS = 45
 export const SERVER_POWER_LOCK_TTL_SECONDS = 30
 export const SERVER_POWER_LOCK_COOLDOWN_MS = 2000
@@ -396,6 +408,7 @@ export const SERVER_COMMAND_RATE_LIMIT = {
   MAX_COMMANDS: 10,
   WINDOW_SECONDS: 10,
 } as const
+
 
 /**
  * Validates a server command string ensuring type, non-empty, and character limit.

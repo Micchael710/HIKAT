@@ -1,21 +1,19 @@
 /**
- * HiKAT Backend Server Console WebSocket Proxy (Shard 06 & Shard 06A)
- * Provides authenticated, single-use ticket-gated, bi-directional WebSocket streaming
- * between Back Office and Wings daemon, with continuous session revalidation,
- * centralized command validation, and strict Pterodactyl payload filtering.
+ * HiKAT Backend Server Console WebSocket Proxy (Shard 06, 06A & 06B)
+ * Provides authenticated, single-use ticket-gated, pure downstream WebSocket streaming
+ * from Wings daemon to Back Office, with mandatory Origin validation, continuous session
+ * revalidation in D1, and strict Pterodactyl payload filtering.
  */
 
 import { eq, and, gt, isNull } from "drizzle-orm"
 import { createDatabase, schema } from "@hikat/database"
-import { mapPterodactylStateToHiKAT, validateServerCommand } from "@hikat/shared"
+import { mapPterodactylStateToHiKAT } from "@hikat/shared"
 import type { Env } from "../../types"
 import { isOriginAllowed } from "../../cors"
 import {
   consumeConsoleTicket,
   getServerConsoleWebsocketCredentials,
-  checkAndIncrementCommandRateLimit,
 } from "./serverAdministrationService"
-
 import type { IPterodactylClient } from "./types"
 
 const MAX_CONNECTION_DURATION_MS = 3600 * 1000 // 1 hour max session
@@ -27,7 +25,6 @@ export async function handleConsoleWebSocket(
   clientOverride?: IPterodactylClient,
 ): Promise<Response> {
   // 1. Method validation
-
   if (request.method !== "GET") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
@@ -47,9 +44,9 @@ export async function handleConsoleWebSocket(
     )
   }
 
-  // 3. Origin header validation
+  // 3. Mandatory Origin header validation (must be present AND allowed)
   const origin = request.headers.get("Origin")
-  if (origin && !isOriginAllowed(origin, env)) {
+  if (!origin || !isOriginAllowed(origin, env)) {
     return new Response(JSON.stringify({ error: "Origin not allowed" }), {
       status: 403,
       headers: { "Content-Type": "application/json" },
@@ -96,7 +93,6 @@ export async function handleConsoleWebSocket(
 
   const db = createDatabase(env.DB)
   let ticketRecord: { userId: string; sessionId: string }
-
 
   try {
     ticketRecord = await consumeConsoleTicket(db, ticket)
@@ -158,7 +154,6 @@ export async function handleConsoleWebSocket(
   try {
     wsCreds = await getServerConsoleWebsocketCredentials(env, clientOverride)
   } catch {
-
     return new Response(
       JSON.stringify({ error: "Unable to retrieve server console credentials" }),
       {
@@ -297,61 +292,14 @@ export async function handleConsoleWebSocket(
     }
   })
 
-  // 11. Handle client commands with centralized validation and rate limiting
-  serverWs.addEventListener("message", async (event) => {
-    if (isClosed) return
+  // Note: Commands are sent exclusively via GraphQL mutation (sendServerCommand).
+  // The WebSocket connection is pure streaming (logs & status).
 
-    try {
-      const payload = JSON.parse(String(event.data))
-      if (!payload || payload.type !== "command") return
-
-      // Centralized command validation
-      const validation = validateServerCommand(payload.command)
-      if (!validation.valid || !validation.command) {
-        serverWs.send(
-          JSON.stringify({
-            type: "error",
-            message: validation.error || "Comando inválido.",
-          }),
-        )
-        return
-      }
-
-      // Centralized rate limiting in D1
-      try {
-        await checkAndIncrementCommandRateLimit(db, userId)
-      } catch {
-        serverWs.send(
-          JSON.stringify({
-            type: "error",
-            message: "Has enviado demasiados comandos. Espera un momento.",
-          }),
-        )
-        return
-      }
-
-      // Forward command upstream to Wings
-      upstreamWs.send(
-        JSON.stringify({
-          event: "send command",
-          args: [validation.command],
-        }),
-      )
-    } catch {
-      serverWs.send(
-        JSON.stringify({
-          type: "error",
-          message: "Formato de mensaje inválido.",
-        }),
-      )
-    }
-  })
-
-  // 12. Periodic session revalidation (every 30 seconds)
+  // 11. Periodic session revalidation (every 30 seconds)
   revalidationInterval = setInterval(async () => {
     if (isClosed) return
 
-    // Enforce max connection duration
+    // Enforce max connection duration (1 hour)
     if (Date.now() - connectionStartTime > MAX_CONNECTION_DURATION_MS) {
       serverWs.close(1000, "Maximum connection duration reached")
       cleanup()
@@ -388,7 +336,7 @@ export async function handleConsoleWebSocket(
     }
   }, SESSION_REVALIDATION_INTERVAL_MS)
 
-  // 13. Closure and error listeners
+  // 12. Closure and error listeners
   serverWs.addEventListener("close", () => cleanup())
   serverWs.addEventListener("error", () => cleanup())
   upstreamWs.addEventListener("close", () => cleanup())

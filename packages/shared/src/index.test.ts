@@ -171,7 +171,14 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     const bigCmd = "say " + "x".repeat(500)
     expect(validateServerCommand(bigCmd).valid).toBe(false)
     expect(validateServerCommand(bigCmd).error).toContain("500")
+
+    const { SERVER_PUBLIC_MESSAGES } = await import("./index")
+    expect(SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED).toBe("El servidor todavía no está configurado.")
+    expect(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE).toBe("No se pudo conectar con el servidor en este momento.")
+    expect(SERVER_PUBLIC_MESSAGES.SERVER_BUSY).toBe("Hay otra acción en curso. Espera un momento.")
+    expect(SERVER_PUBLIC_MESSAGES.COMMAND_RATE_LIMITED).toBe("Has enviado demasiados comandos. Espera un momento.")
   })
 })
+
 
 

@@ -1,7 +1,7 @@
 /**
- * Pterodactyl HTTP Client Adapter (Shard 06 & 06A)
+ * Pterodactyl HTTP Client Adapter (Shard 06, 06A & 06B)
  * Encapsulates communication with Pterodactyl Panel Client API v1 with strict
- * timeouts, protocol/SSRF validation, credential protection, normalized Spanish errors,
+ * timeouts, protocol/SSRF validation, credential protection, normalized Spanish public messages,
  * and zero secret leakage.
  */
 
@@ -12,19 +12,27 @@ import type {
   PterodactylWebsocketData,
   PterodactylWebsocketResponse,
 } from "./types"
-import { SERVER_ERROR_CODES } from "@hikat/shared"
+import { SERVER_ERROR_CODES, SERVER_PUBLIC_MESSAGES } from "@hikat/shared"
 
 export class ServerInfrastructureError extends Error {
   public readonly code: string
+  public readonly publicMessage: string
+  public readonly internalMessage?: string
   public readonly extensions: { code: string }
-  constructor(message: string, code: string = SERVER_ERROR_CODES.SERVER_UNAVAILABLE) {
-    super(message)
+
+  constructor(
+    code: string = SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+    publicMessage: string = SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+    internalMessage?: string,
+  ) {
+    super(publicMessage)
     this.name = "ServerInfrastructureError"
     this.code = code
+    this.publicMessage = publicMessage
+    this.internalMessage = internalMessage
     this.extensions = { code }
   }
 }
-
 
 export interface PterodactylClientOptions {
   baseUrl: string
@@ -45,13 +53,25 @@ export class PterodactylHttpClient implements IPterodactylClient {
 
   constructor(options: PterodactylClientOptions) {
     if (!options.baseUrl || typeof options.baseUrl !== "string") {
-      throw new ServerInfrastructureError("La URL de Pterodactyl no está configurada.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Pterodactyl baseUrl is missing or not a string",
+      )
     }
     if (!options.apiKey || typeof options.apiKey !== "string") {
-      throw new ServerInfrastructureError("La API key de Pterodactyl no está configurada.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Pterodactyl apiKey is missing or not a string",
+      )
     }
     if (!options.serverId || typeof options.serverId !== "string") {
-      throw new ServerInfrastructureError("El ID del servidor no está configurado.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Pterodactyl serverId is missing or not a string",
+      )
     }
 
     const trimmedUrl = options.baseUrl.trim()
@@ -59,20 +79,36 @@ export class PterodactylHttpClient implements IPterodactylClient {
     try {
       parsed = new URL(trimmedUrl)
     } catch {
-      throw new ServerInfrastructureError("La URL de Pterodactyl es inválida.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Invalid Pterodactyl baseUrl URL format",
+      )
     }
 
     this.isProduction = options.isProduction ?? false
 
     // SSRF & Protocol validation
     if (this.isProduction && parsed.protocol !== "https:") {
-      throw new ServerInfrastructureError("Pterodactyl debe utilizar HTTPS en entorno de producción.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Pterodactyl baseUrl must use HTTPS in production environment",
+      )
     } else if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-      throw new ServerInfrastructureError("Protocolo de Pterodactyl inválido. Debe ser HTTP o HTTPS.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Invalid Pterodactyl URL protocol. Expected HTTP or HTTPS.",
+      )
     }
 
     if (parsed.username || parsed.password) {
-      throw new ServerInfrastructureError("La URL de Pterodactyl no debe contener credenciales embebidas.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Pterodactyl baseUrl must not contain embedded user credentials",
+      )
     }
 
     // Normalize baseUrl: strip trailing slashes
@@ -111,27 +147,55 @@ export class PterodactylHttpClient implements IPterodactylClient {
     } catch (err: unknown) {
       clearTimeout(timeoutId)
       if (err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))) {
-        throw new ServerInfrastructureError("Tiempo de espera agotado al conectar con el servidor.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+          "Connection timeout with Pterodactyl API",
+        )
       }
-      throw new ServerInfrastructureError("No se pudo conectar con el servidor en este momento.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        "Network connection failure with Pterodactyl API",
+      )
     } finally {
       clearTimeout(timeoutId)
     }
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        throw new ServerInfrastructureError("Error de autenticación con la infraestructura del servidor.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+          SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+          `Pterodactyl authentication failed with status ${response.status}`,
+        )
       }
       if (response.status === 404) {
-        throw new ServerInfrastructureError("Servidor no encontrado en la infraestructura.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+          `Pterodactyl server resource not found (${response.status})`,
+        )
       }
       if (response.status === 429) {
-        throw new ServerInfrastructureError("Límite de solicitudes alcanzado. Por favor espera un momento.", SERVER_ERROR_CODES.SERVER_RATE_LIMITED)
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_RATE_LIMITED,
+          SERVER_PUBLIC_MESSAGES.SERVER_RATE_LIMITED,
+          "Pterodactyl upstream rate limit (429)",
+        )
       }
       if (response.status === 502 || response.status === 503 || response.status === 504) {
-        throw new ServerInfrastructureError("No se pudo conectar con el servidor en este momento.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+          `Pterodactyl upstream gateway error (${response.status})`,
+        )
       }
-      throw new ServerInfrastructureError("Error al comunicarse con la infraestructura del servidor.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        `Pterodactyl API returned HTTP error ${response.status}`,
+      )
     }
 
     // 204 No Content
@@ -143,7 +207,11 @@ export class PterodactylHttpClient implements IPterodactylClient {
       const data = await response.json()
       return data as T
     } catch {
-      throw new ServerInfrastructureError("Respuesta inválida de la infraestructura del servidor.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        "Invalid JSON response from Pterodactyl API",
+      )
     }
   }
 
@@ -187,20 +255,36 @@ export class PterodactylHttpClient implements IPterodactylClient {
       { method: "GET" },
     )
     if (!res || !res.data || !res.data.socket || !res.data.token) {
-      throw new ServerInfrastructureError("No se pudieron obtener credenciales de consola.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        "Failed to retrieve WebSocket credentials from Pterodactyl",
+      )
     }
 
     // Validate Wings socket URL
     try {
       const socketUrl = new URL(res.data.socket)
       if (this.isProduction && socketUrl.protocol !== "wss:") {
-        throw new ServerInfrastructureError("El WebSocket de Wings debe utilizar WSS en producción.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+          "Wings WebSocket URL must use WSS in production environment",
+        )
       } else if (socketUrl.protocol !== "wss:" && socketUrl.protocol !== "ws:") {
-        throw new ServerInfrastructureError("Protocolo de WebSocket de Wings inválido.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+          "Invalid Wings WebSocket URL protocol",
+        )
       }
     } catch (err: unknown) {
       if (err instanceof ServerInfrastructureError) throw err
-      throw new ServerInfrastructureError("URL de WebSocket de Wings inválida.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        "Invalid Wings WebSocket URL structure",
+      )
     }
 
     return res.data

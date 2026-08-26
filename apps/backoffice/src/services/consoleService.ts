@@ -218,17 +218,12 @@ class ConsoleService {
       throw new Error(validation.error || "El comando no es válido.")
     }
 
-    if (this.isConnected() && this.ws) {
-      try {
-        this.ws.send(JSON.stringify({ type: "command", command: validation.command }))
-        return
-      } catch {
-        // Fallback to GraphQL mutation
-      }
+    const res = await serverApi.sendServerCommand(validation.command)
+    if (!res || !res.success) {
+      throw new Error(res?.message || "No se pudo ejecutar el comando.")
     }
-
-    await serverApi.sendServerCommand(validation.command)
   }
 }
+
 
 export const consoleService = new ConsoleService()

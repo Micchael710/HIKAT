@@ -1,7 +1,7 @@
 /**
- * Server Administration Service (Shard 06 & Shard 06A)
- * Business logic orchestrating Pterodactyl infrastructure, distributed power locks in D1,
- * distributed command rate limits in D1, single-use console tickets, and telemetry mapping.
+ * Server Administration Service (Shard 06, 06A & 06B)
+ * Business logic orchestrating Pterodactyl infrastructure, truly atomic distributed command rate limits,
+ * distributed power action locks, real-state power action validation, and single-use console tickets.
  */
 
 import { eq, and, sql, lt, gt, isNull } from "drizzle-orm"
@@ -10,6 +10,7 @@ import {
   mapPterodactylStateToHiKAT,
   validateServerCommand,
   SERVER_ERROR_CODES,
+  SERVER_PUBLIC_MESSAGES,
   SERVER_CONSOLE_TICKET_TTL_SECONDS,
   SERVER_POWER_LOCK_TTL_SECONDS,
   SERVER_COMMAND_RATE_LIMIT,
@@ -26,8 +27,9 @@ export function createPterodactylClient(env: Env): IPterodactylClient {
 
   if (!baseUrl || !apiKey || !serverId) {
     throw new ServerInfrastructureError(
-      "La integración con el servidor no está configurada.",
       SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+      SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+      "Pterodactyl configuration missing (baseUrl, apiKey, or serverId)",
     )
   }
 
@@ -46,7 +48,6 @@ export async function getServerStatus(
   env: Env,
   clientOverride?: IPterodactylClient,
 ): Promise<ServerResourcesData> {
-
   const client = clientOverride || createPterodactylClient(env)
 
   const [statsRes, detailsRes] = await Promise.all([
@@ -130,8 +131,9 @@ async function acquireDistributedPowerLock(
 
   if (activeLock) {
     throw new ServerInfrastructureError(
-      "Hay otra acción en curso en el servidor. Por favor espera un momento.",
       SERVER_ERROR_CODES.SERVER_BUSY,
+      SERVER_PUBLIC_MESSAGES.SERVER_BUSY,
+      "Another power action is currently in progress",
     )
   }
 
@@ -151,8 +153,9 @@ async function acquireDistributedPowerLock(
   } catch {
     // Conflict on insert means another isolate concurrently acquired the lock
     throw new ServerInfrastructureError(
-      "Hay otra acción en curso en el servidor. Por favor espera un momento.",
       SERVER_ERROR_CODES.SERVER_BUSY,
+      SERVER_PUBLIC_MESSAGES.SERVER_BUSY,
+      "Concurrent power action lock acquisition collision",
     )
   }
 }
@@ -171,7 +174,8 @@ async function releaseDistributedPowerLock(
 }
 
 /**
- * Executes a power action (START, RESTART, STOP) with distributed lock coordination.
+ * Executes a power action (START, RESTART, STOP) with distributed lock coordination
+ * and real server-state compatibility validation.
  */
 export async function executeServerPowerAction(
   env: Env,
@@ -181,17 +185,76 @@ export async function executeServerPowerAction(
 ): Promise<{ success: boolean; status: ServerStatus; message: string }> {
   if (!env.DB) {
     throw new ServerInfrastructureError(
-      "La base de datos no está disponible.",
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+      "Database binding is unavailable",
     )
   }
+
+  if (action !== "START" && action !== "RESTART" && action !== "STOP") {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "Acción de servidor inválida.",
+      `Invalid power action requested: ${action}`,
+    )
+  }
+
   const client = clientOverride || createPterodactylClient(env)
   const db = createDatabase(env.DB)
 
+  // 1. Acquire distributed lock for concurrency safety during request
   await acquireDistributedPowerLock(db, action, userId)
 
-
   try {
+    // 2. Validate current real server state before dispatching power action
+    let currentMetrics: ServerResourcesData
+    try {
+      currentMetrics = await getServerStatus(env, client)
+    } catch {
+      // If server details query fails, allow proceed or handle conservatively
+      currentMetrics = {
+        status: "UNKNOWN",
+        cpuPercent: 0,
+        memoryUsedBytes: 0,
+        diskUsedBytes: 0,
+        isSuspended: false,
+      }
+    }
+
+    const currentStatus = currentMetrics.status
+
+    if (currentStatus === "STARTING") {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_BUSY,
+        SERVER_PUBLIC_MESSAGES.SERVER_IS_STARTING,
+        "Cannot execute power action while server is starting",
+      )
+    }
+
+    if (currentStatus === "STOPPING") {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_BUSY,
+        SERVER_PUBLIC_MESSAGES.SERVER_IS_STOPPING,
+        "Cannot execute power action while server is stopping",
+      )
+    }
+
+    if (action === "START" && currentStatus === "ONLINE") {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_BUSY,
+        SERVER_PUBLIC_MESSAGES.SERVER_ALREADY_RUNNING,
+        "Cannot start server that is already online",
+      )
+    }
+
+    if ((action === "STOP" || action === "RESTART") && currentStatus === "OFFLINE") {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_BUSY,
+        SERVER_PUBLIC_MESSAGES.SERVER_ALREADY_STOPPED,
+        `Cannot ${action.toLowerCase()} server that is already offline`,
+      )
+    }
+
     let signal: "start" | "restart" | "stop"
     let targetStatus: ServerStatus
     let message: string
@@ -212,11 +275,6 @@ export async function executeServerPowerAction(
         targetStatus = "STOPPING"
         message = "Apagando servidor..."
         break
-      default:
-        throw new ServerInfrastructureError(
-          "Acción de servidor desconocida.",
-          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-        )
     }
 
     await client.sendPowerAction(signal)
@@ -232,67 +290,49 @@ export async function executeServerPowerAction(
 }
 
 /**
- * Checks and increments distributed command rate limit in D1.
+ * Truly atomic command rate limiting in D1 using a single UPSERT query.
  */
 export async function checkAndIncrementCommandRateLimit(
   db: ReturnType<typeof createDatabase>,
   userId: string,
 ): Promise<void> {
   const now = Date.now()
-  const key = `cmd_rl:${userId}`
   const nowIso = new Date(now).toISOString()
+  const newResetAtIso = new Date(
+    now + SERVER_COMMAND_RATE_LIMIT.WINDOW_SECONDS * 1000,
+  ).toISOString()
+  const key = `cmd_rl:${userId}`
 
-  const existing = await db
-    .select()
-    .from(schema.serverCommandRateLimits)
-    .where(eq(schema.serverCommandRateLimits.key, key))
-    .get()
+  // Execute an atomic UPSERT in D1:
+  // If no row exists: inserts with count = 1, reset_at = now + 10s.
+  // If row exists:
+  //   - If reset_at <= now (expired window): resets count = 1, reset_at = now + 10s.
+  //   - If reset_at > now (active window): increments count = count + 1.
+  // RETURNING count gives the atomically assigned count for this request.
+  const query = sql`
+    INSERT INTO server_command_rate_limits (key, count, window_start, reset_at)
+    VALUES (${key}, 1, ${nowIso}, ${newResetAtIso})
+    ON CONFLICT(key) DO UPDATE SET
+      count = CASE WHEN reset_at <= ${nowIso} THEN 1 ELSE count + 1 END,
+      window_start = CASE WHEN reset_at <= ${nowIso} THEN ${nowIso} ELSE window_start END,
+      reset_at = CASE WHEN reset_at <= ${nowIso} THEN ${newResetAtIso} ELSE reset_at END
+    RETURNING count;
+  `
 
-  if (!existing || new Date(existing.resetAt).getTime() <= now) {
-    // Start new window
-    const resetAt = new Date(
-      now + SERVER_COMMAND_RATE_LIMIT.WINDOW_SECONDS * 1000,
-    ).toISOString()
+  const rows = await db.all<{ count: number }>(query)
+  const assignedCount = rows?.[0]?.count ?? 1
 
-    if (!existing) {
-      await db.insert(schema.serverCommandRateLimits).values({
-        key,
-        count: 1,
-        windowStart: nowIso,
-        resetAt,
-      })
-    } else {
-      await db
-        .update(schema.serverCommandRateLimits)
-        .set({
-          count: 1,
-          windowStart: nowIso,
-          resetAt,
-        })
-        .where(eq(schema.serverCommandRateLimits.key, key))
-    }
-    return
-  }
-
-  // Inside current window
-  if (existing.count >= SERVER_COMMAND_RATE_LIMIT.MAX_COMMANDS) {
+  if (assignedCount > SERVER_COMMAND_RATE_LIMIT.MAX_COMMANDS) {
     throw new ServerInfrastructureError(
-      "Has enviado demasiados comandos. Espera un momento.",
       SERVER_ERROR_CODES.SERVER_RATE_LIMITED,
+      SERVER_PUBLIC_MESSAGES.COMMAND_RATE_LIMITED,
+      `Command rate limit exceeded: count is ${assignedCount} (max ${SERVER_COMMAND_RATE_LIMIT.MAX_COMMANDS})`,
     )
   }
-
-  // Increment
-  await db
-    .update(schema.serverCommandRateLimits)
-    .set({
-      count: existing.count + 1,
-    })
-    .where(eq(schema.serverCommandRateLimits.key, key))
 }
 
 /**
- * Executes a console command with centralized validation and rate limiting.
+ * Executes a console command with centralized validation and atomic rate limiting.
  */
 export async function executeServerCommand(
   env: Env,
@@ -303,15 +343,17 @@ export async function executeServerCommand(
   const validation = validateServerCommand(command)
   if (!validation.valid || !validation.command) {
     throw new ServerInfrastructureError(
-      validation.error || "Comando inválido.",
       "VALIDATION_ERROR",
+      validation.error || "El comando no es válido.",
+      "Command validation failed",
     )
   }
 
   if (!env.DB) {
     throw new ServerInfrastructureError(
-      "La base de datos no está disponible.",
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+      "Database binding is unavailable",
     )
   }
 
@@ -337,14 +379,14 @@ export async function createConsoleTicket(
 ): Promise<{ ticket: string; expiresAt: string }> {
   if (!env.DB) {
     throw new ServerInfrastructureError(
-      "La base de datos no está disponible.",
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+      "Database binding is unavailable",
     )
   }
 
   const db = createDatabase(env.DB)
   const now = Date.now()
-
   const nowIso = new Date(now).toISOString()
 
   // 1. Opportunistically delete expired tickets
@@ -390,8 +432,9 @@ export async function consumeConsoleTicket(
 ): Promise<{ userId: string; sessionId: string }> {
   if (!ticketId || typeof ticketId !== "string" || !ticketId.startsWith("cstk_")) {
     throw new ServerInfrastructureError(
-      "Ticket de consola inválido o expirado.",
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+      "Invalid console ticket format",
     )
   }
 
@@ -416,8 +459,9 @@ export async function consumeConsoleTicket(
 
   if (!updatedRow) {
     throw new ServerInfrastructureError(
-      "Ticket de consola inválido o expirado.",
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+      "Console ticket already consumed, expired, or not found",
     )
   }
 
