@@ -93,6 +93,11 @@ export function computeDraftChanges(
   for (const pf of publishedFiles) {
     if (!draftPaths.has(pf.logicalPath)) {
       removed++
+      taggedFiles.push({
+        ...formatAdminGameFile(pf),
+        id: `tombstone-${pf.id}`,
+        changeStatus: "REMOVED",
+      })
     }
   }
 
@@ -107,6 +112,7 @@ export function computeDraftChanges(
     taggedFiles,
   }
 }
+
 
 export async function validateDraftReadiness(
   env: Env,
@@ -443,26 +449,49 @@ export async function publishGameRelease(
   const now = new Date().toISOString()
 
   // 5. ATOMIC PUBLICATION:
-  // Step A: Archive currently published release
-  await db
-    .update(schema.gameReleases)
-    .set({
-      status: "ARCHIVED",
-      updatedAt: now,
-    })
-    .where(eq(schema.gameReleases.status, "PUBLISHED"))
+  // Execute both queries atomically in a single D1 batch
+  if (typeof (db as any).batch === "function") {
+    await (db as any).batch([
+      db
+        .update(schema.gameReleases)
+        .set({
+          status: "ARCHIVED",
+          updatedAt: now,
+        })
+        .where(eq(schema.gameReleases.status, "PUBLISHED")),
+      db
+        .update(schema.gameReleases)
+        .set({
+          version,
+          status: "PUBLISHED",
+          notes: input.notes?.trim() || null,
+          publishedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(schema.gameReleases.id, draft.id)),
+    ])
+  } else {
+    // Fallback for test environments without batch support
+    await db
+      .update(schema.gameReleases)
+      .set({
+        status: "ARCHIVED",
+        updatedAt: now,
+      })
+      .where(eq(schema.gameReleases.status, "PUBLISHED"))
 
-  // Step B: Mark draft as PUBLISHED
-  await db
-    .update(schema.gameReleases)
-    .set({
-      version,
-      status: "PUBLISHED",
-      notes: input.notes?.trim() || null,
-      publishedAt: now,
-      updatedAt: now,
-    })
-    .where(eq(schema.gameReleases.id, draft.id))
+    await db
+      .update(schema.gameReleases)
+      .set({
+        version,
+        status: "PUBLISHED",
+        notes: input.notes?.trim() || null,
+        publishedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(schema.gameReleases.id, draft.id))
+  }
+
 
   const published = await db
     .select()

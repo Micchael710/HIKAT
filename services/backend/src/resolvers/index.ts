@@ -88,7 +88,9 @@ import {
   addGameFile,
   updateGameFile,
   removeGameFile,
+  restoreGameFile,
 } from "../services/game"
+
 import {
   getAdminSettings,
   getClientConfiguration,
@@ -709,20 +711,33 @@ export const resolvers = {
       return removeGameFile(context.db, args.id)
     },
 
+    restoreGameFile: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return restoreGameFile(context.db, args.id, identity.userId)
+    },
+
     publishGameRelease: async (
       _parent: unknown,
       args: { input: PublishGameReleaseInputGql },
       context: BackendGraphQLContext,
     ): Promise<GameReleaseGql> => {
       const identity = requireAdmin(context)
+
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return publishGameRelease(context.db, context.env, args.input, identity.userId)
     },
 
-
     // --- Settings Administrative Mutations (Require ADMIN - Shard 06.5) ---
+
 
     updateAdminSettings: async (
       _parent: unknown,

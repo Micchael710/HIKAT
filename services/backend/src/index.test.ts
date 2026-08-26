@@ -5274,8 +5274,10 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const uploadHttpRes = await worker.fetch(uploadHttpReq, createCoreEnv())
       expect(uploadHttpRes.status).toBe(200)
       const uploadedInfo = (await uploadHttpRes.json()) as any
-      expect(uploadedInfo.sha256).toBeDefined()
       expect(uploadedInfo.tokenHash).toBeDefined()
+      expect(uploadedInfo.originalFilename).toBe("journeymap-1.21.1-6.0.0.jar")
+      expect(uploadedInfo.objectKey).toBeUndefined()
+
 
       // 4. Attach uploaded file to draft via addGameFile mutation
       const addFileMutation = `
@@ -5560,8 +5562,258 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(historyData.data.gameReleaseHistory.length).toBeGreaterThanOrEqual(1)
       expect(historyData.data.gameReleaseHistory[0].version).toBe("1.4.2")
     })
+
+    it("enforces backend DRAFT guards, sanitized upload response, tombstones, restore, and atomic publication (Shard 06.5B)", async () => {
+      const testEnv = createCoreEnv()
+
+      // 1. Test sanitized upload response (Requirement 7)
+      const ticketReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+        body: JSON.stringify({
+          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-a.jar", sizeBytes: 100 }) { uploadUrl uploadToken } }`,
+        }),
+      })
+      const ticketRes = await worker.fetch(ticketReq, testEnv)
+      const ticketData = (await ticketRes.json()) as any
+      const { uploadUrl, uploadToken } = ticketData.data.createGameFileUpload
+
+      const binaryA = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Array(96).fill(0x00)])
+      const uploadReq = new Request(`http://localhost${uploadUrl}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${coreAdminToken}`, "X-Upload-Token": uploadToken },
+        body: binaryA,
+      })
+
+      const uploadRes = await worker.fetch(uploadReq, testEnv)
+      expect(uploadRes.status).toBe(200)
+      const uploadJson = (await uploadRes.json()) as any
+
+      // Assert that internal storage details are NOT exposed
+      expect(uploadJson.tokenHash).toBeDefined()
+      expect(uploadJson.originalFilename).toBe("mod-a.jar")
+      expect(uploadJson.category).toBe("MOD")
+      expect(uploadJson.sizeBytes).toBe(100)
+      expect(uploadJson.objectKey).toBeUndefined()
+      expect(uploadJson.sha256).toBeUndefined()
+      expect(uploadJson.id).toBeUndefined()
+
+      // 2. Add mod A to draft and publish version 1.0.0
+      const addFileRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { addGameFile(input: { name: "Mod A", category: MOD, tokenHash: "${uploadJson.tokenHash}" }) { id name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const addFileData = (await addFileRes.json()) as any
+      const fileAId = addFileData.data.addGameFile.id
+
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { publishGameRelease(input: { version: "1.0.0", notes: "Initial v1.0.0" }) { id version status } }`,
+          }),
+        }),
+        testEnv,
+      )
+
+      // 3. Backend MUST reject update / remove on PUBLISHED release files (Requirement 5)
+      const updatePubRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { updateGameFile(id: "${fileAId}", input: { name: "Mod A Hacked" }) { id } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const updatePubData = (await updatePubRes.json()) as any
+      expect(updatePubData.errors).toBeDefined()
+      expect(updatePubData.errors[0].message).toContain("Solo puedes modificar archivos de una actualización en preparación")
+
+      const removePubRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { removeGameFile(id: "${fileAId}") }`,
+          }),
+        }),
+        testEnv,
+      )
+      const removePubData = (await removePubRes.json()) as any
+      expect(removePubData.errors).toBeDefined()
+      expect(removePubData.errors[0].message).toContain("Solo puedes modificar archivos de una actualización en preparación")
+
+      // 4. Prepare draft for next update (cloned from published 1.0.0)
+      const prepareRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({ query: "mutation { prepareGameDraft { id version files { id name } } }" }),
+        }),
+        testEnv,
+      )
+      const prepareData = (await prepareRes.json()) as any
+      const draftFileAId = prepareData.data.prepareGameDraft.files[0].id
+
+      // 5. Upload Mod B and add to draft
+      const ticketBReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+        body: JSON.stringify({
+          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-b.jar", sizeBytes: 80 }) { uploadUrl uploadToken } }`,
+        }),
+      })
+      const ticketBRes = await worker.fetch(ticketBReq, testEnv)
+      const { uploadUrl: uB, uploadToken: tB } = ((await ticketBRes.json()) as any).data.createGameFileUpload
+
+      const uploadBRes = await worker.fetch(
+        new Request(`http://localhost${uB}`, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${coreAdminToken}`, "X-Upload-Token": tB },
+          body: new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Array(76).fill(0x00)]),
+        }),
+        testEnv,
+      )
+      const tokenHashB = ((await uploadBRes.json()) as any).tokenHash
+
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { addGameFile(input: { name: "Mod B", category: MOD, tokenHash: "${tokenHashB}" }) { id } }`,
+          }),
+        }),
+        testEnv,
+      )
+
+      // 6. Delete draftFileA from draft -> verifies tombstone with changeStatus REMOVED (Requirement 4)
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { removeGameFile(id: "${draftFileAId}") }`,
+          }),
+        }),
+        testEnv,
+      )
+
+      const overviewDiffRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `
+              query {
+                adminGameOverview {
+                  draftRelease {
+                    files { id name changeStatus }
+                  }
+                  changes { added updated removed unchanged total }
+                }
+              }
+            `,
+          }),
+        }),
+        testEnv,
+      )
+      const overviewDiff = ((await overviewDiffRes.json()) as any).data.adminGameOverview
+      expect(overviewDiff.changes.removed).toBe(1)
+      expect(overviewDiff.changes.added).toBe(1)
+
+      const tombstoneA = overviewDiff.draftRelease.files.find((f: any) => f.name === "Mod A")
+      expect(tombstoneA).toBeDefined()
+      expect(tombstoneA.changeStatus).toBe("REMOVED")
+
+      // 7. Test restore (Deshacer) tombstone
+      const restoreRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { restoreGameFile(id: "${tombstoneA.id}") { id name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const restoreData = (await restoreRes.json()) as any
+      expect(restoreData.errors).toBeUndefined()
+      expect(restoreData.data.restoreGameFile.name).toBe("Mod A")
+
+      // Remove it again so final release has only Mod B
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { removeGameFile(id: "${restoreData.data.restoreGameFile.id}") }`,
+          }),
+        }),
+        testEnv,
+      )
+
+      // 8. Atomically publish release 1.0.1
+      const finalPubRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { publishGameRelease(input: { version: "1.0.1", notes: "Release with Mod B" }) { id version status files { name } } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const finalPubData = (await finalPubRes.json()) as any
+      expect(finalPubData.errors).toBeUndefined()
+      expect(finalPubData.data.publishGameRelease.version).toBe("1.0.1")
+      expect(finalPubData.data.publishGameRelease.files.length).toBe(1)
+      expect(finalPubData.data.publishGameRelease.files[0].name).toBe("Mod B")
+
+      // 9. Verify history: previous release 1.0.0 is ARCHIVED and its file Mod A remains intact
+      const historyCheckRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `query { gameReleaseHistory { version status files { name } } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const historyCheck = ((await historyCheckRes.json()) as any).data.gameReleaseHistory
+      expect(historyCheck.length).toBe(2)
+      const v1 = historyCheck.find((r: any) => r.version === "1.0.0")
+      expect(v1.status).toBe("ARCHIVED")
+      expect(v1.files[0].name).toBe("Mod A")
+
+      // 10. Attempt update/remove on ARCHIVED release files -> rejected
+      const updateArchRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { updateGameFile(id: "${fileAId}", input: { name: "Archived Hack" }) { id } }`,
+          }),
+        }),
+        testEnv,
+      )
+      expect(((await updateArchRes.json()) as any).errors[0].message).toContain(
+        "Solo puedes modificar archivos de una actualización en preparación",
+      )
+    })
   })
 })
+
 
 
 

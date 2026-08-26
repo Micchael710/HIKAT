@@ -12,7 +12,6 @@ import {
   IconTrash,
   IconSpinner,
   IconCheck,
-  IconWarning,
   IconBox,
   IconRefresh,
   IconEdit,
@@ -135,6 +134,16 @@ export default function GameView({ theme }: GameViewProps) {
       setError(err.message || "Error al descartar el borrador.")
     } finally {
       setIsDiscardingDraft(false)
+    }
+  }
+
+  const handleRestoreFile = async (file: AdminGameFile) => {
+    try {
+      await gameApi.restoreGameFile(file.id)
+      setToastMessage(`"${file.name}" reincorporado a la actualización.`)
+      await fetchOverview()
+    } catch (err: any) {
+      setError(err.message || "Error al reincorporar el archivo.")
     }
   }
 
@@ -443,7 +452,7 @@ export default function GameView({ theme }: GameViewProps) {
                       color: hasDraft ? "#818cf8" : "#22c55e",
                     }}
                   >
-                    {hasDraft ? "Actualización en preparación (Borrador)" : "Versión Oficial Publicada"}
+                    {hasDraft ? "Actualización en preparación (Borrador)" : "Versión oficial publicada"}
                   </span>
                   <span
                     style={{
@@ -458,7 +467,7 @@ export default function GameView({ theme }: GameViewProps) {
                 <p style={{ margin: 0, fontSize: "14px", color: isDark ? "#94a3b8" : "#64748b" }}>
                   {hasDraft
                     ? "Los cambios que realices aquí no afectarán a los jugadores hasta que pulses Publicar actualización."
-                    : "Esta versión está siendo sincronizada activamente por los jugadores."}
+                    : "Para añadir, actualizar o eliminar archivos, prepara una nueva actualización."}
                 </p>
               </div>
 
@@ -573,11 +582,11 @@ export default function GameView({ theme }: GameViewProps) {
                       alignItems: "center",
                       gap: "6px",
                       fontSize: "13px",
-                      color: files.length > 0 ? "#22c55e" : "#ef4444",
+                      color: files.filter((f) => f.changeStatus !== "REMOVED").length > 0 ? "#22c55e" : "#ef4444",
                     }}
                   >
                     <IconCheck size={16} />
-                    {files.length} archivos preparados
+                    {files.filter((f) => f.changeStatus !== "REMOVED").length} archivos preparados
                   </span>
                   <span
                     style={{
@@ -747,133 +756,181 @@ export default function GameView({ theme }: GameViewProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {files.map((file) => (
-                      <tr
-                        key={file.id}
-                        style={{
-                          borderBottom: `1px solid ${isDark ? "#334155" : "#f1f5f9"}`,
-                          fontSize: "14px",
-                        }}
-                      >
-                        {/* Name */}
-                        <td style={{ padding: "14px 24px", fontWeight: "600", color: isDark ? "#f1f5f9" : "#0f172a" }}>
-                          {file.name}
-                        </td>
+                    {files.map((file) => {
+                      const isRemoved = file.changeStatus === "REMOVED"
+                      return (
+                        <tr
+                          key={file.id}
+                          style={{
+                            borderBottom: `1px solid ${isDark ? "#334155" : "#f1f5f9"}`,
+                            fontSize: "14px",
+                            opacity: isRemoved ? 0.7 : 1,
+                            backgroundColor: isRemoved
+                              ? isDark
+                                ? "rgba(239, 68, 68, 0.05)"
+                                : "rgba(239, 68, 68, 0.02)"
+                              : "transparent",
+                          }}
+                        >
+                          {/* Name */}
+                          <td style={{ padding: "14px 24px", fontWeight: "600", color: isDark ? "#f1f5f9" : "#0f172a" }}>
+                            <span style={{ textDecoration: isRemoved ? "line-through" : "none" }}>
+                              {file.name}
+                            </span>
+                          </td>
 
-                        {/* Category */}
-                        <td style={{ padding: "14px 16px" }}>
-                          <span
-                            style={{
-                              display: "inline-block",
-                              padding: "3px 8px",
-                              borderRadius: "6px",
-                              fontSize: "12px",
-                              fontWeight: "600",
-                              backgroundColor: isDark ? "#334155" : "#f1f5f9",
-                              color: isDark ? "#cbd5e1" : "#475569",
-                            }}
-                          >
-                            {getCategoryHumanName(file.category)}
-                          </span>
-                        </td>
-
-                        {/* Size */}
-                        <td style={{ padding: "14px 16px", color: isDark ? "#94a3b8" : "#64748b" }}>
-                          {formatBytes(file.sizeBytes)}
-                        </td>
-
-                        {/* Change Status (in Draft) */}
-                        {hasDraft && (
+                          {/* Category */}
                           <td style={{ padding: "14px 16px" }}>
-                            {file.changeStatus === "ADDED" ? (
-                              <span
-                                style={{
-                                  padding: "3px 8px",
-                                  borderRadius: "6px",
-                                  fontSize: "11px",
-                                  fontWeight: "700",
-                                  backgroundColor: "rgba(34, 197, 94, 0.15)",
-                                  color: "#22c55e",
-                                }}
-                              >
-                                + Añadido
-                              </span>
-                            ) : file.changeStatus === "UPDATED" ? (
-                              <span
-                                style={{
-                                  padding: "3px 8px",
-                                  borderRadius: "6px",
-                                  fontSize: "11px",
-                                  fontWeight: "700",
-                                  backgroundColor: "rgba(56, 189, 248, 0.15)",
-                                  color: "#38bdf8",
-                                }}
-                              >
-                                ↑ Actualizado
-                              </span>
-                            ) : (
-                              <span
-                                style={{
-                                  padding: "3px 8px",
-                                  borderRadius: "6px",
-                                  fontSize: "11px",
-                                  fontWeight: "600",
-                                  backgroundColor: isDark ? "#334155" : "#f1f5f9",
-                                  color: isDark ? "#94a3b8" : "#64748b",
-                                }}
-                              >
-                                Sin cambios
-                              </span>
-                            )}
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "3px 8px",
+                                borderRadius: "6px",
+                                fontSize: "12px",
+                                fontWeight: "600",
+                                backgroundColor: isDark ? "#334155" : "#f1f5f9",
+                                color: isDark ? "#cbd5e1" : "#475569",
+                              }}
+                            >
+                              {getCategoryHumanName(file.category)}
+                            </span>
                           </td>
-                        )}
 
-                        {/* Row Actions (Draft only) */}
-                        {hasDraft && (
-                          <td style={{ padding: "14px 24px", textAlign: "right" }}>
-                            <div style={{ display: "inline-flex", gap: "8px", justifyContent: "flex-end" }}>
-                              <button
-                                onClick={() => {
-                                  setTargetFileToUpdate(file)
-                                  setIsAddFileOpen(true)
-                                }}
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "4px",
-                                  padding: "6px 10px",
-                                  borderRadius: "6px",
-                                  border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                                  backgroundColor: "transparent",
-                                  color: isDark ? "#f1f5f9" : "#1e293b",
-                                  fontSize: "12px",
-                                  fontWeight: "500",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                <IconEdit size={13} />
-                                Actualizar
-                              </button>
-                              <button
-                                onClick={() => setDeleteFileItem(file)}
-                                style={{
-                                  padding: "6px 10px",
-                                  borderRadius: "6px",
-                                  border: "1px solid rgba(239, 68, 68, 0.3)",
-                                  backgroundColor: "transparent",
-                                  color: "#ef4444",
-                                  fontSize: "12px",
-                                  cursor: "pointer",
-                                }}
-                                title="Eliminar del borrador"
-                              >
-                                <IconTrash size={13} />
-                              </button>
-                            </div>
+                          {/* Size */}
+                          <td style={{ padding: "14px 16px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                            {formatBytes(file.sizeBytes)}
                           </td>
-                        )}
-                      </tr>
-                    ))}
+
+                          {/* Change Status (in Draft) */}
+                          {hasDraft && (
+                            <td style={{ padding: "14px 16px" }}>
+                              {file.changeStatus === "ADDED" ? (
+                                <span
+                                  style={{
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    backgroundColor: "rgba(34, 197, 94, 0.15)",
+                                    color: "#22c55e",
+                                  }}
+                                >
+                                  + Añadido
+                                </span>
+                              ) : file.changeStatus === "UPDATED" ? (
+                                <span
+                                  style={{
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    backgroundColor: "rgba(56, 189, 248, 0.15)",
+                                    color: "#38bdf8",
+                                  }}
+                                >
+                                  ↑ Actualizado
+                                </span>
+                              ) : file.changeStatus === "REMOVED" ? (
+                                <span
+                                  style={{
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    backgroundColor: "rgba(239, 68, 68, 0.15)",
+                                    color: "#ef4444",
+                                  }}
+                                >
+                                  − Se eliminará
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    padding: "3px 8px",
+                                    borderRadius: "6px",
+                                    fontSize: "11px",
+                                    fontWeight: "600",
+                                    backgroundColor: isDark ? "#334155" : "#f1f5f9",
+                                    color: isDark ? "#94a3b8" : "#64748b",
+                                  }}
+                                >
+                                  Sin cambios
+                                </span>
+                              )}
+                            </td>
+                          )}
+
+                          {/* Row Actions (Draft only) */}
+                          {hasDraft && (
+                            <td style={{ padding: "14px 24px", textAlign: "right" }}>
+                              <div style={{ display: "inline-flex", gap: "8px", justifyContent: "flex-end" }}>
+                                {isRemoved ? (
+                                  <button
+                                    onClick={() => handleRestoreFile(file)}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                      padding: "6px 12px",
+                                      borderRadius: "6px",
+                                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
+                                      backgroundColor: "transparent",
+                                      color: "#6366f1",
+                                      fontSize: "12px",
+                                      fontWeight: "600",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <IconRefresh size={13} />
+                                    Deshacer
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setTargetFileToUpdate(file)
+                                        setIsAddFileOpen(true)
+                                      }}
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "4px",
+                                        padding: "6px 10px",
+                                        borderRadius: "6px",
+                                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
+                                        backgroundColor: "transparent",
+                                        color: isDark ? "#f1f5f9" : "#1e293b",
+                                        fontSize: "12px",
+                                        fontWeight: "500",
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      <IconEdit size={13} />
+                                      Actualizar
+                                    </button>
+                                    <button
+                                      onClick={() => setDeleteFileItem(file)}
+                                      style={{
+                                        padding: "6px 10px",
+                                        borderRadius: "6px",
+                                        border: "1px solid rgba(239, 68, 68, 0.3)",
+                                        backgroundColor: "transparent",
+                                        color: "#ef4444",
+                                        fontSize: "12px",
+                                        cursor: "pointer",
+                                      }}
+                                      title="Eliminar del borrador"
+                                    >
+                                      <IconTrash size={13} />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
