@@ -5,14 +5,27 @@ interface LiveToastProps {
   message: string | null
   type?: "success" | "error" | "info"
   theme?: ThemeMode
+  duration?: number
+  onClose?: () => void
 }
 
 export default function LiveToast({
   message,
   type = "success",
   theme = "dark",
+  duration = 3500,
+  onClose,
 }: LiveToastProps) {
+  React.useEffect(() => {
+    if (!message || !onClose) return
+    const timer = setTimeout(() => {
+      onClose()
+    }, duration)
+    return () => clearTimeout(timer)
+  }, [message, duration, onClose])
+
   if (!message) return null
+
 
   const isDark = theme === "dark"
   const isError = type === "error"

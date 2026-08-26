@@ -6,6 +6,8 @@ import BackofficeSidebar from "./components/layout/BackofficeSidebar"
 import BackofficeHeader from "./components/layout/BackofficeHeader"
 import PlaceholderView from "./components/layout/PlaceholderView"
 import NewsListView from "./components/news/NewsListView"
+import ServerOverviewView from "./components/server/ServerOverviewView"
+
 import {
   IconDashboard,
   IconShirt,
@@ -123,13 +125,8 @@ function BackofficeShell({
             />
           )}
 
-          {section === "server" && (
-            <PlaceholderView
-              title="Servidor"
-              icon={<IconServer size={36} />}
-              theme={theme}
-            />
-          )}
+          {section === "server" && <ServerOverviewView theme={theme} />}
+
 
           {section === "game" && (
             <PlaceholderView

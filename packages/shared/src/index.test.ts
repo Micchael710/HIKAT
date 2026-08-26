@@ -12,7 +12,14 @@ import {
   isValidYouTubeUrl,
   encodeCursor,
   decodeCursor,
+  ALLOWED_SERVER_STATUSES,
+  ALLOWED_SERVER_POWER_ACTIONS,
+  mapPterodactylStateToHiKAT,
+  getServerStatusLabel,
+  formatBytesToHuman,
+  formatUptime,
 } from "./index"
+
 
 describe("Shared News & Media Content Utilities (Shard 04B)", () => {
   it("exports valid News and Media constants", () => {
@@ -98,4 +105,45 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
 
     expect(decodeCursor("invalid-base64-!#@")).toBeNull()
   })
+
+  it("maps Pterodactyl server states to human HiKAT states", () => {
+    expect(ALLOWED_SERVER_STATUSES).toEqual([
+      "ONLINE",
+      "STARTING",
+      "STOPPING",
+      "OFFLINE",
+      "DISCONNECTED",
+      "UNKNOWN",
+    ])
+    expect(ALLOWED_SERVER_POWER_ACTIONS).toEqual(["START", "RESTART", "STOP"])
+
+
+    expect(mapPterodactylStateToHiKAT("running")).toBe("ONLINE")
+    expect(mapPterodactylStateToHiKAT("starting")).toBe("STARTING")
+    expect(mapPterodactylStateToHiKAT("stopping")).toBe("STOPPING")
+    expect(mapPterodactylStateToHiKAT("offline")).toBe("OFFLINE")
+    expect(mapPterodactylStateToHiKAT("unknown-state")).toBe("UNKNOWN")
+    expect(mapPterodactylStateToHiKAT(null)).toBe("UNKNOWN")
+    expect(mapPterodactylStateToHiKAT("running", true)).toBe("DISCONNECTED")
+
+    expect(getServerStatusLabel("ONLINE")).toBe("En línea")
+    expect(getServerStatusLabel("STARTING")).toBe("Iniciando")
+    expect(getServerStatusLabel("STOPPING")).toBe("Apagándose")
+    expect(getServerStatusLabel("OFFLINE")).toBe("Apagado")
+    expect(getServerStatusLabel("DISCONNECTED")).toBe("Sin conexión")
+    expect(getServerStatusLabel("UNKNOWN")).toBe("Estado desconocido")
+
+    expect(formatBytesToHuman(0)).toBe("0 B")
+    expect(formatBytesToHuman(1024)).toBe("1.0 KB")
+    expect(formatBytesToHuman(1024 * 1024 * 512)).toBe("512.0 MB")
+    expect(formatBytesToHuman(1024 * 1024 * 1024 * 8)).toBe("8.0 GB")
+
+    expect(formatUptime(null)).toBe("-")
+    expect(formatUptime(0)).toBe("-")
+    expect(formatUptime(45000)).toBe("45s")
+    expect(formatUptime(125000)).toBe("2m 5s")
+    expect(formatUptime(3600000 * 3 + 15 * 60000)).toBe("3h 15m")
+    expect(formatUptime(86400000 * 2 + 3600000 * 4)).toBe("2d 4h")
+  })
 })
+

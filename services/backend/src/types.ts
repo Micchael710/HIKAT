@@ -11,7 +11,11 @@ export interface Env {
   JWT_PUBLIC_KEY_PEM?: string
   CORS_ALLOW_ORIGIN?: string
   PUBLIC_MEDIA_URL_BASE?: string
+  PTERODACTYL_BASE_URL?: string
+  PTERODACTYL_API_KEY?: string
+  PTERODACTYL_SERVER_ID?: string
 }
+
 
 export interface AuthenticatedIdentity {
   userId: string

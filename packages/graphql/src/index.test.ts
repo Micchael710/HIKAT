@@ -186,4 +186,57 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(err.extensions.entity).toBe("User")
     expect(err.extensions.entityId).toBe("123")
   })
+
+  it("builds a valid GraphQLSchema with Server Administration queries and mutations (Shard 06)", () => {
+    const schema = getBaseSchema()
+
+    const queryType = schema.getQueryType()
+    expect(queryType?.getFields()["serverStatus"]).toBeDefined()
+
+    const mutationType = schema.getMutationType()
+    expect(mutationType?.getFields()["serverPowerAction"]).toBeDefined()
+    expect(mutationType?.getFields()["startServer"]).toBeDefined()
+    expect(mutationType?.getFields()["restartServer"]).toBeDefined()
+    expect(mutationType?.getFields()["stopServer"]).toBeDefined()
+    expect(mutationType?.getFields()["sendServerCommand"]).toBeDefined()
+
+    const serverStatusEnum = schema.getType("ServerStatus") as GraphQLEnumType
+    expect(serverStatusEnum).toBeDefined()
+    expect(serverStatusEnum.getValues().map((v) => v.name)).toEqual([
+      "ONLINE",
+      "STARTING",
+      "STOPPING",
+      "OFFLINE",
+      "DISCONNECTED",
+      "UNKNOWN",
+    ])
+
+    const serverPowerActionEnum = schema.getType("ServerPowerAction") as GraphQLEnumType
+    expect(serverPowerActionEnum).toBeDefined()
+    expect(serverPowerActionEnum.getValues().map((v) => v.name)).toEqual([
+      "START",
+      "RESTART",
+      "STOP",
+    ])
+
+    const serverResourcesType = schema.getType("ServerResources") as GraphQLObjectType
+    expect(serverResourcesType).toBeDefined()
+    const resourceFields = Object.keys(serverResourcesType.getFields())
+    expect(resourceFields).toContain("status")
+    expect(resourceFields).toContain("cpuPercent")
+    expect(resourceFields).toContain("cpuLimitPercent")
+    expect(resourceFields).toContain("memoryUsedBytes")
+    expect(resourceFields).toContain("memoryLimitBytes")
+    expect(resourceFields).toContain("diskUsedBytes")
+    expect(resourceFields).toContain("diskLimitBytes")
+    expect(resourceFields).toContain("uptimeMs")
+    expect(resourceFields).toContain("isSuspended")
+
+    // Security check: internal Pterodactyl details are not exposed
+    expect(resourceFields).not.toContain("node")
+    expect(resourceFields).not.toContain("allocation")
+    expect(resourceFields).not.toContain("dockerImage")
+    expect(resourceFields).not.toContain("containerId")
+  })
 })
+

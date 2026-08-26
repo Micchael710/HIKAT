@@ -249,3 +249,133 @@ export function decodeCursor<T = Record<string, unknown>>(
     return null
   }
 }
+
+// --- HiKAT Server Administration & Pterodactyl Integration Constants & Types (Shard 06) ---
+
+export const ALLOWED_SERVER_STATUSES = [
+  "ONLINE",
+  "STARTING",
+  "STOPPING",
+  "OFFLINE",
+  "DISCONNECTED",
+  "UNKNOWN",
+] as const
+export type ServerStatus = typeof ALLOWED_SERVER_STATUSES[number]
+
+export const ALLOWED_SERVER_POWER_ACTIONS = [
+  "START",
+  "RESTART",
+  "STOP",
+] as const
+export type ServerPowerAction = typeof ALLOWED_SERVER_POWER_ACTIONS[number]
+
+export const SERVER_LIMITS = {
+  MAX_COMMAND_LENGTH: 500,
+} as const
+
+export interface ServerResourcesData {
+  status: ServerStatus
+  cpuPercent: number
+  cpuLimitPercent?: number | null
+  memoryUsedBytes: number
+  memoryLimitBytes?: number | null
+  diskUsedBytes: number
+  diskLimitBytes?: number | null
+  uptimeMs?: number | null
+  isSuspended: boolean
+}
+
+/**
+ * Maps raw Pterodactyl server states to human-friendly HiKAT ServerStatus.
+ */
+export function mapPterodactylStateToHiKAT(
+  state: string | null | undefined,
+  isSuspended?: boolean,
+): ServerStatus {
+  if (isSuspended) {
+    return "DISCONNECTED"
+  }
+  if (!state || typeof state !== "string") {
+    return "UNKNOWN"
+  }
+
+  const normalized = state.toLowerCase().trim()
+  switch (normalized) {
+    case "running":
+      return "ONLINE"
+    case "starting":
+      return "STARTING"
+    case "stopping":
+      return "STOPPING"
+    case "offline":
+      return "OFFLINE"
+    default:
+      return "UNKNOWN"
+  }
+}
+
+/**
+ * Returns human-friendly Spanish label for a given ServerStatus.
+ */
+export function getServerStatusLabel(status: ServerStatus): string {
+  switch (status) {
+    case "ONLINE":
+      return "En línea"
+    case "STARTING":
+      return "Iniciando"
+    case "STOPPING":
+      return "Apagándose"
+    case "OFFLINE":
+      return "Apagado"
+    case "DISCONNECTED":
+      return "Sin conexión"
+    case "UNKNOWN":
+    default:
+      return "Estado desconocido"
+  }
+}
+
+/**
+ * Formats a byte amount into human-readable representation (e.g. "5.4 GB", "512 MB").
+ */
+export function formatBytesToHuman(bytes: number, decimals: number = 1): string {
+  if (bytes < 0 || !Number.isFinite(bytes)) return "0 B"
+  if (bytes === 0) return "0 B"
+
+  const k = 1024
+  const dm = decimals < 0 ? 0 : decimals
+  const sizes = ["B", "KB", "MB", "GB", "TB"]
+
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const clampedIndex = Math.min(i, sizes.length - 1)
+  const val = bytes / Math.pow(k, clampedIndex)
+
+  return `${val.toFixed(dm)} ${sizes[clampedIndex]}`
+}
+
+/**
+ * Formats an uptime duration in milliseconds to human-friendly Spanish string (e.g. "2d 4h", "3h 15m", "45s").
+ */
+export function formatUptime(uptimeMs: number | null | undefined): string {
+  if (!uptimeMs || uptimeMs <= 0 || !Number.isFinite(uptimeMs)) {
+    return "-"
+  }
+
+  const totalSeconds = Math.floor(uptimeMs / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (days > 0) {
+    return `${days}d ${hours}h`
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`
+  }
+  return `${seconds}s`
+}
+

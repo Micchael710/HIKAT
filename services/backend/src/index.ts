@@ -21,6 +21,8 @@ import { resolvers } from "./resolvers"
 import { getCorsHeaders, handleOptionsRequest } from "./cors"
 
 import { handleMediaUpload, handleMediaServe } from "./media/transport"
+import { handleConsoleWebSocket } from "./services/pterodactyl/consoleTransport"
+
 
 export * from "./types"
 
@@ -38,9 +40,18 @@ export * from "./services/newsService"
 
 export * from "./services/mediaService"
 
+export * from "./services/pterodactyl/types"
+
+export * from "./services/pterodactyl/pterodactylClient"
+
+export * from "./services/pterodactyl/serverAdministrationService"
+
+export * from "./services/pterodactyl/consoleTransport"
+
 export * from "./media/transport"
 
 export * from "./resolvers"
+
 
 const KNOWN_SAFE_CODES = [
   "UNAUTHENTICATED",
@@ -148,9 +159,27 @@ export default {
       })
     }
 
+    // Realtime Server Console WebSocket Proxy Route: /api/server/console/ws (Shard 06)
+
+    if (url.pathname === "/api/server/console/ws") {
+      const wsResponse = await handleConsoleWebSocket(request, env)
+      const corsHeaders = getCorsHeaders(request, env)
+      const headers = new Headers(wsResponse.headers)
+      for (const [k, v] of Object.entries(corsHeaders)) {
+        headers.set(k, v)
+      }
+      return new Response(wsResponse.body, {
+        status: wsResponse.status,
+        statusText: wsResponse.statusText,
+        headers,
+        webSocket: wsResponse.webSocket,
+      })
+    }
+
     // GraphQL Endpoint
 
     const response = await yoga.fetch(request, context)
+
 
     // Secure-by-default error sanitization:
 

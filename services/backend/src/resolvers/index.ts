@@ -14,8 +14,16 @@ import type {
   UpdateNewsInputGql,
   ContentMediaUploadPayloadGql,
   CreateContentMediaUploadInputGql,
+  ServerResourcesGql,
+  ServerPowerActionResultGql,
+  ServerCommandResultGql,
 } from "@hikat/graphql"
-import { HIKAT_VERSION, NewsType, NewsStatus } from "@hikat/shared"
+import {
+  HIKAT_VERSION,
+  NewsType,
+  NewsStatus,
+  type ServerPowerAction,
+} from "@hikat/shared"
 import { requireAuth, requireAdmin } from "../auth/guards"
 import { getUserById } from "../services/userService"
 import {
@@ -30,7 +38,13 @@ import {
   deleteNews,
 } from "../services/newsService"
 import { createContentMediaUpload, deleteMedia } from "../services/mediaService"
+import {
+  getServerStatus,
+  executeServerPowerAction,
+  executeServerCommand,
+} from "../services/pterodactyl/serverAdministrationService"
 import type { BackendGraphQLContext } from "../types"
+
 
 export const resolvers = {
   DateTime: DateTimeScalar,
@@ -163,10 +177,69 @@ export const resolvers = {
 
       return getAdminNewsById(context.db, context.env, args.id, context.request)
     },
+
+    // --- Server Administration Queries (Require ADMIN - Shard 06) ---
+
+    serverStatus: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerResourcesGql> => {
+      requireAdmin(context)
+      return getServerStatus(context.env)
+    },
   },
 
   Mutation: {
+    // --- Server Administration Mutations (Require ADMIN - Shard 06) ---
+
+    serverPowerAction: async (
+      _parent: unknown,
+      args: { action: ServerPowerAction },
+      context: BackendGraphQLContext,
+    ): Promise<ServerPowerActionResultGql> => {
+      requireAdmin(context)
+      return executeServerPowerAction(context.env, args.action)
+    },
+
+    startServer: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerPowerActionResultGql> => {
+      requireAdmin(context)
+      return executeServerPowerAction(context.env, "START")
+    },
+
+    restartServer: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerPowerActionResultGql> => {
+      requireAdmin(context)
+      return executeServerPowerAction(context.env, "RESTART")
+    },
+
+    stopServer: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerPowerActionResultGql> => {
+      requireAdmin(context)
+      return executeServerPowerAction(context.env, "STOP")
+    },
+
+    sendServerCommand: async (
+      _parent: unknown,
+      args: { command: string },
+      context: BackendGraphQLContext,
+    ): Promise<ServerCommandResultGql> => {
+      requireAdmin(context)
+      return executeServerCommand(context.env, args.command)
+    },
+
     // --- News Administrative Mutations (Require ADMIN) ---
+
 
     createNews: async (
       _parent: unknown,

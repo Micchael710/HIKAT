@@ -4,7 +4,36 @@ import type {
   NewsStatus,
   MediaType,
   MediaMimeType,
+  ServerStatus,
+  ServerPowerAction,
 } from "@hikat/shared"
+
+export type ServerStatusGql = ServerStatus
+export type ServerPowerActionGql = ServerPowerAction
+
+export interface ServerResourcesGql {
+  status: ServerStatusGql
+  cpuPercent: number
+  cpuLimitPercent?: number | null
+  memoryUsedBytes: number
+  memoryLimitBytes?: number | null
+  diskUsedBytes: number
+  diskLimitBytes?: number | null
+  uptimeMs?: number | null
+  isSuspended: boolean
+}
+
+export interface ServerPowerActionResultGql {
+  success: boolean
+  status: ServerStatusGql
+  message?: string | null
+}
+
+export interface ServerCommandResultGql {
+  success: boolean
+  message?: string | null
+}
+
 
 export interface UserGql {
   id: string

@@ -1,4 +1,13 @@
-import type { AppRole, NewsType, NewsStatus, MediaType } from "@hikat/shared"
+import type {
+  AppRole,
+  NewsType,
+  NewsStatus,
+  MediaType,
+  ServerStatus,
+  ServerPowerAction,
+} from "@hikat/shared"
+
+export type { ServerStatus, ServerPowerAction }
 
 export type ThemeMode = "dark" | "light"
 
@@ -45,6 +54,25 @@ export interface NewsConnection {
   totalCount: number
 }
 
+export interface ServerResources {
+  status: ServerStatus
+  cpuPercent: number
+  cpuLimitPercent?: number | null
+  memoryUsedBytes: number
+  memoryLimitBytes?: number | null
+  diskUsedBytes: number
+  diskLimitBytes?: number | null
+  uptimeMs?: number | null
+  isSuspended: boolean
+}
+
+export interface ConsoleLogEntry {
+  id: string
+  line: string
+  timestamp?: string
+  type?: "stdout" | "stderr" | "info" | "error"
+}
+
 export interface AdminUser {
   id: string
   displayName?: string | null
@@ -60,3 +88,4 @@ export interface AuthState {
   accessToken: string | null
   error: string | null
 }
+

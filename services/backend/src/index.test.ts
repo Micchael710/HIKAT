@@ -4209,4 +4209,508 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       })
     })
   })
+
+  describe("HiKAT Server Administration & Pterodactyl Integration (Shard 06)", () => {
+    const adminId = "srv-admin-1"
+    const adminSessionId = "srv-admin-session-1"
+    const playerId = "srv-player-1"
+    const playerSessionId = "srv-player-session-1"
+
+    let adminToken: string
+    let playerToken: string
+
+    const fakePterodactylUrl = "https://panel.test.hikat.org"
+    const fakeApiKey = "ptlc_test_secret_api_key_123"
+    const fakeServerId = "srv-abc12345"
+
+    beforeEach(async () => {
+      await seedUserAndSession({
+        userId: adminId,
+        sessionId: adminSessionId,
+        role: "ADMIN",
+        displayName: "ServerAdmin",
+      })
+
+      adminToken = await createTestAccessToken({
+        userId: adminId,
+        sessionId: adminSessionId,
+        role: "ADMIN",
+        displayName: "ServerAdmin",
+      })
+
+      await seedUserAndSession({
+        userId: playerId,
+        sessionId: playerSessionId,
+        role: "PLAYER",
+        displayName: "ServerPlayer",
+      })
+
+      playerToken = await createTestAccessToken({
+        userId: playerId,
+        sessionId: playerSessionId,
+        role: "PLAYER",
+        displayName: "ServerPlayer",
+      })
+    })
+
+    function createServerEnv(overrides?: Partial<Env>): Env {
+      return {
+        ENVIRONMENT: "production",
+        AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+        DB: testD1,
+        PTERODACTYL_BASE_URL: fakePterodactylUrl,
+        PTERODACTYL_API_KEY: fakeApiKey,
+        PTERODACTYL_SERVER_ID: fakeServerId,
+        ...overrides,
+      }
+    }
+
+    async function executeGqlServer(
+      query: string,
+      variables?: Record<string, any>,
+      token?: string,
+      env?: Env,
+    ) {
+      const activeEnv = env || createServerEnv()
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`
+      }
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query, variables }),
+      })
+      const response = await worker.fetch(request, activeEnv)
+      return getJson(response)
+    }
+
+    describe("1. Pterodactyl HTTP Client Adapter (Unit)", () => {
+      it("creates PterodactylHttpClient with trimmed baseUrl and normalizes URLs", async () => {
+        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+
+        let requestedUrl = ""
+        let authHeader = ""
+
+        const mockFetch: typeof fetch = async (input, init) => {
+          requestedUrl = String(input)
+          authHeader = (init?.headers as Record<string, string>)?.["Authorization"] || ""
+          return new Response(JSON.stringify({
+            object: "stats",
+            attributes: {
+              current_state: "running",
+              is_suspended: false,
+              resources: {
+                memory_bytes: 4 * 1024 * 1024 * 1024,
+                cpu_absolute: 25.5,
+                disk_bytes: 10 * 1024 * 1024 * 1024,
+                network_rx_bytes: 1000,
+                network_tx_bytes: 2000,
+                uptime: 3600000,
+              },
+            },
+          }), { status: 200 })
+        }
+
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.example.com/",
+          apiKey: "  secret_key  ",
+          serverId: "server-123",
+          fetchFn: mockFetch,
+        })
+
+        const res = await client.getServerResources()
+        expect(res.attributes.current_state).toBe("running")
+        expect(requestedUrl).toBe("https://panel.example.com/api/client/servers/server-123/resources")
+        expect(authHeader).toBe("Bearer secret_key")
+      })
+
+      it("handles and normalizes 401/403 upstream errors without leaking API key", async () => {
+        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+
+        const mockFetch: typeof fetch = async () => {
+          return new Response(JSON.stringify({ errors: [{ code: "Unauthorized" }] }), { status: 401 })
+        }
+
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.example.com",
+          apiKey: "super_secret_token_12345",
+          serverId: "server-123",
+          fetchFn: mockFetch,
+        })
+
+        await expect(client.getServerResources()).rejects.toThrow("Error de autenticación con la infraestructura del servidor.")
+      })
+
+      it("handles and normalizes 404 upstream errors", async () => {
+        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+
+        const mockFetch: typeof fetch = async () => {
+          return new Response(JSON.stringify({ errors: [{ code: "NotFound" }] }), { status: 404 })
+        }
+
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.example.com",
+          apiKey: "secret",
+          serverId: "server-unknown",
+          fetchFn: mockFetch,
+        })
+
+        await expect(client.getServerDetails()).rejects.toThrow("Servidor no encontrado en la infraestructura.")
+      })
+
+      it("handles and normalizes 429 rate limited upstream error", async () => {
+        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+
+        const mockFetch: typeof fetch = async () => {
+          return new Response("Too Many Requests", { status: 429 })
+        }
+
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.example.com",
+          apiKey: "secret",
+          serverId: "server-123",
+          fetchFn: mockFetch,
+        })
+
+        await expect(client.sendCommand("say hi")).rejects.toThrow("Límite de solicitudes alcanzado. Por favor espera un momento.")
+      })
+
+      it("handles and normalizes 502/503/504 Wings upstream error", async () => {
+        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+
+        const mockFetch: typeof fetch = async () => {
+          return new Response("502 Bad Gateway from Wings", { status: 502 })
+        }
+
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.example.com",
+          apiKey: "secret",
+          serverId: "server-123",
+          fetchFn: mockFetch,
+        })
+
+        await expect(client.sendPowerAction("start")).rejects.toThrow("No se pudo conectar con el servidor en este momento.")
+      })
+
+      it("handles AbortError timeout gracefully", async () => {
+        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+
+        const mockFetch: typeof fetch = async () => {
+          const err = new Error("The operation was aborted")
+          err.name = "AbortError"
+          throw err
+        }
+
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.example.com",
+          apiKey: "secret",
+          serverId: "server-123",
+          fetchFn: mockFetch,
+        })
+
+        await expect(client.getServerResources()).rejects.toThrow("Tiempo de espera agotado al conectar con el servidor.")
+      })
+
+      it("handles network failure (TypeError) gracefully", async () => {
+        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+
+        const mockFetch: typeof fetch = async () => {
+          throw new TypeError("Failed to fetch")
+        }
+
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.example.com",
+          apiKey: "secret",
+          serverId: "server-123",
+          fetchFn: mockFetch,
+        })
+
+        await expect(client.getServerResources()).rejects.toThrow("No se pudo conectar con el servidor en este momento.")
+      })
+    })
+
+    describe("2. Security & Authorization Guards", () => {
+      it("REJECTS anonymous requests to serverStatus with UNAUTHENTICATED", async () => {
+        const res = await executeGqlServer(`
+          query {
+            serverStatus {
+              status
+            }
+          }
+        `)
+
+        expect(res.errors).toBeDefined()
+        expect(res.errors[0].extensions.code).toBe("UNAUTHENTICATED")
+      })
+
+      it("REJECTS PLAYER requests to serverStatus with FORBIDDEN", async () => {
+        const res = await executeGqlServer(
+          `
+          query {
+            serverStatus {
+              status
+            }
+          }
+          `,
+          {},
+          playerToken,
+        )
+
+        expect(res.errors).toBeDefined()
+        expect(res.errors[0].extensions.code).toBe("FORBIDDEN")
+      })
+
+      it("REJECTS anonymous and PLAYER requests to power actions and command with FORBIDDEN/UNAUTHENTICATED", async () => {
+        // Anonymous startServer
+        const resAnon = await executeGqlServer(`
+          mutation {
+            startServer { success }
+          }
+        `)
+        expect(resAnon.errors[0].extensions.code).toBe("UNAUTHENTICATED")
+
+        // Player restartServer
+        const resPlayerRestart = await executeGqlServer(
+          `mutation { restartServer { success } }`,
+          {},
+          playerToken,
+        )
+        expect(resPlayerRestart.errors[0].extensions.code).toBe("FORBIDDEN")
+
+        // Player stopServer
+        const resPlayerStop = await executeGqlServer(
+          `mutation { stopServer { success } }`,
+          {},
+          playerToken,
+        )
+        expect(resPlayerStop.errors[0].extensions.code).toBe("FORBIDDEN")
+
+        // Player sendServerCommand
+        const resPlayerCmd = await executeGqlServer(
+          `mutation { sendServerCommand(command: "op test") { success } }`,
+          {},
+          playerToken,
+        )
+        expect(resPlayerCmd.errors[0].extensions.code).toBe("FORBIDDEN")
+      })
+    })
+
+    describe("3. Server Administration Service & GraphQL Operations", () => {
+      it("fails gracefully if Pterodactyl environment variables are missing", async () => {
+        const unconfiguredEnv = createServerEnv({
+          ENVIRONMENT: "development",
+          PTERODACTYL_BASE_URL: undefined,
+          PTERODACTYL_API_KEY: undefined,
+        })
+
+        const res = await executeGqlServer(
+          `query { serverStatus { status } }`,
+          {},
+          adminToken,
+          unconfiguredEnv,
+        )
+
+        expect(res.errors).toBeDefined()
+        expect(res.errors[0].message).toContain("La integración con el servidor no está configurada.")
+      })
+
+
+      it("ADMIN queries serverStatus and receives properly formatted metrics and limits", async () => {
+        const { getServerStatus } = await import("./services/pterodactyl/serverAdministrationService")
+
+        const mockClient = {
+
+          getServerResources: async () => ({
+            object: "stats" as const,
+            attributes: {
+              current_state: "running" as const,
+              is_suspended: false,
+              resources: {
+                cpu_absolute: 42.8,
+                memory_bytes: 6442450944, // 6 GB in bytes
+
+                disk_bytes: 21474836480, // 20 GB in bytes
+                network_rx_bytes: 12345,
+                network_tx_bytes: 67890,
+                uptime: 7200000, // 2 hours in ms
+              },
+            },
+          }),
+          getServerDetails: async () => ({
+            object: "server" as const,
+            attributes: {
+              server_owner: true,
+              identifier: "srv-123",
+              uuid: "uuid-123",
+              name: "HiKAT Main",
+              node: "Node-1",
+              is_suspended: false,
+              limits: {
+                memory: 8192, // 8 GB in MB
+                swap: 0,
+                disk: 51200, // 50 GB in MB
+                io: 500,
+                cpu: 200, // 200%
+                threads: null,
+              },
+            },
+          }),
+
+          sendPowerAction: async () => {},
+          sendCommand: async () => {},
+          getWebsocketCredentials: async () => ({ token: "ws-token", socket: "wss://wings.test/ws" }),
+        }
+
+        const metrics = await getServerStatus(createServerEnv(), mockClient)
+
+        expect(metrics.status).toBe("ONLINE")
+        expect(metrics.cpuPercent).toBe(42.8)
+        expect(metrics.cpuLimitPercent).toBe(200)
+        expect(metrics.memoryUsedBytes).toBe(6442450944)
+        expect(metrics.memoryLimitBytes).toBe(8192 * 1024 * 1024)
+        expect(metrics.diskUsedBytes).toBe(21474836480)
+        expect(metrics.diskLimitBytes).toBe(51200 * 1024 * 1024)
+        expect(metrics.uptimeMs).toBe(7200000)
+        expect(metrics.isSuspended).toBe(false)
+      })
+
+      it("maps offline / starting / stopping / suspended states correctly", async () => {
+        const { getServerStatus } = await import("./services/pterodactyl/serverAdministrationService")
+
+        const createMockClientWithState = (state: any, isSuspended = false) => ({
+          getServerResources: async () => ({
+            object: "stats" as const,
+            attributes: {
+              current_state: state,
+              is_suspended: isSuspended,
+              resources: {
+                cpu_absolute: 0,
+                memory_bytes: 0,
+                disk_bytes: 1024,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+                uptime: 0,
+              },
+            },
+          }),
+          getServerDetails: async () => ({
+            object: "server" as const,
+            attributes: {
+              server_owner: true,
+              identifier: "srv",
+              uuid: "uuid",
+              name: "Server",
+              node: "Node",
+              is_suspended: isSuspended,
+              limits: { memory: 0, swap: 0, disk: 0, io: 500, cpu: 0, threads: null },
+            },
+          }),
+          sendPowerAction: async () => {},
+          sendCommand: async () => {},
+          getWebsocketCredentials: async () => ({ token: "t", socket: "s" }),
+        })
+
+        const starting = await getServerStatus(createServerEnv(), createMockClientWithState("starting"))
+        expect(starting.status).toBe("STARTING")
+
+        const stopping = await getServerStatus(createServerEnv(), createMockClientWithState("stopping"))
+        expect(stopping.status).toBe("STOPPING")
+
+        const offline = await getServerStatus(createServerEnv(), createMockClientWithState("offline"))
+        expect(offline.status).toBe("OFFLINE")
+
+        const suspended = await getServerStatus(createServerEnv(), createMockClientWithState("running", true))
+        expect(suspended.status).toBe("DISCONNECTED")
+      })
+
+      it("executes power actions (START, RESTART, STOP) and rejects invalid actions", async () => {
+        const { executeServerPowerAction } = await import("./services/pterodactyl/serverAdministrationService")
+
+        let lastSignal = ""
+        const mockClient = {
+          getServerResources: async () => ({} as any),
+          getServerDetails: async () => ({} as any),
+          sendPowerAction: async (signal: string) => {
+            lastSignal = signal
+          },
+          sendCommand: async () => {},
+          getWebsocketCredentials: async () => ({} as any),
+        }
+
+        // START
+        const startRes = await executeServerPowerAction(createServerEnv(), "START", mockClient)
+        expect(startRes.success).toBe(true)
+        expect(startRes.status).toBe("STARTING")
+        expect(lastSignal).toBe("start")
+
+        // Wait brief cooldown
+        await new Promise((r) => setTimeout(r, 1600))
+
+        // RESTART
+        const restartRes = await executeServerPowerAction(createServerEnv(), "RESTART", mockClient)
+        expect(restartRes.success).toBe(true)
+        expect(restartRes.status).toBe("STARTING")
+        expect(lastSignal).toBe("restart")
+
+        // Wait brief cooldown
+        await new Promise((r) => setTimeout(r, 1600))
+
+        // STOP
+        const stopRes = await executeServerPowerAction(createServerEnv(), "STOP", mockClient)
+        expect(stopRes.success).toBe(true)
+        expect(stopRes.status).toBe("STOPPING")
+        expect(lastSignal).toBe("stop")
+      })
+
+      it("validates console commands and rejects empty or oversized commands", async () => {
+        const { executeServerCommand } = await import("./services/pterodactyl/serverAdministrationService")
+
+        let sentCommand = ""
+        const mockClient = {
+          getServerResources: async () => ({} as any),
+          getServerDetails: async () => ({} as any),
+          sendPowerAction: async () => {},
+          sendCommand: async (cmd: string) => {
+            sentCommand = cmd
+          },
+          getWebsocketCredentials: async () => ({} as any),
+        }
+
+        // Empty command -> rejected
+        await expect(executeServerCommand(createServerEnv(), "", mockClient)).rejects.toThrow(
+          "El comando no puede estar vacío.",
+        )
+        await expect(executeServerCommand(createServerEnv(), "   ", mockClient)).rejects.toThrow(
+          "El comando no puede estar vacío.",
+        )
+
+        // Oversized command (>500 chars) -> rejected
+        const hugeCmd = "say " + "a".repeat(510)
+        await expect(executeServerCommand(createServerEnv(), hugeCmd, mockClient)).rejects.toThrow(
+          "El comando excede la longitud máxima permitida",
+        )
+
+        // Valid command -> accepted
+        const validRes = await executeServerCommand(createServerEnv(), "say Servidor reiniciando en 5 minutos", mockClient)
+        expect(validRes.success).toBe(true)
+        expect(sentCommand).toBe("say Servidor reiniciando en 5 minutos")
+      })
+
+      it("rejects console websocket requests without valid admin authentication", async () => {
+        // No token
+        const reqAnon = new Request("http://localhost/api/server/console/ws")
+        const resAnon = await worker.fetch(reqAnon, createServerEnv())
+        expect(resAnon.status).toBe(401)
+
+        // Player token
+        const reqPlayer = new Request(`http://localhost/api/server/console/ws?token=${playerToken}`)
+        const resPlayer = await worker.fetch(reqPlayer, createServerEnv())
+        expect(resPlayer.status).toBe(403)
+      })
+    })
+  })
 })
+

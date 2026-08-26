@@ -2,7 +2,10 @@ import type {
   NewsItem,
   NewsConnection,
   ContentMedia,
+  ServerResources,
+  ServerStatus,
 } from "../types"
+
 import type { NewsType, NewsStatus } from "@hikat/shared"
 import { authService } from "./authService"
 
@@ -293,3 +296,96 @@ export const newsApi = {
     return data.deleteContentMedia
   },
 }
+
+export const serverApi = {
+  async getServerStatus(): Promise<ServerResources> {
+    const query = /* GraphQL */ `
+      query ServerStatus {
+        serverStatus {
+          status
+          cpuPercent
+          cpuLimitPercent
+          memoryUsedBytes
+          memoryLimitBytes
+          diskUsedBytes
+          diskLimitBytes
+          uptimeMs
+          isSuspended
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ serverStatus: ServerResources }>(query)
+    return data.serverStatus
+  },
+
+  async startServer(): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
+    const mutation = /* GraphQL */ `
+      mutation StartServer {
+        startServer {
+          success
+          status
+          message
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{
+      startServer: { success: boolean; status: ServerStatus; message?: string }
+    }>(mutation)
+    return data.startServer
+  },
+
+  async restartServer(): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
+    const mutation = /* GraphQL */ `
+      mutation RestartServer {
+        restartServer {
+          success
+          status
+          message
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{
+      restartServer: { success: boolean; status: ServerStatus; message?: string }
+    }>(mutation)
+    return data.restartServer
+  },
+
+  async stopServer(): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
+    const mutation = /* GraphQL */ `
+      mutation StopServer {
+        stopServer {
+          success
+          status
+          message
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{
+      stopServer: { success: boolean; status: ServerStatus; message?: string }
+    }>(mutation)
+    return data.stopServer
+  },
+
+  async sendServerCommand(
+    command: string,
+  ): Promise<{ success: boolean; message?: string }> {
+    const mutation = /* GraphQL */ `
+      mutation SendServerCommand($command: String!) {
+        sendServerCommand(command: $command) {
+          success
+          message
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{
+      sendServerCommand: { success: boolean; message?: string }
+    }>(mutation, { command })
+    return data.sendServerCommand
+  },
+}
+

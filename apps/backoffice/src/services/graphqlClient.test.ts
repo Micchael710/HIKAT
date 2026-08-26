@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { newsApi } from "./graphqlClient"
+import { newsApi, serverApi } from "./graphqlClient"
 import { authService } from "./authService"
+
 
 describe("Back Office GraphQL News Client", () => {
   beforeEach(() => {
@@ -221,3 +222,121 @@ describe("Back Office GraphQL News Client", () => {
     ).rejects.toThrow("Title must be between 3 and 200 characters")
   })
 })
+
+describe("Back Office GraphQL Server Client (Shard 06)", () => {
+  beforeEach(() => {
+    authService.clearSession()
+    vi.restoreAllMocks()
+  })
+
+  it("fetches serverStatus metrics and limits", async () => {
+    authService.setSession("test-bearer-token", "refresh-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    const mockResponseData = {
+      data: {
+        serverStatus: {
+          status: "ONLINE",
+          cpuPercent: 32.5,
+          cpuLimitPercent: 200,
+          memoryUsedBytes: 5767168000,
+          memoryLimitBytes: 8589934592,
+          diskUsedBytes: 19327352832,
+          diskLimitBytes: 53687091200,
+          uptimeMs: 3600000,
+          isSuspended: false,
+        },
+      },
+    }
+
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => mockResponseData,
+    } as Response)
+
+    const status = await serverApi.getServerStatus()
+
+    expect(status.status).toBe("ONLINE")
+    expect(status.cpuPercent).toBe(32.5)
+    expect(status.memoryUsedBytes).toBe(5767168000)
+    expect(status.memoryLimitBytes).toBe(8589934592)
+    expect(status.uptimeMs).toBe(3600000)
+  })
+
+  it("executes power actions (start, restart, stop)", async () => {
+    authService.setSession("test-bearer-token", "refresh-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    // Start
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          startServer: { success: true, status: "STARTING", message: "Iniciando servidor..." },
+        },
+      }),
+    } as Response)
+
+    const startRes = await serverApi.startServer()
+    expect(startRes.success).toBe(true)
+    expect(startRes.status).toBe("STARTING")
+
+    // Restart
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          restartServer: { success: true, status: "STARTING", message: "Reiniciando servidor..." },
+        },
+      }),
+    } as Response)
+
+    const restartRes = await serverApi.restartServer()
+    expect(restartRes.success).toBe(true)
+    expect(restartRes.status).toBe("STARTING")
+
+    // Stop
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          stopServer: { success: true, status: "STOPPING", message: "Apagando servidor..." },
+        },
+      }),
+    } as Response)
+
+    const stopRes = await serverApi.stopServer()
+    expect(stopRes.success).toBe(true)
+    expect(stopRes.status).toBe("STOPPING")
+  })
+
+  it("sends server console commands", async () => {
+    authService.setSession("test-bearer-token", "refresh-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          sendServerCommand: { success: true, message: "Comando enviado correctamente." },
+        },
+      }),
+    } as Response)
+
+    const res = await serverApi.sendServerCommand("say Hola mundo")
+    expect(res.success).toBe(true)
+    expect(res.message).toBe("Comando enviado correctamente.")
+  })
+})
+

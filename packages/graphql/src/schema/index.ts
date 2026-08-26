@@ -8,6 +8,8 @@ import { adminTypeDefs } from "./admin"
 
 import { contentTypeDefs } from "./content"
 
+import { serverTypeDefs } from "./server"
+
 export * from "./common"
 
 export * from "./user"
@@ -17,6 +19,8 @@ export * from "./health"
 export * from "./admin"
 
 export * from "./content"
+
+export * from "./server"
 
 export const typeDefs = [
   commonTypeDefs,
@@ -28,4 +32,7 @@ export const typeDefs = [
   adminTypeDefs,
 
   contentTypeDefs,
+
+  serverTypeDefs,
 ].join("\n\n")
+
