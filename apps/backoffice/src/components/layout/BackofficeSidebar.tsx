@@ -1,7 +1,8 @@
 import React from "react"
 import type { ThemeMode, BackofficeSection } from "../../types"
+import logoReducedWhite from "../../assets/branding/logo-reduced-white.png"
+import logoReducedBlack from "../../assets/branding/logo-reduced-black.png"
 import {
-  HikatLogoIcon,
   IconDashboard,
   IconNews,
   IconShirt,
@@ -23,38 +24,37 @@ export default function BackofficeSidebar({
 }: BackofficeSidebarProps) {
   const isDark = theme === "dark"
   const BTN_SIZE = 48
-  const ICON_SIZE = 22
 
   const navItems: { key: BackofficeSection; label: string; icon: React.ReactNode }[] = [
     {
       key: "dashboard",
       label: "Dashboard",
-      icon: <IconDashboard size={ICON_SIZE} />,
+      icon: <IconDashboard size={24} />,
     },
     {
       key: "news",
       label: "Noticias",
-      icon: <IconNews size={ICON_SIZE} />,
+      icon: <IconNews size={24} />,
     },
     {
       key: "skins",
       label: "Skins",
-      icon: <IconShirt size={ICON_SIZE} />,
+      icon: <IconShirt size={24} />,
     },
     {
       key: "server",
       label: "Servidor",
-      icon: <IconServer size={ICON_SIZE} />,
+      icon: <IconServer size={24} />,
     },
     {
       key: "game",
       label: "Juego",
-      icon: <IconGamepad size={ICON_SIZE} />,
+      icon: <IconGamepad size={24} />,
     },
     {
       key: "settings",
       label: "Ajustes",
-      icon: <IconSettings size={ICON_SIZE} />,
+      icon: <IconSettings size={24} />,
     },
   ]
 
@@ -67,20 +67,21 @@ export default function BackofficeSidebar({
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "20px 0 24px",
+        padding: "20px 0",
         background: isDark
-          ? "rgba(12, 17, 22, 0.88)"
-          : "rgba(255, 255, 255, 0.9)",
-        borderRight: isDark
-          ? "1.5px solid rgba(255, 255, 255, 0.08)"
-          : "1.5px solid rgba(0, 0, 0, 0.08)",
-        backdropFilter: "blur(20px)",
-        WebkitBackdropFilter: "blur(20px)",
-        zIndex: 50,
+          ? "linear-gradient(180deg, #131c23 0%, #0d141a 100%)"
+          : "linear-gradient(180deg, #ffffff 0%, #f0f3f6 100%)",
+        borderRight: `1px solid ${isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)"}`,
+        boxShadow: isDark
+          ? "4px 0 24px rgba(0, 0, 0, 0.35)"
+          : "4px 0 24px rgba(0, 0, 0, 0.04)",
+        zIndex: 20,
+        userSelect: "none",
+        flexShrink: 0,
         position: "relative",
       }}
     >
-      {/* Top Logo */}
+      {/* Top Logo Section */}
       <div
         onClick={() => setSection("news")}
         title="HiKAT Back Office"
@@ -91,14 +92,23 @@ export default function BackofficeSidebar({
           alignItems: "center",
           justifyContent: "center",
           cursor: "pointer",
-          color: isDark ? "#ffffff" : "#111822",
           transition: "transform 0.18s ease",
           animation: "topLogoSlideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) both",
         }}
         onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
         onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
       >
-        <HikatLogoIcon size={38} />
+        <img
+          src={isDark ? logoReducedWhite : logoReducedBlack}
+          alt="HiKAT Logo"
+          style={{
+            width: 38,
+            height: 38,
+            objectFit: "contain",
+            userSelect: "none",
+          }}
+          draggable={false}
+        />
       </div>
 
       {/* Navigation Buttons Center */}
