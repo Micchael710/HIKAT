@@ -6,7 +6,7 @@
   "description": "HiKAT Authentication Service - Cloudflare Worker shell",
   "main": "./src/index.ts",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --port 8788 --persist-to ../../.wrangler/state --var ENVIRONMENT:development",
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

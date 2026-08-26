@@ -68,21 +68,25 @@ describe("Back Office AuthService", () => {
     expect(authService.getUser()).toBeNull()
   })
 
-  it("handles token refresh correctly", async () => {
+  it("handles token refresh with rotation and notifies subscribers", async () => {
     const mockUser = {
       id: "admin-1",
       displayName: "Admin User",
       role: "ADMIN" as const,
     }
 
+    const listener = vi.fn()
+    const unsubscribe = authService.subscribe(listener)
+
     authService.setSession("old-jwt", "refresh-tok-1", mockUser)
+    expect(listener).toHaveBeenCalledWith(mockUser)
 
     vi.spyOn(global, "fetch").mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({
         accessToken: "new-jwt-token",
-        refreshToken: "new-refresh-token",
+        refreshToken: "new-refresh-token-rotated",
         expiresIn: 900,
         tokenType: "Bearer",
         user: mockUser,
@@ -92,6 +96,32 @@ describe("Back Office AuthService", () => {
     const newToken = await authService.refresh()
     expect(newToken).toBe("new-jwt-token")
     expect(authService.getAccessToken()).toBe("new-jwt-token")
+
+    unsubscribe()
+  })
+
+  it("clears memory and notifies subscribers on failed refresh", async () => {
+    const mockUser = {
+      id: "admin-1",
+      displayName: "Admin User",
+      role: "ADMIN" as const,
+    }
+
+    const listener = vi.fn()
+    authService.subscribe(listener)
+    authService.setSession("old-jwt", "expired-refresh-tok", mockUser)
+
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "TOKEN_EXPIRED" }),
+    } as Response)
+
+    const result = await authService.refresh()
+    expect(result).toBeNull()
+    expect(authService.getAccessToken()).toBeNull()
+    expect(authService.getUser()).toBeNull()
+    expect(listener).toHaveBeenLastCalledWith(null)
   })
 
   it("clears memory on logout", async () => {

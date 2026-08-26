@@ -14,8 +14,15 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AdminUser | null>(null)
+  const [user, setUser] = useState<AdminUser | null>(() => authService.getUser())
   const [isLoading, setIsLoading] = useState(false)
+
+  React.useEffect(() => {
+    const unsubscribe = authService.subscribe((updatedUser) => {
+      setUser(updatedUser)
+    })
+    return () => unsubscribe()
+  }, [])
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true)

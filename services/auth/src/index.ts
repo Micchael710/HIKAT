@@ -6,9 +6,11 @@ import { createDatabase, Database } from "@hikat/database"
 import { initializeKeyManager, JwtKeyManager } from "./crypto/jwt"
 import { MockEmailService, EmailService } from "./services/email"
 import { handleRequest } from "./routes"
+import { handleOptionsRequest, getCorsHeaders } from "./cors"
 
 export interface Env {
   ENVIRONMENT?: string
+  CORS_ALLOW_ORIGIN?: string
   AUTH_SERVICE_ENDPOINT?: string
   GOOGLE_CLIENT_ID?: string
   GOOGLE_CLIENT_SECRET?: string
@@ -23,7 +25,7 @@ export interface Env {
 let keyManagerCache: JwtKeyManager | null = null
 const defaultEmailService: EmailService = new MockEmailService()
 
-export { createDatabase, type Database, MockEmailService, type EmailService }
+export { createDatabase, type Database, MockEmailService, type EmailService, handleOptionsRequest, getCorsHeaders }
 
 export default {
   async fetch(
@@ -31,6 +33,10 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<Response> {
+    if (request.method === "OPTIONS") {
+      return handleOptionsRequest(request, env)
+    }
+
     const db = env.DB ? createDatabase(env.DB) : undefined
 
     if (!keyManagerCache) {
@@ -46,3 +52,4 @@ export default {
     })
   },
 }
+

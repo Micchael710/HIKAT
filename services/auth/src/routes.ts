@@ -52,10 +52,13 @@ import {
   OAuthFetcher,
 } from "./services/oauth"
 
+import { getCorsHeaders, handleOptionsRequest } from "./cors"
+
 export interface RouteContext {
   request: Request
   env: {
     ENVIRONMENT?: string
+    CORS_ALLOW_ORIGIN?: string
     AUTH_SERVICE_ENDPOINT?: string
     GOOGLE_CLIENT_ID?: string
     GOOGLE_CLIENT_SECRET?: string
@@ -72,24 +75,47 @@ export interface RouteContext {
   oauthFetcher?: OAuthFetcher
 }
 
-function jsonResponse(data: unknown, status: number = 200, headers: HeadersInit = {}): Response {
+function jsonResponse(
+  data: unknown,
+  status: number = 200,
+  headers: HeadersInit = {},
+  request?: Request,
+  env?: { ENVIRONMENT?: string; CORS_ALLOW_ORIGIN?: string },
+): Response {
+  const cors = request && env ? getCorsHeaders(request, env) : {}
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json",
+      ...cors,
       ...headers,
     },
   })
 }
 
-function errorResponse(code: string, message: string, status: number = 400): Response {
-  return jsonResponse({ error: code, message }, status)
+function errorResponse(
+  code: string,
+  message: string,
+  status: number = 400,
+  request?: Request,
+  env?: { ENVIRONMENT?: string; CORS_ALLOW_ORIGIN?: string },
+): Response {
+  return jsonResponse({ error: code, message }, status, {}, request, env)
 }
 
-function redirectResponse(url: string, status: number = 302): Response {
+function redirectResponse(
+  url: string,
+  status: number = 302,
+  request?: Request,
+  env?: { ENVIRONMENT?: string; CORS_ALLOW_ORIGIN?: string },
+): Response {
+  const cors = request && env ? getCorsHeaders(request, env) : {}
   return new Response(null, {
     status,
-    headers: { Location: url },
+    headers: {
+      Location: url,
+      ...cors,
+    },
   })
 }
 
@@ -117,6 +143,38 @@ async function extractAuthenticatedSession(
 
 export async function handleRequest(ctx: RouteContext): Promise<Response> {
   const { request, env, db, keyManager, emailService, oauthFetcher } = ctx
+
+  if (request.method === "OPTIONS") {
+    return handleOptionsRequest(request, env)
+  }
+
+  const corsHeaders = getCorsHeaders(request, env)
+
+  function jsonResponse(data: unknown, status: number = 200, headers: HeadersInit = {}): Response {
+    return new Response(JSON.stringify(data), {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders,
+        ...headers,
+      },
+    })
+  }
+
+  function errorResponse(code: string, message: string, status: number = 400): Response {
+    return jsonResponse({ error: code, message }, status)
+  }
+
+  function redirectResponse(url: string, status: number = 302): Response {
+    return new Response(null, {
+      status,
+      headers: {
+        Location: url,
+        ...corsHeaders,
+      },
+    })
+  }
+
   const url = new URL(request.url)
   const pathname = url.pathname
   const method = request.method.toUpperCase()

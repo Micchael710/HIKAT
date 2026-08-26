@@ -11,12 +11,18 @@
     "lint": "eslint .",
     "format": "oxfmt .",
     "db:generate": "pnpm --filter @hikat/database db:generate",
-    "db:migrate:local": "pnpm --filter @hikat/backend-service exec wrangler d1 migrations apply hikat-d1 --local"
+    "db:migrate:local": "pnpm --filter @hikat/backend-service exec wrangler d1 migrations apply hikat-d1 --local --persist-to ../../.wrangler/state",
+    "local:create-admin": "tsx scripts/createAdmin.ts",
+    "dev:auth": "pnpm --filter @hikat/auth-service dev",
+    "dev:backend": "pnpm --filter @hikat/backend-service dev",
+    "dev:backoffice": "pnpm --filter hikat-backoffice dev"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
+    "better-sqlite3": "^13.0.3",
     "eslint": "^9.20.0",
     "oxfmt": "^0.2.0",
+    "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.24.0",
     "vitest": "^3.0.0"

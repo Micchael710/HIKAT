@@ -22,6 +22,7 @@ export class MediaUploadError extends Error {
 export async function uploadMediaFile(
   file: File,
   expectedType: "IMAGE" | "VIDEO",
+  isRetry: boolean = false,
 ): Promise<ContentMedia> {
   const mimeType = file.type.toLowerCase().trim()
 
@@ -50,7 +51,7 @@ export async function uploadMediaFile(
     throw new MediaUploadError("El archivo seleccionado está vacío.")
   }
 
-  // 2. Request single-use upload ticket via GraphQL
+  // 2. Request single-use upload ticket via GraphQL (with automatic refresh handling)
   const ticket = await newsApi.createContentMediaUpload({
     mimeType,
     sizeBytes: file.size,
@@ -80,6 +81,18 @@ export async function uploadMediaFile(
   })
 
   if (!response.ok) {
+    // If token expired during binary transport, refresh once and retry with fresh ticket
+    if (response.status === 401) {
+      if (!isRetry) {
+        const refreshedToken = await authService.refresh()
+        if (refreshedToken) {
+          return uploadMediaFile(file, expectedType, true)
+        }
+      }
+      authService.clearSession()
+      throw new MediaUploadError("Su sesión ha expirado al subir el archivo.")
+    }
+
     const errData = await response.json().catch(() => ({}))
     const msg =
       errData.error ||
