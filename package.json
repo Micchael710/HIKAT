@@ -7,7 +7,8 @@
   "scripts": {
     "build": "pnpm --recursive run build",
     "test": "vitest run",
-    "typecheck": "pnpm --recursive run typecheck",
+    "typecheck": "pnpm --config.minimum-release-age=0 --recursive run typecheck",
+
     "lint": "eslint .",
     "format": "oxfmt .",
     "db:generate": "pnpm --filter @hikat/database db:generate",
