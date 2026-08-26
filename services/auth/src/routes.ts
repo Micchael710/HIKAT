@@ -16,6 +16,7 @@ import {
   getJwksResponse,
   verifyAccessToken,
 } from "./crypto/jwt"
+import { hashToken } from "./crypto/tokens"
 import { EmailService } from "./services/email"
 import { checkRateLimit } from "./services/rateLimiter"
 import {
@@ -25,6 +26,7 @@ import {
   requestPasswordReset,
   resetPasswordWithToken,
   changePassword,
+  getOrCreateOAuthUser,
   resolveOAuthUser,
   getLinkedAuthMethods,
   linkOAuthAccount,
@@ -35,6 +37,7 @@ import {
   createSession,
   rotateRefreshToken,
   revokeSession,
+  validateActiveSession,
 } from "./services/session"
 import {
   isAllowedRedirectUri,
@@ -118,6 +121,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
   const method = request.method.toUpperCase()
   const authServiceUrl = env.AUTH_SERVICE_ENDPOINT || `${url.protocol}//${url.host}`
   const clientIp = request.headers.get("cf-connecting-ip") || "127.0.0.1"
+  const isProduction = env.ENVIRONMENT === "production"
 
   // 1. Health Checks
   if (pathname === "/health" || pathname === "/") {
@@ -144,7 +148,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
   try {
     // 3. Email/Password: Register
     if (pathname === "/auth/register" && method === "POST") {
-      const rate = await checkRateLimit(db, `register:${clientIp}`, 15, 3600)
+      const rate = await checkRateLimit(db, `register:${clientIp}`, 15, 3600, { isProduction })
       if (!rate.allowed) {
         return errorResponse(AuthErrorCode.RATE_LIMITED, "Too many registration attempts", 429)
       }
@@ -182,7 +186,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
     // 4. Email/Password: Login
     if (pathname === "/auth/login" && method === "POST") {
-      const rate = await checkRateLimit(db, `login:${clientIp}`, 10, 300)
+      const rate = await checkRateLimit(db, `login:${clientIp}`, 10, 300, { isProduction })
       if (!rate.allowed) {
         return errorResponse(AuthErrorCode.RATE_LIMITED, "Too many login attempts. Please wait.", 429)
       }
@@ -227,7 +231,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
     // 6. Forgot Password
     if (pathname === "/auth/forgot-password" && method === "POST") {
-      const rate = await checkRateLimit(db, `forgot-pwd:${clientIp}`, 5, 900)
+      const rate = await checkRateLimit(db, `forgot-pwd:${clientIp}`, 5, 900, { isProduction })
       if (!rate.allowed) {
         return errorResponse(AuthErrorCode.RATE_LIMITED, "Too many reset requests", 429)
       }
@@ -245,6 +249,11 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
     // 7. Reset Password
     if (pathname === "/auth/reset-password" && method === "POST") {
+      const rate = await checkRateLimit(db, `reset-pwd:${clientIp}`, 5, 900, { isProduction })
+      if (!rate.allowed) {
+        return errorResponse(AuthErrorCode.RATE_LIMITED, "Too many password reset attempts", 429)
+      }
+
       const body = (await request.json().catch(() => ({}))) as {
         token?: string
         newPassword?: string
@@ -261,6 +270,11 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     // 8. Change Password (authenticated)
     if (pathname === "/auth/change-password" && method === "POST") {
       const session = await extractAuthenticatedSession(request, keyManager)
+      const isSessionActive = await validateActiveSession(db, session.sessionId, session.userId)
+      if (!isSessionActive) {
+        return errorResponse(AuthErrorCode.UNAUTHORIZED, "Session expired or revoked", 401)
+      }
+
       const body = (await request.json().catch(() => ({}))) as {
         currentPassword?: string
         newPassword?: string
@@ -298,23 +312,40 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       })
     }
 
-    // 10. Logout (Session Revocation)
+    // 10. Logout (Secure Session Revocation - strictly authenticated)
     if (pathname === "/auth/logout" && method === "POST") {
-      try {
+      const authHeader = request.headers.get("Authorization")
+
+      // Option A: Logout with Bearer Access JWT
+      if (authHeader && authHeader.startsWith("Bearer ")) {
         const session = await extractAuthenticatedSession(request, keyManager)
         await revokeSession(db, session.sessionId)
-      } catch {
-        // Fallback: check if sessionId or refreshToken is in JSON body
-        const body = (await request.json().catch(() => ({}))) as {
-          sessionId?: string
-          refreshToken?: string
-        }
-        if (body.sessionId) {
-          await revokeSession(db, body.sessionId)
-        }
+        return jsonResponse({ success: true, message: "Logged out successfully" })
       }
 
-      return jsonResponse({ success: true, message: "Logged out successfully" })
+      // Option B: Logout with Refresh Token (validated cryptographically by SHA-256 hash)
+      const body = (await request.json().catch(() => ({}))) as {
+        refreshToken?: string
+      }
+
+      if (body.refreshToken && typeof body.refreshToken === "string") {
+        const tokenHash = await hashToken(body.refreshToken)
+        const tokenRecord = await db
+          .select()
+          .from(schema.sessionRefreshTokens)
+          .where(eq(schema.sessionRefreshTokens.tokenHash, tokenHash))
+          .get()
+
+        if (!tokenRecord) {
+          return errorResponse(AuthErrorCode.INVALID_TOKEN, "Invalid refresh token", 401)
+        }
+
+        await revokeSession(db, tokenRecord.sessionId)
+        return jsonResponse({ success: true, message: "Logged out successfully" })
+      }
+
+      // Rejection: Arbitrary unauthenticated session ID is never accepted!
+      return errorResponse(AuthErrorCode.UNAUTHORIZED, "Authentication (Bearer token or valid refreshToken) is required to logout", 401)
     }
 
     // 11. Game JWT for Minecraft
@@ -332,6 +363,11 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     // 12. Get Linked Auth Methods (authenticated)
     if (pathname === "/auth/me/methods" && method === "GET") {
       const session = await extractAuthenticatedSession(request, keyManager)
+      const isSessionActive = await validateActiveSession(db, session.sessionId, session.userId)
+      if (!isSessionActive) {
+        return errorResponse(AuthErrorCode.UNAUTHORIZED, "Session expired or revoked", 401)
+      }
+
       const methods = await getLinkedAuthMethods(db, session.userId)
       return jsonResponse({ methods })
     }
@@ -355,7 +391,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       const codeChallenge = url.searchParams.get("code_challenge")
       const codeChallengeMethod = url.searchParams.get("code_challenge_method") || "S256"
       const provider = (url.searchParams.get("provider") || "google").toUpperCase() as ExternalAuthProvider
-      const state = url.searchParams.get("state")
+      const clientState = url.searchParams.get("state") || undefined
 
       if (responseType !== "code") {
         return errorResponse("UNSUPPORTED_RESPONSE_TYPE", "Only response_type=code is supported", 400)
@@ -369,13 +405,14 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         return errorResponse(AuthErrorCode.INVALID_PKCE, "PKCE code_challenge is required", 400)
       }
 
-      // Store Launcher OAuth state
+      // Store Launcher OAuth state and preserve original clientState
       const internalState = await createOAuthState(db, {
         flowType: "LAUNCHER",
         provider,
         redirectUri,
         codeChallenge,
         codeChallengeMethod,
+        clientState,
       })
 
       // Redirect to Google or Discord authorization endpoint
@@ -410,12 +447,20 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       }
 
       const session = await extractAuthenticatedSession(request, keyManager)
+      const isSessionActive = await validateActiveSession(db, session.sessionId, session.userId)
+      if (!isSessionActive) {
+        return errorResponse(AuthErrorCode.UNAUTHORIZED, "Session expired or revoked", 401)
+      }
+
       const redirectUri = url.searchParams.get("redirect_uri") || `${authServiceUrl}/auth/me/methods`
+      const clientState = url.searchParams.get("state") || undefined
 
       const internalState = await createOAuthState(db, {
         flowType: "LINK",
         provider,
         userId: session.userId,
+        sessionId: session.sessionId,
+        clientState,
         redirectUri,
       })
 
@@ -460,33 +505,51 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         oauthFetcher,
       )
 
-      // Handle LINK flow
-      if (oauthState.flowType === "LINK" && oauthState.userId) {
-        await linkOAuthAccount(db, oauthState.userId, "link-flow", profile)
+      // Handle LINK flow with active session verification
+      if (oauthState.flowType === "LINK") {
+        if (!oauthState.userId || !oauthState.sessionId) {
+          return errorResponse(AuthErrorCode.UNAUTHORIZED, "Invalid linking state", 401)
+        }
+
+        const isSessionActive = await validateActiveSession(db, oauthState.sessionId, oauthState.userId)
+        if (!isSessionActive) {
+          return errorResponse(AuthErrorCode.UNAUTHORIZED, "Linking session expired or was revoked", 401)
+        }
+
+        await linkOAuthAccount(db, oauthState.userId, oauthState.sessionId, profile)
         if (oauthState.redirectUri) {
-          return redirectResponse(`${oauthState.redirectUri}?linked=google&success=true`)
+          const redirectUrl = new URL(oauthState.redirectUri)
+          redirectUrl.searchParams.set("linked", "google")
+          redirectUrl.searchParams.set("success", "true")
+          if (oauthState.clientState) {
+            redirectUrl.searchParams.set("state", oauthState.clientState)
+          }
+          return redirectResponse(redirectUrl.toString())
         }
         return jsonResponse({ success: true, provider: "GOOGLE", message: "Google account linked successfully" })
       }
 
-      // Handle LAUNCHER flow: generate short HiKAT authorization code bound to PKCE
+      // Handle LAUNCHER flow: generate short HiKAT authorization code bound to PKCE (NO intermediate session created!)
       if (oauthState.flowType === "LAUNCHER" && oauthState.redirectUri && oauthState.codeChallenge) {
-        let authSession: { user: { id: string } }
+        let user: { id: string }
         try {
-          authSession = await resolveOAuthUser(db, profile, keyManager)
+          user = await getOrCreateOAuthUser(db, profile)
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err)
           if (errMsg === AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED) {
             const redirectUrl = new URL(oauthState.redirectUri)
             redirectUrl.searchParams.set("error", AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED)
             redirectUrl.searchParams.set("email", profile.email || "")
+            if (oauthState.clientState) {
+              redirectUrl.searchParams.set("state", oauthState.clientState)
+            }
             return redirectResponse(redirectUrl.toString())
           }
           throw err
         }
 
         const hikatAuthCode = await createAuthorizationCode(db, {
-          userId: authSession.user.id,
+          userId: user.id,
           codeChallenge: oauthState.codeChallenge,
           codeChallengeMethod: oauthState.codeChallengeMethod || "S256",
           redirectUri: oauthState.redirectUri,
@@ -494,6 +557,9 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
         const launcherRedirectUrl = new URL(oauthState.redirectUri)
         launcherRedirectUrl.searchParams.set("code", hikatAuthCode)
+        if (oauthState.clientState) {
+          launcherRedirectUrl.searchParams.set("state", oauthState.clientState)
+        }
         return redirectResponse(launcherRedirectUrl.toString())
       }
 
@@ -531,33 +597,51 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         oauthFetcher,
       )
 
-      // Handle LINK flow
-      if (oauthState.flowType === "LINK" && oauthState.userId) {
-        await linkOAuthAccount(db, oauthState.userId, "link-flow", profile)
+      // Handle LINK flow with active session verification
+      if (oauthState.flowType === "LINK") {
+        if (!oauthState.userId || !oauthState.sessionId) {
+          return errorResponse(AuthErrorCode.UNAUTHORIZED, "Invalid linking state", 401)
+        }
+
+        const isSessionActive = await validateActiveSession(db, oauthState.sessionId, oauthState.userId)
+        if (!isSessionActive) {
+          return errorResponse(AuthErrorCode.UNAUTHORIZED, "Linking session expired or was revoked", 401)
+        }
+
+        await linkOAuthAccount(db, oauthState.userId, oauthState.sessionId, profile)
         if (oauthState.redirectUri) {
-          return redirectResponse(`${oauthState.redirectUri}?linked=discord&success=true`)
+          const redirectUrl = new URL(oauthState.redirectUri)
+          redirectUrl.searchParams.set("linked", "discord")
+          redirectUrl.searchParams.set("success", "true")
+          if (oauthState.clientState) {
+            redirectUrl.searchParams.set("state", oauthState.clientState)
+          }
+          return redirectResponse(redirectUrl.toString())
         }
         return jsonResponse({ success: true, provider: "DISCORD", message: "Discord account linked successfully" })
       }
 
-      // Handle LAUNCHER flow: generate short HiKAT authorization code bound to PKCE
+      // Handle LAUNCHER flow: generate short HiKAT authorization code bound to PKCE (NO intermediate session created!)
       if (oauthState.flowType === "LAUNCHER" && oauthState.redirectUri && oauthState.codeChallenge) {
-        let authSession: { user: { id: string } }
+        let user: { id: string }
         try {
-          authSession = await resolveOAuthUser(db, profile, keyManager)
+          user = await getOrCreateOAuthUser(db, profile)
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err)
           if (errMsg === AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED) {
             const redirectUrl = new URL(oauthState.redirectUri)
             redirectUrl.searchParams.set("error", AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED)
             redirectUrl.searchParams.set("email", profile.email || "")
+            if (oauthState.clientState) {
+              redirectUrl.searchParams.set("state", oauthState.clientState)
+            }
             return redirectResponse(redirectUrl.toString())
           }
           throw err
         }
 
         const hikatAuthCode = await createAuthorizationCode(db, {
-          userId: authSession.user.id,
+          userId: user.id,
           codeChallenge: oauthState.codeChallenge,
           codeChallengeMethod: oauthState.codeChallengeMethod || "S256",
           redirectUri: oauthState.redirectUri,
@@ -565,6 +649,9 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
         const launcherRedirectUrl = new URL(oauthState.redirectUri)
         launcherRedirectUrl.searchParams.set("code", hikatAuthCode)
+        if (oauthState.clientState) {
+          launcherRedirectUrl.searchParams.set("state", oauthState.clientState)
+        }
         return redirectResponse(launcherRedirectUrl.toString())
       }
 
@@ -581,6 +668,11 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
     // 18. Launcher PKCE Token Exchange: POST /oauth/token
     if (pathname === "/oauth/token" && method === "POST") {
+      const rate = await checkRateLimit(db, `oauth-token:${clientIp}`, 20, 60, { isProduction })
+      if (!rate.allowed) {
+        return errorResponse(AuthErrorCode.RATE_LIMITED, "Too many token exchange requests", 429)
+      }
+
       let body: Record<string, string> = {}
       const contentType = request.headers.get("Content-Type") || ""
 

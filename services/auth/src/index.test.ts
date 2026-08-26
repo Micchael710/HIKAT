@@ -32,7 +32,7 @@ import {
   getJwksResponse,
 } from "./crypto/jwt"
 import { MockEmailService } from "./services/email"
-import { clearInMemoryRateLimits } from "./services/rateLimiter"
+import { checkRateLimit, clearInMemoryRateLimits } from "./services/rateLimiter"
 import {
   createSession,
   rotateRefreshToken,
@@ -910,6 +910,262 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       })
       const logoutRes = await handleRequest({ request: logoutReq, env: {}, db, keyManager, emailService })
       expect(logoutRes.status).toBe(200)
+    })
+
+    it("validates active session during OAuth account linking and rejects if session was revoked", async () => {
+      // 1. Register and login
+      await registerWithPassword(db, { email: "linking-test@hikat.org", password: "password123" }, emailService)
+      const session = await loginWithPassword(db, { email: "linking-test@hikat.org", password: "password123" }, keyManager)
+
+      const mockOAuthFetcher: OAuthFetcher = {
+        fetch: async (url: RequestInfo | URL) => {
+          const urlStr = url.toString()
+          if (urlStr.includes("oauth2.googleapis.com/token")) {
+            return new Response(JSON.stringify({ access_token: "google-token-link" }), { status: 200 })
+          }
+          if (urlStr.includes("openidconnect.googleapis.com/v1/userinfo")) {
+            return new Response(
+              JSON.stringify({
+                sub: "google-link-sub-99",
+                email: "google-link-sub-99@gmail.com",
+                email_verified: true,
+                name: "Link Subject",
+              }),
+              { status: 200 },
+            )
+          }
+          return new Response("{}", { status: 404 })
+        },
+      }
+
+      // 2. Start link flow
+      const linkReq = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://app.hikat.org/settings&state=client-link-state", {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      const linkRes = await handleRequest({ request: linkReq, env: {}, db, keyManager, emailService })
+      expect(linkRes.status).toBe(302)
+      const location = linkRes.headers.get("Location")!
+      const locationUrl = new URL(location)
+      const internalState = locationUrl.searchParams.get("state")!
+      expect(internalState).toBeDefined()
+
+      // 3. Complete callback with active session -> success
+      const cbReq = new Request(`http://localhost:8788/oauth/google/callback?code=mock-google-code&state=${internalState}`)
+      const cbRes = await handleRequest({ request: cbReq, env: {}, db, keyManager, emailService, oauthFetcher: mockOAuthFetcher })
+      expect(cbRes.status).toBe(302)
+      const cbLocation = new URL(cbRes.headers.get("Location")!)
+      expect(cbLocation.searchParams.get("linked")).toBe("google")
+      expect(cbLocation.searchParams.get("success")).toBe("true")
+      expect(cbLocation.searchParams.get("state")).toBe("client-link-state")
+
+      // 4. Start second link flow, but revoke the session before callback
+      const linkReq2 = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://app.hikat.org/settings", {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      })
+      const linkRes2 = await handleRequest({ request: linkReq2, env: {}, db, keyManager, emailService })
+      const internalState2 = new URL(linkRes2.headers.get("Location")!).searchParams.get("state")!
+
+      // Revoke session in D1
+      await revokeSession(db, session.sessionId)
+
+      // Callback should now be rejected because the linking session is revoked!
+      const cbReq2 = new Request(`http://localhost:8788/oauth/google/callback?code=mock-google-code&state=${internalState2}`)
+      const cbRes2 = await handleRequest({ request: cbReq2, env: {}, db, keyManager, emailService, oauthFetcher: mockOAuthFetcher })
+      expect(cbRes2.status).toBe(401)
+      const cbData2 = (await cbRes2.json()) as { error: string }
+      expect(cbData2.error).toBe(AuthErrorCode.UNAUTHORIZED)
+    })
+
+    it("preserves client state parameter in Launcher PKCE flow and rejects tampered state", async () => {
+      const codeVerifier = generateSecureToken(43)
+      const codeChallenge = await generatePkceChallenge(codeVerifier)
+      const clientState = "launcher_session_random_xyz_789"
+
+      const mockOAuthFetcher: OAuthFetcher = {
+        fetch: async (url: RequestInfo | URL) => {
+          const urlStr = url.toString()
+          if (urlStr.includes("oauth2.googleapis.com/token")) {
+            return new Response(JSON.stringify({ access_token: "google-token-pkce" }), { status: 200 })
+          }
+          if (urlStr.includes("openidconnect.googleapis.com/v1/userinfo")) {
+            return new Response(
+              JSON.stringify({
+                sub: "google-pkce-sub-1",
+                email: "pkce-user@gmail.com",
+                email_verified: true,
+                name: "PKCE User",
+              }),
+              { status: 200 },
+            )
+          }
+          return new Response("{}", { status: 404 })
+        },
+      }
+
+      // 1. GET /oauth/authorize with custom client state
+      const authReq = new Request(
+        `http://localhost:8788/oauth/authorize?response_type=code&redirect_uri=hikat://auth/callback&code_challenge=${codeChallenge}&code_challenge_method=S256&provider=google&state=${clientState}`,
+      )
+      const authRes = await handleRequest({ request: authReq, env: {}, db, keyManager, emailService })
+      expect(authRes.status).toBe(302)
+      const googleAuthUrl = new URL(authRes.headers.get("Location")!)
+      const internalState = googleAuthUrl.searchParams.get("state")!
+      expect(internalState).toBeDefined()
+      expect(internalState).not.toBe(clientState) // Internal state is distinct and secure
+
+      // 2. Reject tampered state token
+      const tamperedCbReq = new Request(`http://localhost:8788/oauth/google/callback?code=mock-code&state=tampered-invalid-state`)
+      const tamperedRes = await handleRequest({ request: tamperedCbReq, env: {}, db, keyManager, emailService, oauthFetcher: mockOAuthFetcher })
+      expect(tamperedRes.status).toBe(400)
+      const tamperedData = (await tamperedRes.json()) as { error: string }
+      expect(tamperedData.error).toBe(AuthErrorCode.INVALID_STATE)
+
+      // 3. Valid callback redirects back to Launcher with auth code and exact client state
+      const cbReq = new Request(`http://localhost:8788/oauth/google/callback?code=mock-code&state=${internalState}`)
+      const cbRes = await handleRequest({ request: cbReq, env: {}, db, keyManager, emailService, oauthFetcher: mockOAuthFetcher })
+      expect(cbRes.status).toBe(302)
+      const launcherRedirect = new URL(cbRes.headers.get("Location")!)
+      expect(launcherRedirect.protocol).toBe("hikat:")
+      expect(launcherRedirect.searchParams.get("code")).toBeDefined()
+      expect(launcherRedirect.searchParams.get("state")).toBe(clientState)
+    })
+
+    it("ensures Launcher PKCE flow does NOT create a session during OAuth callback, creating session only in /oauth/token", async () => {
+      const codeVerifier = generateSecureToken(43)
+      const codeChallenge = await generatePkceChallenge(codeVerifier)
+
+      const mockOAuthFetcher: OAuthFetcher = {
+        fetch: async (url: RequestInfo | URL) => {
+          const urlStr = url.toString()
+          if (urlStr.includes("oauth2.googleapis.com/token")) {
+            return new Response(JSON.stringify({ access_token: "google-token-separate-session" }), { status: 200 })
+          }
+          if (urlStr.includes("openidconnect.googleapis.com/v1/userinfo")) {
+            return new Response(
+              JSON.stringify({
+                sub: "google-separate-session-sub-1",
+                email: "separate-session@gmail.com",
+                email_verified: true,
+                name: "Separate Session User",
+              }),
+              { status: 200 },
+            )
+          }
+          return new Response("{}", { status: 404 })
+        },
+      }
+
+      // Count sessions in DB before
+      const sessionsBefore = (await db.select().from(schema.sessions).all()).length
+
+      // 1. Authorize
+      const authReq = new Request(
+        `http://localhost:8788/oauth/authorize?response_type=code&redirect_uri=hikat://auth/callback&code_challenge=${codeChallenge}&provider=google`,
+      )
+      const authRes = await handleRequest({ request: authReq, env: {}, db, keyManager, emailService })
+      const internalState = new URL(authRes.headers.get("Location")!).searchParams.get("state")!
+
+      // 2. Callback
+      const cbReq = new Request(`http://localhost:8788/oauth/google/callback?code=mock-code&state=${internalState}`)
+      const cbRes = await handleRequest({ request: cbReq, env: {}, db, keyManager, emailService, oauthFetcher: mockOAuthFetcher })
+      expect(cbRes.status).toBe(302)
+      const authCode = new URL(cbRes.headers.get("Location")!).searchParams.get("code")!
+
+      // VERIFY: No new session was created during callback!
+      const sessionsAfterCallback = (await db.select().from(schema.sessions).all()).length
+      expect(sessionsAfterCallback).toBe(sessionsBefore)
+
+      // 3. Exchange at /oauth/token
+      const tokenReq = new Request("http://localhost:8788/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code: authCode,
+          code_verifier: codeVerifier,
+          redirect_uri: "hikat://auth/callback",
+        }),
+      })
+      const tokenRes = await handleRequest({ request: tokenReq, env: {}, db, keyManager, emailService })
+      expect(tokenRes.status).toBe(200)
+
+      // VERIFY: Exactly one new session was created upon token exchange!
+      const sessionsAfterToken = (await db.select().from(schema.sessions).all()).length
+      expect(sessionsAfterToken).toBe(sessionsBefore + 1)
+    })
+
+    it("securely handles /auth/logout: rejecting arbitrary sessionId, supporting Bearer JWT and verified refreshToken", async () => {
+      await registerWithPassword(db, { email: "logout-secure@hikat.org", password: "password123" }, emailService)
+      const session = await loginWithPassword(db, { email: "logout-secure@hikat.org", password: "password123" }, keyManager)
+
+      // 1. Rejects arbitrary unauthenticated sessionId
+      const insecureReq = new Request("http://localhost:8788/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session.sessionId }),
+      })
+      const insecureRes = await handleRequest({ request: insecureReq, env: {}, db, keyManager, emailService })
+      expect(insecureRes.status).toBe(401)
+      expect(await validateActiveSession(db, session.sessionId, session.user.id)).toBe(true)
+
+      // 2. Rejects invalid refresh token
+      const invalidRefreshReq = new Request("http://localhost:8788/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: "invalid-random-token" }),
+      })
+      const invalidRefreshRes = await handleRequest({ request: invalidRefreshReq, env: {}, db, keyManager, emailService })
+      expect(invalidRefreshRes.status).toBe(401)
+
+      // 3. Successfully logs out with valid refreshToken
+      const validRefreshReq = new Request("http://localhost:8788/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: session.refreshToken }),
+      })
+      const validRefreshRes = await handleRequest({ request: validRefreshReq, env: {}, db, keyManager, emailService })
+      expect(validRefreshRes.status).toBe(200)
+      expect(await validateActiveSession(db, session.sessionId, session.user.id)).toBe(false)
+    })
+
+    it("enforces rate limits on /auth/reset-password and /oauth/token", async () => {
+      // Test /auth/reset-password rate limit
+      for (let i = 0; i < 5; i++) {
+        const req = new Request("http://localhost:8788/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "CF-Connecting-IP": "198.51.100.1" },
+          body: JSON.stringify({ token: "fake-token", newPassword: "newPassword123!" }),
+        })
+        await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+      }
+
+      // 6th attempt from the same IP must be rate limited (429)
+      const limitedReq = new Request("http://localhost:8788/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "CF-Connecting-IP": "198.51.100.1" },
+        body: JSON.stringify({ token: "fake-token", newPassword: "newPassword123!" }),
+      })
+      const limitedRes = await handleRequest({ request: limitedReq, env: {}, db, keyManager, emailService })
+      expect(limitedRes.status).toBe(429)
+      const data = (await limitedRes.json()) as { error: string }
+      expect(data.error).toBe(AuthErrorCode.RATE_LIMITED)
+    })
+
+    it("handles concurrent rate limiter increments safely in D1", async () => {
+      const key = `test-concurrent-rate-${Date.now()}`
+      const attempts = 10
+
+      // Execute 10 concurrent checkRateLimit calls
+      const results = await Promise.all(
+        Array.from({ length: attempts }, () => checkRateLimit(db, key, 20, 60)),
+      )
+
+      // All 10 requests should be allowed
+      expect(results.every((r) => r.allowed)).toBe(true)
+
+      // Remaining on the last result should reflect exactly 20 - 10 = 10
+      const minRemaining = Math.min(...results.map((r) => r.remaining))
+      expect(minRemaining).toBe(10)
     })
   })
 })

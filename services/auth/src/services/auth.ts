@@ -368,13 +368,12 @@ export async function changePassword(
 }
 
 /**
- * Resolve OAuth user: authenticate existing, create new PLAYER, or prevent auto-link on email collision
+ * Get or create HiKAT User identity from OAuth profile without creating a session
  */
-export async function resolveOAuthUser(
+export async function getOrCreateOAuthUser(
   db: Database,
   profile: OAuthProviderProfile,
-  keyManager: JwtKeyManager,
-): Promise<AuthSessionResult> {
+): Promise<{ id: string; role: AppRole; displayName: string | null }> {
   // 1. Check if external account is already linked
   const linkedAccount = await db
     .select({
@@ -394,13 +393,11 @@ export async function resolveOAuthUser(
     .get()
 
   if (linkedAccount) {
-    // Authenticate existing linked user
-    const user = {
+    return {
       id: linkedAccount.userId,
       role: linkedAccount.role as AppRole,
       displayName: linkedAccount.displayName,
     }
-    return createSession(db, user, keyManager)
   }
 
   // 2. If not linked, check if the email belongs to an existing HiKAT account
@@ -449,12 +446,22 @@ export async function resolveOAuthUser(
     updatedAt: now,
   })
 
-  const user = {
+  return {
     id: userId,
     role: "PLAYER" as AppRole,
     displayName: newUser.displayName ?? null,
   }
+}
 
+/**
+ * Resolve OAuth user: authenticate existing or create new PLAYER and issue a session
+ */
+export async function resolveOAuthUser(
+  db: Database,
+  profile: OAuthProviderProfile,
+  keyManager: JwtKeyManager,
+): Promise<AuthSessionResult> {
+  const user = await getOrCreateOAuthUser(db, profile)
   return createSession(db, user, keyManager)
 }
 

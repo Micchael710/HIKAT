@@ -45,7 +45,9 @@ export const passwordResetTokens = sqliteTable(
 export const oauthStates = sqliteTable(
   "oauth_states",
   {
-    id: text("id").primaryKey(), // State token
+    id: text("id").primaryKey(), // Internal State token sent to Google/Discord
+    clientState: text("client_state"), // Original client state sent by Launcher/Web
+    sessionId: text("session_id").references(() => sessions.id, { onDelete: "cascade" }), // Active session initiating a LINK flow
     codeChallenge: text("code_challenge"),
     codeChallengeMethod: text("code_challenge_method"),
     flowType: text("flow_type").notNull(), // 'LOGIN' | 'LINK' | 'LAUNCHER'
@@ -60,6 +62,7 @@ export const oauthStates = sqliteTable(
   },
   (table) => [
     index("oauth_states_user_id_idx").on(table.userId),
+    index("oauth_states_session_id_idx").on(table.sessionId),
   ],
 )
 

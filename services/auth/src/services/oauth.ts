@@ -54,6 +54,8 @@ export async function createOAuthState(
     flowType: "LOGIN" | "LINK" | "LAUNCHER"
     provider?: ExternalAuthProvider
     userId?: string
+    sessionId?: string
+    clientState?: string
     redirectUri?: string
     codeChallenge?: string
     codeChallengeMethod?: string
@@ -67,6 +69,8 @@ export async function createOAuthState(
 
   await db.insert(schema.oauthStates).values({
     id: stateId,
+    clientState: params.clientState || null,
+    sessionId: params.sessionId || null,
     flowType: params.flowType,
     provider: params.provider || null,
     userId: params.userId || null,
