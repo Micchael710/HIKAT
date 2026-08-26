@@ -6,7 +6,15 @@
 
 import { describe, it, expect, beforeEach } from "vitest"
 import * as jose from "jose"
-import { createDatabase, users, sessions } from "@hikat/database"
+import { eq } from "drizzle-orm"
+import {
+  createDatabase,
+  users,
+  sessions,
+  contentPosts,
+  contentMedia,
+  contentMediaUploadTokens,
+} from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
 import {
   AUTH_AUDIENCE_API,
@@ -14,6 +22,7 @@ import {
   DEFAULT_AUTH_ISSUER,
   HIKAT_VERSION,
   AppRole,
+  MAX_MEDIA_SIZE_BYTES,
 } from "@hikat/shared"
 import worker, {
   Env,
@@ -22,7 +31,18 @@ import worker, {
   verifyAccessToken,
   validateSessionInDb,
   getUserById,
+  getContentFeed,
+  getContentPostBySlug,
+  getAdminContentPosts,
+  createContentPost,
+  updateContentPost,
+  publishContentPost,
+  unpublishContentPost,
+  deleteContentPost,
+  createContentMediaUpload,
+  deleteContentMedia,
 } from "./index"
+import { createTestR2Bucket } from "./testUtils/mockR2"
 
 describe("HiKAT Backend Core (Shard 03)", () => {
   let testD1: ReturnType<typeof createTestD1>
@@ -1378,6 +1398,1282 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       // In development, the specific debug error details are preserved with INTERNAL_ERROR code
       expect(result.errors[0].message).toContain("Failed query:")
       expect(result.errors[0].extensions.code).toBe("INTERNAL_ERROR")
+    })
+  })
+
+  describe("HiKAT Content Core (Shard 04)", () => {
+    let testR2: ReturnType<typeof createTestR2Bucket>
+    let adminToken: string
+    let playerToken: string
+    let adminBToken: string
+    const adminId = "admin-content-user-1"
+    const adminSessionId = "sess-admin-content-1"
+    const adminBId = "admin-content-user-2"
+    const adminBSessionId = "sess-admin-content-2"
+    const playerId = "player-content-user-1"
+    const playerSessionId = "sess-player-content-1"
+
+    beforeEach(async () => {
+      testR2 = createTestR2Bucket()
+
+      // Seed Admin User 1
+      await seedUserAndSession({
+        userId: adminId,
+        role: "ADMIN",
+        displayName: "ContentAdmin1",
+        sessionId: adminSessionId,
+      })
+      adminToken = await createTestAccessToken({
+        userId: adminId,
+        sessionId: adminSessionId,
+        role: "ADMIN",
+        displayName: "ContentAdmin1",
+      })
+
+      // Seed Admin User 2
+      await seedUserAndSession({
+        userId: adminBId,
+        role: "ADMIN",
+        displayName: "ContentAdmin2",
+        sessionId: adminBSessionId,
+      })
+      adminBToken = await createTestAccessToken({
+        userId: adminBId,
+        sessionId: adminBSessionId,
+        role: "ADMIN",
+        displayName: "ContentAdmin2",
+      })
+
+      // Seed Player User
+      await seedUserAndSession({
+        userId: playerId,
+        role: "PLAYER",
+        displayName: "PlayerNormal",
+        sessionId: playerSessionId,
+      })
+      playerToken = await createTestAccessToken({
+        userId: playerId,
+        sessionId: playerSessionId,
+        role: "PLAYER",
+        displayName: "PlayerNormal",
+      })
+    })
+
+    function createEnv(overrides?: Partial<Env>): Env {
+      return {
+        ENVIRONMENT: "production",
+        AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+        DB: testD1,
+        ASSETS: testR2,
+        ...overrides,
+      }
+    }
+
+    async function executeGql(query: string, variables?: Record<string, any>, token?: string, env?: Env) {
+      const activeEnv = env || createEnv()
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`
+      }
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query, variables }),
+      })
+      const response = await worker.fetch(request, activeEnv)
+      return getJson(response)
+    }
+
+    describe("Public Content Queries", () => {
+      it("returns empty feed when no content posts are published", async () => {
+        const res = await executeGql(`
+          query {
+            contentFeed {
+              totalCount
+              items { id title }
+              edges { cursor node { id } }
+              pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+            }
+          }
+        `)
+        expect(res.data?.contentFeed).toBeDefined()
+        expect(res.data.contentFeed.totalCount).toBe(0)
+        expect(res.data.contentFeed.items).toEqual([])
+        expect(res.data.contentFeed.edges).toEqual([])
+        expect(res.data.contentFeed.pageInfo.hasNextPage).toBe(false)
+        expect(res.data.contentFeed.pageInfo.hasPreviousPage).toBe(false)
+      })
+
+      it("returns only published posts in descending order of (publishedAt, id)", async () => {
+        const now = Date.now()
+        // 1. Published Post 1 (earlier)
+        await db.insert(contentPosts).values({
+          id: "post-pub-1",
+          kind: "NEWS",
+          slug: "primera-noticia",
+          title: "Primera Noticia",
+          summary: "Resumen 1",
+          bodyMarkdown: "Cuerpo 1",
+          status: "PUBLISHED",
+          publishedAt: new Date(now - 100000).toISOString(),
+          createdBy: adminId,
+          updatedBy: adminId,
+          createdAt: new Date(now - 100000).toISOString(),
+          updatedAt: new Date(now - 100000).toISOString(),
+        })
+
+        // 2. Draft Post (must NOT appear in public feed)
+        await db.insert(contentPosts).values({
+          id: "post-draft-secret",
+          kind: "NEWS",
+          slug: "noticia-secreta",
+          title: "Noticia Secreta",
+          summary: "Borrador secreto",
+          bodyMarkdown: "Cuerpo secreto",
+          status: "DRAFT",
+          publishedAt: null,
+          createdBy: adminId,
+          updatedBy: adminId,
+          createdAt: new Date(now - 50000).toISOString(),
+          updatedAt: new Date(now - 50000).toISOString(),
+        })
+
+        // 3. Published Post 2 (later)
+        await db.insert(contentPosts).values({
+          id: "post-pub-2",
+          kind: "ANNOUNCEMENT",
+          slug: "anuncio-importante",
+          title: "Anuncio Importante",
+          summary: "Resumen 2",
+          bodyMarkdown: "Cuerpo 2",
+          status: "PUBLISHED",
+          publishedAt: new Date(now).toISOString(),
+          createdBy: adminId,
+          updatedBy: adminId,
+          createdAt: new Date(now).toISOString(),
+          updatedAt: new Date(now).toISOString(),
+        })
+
+        const res = await executeGql(`
+          query {
+            contentFeed {
+              totalCount
+              items {
+                id
+                slug
+                title
+                kind
+                status
+                publishedAt
+              }
+            }
+          }
+        `)
+
+        expect(res.data.contentFeed.totalCount).toBe(2)
+        expect(res.data.contentFeed.items.length).toBe(2)
+        // Most recent first: post-pub-2 then post-pub-1
+        expect(res.data.contentFeed.items[0].id).toBe("post-pub-2")
+        expect(res.data.contentFeed.items[0].slug).toBe("anuncio-importante")
+        expect(res.data.contentFeed.items[0].kind).toBe("ANNOUNCEMENT")
+        expect(res.data.contentFeed.items[1].id).toBe("post-pub-1")
+        expect(res.data.contentFeed.items[1].slug).toBe("primera-noticia")
+
+        // Draft never returned
+        const foundDraft = res.data.contentFeed.items.find((i: any) => i.id === "post-draft-secret")
+        expect(foundDraft).toBeUndefined()
+      })
+
+      it("filters public feed by kind (NEWS vs ANNOUNCEMENT)", async () => {
+        const now = Date.now()
+        await db.insert(contentPosts).values([
+          {
+            id: "post-news-1",
+            kind: "NEWS",
+            slug: "noticia-1",
+            title: "Noticia 1",
+            summary: "Resumen",
+            bodyMarkdown: "Body",
+            status: "PUBLISHED",
+            publishedAt: new Date(now).toISOString(),
+            createdBy: adminId,
+            updatedBy: adminId,
+            createdAt: new Date(now).toISOString(),
+            updatedAt: new Date(now).toISOString(),
+          },
+          {
+            id: "post-announcement-1",
+            kind: "ANNOUNCEMENT",
+            slug: "anuncio-1",
+            title: "Anuncio 1",
+            summary: "Resumen",
+            bodyMarkdown: "Body",
+            status: "PUBLISHED",
+            publishedAt: new Date(now - 1000).toISOString(),
+            createdBy: adminId,
+            updatedBy: adminId,
+            createdAt: new Date(now - 1000).toISOString(),
+            updatedAt: new Date(now - 1000).toISOString(),
+          },
+        ])
+
+        const resNews = await executeGql(`
+          query {
+            contentFeed(kind: NEWS) {
+              totalCount
+              items { id kind slug }
+            }
+          }
+        `)
+        expect(resNews.data.contentFeed.totalCount).toBe(1)
+        expect(resNews.data.contentFeed.items[0].id).toBe("post-news-1")
+
+        const resAnnounce = await executeGql(`
+          query {
+            contentFeed(kind: ANNOUNCEMENT) {
+              totalCount
+              items { id kind slug }
+            }
+          }
+        `)
+        expect(resAnnounce.data.contentFeed.totalCount).toBe(1)
+        expect(resAnnounce.data.contentFeed.items[0].id).toBe("post-announcement-1")
+      })
+
+      it("supports deterministic compound cursor pagination on public feed", async () => {
+        const now = Date.now()
+        const postsToInsert = []
+        for (let i = 1; i <= 5; i++) {
+          postsToInsert.push({
+            id: `post-page-${i}`,
+            kind: "NEWS" as const,
+            slug: `post-page-${i}`,
+            title: `Post Page ${i}`,
+            summary: `Summary ${i}`,
+            bodyMarkdown: `Body ${i}`,
+            status: "PUBLISHED" as const,
+            publishedAt: new Date(now - (10 - i) * 1000).toISOString(),
+            createdBy: adminId,
+            updatedBy: adminId,
+            createdAt: new Date(now - (10 - i) * 1000).toISOString(),
+            updatedAt: new Date(now - (10 - i) * 1000).toISOString(),
+          })
+        }
+        await db.insert(contentPosts).values(postsToInsert)
+
+        // Page 1: first 2 items
+        const page1 = await executeGql(`
+          query {
+            contentFeed(first: 2) {
+              items { id }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        `)
+        expect(page1.data.contentFeed.items.length).toBe(2)
+        expect(page1.data.contentFeed.items[0].id).toBe("post-page-5")
+        expect(page1.data.contentFeed.items[1].id).toBe("post-page-4")
+        expect(page1.data.contentFeed.pageInfo.hasNextPage).toBe(true)
+
+        const endCursor1 = page1.data.contentFeed.pageInfo.endCursor
+        expect(endCursor1).toBeDefined()
+
+        // Page 2: next 2 items using after cursor
+        const page2 = await executeGql(`
+          query($after: String) {
+            contentFeed(first: 2, after: $after) {
+              items { id }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        `, { after: endCursor1 })
+        expect(page2.data.contentFeed.items.length).toBe(2)
+        expect(page2.data.contentFeed.items[0].id).toBe("post-page-3")
+        expect(page2.data.contentFeed.items[1].id).toBe("post-page-2")
+        expect(page2.data.contentFeed.pageInfo.hasNextPage).toBe(true)
+
+        // Page 3: last 1 item
+        const endCursor2 = page2.data.contentFeed.pageInfo.endCursor
+        const page3 = await executeGql(`
+          query($after: String) {
+            contentFeed(first: 2, after: $after) {
+              items { id }
+              pageInfo { hasNextPage }
+            }
+          }
+        `, { after: endCursor2 })
+        expect(page3.data.contentFeed.items.length).toBe(1)
+        expect(page3.data.contentFeed.items[0].id).toBe("post-page-1")
+        expect(page3.data.contentFeed.pageInfo.hasNextPage).toBe(false)
+      })
+
+      it("looks up published post by slug, returning cover media if present", async () => {
+        const now = new Date().toISOString()
+        // Insert cover media
+        await db.insert(contentMedia).values({
+          id: "media-cover-1",
+          objectKey: "content/media/media-cover-1.webp",
+          mimeType: "image/webp",
+          sizeBytes: 45000,
+          createdBy: adminId,
+          createdAt: now,
+        })
+
+        // Insert post with cover media
+        await db.insert(contentPosts).values({
+          id: "post-with-cover",
+          kind: "NEWS",
+          slug: "actualizacion-de-otono",
+          title: "Actualización de Otoño",
+          summary: "Novedades de la temporada",
+          bodyMarkdown: "# Detalles\n\nNuevos mundos y características.",
+          coverMediaId: "media-cover-1",
+          status: "PUBLISHED",
+          publishedAt: now,
+          createdBy: adminId,
+          updatedBy: adminId,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        const res = await executeGql(`
+          query {
+            contentPost(slug: "actualizacion-de-otono") {
+              id
+              slug
+              title
+              summary
+              bodyMarkdown
+              status
+              publishedAt
+              coverMedia {
+                id
+                objectKey
+                mimeType
+                sizeBytes
+                url
+              }
+            }
+          }
+        `)
+
+        expect(res.data.contentPost).toBeDefined()
+        expect(res.data.contentPost.title).toBe("Actualización de Otoño")
+        expect(res.data.contentPost.coverMedia).toBeDefined()
+        expect(res.data.contentPost.coverMedia.id).toBe("media-cover-1")
+        expect(res.data.contentPost.coverMedia.url).toContain("/media/content/media-cover-1")
+      })
+
+      it("returns null for draft post when queried by public contentPost(slug)", async () => {
+        const now = new Date().toISOString()
+        await db.insert(contentPosts).values({
+          id: "post-draft-slug-test",
+          kind: "NEWS",
+          slug: "draft-slug-public-test",
+          title: "Draft Title",
+          summary: "Draft Summary",
+          bodyMarkdown: "Draft Body",
+          status: "DRAFT",
+          publishedAt: null,
+          createdBy: adminId,
+          updatedBy: adminId,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        const res = await executeGql(`
+          query {
+            contentPost(slug: "draft-slug-public-test") {
+              id
+              title
+            }
+          }
+        `)
+
+        expect(res.data.contentPost).toBeNull()
+      })
+
+      it("returns null for non-existent slug", async () => {
+        const res = await executeGql(`
+          query {
+            contentPost(slug: "slug-que-no-existe-en-el-sistema") {
+              id
+            }
+          }
+        `)
+        expect(res.data.contentPost).toBeNull()
+      })
+    })
+
+    describe("Administrative Content Operations", () => {
+      it("ADMIN creates a post successfully (createdBy & updatedBy bound to admin identity)", async () => {
+        const res = await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) {
+              id
+              kind
+              slug
+              title
+              summary
+              bodyMarkdown
+              status
+              publishedAt
+              createdBy
+              updatedBy
+            }
+          }
+          `,
+          {
+            input: {
+              kind: "NEWS",
+              slug: "nueva-guia-de-inicio",
+              title: "Nueva Guía de Inicio",
+              summary: "Aprende a jugar en HiKAT",
+              bodyMarkdown: "## Guía completa para nuevos jugadores",
+              status: "PUBLISHED",
+            },
+          },
+          adminToken,
+        )
+
+        expect(res.errors).toBeUndefined()
+        expect(res.data.createContentPost).toBeDefined()
+        expect(res.data.createContentPost.slug).toBe("nueva-guia-de-inicio")
+        expect(res.data.createContentPost.status).toBe("PUBLISHED")
+        expect(res.data.createContentPost.publishedAt).toBeDefined()
+        expect(res.data.createContentPost.createdBy).toBe(adminId)
+        expect(res.data.createContentPost.updatedBy).toBe(adminId)
+      })
+
+      it("REJECTS createContentPost for PLAYER role (FORBIDDEN)", async () => {
+        const res = await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) {
+              id
+            }
+          }
+          `,
+          {
+            input: {
+              kind: "NEWS",
+              slug: "post-hacker-player",
+              title: "Hacked Post",
+              summary: "Hacked Summary",
+              bodyMarkdown: "Hacked Body",
+            },
+          },
+          playerToken,
+        )
+
+        expect(res.errors).toBeDefined()
+        expect(res.errors[0].extensions.code).toBe("FORBIDDEN")
+      })
+
+      it("REJECTS createContentPost for anonymous caller (UNAUTHENTICATED)", async () => {
+        const res = await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) {
+              id
+            }
+          }
+          `,
+          {
+            input: {
+              kind: "NEWS",
+              slug: "post-anon",
+              title: "Anon Post",
+              summary: "Anon Summary",
+              bodyMarkdown: "Anon Body",
+            },
+          },
+        )
+
+        expect(res.errors).toBeDefined()
+        expect(res.errors[0].extensions.code).toBe("UNAUTHENTICATED")
+      })
+
+      it("REJECTS duplicate slug on creation via D1 UNIQUE constraint and returns CONFLICT", async () => {
+        // Create first post
+        await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) { id }
+          }
+          `,
+          {
+            input: {
+              kind: "NEWS",
+              slug: "slug-duplicado-test",
+              title: "Primer Post",
+              summary: "Primer Resumen",
+              bodyMarkdown: "Primer Body",
+            },
+          },
+          adminToken,
+        )
+
+        // Try creating second post with identical slug
+        const res = await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) { id }
+          }
+          `,
+          {
+            input: {
+              kind: "ANNOUNCEMENT",
+              slug: "slug-duplicado-test",
+              title: "Segundo Post",
+              summary: "Segundo Resumen",
+              bodyMarkdown: "Segundo Body",
+            },
+          },
+          adminToken,
+        )
+
+        expect(res.errors).toBeDefined()
+        expect(res.errors[0].extensions.code).toBe("CONFLICT")
+        expect(res.errors[0].message).toContain("already exists")
+      })
+
+      it("REJECTS invalid input fields with VALIDATION_ERROR", async () => {
+        // Invalid slug format (e.g. uppercase / spaces / invalid chars)
+        const resInvalidSlug = await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) { id }
+          }
+          `,
+          {
+            input: {
+              kind: "NEWS",
+              slug: "Slug Con Espacios & Mayusculas!!", // normalized slug helper might handle it or reject if invalid after normalization
+              title: "Ab", // too short (<3)
+              summary: "Ok summary",
+              bodyMarkdown: "Ok body",
+            },
+          },
+          adminToken,
+        )
+        expect(resInvalidSlug.errors).toBeDefined()
+        expect(resInvalidSlug.errors[0].extensions.code).toBe("VALIDATION_ERROR")
+      })
+
+      it("updates an existing post, updates updatedBy, and enforces unique slug on update", async () => {
+        // Create post
+        const createRes = await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) { id slug }
+          }
+          `,
+          {
+            input: {
+              kind: "NEWS",
+              slug: "post-para-actualizar",
+              title: "Titulo Original",
+              summary: "Resumen Original",
+              bodyMarkdown: "Cuerpo Original",
+            },
+          },
+          adminToken,
+        )
+        const postId = createRes.data.createContentPost.id
+
+        // Update post with Admin B
+        const updateRes = await executeGql(
+          `
+          mutation($id: ID!, $input: UpdateContentPostInput!) {
+            updateContentPost(id: $id, input: $input) {
+              id
+              title
+              summary
+              updatedBy
+            }
+          }
+          `,
+          {
+            id: postId,
+            input: {
+              title: "Titulo Modificado por Admin B",
+              summary: "Resumen Modificado",
+            },
+          },
+          adminBToken,
+        )
+
+        expect(updateRes.errors).toBeUndefined()
+        expect(updateRes.data.updateContentPost.title).toBe("Titulo Modificado por Admin B")
+        expect(updateRes.data.updateContentPost.updatedBy).toBe(adminBId)
+      })
+
+      it("handles publish, unpublish, and republication semantics", async () => {
+        // 1. Create draft post
+        const createRes = await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) { id status publishedAt }
+          }
+          `,
+          {
+            input: {
+              kind: "NEWS",
+              slug: "post-ciclo-publicacion",
+              title: "Post Ciclo",
+              summary: "Resumen Ciclo",
+              bodyMarkdown: "Cuerpo Ciclo",
+              status: "DRAFT",
+            },
+          },
+          adminToken,
+        )
+        const postId = createRes.data.createContentPost.id
+        expect(createRes.data.createContentPost.status).toBe("DRAFT")
+        expect(createRes.data.createContentPost.publishedAt).toBeNull()
+
+        // 2. Publish post -> sets PUBLISHED and publishedAt = now
+        const publishRes = await executeGql(
+          `
+          mutation($id: ID!) {
+            publishContentPost(id: $id) { id status publishedAt }
+          }
+          `,
+          { id: postId },
+          adminToken,
+        )
+        expect(publishRes.data.publishContentPost.status).toBe("PUBLISHED")
+        const firstPublishedAt = publishRes.data.publishContentPost.publishedAt
+        expect(firstPublishedAt).toBeDefined()
+
+        // 3. Unpublish post -> sets DRAFT and resets publishedAt = null
+        const unpublishRes = await executeGql(
+          `
+          mutation($id: ID!) {
+            unpublishContentPost(id: $id) { id status publishedAt }
+          }
+          `,
+          { id: postId },
+          adminToken,
+        )
+        expect(unpublishRes.data.unpublishContentPost.status).toBe("DRAFT")
+        expect(unpublishRes.data.unpublishContentPost.publishedAt).toBeNull()
+
+        // 4. Republish post -> sets PUBLISHED and updates publishedAt
+        const republishRes = await executeGql(
+          `
+          mutation($id: ID!) {
+            publishContentPost(id: $id) { id status publishedAt }
+          }
+          `,
+          { id: postId },
+          adminToken,
+        )
+        expect(republishRes.data.publishContentPost.status).toBe("PUBLISHED")
+        expect(republishRes.data.publishContentPost.publishedAt).toBeDefined()
+      })
+
+      it("deletes a content post successfully", async () => {
+        const createRes = await executeGql(
+          `
+          mutation($input: CreateContentPostInput!) {
+            createContentPost(input: $input) { id }
+          }
+          `,
+          {
+            input: {
+              kind: "NEWS",
+              slug: "post-para-borrar",
+              title: "Para Borrar",
+              summary: "Resumen",
+              bodyMarkdown: "Cuerpo",
+            },
+          },
+          adminToken,
+        )
+        const postId = createRes.data.createContentPost.id
+
+        const deleteRes = await executeGql(
+          `
+          mutation($id: ID!) {
+            deleteContentPost(id: $id)
+          }
+          `,
+          { id: postId },
+          adminToken,
+        )
+        expect(deleteRes.data.deleteContentPost).toBe(true)
+
+        // Verify post no longer exists
+        const checkPost = await db.select().from(contentPosts).where(eq(contentPosts.id, postId)).get()
+        expect(checkPost).toBeUndefined()
+      })
+
+      it("adminContentPosts lists both drafts and published posts with filters", async () => {
+        const now = new Date().toISOString()
+        await db.insert(contentPosts).values([
+          {
+            id: "adm-p-1",
+            kind: "NEWS",
+            slug: "adm-noticia-borrador",
+            title: "Admin Draft",
+            summary: "Summary",
+            bodyMarkdown: "Body",
+            status: "DRAFT",
+            createdBy: adminId,
+            updatedBy: adminId,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "adm-p-2",
+            kind: "ANNOUNCEMENT",
+            slug: "adm-anuncio-publicado",
+            title: "Admin Published",
+            summary: "Summary",
+            bodyMarkdown: "Body",
+            status: "PUBLISHED",
+            publishedAt: now,
+            createdBy: adminId,
+            updatedBy: adminId,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ])
+
+        const resAll = await executeGql(
+          `
+          query {
+            adminContentPosts {
+              totalCount
+              items { id status kind }
+            }
+          }
+          `,
+          {},
+          adminToken,
+        )
+
+        expect(resAll.data.adminContentPosts.totalCount).toBe(2)
+        expect(resAll.data.adminContentPosts.items.length).toBe(2)
+
+        const resDraftsOnly = await executeGql(
+          `
+          query {
+            adminContentPosts(status: DRAFT) {
+              totalCount
+              items { id status }
+            }
+          }
+          `,
+          {},
+          adminToken,
+        )
+        expect(resDraftsOnly.data.adminContentPosts.totalCount).toBe(1)
+        expect(resDraftsOnly.data.adminContentPosts.items[0].id).toBe("adm-p-1")
+      })
+    })
+
+    describe("Cloudflare R2 Media Upload & Delivery Transport", () => {
+      it("ADMIN requests upload token via GraphQL createContentMediaUpload", async () => {
+        const res = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) {
+              uploadUrl
+              uploadToken
+              expiresAt
+              maxSizeBytes
+              expectedMimeType
+              allowedMimeTypes
+            }
+          }
+          `,
+          {
+            input: {
+              mimeType: "image/png",
+              sizeBytes: 102400,
+            },
+          },
+          adminToken,
+        )
+
+        expect(res.errors).toBeUndefined()
+        expect(res.data.createContentMediaUpload).toBeDefined()
+        expect(res.data.createContentMediaUpload.uploadUrl).toContain("/media/content/upload")
+        expect(res.data.createContentMediaUpload.uploadToken.length).toBeGreaterThan(16)
+        expect(res.data.createContentMediaUpload.expectedMimeType).toBe("image/png")
+        expect(res.data.createContentMediaUpload.allowedMimeTypes).toContain("image/png")
+      })
+
+      it("REJECTS createContentMediaUpload for PLAYER role (FORBIDDEN)", async () => {
+        const res = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          {
+            input: {
+              mimeType: "image/png",
+              sizeBytes: 1024,
+            },
+          },
+          playerToken,
+        )
+
+        expect(res.errors).toBeDefined()
+        expect(res.errors[0].extensions.code).toBe("FORBIDDEN")
+      })
+
+      it("executes binary upload via PUT /media/content/upload with Bearer JWT + X-Upload-Token header", async () => {
+        // 1. Request upload token
+        const uploadTicket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          {
+            input: {
+              mimeType: "image/png",
+              sizeBytes: 2048,
+            },
+          },
+          adminToken,
+        )
+        const rawToken = uploadTicket.data.createContentMediaUpload.uploadToken
+
+        // 2. Perform PUT /media/content/upload with mock PNG binary
+        const fakePngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13])
+        const uploadRequest = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: fakePngBytes,
+        })
+
+        const env = createEnv()
+        const uploadResponse = await worker.fetch(uploadRequest, env)
+        expect(uploadResponse.status).toBe(201)
+
+        const uploadData = await getJson(uploadResponse)
+        expect(uploadData.id).toBeDefined()
+        expect(uploadData.objectKey).toContain("content/media/")
+        expect(uploadData.mimeType).toBe("image/png")
+        expect(uploadData.sizeBytes).toBe(fakePngBytes.byteLength)
+        expect(uploadData.url).toContain(`/media/content/${uploadData.id}`)
+
+        // 3. Verify object written to R2 mock
+        const storedObject = await testR2.get(uploadData.objectKey)
+        expect(storedObject).toBeDefined()
+        expect(storedObject?.size).toBe(fakePngBytes.byteLength)
+
+        // 4. Verify GET /media/content/:id delivers the file with caching and correct headers
+        const serveRequest = new Request(`http://localhost/media/content/${uploadData.id}`, {
+          method: "GET",
+        })
+        const serveResponse = await worker.fetch(serveRequest, env)
+        expect(serveResponse.status).toBe(200)
+        expect(serveResponse.headers.get("Content-Type")).toBe("image/png")
+        expect(serveResponse.headers.get("Cache-Control")).toContain("immutable")
+
+        const servedBuffer = await serveResponse.arrayBuffer()
+        expect(new Uint8Array(servedBuffer)).toEqual(fakePngBytes)
+      })
+
+      it("REJECTS upload without Bearer JWT (401)", async () => {
+        const fakeBytes = new Uint8Array([1, 2, 3, 4])
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            "X-Upload-Token": "some-token",
+            "Content-Type": "image/png",
+          },
+          body: fakeBytes,
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect(res.status).toBe(401)
+      })
+
+      it("REJECTS upload with PLAYER Bearer JWT (403)", async () => {
+        const fakeBytes = new Uint8Array([1, 2, 3, 4])
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${playerToken}`,
+            "X-Upload-Token": "some-token",
+            "Content-Type": "image/png",
+          },
+          body: fakeBytes,
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect(res.status).toBe(403)
+      })
+
+      it("REJECTS upload when X-Upload-Token header is missing (400)", async () => {
+        const fakeBytes = new Uint8Array([1, 2, 3, 4])
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "Content-Type": "image/png",
+          },
+          body: fakeBytes,
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect(res.status).toBe(400)
+      })
+
+      it("REJECTS upload if token belongs to a different administrator (403)", async () => {
+        // Admin A generates token
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 1024 } },
+          adminToken,
+        )
+        const tokenFromAdminA = ticket.data.createContentMediaUpload.uploadToken
+
+        // Admin B tries to upload using Admin A's token
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminBToken}`,
+            "X-Upload-Token": tokenFromAdminA,
+            "Content-Type": "image/png",
+          },
+          body: new Uint8Array([1, 2, 3]),
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect(res.status).toBe(403)
+      })
+
+      it("REJECTS reused upload token on second upload (single-use enforcement: 409)", async () => {
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 1024 } },
+          adminToken,
+        )
+        const rawToken = ticket.data.createContentMediaUpload.uploadToken
+
+        const body = new Uint8Array([1, 2, 3])
+
+        // First upload succeeds (201)
+        const req1 = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body,
+        })
+        const res1 = await worker.fetch(req1, createEnv())
+        expect(res1.status).toBe(201)
+
+        // Second upload with same token fails (409)
+        const req2 = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body,
+        })
+        const res2 = await worker.fetch(req2, createEnv())
+        expect(res2.status).toBe(409)
+      })
+
+      it("enforces atomic consumption under concurrent upload requests (only one succeeds)", async () => {
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 1024 } },
+          adminToken,
+        )
+        const rawToken = ticket.data.createContentMediaUpload.uploadToken
+
+        const body1 = new Uint8Array([1, 2, 3, 4])
+        const body2 = new Uint8Array([5, 6, 7, 8])
+
+        const req1 = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: body1,
+        })
+
+        const req2 = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: body2,
+        })
+
+        const env = createEnv()
+        const [res1, res2] = await Promise.all([
+          worker.fetch(req1, env),
+          worker.fetch(req2, env),
+        ])
+
+        const statuses = [res1.status, res2.status].sort()
+        expect(statuses).toEqual([201, 409])
+      })
+
+      it("REJECTS expired upload token (401)", async () => {
+        const past = new Date(Date.now() - 3600000).toISOString()
+        const rawToken = "expired-token-raw-value"
+        const tokenHash = await (await import("./services/mediaService")).sha256Hex(rawToken)
+
+        await db.insert(contentMediaUploadTokens).values({
+          id: "token-exp",
+          tokenHash,
+          createdBy: adminId,
+          expectedMimeType: "image/png",
+          maxSizeBytes: 1024,
+          expiresAt: past,
+          createdAt: past,
+        })
+
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: new Uint8Array([1, 2, 3]),
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect(res.status).toBe(401)
+      })
+
+      it("REJECTS invalid / unsupported MIME type (415)", async () => {
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 1024 } },
+          adminToken,
+        )
+        const rawToken = ticket.data.createContentMediaUpload.uploadToken
+
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "application/x-msdownload", // .exe
+          },
+          body: new Uint8Array([1, 2, 3]),
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect(res.status).toBe(415)
+      })
+
+      it("REJECTS oversized file exceeding MAX_MEDIA_SIZE_BYTES (413)", async () => {
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 1024 } },
+          adminToken,
+        )
+        const rawToken = ticket.data.createContentMediaUpload.uploadToken
+
+        // Create buffer exceeding 5MB
+        const largeBuffer = new Uint8Array(MAX_MEDIA_SIZE_BYTES + 1024)
+
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: largeBuffer,
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect(res.status).toBe(413)
+      })
+
+      it("performs explicit compensation rollback (deletes from R2) if D1 insert fails", async () => {
+        const ticket = await executeGql(
+          `
+          mutation($input: CreateContentMediaUploadInput!) {
+            createContentMediaUpload(input: $input) { uploadToken }
+          }
+          `,
+          { input: { mimeType: "image/png", sizeBytes: 1024 } },
+          adminToken,
+        )
+        const rawToken = ticket.data.createContentMediaUpload.uploadToken
+
+        // Create a faulty D1 that fails during content_media insert
+        const originalPrepare = testD1.prepare.bind(testD1)
+        const faultyD1 = {
+          ...testD1,
+          prepare(query: string) {
+            const q = query.toLowerCase()
+            if (q.includes("content_media") && q.includes("insert")) {
+              return {
+                bind: () => ({
+                  run: () => {
+                    throw new Error("D1_DISK_FULL_SIMULATION")
+                  },
+                  get: () => {
+                    throw new Error("D1_DISK_FULL_SIMULATION")
+                  },
+                  first: () => {
+                    throw new Error("D1_DISK_FULL_SIMULATION")
+                  },
+                  all: () => {
+                    throw new Error("D1_DISK_FULL_SIMULATION")
+                  },
+                }),
+              } as any
+            }
+            return originalPrepare(query)
+          },
+        } as unknown as D1Database
+
+        const req = new Request("http://localhost/media/content/upload", {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "X-Upload-Token": rawToken,
+            "Content-Type": "image/png",
+          },
+          body: new Uint8Array([1, 2, 3, 4]),
+        })
+
+        const env = createEnv({ DB: faultyD1 })
+        const res = await worker.fetch(req, env)
+        expect(res.status).toBe(500)
+
+        // Verify compensation: R2 storage must NOT retain the orphaned media file
+        expect(testR2._storage.size).toBe(0)
+      })
+
+      it("serves 404 for non-existent media ID", async () => {
+        const req = new Request("http://localhost/media/content/non-existent-media-id", {
+          method: "GET",
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect(res.status).toBe(404)
+      })
+
+      it("prevents arbitrary object key access and path traversal on GET /media/content/:id", async () => {
+        const req = new Request("http://localhost/media/content/..%2F..%2Fsecret", {
+          method: "GET",
+        })
+        const res = await worker.fetch(req, createEnv())
+        expect([400, 404]).toContain(res.status)
+      })
+
+      it("REJECTS media deletion if media is currently used as cover image (CONFLICT)", async () => {
+        const now = new Date().toISOString()
+        await db.insert(contentMedia).values({
+          id: "media-linked-1",
+          objectKey: "content/media/media-linked-1.png",
+          mimeType: "image/png",
+          sizeBytes: 100,
+          createdBy: adminId,
+          createdAt: now,
+        })
+        await db.insert(contentPosts).values({
+          id: "post-using-media",
+          kind: "NEWS",
+          slug: "post-con-media",
+          title: "Post con media",
+          summary: "Summary",
+          bodyMarkdown: "Body",
+          coverMediaId: "media-linked-1",
+          status: "PUBLISHED",
+          publishedAt: now,
+          createdBy: adminId,
+          updatedBy: adminId,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        const res = await executeGql(
+          `
+          mutation($id: ID!) {
+            deleteContentMedia(id: $id)
+          }
+          `,
+          { id: "media-linked-1" },
+          adminToken,
+        )
+
+        expect(res.errors).toBeDefined()
+        expect(res.errors[0].extensions.code).toBe("CONFLICT")
+      })
+
+      it("deletes unreferenced media from D1 and R2 successfully", async () => {
+        const now = new Date().toISOString()
+        const fakeBytes = new Uint8Array([1, 2, 3])
+        await testR2.put("content/media/media-unref-1.png", fakeBytes)
+
+        await db.insert(contentMedia).values({
+          id: "media-unref-1",
+          objectKey: "content/media/media-unref-1.png",
+          mimeType: "image/png",
+          sizeBytes: 3,
+          createdBy: adminId,
+          createdAt: now,
+        })
+
+        const res = await executeGql(
+          `
+          mutation($id: ID!) {
+            deleteContentMedia(id: $id)
+          }
+          `,
+          { id: "media-unref-1" },
+          adminToken,
+        )
+
+        expect(res.data.deleteContentMedia).toBe(true)
+
+        // Verify removed from D1
+        const inDb = await db.select().from(contentMedia).where(eq(contentMedia.id, "media-unref-1")).get()
+        expect(inDb).toBeUndefined()
+
+        // Verify removed from R2
+        const inR2 = await testR2.get("content/media/media-unref-1.png")
+        expect(inR2).toBeNull()
+      })
     })
   })
 })

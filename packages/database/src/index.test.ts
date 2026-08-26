@@ -237,4 +237,112 @@ describe("@hikat/database schema and D1 operations", () => {
 
     expect(res2.meta.changes).toBe(0)
   })
+
+  it("handles Content Core tables: media, upload tokens, and posts", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const now = new Date().toISOString()
+    const future = new Date(Date.now() + 900000).toISOString()
+
+    // 1. Seed admin user
+    await db.insert(schema.users).values({
+      id: "admin-author",
+      role: "ADMIN",
+      displayName: "ContentAdmin",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // 2. Upload token
+    await db.insert(schema.contentMediaUploadTokens).values({
+      id: "token-1",
+      tokenHash: "hash-upload-1",
+      createdBy: "admin-author",
+      expectedMimeType: "image/png",
+      maxSizeBytes: 5242880,
+      expiresAt: future,
+      createdAt: now,
+    })
+
+    // Atomic upload token consumption
+    const tokenConsume = await d1
+      .prepare(
+        "UPDATE content_media_upload_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+      )
+      .bind(now, "hash-upload-1", now)
+      .run()
+    expect(tokenConsume.meta.changes).toBe(1)
+
+    // Replay attempt must affect 0 rows
+    const tokenConsumeReplay = await d1
+      .prepare(
+        "UPDATE content_media_upload_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+      )
+      .bind(now, "hash-upload-1", now)
+      .run()
+    expect(tokenConsumeReplay.meta.changes).toBe(0)
+
+    // 3. Media record
+    await db.insert(schema.contentMedia).values({
+      id: "media-1",
+      objectKey: "content/media/media-1.png",
+      mimeType: "image/png",
+      sizeBytes: 102400,
+      createdBy: "admin-author",
+      createdAt: now,
+    })
+
+    // 4. Content post
+    await db.insert(schema.contentPosts).values({
+      id: "post-1",
+      kind: "NEWS",
+      slug: "bienvenidos-a-hikat",
+      title: "Bienvenidos a HiKAT",
+      summary: "Gran lanzamiento oficial de la plataforma",
+      bodyMarkdown: "# Bienvenidos\n\nEste es el post oficial de bienvenida.",
+      coverMediaId: "media-1",
+      status: "PUBLISHED",
+      publishedAt: now,
+      createdBy: "admin-author",
+      updatedBy: "admin-author",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const post = await db
+      .select()
+      .from(schema.contentPosts)
+      .where(eq(schema.contentPosts.slug, "bienvenidos-a-hikat"))
+      .get()
+
+    expect(post).toBeDefined()
+    expect(post?.title).toBe("Bienvenidos a HiKAT")
+    expect(post?.coverMediaId).toBe("media-1")
+
+    // 5. Unique slug constraint enforcement
+    await expect(
+      db.insert(schema.contentPosts).values({
+        id: "post-duplicate-slug",
+        kind: "ANNOUNCEMENT",
+        slug: "bienvenidos-a-hikat",
+        title: "Otro titulo",
+        summary: "Otro resumen",
+        bodyMarkdown: "Otro cuerpo",
+        createdBy: "admin-author",
+        updatedBy: "admin-author",
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
+
+    // 6. Cover media deletion sets cover_media_id to null
+    await db.delete(schema.contentMedia).where(eq(schema.contentMedia.id, "media-1"))
+    const postAfterMediaDelete = await db
+      .select()
+      .from(schema.contentPosts)
+      .where(eq(schema.contentPosts.id, "post-1"))
+      .get()
+
+    expect(postAfterMediaDelete?.coverMediaId).toBeNull()
+  })
 })

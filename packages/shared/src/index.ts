@@ -95,3 +95,88 @@ export interface ServiceHealth {
   timestamp: string
 }
 
+// --- HiKAT Content Core Constants & Types ---
+
+export const ALLOWED_CONTENT_KINDS = ["NEWS", "ANNOUNCEMENT"] as const
+export type ContentPostKind = typeof ALLOWED_CONTENT_KINDS[number]
+
+export const ALLOWED_CONTENT_STATUSES = ["DRAFT", "PUBLISHED"] as const
+export type ContentPostStatus = typeof ALLOWED_CONTENT_STATUSES[number]
+
+export const ALLOWED_MEDIA_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+] as const
+export type MediaMimeType = typeof ALLOWED_MEDIA_MIME_TYPES[number]
+
+export const MAX_MEDIA_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
+export const MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS = 15 * 60 // 15 minutes
+
+export const CONTENT_LIMITS = {
+  TITLE_MIN_LENGTH: 3,
+  TITLE_MAX_LENGTH: 200,
+  SLUG_MIN_LENGTH: 3,
+  SLUG_MAX_LENGTH: 100,
+  SUMMARY_MIN_LENGTH: 3,
+  SUMMARY_MAX_LENGTH: 500,
+  BODY_MIN_LENGTH: 1,
+  BODY_MAX_LENGTH: 100000,
+  DEFAULT_FEED_LIMIT: 20,
+  MAX_FEED_LIMIT: 50,
+} as const
+
+const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+/**
+ * Normalizes a raw slug: converts to lowercase, removes invalid characters,
+ * collapses consecutive hyphens, and trims leading/trailing hyphens.
+ */
+export function normalizeSlug(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove diacritics
+    .replace(/[^a-z0-9-]+/g, "-") // replace non-alphanumerics with -
+    .replace(/-+/g, "-") // collapse consecutive hyphens
+    .replace(/^-|-$/g, "") // trim leading/trailing hyphens
+}
+
+/**
+ * Validates whether a slug matches strict URL-safe format and length bounds.
+ */
+export function isValidSlug(slug: string): boolean {
+  if (
+    slug.length < CONTENT_LIMITS.SLUG_MIN_LENGTH ||
+    slug.length > CONTENT_LIMITS.SLUG_MAX_LENGTH
+  ) {
+    return false
+  }
+  return SLUG_REGEX.test(slug)
+}
+
+/**
+ * Encodes compound pagination cursor data to a stable Base64 string.
+ */
+export function encodeCursor<T extends object>(data: T): string {
+  const json = JSON.stringify(data)
+  return Buffer.from(json, "utf-8").toString("base64url")
+}
+
+/**
+ * Decodes a Base64 cursor string into typed structured data.
+ */
+export function decodeCursor<T = Record<string, unknown>>(cursor: string): T | null {
+  try {
+    const json = Buffer.from(cursor, "base64url").toString("utf-8")
+    const parsed = JSON.parse(json)
+    if (typeof parsed === "object" && parsed !== null) {
+      return parsed as T
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+

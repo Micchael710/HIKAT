@@ -10,6 +10,7 @@ export interface Env {
   AUTH_JWT_PUBLIC_KEY_PEM?: string
   JWT_PUBLIC_KEY_PEM?: string
   CORS_ALLOW_ORIGIN?: string
+  PUBLIC_MEDIA_URL_BASE?: string
 }
 
 export interface AuthenticatedIdentity {

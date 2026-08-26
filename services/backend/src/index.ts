@@ -1,6 +1,7 @@
 /**
  * HiKAT Backend Service
- * Cloudflare Worker entrypoint with GraphQL Yoga, authenticated context, and health endpoints.
+ * Cloudflare Worker entrypoint with GraphQL Yoga, authenticated context,
+ * health endpoints, and Cloudflare R2 media transport endpoints.
  */
 
 import { createYoga, createSchema } from "graphql-yoga"
@@ -11,6 +12,7 @@ import type { Env, BackendGraphQLContext } from "./types"
 import { createGraphQLContext } from "./context"
 import { resolvers } from "./resolvers"
 import { getCorsHeaders, handleOptionsRequest } from "./cors"
+import { handleMediaUpload, handleMediaServe } from "./media/transport"
 
 export * from "./types"
 export * from "./auth/verifier"
@@ -18,6 +20,9 @@ export * from "./auth/session"
 export * from "./auth/guards"
 export * from "./context"
 export * from "./services/userService"
+export * from "./services/contentService"
+export * from "./services/mediaService"
+export * from "./media/transport"
 export * from "./resolvers"
 
 const KNOWN_SAFE_CODES = [
@@ -73,6 +78,32 @@ export default {
     const db = env.DB ? createDatabase(env.DB) : undefined
     const context = await createGraphQLContext(request, env, db)
 
+    // Binary Media Upload Route: PUT /media/content/upload
+    if (url.pathname === "/media/content/upload") {
+      if (request.method === "PUT") {
+        return handleMediaUpload(request, env, db, context)
+      }
+      const corsHeaders = getCorsHeaders(request, env)
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    // Public Media Serving Route: GET /media/content/:id
+    const mediaMatch = url.pathname.match(/^\/media\/content\/([a-zA-Z0-9_-]+)$/)
+    if (mediaMatch && mediaMatch[1]) {
+      if (request.method === "GET") {
+        return handleMediaServe(request, env, db, mediaMatch[1])
+      }
+      const corsHeaders = getCorsHeaders(request, env)
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    // GraphQL Endpoint
     const response = await yoga.fetch(request, context)
 
     // Secure-by-default error sanitization:

@@ -21,10 +21,13 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(typeDefs).toContain("type User")
     expect(typeDefs).toContain("type HealthStatus")
     expect(typeDefs).toContain("type AdminStatus")
+    expect(typeDefs).toContain("type ContentPost")
+    expect(typeDefs).toContain("type ContentMedia")
     expect(typeDefs).toContain("type Query")
+    expect(typeDefs).toContain("type Mutation")
   })
 
-  it("builds a valid GraphQLSchema object", () => {
+  it("builds a valid GraphQLSchema object with Content queries and mutations", () => {
     const schema = getBaseSchema()
     expect(schema).toBeInstanceOf(GraphQLSchema)
 
@@ -34,6 +37,31 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(queryType?.getFields()["version"]).toBeDefined()
     expect(queryType?.getFields()["me"]).toBeDefined()
     expect(queryType?.getFields()["adminStatus"]).toBeDefined()
+    expect(queryType?.getFields()["contentFeed"]).toBeDefined()
+    expect(queryType?.getFields()["contentPost"]).toBeDefined()
+    expect(queryType?.getFields()["adminContentPosts"]).toBeDefined()
+    expect(queryType?.getFields()["adminContentPost"]).toBeDefined()
+
+    const mutationType = schema.getMutationType()
+    expect(mutationType).toBeDefined()
+    expect(mutationType?.getFields()["createContentPost"]).toBeDefined()
+    expect(mutationType?.getFields()["updateContentPost"]).toBeDefined()
+    expect(mutationType?.getFields()["publishContentPost"]).toBeDefined()
+    expect(mutationType?.getFields()["unpublishContentPost"]).toBeDefined()
+    expect(mutationType?.getFields()["deleteContentPost"]).toBeDefined()
+    expect(mutationType?.getFields()["createContentMediaUpload"]).toBeDefined()
+    expect(mutationType?.getFields()["deleteContentMedia"]).toBeDefined()
+  })
+
+  it("defines ContentPostKind and ContentPostStatus enums", () => {
+    const schema = getBaseSchema()
+    const kindEnum = schema.getType("ContentPostKind") as GraphQLEnumType
+    expect(kindEnum).toBeDefined()
+    expect(kindEnum.getValues().map((v) => v.name)).toEqual(["NEWS", "ANNOUNCEMENT"])
+
+    const statusEnum = schema.getType("ContentPostStatus") as GraphQLEnumType
+    expect(statusEnum).toBeDefined()
+    expect(statusEnum.getValues().map((v) => v.name)).toEqual(["DRAFT", "PUBLISHED"])
   })
 
   it("defines Role enum with strictly PLAYER and ADMIN", () => {
