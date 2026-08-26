@@ -39,13 +39,13 @@ export function createTestD1(): D1Database & { _sqlite: DatabaseSync } {
         },
         async first<T = unknown>(colName?: string): Promise<T | null> {
           const stmt = sqlite.prepare(query)
-          const row = (stmt.get as any)(...boundParams) as Record<string, unknown> | undefined
+          const row = (stmt as any).get(...boundParams) as Record<string, unknown> | undefined
           if (!row) return null
           return (colName ? row[colName] : row) as T
         },
         async all<T = unknown>(): Promise<D1Result<T>> {
           const stmt = sqlite.prepare(query)
-          const results = (stmt.all as any)(...boundParams) as T[]
+          const results = (stmt as any).all(...boundParams) as T[]
           return {
             results,
             success: true,
@@ -63,7 +63,7 @@ export function createTestD1(): D1Database & { _sqlite: DatabaseSync } {
         },
         async run(): Promise<D1Response> {
           const stmt = sqlite.prepare(query)
-          const res = (stmt.run as any)(...boundParams)
+          const res = (stmt as any).run(...boundParams)
           return {
             success: true,
             meta: {
@@ -80,7 +80,7 @@ export function createTestD1(): D1Database & { _sqlite: DatabaseSync } {
         },
         async raw<T = unknown>(): Promise<T[]> {
           const stmt = sqlite.prepare(query)
-          const rows = (stmt.all as any)(...boundParams) as Record<string, unknown>[]
+          const rows = (stmt as any).all(...boundParams) as Record<string, unknown>[]
           return rows.map((r) => Object.values(r)) as T[]
         },
       } as unknown as D1PreparedStatement

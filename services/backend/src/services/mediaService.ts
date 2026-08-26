@@ -1,50 +1,53 @@
 /**
- * HiKAT Media Service
- * Handles media upload tickets, token validation, atomic consumption,
+ * HiKAT Media Storage & Asset Management Service (Shard 04B)
+ * Dedicated media ticket generation, MIME & size limit enforcement (IMAGE vs VIDEO),
  * Cloudflare R2 binary storage with explicit compensation rollback, and metadata records.
  */
 
-import { eq, sql } from "drizzle-orm"
+import { eq, sql, inArray } from "drizzle-orm"
 import {
   Database,
   contentMedia,
   contentMediaUploadTokens,
-  contentPosts,
+  news,
   ContentMedia,
 } from "@hikat/database"
 import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  ALLOWED_VIDEO_MIME_TYPES,
   ALLOWED_MEDIA_MIME_TYPES,
+  MAX_IMAGE_SIZE_BYTES,
+  MAX_VIDEO_SIZE_BYTES,
   MAX_MEDIA_SIZE_BYTES,
   MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS,
+  MediaType,
   MediaMimeType,
+  getMediaTypeFromMime,
 } from "@hikat/shared"
-import {
-  createGraphQLError,
+import { createGraphQLError } from "@hikat/graphql"
+import type {
   ContentMediaGql,
   ContentMediaUploadPayloadGql,
   CreateContentMediaUploadInputGql,
 } from "@hikat/graphql"
 import type { Env } from "../types"
 
-export async function sha256Hex(text: string): Promise<string> {
+export async function sha256Hex(data: string): Promise<string> {
   const encoder = new TextEncoder()
-  const data = encoder.encode(text)
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(data))
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
-function getExtensionForMime(mime: string): string {
-  switch (mime) {
-    case "image/png":
-      return "png"
-    case "image/jpeg":
-      return "jpg"
-    case "image/webp":
-      return "webp"
-    default:
-      return "bin"
+function getExtensionForMime(mimeType: string): string {
+  const map: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "video/mp4": "mp4",
+    "video/webm": "webm",
   }
+  return map[mimeType.toLowerCase()] || "bin"
 }
 
 export function formatMediaGql(
@@ -52,20 +55,22 @@ export function formatMediaGql(
   env: Env,
   request?: Request,
 ): ContentMediaGql {
-  let url = `/media/content/${media.id}`
+  let baseUrl = ""
   if (env.PUBLIC_MEDIA_URL_BASE && env.PUBLIC_MEDIA_URL_BASE.trim() !== "") {
-    url = `${env.PUBLIC_MEDIA_URL_BASE.replace(/\/$/, "")}/media/content/${media.id}`
+    baseUrl = env.PUBLIC_MEDIA_URL_BASE.replace(/\/$/, "")
   } else if (request) {
     try {
-      url = `${new URL(request.url).origin}/media/content/${media.id}`
+      baseUrl = new URL(request.url).origin
     } catch {
-      url = `/media/content/${media.id}`
+      baseUrl = ""
     }
   }
 
+  const url = `${baseUrl}/media/content/${media.id}`
+
   return {
     id: media.id,
-    objectKey: media.objectKey,
+    mediaType: media.mediaType as MediaType,
     mimeType: media.mimeType,
     sizeBytes: media.sizeBytes,
     url,
@@ -73,8 +78,38 @@ export function formatMediaGql(
   }
 }
 
+export async function getContentMediaById(
+  db: Database,
+  id: string,
+): Promise<ContentMedia | undefined> {
+  return await db
+    .select()
+    .from(contentMedia)
+    .where(eq(contentMedia.id, id))
+    .get()
+}
+
+export async function getContentMediaByIds(
+  db: Database,
+  ids: string[],
+): Promise<Map<string, ContentMedia>> {
+  const map = new Map<string, ContentMedia>()
+  if (ids.length === 0) return map
+
+  const rows = await db
+    .select()
+    .from(contentMedia)
+    .where(inArray(contentMedia.id, ids))
+    .all()
+
+  for (const row of rows) {
+    map.set(row.id, row)
+  }
+  return map
+}
+
 /**
- * Creates a single-use, time-limited media upload ticket for an authenticated administrator.
+ * Creates a single-use upload ticket for binary media (images or videos).
  */
 export async function createContentMediaUpload(
   db: Database,
@@ -83,36 +118,58 @@ export async function createContentMediaUpload(
   input: CreateContentMediaUploadInputGql,
   request?: Request,
 ): Promise<ContentMediaUploadPayloadGql> {
-  if (!ALLOWED_MEDIA_MIME_TYPES.includes(input.mimeType as MediaMimeType)) {
+  const normalizedMime = input.mimeType.toLowerCase().trim()
+  if (!ALLOWED_MEDIA_MIME_TYPES.includes(normalizedMime as MediaMimeType)) {
     throw createGraphQLError(
-      `Invalid MIME type '${input.mimeType}'. Allowed MIME types: ${ALLOWED_MEDIA_MIME_TYPES.join(", ")}`,
+      `Unsupported MIME type '${input.mimeType}'. Allowed: ${ALLOWED_MEDIA_MIME_TYPES.join(", ")}`,
       "VALIDATION_ERROR",
     )
   }
 
-  if (
-    typeof input.sizeBytes !== "number" ||
-    input.sizeBytes <= 0 ||
-    input.sizeBytes > MAX_MEDIA_SIZE_BYTES
-  ) {
+  const mediaType = getMediaTypeFromMime(normalizedMime)
+  if (!mediaType) {
     throw createGraphQLError(
-      `Invalid file size. Size must be between 1 and ${MAX_MEDIA_SIZE_BYTES} bytes (${MAX_MEDIA_SIZE_BYTES / (1024 * 1024)}MB)`,
+      `Invalid MIME type '${input.mimeType}'`,
       "VALIDATION_ERROR",
     )
   }
 
-  const rawToken = `${crypto.randomUUID().replace(/-/g, "")}${crypto.randomUUID().replace(/-/g, "")}`
+  const maxTypeLimit =
+    mediaType === "VIDEO" ? MAX_VIDEO_SIZE_BYTES : MAX_IMAGE_SIZE_BYTES
+
+  if (input.sizeBytes <= 0) {
+    throw createGraphQLError(
+      "Media size must be greater than 0",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  if (input.sizeBytes > maxTypeLimit) {
+    throw createGraphQLError(
+      `Requested size (${input.sizeBytes} bytes) exceeds maximum limit for ${mediaType} (${maxTypeLimit} bytes)`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const rawTokenBytes = new Uint8Array(32)
+  crypto.getRandomValues(rawTokenBytes)
+  const rawToken = Array.from(rawTokenBytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+
   const tokenHash = await sha256Hex(rawToken)
+  const tokenId = crypto.randomUUID()
   const now = new Date()
   const expiresAt = new Date(
     now.getTime() + MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS * 1000,
   ).toISOString()
 
   await db.insert(contentMediaUploadTokens).values({
-    id: crypto.randomUUID(),
+    id: tokenId,
     tokenHash,
+    mediaType,
     createdBy: adminUserId,
-    expectedMimeType: input.mimeType,
+    expectedMimeType: normalizedMime,
     maxSizeBytes: input.sizeBytes,
     expiresAt,
     createdAt: now.toISOString(),
@@ -134,7 +191,7 @@ export async function createContentMediaUpload(
     uploadToken: rawToken,
     expiresAt,
     maxSizeBytes: input.sizeBytes,
-    expectedMimeType: input.mimeType,
+    expectedMimeType: normalizedMime,
     allowedMimeTypes: [...ALLOWED_MEDIA_MIME_TYPES],
   }
 }
@@ -142,6 +199,7 @@ export async function createContentMediaUpload(
 export interface ValidatedUploadToken {
   id: string
   tokenHash: string
+  mediaType: MediaType
   createdBy: string
   expectedMimeType: string
   maxSizeBytes: number
@@ -192,6 +250,7 @@ export async function getAndValidateUploadToken(
   return {
     id: tokenRecord.id,
     tokenHash: tokenRecord.tokenHash,
+    mediaType: tokenRecord.mediaType as MediaType,
     createdBy: tokenRecord.createdBy,
     expectedMimeType: tokenRecord.expectedMimeType,
     maxSizeBytes: tokenRecord.maxSizeBytes,
@@ -227,12 +286,16 @@ export async function saveMediaObjectWithCompensation(
   env: Env,
   params: {
     mimeType: string
+    mediaType: MediaType
     body: ArrayBuffer
     createdBy: string
   },
 ): Promise<ContentMedia> {
   if (!env.ASSETS) {
-    throw createGraphQLError("Cloudflare R2 ASSETS binding is unavailable", "INTERNAL_ERROR")
+    throw createGraphQLError(
+      "Cloudflare R2 ASSETS binding is unavailable",
+      "INTERNAL_ERROR",
+    )
   }
 
   const mediaId = crypto.randomUUID()
@@ -254,6 +317,7 @@ export async function saveMediaObjectWithCompensation(
       .values({
         id: mediaId,
         objectKey,
+        mediaType: params.mediaType,
         mimeType: params.mimeType as MediaMimeType,
         sizeBytes: params.body.byteLength,
         createdBy: params.createdBy,
@@ -268,66 +332,51 @@ export async function saveMediaObjectWithCompensation(
     try {
       await env.ASSETS.delete(objectKey)
     } catch {
-      // Ignore cleanup error
+      // Ignore secondary deletion failure in rollback handler
     }
     throw err
   }
 }
 
 /**
- * Retrieves ContentMedia metadata from D1 by ID.
+ * Deletes a media asset from D1 and R2.
+ * Rejects deletion with CONFLICT if the media is referenced by any news article as image OR video.
  */
-export async function getContentMediaById(
-  db: Database,
-  id: string,
-): Promise<ContentMedia | null> {
-  const record = await db
-    .select()
-    .from(contentMedia)
-    .where(eq(contentMedia.id, id))
-    .get()
-
-  return record || null
-}
-
-/**
- * Deletes a ContentMedia entity and its backing R2 object.
- * Refuses deletion if media is referenced by any content post as a cover image.
- */
-export async function deleteContentMedia(
+export async function deleteMedia(
   db: Database,
   env: Env,
-  id: string,
+  mediaId: string,
 ): Promise<boolean> {
-  const media = await getContentMediaById(db, id)
-  if (!media) {
-    throw createGraphQLError("Media not found", "NOT_FOUND")
+  const existing = await getContentMediaById(db, mediaId)
+  if (!existing) {
+    throw createGraphQLError("Media asset not found", "NOT_FOUND")
   }
 
-  // Check if referenced by any content post
-  const referencingPost = await db
-    .select({ id: contentPosts.id })
-    .from(contentPosts)
-    .where(eq(contentPosts.coverMediaId, id))
-    .limit(1)
+  // Check if referenced by any news article as image or video
+  const referencingArticle = await db
+    .select({ id: news.id, title: news.title })
+    .from(news)
+    .where(
+      sql`${news.imageMediaId} = ${mediaId} OR ${news.videoMediaId} = ${mediaId}`,
+    )
     .get()
 
-  if (referencingPost) {
+  if (referencingArticle) {
     throw createGraphQLError(
-      "Cannot delete media that is currently referenced by a content post as cover image",
+      `Cannot delete media asset because it is currently in use by news article '${referencingArticle.title}' (${referencingArticle.id})`,
       "CONFLICT",
     )
   }
 
   // Delete from D1
-  await db.delete(contentMedia).where(eq(contentMedia.id, id))
+  await db.delete(contentMedia).where(eq(contentMedia.id, mediaId))
 
   // Delete from R2
   if (env.ASSETS) {
     try {
-      await env.ASSETS.delete(media.objectKey)
+      await env.ASSETS.delete(existing.objectKey)
     } catch {
-      // Best-effort R2 deletion
+      // Continue even if R2 delete fails
     }
   }
 

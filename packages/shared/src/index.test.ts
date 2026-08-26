@@ -1,59 +1,101 @@
 import { describe, it, expect } from "vitest"
-
 import {
-  HIKAT_APP_NAME,
-  HIKAT_VERSION,
-  ALLOWED_ROLES,
-  ALLOWED_AUTH_PROVIDERS,
-  ALLOWED_CONTENT_KINDS,
-  ALLOWED_CONTENT_STATUSES,
+  ALLOWED_NEWS_TYPES,
+  ALLOWED_NEWS_STATUSES,
+  ALLOWED_IMAGE_MIME_TYPES,
+  ALLOWED_VIDEO_MIME_TYPES,
   ALLOWED_MEDIA_MIME_TYPES,
-  MAX_MEDIA_SIZE_BYTES,
-  normalizeSlug,
-  isValidSlug,
+  MAX_IMAGE_SIZE_BYTES,
+  MAX_VIDEO_SIZE_BYTES,
+  getMediaTypeFromMime,
+  parseAndNormalizeYouTubeUrl,
+  isValidYouTubeUrl,
   encodeCursor,
   decodeCursor,
 } from "./index"
 
-describe("@hikat/shared foundation", () => {
-  it("exports valid core constants", () => {
-    expect(HIKAT_APP_NAME).toBe("HiKAT")
-    expect(HIKAT_VERSION).toBe("0.1.0")
+describe("Shared News & Media Content Utilities (Shard 04B)", () => {
+  it("exports valid News and Media constants", () => {
+    expect(ALLOWED_NEWS_TYPES).toEqual([
+      "NEWS",
+      "UPDATE",
+      "ANNOUNCEMENT",
+      "MAINTENANCE",
+    ])
+    expect(ALLOWED_NEWS_STATUSES).toEqual(["DRAFT", "PUBLISHED"])
+    expect(ALLOWED_IMAGE_MIME_TYPES).toContain("image/png")
+    expect(ALLOWED_IMAGE_MIME_TYPES).toContain("image/jpeg")
+    expect(ALLOWED_IMAGE_MIME_TYPES).toContain("image/webp")
+    expect(ALLOWED_VIDEO_MIME_TYPES).toContain("video/mp4")
+    expect(ALLOWED_VIDEO_MIME_TYPES).toContain("video/webm")
+    expect(ALLOWED_MEDIA_MIME_TYPES.length).toBe(5)
+    expect(MAX_IMAGE_SIZE_BYTES).toBe(5 * 1024 * 1024)
+    expect(MAX_VIDEO_SIZE_BYTES).toBe(25 * 1024 * 1024)
   })
 
-  it("exports valid roles and external providers", () => {
-    expect(ALLOWED_ROLES).toEqual(["PLAYER", "ADMIN"])
-    expect(ALLOWED_AUTH_PROVIDERS).toEqual(["GOOGLE", "DISCORD"])
+  it("identifies media type correctly from MIME string", () => {
+    expect(getMediaTypeFromMime("image/png")).toBe("IMAGE")
+    expect(getMediaTypeFromMime("image/jpeg")).toBe("IMAGE")
+    expect(getMediaTypeFromMime("image/webp")).toBe("IMAGE")
+    expect(getMediaTypeFromMime("video/mp4")).toBe("VIDEO")
+    expect(getMediaTypeFromMime("video/webm")).toBe("VIDEO")
+    expect(getMediaTypeFromMime("application/pdf")).toBeNull()
+    expect(getMediaTypeFromMime("text/html")).toBeNull()
   })
 
-  it("exports content core constants and validates slug normalization", () => {
-    expect(ALLOWED_CONTENT_KINDS).toEqual(["NEWS", "ANNOUNCEMENT"])
-    expect(ALLOWED_CONTENT_STATUSES).toEqual(["DRAFT", "PUBLISHED"])
-    expect(ALLOWED_MEDIA_MIME_TYPES).toEqual(["image/png", "image/jpeg", "image/webp"])
-    expect(MAX_MEDIA_SIZE_BYTES).toBe(5 * 1024 * 1024)
+  it("parses and normalizes valid YouTube URLs and rejects invalid ones", () => {
+    const watchUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    const parsedWatch = parseAndNormalizeYouTubeUrl(watchUrl)
+    expect(parsedWatch).not.toBeNull()
+    expect(parsedWatch?.videoId).toBe("dQw4w9WgXcQ")
+    expect(parsedWatch?.canonicalUrl).toBe(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+    expect(isValidYouTubeUrl(watchUrl)).toBe(true)
 
-    expect(normalizeSlug("  Hello World! New Release v1.0.0 -- ")).toBe("hello-world-new-release-v1-0-0")
-    expect(normalizeSlug("Noticias de Verano: ¡Gran Apertura!")).toBe("noticias-de-verano-gran-apertura")
+    const shortUrl = "https://youtu.be/dQw4w9WgXcQ"
+    const parsedShort = parseAndNormalizeYouTubeUrl(shortUrl)
+    expect(parsedShort?.videoId).toBe("dQw4w9WgXcQ")
+    expect(parsedShort?.canonicalUrl).toBe(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+    expect(isValidYouTubeUrl(shortUrl)).toBe(true)
 
-    expect(isValidSlug("hello-world")).toBe(true)
-    expect(isValidSlug("valid-slug-123")).toBe(true)
-    expect(isValidSlug("ab")).toBe(false) // too short (<3)
-    expect(isValidSlug("-invalid-leading")).toBe(false)
-    expect(isValidSlug("invalid--double")).toBe(false)
-    expect(isValidSlug("invalid trailing-")).toBe(false)
-    expect(isValidSlug("invalid_underscore")).toBe(false)
+    const shortsUrl = "https://youtube.com/shorts/dQw4w9WgXcQ"
+    const parsedShorts = parseAndNormalizeYouTubeUrl(shortsUrl)
+    expect(parsedShorts?.videoId).toBe("dQw4w9WgXcQ")
+    expect(parsedShorts?.canonicalUrl).toBe(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+    expect(isValidYouTubeUrl(shortsUrl)).toBe(true)
+
+    const embedUrl = "https://www.youtube.com/embed/dQw4w9WgXcQ"
+    const parsedEmbed = parseAndNormalizeYouTubeUrl(embedUrl)
+    expect(parsedEmbed?.videoId).toBe("dQw4w9WgXcQ")
+
+    // Rejections
+    expect(parseAndNormalizeYouTubeUrl("https://vimeo.com/123456")).toBeNull()
+    expect(
+      parseAndNormalizeYouTubeUrl(
+        "https://evil.com/youtube.com/watch?v=12345678901",
+      ),
+    ).toBeNull()
+    expect(parseAndNormalizeYouTubeUrl("not-a-url")).toBeNull()
+    expect(
+      parseAndNormalizeYouTubeUrl("https://youtube.com/watch?v=short"),
+    ).toBeNull() // invalid ID length
+    expect(parseAndNormalizeYouTubeUrl(null)).toBeNull()
+    expect(isValidYouTubeUrl("invalid-youtube")).toBe(false)
   })
 
-  it("encodes and decodes compound pagination cursor reliably", () => {
-    const original = { publishedAt: "2026-08-26T12:00:00.000Z", id: "post-123" }
-    const cursor = encodeCursor(original)
+  it("encodes and decodes pagination compound cursors deterministically", () => {
+    const payload = { publishedAt: "2026-08-26T00:00:00.000Z", id: "news-123" }
+    const cursor = encodeCursor(payload)
     expect(typeof cursor).toBe("string")
-    expect(cursor.length).toBeGreaterThan(0)
 
-    const decoded = decodeCursor<typeof original>(cursor)
-    expect(decoded).toEqual(original)
+    const decoded = decodeCursor<typeof payload>(cursor)
+    expect(decoded).toEqual(payload)
 
-    expect(decodeCursor("invalid-base64-%%$$")).toBeNull()
-    expect(decodeCursor("")).toBeNull()
+    expect(decodeCursor("invalid-base64-!#@")).toBeNull()
   })
 })

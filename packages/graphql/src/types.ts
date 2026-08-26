@@ -1,74 +1,69 @@
 import type {
-  AppRole,
-  ContentPostKind,
-  ContentPostStatus,
+  AppRoleType,
+  NewsType,
+  NewsStatus,
+  MediaType,
   MediaMimeType,
 } from "@hikat/shared"
 
-export type RoleGql = AppRole
-
 export interface UserGql {
   id: string
-  role: RoleGql
-  displayName: string | null
+  displayName?: string | null
+  role: AppRoleType
+  email?: string | null
+  emailVerified?: boolean
+  minecraftUuid?: string | null
+  minecraftUsername?: string | null
   createdAt: string
   updatedAt: string
 }
 
-export interface HealthStatusGql {
-  status: string
+export interface ServiceHealthGql {
+  status: "ok" | "degraded" | "error"
   service: string
   version: string
   timestamp: string
 }
 
-export interface AdminStatusGql {
-  ok: boolean
-  serverTime: string
-  environment: string
+export interface PageInfoGql {
+  hasNextPage: boolean
+  hasPreviousPage: boolean
+  startCursor?: string | null
+  endCursor?: string | null
 }
 
 export interface ContentMediaGql {
   id: string
-  objectKey: string
-  mimeType: MediaMimeType | string
+  mediaType: MediaType
+  mimeType: string
   sizeBytes: number
   url: string
   createdAt: string
 }
 
-export interface ContentPostGql {
+export interface NewsGql {
   id: string
-  kind: ContentPostKind
-  slug: string
   title: string
-  summary: string
-  bodyMarkdown: string
-  coverMediaId?: string | null
-  coverMedia?: ContentMediaGql | null
-  status: ContentPostStatus
+  content: string
+  type: NewsType
+  image?: ContentMediaGql | null
+  youtubeVideoId?: string | null
+  youtubeUrl?: string | null
+  video?: ContentMediaGql | null
+  status: NewsStatus
   publishedAt?: string | null
-  createdBy: string
-  updatedBy: string
   createdAt: string
   updatedAt: string
 }
 
-export interface PageInfoGql {
-  hasNextPage: boolean
-  hasPreviousPage: boolean
-  startCursor: string | null
-  endCursor: string | null
-}
-
-export interface ContentPostEdgeGql {
-  node: ContentPostGql
+export interface NewsEdgeGql {
+  node: NewsGql
   cursor: string
 }
 
-export interface ContentFeedConnectionGql {
-  edges: ContentPostEdgeGql[]
-  items: ContentPostGql[]
+export interface NewsConnectionGql {
+  edges: NewsEdgeGql[]
+  items: NewsGql[]
   pageInfo: PageInfoGql
   totalCount: number
 }
@@ -82,28 +77,27 @@ export interface ContentMediaUploadPayloadGql {
   allowedMimeTypes: string[]
 }
 
-export interface CreateContentPostInputGql {
-  kind: ContentPostKind
-  slug: string
+export interface CreateNewsInputGql {
   title: string
-  summary: string
-  bodyMarkdown: string
-  coverMediaId?: string | null
-  status?: ContentPostStatus | null
+  content: string
+  type: NewsType
+  imageMediaId?: string | null
+  youtubeUrl?: string | null
+  videoMediaId?: string | null
+  status?: NewsStatus | null
 }
 
-export interface UpdateContentPostInputGql {
-  kind?: ContentPostKind | null
-  slug?: string | null
+export interface UpdateNewsInputGql {
   title?: string | null
-  summary?: string | null
-  bodyMarkdown?: string | null
-  coverMediaId?: string | null
-  status?: ContentPostStatus | null
+  content?: string | null
+  type?: NewsType | null
+  imageMediaId?: string | null
+  youtubeUrl?: string | null
+  videoMediaId?: string | null
+  status?: NewsStatus | null
 }
 
 export interface CreateContentMediaUploadInputGql {
   mimeType: string
   sizeBytes: number
 }
-

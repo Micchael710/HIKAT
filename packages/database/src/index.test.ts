@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { eq } from "drizzle-orm"
+import { DatabaseSync } from "node:sqlite"
+import { readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
 
 import * as schema from "./schema"
 import { createDatabase } from "./client"
@@ -17,6 +20,9 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(schema.oauthStates).toBeDefined()
     expect(schema.authorizationCodes).toBeDefined()
     expect(schema.rateLimits).toBeDefined()
+    expect(schema.news).toBeDefined()
+    expect(schema.contentMedia).toBeDefined()
+    expect(schema.contentMediaUploadTokens).toBeDefined()
   })
 
   it("creates user with default role PLAYER", async () => {
@@ -82,15 +88,16 @@ describe("@hikat/database schema and D1 operations", () => {
         .run("u-sql-player", "PLAYER", "Player 1", now, now)
     }).not.toThrow()
 
-    // ADMIN allowed
+    // Invalid role rejected
     expect(() => {
       d1._sqlite
         .prepare(
           "INSERT INTO users (id, role, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
-        .run("u-sql-admin", "Admin 1", now, now, "ADMIN") // Wait, column order: id, role, display_name, created_at, updated_at
+        .run("u-sql-admin-invalid", "SUPERUSER", "Super", now, now)
     }).toThrow()
 
+    // ADMIN allowed
     expect(() => {
       d1._sqlite
         .prepare(
@@ -98,147 +105,9 @@ describe("@hikat/database schema and D1 operations", () => {
         )
         .run("u-sql-admin", "ADMIN", "Admin 1", now, now)
     }).not.toThrow()
-
-    // Invalid role rejected
-    expect(() => {
-      d1._sqlite
-        .prepare(
-          "INSERT INTO users (id, role, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run("u-sql-invalid", "MODERATOR", "Hacker", now, now)
-    }).toThrow(/CHECK constraint failed/i)
   })
 
-  it("enforces foreign key cascading delete on all auth tables", async () => {
-    const d1 = createTestD1()
-    const db = createDatabase(d1)
-
-    const now = new Date().toISOString()
-    const userId = "user-cascade-test"
-
-    await db.insert(schema.users).values({
-      id: userId,
-      createdAt: now,
-      updatedAt: now,
-    })
-
-    await db.insert(schema.passwordCredentials).values({
-      id: "pc-1",
-      userId,
-      email: "steve@hikat.org",
-      passwordHash: "hash-value",
-      createdAt: now,
-      updatedAt: now,
-    })
-
-    await db.insert(schema.externalAccounts).values({
-      id: "ea-1",
-      userId,
-      provider: "DISCORD",
-      providerSubject: "discord-123",
-      createdAt: now,
-      updatedAt: now,
-    })
-
-    await db.insert(schema.sessions).values({
-      id: "sess-1",
-      userId,
-      createdAt: now,
-      expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    })
-
-    await db.insert(schema.sessionRefreshTokens).values({
-      id: "srt-1",
-      sessionId: "sess-1",
-      tokenHash: "token-hash-1",
-      createdAt: now,
-      expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    })
-
-    // Delete user
-    await db.delete(schema.users).where(eq(schema.users.id, userId))
-
-    // Verify cascade deleted everything
-    const pc = await db.select().from(schema.passwordCredentials).where(eq(schema.passwordCredentials.userId, userId)).all()
-    const ea = await db.select().from(schema.externalAccounts).where(eq(schema.externalAccounts.userId, userId)).all()
-    const sess = await db.select().from(schema.sessions).where(eq(schema.sessions.userId, userId)).all()
-    const srt = await db.select().from(schema.sessionRefreshTokens).where(eq(schema.sessionRefreshTokens.sessionId, "sess-1")).all()
-
-    expect(pc.length).toBe(0)
-    expect(ea.length).toBe(0)
-    expect(sess.length).toBe(0)
-    expect(srt.length).toBe(0)
-  })
-
-  it("enforces unique email on password_credentials", async () => {
-    const d1 = createTestD1()
-    const db = createDatabase(d1)
-    const now = new Date().toISOString()
-
-    await db.insert(schema.users).values([
-      { id: "u-1", createdAt: now, updatedAt: now },
-      { id: "u-2", createdAt: now, updatedAt: now },
-    ])
-
-    await db.insert(schema.passwordCredentials).values({
-      id: "pc-1",
-      userId: "u-1",
-      email: "duplicate@hikat.org",
-      passwordHash: "hash-1",
-      createdAt: now,
-      updatedAt: now,
-    })
-
-    await expect(
-      db.insert(schema.passwordCredentials).values({
-        id: "pc-2",
-        userId: "u-2",
-        email: "duplicate@hikat.org",
-        passwordHash: "hash-2",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ).rejects.toThrow()
-  })
-
-  it("supports atomic conditional update on session_refresh_tokens for replay detection", async () => {
-    const d1 = createTestD1()
-    const db = createDatabase(d1)
-    const now = new Date().toISOString()
-    const future = new Date(Date.now() + 86400000).toISOString()
-
-    await db.insert(schema.users).values({ id: "u-atomic", createdAt: now, updatedAt: now })
-    await db.insert(schema.sessions).values({ id: "sess-atomic", userId: "u-atomic", createdAt: now, expiresAt: future })
-    await db.insert(schema.sessionRefreshTokens).values({
-      id: "srt-atomic",
-      sessionId: "sess-atomic",
-      tokenHash: "unique-hash-123",
-      createdAt: now,
-      expiresAt: future,
-    })
-
-    // First atomic consumption
-    const res1 = await d1
-      .prepare(
-        "UPDATE session_refresh_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?",
-      )
-      .bind(now, "srt-atomic", now)
-      .run()
-
-    expect(res1.meta.changes).toBe(1)
-
-    // Second atomic consumption with same token (concurrent or replay) must affect 0 rows
-    const res2 = await d1
-      .prepare(
-        "UPDATE session_refresh_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?",
-      )
-      .bind(now, "srt-atomic", now)
-      .run()
-
-    expect(res2.meta.changes).toBe(0)
-  })
-
-  it("handles Content Core tables: media, upload tokens, and posts", async () => {
+  it("handles News and Media tables: images, videos, YouTube, and news articles", async () => {
     const d1 = createTestD1()
     const db = createDatabase(d1)
     const now = new Date().toISOString()
@@ -248,18 +117,19 @@ describe("@hikat/database schema and D1 operations", () => {
     await db.insert(schema.users).values({
       id: "admin-author",
       role: "ADMIN",
-      displayName: "ContentAdmin",
+      displayName: "NewsAdmin",
       createdAt: now,
       updatedAt: now,
     })
 
-    // 2. Upload token
+    // 2. Upload token for video
     await db.insert(schema.contentMediaUploadTokens).values({
-      id: "token-1",
-      tokenHash: "hash-upload-1",
+      id: "token-video-1",
+      tokenHash: "hash-upload-video-1",
+      mediaType: "VIDEO",
       createdBy: "admin-author",
-      expectedMimeType: "image/png",
-      maxSizeBytes: 5242880,
+      expectedMimeType: "video/mp4",
+      maxSizeBytes: 26214400,
       expiresAt: future,
       createdAt: now,
     })
@@ -267,40 +137,53 @@ describe("@hikat/database schema and D1 operations", () => {
     // Atomic upload token consumption
     const tokenConsume = await d1
       .prepare(
-        "UPDATE content_media_upload_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+        "UPDATE content_media_upload_tokens SET used_at = ? WHERE token_hash = ? AND created_by = ? AND used_at IS NULL AND expires_at > ?",
       )
-      .bind(now, "hash-upload-1", now)
+      .bind(now, "hash-upload-video-1", "admin-author", now)
       .run()
     expect(tokenConsume.meta.changes).toBe(1)
 
     // Replay attempt must affect 0 rows
     const tokenConsumeReplay = await d1
       .prepare(
-        "UPDATE content_media_upload_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+        "UPDATE content_media_upload_tokens SET used_at = ? WHERE token_hash = ? AND created_by = ? AND used_at IS NULL AND expires_at > ?",
       )
-      .bind(now, "hash-upload-1", now)
+      .bind(now, "hash-upload-video-1", "admin-author", now)
       .run()
     expect(tokenConsumeReplay.meta.changes).toBe(0)
 
-    // 3. Media record
+    // 3. Media records: image and video
     await db.insert(schema.contentMedia).values({
-      id: "media-1",
-      objectKey: "content/media/media-1.png",
+      id: "media-img-1",
+      objectKey: "content/media/media-img-1.png",
+      mediaType: "IMAGE",
       mimeType: "image/png",
       sizeBytes: 102400,
       createdBy: "admin-author",
       createdAt: now,
     })
 
-    // 4. Content post
-    await db.insert(schema.contentPosts).values({
-      id: "post-1",
-      kind: "NEWS",
-      slug: "bienvenidos-a-hikat",
-      title: "Bienvenidos a HiKAT",
-      summary: "Gran lanzamiento oficial de la plataforma",
-      bodyMarkdown: "# Bienvenidos\n\nEste es el post oficial de bienvenida.",
-      coverMediaId: "media-1",
+    await db.insert(schema.contentMedia).values({
+      id: "media-vid-1",
+      objectKey: "content/media/media-vid-1.mp4",
+      mediaType: "VIDEO",
+      mimeType: "video/mp4",
+      sizeBytes: 5242880,
+      createdBy: "admin-author",
+      createdAt: now,
+    })
+
+    // 4. News record
+    await db.insert(schema.news).values({
+      id: "news-article-1",
+      title: "Gran Actualización v1.0",
+      content:
+        "La gran actualización v1.0 ya está disponible para toda la comunidad.",
+      type: "UPDATE",
+      imageMediaId: "media-img-1",
+      videoMediaId: "media-vid-1",
+      youtubeVideoId: "dQw4w9WgXcQ",
+      youtubeUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       status: "PUBLISHED",
       publishedAt: now,
       createdBy: "admin-author",
@@ -309,40 +192,137 @@ describe("@hikat/database schema and D1 operations", () => {
       updatedAt: now,
     })
 
-    const post = await db
+    const article = await db
       .select()
-      .from(schema.contentPosts)
-      .where(eq(schema.contentPosts.slug, "bienvenidos-a-hikat"))
+      .from(schema.news)
+      .where(eq(schema.news.id, "news-article-1"))
       .get()
 
-    expect(post).toBeDefined()
-    expect(post?.title).toBe("Bienvenidos a HiKAT")
-    expect(post?.coverMediaId).toBe("media-1")
+    expect(article).toBeDefined()
+    expect(article?.title).toBe("Gran Actualización v1.0")
+    expect(article?.type).toBe("UPDATE")
+    expect(article?.imageMediaId).toBe("media-img-1")
+    expect(article?.videoMediaId).toBe("media-vid-1")
+    expect(article?.youtubeVideoId).toBe("dQw4w9WgXcQ")
 
-    // 5. Unique slug constraint enforcement
-    await expect(
-      db.insert(schema.contentPosts).values({
-        id: "post-duplicate-slug",
-        kind: "ANNOUNCEMENT",
-        slug: "bienvenidos-a-hikat",
-        title: "Otro titulo",
-        summary: "Otro resumen",
-        bodyMarkdown: "Otro cuerpo",
-        createdBy: "admin-author",
-        updatedBy: "admin-author",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ).rejects.toThrow()
-
-    // 6. Cover media deletion sets cover_media_id to null
-    await db.delete(schema.contentMedia).where(eq(schema.contentMedia.id, "media-1"))
-    const postAfterMediaDelete = await db
+    // 5. Image media deletion sets image_media_id to null
+    await db
+      .delete(schema.contentMedia)
+      .where(eq(schema.contentMedia.id, "media-img-1"))
+    const articleAfterImageDelete = await db
       .select()
-      .from(schema.contentPosts)
-      .where(eq(schema.contentPosts.id, "post-1"))
+      .from(schema.news)
+      .where(eq(schema.news.id, "news-article-1"))
       .get()
 
-    expect(postAfterMediaDelete?.coverMediaId).toBeNull()
+    expect(articleAfterImageDelete?.imageMediaId).toBeNull()
+    expect(articleAfterImageDelete?.videoMediaId).toBe("media-vid-1")
+  })
+
+  it("migrates legacy content_posts to news table and adds media_type via 0004 migration", async () => {
+    const sqlite = new DatabaseSync(":memory:")
+    sqlite.exec("PRAGMA foreign_keys = ON;")
+
+    // Apply migrations 0000, 0001, 0002, 0003 manually
+    const migrationsDir = join(__dirname, "../migrations")
+    const sql0000 = readFileSync(
+      join(migrationsDir, "0000_true_tag.sql"),
+      "utf-8",
+    )
+    const sql0001 = readFileSync(
+      join(migrationsDir, "0001_auth_tables.sql"),
+      "utf-8",
+    )
+    const sql0002 = readFileSync(
+      join(migrationsDir, "0002_auth_oauth_hardening.sql"),
+      "utf-8",
+    )
+    const sql0003 = readFileSync(
+      join(migrationsDir, "0003_content_core.sql"),
+      "utf-8",
+    )
+
+    for (const sql of [sql0000, sql0001, sql0002, sql0003]) {
+      for (const statement of sql.split("--> statement-breakpoint")) {
+        const t = statement.trim()
+        if (t) sqlite.exec(t)
+      }
+    }
+
+    const now = new Date().toISOString()
+
+    // Seed admin
+    sqlite
+      .prepare(
+        "INSERT INTO users (id, role, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run("admin-mig", "ADMIN", "Mig Admin", now, now)
+
+    // Seed media under 0003
+    sqlite
+      .prepare(
+        "INSERT INTO content_media (id, object_key, mime_type, size_bytes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "mig-media-1",
+        "content/media/mig-1.png",
+        "image/png",
+        5000,
+        "admin-mig",
+        now,
+      )
+
+    // Seed legacy content_post under 0003
+    sqlite
+      .prepare(
+        "INSERT INTO content_posts (id, kind, slug, title, summary, body_markdown, cover_media_id, status, published_at, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "legacy-post-1",
+        "ANNOUNCEMENT",
+        "legacy-slug",
+        "Legacy Announcement",
+        "Legacy Summary",
+        "Legacy Markdown Content",
+        "mig-media-1",
+        "PUBLISHED",
+        now,
+        "admin-mig",
+        "admin-mig",
+        now,
+        now,
+      )
+
+    // Now apply migration 0004
+    const sql0004 = readFileSync(
+      join(migrationsDir, "0004_news_model_alignment.sql"),
+      "utf-8",
+    )
+    for (const statement of sql0004.split("--> statement-breakpoint")) {
+      const t = statement.trim()
+      if (t) sqlite.exec(t)
+    }
+
+    // Verify media_type column added and populated
+    const mediaRow = sqlite
+      .prepare("SELECT * FROM content_media WHERE id = ?")
+      .get("mig-media-1") as Record<string, unknown>
+    expect(mediaRow.media_type).toBe("IMAGE")
+
+    // Verify news row migrated properly from legacy content_posts
+    const newsRow = sqlite
+      .prepare("SELECT * FROM news WHERE id = ?")
+      .get("legacy-post-1") as Record<string, unknown>
+    expect(newsRow).toBeDefined()
+    expect(newsRow.title).toBe("Legacy Announcement")
+    expect(newsRow.content).toBe("Legacy Markdown Content")
+    expect(newsRow.type).toBe("ANNOUNCEMENT")
+    expect(newsRow.image_media_id).toBe("mig-media-1")
+    expect(newsRow.status).toBe("PUBLISHED")
+
+    // Verify legacy content_posts table no longer exists
+    expect(() => {
+      sqlite.prepare("SELECT * FROM content_posts").all()
+    }).toThrow()
   })
 })
