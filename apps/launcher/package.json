@@ -19,14 +19,17 @@
     "minecraft-launcher-core": "^3.18.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "skinview3d": "^3.4.2"
+    "skinview3d": "^3.4.2",
+    "three": "^0.156.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.156.0",
     "@vitejs/plugin-react": "^6.0.0",
+
     "electron": "^43.4.1",
     "oxfmt": "^0.2.0",
     "tailwindcss": "^4.0.0",

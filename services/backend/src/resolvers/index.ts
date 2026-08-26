@@ -38,7 +38,13 @@ import type {
   ClientConfigurationGql,
   UpdateAdminSettingsInputGql,
   GameFileCategoryGql,
+  PlayerSkinGql,
+  AdminPlayerSkinGql,
+  AdminPlayerSkinConnectionGql,
+  SetPlayerSkinInputGql,
+  UpdateAdminPlayerSkinInputGql,
 } from "@hikat/graphql"
+
 import {
   HIKAT_VERSION,
   NewsType,
@@ -73,7 +79,16 @@ import {
   createSkin,
   updateSkin,
   deleteSkin,
+  getMyPlayerSkin,
+  createPlayerSkinUpload,
+  setMyPlayerSkin,
+  deleteMyPlayerSkin,
+  getAdminPlayerSkins,
+  getAdminPlayerSkinById,
+  updateAdminPlayerSkin,
+  deleteAdminPlayerSkin,
 } from "../services/skinService"
+
 import {
   getPublishedModpack,
   getAdminGameOverview,
@@ -299,6 +314,47 @@ export const resolvers = {
       }
       return getSkinById(context.db, args.id)
     },
+
+    myPlayerSkin: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<PlayerSkinGql | null> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getMyPlayerSkin(context.db, identity.userId)
+    },
+
+    adminPlayerSkins: async (
+      _parent: unknown,
+      args: {
+        first?: number | null
+        after?: string | null
+        search?: string | null
+      },
+      context: BackendGraphQLContext,
+    ): Promise<AdminPlayerSkinConnectionGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminPlayerSkins(context.db, context.env, args)
+    },
+
+    adminPlayerSkin: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<AdminPlayerSkinGql | null> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminPlayerSkinById(context.db, args.id)
+    },
+
 
     // --- Game & Launcher Queries (Shard 06.5) ---
 
@@ -636,6 +692,76 @@ export const resolvers = {
       }
       return deleteSkin(context.db, args.id, context.env)
     },
+
+    // --- Player Custom Skins Mutations (Shard 06.6) ---
+
+    createPlayerSkinUpload: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ContentMediaUploadPayloadGql> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createPlayerSkinUpload(
+        context.db,
+        context.env,
+        identity.userId,
+        context.request,
+      )
+    },
+
+    setMyPlayerSkin: async (
+      _parent: unknown,
+      args: { input: SetPlayerSkinInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<PlayerSkinGql> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return setMyPlayerSkin(context.db, context.env, args.input, identity.userId)
+    },
+
+    deleteMyPlayerSkin: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteMyPlayerSkin(context.db, context.env, identity.userId)
+    },
+
+    updateAdminPlayerSkin: async (
+      _parent: unknown,
+      args: { id: string; input: UpdateAdminPlayerSkinInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminPlayerSkinGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateAdminPlayerSkin(context.db, context.env, args.id, args.input)
+    },
+
+
+    deleteAdminPlayerSkin: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteAdminPlayerSkin(context.db, context.env, args.id)
+    },
+
+
 
     // --- Game Administrative Mutations (Require ADMIN - Shard 06.5) ---
 

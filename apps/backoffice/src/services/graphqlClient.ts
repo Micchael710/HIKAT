@@ -546,7 +546,108 @@ export const skinsApi = {
     const data = await executeGraphQL<{ deleteSkin: boolean }>(mutation, { id })
     return data.deleteSkin
   },
+
+  async getAdminPlayerSkins(
+    paramsOrFirst?: { first?: number; after?: string | null; search?: string | null } | number,
+    afterArg?: string | null,
+    searchArg?: string | null,
+  ): Promise<import("../types").AdminPlayerSkinConnection> {
+    let first = 50
+    let after: string | null | undefined = undefined
+    let search: string | null | undefined = undefined
+
+    if (typeof paramsOrFirst === "object" && paramsOrFirst !== null) {
+      first = paramsOrFirst.first ?? 50
+      after = paramsOrFirst.after
+      search = paramsOrFirst.search
+    } else {
+      if (typeof paramsOrFirst === "number") first = paramsOrFirst
+      after = afterArg
+      search = searchArg
+    }
+
+    const query = /* GraphQL */ `
+      query AdminPlayerSkins($first: Int, $after: String, $search: String) {
+        adminPlayerSkins(first: $first, after: $after, search: $search) {
+          totalCount
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          items {
+            id
+            userId
+            userDisplayName
+            model
+            imageUrl
+            createdAt
+            updatedAt
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminPlayerSkins: import("../types").AdminPlayerSkinConnection }>(query, {
+      first,
+      after,
+      search,
+    })
+    return data.adminPlayerSkins
+  },
+
+
+  async getAdminPlayerSkin(id: string): Promise<import("../types").AdminPlayerSkin | null> {
+    const query = /* GraphQL */ `
+      query AdminPlayerSkin($id: ID!) {
+        adminPlayerSkin(id: $id) {
+          id
+          userId
+          userDisplayName
+          model
+          imageUrl
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminPlayerSkin: import("../types").AdminPlayerSkin | null }>(query, { id })
+    return data.adminPlayerSkin
+  },
+
+  async updateAdminPlayerSkin(
+    id: string,
+    input: import("../types").UpdateAdminPlayerSkinInput,
+  ): Promise<import("../types").AdminPlayerSkin> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateAdminPlayerSkin($id: ID!, $input: UpdateAdminPlayerSkinInput!) {
+        updateAdminPlayerSkin(id: $id, input: $input) {
+          id
+          userId
+          userDisplayName
+          model
+          imageUrl
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ updateAdminPlayerSkin: import("../types").AdminPlayerSkin }>(mutation, {
+      id,
+      input,
+    })
+    return data.updateAdminPlayerSkin
+  },
+
+  async deleteAdminPlayerSkin(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteAdminPlayerSkin($id: ID!) {
+        deleteAdminPlayerSkin(id: $id)
+      }
+    `
+    const data = await executeGraphQL<{ deleteAdminPlayerSkin: boolean }>(mutation, { id })
+    return data.deleteAdminPlayerSkin
+  },
 }
+
 
 // --- Game & Updates API Facade (Shard 06.5) ---
 

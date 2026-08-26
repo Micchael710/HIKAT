@@ -20,43 +20,74 @@ import { resolvers } from "./resolvers"
 
 import { getCorsHeaders, handleOptionsRequest } from "./cors"
 
-import { handleMediaUpload, handleMediaServe } from "./media/transport"
+import {
+  handleMediaUpload,
+  handlePlayerSkinUpload,
+  handleMediaServe,
+} from "./media/transport"
+
 import { handleConsoleWebSocket } from "./services/pterodactyl/consoleTransport"
-import { handleGameFileUpload, handleGameFileDownload } from "./services/game/gameStorageService"
+
+import {
+  handleGameFileUpload,
+  handleGameFileDownload,
+} from "./services/game/gameStorageService"
 
 export * from "./types"
+
 export * from "./auth/verifier"
+
 export * from "./auth/session"
+
 export * from "./auth/guards"
+
 export * from "./context"
+
 export * from "./services/userService"
+
 export * from "./services/newsService"
+
 export * from "./services/mediaService"
+
 export * from "./services/dashboardService"
+
 export * from "./services/skinService"
+
 export * from "./services/game"
+
 export * from "./services/settingsService"
+
 export * from "./services/pterodactyl/types"
+
 export * from "./services/pterodactyl/pterodactylClient"
+
 export * from "./services/pterodactyl/serverAdministrationService"
+
 export * from "./services/pterodactyl/consoleTransport"
+
 export * from "./media/transport"
+
 export * from "./resolvers"
-
-
 
 const KNOWN_SAFE_CODES = [
   "UNAUTHENTICATED",
+
   "FORBIDDEN",
+
   "NOT_FOUND",
+
   "VALIDATION_ERROR",
+
   "CONFLICT",
+
   SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+
   SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+
   SERVER_ERROR_CODES.SERVER_BUSY,
+
   SERVER_ERROR_CODES.SERVER_RATE_LIMITED,
 ]
-
 
 export const yoga = createYoga<BackendGraphQLContext>({
   graphqlEndpoint: "/graphql",
@@ -134,6 +165,22 @@ export default {
       })
     }
 
+    // Dedicated Binary Player Skin Upload Route: PUT /media/player-skin/upload (Shard 06.6)
+
+    if (url.pathname === "/media/player-skin/upload") {
+      if (request.method === "PUT") {
+        return handlePlayerSkinUpload(request, env, db, context)
+      }
+
+      const corsHeaders = getCorsHeaders(request, env)
+
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
     // Public Media Serving Route: GET /media/content/:id
 
     if (url.pathname.startsWith("/media/content/")) {
@@ -156,49 +203,63 @@ export default {
 
     if (url.pathname === "/api/server/console/ws") {
       const wsResponse = await handleConsoleWebSocket(request, env)
+
       const corsHeaders = getCorsHeaders(request, env)
+
       const headers = new Headers(wsResponse.headers)
+
       for (const [k, v] of Object.entries(corsHeaders)) {
         headers.set(k, v)
       }
+
       return new Response(wsResponse.body, {
         status: wsResponse.status,
+
         statusText: wsResponse.statusText,
+
         headers,
+
         webSocket: wsResponse.webSocket,
       })
     }
 
     // Binary Game File Upload Route: PUT /game/files/upload (Shard 06.5)
+
     if (url.pathname === "/game/files/upload") {
       if (request.method === "PUT") {
         return handleGameFileUpload(request, env, db, context)
       }
+
       const corsHeaders = getCorsHeaders(request, env)
+
       return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
         status: 405,
+
         headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 
     // Public Game File Download Route: GET /game/download/:fileId (Shard 06.5)
+
     if (url.pathname.startsWith("/game/download/")) {
       const fileId = url.pathname.slice("/game/download/".length)
+
       if (request.method === "GET") {
         return handleGameFileDownload(request, env, db, fileId)
       }
+
       const corsHeaders = getCorsHeaders(request, env)
+
       return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
         status: 405,
+
         headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 
     // GraphQL Endpoint
 
-
     const response = await yoga.fetch(request, context)
-
 
     // Secure-by-default error sanitization:
 
@@ -230,6 +291,7 @@ export default {
 
                 extensions: {
                   ...err.extensions,
+
                   code: code || "INTERNAL_ERROR",
                 },
               }

@@ -6,7 +6,6 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 
-
 import * as jose from "jose"
 
 import { eq } from "drizzle-orm"
@@ -55,7 +54,6 @@ import worker, {
   deleteMedia,
   publishGameRelease,
 } from "./index"
-
 
 import { createTestR2Bucket } from "./testUtils/mockR2"
 
@@ -840,7 +838,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const validToken = await createTestAccessToken({
         userId,
+
         sessionId,
+
         role: "PLAYER",
       })
 
@@ -1120,7 +1120,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const token = await createTestAccessToken({
         userId,
+
         sessionId,
+
         role: "PLAYER",
       })
 
@@ -1218,7 +1220,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const token = await createTestAccessToken({
         userId,
+
         sessionId,
+
         role: "PLAYER",
       })
 
@@ -1260,7 +1264,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const token = await createTestAccessToken({
         userId,
+
         sessionId,
+
         role: "PLAYER",
       })
 
@@ -1307,6 +1313,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         auth: {
           status: "invalid" as const,
+
           reason: "Session has been revoked",
         },
 
@@ -1563,7 +1570,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const token = await createTestAccessToken({
         userId,
+
         sessionId,
+
         role: "PLAYER",
       })
 
@@ -1803,7 +1812,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const token = await createTestAccessToken({
         userId,
+
         sessionId,
+
         role: "PLAYER",
       })
 
@@ -1893,7 +1904,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const token = await createTestAccessToken({
         userId,
+
         sessionId,
+
         role: "PLAYER",
       })
 
@@ -1983,7 +1996,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const token = await createTestAccessToken({
         userId,
+
         sessionId,
+
         role: "PLAYER",
       })
 
@@ -2918,9 +2933,13 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         // Verify article no longer exists in D1
 
         const checkArticle = await db
+
           .select()
+
           .from(news)
+
           .where(eq(news.id, id))
+
           .get()
 
         expect(checkArticle).toBeUndefined()
@@ -3632,9 +3651,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         const rawToken = "expired-token-raw-value"
 
-        const tokenHash = await (
-          await import("./services/mediaService")
-        ).sha256Hex(rawToken)
+        const tokenHash = await (await import("./services/mediaService"))
+
+          .sha256Hex(rawToken)
 
         await db.insert(contentMediaUploadTokens).values({
           id: "token-exp",
@@ -3826,6 +3845,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         const req404 = new Request(
           "http://localhost/media/content/non-existent",
+
           { method: "GET" },
         )
 
@@ -3837,6 +3857,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         const reqTraversal = new Request(
           "http://localhost/media/content/..%2F..%2Fsecret",
+
           { method: "GET" },
         )
 
@@ -4137,9 +4158,13 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         // Verify removed from D1 and R2
 
         const inDb = await db
+
           .select()
+
           .from(contentMedia)
+
           .where(eq(contentMedia.id, "media-unref-1"))
+
           .get()
 
         expect(inDb).toBeUndefined()
@@ -4217,43 +4242,61 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
   describe("HiKAT Server Administration & Pterodactyl Integration (Shard 06)", () => {
     const adminId = "srv-admin-1"
+
     const adminSessionId = "srv-admin-session-1"
+
     const playerId = "srv-player-1"
+
     const playerSessionId = "srv-player-session-1"
 
     let adminToken: string
+
     let playerToken: string
 
     const fakePterodactylUrl = "https://panel.test.hikat.org"
+
     const fakeApiKey = "ptlc_test_secret_api_key_123"
+
     const fakeServerId = "srv-abc12345"
 
     beforeEach(async () => {
       await seedUserAndSession({
         userId: adminId,
+
         sessionId: adminSessionId,
+
         role: "ADMIN",
+
         displayName: "ServerAdmin",
       })
 
       adminToken = await createTestAccessToken({
         userId: adminId,
+
         sessionId: adminSessionId,
+
         role: "ADMIN",
+
         displayName: "ServerAdmin",
       })
 
       await seedUserAndSession({
         userId: playerId,
+
         sessionId: playerSessionId,
+
         role: "PLAYER",
+
         displayName: "ServerPlayer",
       })
 
       playerToken = await createTestAccessToken({
         userId: playerId,
+
         sessionId: playerSessionId,
+
         role: "PLAYER",
+
         displayName: "ServerPlayer",
       })
     })
@@ -4261,131 +4304,203 @@ describe("HiKAT Backend Core (Shard 03)", () => {
     function createServerEnv(overrides?: Partial<Env>): Env {
       return {
         ENVIRONMENT: "production",
+
         AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+
         DB: testD1,
+
         PTERODACTYL_BASE_URL: fakePterodactylUrl,
+
         PTERODACTYL_API_KEY: fakeApiKey,
+
         PTERODACTYL_SERVER_ID: fakeServerId,
+
         ...overrides,
       }
     }
 
     async function executeGqlServer(
       query: string,
+
       variables?: Record<string, any>,
+
       token?: string,
+
       env?: Env,
     ) {
       const activeEnv = env || createServerEnv()
+
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       }
+
       if (token) {
         headers["Authorization"] = `Bearer ${token}`
       }
+
       const request = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers,
+
         body: JSON.stringify({ query, variables }),
       })
+
       const response = await worker.fetch(request, activeEnv)
+
       return getJson(response)
     }
 
     describe("1. Pterodactyl HTTP Client Adapter (Unit)", () => {
       it("creates PterodactylHttpClient with trimmed baseUrl and normalizes URLs", async () => {
-        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { PterodactylHttpClient } = await import(
+          "./services/pterodactyl/pterodactylClient"
+        )
 
         let requestedUrl = ""
+
         let authHeader = ""
 
         const mockFetch: typeof fetch = async (input, init) => {
           requestedUrl = String(input)
-          authHeader = (init?.headers as Record<string, string>)?.["Authorization"] || ""
-          return new Response(JSON.stringify({
-            object: "stats",
-            attributes: {
-              current_state: "running",
-              is_suspended: false,
-              resources: {
-                memory_bytes: 4 * 1024 * 1024 * 1024,
-                cpu_absolute: 25.5,
-                disk_bytes: 10 * 1024 * 1024 * 1024,
-                network_rx_bytes: 1000,
-                network_tx_bytes: 2000,
-                uptime: 3600000,
+
+          authHeader =
+            (init?.headers as Record<string, string>)?.["Authorization"] || ""
+
+          return new Response(
+            JSON.stringify({
+              object: "stats",
+
+              attributes: {
+                current_state: "running",
+
+                is_suspended: false,
+
+                resources: {
+                  memory_bytes: 4 * 1024 * 1024 * 1024,
+
+                  cpu_absolute: 25.5,
+
+                  disk_bytes: 10 * 1024 * 1024 * 1024,
+
+                  network_rx_bytes: 1000,
+
+                  network_tx_bytes: 2000,
+
+                  uptime: 3600000,
+                },
               },
-            },
-          }), { status: 200 })
+            }),
+            { status: 200 },
+          )
         }
 
         const client = new PterodactylHttpClient({
           baseUrl: "https://panel.example.com/",
+
           apiKey: "  secret_key  ",
+
           serverId: "server-123",
+
           fetchFn: mockFetch,
         })
 
         const res = await client.getServerResources()
+
         expect(res.attributes.current_state).toBe("running")
-        expect(requestedUrl).toBe("https://panel.example.com/api/client/servers/server-123/resources")
+
+        expect(requestedUrl).toBe(
+          "https://panel.example.com/api/client/servers/server-123/resources",
+        )
+
         expect(authHeader).toBe("Bearer secret_key")
       })
 
       it("handles and normalizes 401/403 upstream errors without leaking API key", async () => {
-        const { PterodactylHttpClient, ServerInfrastructureError } = await import("./services/pterodactyl/pterodactylClient")
-        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import("@hikat/shared")
+        const { PterodactylHttpClient, ServerInfrastructureError } =
+          await import("./services/pterodactyl/pterodactylClient")
+
+        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import(
+          "@hikat/shared"
+        )
 
         const mockFetch: typeof fetch = async () => {
-          return new Response(JSON.stringify({ errors: [{ code: "Unauthorized" }] }), { status: 401 })
+          return new Response(
+            JSON.stringify({ errors: [{ code: "Unauthorized" }] }),
+            { status: 401 },
+          )
         }
 
         const client = new PterodactylHttpClient({
           baseUrl: "https://panel.example.com",
+
           apiKey: "super_secret_token_12345",
+
           serverId: "server-123",
+
           fetchFn: mockFetch,
         })
 
         try {
           await client.getServerResources()
+
           expect.unreachable("should have thrown")
         } catch (err: any) {
           expect(err).toBeInstanceOf(ServerInfrastructureError)
+
           expect(err.message).toBe(SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED)
+
           expect(err.code).toBe(SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+
           expect(err.internalMessage).toContain("401")
         }
       })
 
       it("handles and normalizes 404 upstream errors", async () => {
-        const { PterodactylHttpClient, ServerInfrastructureError } = await import("./services/pterodactyl/pterodactylClient")
-        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import("@hikat/shared")
+        const { PterodactylHttpClient, ServerInfrastructureError } =
+          await import("./services/pterodactyl/pterodactylClient")
+
+        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import(
+          "@hikat/shared"
+        )
 
         const mockFetch: typeof fetch = async () => {
-          return new Response(JSON.stringify({ errors: [{ code: "NotFound" }] }), { status: 404 })
+          return new Response(
+            JSON.stringify({ errors: [{ code: "NotFound" }] }),
+            { status: 404 },
+          )
         }
 
         const client = new PterodactylHttpClient({
           baseUrl: "https://panel.example.com",
+
           apiKey: "secret",
+
           serverId: "server-unknown",
+
           fetchFn: mockFetch,
         })
 
         try {
           await client.getServerDetails()
+
           expect.unreachable("should have thrown")
         } catch (err: any) {
           expect(err).toBeInstanceOf(ServerInfrastructureError)
+
           expect(err.message).toBe(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE)
+
           expect(err.code).toBe(SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
         }
       })
 
       it("handles and normalizes 429 rate limited upstream error", async () => {
-        const { PterodactylHttpClient, ServerInfrastructureError } = await import("./services/pterodactyl/pterodactylClient")
-        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import("@hikat/shared")
+        const { PterodactylHttpClient, ServerInfrastructureError } =
+          await import("./services/pterodactyl/pterodactylClient")
+
+        const { SERVER_PUBLIC_MESSAGES, SERVER_ERROR_CODES } = await import(
+          "@hikat/shared"
+        )
 
         const mockFetch: typeof fetch = async () => {
           return new Response("Too Many Requests", { status: 429 })
@@ -4393,23 +4508,32 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         const client = new PterodactylHttpClient({
           baseUrl: "https://panel.example.com",
+
           apiKey: "secret",
+
           serverId: "server-123",
+
           fetchFn: mockFetch,
         })
 
         try {
           await client.sendCommand("say hi")
+
           expect.unreachable("should have thrown")
         } catch (err: any) {
           expect(err).toBeInstanceOf(ServerInfrastructureError)
+
           expect(err.message).toBe(SERVER_PUBLIC_MESSAGES.SERVER_RATE_LIMITED)
+
           expect(err.code).toBe(SERVER_ERROR_CODES.SERVER_RATE_LIMITED)
         }
       })
 
       it("handles and normalizes 502/503/504 Wings upstream error", async () => {
-        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { PterodactylHttpClient } = await import(
+          "./services/pterodactyl/pterodactylClient"
+        )
+
         const { SERVER_PUBLIC_MESSAGES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
@@ -4418,36 +4542,54 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         const client = new PterodactylHttpClient({
           baseUrl: "https://panel.example.com",
+
           apiKey: "secret",
+
           serverId: "server-123",
+
           fetchFn: mockFetch,
         })
 
-        await expect(client.sendPowerAction("start")).rejects.toThrow(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE)
+        await expect(client.sendPowerAction("start")).rejects.toThrow(
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        )
       })
 
       it("handles AbortError timeout gracefully", async () => {
-        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { PterodactylHttpClient } = await import(
+          "./services/pterodactyl/pterodactylClient"
+        )
+
         const { SERVER_PUBLIC_MESSAGES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
           const err = new Error("The operation was aborted")
+
           err.name = "AbortError"
+
           throw err
         }
 
         const client = new PterodactylHttpClient({
           baseUrl: "https://panel.example.com",
+
           apiKey: "secret",
+
           serverId: "server-123",
+
           fetchFn: mockFetch,
         })
 
-        await expect(client.getServerResources()).rejects.toThrow(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE)
+        await expect(client.getServerResources()).rejects.toThrow(
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        )
       })
 
       it("handles network failure (TypeError) gracefully", async () => {
-        const { PterodactylHttpClient } = await import("./services/pterodactyl/pterodactylClient")
+        const { PterodactylHttpClient } = await import(
+          "./services/pterodactyl/pterodactylClient"
+        )
+
         const { SERVER_PUBLIC_MESSAGES } = await import("@hikat/shared")
 
         const mockFetch: typeof fetch = async () => {
@@ -4456,12 +4598,17 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         const client = new PterodactylHttpClient({
           baseUrl: "https://panel.example.com",
+
           apiKey: "secret",
+
           serverId: "server-123",
+
           fetchFn: mockFetch,
         })
 
-        await expect(client.getServerResources()).rejects.toThrow(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE)
+        await expect(client.getServerResources()).rejects.toThrow(
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        )
       })
     })
 
@@ -4476,6 +4623,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         `)
 
         expect(res.errors).toBeDefined()
+
         expect(res.errors[0].extensions.code).toBe("UNAUTHENTICATED")
       })
 
@@ -4488,61 +4636,84 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             }
           }
           `,
+
           {},
+
           playerToken,
         )
 
         expect(res.errors).toBeDefined()
+
         expect(res.errors[0].extensions.code).toBe("FORBIDDEN")
       })
 
       it("REJECTS anonymous and PLAYER requests to power actions, command, and console ticket with FORBIDDEN/UNAUTHENTICATED", async () => {
         // Anonymous startServer
+
         const resAnon = await executeGqlServer(`
           mutation {
             startServer { success }
           }
         `)
+
         expect(resAnon.errors[0].extensions.code).toBe("UNAUTHENTICATED")
 
         // Anonymous createServerConsoleTicket
+
         const resAnonTicket = await executeGqlServer(`
           mutation {
             createServerConsoleTicket { ticket expiresAt }
           }
         `)
+
         expect(resAnonTicket.errors[0].extensions.code).toBe("UNAUTHENTICATED")
 
         // Player restartServer
+
         const resPlayerRestart = await executeGqlServer(
           `mutation { restartServer { success } }`,
+
           {},
+
           playerToken,
         )
+
         expect(resPlayerRestart.errors[0].extensions.code).toBe("FORBIDDEN")
 
         // Player stopServer
+
         const resPlayerStop = await executeGqlServer(
           `mutation { stopServer { success } }`,
+
           {},
+
           playerToken,
         )
+
         expect(resPlayerStop.errors[0].extensions.code).toBe("FORBIDDEN")
 
         // Player sendServerCommand
+
         const resPlayerCmd = await executeGqlServer(
           `mutation { sendServerCommand(command: "op test") { success } }`,
+
           {},
+
           playerToken,
         )
+
         expect(resPlayerCmd.errors[0].extensions.code).toBe("FORBIDDEN")
 
         // Player createServerConsoleTicket
+
         const resPlayerTicket = await executeGqlServer(
           `mutation { createServerConsoleTicket { ticket expiresAt } }`,
+
           {},
+
           playerToken,
         )
+
         expect(resPlayerTicket.errors[0].extensions.code).toBe("FORBIDDEN")
       })
     })
@@ -4551,456 +4722,854 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       it("fails gracefully if Pterodactyl environment variables are missing with safe code SERVER_NOT_CONFIGURED", async () => {
         const unconfiguredEnv = createServerEnv({
           PTERODACTYL_BASE_URL: undefined,
+
           PTERODACTYL_API_KEY: undefined,
         })
 
         const res = await executeGqlServer(
           `query { serverStatus { status } }`,
+
           {},
+
           adminToken,
+
           unconfiguredEnv,
         )
 
         expect(res.errors).toBeDefined()
-        expect(res.errors[0].message).toContain("El servidor todavía no está configurado.")
+
+        expect(res.errors[0].message).toContain(
+          "El servidor todavía no está configurado.",
+        )
+
         expect(res.errors[0].extensions.code).toBe("SERVER_NOT_CONFIGURED")
       })
 
       it("enforces HTTPS in production and rejects embedded credentials", async () => {
-        const { PterodactylHttpClient, ServerInfrastructureError } = await import(
-          "./services/pterodactyl/pterodactylClient"
-        )
+        const { PterodactylHttpClient, ServerInfrastructureError } =
+          await import("./services/pterodactyl/pterodactylClient")
+
         const { SERVER_PUBLIC_MESSAGES } = await import("@hikat/shared")
 
         // Non-https in production
+
         expect(() => {
           new PterodactylHttpClient({
             baseUrl: "http://panel.example.com",
+
             apiKey: "key",
+
             serverId: "srv",
+
             isProduction: true,
           })
         }).toThrow(SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED)
 
         // Embedded credentials
+
         expect(() => {
           new PterodactylHttpClient({
             baseUrl: "https://user:pass@panel.example.com",
+
             apiKey: "key",
+
             serverId: "srv",
+
             isProduction: false,
           })
         }).toThrow(SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED)
       })
 
-
       it("ADMIN queries serverStatus and receives properly formatted metrics and limits", async () => {
-        const { getServerStatus } = await import("./services/pterodactyl/serverAdministrationService")
+        const { getServerStatus } = await import(
+          "./services/pterodactyl/serverAdministrationService"
+        )
 
         const mockClient = {
           getServerResources: async () => ({
             object: "stats" as const,
+
             attributes: {
               current_state: "running" as const,
+
               is_suspended: false,
+
               resources: {
                 cpu_absolute: 42.8,
+
                 memory_bytes: 6442450944, // 6 GB in bytes
+
                 disk_bytes: 21474836480, // 20 GB in bytes
+
                 network_rx_bytes: 12345,
+
                 network_tx_bytes: 67890,
+
                 uptime: 7200000, // 2 hours in ms
               },
             },
           }),
+
           getServerDetails: async () => ({
             object: "server" as const,
+
             attributes: {
               server_owner: true,
+
               identifier: "srv-123",
+
               uuid: "uuid-123",
+
               name: "HiKAT Main",
+
               node: "Node-1",
+
               is_suspended: false,
+
               limits: {
                 memory: 8192, // 8 GB in MB
+
                 swap: 0,
+
                 disk: 51200, // 50 GB in MB
+
                 io: 500,
+
                 cpu: 200, // 200%
+
                 threads: null,
               },
             },
           }),
+
           sendPowerAction: async () => {},
+
           sendCommand: async () => {},
-          getWebsocketCredentials: async () => ({ token: "ws-token", socket: "wss://wings.test/ws" }),
+
+          getWebsocketCredentials: async () => ({
+            token: "ws-token",
+            socket: "wss://wings.test/ws",
+          }),
         }
 
         const metrics = await getServerStatus(createServerEnv(), mockClient)
 
         expect(metrics.status).toBe("ONLINE")
+
         expect(metrics.cpuPercent).toBe(42.8)
+
         expect(metrics.cpuLimitPercent).toBe(200)
+
         expect(metrics.memoryUsedBytes).toBe(6442450944)
+
         expect(metrics.memoryLimitBytes).toBe(8192 * 1024 * 1024)
+
         expect(metrics.diskUsedBytes).toBe(21474836480)
+
         expect(metrics.diskLimitBytes).toBe(51200 * 1024 * 1024)
+
         expect(metrics.uptimeMs).toBe(7200000)
+
         expect(metrics.isSuspended).toBe(false)
       })
 
       it("maps offline / starting / stopping / suspended states correctly", async () => {
-        const { getServerStatus } = await import("./services/pterodactyl/serverAdministrationService")
+        const { getServerStatus } = await import(
+          "./services/pterodactyl/serverAdministrationService"
+        )
 
-        const createMockClientWithState = (state: any, isSuspended = false) => ({
+        const createMockClientWithState = (
+          state: any,
+          isSuspended = false,
+        ) => ({
           getServerResources: async () => ({
             object: "stats" as const,
+
             attributes: {
               current_state: state,
+
               is_suspended: isSuspended,
+
+              resources: {
+                cpu_absolute: 0,
+
+                memory_bytes: 0,
+
+                disk_bytes: 1024,
+
+                network_rx_bytes: 0,
+
+                network_tx_bytes: 0,
+
+                uptime: 0,
+              },
+            },
+          }),
+
+          getServerDetails: async () => ({
+            object: "server" as const,
+
+            attributes: {
+              server_owner: true,
+
+              identifier: "srv",
+
+              uuid: "uuid",
+
+              name: "Server",
+
+              node: "Node",
+
+              is_suspended: isSuspended,
+
+              limits: {
+                memory: 0,
+                swap: 0,
+                disk: 0,
+                io: 500,
+                cpu: 0,
+                threads: null,
+              },
+            },
+          }),
+
+          sendPowerAction: async () => {},
+
+          sendCommand: async () => {},
+
+          getWebsocketCredentials: async () => ({
+            token: "t",
+            socket: "wss://wings.test/ws",
+          }),
+        })
+
+        const starting = await getServerStatus(
+          createServerEnv(),
+          createMockClientWithState("starting"),
+        )
+
+        expect(starting.status).toBe("STARTING")
+
+        const stopping = await getServerStatus(
+          createServerEnv(),
+          createMockClientWithState("stopping"),
+        )
+
+        expect(stopping.status).toBe("STOPPING")
+
+        const offline = await getServerStatus(
+          createServerEnv(),
+          createMockClientWithState("offline"),
+        )
+
+        expect(offline.status).toBe("OFFLINE")
+
+        const suspended = await getServerStatus(
+          createServerEnv(),
+          createMockClientWithState("running", true),
+        )
+
+        expect(suspended.status).toBe("DISCONNECTED")
+      })
+
+      it("executes power actions (START, RESTART, STOP) with real state validation and distributed lock in D1", async () => {
+        const { executeServerPowerAction } = await import(
+          "./services/pterodactyl/serverAdministrationService"
+        )
+
+        let lastSignal = ""
+
+        const createMockClientWithStatus = (state: string) => ({
+          getServerResources: async () => ({
+            object: "stats" as const,
+
+            attributes: {
+              current_state: state as any,
+
+              is_suspended: false,
+
               resources: {
                 cpu_absolute: 0,
                 memory_bytes: 0,
-                disk_bytes: 1024,
+                disk_bytes: 0,
                 network_rx_bytes: 0,
                 network_tx_bytes: 0,
                 uptime: 0,
               },
             },
           }),
+
           getServerDetails: async () => ({
             object: "server" as const,
+
             attributes: {
               server_owner: true,
+
               identifier: "srv",
+
               uuid: "uuid",
+
               name: "Server",
+
               node: "Node",
-              is_suspended: isSuspended,
-              limits: { memory: 0, swap: 0, disk: 0, io: 500, cpu: 0, threads: null },
-            },
-          }),
-          sendPowerAction: async () => {},
-          sendCommand: async () => {},
-          getWebsocketCredentials: async () => ({ token: "t", socket: "wss://wings.test/ws" }),
-        })
 
-        const starting = await getServerStatus(createServerEnv(), createMockClientWithState("starting"))
-        expect(starting.status).toBe("STARTING")
-
-        const stopping = await getServerStatus(createServerEnv(), createMockClientWithState("stopping"))
-        expect(stopping.status).toBe("STOPPING")
-
-        const offline = await getServerStatus(createServerEnv(), createMockClientWithState("offline"))
-        expect(offline.status).toBe("OFFLINE")
-
-        const suspended = await getServerStatus(createServerEnv(), createMockClientWithState("running", true))
-        expect(suspended.status).toBe("DISCONNECTED")
-      })
-
-      it("executes power actions (START, RESTART, STOP) with real state validation and distributed lock in D1", async () => {
-        const { executeServerPowerAction } = await import("./services/pterodactyl/serverAdministrationService")
-
-        let lastSignal = ""
-        const createMockClientWithStatus = (state: string) => ({
-          getServerResources: async () => ({
-            object: "stats" as const,
-            attributes: {
-              current_state: state as any,
               is_suspended: false,
-              resources: { cpu_absolute: 0, memory_bytes: 0, disk_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 0 },
+
+              limits: {
+                memory: 0,
+                swap: 0,
+                disk: 0,
+                io: 500,
+                cpu: 0,
+                threads: null,
+              },
             },
           }),
-          getServerDetails: async () => ({
-            object: "server" as const,
-            attributes: {
-              server_owner: true,
-              identifier: "srv",
-              uuid: "uuid",
-              name: "Server",
-              node: "Node",
-              is_suspended: false,
-              limits: { memory: 0, swap: 0, disk: 0, io: 500, cpu: 0, threads: null },
-            },
-          }),
+
           sendPowerAction: async (signal: string) => {
             lastSignal = signal
           },
+
           sendCommand: async () => {},
-          getWebsocketCredentials: async () => ({} as any),
+
+          getWebsocketCredentials: async () => ({}) as any,
         })
 
         // 1. If server is already ONLINE, START must be rejected
+
         const onlineClient = createMockClientWithStatus("running")
+
         await expect(
-          executeServerPowerAction(createServerEnv(), "START", adminId, onlineClient),
+          executeServerPowerAction(
+            createServerEnv(),
+            "START",
+            adminId,
+            onlineClient,
+          ),
         ).rejects.toThrow("El servidor ya está encendido.")
 
         // 2. If server is already OFFLINE, STOP and RESTART must be rejected
+
         const offlineClient = createMockClientWithStatus("offline")
+
         await expect(
-          executeServerPowerAction(createServerEnv(), "STOP", adminId, offlineClient),
+          executeServerPowerAction(
+            createServerEnv(),
+            "STOP",
+            adminId,
+            offlineClient,
+          ),
         ).rejects.toThrow("El servidor ya está apagado.")
+
         await expect(
-          executeServerPowerAction(createServerEnv(), "RESTART", adminId, offlineClient),
+          executeServerPowerAction(
+            createServerEnv(),
+            "RESTART",
+            adminId,
+            offlineClient,
+          ),
         ).rejects.toThrow("El servidor ya está apagado.")
 
         // 3. If server is STARTING, power actions must be rejected
+
         const startingClient = createMockClientWithStatus("starting")
+
         await expect(
-          executeServerPowerAction(createServerEnv(), "START", adminId, startingClient),
+          executeServerPowerAction(
+            createServerEnv(),
+            "START",
+            adminId,
+            startingClient,
+          ),
         ).rejects.toThrow("El servidor se está iniciando. Espera un momento.")
 
         // 4. If server is STOPPING, power actions must be rejected
+
         const stoppingClient = createMockClientWithStatus("stopping")
+
         await expect(
-          executeServerPowerAction(createServerEnv(), "STOP", adminId, stoppingClient),
+          executeServerPowerAction(
+            createServerEnv(),
+            "STOP",
+            adminId,
+            stoppingClient,
+          ),
         ).rejects.toThrow("El servidor se está apagando. Espera un momento.")
 
         // 5. If server is UNKNOWN or DISCONNECTED, power actions must be rejected without calling sendPowerAction
+
         const unknownClient = createMockClientWithStatus("invalid_state")
+
         const disconnectedClient = {
           ...createMockClientWithStatus("running"),
+
           getServerResources: async () => ({
             object: "stats" as const,
+
             attributes: {
               current_state: "running" as any,
+
               is_suspended: true,
-              resources: { cpu_absolute: 0, memory_bytes: 0, disk_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 0 },
+
+              resources: {
+                cpu_absolute: 0,
+                memory_bytes: 0,
+                disk_bytes: 0,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+                uptime: 0,
+              },
             },
           }),
         }
 
         let powerActionCalled = false
+
         const trackingUnknownClient = {
           ...unknownClient,
+
           sendPowerAction: async () => {
             powerActionCalled = true
           },
         }
+
         const trackingDisconnectedClient = {
           ...disconnectedClient,
+
           sendPowerAction: async () => {
             powerActionCalled = true
           },
         }
 
         // UNKNOWN rejections
+
         powerActionCalled = false
-        await expect(executeServerPowerAction(createServerEnv(), "START", adminId, trackingUnknownClient)).rejects.toThrow(
+
+        await expect(
+          executeServerPowerAction(
+            createServerEnv(),
+            "START",
+            adminId,
+            trackingUnknownClient,
+          ),
+        ).rejects.toThrow(
           "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
         )
+
         expect(powerActionCalled).toBe(false)
 
-        await expect(executeServerPowerAction(createServerEnv(), "STOP", adminId, trackingUnknownClient)).rejects.toThrow(
+        await expect(
+          executeServerPowerAction(
+            createServerEnv(),
+            "STOP",
+            adminId,
+            trackingUnknownClient,
+          ),
+        ).rejects.toThrow(
           "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
         )
+
         expect(powerActionCalled).toBe(false)
 
-        await expect(executeServerPowerAction(createServerEnv(), "RESTART", adminId, trackingUnknownClient)).rejects.toThrow(
+        await expect(
+          executeServerPowerAction(
+            createServerEnv(),
+            "RESTART",
+            adminId,
+            trackingUnknownClient,
+          ),
+        ).rejects.toThrow(
           "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
         )
+
         expect(powerActionCalled).toBe(false)
 
         // DISCONNECTED rejections
-        await expect(executeServerPowerAction(createServerEnv(), "START", adminId, trackingDisconnectedClient)).rejects.toThrow(
+
+        await expect(
+          executeServerPowerAction(
+            createServerEnv(),
+            "START",
+            adminId,
+            trackingDisconnectedClient,
+          ),
+        ).rejects.toThrow(
           "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
         )
+
         expect(powerActionCalled).toBe(false)
 
-        await expect(executeServerPowerAction(createServerEnv(), "STOP", adminId, trackingDisconnectedClient)).rejects.toThrow(
+        await expect(
+          executeServerPowerAction(
+            createServerEnv(),
+            "STOP",
+            adminId,
+            trackingDisconnectedClient,
+          ),
+        ).rejects.toThrow(
           "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
         )
+
         expect(powerActionCalled).toBe(false)
 
-        await expect(executeServerPowerAction(createServerEnv(), "RESTART", adminId, trackingDisconnectedClient)).rejects.toThrow(
+        await expect(
+          executeServerPowerAction(
+            createServerEnv(),
+            "RESTART",
+            adminId,
+            trackingDisconnectedClient,
+          ),
+        ).rejects.toThrow(
           "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
         )
+
         expect(powerActionCalled).toBe(false)
 
         // getServerStatus() network / infrastructure failure rejection
+
         const failingStatusClient = {
           ...unknownClient,
+
           getServerResources: async () => {
             throw new Error("Network timeout / Pterodactyl offline")
           },
+
           sendPowerAction: async () => {
             powerActionCalled = true
           },
         }
-        await expect(executeServerPowerAction(createServerEnv(), "START", adminId, failingStatusClient)).rejects.toThrow(
+
+        await expect(
+          executeServerPowerAction(
+            createServerEnv(),
+            "START",
+            adminId,
+            failingStatusClient,
+          ),
+        ).rejects.toThrow(
           "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
         )
+
         expect(powerActionCalled).toBe(false)
 
         // 6. Valid actions execute successfully
-        const startRes = await executeServerPowerAction(createServerEnv(), "START", adminId, offlineClient)
+
+        const startRes = await executeServerPowerAction(
+          createServerEnv(),
+          "START",
+          adminId,
+          offlineClient,
+        )
+
         expect(startRes.success).toBe(true)
+
         expect(startRes.status).toBe("STARTING")
+
         expect(lastSignal).toBe("start")
 
-        const restartRes = await executeServerPowerAction(createServerEnv(), "RESTART", adminId, onlineClient)
+        const restartRes = await executeServerPowerAction(
+          createServerEnv(),
+          "RESTART",
+          adminId,
+          onlineClient,
+        )
+
         expect(restartRes.success).toBe(true)
+
         expect(restartRes.status).toBe("STARTING")
+
         expect(lastSignal).toBe("restart")
 
-        const stopRes = await executeServerPowerAction(createServerEnv(), "STOP", adminId, onlineClient)
+        const stopRes = await executeServerPowerAction(
+          createServerEnv(),
+          "STOP",
+          adminId,
+          onlineClient,
+        )
+
         expect(stopRes.success).toBe(true)
+
         expect(stopRes.status).toBe("STOPPING")
+
         expect(lastSignal).toBe("stop")
       })
 
-
       it("enforces distributed power lock concurrency rejection in D1", async () => {
-        const { executeServerPowerAction } = await import("./services/pterodactyl/serverAdministrationService")
+        const { executeServerPowerAction } = await import(
+          "./services/pterodactyl/serverAdministrationService"
+        )
 
         // Pre-insert an active lock
-        await testD1.prepare(`
+
+        await testD1
+          .prepare(`
           INSERT OR REPLACE INTO server_power_locks (lock_key, action, acquired_by_user_id, acquired_at, expires_at)
           VALUES ('main_server_power', 'START', ?, ?, ?)
-        `).bind(adminId, new Date().toISOString(), new Date(Date.now() + 20000).toISOString()).run()
+        `)
+          .bind(
+            adminId,
+            new Date().toISOString(),
+            new Date(Date.now() + 20000).toISOString(),
+          )
+          .run()
 
         const mockClient = {
-          getServerResources: async () => ({} as any),
-          getServerDetails: async () => ({} as any),
+          getServerResources: async () => ({}) as any,
+
+          getServerDetails: async () => ({}) as any,
+
           sendPowerAction: async () => {},
+
           sendCommand: async () => {},
-          getWebsocketCredentials: async () => ({} as any),
+
+          getWebsocketCredentials: async () => ({}) as any,
         }
 
         // Attempting another power action while locked must throw SERVER_BUSY
-        await expect(executeServerPowerAction(createServerEnv(), "STOP", adminId, mockClient)).rejects.toThrow(
+
+        await expect(
+          executeServerPowerAction(
+            createServerEnv(),
+            "STOP",
+            adminId,
+            mockClient,
+          ),
+        ).rejects.toThrow(
           "Hay otra acción en curso. Espera un momento.",
         )
 
         // Clear lock
-        await testD1.prepare("DELETE FROM server_power_locks WHERE lock_key = 'main_server_power'").run()
+
+        await testD1
+          .prepare(
+            "DELETE FROM server_power_locks WHERE lock_key = 'main_server_power'",
+          )
+          .run()
       })
 
       it("validates console commands and enforces truly atomic rate limiting under 20 concurrent requests", async () => {
-        const { executeServerCommand } = await import("./services/pterodactyl/serverAdministrationService")
+        const { executeServerCommand } = await import(
+          "./services/pterodactyl/serverAdministrationService"
+        )
 
         let sentCommand = ""
+
         const mockClient = {
-          getServerResources: async () => ({} as any),
-          getServerDetails: async () => ({} as any),
+          getServerResources: async () => ({}) as any,
+
+          getServerDetails: async () => ({}) as any,
+
           sendPowerAction: async () => {},
+
           sendCommand: async (cmd: string) => {
             sentCommand = cmd
           },
-          getWebsocketCredentials: async () => ({} as any),
+
+          getWebsocketCredentials: async () => ({}) as any,
         }
 
         // Empty command -> rejected
-        await expect(executeServerCommand(createServerEnv(), "", adminId, mockClient)).rejects.toThrow(
+
+        await expect(
+          executeServerCommand(createServerEnv(), "", adminId, mockClient),
+        ).rejects.toThrow(
           "El comando no puede estar vacío.",
         )
-        await expect(executeServerCommand(createServerEnv(), "   ", adminId, mockClient)).rejects.toThrow(
+
+        await expect(
+          executeServerCommand(createServerEnv(), "   ", adminId, mockClient),
+        ).rejects.toThrow(
           "El comando no puede estar vacío.",
         )
 
         // Oversized command (>500 chars) -> rejected
+
         const hugeCmd = "say " + "a".repeat(510)
-        await expect(executeServerCommand(createServerEnv(), hugeCmd, adminId, mockClient)).rejects.toThrow(
+
+        await expect(
+          executeServerCommand(createServerEnv(), hugeCmd, adminId, mockClient),
+        ).rejects.toThrow(
           "El comando excede la longitud máxima permitida",
         )
 
         // Clear rate limit table for clean test
+
         await testD1.prepare("DELETE FROM server_command_rate_limits").run()
 
         // Launch 20 concurrent commands simultaneously to test atomic race condition resistance
+
         const promises = Array.from({ length: 20 }, (_, idx) =>
-          executeServerCommand(createServerEnv(), `say concurrent command ${idx}`, adminId, mockClient)
+          executeServerCommand(
+            createServerEnv(),
+            `say concurrent command ${idx}`,
+            adminId,
+            mockClient,
+          )
+
             .then(() => ({ success: true, error: null }))
+
             .catch((err: any) => ({ success: false, error: err.message })),
         )
 
         const results = await Promise.all(promises)
+
         const succeeded = results.filter((r) => r.success)
+
         const rateLimited = results.filter(
-          (r) => !r.success && r.error === "Has enviado demasiados comandos. Espera un momento.",
+          (r) =>
+            !r.success &&
+            r.error === "Has enviado demasiados comandos. Espera un momento.",
         )
 
         // Exactly MAX_COMMANDS (10) must succeed, and the remaining 10 must be rate limited!
+
         expect(succeeded.length).toBe(10)
+
         expect(rateLimited.length).toBe(10)
       })
 
       it("generates single-use console tickets and enforces mandatory Origin validation on WebSocket", async () => {
         // 1. ADMIN requests console ticket via GraphQL
+
         const ticketRes = await executeGqlServer(
           `mutation { createServerConsoleTicket { ticket expiresAt } }`,
+
           {},
+
           adminToken,
         )
 
         expect(ticketRes.data?.createServerConsoleTicket).toBeDefined()
+
         const { ticket, expiresAt } = ticketRes.data.createServerConsoleTicket
+
         expect(ticket.startsWith("cstk_")).toBe(true)
+
         expect(new Date(expiresAt).getTime()).toBeGreaterThan(Date.now())
 
         // 2. Reject POST method
-        const reqPost = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
-          method: "POST",
-          headers: { Upgrade: "websocket", Origin: "https://admin.hikat.org" },
-        })
+
+        const reqPost = new Request(
+          `http://localhost/api/server/console/ws?ticket=${ticket}`,
+          {
+            method: "POST",
+
+            headers: {
+              Upgrade: "websocket",
+              Origin: "https://admin.hikat.org",
+            },
+          },
+        )
+
         const resPost = await worker.fetch(reqPost, createServerEnv())
+
         expect(resPost.status).toBe(405)
 
         // 3. Reject missing Upgrade header
-        const reqNoUpgrade = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
-          method: "GET",
-          headers: { Origin: "https://admin.hikat.org" },
-        })
+
+        const reqNoUpgrade = new Request(
+          `http://localhost/api/server/console/ws?ticket=${ticket}`,
+          {
+            method: "GET",
+
+            headers: { Origin: "https://admin.hikat.org" },
+          },
+        )
+
         const resNoUpgrade = await worker.fetch(reqNoUpgrade, createServerEnv())
+
         expect(resNoUpgrade.status).toBe(426)
 
         // 4. Reject access token in query string (enforcing tickets only)
-        const reqTokenParam = new Request(`http://localhost/api/server/console/ws?token=${adminToken}`, {
-          method: "GET",
-          headers: { Upgrade: "websocket", Origin: "https://admin.hikat.org" },
-        })
-        const resTokenParam = await worker.fetch(reqTokenParam, createServerEnv())
+
+        const reqTokenParam = new Request(
+          `http://localhost/api/server/console/ws?token=${adminToken}`,
+          {
+            method: "GET",
+
+            headers: {
+              Upgrade: "websocket",
+              Origin: "https://admin.hikat.org",
+            },
+          },
+        )
+
+        const resTokenParam = await worker.fetch(
+          reqTokenParam,
+          createServerEnv(),
+        )
+
         expect(resTokenParam.status).toBe(400)
 
         // 5. Reject missing Origin header (mandatory Origin requirement)
-        const reqNoOrigin = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
-          method: "GET",
-          headers: { Upgrade: "websocket" },
-        })
+
+        const reqNoOrigin = new Request(
+          `http://localhost/api/server/console/ws?ticket=${ticket}`,
+          {
+            method: "GET",
+
+            headers: { Upgrade: "websocket" },
+          },
+        )
+
         const resNoOrigin = await worker.fetch(reqNoOrigin, createServerEnv())
+
         expect(resNoOrigin.status).toBe(403)
 
         // 6. Reject unauthorized / malicious origin
-        const reqBadOrigin = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
-          method: "GET",
-          headers: { Upgrade: "websocket", Origin: "https://malicious-site.com" },
-        })
+
+        const reqBadOrigin = new Request(
+          `http://localhost/api/server/console/ws?ticket=${ticket}`,
+          {
+            method: "GET",
+
+            headers: {
+              Upgrade: "websocket",
+              Origin: "https://malicious-site.com",
+            },
+          },
+        )
+
         const resBadOrigin = await worker.fetch(reqBadOrigin, createServerEnv())
+
         expect(resBadOrigin.status).toBe(403)
 
         // 7. Connect with valid ticket and allowed production origin
+
         const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
           new Response(
             JSON.stringify({
               object: "token",
+
               data: { socket: "wss://wings.test/ws", token: "mock-token" },
             }),
+
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
         )
 
-        const reqValid = new Request(`http://localhost/api/server/console/ws?ticket=${ticket}`, {
-          method: "GET",
-          headers: { Upgrade: "websocket", Origin: "https://admin.hikat.org" },
-        })
+        const reqValid = new Request(
+          `http://localhost/api/server/console/ws?ticket=${ticket}`,
+          {
+            method: "GET",
+
+            headers: {
+              Upgrade: "websocket",
+              Origin: "https://admin.hikat.org",
+            },
+          },
+        )
+
         const resValid = await worker.fetch(reqValid, createServerEnv())
+
         expect(resValid.status).toBe(200) // 200 in Node test mock environment
+
         fetchSpy.mockRestore()
 
         // 8. Single-use enforcement: re-using the same ticket must fail (401)
+
         const resReused = await worker.fetch(reqValid, createServerEnv())
+
         expect(resReused.status).toBe(401)
       })
     })
@@ -5008,19 +5577,30 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
   describe("HiKAT Back Office Core (Shard 06.5)", () => {
     let coreAdminId: string
+
     let coreAdminToken: string
+
     let playerUserId: string
+
     let playerUserToken: string
+
     let mockR2: ReturnType<typeof createTestR2Bucket>
 
     const createCoreEnv = (): Env => ({
       DB: testD1 as unknown as D1Database,
+
       ASSETS: mockR2 as unknown as R2Bucket,
+
       AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+
       AUTH_ISSUER: DEFAULT_AUTH_ISSUER,
+
       PTERODACTYL_BASE_URL: "https://panel.test",
+
       PTERODACTYL_API_KEY: "ptlc_test_key",
+
       PTERODACTYL_SERVER_ID: "srv_test_uuid",
+
       ENVIRONMENT: "test",
     })
 
@@ -5028,55 +5608,88 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       mockR2 = createTestR2Bucket()
 
       // Create Admin User & Session
+
       coreAdminId = "admin-core-" + crypto.randomUUID()
+
       const adminSessionId = "sess-admin-" + crypto.randomUUID()
+
       await db.insert(users).values({
         id: coreAdminId,
+
         displayName: "Super Admin",
+
         role: "ADMIN",
+
         createdAt: new Date().toISOString(),
+
         updatedAt: new Date().toISOString(),
       })
+
       await db.insert(sessions).values({
         id: adminSessionId,
+
         userId: coreAdminId,
+
         expiresAt: new Date(Date.now() + 86400000).toISOString(),
+
         createdAt: new Date().toISOString(),
       })
+
       coreAdminToken = await createTestAccessToken({
         userId: coreAdminId,
+
         sessionId: adminSessionId,
+
         role: "ADMIN" as any,
+
         displayName: "Super Admin",
       })
 
       // Create Player User & Session
+
       playerUserId = "player-" + crypto.randomUUID()
+
       const playerSessionId = "sess-player-" + crypto.randomUUID()
+
       await db.insert(users).values({
         id: playerUserId,
+
         displayName: "Regular Player",
+
         role: "PLAYER",
+
         createdAt: new Date().toISOString(),
+
         updatedAt: new Date().toISOString(),
       })
+
       await db.insert(sessions).values({
         id: playerSessionId,
+
         userId: playerUserId,
+
         expiresAt: new Date(Date.now() + 86400000).toISOString(),
+
         createdAt: new Date().toISOString(),
       })
+
       playerUserToken = await createTestAccessToken({
         userId: playerUserId,
+
         sessionId: playerSessionId,
+
         role: "PLAYER" as any,
+
         displayName: "Regular Player",
       })
     })
 
     it("adminDashboard gracefully survives upstream server errors and returns D1 stats", async () => {
       // Mock fetch failure (e.g. Pterodactyl DNS not found / offline)
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("DNS resolution failed"))
+
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new Error("DNS resolution failed"))
 
       const query = `
         query {
@@ -5088,22 +5701,33 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const req = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
+
           Authorization: `Bearer ${coreAdminToken}`,
         },
+
         body: JSON.stringify({ query }),
       })
 
       const res = await worker.fetch(req, createCoreEnv())
+
       expect(res.status).toBe(200)
+
       const data = (await res.json()) as any
+
       expect(data.errors).toBeUndefined()
+
       expect(data.data.adminDashboard.server.status).toBe("UNKNOWN")
+
       expect(data.data.adminDashboard.news).toBeDefined()
+
       expect(data.data.adminDashboard.skins).toBeDefined()
+
       expect(data.data.adminDashboard.game).toBeDefined()
 
       fetchSpy.mockRestore()
@@ -5111,27 +5735,41 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
     it("handles full Skins lifecycle: upload texture, create, update, query and delete", async () => {
       // 1. Upload valid 64x64 PNG skin texture to R2
+
       const skinTexture = new Uint8Array(64)
+
       skinTexture.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+
       const view = new DataView(skinTexture.buffer)
+
       view.setUint32(16, 64, false)
+
       view.setUint32(20, 64, false)
 
       const mediaId = "media-skin-" + crypto.randomUUID()
+
       await db.insert(contentMedia).values({
         id: mediaId,
+
         objectKey: `content/${mediaId}.png`,
+
         mediaType: "IMAGE",
+
         mimeType: "image/png",
+
         sizeBytes: skinTexture.byteLength,
+
         createdBy: coreAdminId,
+
         createdAt: new Date().toISOString(),
       })
+
       await mockR2.put(`content/${mediaId}.png`, skinTexture.buffer, {
         httpMetadata: { contentType: "image/png" },
       })
 
       // 2. Create Skin mutation
+
       const createMutation = `
         mutation CreateSkin($input: CreateSkinInput!) {
           createSkin(input: $input) {
@@ -5143,33 +5781,49 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const createReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
+
           Authorization: `Bearer ${coreAdminToken}`,
         },
+
         body: JSON.stringify({
           query: createMutation,
+
           variables: {
             input: {
               name: "Alex Aventurera",
+
               model: "SLIM",
+
               mediaId,
+
               status: "AVAILABLE",
             },
           },
         }),
       })
+
       const createRes = await worker.fetch(createReq, createCoreEnv())
+
       const createData = (await createRes.json()) as any
+
       expect(createData.errors).toBeUndefined()
+
       const skinId = createData.data.createSkin.id
+
       expect(skinId).toBeDefined()
+
       expect(createData.data.createSkin.name).toBe("Alex Aventurera")
+
       expect(createData.data.createSkin.model).toBe("SLIM")
 
       // 3. Public catalog query
+
       const publicQuery = `
         query {
           skins {
@@ -5178,37 +5832,58 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const publicReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: { "Content-Type": "application/json" },
+
         body: JSON.stringify({ query: publicQuery }),
       })
+
       const publicRes = await worker.fetch(publicReq, createCoreEnv())
+
       const publicData = (await publicRes.json()) as any
+
       expect(publicData.data.skins.totalCount).toBeGreaterThanOrEqual(1)
-      expect(publicData.data.skins.items.some((s: any) => s.id === skinId)).toBe(true)
+
+      expect(
+        publicData.data.skins.items.some((s: any) => s.id === skinId),
+      ).toBe(true)
 
       // 4. Delete skin
+
       const deleteMutation = `
         mutation DeleteSkin($id: ID!) {
           deleteSkin(id: $id)
         }
       `
+
       const deleteReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
+
           Authorization: `Bearer ${coreAdminToken}`,
         },
-        body: JSON.stringify({ query: deleteMutation, variables: { id: skinId } }),
+
+        body: JSON.stringify({
+          query: deleteMutation,
+          variables: { id: skinId },
+        }),
       })
+
       const deleteRes = await worker.fetch(deleteReq, createCoreEnv())
+
       const deleteData = (await deleteRes.json()) as any
+
       expect(deleteData.data.deleteSkin).toBe(true)
     })
 
     it("enforces Game Releases draft cloning, atomic publish, single published constraint, and safe download", async () => {
       // 1. Initial State: Prepare Draft
+
       const prepMutation = `
         mutation {
           prepareGameDraft {
@@ -5219,20 +5894,29 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const prepReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
+
           Authorization: `Bearer ${coreAdminToken}`,
         },
+
         body: JSON.stringify({ query: prepMutation }),
       })
+
       const prepRes = await worker.fetch(prepReq, createCoreEnv())
+
       const prepData = (await prepRes.json()) as any
+
       expect(prepData.errors).toBeUndefined()
+
       expect(prepData.data.prepareGameDraft.status).toBe("DRAFT")
 
       // 2. Request upload token for a mod
+
       const uploadTokenMutation = `
         mutation CreateUpload($input: CreateGameFileUploadInput!) {
           createGameFileUpload(input: $input) {
@@ -5243,47 +5927,71 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const tokenReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
+
           Authorization: `Bearer ${coreAdminToken}`,
         },
+
         body: JSON.stringify({
           query: uploadTokenMutation,
+
           variables: {
             input: {
               category: "MOD",
+
               originalFilename: "journeymap-1.21.1-6.0.0.jar",
+
               sizeBytes: 1024,
             },
           },
         }),
       })
+
       const tokenRes = await worker.fetch(tokenReq, createCoreEnv())
+
       const tokenData = (await tokenRes.json()) as any
+
       const uploadToken = tokenData.data.createGameFileUpload.uploadToken
+
       expect(uploadToken).toBeDefined()
 
       // 3. Upload valid ZIP/JAR binary via PUT /game/files/upload
-      const jarBuffer = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04])
+
+      const jarBuffer = new Uint8Array([
+        0x50, 0x4b, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04,
+      ])
+
       const uploadHttpReq = new Request("http://localhost/game/files/upload", {
         method: "PUT",
+
         headers: {
           Authorization: `Bearer ${coreAdminToken}`,
+
           "X-Upload-Token": uploadToken,
         },
+
         body: jarBuffer,
       })
+
       const uploadHttpRes = await worker.fetch(uploadHttpReq, createCoreEnv())
+
       expect(uploadHttpRes.status).toBe(200)
+
       const uploadedInfo = (await uploadHttpRes.json()) as any
+
       expect(uploadedInfo.tokenHash).toBeDefined()
+
       expect(uploadedInfo.originalFilename).toBe("journeymap-1.21.1-6.0.0.jar")
+
       expect(uploadedInfo.objectKey).toBeUndefined()
 
-
       // 4. Attach uploaded file to draft via addGameFile mutation
+
       const addFileMutation = `
         mutation AddFile($input: AddGameFileInput!) {
           addGameFile(input: $input) {
@@ -5297,38 +6005,63 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const addReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
+
           Authorization: `Bearer ${coreAdminToken}`,
         },
+
         body: JSON.stringify({
           query: addFileMutation,
+
           variables: {
             input: {
               name: "JourneyMap",
+
               category: "MOD",
+
               tokenHash: uploadedInfo.tokenHash,
             },
           },
         }),
       })
+
       const addRes = await worker.fetch(addReq, createCoreEnv())
+
       const addData = (await addRes.json()) as any
+
       expect(addData.errors).toBeUndefined()
+
       const fileId = addData.data.addGameFile.id
-      expect(addData.data.addGameFile.logicalPath).toBe("mods/journeymap-1.21.1-6.0.0.jar")
+
+      expect(addData.data.addGameFile.logicalPath).toBe(
+        "mods/journeymap-1.21.1-6.0.0.jar",
+      )
+
       expect(addData.data.addGameFile.policy).toBe("NO_MODIFICABLE")
 
       // 5. Verify that file CANNOT be downloaded publicly while in DRAFT status
-      const downloadDraftReq = new Request(`http://localhost/game/download/${fileId}`, {
-        method: "GET",
-      })
-      const downloadDraftRes = await worker.fetch(downloadDraftReq, createCoreEnv())
+
+      const downloadDraftReq = new Request(
+        `http://localhost/game/download/${fileId}`,
+        {
+          method: "GET",
+        },
+      )
+
+      const downloadDraftRes = await worker.fetch(
+        downloadDraftReq,
+        createCoreEnv(),
+      )
+
       expect(downloadDraftRes.status).toBe(404)
 
       // 6. Publish Game Release 1.4.2
+
       const publishMutation = `
         mutation Publish($input: PublishGameReleaseInput!) {
           publishGameRelease(input: $input) {
@@ -5339,35 +6072,56 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const publishReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
+
           Authorization: `Bearer ${coreAdminToken}`,
         },
+
         body: JSON.stringify({
           query: publishMutation,
+
           variables: {
             input: {
               version: "1.4.2",
+
               notes: "Actualización inicial de mods",
             },
           },
         }),
       })
+
       const publishRes = await worker.fetch(publishReq, createCoreEnv())
+
       const publishData = (await publishRes.json()) as any
+
       expect(publishData.errors).toBeUndefined()
+
       expect(publishData.data.publishGameRelease.status).toBe("PUBLISHED")
+
       expect(publishData.data.publishGameRelease.version).toBe("1.4.2")
 
       // 7. Verify file CAN now be downloaded publicly
-      const downloadPubRes = await worker.fetch(downloadDraftReq, createCoreEnv())
+
+      const downloadPubRes = await worker.fetch(
+        downloadDraftReq,
+        createCoreEnv(),
+      )
+
       expect(downloadPubRes.status).toBe(200)
+
       expect(downloadPubRes.headers.get("Cache-Control")).toContain("immutable")
-      expect(downloadPubRes.headers.get("Content-Disposition")).toContain("journeymap-1.21.1-6.0.0.jar")
+
+      expect(downloadPubRes.headers.get("Content-Disposition")).toContain(
+        "journeymap-1.21.1-6.0.0.jar",
+      )
 
       // 8. Public PublishedModpack query contract verification
+
       const modpackQuery = `
         query {
           publishedModpack {
@@ -5385,25 +6139,43 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const modpackReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: { "Content-Type": "application/json" },
+
         body: JSON.stringify({ query: modpackQuery }),
       })
+
       const modpackRes = await worker.fetch(modpackReq, createCoreEnv())
+
       const modpackData = (await modpackRes.json()) as any
+
       expect(modpackData.errors).toBeUndefined()
+
       const modpack = modpackData.data.publishedModpack
+
       expect(modpack.version).toBe("1.4.2")
+
       expect(modpack.mandatory).toBe(true)
+
       expect(modpack.clientFiles.length).toBe(1)
-      expect(modpack.clientFiles[0].path).toBe("mods/journeymap-1.21.1-6.0.0.jar")
-      expect(modpack.clientFiles[0].downloadUrl).toBe(`/game/download/${fileId}`)
+
+      expect(modpack.clientFiles[0].path).toBe(
+        "mods/journeymap-1.21.1-6.0.0.jar",
+      )
+
+      expect(modpack.clientFiles[0].downloadUrl).toBe(
+        `/game/download/${fileId}`,
+      )
+
       expect(modpack.clientFiles[0].policy).toBe("NO_MODIFICABLE")
     })
 
     it("manages typed project settings and provides public client configuration", async () => {
       // 1. Query client configuration (public)
+
       const clientConfigQuery = `
         query {
           clientConfiguration {
@@ -5416,17 +6188,25 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const clientReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: { "Content-Type": "application/json" },
+
         body: JSON.stringify({ query: clientConfigQuery }),
       })
+
       const clientRes = await worker.fetch(clientReq, createCoreEnv())
+
       const clientData = (await clientRes.json()) as any
+
       expect(clientData.errors).toBeUndefined()
+
       expect(clientData.data.clientConfiguration.projectName).toBe("HiKAT")
 
       // 2. Update Admin Settings
+
       const updateMutation = `
         mutation UpdateSettings($input: UpdateAdminSettingsInput!) {
           updateAdminSettings(input: $input) {
@@ -5437,29 +6217,47 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           }
         }
       `
+
       const updateReq = new Request("http://localhost/graphql", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
+
           Authorization: `Bearer ${coreAdminToken}`,
         },
+
         body: JSON.stringify({
           query: updateMutation,
+
           variables: {
             input: {
               projectName: "HiKAT Official",
+
               serverIp: "play.hikat.org",
+
               minRamGb: 6,
+
               recommendedRamGb: 12,
             },
           },
         }),
       })
+
       const updateRes = await worker.fetch(updateReq, createCoreEnv())
+
       const updateData = (await updateRes.json()) as any
+
       expect(updateData.errors).toBeUndefined()
-      expect(updateData.data.updateAdminSettings.projectName).toBe("HiKAT Official")
-      expect(updateData.data.updateAdminSettings.serverIp).toBe("play.hikat.org")
+
+      expect(updateData.data.updateAdminSettings.projectName).toBe(
+        "HiKAT Official",
+      )
+
+      expect(updateData.data.updateAdminSettings.serverIp).toBe(
+        "play.hikat.org",
+      )
+
       expect(updateData.data.updateAdminSettings.recommendedRamGb).toBe(12)
     })
 
@@ -5467,64 +6265,119 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const testEnv = createCoreEnv()
 
       // 1. Initial upload and publish release 1.4.2
+
       const ticketReq = new Request("http://localhost/graphql", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+
         body: JSON.stringify({
           query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "sodium-1.21.1.jar", sizeBytes: 50 }) { uploadUrl uploadToken } }`,
         }),
       })
+
       const ticketRes = await worker.fetch(ticketReq, testEnv)
+
       const ticketData = (await ticketRes.json()) as any
+
       const { uploadUrl, uploadToken } = ticketData.data.createGameFileUpload
 
-      const binaryPayload = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Array(46).fill(0x00)])
+      const binaryPayload = new Uint8Array([
+        0x50,
+        0x4b,
+        0x03,
+        0x04,
+        ...new Array(46).fill(0x00),
+      ])
+
       const uploadReq = new Request(`http://localhost${uploadUrl}`, {
         method: "PUT",
-        headers: { Authorization: `Bearer ${coreAdminToken}`, "X-Upload-Token": uploadToken },
+
+        headers: {
+          Authorization: `Bearer ${coreAdminToken}`,
+          "X-Upload-Token": uploadToken,
+        },
+
         body: binaryPayload,
       })
+
       const uploadRes = await worker.fetch(uploadReq, testEnv)
+
       const uploadedInfo = (await uploadRes.json()) as any
 
       // Add to draft and publish 1.4.2
+
       await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { addGameFile(input: { name: "Sodium", category: MOD, tokenHash: "${uploadedInfo.tokenHash}" }) { id } }`,
           }),
         }),
+
         testEnv,
       )
 
       await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { publishGameRelease(input: { version: "1.4.2", notes: "Initial version" }) { id version } }`,
           }),
         }),
+
         testEnv,
       )
 
       // 2. Prepare new draft from published 1.4.2
+
       const draftReq = new Request("http://localhost/graphql", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
-        body: JSON.stringify({ query: "mutation { prepareGameDraft { id version files { id name } } }" }),
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+
+        body: JSON.stringify({
+          query:
+            "mutation { prepareGameDraft { id version files { id name } } }",
+        }),
       })
+
       const draftRes = await worker.fetch(draftReq, testEnv)
+
       const draftData = (await draftRes.json()) as any
+
       expect(draftData.errors).toBeUndefined()
+
       expect(draftData.data.prepareGameDraft.files.length).toBe(1)
 
       // 3. Query overview to verify change tracking & readiness
+
       const overviewReq = new Request("http://localhost/graphql", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+
         body: JSON.stringify({
           query: `
             query {
@@ -5537,16 +6390,27 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           `,
         }),
       })
+
       const overviewRes = await worker.fetch(overviewReq, testEnv)
+
       const overviewData = (await overviewRes.json()) as any
+
       expect(overviewData.errors).toBeUndefined()
+
       expect(overviewData.data.adminGameOverview.changes.unchanged).toBe(1)
+
       expect(overviewData.data.adminGameOverview.readiness.isReady).toBe(true)
 
       // 4. Query game release history
+
       const historyReq = new Request("http://localhost/graphql", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+
         body: JSON.stringify({
           query: `
             query {
@@ -5560,10 +6424,17 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           `,
         }),
       })
+
       const historyRes = await worker.fetch(historyReq, testEnv)
+
       const historyData = (await historyRes.json()) as any
+
       expect(historyData.errors).toBeUndefined()
-      expect(historyData.data.gameReleaseHistory.length).toBeGreaterThanOrEqual(1)
+
+      expect(historyData.data.gameReleaseHistory.length).toBeGreaterThanOrEqual(
+        1,
+      )
+
       expect(historyData.data.gameReleaseHistory[0].version).toBe("1.4.2")
     })
 
@@ -5571,151 +6442,271 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const testEnv = createCoreEnv()
 
       // 1. Test sanitized upload response (Requirement 7)
+
       const ticketReq = new Request("http://localhost/graphql", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+
         body: JSON.stringify({
           query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-a.jar", sizeBytes: 100 }) { uploadUrl uploadToken } }`,
         }),
       })
+
       const ticketRes = await worker.fetch(ticketReq, testEnv)
+
       const ticketData = (await ticketRes.json()) as any
+
       const { uploadUrl, uploadToken } = ticketData.data.createGameFileUpload
 
-      const binaryA = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Array(96).fill(0x00)])
+      const binaryA = new Uint8Array([
+        0x50,
+        0x4b,
+        0x03,
+        0x04,
+        ...new Array(96).fill(0x00),
+      ])
+
       const uploadReq = new Request(`http://localhost${uploadUrl}`, {
         method: "PUT",
-        headers: { Authorization: `Bearer ${coreAdminToken}`, "X-Upload-Token": uploadToken },
+
+        headers: {
+          Authorization: `Bearer ${coreAdminToken}`,
+          "X-Upload-Token": uploadToken,
+        },
+
         body: binaryA,
       })
 
       const uploadRes = await worker.fetch(uploadReq, testEnv)
+
       expect(uploadRes.status).toBe(200)
+
       const uploadJson = (await uploadRes.json()) as any
 
       // Assert that internal storage details are NOT exposed
+
       expect(uploadJson.tokenHash).toBeDefined()
+
       expect(uploadJson.originalFilename).toBe("mod-a.jar")
+
       expect(uploadJson.category).toBe("MOD")
+
       expect(uploadJson.sizeBytes).toBe(100)
+
       expect(uploadJson.objectKey).toBeUndefined()
+
       expect(uploadJson.sha256).toBeUndefined()
+
       expect(uploadJson.id).toBeUndefined()
 
       // 2. Add mod A to draft and publish version 1.0.0
+
       const addFileRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { addGameFile(input: { name: "Mod A", category: MOD, tokenHash: "${uploadJson.tokenHash}" }) { id name } }`,
           }),
         }),
+
         testEnv,
       )
+
       const addFileData = (await addFileRes.json()) as any
+
       const fileAId = addFileData.data.addGameFile.id
 
       await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { publishGameRelease(input: { version: "1.0.0", notes: "Initial v1.0.0" }) { id version status } }`,
           }),
         }),
+
         testEnv,
       )
 
       // 3. Backend MUST reject update / remove on PUBLISHED release files (Requirement 5)
+
       const updatePubRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { updateGameFile(id: "${fileAId}", input: { name: "Mod A Hacked" }) { id } }`,
           }),
         }),
+
         testEnv,
       )
+
       const updatePubData = (await updatePubRes.json()) as any
+
       expect(updatePubData.errors).toBeDefined()
-      expect(updatePubData.errors[0].message).toContain("Solo puedes modificar archivos de una actualización en preparación")
+
+      expect(updatePubData.errors[0].message).toContain(
+        "Solo puedes modificar archivos de una actualización en preparación",
+      )
 
       const removePubRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { removeGameFile(id: "${fileAId}") }`,
           }),
         }),
+
         testEnv,
       )
+
       const removePubData = (await removePubRes.json()) as any
+
       expect(removePubData.errors).toBeDefined()
-      expect(removePubData.errors[0].message).toContain("Solo puedes modificar archivos de una actualización en preparación")
+
+      expect(removePubData.errors[0].message).toContain(
+        "Solo puedes modificar archivos de una actualización en preparación",
+      )
 
       // 4. Prepare draft for next update (cloned from published 1.0.0)
+
       const prepareRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
-          body: JSON.stringify({ query: "mutation { prepareGameDraft { id version files { id name } } }" }),
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
+          body: JSON.stringify({
+            query:
+              "mutation { prepareGameDraft { id version files { id name } } }",
+          }),
         }),
+
         testEnv,
       )
+
       const prepareData = (await prepareRes.json()) as any
+
       const draftFileAId = prepareData.data.prepareGameDraft.files[0].id
 
       // 5. Upload Mod B and add to draft
+
       const ticketBReq = new Request("http://localhost/graphql", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+
         body: JSON.stringify({
           query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-b.jar", sizeBytes: 80 }) { uploadUrl uploadToken } }`,
         }),
       })
+
       const ticketBRes = await worker.fetch(ticketBReq, testEnv)
-      const { uploadUrl: uB, uploadToken: tB } = ((await ticketBRes.json()) as any).data.createGameFileUpload
+
+      const { uploadUrl: uB, uploadToken: tB } =
+        ((await ticketBRes.json()) as any).data.createGameFileUpload
 
       const uploadBRes = await worker.fetch(
         new Request(`http://localhost${uB}`, {
           method: "PUT",
-          headers: { Authorization: `Bearer ${coreAdminToken}`, "X-Upload-Token": tB },
-          body: new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Array(76).fill(0x00)]),
+
+          headers: {
+            Authorization: `Bearer ${coreAdminToken}`,
+            "X-Upload-Token": tB,
+          },
+
+          body: new Uint8Array([
+            0x50,
+            0x4b,
+            0x03,
+            0x04,
+            ...new Array(76).fill(0x00),
+          ]),
         }),
+
         testEnv,
       )
+
       const tokenHashB = ((await uploadBRes.json()) as any).tokenHash
 
       await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { addGameFile(input: { name: "Mod B", category: MOD, tokenHash: "${tokenHashB}" }) { id } }`,
           }),
         }),
+
         testEnv,
       )
 
       // 6. Delete draftFileA from draft -> verifies tombstone with changeStatus REMOVED (Requirement 4)
+
       await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { removeGameFile(id: "${draftFileAId}") }`,
           }),
         }),
+
         testEnv,
       )
 
       const overviewDiffRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `
               query {
@@ -5729,88 +6720,147 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             `,
           }),
         }),
+
         testEnv,
       )
-      const overviewDiff = ((await overviewDiffRes.json()) as any).data.adminGameOverview
+
+      const overviewDiff = ((await overviewDiffRes.json()) as any).data
+        .adminGameOverview
+
       expect(overviewDiff.changes.removed).toBe(1)
+
       expect(overviewDiff.changes.added).toBe(1)
 
-      const tombstoneA = overviewDiff.draftRelease.files.find((f: any) => f.name === "Mod A")
+      const tombstoneA = overviewDiff.draftRelease.files.find(
+        (f: any) => f.name === "Mod A",
+      )
+
       expect(tombstoneA).toBeDefined()
+
       expect(tombstoneA.changeStatus).toBe("REMOVED")
 
       // 7. Test restore (Deshacer) tombstone
+
       const restoreRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { restoreGameFile(id: "${tombstoneA.id}") { id name } }`,
           }),
         }),
+
         testEnv,
       )
+
       const restoreData = (await restoreRes.json()) as any
+
       expect(restoreData.errors).toBeUndefined()
+
       expect(restoreData.data.restoreGameFile.name).toBe("Mod A")
 
       // Remove it again so final release has only Mod B
+
       await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { removeGameFile(id: "${restoreData.data.restoreGameFile.id}") }`,
           }),
         }),
+
         testEnv,
       )
 
       // 8. Atomically publish release 1.0.1
+
       const finalPubRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { publishGameRelease(input: { version: "1.0.1", notes: "Release with Mod B" }) { id version status files { name } } }`,
           }),
         }),
+
         testEnv,
       )
+
       const finalPubData = (await finalPubRes.json()) as any
+
       expect(finalPubData.errors).toBeUndefined()
+
       expect(finalPubData.data.publishGameRelease.version).toBe("1.0.1")
+
       expect(finalPubData.data.publishGameRelease.files.length).toBe(1)
+
       expect(finalPubData.data.publishGameRelease.files[0].name).toBe("Mod B")
 
       // 9. Verify history: previous release 1.0.0 is ARCHIVED and its file Mod A remains intact
+
       const historyCheckRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `query { gameReleaseHistory { version status files { name } } }`,
           }),
         }),
+
         testEnv,
       )
-      const historyCheck = ((await historyCheckRes.json()) as any).data.gameReleaseHistory
+
+      const historyCheck = ((await historyCheckRes.json()) as any).data
+        .gameReleaseHistory
+
       expect(historyCheck.length).toBe(2)
+
       const v1 = historyCheck.find((r: any) => r.version === "1.0.0")
+
       expect(v1.status).toBe("ARCHIVED")
+
       expect(v1.files[0].name).toBe("Mod A")
 
       // 10. Attempt update and remove on ARCHIVED release files -> rejected (Requirement 2 & 3)
+
       const updateArchRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { updateGameFile(id: "${fileAId}", input: { name: "Archived Hack" }) { id } }`,
           }),
         }),
+
         testEnv,
       )
+
       expect(((await updateArchRes.json()) as any).errors[0].message).toContain(
         "Solo puedes modificar archivos de una actualización en preparación",
       )
@@ -5818,39 +6868,68 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const removeArchRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { removeGameFile(id: "${fileAId}") }`,
           }),
         }),
+
         testEnv,
       )
+
       expect(((await removeArchRes.json()) as any).errors[0].message).toContain(
         "Solo puedes modificar archivos de una actualización en preparación",
       )
 
       // Confirm archived file and release remain 100% intact in database (Requirement 2)
+
       const historyVerifyRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `query { gameReleaseHistory { version status files { id name } } }`,
           }),
         }),
+
         testEnv,
       )
-      const historyVerify = ((await historyVerifyRes.json()) as any).data.gameReleaseHistory
+
+      const historyVerify = ((await historyVerifyRes.json()) as any).data
+        .gameReleaseHistory
+
       const v1Archived = historyVerify.find((r: any) => r.version === "1.0.0")
+
       expect(v1Archived.status).toBe("ARCHIVED")
-      expect(v1Archived.files.some((f: any) => f.id === fileAId && f.name === "Mod A")).toBe(true)
+
+      expect(
+        v1Archived.files.some(
+          (f: any) => f.id === fileAId && f.name === "Mod A",
+        ),
+      ).toBe(true)
 
       const dbArchivedFile = await db
+
         .select()
+
         .from(gameReleaseFiles)
+
         .where(eq(gameReleaseFiles.id, fileAId))
+
         .get()
+
       expect(dbArchivedFile).toBeDefined()
+
       expect(dbArchivedFile?.name).toBe("Mod A")
     })
 
@@ -5858,96 +6937,178 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const testEnv = createCoreEnv()
 
       // 1. Setup Initial State:
+
       // - Publish release v1.0.0 with 1 mod
+
       // - Prepare draft v1.0.1 with 1 mod
+
       const prepRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
-          body: JSON.stringify({ query: "mutation { prepareGameDraft { id version } }" }),
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
+          body: JSON.stringify({
+            query: "mutation { prepareGameDraft { id version } }",
+          }),
         }),
+
         testEnv,
       )
+
       expect(((await prepRes.json()) as any).errors).toBeUndefined()
 
       // Upload binary for mod 1
+
       const ticketRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-1.jar", sizeBytes: 120 }) { uploadUrl uploadToken } }`,
           }),
         }),
+
         testEnv,
       )
-      const { uploadUrl, uploadToken } = ((await ticketRes.json()) as any).data.createGameFileUpload
+
+      const { uploadUrl, uploadToken } = ((await ticketRes.json()) as any).data
+        .createGameFileUpload
+
       const uploadRes = await worker.fetch(
         new Request(`http://localhost${uploadUrl}`, {
           method: "PUT",
-          headers: { Authorization: `Bearer ${coreAdminToken}`, "X-Upload-Token": uploadToken },
-          body: new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Array(116).fill(0x00)]),
+
+          headers: {
+            Authorization: `Bearer ${coreAdminToken}`,
+            "X-Upload-Token": uploadToken,
+          },
+
+          body: new Uint8Array([
+            0x50,
+            0x4b,
+            0x03,
+            0x04,
+            ...new Array(116).fill(0x00),
+          ]),
         }),
+
         testEnv,
       )
+
       const { tokenHash } = (await uploadRes.json()) as any
 
       // Add to draft and publish v1.0.0
+
       await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { addGameFile(input: { name: "Mod 1", category: MOD, tokenHash: "${tokenHash}" }) { id } }`,
           }),
         }),
+
         testEnv,
       )
 
       const pub1Res = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
           body: JSON.stringify({
             query: `mutation { publishGameRelease(input: { version: "1.0.0", notes: "Initial release" }) { id version status } }`,
           }),
         }),
+
         testEnv,
       )
+
       const pub1Data = (await pub1Res.json()) as any
+
       expect(pub1Data.errors).toBeUndefined()
+
       expect(pub1Data.data.publishGameRelease.status).toBe("PUBLISHED")
+
       expect(pub1Data.data.publishGameRelease.version).toBe("1.0.0")
 
       // 2. Prepare next draft for v1.0.1
+
       const draft2Res = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
-          body: JSON.stringify({ query: "mutation { prepareGameDraft { id version files { id name } } }" }),
+
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${coreAdminToken}`,
+          },
+
+          body: JSON.stringify({
+            query:
+              "mutation { prepareGameDraft { id version files { id name } } }",
+          }),
         }),
+
         testEnv,
       )
+
       const draft2Data = (await draft2Res.json()) as any
+
       const draft2Id = draft2Data.data.prepareGameDraft.id
+
       expect(draft2Data.data.prepareGameDraft.files.length).toBe(1)
 
       // Confirm baseline state in database before batch test:
+
       // Exactly 1 PUBLISHED (v1.0.0), 1 DRAFT (v1.0.1)
+
       const releasesBefore = await db.select().from(gameReleases).all()
-      const publishedBefore = releasesBefore.find((r) => r.status === "PUBLISHED")
+
+      const publishedBefore = releasesBefore.find(
+        (r) => r.status === "PUBLISHED",
+      )
+
       const draftBefore = releasesBefore.find((r) => r.status === "DRAFT")
+
       expect(publishedBefore?.version).toBe("1.0.0")
+
       expect(draftBefore?.id).toBe(draft2Id)
 
       // 3. Mock db.batch on the database to SIMULATE a D1 batch failure and explicitly exercise the db.batch() branch
-      const batchError = new Error("D1_ERROR: simulated atomic batch transaction rollback")
+
+      const batchError = new Error(
+        "D1_ERROR: simulated atomic batch transaction rollback",
+      )
+
       const batchSpy = vi.fn().mockImplementation(async (queries: any[]) => {
         // Assert that the batch received exactly 2 statements:
+
         // [0]: update gameReleases set status=ARCHIVED where status=PUBLISHED
+
         // [1]: update gameReleases set version=1.0.1, status=PUBLISHED where id=draft2Id
+
         expect(queries.length).toBe(2)
+
         // Simulate atomic rollback - no changes are written to database
+
         throw batchError
       })
 
@@ -5955,79 +7116,799 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       ;(db as any).batch = batchSpy
 
       // Attempt to publish v1.0.1 using publishGameRelease with mock db.batch
+
       await expect(
-        publishGameRelease(db, testEnv, { version: "1.0.1", notes: "Failing batch" }, coreAdminId),
+        publishGameRelease(
+          db,
+          testEnv,
+          { version: "1.0.1", notes: "Failing batch" },
+          coreAdminId,
+        ),
       ).rejects.toThrow("D1_ERROR: simulated atomic batch transaction rollback")
 
       // Verify db.batch was explicitly invoked
+
       expect(batchSpy).toHaveBeenCalledTimes(1)
 
       // 4. VERIFY OBSERVABLE ATOMIC ROLLBACK PROPERTIES (Requirement 1):
+
       // - v1.0.0 MUST STILL BE "PUBLISHED"
+
       // - Draft MUST STILL BE "DRAFT"
+
       // - NO orphan state (system is NOT left without a published version)
+
       // - NO partial publication (draft was NOT marked published, old was NOT archived)
+
       const releasesAfterFail = await db.select().from(gameReleases).all()
-      const publishedAfterFail = releasesAfterFail.filter((r) => r.status === "PUBLISHED")
-      const draftAfterFail = releasesAfterFail.filter((r) => r.status === "DRAFT")
+
+      const publishedAfterFail = releasesAfterFail.filter(
+        (r) => r.status === "PUBLISHED",
+      )
+
+      const draftAfterFail = releasesAfterFail.filter(
+        (r) => r.status === "DRAFT",
+      )
 
       expect(publishedAfterFail.length).toBe(1)
+
       expect(publishedAfterFail[0]?.version).toBe("1.0.0")
+
       expect(publishedAfterFail[0]?.id).toBe(publishedBefore?.id)
 
       expect(draftAfterFail.length).toBe(1)
+
       expect(draftAfterFail[0]?.id).toBe(draft2Id)
+
       expect(draftAfterFail[0]?.status).toBe("DRAFT")
 
       // 5. Verify the SUCCESS path of db.batch()
-      const successBatchSpy = vi.fn().mockImplementation(async (queries: any[]) => {
-        expect(queries.length).toBe(2)
-        // Execute both queries atomically
-        for (const q of queries) {
-          if (typeof q.execute === "function") {
-            await q.execute()
-          } else {
-            await q
+
+      const successBatchSpy = vi
+        .fn()
+        .mockImplementation(async (queries: any[]) => {
+          expect(queries.length).toBe(2)
+
+          // Execute both queries atomically
+
+          for (const q of queries) {
+            if (typeof q.execute === "function") {
+              await q.execute()
+            } else {
+              await q
+            }
           }
-        }
-        return []
-      })
+
+          return []
+        })
       ;(db as any).batch = successBatchSpy
 
       const successPub = await publishGameRelease(
         db,
+
         testEnv,
+
         { version: "1.0.1", notes: "Successful atomic publication" },
+
         coreAdminId,
       )
 
       expect(successBatchSpy).toHaveBeenCalledTimes(1)
+
       expect(successPub.version).toBe("1.0.1")
+
       expect(successPub.status).toBe("PUBLISHED")
 
       // Verify DB state after successful batch
+
       const releasesAfterSuccess = await db.select().from(gameReleases).all()
-      const publishedFinal = releasesAfterSuccess.filter((r) => r.status === "PUBLISHED")
-      const archivedFinal = releasesAfterSuccess.filter((r) => r.status === "ARCHIVED")
+
+      const publishedFinal = releasesAfterSuccess.filter(
+        (r) => r.status === "PUBLISHED",
+      )
+
+      const archivedFinal = releasesAfterSuccess.filter(
+        (r) => r.status === "ARCHIVED",
+      )
 
       expect(publishedFinal.length).toBe(1)
+
       expect(publishedFinal[0]?.version).toBe("1.0.1")
 
       const v1Archived = archivedFinal.find((r) => r.version === "1.0.0")
+
       expect(v1Archived).toBeDefined()
+
       expect(v1Archived?.status).toBe("ARCHIVED")
 
-
       // Clean up mock
+
       delete (db as any).batch
     })
+  })
 
+  describe("HiKAT Player Custom Skins & Synchronization (Shard 06.6)", () => {
+    let mockR2: ReturnType<typeof createTestR2Bucket>
+
+    const createEnv = (): Env => ({
+      DB: testD1 as unknown as D1Database,
+
+      ASSETS: mockR2 as unknown as R2Bucket,
+
+      AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+
+      AUTH_ISSUER: DEFAULT_AUTH_ISSUER,
+
+      PTERODACTYL_BASE_URL: "https://panel.test",
+
+      PTERODACTYL_API_KEY: "ptlc_test_key",
+
+      PTERODACTYL_SERVER_ID: "srv_test_uuid",
+
+      ENVIRONMENT: "test",
+    })
+
+    beforeEach(() => {
+      mockR2 = createTestR2Bucket()
+    })
+
+    function createMockSkinPng(width = 64, height = 64): Uint8Array {
+      const buffer = new Uint8Array(33)
+
+      // PNG Magic
+
+      buffer.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+
+      // IHDR length 13
+
+      buffer.set([0x00, 0x00, 0x00, 0x0d], 8)
+
+      // IHDR chunk type
+
+      buffer.set([0x49, 0x48, 0x44, 0x52], 12)
+
+      // Width & Height (Big Endian)
+
+      const view = new DataView(buffer.buffer)
+
+      view.setUint32(16, width, false)
+
+      view.setUint32(20, height, false)
+
+      // Bit depth 8, Color type 6 (RGBA), compression 0, filter 0, interlace 0
+
+      buffer.set([0x08, 0x06, 0x00, 0x00, 0x00], 24)
+
+      return buffer
+    }
+
+    it("handles complete player skin lifecycle: ticket creation, upload, set, query, replace, and delete", async () => {
+      const testEnv = createEnv()
+
+      const db = createDatabase(testEnv.DB!)
+
+      const playerId = crypto.randomUUID()
+
+      const adminId = crypto.randomUUID()
+
+      const playerSessionId = crypto.randomUUID()
+
+      const adminSessionId = crypto.randomUUID()
+
+      await db.insert(users).values([
+        {
+          id: playerId,
+
+          displayName: "SteveMiner",
+
+          role: "PLAYER",
+
+          createdAt: new Date().toISOString(),
+
+          updatedAt: new Date().toISOString(),
+        },
+
+        {
+          id: adminId,
+
+          displayName: "AdminUser",
+
+          role: "ADMIN",
+
+          createdAt: new Date().toISOString(),
+
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      await db.insert(sessions).values([
+        {
+          id: playerSessionId,
+
+          userId: playerId,
+
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+
+          createdAt: new Date().toISOString(),
+        },
+
+        {
+          id: adminSessionId,
+
+          userId: adminId,
+
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+
+          createdAt: new Date().toISOString(),
+        },
+      ])
+
+      const playerToken = await createTestAccessToken({
+        userId: playerId,
+
+        sessionId: playerSessionId,
+
+        role: "PLAYER",
+
+        displayName: "SteveMiner",
+      })
+
+      const adminToken = await createTestAccessToken({
+        userId: adminId,
+
+        sessionId: adminSessionId,
+
+        role: "ADMIN",
+
+        displayName: "AdminUser",
+      })
+
+      // 1. Initial query: myPlayerSkin returns null
+
+      const initMySkinRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `query { myPlayerSkin { id userId model imageUrl } }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const initMySkinJson = (await initMySkinRes.json()) as any
+
+      expect(initMySkinJson.errors).toBeUndefined()
+
+      expect(initMySkinJson.data.myPlayerSkin).toBeNull()
+
+      // 2. PLAYER requests upload ticket
+
+      const ticketRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `mutation { createPlayerSkinUpload { uploadUrl uploadToken } }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const ticketJson = (await ticketRes.json()) as any
+
+      expect(ticketJson.errors).toBeUndefined()
+
+      expect(ticketJson.data.createPlayerSkinUpload.uploadUrl).toContain(
+        "/media/player-skin/upload",
+      )
+
+      expect(ticketJson.data.createPlayerSkinUpload.uploadToken).toBeDefined()
+
+      const uploadToken = ticketJson.data.createPlayerSkinUpload.uploadToken
+
+      // 3. Unauthenticated ticket request fails
+
+      const unauthTicketRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: { "Content-Type": "application/json" },
+
+          body: JSON.stringify({
+            query: `mutation { createPlayerSkinUpload { uploadUrl uploadToken } }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const unauthTicketJson = (await unauthTicketRes.json()) as any
+      expect(unauthTicketJson.errors?.[0]?.extensions?.code).toBe("UNAUTHENTICATED")
+
+
+
+      // 4. Binary upload rejects missing/invalid headers and non-PNG
+
+      const noAuthUpload = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+
+          headers: {
+            "Content-Type": "image/png",
+
+            "X-Upload-Token": uploadToken,
+          },
+
+          body: createMockSkinPng(64, 64) as unknown as BodyInit,
+        }),
+
+        testEnv,
+      )
+
+      expect(noAuthUpload.status).toBe(401)
+
+      const wrongMimeUpload = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+
+          headers: {
+            "Content-Type": "image/jpeg",
+
+            Authorization: `Bearer ${playerToken}`,
+
+            "X-Upload-Token": uploadToken,
+          },
+
+          body: createMockSkinPng(64, 64) as unknown as BodyInit,
+        }),
+
+        testEnv,
+      )
+
+      expect(wrongMimeUpload.status).toBe(415)
+
+      // 5. Binary upload rejects invalid Minecraft texture dimensions (e.g. 50x50)
+
+      const invalidDimUpload = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+
+          headers: {
+            "Content-Type": "image/png",
+
+            Authorization: `Bearer ${playerToken}`,
+
+            "X-Upload-Token": uploadToken,
+          },
+
+          body: createMockSkinPng(50, 50) as unknown as BodyInit,
+        }),
+
+        testEnv,
+      )
+
+      expect(invalidDimUpload.status).toBe(400)
+
+      const invalidDimJson = (await invalidDimUpload.json()) as any
+
+      expect(invalidDimJson.error).toContain("Dimensiones")
+
+      // 6. Valid 64x64 skin upload succeeds and consumes token
+
+      const validSkinBytes = createMockSkinPng(64, 64)
+
+      const validUploadRes = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+
+          headers: {
+            "Content-Type": "image/png",
+
+            Authorization: `Bearer ${playerToken}`,
+
+            "X-Upload-Token": uploadToken,
+          },
+
+          body: validSkinBytes as unknown as BodyInit,
+        }),
+
+        testEnv,
+      )
+
+      expect(validUploadRes.status).toBe(201)
+
+      const mediaJson = (await validUploadRes.json()) as any
+
+      expect(mediaJson.id).toBeDefined()
+
+      const mediaId1 = mediaJson.id
+
+      // 7. Reusing same upload token fails with 409
+
+      const reuseUploadRes = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+
+          headers: {
+            "Content-Type": "image/png",
+
+            Authorization: `Bearer ${playerToken}`,
+
+            "X-Upload-Token": uploadToken,
+          },
+
+          body: validSkinBytes as unknown as BodyInit,
+        }),
+
+        testEnv,
+      )
+
+      expect(reuseUploadRes.status).toBe(409)
+
+      // 8. setMyPlayerSkin assigns custom skin to player
+
+      const setSkinRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `mutation SetSkin($input: SetPlayerSkinInput!) {
+              setMyPlayerSkin(input: $input) {
+                id
+                userId
+                model
+                imageUrl
+              }
+            }`,
+
+            variables: {
+              input: {
+                mediaId: mediaId1,
+
+                model: "CLASSIC",
+              },
+            },
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const setSkinJson = (await setSkinRes.json()) as any
+
+      expect(setSkinJson.errors).toBeUndefined()
+
+      expect(setSkinJson.data.setMyPlayerSkin.model).toBe("CLASSIC")
+
+      expect(setSkinJson.data.setMyPlayerSkin.imageUrl).toBe(
+        `/media/content/${mediaId1}`,
+      )
+
+      const playerSkinId = setSkinJson.data.setMyPlayerSkin.id
+
+      // 9. Query myPlayerSkin now returns the uploaded skin
+
+      const mySkinRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `query { myPlayerSkin { id userId model imageUrl } }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const mySkinJson = (await mySkinRes.json()) as any
+
+      expect(mySkinJson.errors).toBeUndefined()
+
+      expect(mySkinJson.data.myPlayerSkin.id).toBe(playerSkinId)
+
+      expect(mySkinJson.data.myPlayerSkin.model).toBe("CLASSIC")
+
+      // 10. Public skins query does NOT return player custom skins (Strict domain isolation)
+
+      const publicSkinsRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: { "Content-Type": "application/json" },
+
+          body: JSON.stringify({
+            query: `query { skins { items { id name } totalCount } }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const publicSkinsJson = (await publicSkinsRes.json()) as any
+
+      expect(publicSkinsJson.errors).toBeUndefined()
+
+      expect(publicSkinsJson.data.skins.totalCount).toBe(0)
+
+      // 11. Admin player skins listing returns player skin with userDisplayName
+
+      const adminListRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${adminToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `query { adminPlayerSkins { items { id userId userDisplayName model imageUrl } totalCount } }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const adminListJson = (await adminListRes.json()) as any
+
+      expect(adminListJson.errors).toBeUndefined()
+
+      expect(adminListJson.data.adminPlayerSkins.totalCount).toBe(1)
+
+      expect(
+        adminListJson.data.adminPlayerSkins.items[0]?.userDisplayName,
+      ).toBe("SteveMiner")
+
+      expect(adminListJson.data.adminPlayerSkins.items[0]?.model).toBe(
+        "CLASSIC",
+      )
+
+      // 12. Admin single player skin query
+
+      const adminSingleRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${adminToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `query GetSingle($id: ID!) { adminPlayerSkin(id: $id) { id userDisplayName model } }`,
+
+            variables: { id: playerSkinId },
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const adminSingleJson = (await adminSingleRes.json()) as any
+
+      expect(adminSingleJson.errors).toBeUndefined()
+
+      expect(adminSingleJson.data.adminPlayerSkin.userDisplayName).toBe(
+        "SteveMiner",
+      )
+
+      // 13. Admin updates player skin model (e.g. SLIM)
+
+      const adminUpdateRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${adminToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `mutation Update($id: ID!, $input: UpdateAdminPlayerSkinInput!) {
+              updateAdminPlayerSkin(id: $id, input: $input) { id model }
+            }`,
+
+            variables: { id: playerSkinId, input: { model: "SLIM" } },
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const adminUpdateJson = (await adminUpdateRes.json()) as any
+
+      expect(adminUpdateJson.errors).toBeUndefined()
+
+      expect(adminUpdateJson.data.updateAdminPlayerSkin.model).toBe("SLIM")
+
+      // 14. Safe Replacement: Upload a second skin and replace
+
+      const ticket2Res = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `mutation { createPlayerSkinUpload { uploadToken } }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const token2 = ((await ticket2Res.json()) as any).data
+        .createPlayerSkinUpload.uploadToken
+
+      const upload2Res = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+
+          headers: {
+            "Content-Type": "image/png",
+
+            Authorization: `Bearer ${playerToken}`,
+
+            "X-Upload-Token": token2,
+          },
+
+          body: createMockSkinPng(64, 32) as unknown as BodyInit, // Legacy 64x32 format
+        }),
+
+        testEnv,
+      )
+
+      expect(upload2Res.status).toBe(201)
+
+      const media2Json = (await upload2Res.json()) as any
+
+      const mediaId2 = media2Json.id
+
+      // Replace skin
+
+      const replaceRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `mutation SetSkin($input: SetPlayerSkinInput!) {
+              setMyPlayerSkin(input: $input) {
+                id
+                model
+                imageUrl
+              }
+            }`,
+
+            variables: {
+              input: {
+                mediaId: mediaId2,
+
+                model: "CLASSIC",
+              },
+            },
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const replaceJson = (await replaceRes.json()) as any
+
+      expect(replaceJson.data.setMyPlayerSkin.id).toBe(playerSkinId) // Replaces in-place
+
+      expect(replaceJson.data.setMyPlayerSkin.imageUrl).toContain(mediaId2)
+
+      // 15. Player deletes custom skin
+
+      const deleteRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `mutation { deleteMyPlayerSkin }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const deleteJson = (await deleteRes.json()) as any
+
+      expect(deleteJson.data.deleteMyPlayerSkin).toBe(true)
+
+      // Verify myPlayerSkin is null after deletion
+
+      const finalQuery = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `query { myPlayerSkin { id } }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const finalJson = (await finalQuery.json()) as any
+
+      expect(finalJson.data.myPlayerSkin).toBeNull()
+
+      // Idempotent delete returns true
+
+      const repeatDelete = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+
+            Authorization: `Bearer ${playerToken}`,
+          },
+
+          body: JSON.stringify({
+            query: `mutation { deleteMyPlayerSkin }`,
+          }),
+        }),
+
+        testEnv,
+      )
+
+      const repeatDeleteJson = (await repeatDelete.json()) as any
+
+      expect(repeatDeleteJson.data.deleteMyPlayerSkin).toBe(true)
+    })
   })
 })
-
-
-
-
-
-
-

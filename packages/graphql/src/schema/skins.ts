@@ -40,6 +40,44 @@ export const skinsTypeDefs = /* GraphQL */ `
     totalCount: Int!
   }
 
+  """
+  Personal custom skin belonging to an authenticated player
+  """
+  type PlayerSkin {
+    id: ID!
+    userId: ID!
+    model: SkinModel!
+    imageUrl: String!
+    createdAt: DateTime!
+    updatedAt: DateTime!
+  }
+
+
+  """
+  Administrative view of a player's personal skin - requires ADMIN role
+  """
+  type AdminPlayerSkin {
+    id: ID!
+    userId: ID!
+    userDisplayName: String!
+    model: SkinModel!
+    imageUrl: String!
+    createdAt: DateTime!
+    updatedAt: DateTime!
+  }
+
+  type AdminPlayerSkinEdge {
+    node: AdminPlayerSkin!
+    cursor: String!
+  }
+
+  type AdminPlayerSkinConnection {
+    edges: [AdminPlayerSkinEdge!]!
+    items: [AdminPlayerSkin!]!
+    pageInfo: PageInfo!
+    totalCount: Int!
+  }
+
   input CreateSkinInput {
     name: String!
     model: SkinModel
@@ -52,6 +90,16 @@ export const skinsTypeDefs = /* GraphQL */ `
     model: SkinModel
     mediaId: ID
     status: SkinStatus
+  }
+
+  input SetPlayerSkinInput {
+    mediaId: ID!
+    model: SkinModel!
+  }
+
+  input UpdateAdminPlayerSkinInput {
+    model: SkinModel
+    mediaId: ID
   }
 
   extend type Query {
@@ -73,6 +121,25 @@ export const skinsTypeDefs = /* GraphQL */ `
     Administrative lookup of a skin by ID - requires ADMIN role
     """
     adminSkin(id: ID!): Skin
+
+    """
+    Personal custom skin of the currently authenticated player - requires auth
+    """
+    myPlayerSkin: PlayerSkin
+
+    """
+    Administrative list of all player personal skins with optional search by player name - requires ADMIN role
+    """
+    adminPlayerSkins(
+      first: Int
+      after: String
+      search: String
+    ): AdminPlayerSkinConnection!
+
+    """
+    Administrative lookup of a player skin by ID - requires ADMIN role
+    """
+    adminPlayerSkin(id: ID!): AdminPlayerSkin
   }
 
   extend type Mutation {
@@ -90,5 +157,33 @@ export const skinsTypeDefs = /* GraphQL */ `
     Delete a skin - requires ADMIN role
     """
     deleteSkin(id: ID!): Boolean!
+
+    """
+    Request a single-use upload ticket for an authenticated player to upload their custom skin - requires auth
+    """
+    createPlayerSkinUpload: ContentMediaUploadPayload!
+
+    """
+    Set or replace the current authenticated player's personal custom skin - requires auth
+    """
+    setMyPlayerSkin(input: SetPlayerSkinInput!): PlayerSkin!
+
+    """
+    Delete the current authenticated player's personal custom skin - requires auth
+    """
+    deleteMyPlayerSkin: Boolean!
+
+    """
+    Update a player's custom skin model or texture - requires ADMIN role
+    """
+    updateAdminPlayerSkin(
+      id: ID!
+      input: UpdateAdminPlayerSkinInput!
+    ): AdminPlayerSkin!
+
+    """
+    Delete a player's custom skin - requires ADMIN role
+    """
+    deleteAdminPlayerSkin(id: ID!): Boolean!
   }
 `
