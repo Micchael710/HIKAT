@@ -64,13 +64,18 @@ export default function ServerConsoleView({
 
   const scrollToBottom = () => {
     if (terminalRef.current) {
-      terminalRef.current.scrollTo({
-        top: terminalRef.current.scrollHeight,
-        behavior: "smooth",
-      })
+      if (typeof terminalRef.current.scrollTo === "function") {
+        terminalRef.current.scrollTo({
+          top: terminalRef.current.scrollHeight,
+          behavior: "smooth",
+        })
+      } else {
+        terminalRef.current.scrollTop = terminalRef.current.scrollHeight
+      }
       setIsScrolledUp(false)
     }
   }
+
 
   const handleSendCommand = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()

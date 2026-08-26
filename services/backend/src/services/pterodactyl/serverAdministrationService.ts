@@ -211,17 +211,22 @@ export async function executeServerPowerAction(
     try {
       currentMetrics = await getServerStatus(env, client)
     } catch {
-      // If server details query fails, allow proceed or handle conservatively
-      currentMetrics = {
-        status: "UNKNOWN",
-        cpuPercent: 0,
-        memoryUsedBytes: 0,
-        diskUsedBytes: 0,
-        isSuspended: false,
-      }
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_STATUS_UNAVAILABLE,
+        "Failed to verify server status before executing power action",
+      )
     }
 
     const currentStatus = currentMetrics.status
+
+    if (currentStatus === "UNKNOWN" || currentStatus === "DISCONNECTED") {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_STATUS_UNAVAILABLE,
+        `Cannot execute power action when server status is ${currentStatus}`,
+      )
+    }
 
     if (currentStatus === "STARTING") {
       throw new ServerInfrastructureError(
@@ -256,6 +261,7 @@ export async function executeServerPowerAction(
     }
 
     let signal: "start" | "restart" | "stop"
+
     let targetStatus: ServerStatus
     let message: string
 

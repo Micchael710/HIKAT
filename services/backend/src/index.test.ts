@@ -4754,7 +4754,83 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           executeServerPowerAction(createServerEnv(), "STOP", adminId, stoppingClient),
         ).rejects.toThrow("El servidor se está apagando. Espera un momento.")
 
-        // 5. Valid actions execute successfully
+        // 5. If server is UNKNOWN or DISCONNECTED, power actions must be rejected without calling sendPowerAction
+        const unknownClient = createMockClientWithStatus("invalid_state")
+        const disconnectedClient = {
+          ...createMockClientWithStatus("running"),
+          getServerResources: async () => ({
+            object: "stats" as const,
+            attributes: {
+              current_state: "running" as any,
+              is_suspended: true,
+              resources: { cpu_absolute: 0, memory_bytes: 0, disk_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 0 },
+            },
+          }),
+        }
+
+        let powerActionCalled = false
+        const trackingUnknownClient = {
+          ...unknownClient,
+          sendPowerAction: async () => {
+            powerActionCalled = true
+          },
+        }
+        const trackingDisconnectedClient = {
+          ...disconnectedClient,
+          sendPowerAction: async () => {
+            powerActionCalled = true
+          },
+        }
+
+        // UNKNOWN rejections
+        powerActionCalled = false
+        await expect(executeServerPowerAction(createServerEnv(), "START", adminId, trackingUnknownClient)).rejects.toThrow(
+          "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
+        )
+        expect(powerActionCalled).toBe(false)
+
+        await expect(executeServerPowerAction(createServerEnv(), "STOP", adminId, trackingUnknownClient)).rejects.toThrow(
+          "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
+        )
+        expect(powerActionCalled).toBe(false)
+
+        await expect(executeServerPowerAction(createServerEnv(), "RESTART", adminId, trackingUnknownClient)).rejects.toThrow(
+          "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
+        )
+        expect(powerActionCalled).toBe(false)
+
+        // DISCONNECTED rejections
+        await expect(executeServerPowerAction(createServerEnv(), "START", adminId, trackingDisconnectedClient)).rejects.toThrow(
+          "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
+        )
+        expect(powerActionCalled).toBe(false)
+
+        await expect(executeServerPowerAction(createServerEnv(), "STOP", adminId, trackingDisconnectedClient)).rejects.toThrow(
+          "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
+        )
+        expect(powerActionCalled).toBe(false)
+
+        await expect(executeServerPowerAction(createServerEnv(), "RESTART", adminId, trackingDisconnectedClient)).rejects.toThrow(
+          "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
+        )
+        expect(powerActionCalled).toBe(false)
+
+        // getServerStatus() network / infrastructure failure rejection
+        const failingStatusClient = {
+          ...unknownClient,
+          getServerResources: async () => {
+            throw new Error("Network timeout / Pterodactyl offline")
+          },
+          sendPowerAction: async () => {
+            powerActionCalled = true
+          },
+        }
+        await expect(executeServerPowerAction(createServerEnv(), "START", adminId, failingStatusClient)).rejects.toThrow(
+          "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
+        )
+        expect(powerActionCalled).toBe(false)
+
+        // 6. Valid actions execute successfully
         const startRes = await executeServerPowerAction(createServerEnv(), "START", adminId, offlineClient)
         expect(startRes.success).toBe(true)
         expect(startRes.status).toBe("STARTING")
@@ -4770,6 +4846,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         expect(stopRes.status).toBe("STOPPING")
         expect(lastSignal).toBe("stop")
       })
+
 
       it("enforces distributed power lock concurrency rejection in D1", async () => {
         const { executeServerPowerAction } = await import("./services/pterodactyl/serverAdministrationService")

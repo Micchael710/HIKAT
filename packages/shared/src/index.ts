@@ -392,6 +392,7 @@ export type ServerErrorCode = typeof SERVER_ERROR_CODES[keyof typeof SERVER_ERRO
 export const SERVER_PUBLIC_MESSAGES = {
   SERVER_NOT_CONFIGURED: "El servidor todavía no está configurado.",
   SERVER_UNAVAILABLE: "No se pudo conectar con el servidor en este momento.",
+  SERVER_STATUS_UNAVAILABLE: "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
   SERVER_BUSY: "Hay otra acción en curso. Espera un momento.",
   SERVER_RATE_LIMITED: "Has realizado demasiadas acciones. Espera un momento.",
   COMMAND_RATE_LIMITED: "Has enviado demasiados comandos. Espera un momento.",
@@ -400,6 +401,7 @@ export const SERVER_PUBLIC_MESSAGES = {
   SERVER_IS_STARTING: "El servidor se está iniciando. Espera un momento.",
   SERVER_IS_STOPPING: "El servidor se está apagando. Espera un momento.",
 } as const
+
 
 export const SERVER_CONSOLE_TICKET_TTL_SECONDS = 45
 export const SERVER_POWER_LOCK_TTL_SECONDS = 30
