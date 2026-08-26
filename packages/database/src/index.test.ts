@@ -492,7 +492,9 @@ describe("@hikat/database schema and D1 operations", () => {
       "0003_content_core.sql",
       "0004_news_model_alignment.sql",
       "0005_server_administration_hardening.sql",
+      "0006_backoffice_core.sql",
     ])
+
 
     // Apply all migrations wrapped in transaction per D1 standard
     for (const file of sqlFiles) {
@@ -730,5 +732,91 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(rl?.count).toBe(3)
   })
 
+  it("supports skins, game releases, single published unique index, and project settings", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const now = new Date().toISOString()
+
+    // 1. Create User and Media
+    await db.insert(schema.users).values({
+      id: "admin-core",
+      role: "ADMIN",
+      displayName: "CoreAdmin",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.insert(schema.contentMedia).values({
+      id: "media-skin-1",
+      objectKey: "content/skin-1.png",
+      mediaType: "IMAGE",
+      mimeType: "image/png",
+      sizeBytes: 2048,
+      createdBy: "admin-core",
+      createdAt: now,
+    })
+
+    // 2. Insert Skin
+    await db.insert(schema.skins).values({
+      id: "skin-1",
+      name: "Alex Aventurero",
+      model: "SLIM",
+      mediaId: "media-skin-1",
+      status: "AVAILABLE",
+      createdBy: "admin-core",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const skin = await db.select().from(schema.skins).where(eq(schema.skins.id, "skin-1")).get()
+    expect(skin).toBeDefined()
+    expect(skin?.name).toBe("Alex Aventurero")
+    expect(skin?.model).toBe("SLIM")
+
+    // 3. Insert Game Releases
+    await db.insert(schema.gameReleases).values({
+      id: "rel-1",
+      version: "1.4.2",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: now,
+      createdBy: "admin-core",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: "file-1",
+      releaseId: "rel-1",
+      name: "JourneyMap",
+      logicalPath: "mods/journeymap-1.21.1.jar",
+      category: "MOD",
+      sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      sizeBytes: 1048576,
+      policy: "NO_MODIFICABLE",
+      objectKey: "game-files/mod-1",
+      createdAt: now,
+    })
+
+    const rel = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, "rel-1")).get()
+    expect(rel?.status).toBe("PUBLISHED")
+
+    // 4. Enforce exactly ONE PUBLISHED release at SQL level
+    expect(() => {
+      d1._sqlite
+        .prepare(
+          "INSERT INTO game_releases (id, version, minecraft_version, neoforge_version, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run("rel-2", "1.4.3", "1.21.1", "21.1.65", "PUBLISHED", "admin-core", now, now)
+    }).toThrow()
+
+    // 5. Test Project Settings singleton
+    const settings = await db.select().from(schema.projectSettings).where(eq(schema.projectSettings.id, "main")).get()
+    expect(settings).toBeDefined()
+    expect(settings?.projectName).toBe("HiKAT")
+    expect(settings?.serverIp).toBe("mc.hikat.org")
+  })
 })
+
 

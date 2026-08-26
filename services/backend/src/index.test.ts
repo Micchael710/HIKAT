@@ -4999,10 +4999,466 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         const resReused = await worker.fetch(reqValid, createServerEnv())
         expect(resReused.status).toBe(401)
       })
-
     })
   })
 
+  describe("HiKAT Back Office Core (Shard 06.5)", () => {
+    let coreAdminId: string
+    let coreAdminToken: string
+    let playerUserId: string
+    let playerUserToken: string
+    let mockR2: ReturnType<typeof createTestR2Bucket>
+
+    const createCoreEnv = (): Env => ({
+      DB: testD1 as unknown as D1Database,
+      ASSETS: mockR2 as unknown as R2Bucket,
+      AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+      AUTH_ISSUER: DEFAULT_AUTH_ISSUER,
+      PTERODACTYL_BASE_URL: "https://panel.test",
+      PTERODACTYL_API_KEY: "ptlc_test_key",
+      PTERODACTYL_SERVER_ID: "srv_test_uuid",
+      ENVIRONMENT: "test",
+    })
+
+    beforeEach(async () => {
+      mockR2 = createTestR2Bucket()
+
+      // Create Admin User & Session
+      coreAdminId = "admin-core-" + crypto.randomUUID()
+      const adminSessionId = "sess-admin-" + crypto.randomUUID()
+      await db.insert(users).values({
+        id: coreAdminId,
+        displayName: "Super Admin",
+        role: "ADMIN",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      await db.insert(sessions).values({
+        id: adminSessionId,
+        userId: coreAdminId,
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        createdAt: new Date().toISOString(),
+      })
+      coreAdminToken = await createTestAccessToken({
+        userId: coreAdminId,
+        sessionId: adminSessionId,
+        role: "ADMIN" as any,
+        displayName: "Super Admin",
+      })
+
+      // Create Player User & Session
+      playerUserId = "player-" + crypto.randomUUID()
+      const playerSessionId = "sess-player-" + crypto.randomUUID()
+      await db.insert(users).values({
+        id: playerUserId,
+        displayName: "Regular Player",
+        role: "PLAYER",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      await db.insert(sessions).values({
+        id: playerSessionId,
+        userId: playerUserId,
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        createdAt: new Date().toISOString(),
+      })
+      playerUserToken = await createTestAccessToken({
+        userId: playerUserId,
+        sessionId: playerSessionId,
+        role: "PLAYER" as any,
+        displayName: "Regular Player",
+      })
+    })
+
+    it("adminDashboard gracefully survives upstream server errors and returns D1 stats", async () => {
+      // Mock fetch failure (e.g. Pterodactyl DNS not found / offline)
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("DNS resolution failed"))
+
+      const query = `
+        query {
+          adminDashboard {
+            server { status }
+            news { publishedCount draftCount }
+            skins { totalCount availableCount }
+            game { publishedVersion pendingChangesCount }
+          }
+        }
+      `
+      const req = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({ query }),
+      })
+
+      const res = await worker.fetch(req, createCoreEnv())
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.errors).toBeUndefined()
+      expect(data.data.adminDashboard.server.status).toBe("UNKNOWN")
+      expect(data.data.adminDashboard.news).toBeDefined()
+      expect(data.data.adminDashboard.skins).toBeDefined()
+      expect(data.data.adminDashboard.game).toBeDefined()
+
+      fetchSpy.mockRestore()
+    })
+
+    it("handles full Skins lifecycle: upload texture, create, update, query and delete", async () => {
+      // 1. Upload valid 64x64 PNG skin texture to R2
+      const skinTexture = new Uint8Array(64)
+      skinTexture.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+      const view = new DataView(skinTexture.buffer)
+      view.setUint32(16, 64, false)
+      view.setUint32(20, 64, false)
+
+      const mediaId = "media-skin-" + crypto.randomUUID()
+      await db.insert(contentMedia).values({
+        id: mediaId,
+        objectKey: `content/${mediaId}.png`,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: skinTexture.byteLength,
+        createdBy: coreAdminId,
+        createdAt: new Date().toISOString(),
+      })
+      await mockR2.put(`content/${mediaId}.png`, skinTexture.buffer, {
+        httpMetadata: { contentType: "image/png" },
+      })
+
+      // 2. Create Skin mutation
+      const createMutation = `
+        mutation CreateSkin($input: CreateSkinInput!) {
+          createSkin(input: $input) {
+            id
+            name
+            model
+            imageUrl
+            status
+          }
+        }
+      `
+      const createReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({
+          query: createMutation,
+          variables: {
+            input: {
+              name: "Alex Aventurera",
+              model: "SLIM",
+              mediaId,
+              status: "AVAILABLE",
+            },
+          },
+        }),
+      })
+      const createRes = await worker.fetch(createReq, createCoreEnv())
+      const createData = (await createRes.json()) as any
+      expect(createData.errors).toBeUndefined()
+      const skinId = createData.data.createSkin.id
+      expect(skinId).toBeDefined()
+      expect(createData.data.createSkin.name).toBe("Alex Aventurera")
+      expect(createData.data.createSkin.model).toBe("SLIM")
+
+      // 3. Public catalog query
+      const publicQuery = `
+        query {
+          skins {
+            items { id name model imageUrl }
+            totalCount
+          }
+        }
+      `
+      const publicReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: publicQuery }),
+      })
+      const publicRes = await worker.fetch(publicReq, createCoreEnv())
+      const publicData = (await publicRes.json()) as any
+      expect(publicData.data.skins.totalCount).toBeGreaterThanOrEqual(1)
+      expect(publicData.data.skins.items.some((s: any) => s.id === skinId)).toBe(true)
+
+      // 4. Delete skin
+      const deleteMutation = `
+        mutation DeleteSkin($id: ID!) {
+          deleteSkin(id: $id)
+        }
+      `
+      const deleteReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({ query: deleteMutation, variables: { id: skinId } }),
+      })
+      const deleteRes = await worker.fetch(deleteReq, createCoreEnv())
+      const deleteData = (await deleteRes.json()) as any
+      expect(deleteData.data.deleteSkin).toBe(true)
+    })
+
+    it("enforces Game Releases draft cloning, atomic publish, single published constraint, and safe download", async () => {
+      // 1. Initial State: Prepare Draft
+      const prepMutation = `
+        mutation {
+          prepareGameDraft {
+            id
+            version
+            status
+            files { id }
+          }
+        }
+      `
+      const prepReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({ query: prepMutation }),
+      })
+      const prepRes = await worker.fetch(prepReq, createCoreEnv())
+      const prepData = (await prepRes.json()) as any
+      expect(prepData.errors).toBeUndefined()
+      expect(prepData.data.prepareGameDraft.status).toBe("DRAFT")
+
+      // 2. Request upload token for a mod
+      const uploadTokenMutation = `
+        mutation CreateUpload($input: CreateGameFileUploadInput!) {
+          createGameFileUpload(input: $input) {
+            uploadUrl
+            uploadToken
+            maxSizeBytes
+            expectedCategory
+          }
+        }
+      `
+      const tokenReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({
+          query: uploadTokenMutation,
+          variables: {
+            input: {
+              category: "MOD",
+              originalFilename: "journeymap-1.21.1-6.0.0.jar",
+              sizeBytes: 1024,
+            },
+          },
+        }),
+      })
+      const tokenRes = await worker.fetch(tokenReq, createCoreEnv())
+      const tokenData = (await tokenRes.json()) as any
+      const uploadToken = tokenData.data.createGameFileUpload.uploadToken
+      expect(uploadToken).toBeDefined()
+
+      // 3. Upload valid ZIP/JAR binary via PUT /game/files/upload
+      const jarBuffer = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04])
+      const uploadHttpReq = new Request("http://localhost/game/files/upload", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${coreAdminToken}`,
+          "X-Upload-Token": uploadToken,
+        },
+        body: jarBuffer,
+      })
+      const uploadHttpRes = await worker.fetch(uploadHttpReq, createCoreEnv())
+      expect(uploadHttpRes.status).toBe(200)
+      const uploadedInfo = (await uploadHttpRes.json()) as any
+      expect(uploadedInfo.sha256).toBeDefined()
+      expect(uploadedInfo.tokenHash).toBeDefined()
+
+      // 4. Attach uploaded file to draft via addGameFile mutation
+      const addFileMutation = `
+        mutation AddFile($input: AddGameFileInput!) {
+          addGameFile(input: $input) {
+            id
+            name
+            logicalPath
+            category
+            sha256
+            sizeBytes
+            policy
+          }
+        }
+      `
+      const addReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({
+          query: addFileMutation,
+          variables: {
+            input: {
+              name: "JourneyMap",
+              category: "MOD",
+              tokenHash: uploadedInfo.tokenHash,
+            },
+          },
+        }),
+      })
+      const addRes = await worker.fetch(addReq, createCoreEnv())
+      const addData = (await addRes.json()) as any
+      expect(addData.errors).toBeUndefined()
+      const fileId = addData.data.addGameFile.id
+      expect(addData.data.addGameFile.logicalPath).toBe("mods/journeymap-1.21.1-6.0.0.jar")
+      expect(addData.data.addGameFile.policy).toBe("NO_MODIFICABLE")
+
+      // 5. Verify that file CANNOT be downloaded publicly while in DRAFT status
+      const downloadDraftReq = new Request(`http://localhost/game/download/${fileId}`, {
+        method: "GET",
+      })
+      const downloadDraftRes = await worker.fetch(downloadDraftReq, createCoreEnv())
+      expect(downloadDraftRes.status).toBe(404)
+
+      // 6. Publish Game Release 1.4.2
+      const publishMutation = `
+        mutation Publish($input: PublishGameReleaseInput!) {
+          publishGameRelease(input: $input) {
+            id
+            version
+            status
+            files { id logicalPath }
+          }
+        }
+      `
+      const publishReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({
+          query: publishMutation,
+          variables: {
+            input: {
+              version: "1.4.2",
+              notes: "Actualización inicial de mods",
+            },
+          },
+        }),
+      })
+      const publishRes = await worker.fetch(publishReq, createCoreEnv())
+      const publishData = (await publishRes.json()) as any
+      expect(publishData.errors).toBeUndefined()
+      expect(publishData.data.publishGameRelease.status).toBe("PUBLISHED")
+      expect(publishData.data.publishGameRelease.version).toBe("1.4.2")
+
+      // 7. Verify file CAN now be downloaded publicly
+      const downloadPubRes = await worker.fetch(downloadDraftReq, createCoreEnv())
+      expect(downloadPubRes.status).toBe(200)
+      expect(downloadPubRes.headers.get("Cache-Control")).toContain("immutable")
+      expect(downloadPubRes.headers.get("Content-Disposition")).toContain("journeymap-1.21.1-6.0.0.jar")
+
+      // 8. Public PublishedModpack query contract verification
+      const modpackQuery = `
+        query {
+          publishedModpack {
+            version
+            minecraftVersion
+            neoForgeVersion
+            mandatory
+            clientFiles {
+              path
+              sha256
+              sizeBytes
+              downloadUrl
+              policy
+            }
+          }
+        }
+      `
+      const modpackReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: modpackQuery }),
+      })
+      const modpackRes = await worker.fetch(modpackReq, createCoreEnv())
+      const modpackData = (await modpackRes.json()) as any
+      expect(modpackData.errors).toBeUndefined()
+      const modpack = modpackData.data.publishedModpack
+      expect(modpack.version).toBe("1.4.2")
+      expect(modpack.mandatory).toBe(true)
+      expect(modpack.clientFiles.length).toBe(1)
+      expect(modpack.clientFiles[0].path).toBe("mods/journeymap-1.21.1-6.0.0.jar")
+      expect(modpack.clientFiles[0].downloadUrl).toBe(`/game/download/${fileId}`)
+      expect(modpack.clientFiles[0].policy).toBe("NO_MODIFICABLE")
+    })
+
+    it("manages typed project settings and provides public client configuration", async () => {
+      // 1. Query client configuration (public)
+      const clientConfigQuery = `
+        query {
+          clientConfiguration {
+            projectName
+            serverIp
+            serverPort
+            maintenanceEnabled
+            minRamGb
+            recommendedRamGb
+          }
+        }
+      `
+      const clientReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: clientConfigQuery }),
+      })
+      const clientRes = await worker.fetch(clientReq, createCoreEnv())
+      const clientData = (await clientRes.json()) as any
+      expect(clientData.errors).toBeUndefined()
+      expect(clientData.data.clientConfiguration.projectName).toBe("HiKAT")
+
+      // 2. Update Admin Settings
+      const updateMutation = `
+        mutation UpdateSettings($input: UpdateAdminSettingsInput!) {
+          updateAdminSettings(input: $input) {
+            projectName
+            serverIp
+            minRamGb
+            recommendedRamGb
+          }
+        }
+      `
+      const updateReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({
+          query: updateMutation,
+          variables: {
+            input: {
+              projectName: "HiKAT Official",
+              serverIp: "play.hikat.org",
+              minRamGb: 6,
+              recommendedRamGb: 12,
+            },
+          },
+        }),
+      })
+      const updateRes = await worker.fetch(updateReq, createCoreEnv())
+      const updateData = (await updateRes.json()) as any
+      expect(updateData.errors).toBeUndefined()
+      expect(updateData.data.updateAdminSettings.projectName).toBe("HiKAT Official")
+      expect(updateData.data.updateAdminSettings.serverIp).toBe("play.hikat.org")
+      expect(updateData.data.updateAdminSettings.recommendedRamGb).toBe(12)
+    })
+  })
 })
+
+
 
 

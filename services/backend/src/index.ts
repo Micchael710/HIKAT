@@ -22,35 +22,27 @@ import { getCorsHeaders, handleOptionsRequest } from "./cors"
 
 import { handleMediaUpload, handleMediaServe } from "./media/transport"
 import { handleConsoleWebSocket } from "./services/pterodactyl/consoleTransport"
-
+import { handleGameFileUpload, handleGameFileDownload } from "./services/game/gameStorageService"
 
 export * from "./types"
-
 export * from "./auth/verifier"
-
 export * from "./auth/session"
-
 export * from "./auth/guards"
-
 export * from "./context"
-
 export * from "./services/userService"
-
 export * from "./services/newsService"
-
 export * from "./services/mediaService"
-
+export * from "./services/dashboardService"
+export * from "./services/skinService"
+export * from "./services/game"
+export * from "./services/settingsService"
 export * from "./services/pterodactyl/types"
-
 export * from "./services/pterodactyl/pterodactylClient"
-
 export * from "./services/pterodactyl/serverAdministrationService"
-
 export * from "./services/pterodactyl/consoleTransport"
-
 export * from "./media/transport"
-
 export * from "./resolvers"
+
 
 
 const KNOWN_SAFE_CODES = [
@@ -177,7 +169,33 @@ export default {
       })
     }
 
+    // Binary Game File Upload Route: PUT /game/files/upload (Shard 06.5)
+    if (url.pathname === "/game/files/upload") {
+      if (request.method === "PUT") {
+        return handleGameFileUpload(request, env, db, context)
+      }
+      const corsHeaders = getCorsHeaders(request, env)
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    // Public Game File Download Route: GET /game/download/:fileId (Shard 06.5)
+    if (url.pathname.startsWith("/game/download/")) {
+      const fileId = url.pathname.slice("/game/download/".length)
+      if (request.method === "GET") {
+        return handleGameFileDownload(request, env, db, fileId)
+      }
+      const corsHeaders = getCorsHeaders(request, env)
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
     // GraphQL Endpoint
+
 
     const response = await yoga.fetch(request, context)
 

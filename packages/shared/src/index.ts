@@ -436,4 +436,245 @@ export function validateServerCommand(command: unknown): {
   return { valid: true, command: trimmed }
 }
 
+// --- HiKAT Back Office Core Constants & Validation Helpers (Shard 06.5) ---
+
+
+export const ALLOWED_SKIN_MODELS = ["CLASSIC", "SLIM"] as const
+export type SkinModel = typeof ALLOWED_SKIN_MODELS[number]
+
+export const ALLOWED_SKIN_STATUSES = ["AVAILABLE", "UNAVAILABLE"] as const
+export type SkinStatus = typeof ALLOWED_SKIN_STATUSES[number]
+
+export const MAX_SKIN_SIZE_BYTES = 1 * 1024 * 1024 // 1 MB
+
+export const ALLOWED_GAME_CATEGORIES = [
+  "MOD",
+  "RESOURCE_PACK",
+  "SHADER_PACK",
+  "KUBEJS",
+  "SCRIPT",
+] as const
+export type GameFileCategory = typeof ALLOWED_GAME_CATEGORIES[number]
+
+export const ALLOWED_RELEASE_STATUSES = [
+  "DRAFT",
+  "PUBLISHED",
+  "ARCHIVED",
+] as const
+export type GameReleaseStatus = typeof ALLOWED_RELEASE_STATUSES[number]
+
+export const ALLOWED_SYNC_POLICIES = [
+  "NO_MODIFICABLE",
+  "MODIFICABLE",
+] as const
+export type SyncPolicy = typeof ALLOWED_SYNC_POLICIES[number]
+
+export const MAX_GAME_FILE_SIZE_BYTES = 100 * 1024 * 1024 // 100 MB
+
+export const GAME_CATEGORY_DIRECTORIES: Record<GameFileCategory, string> = {
+  MOD: "mods",
+  RESOURCE_PACK: "resourcepacks",
+  SHADER_PACK: "shaderpacks",
+  KUBEJS: "kubejs",
+  SCRIPT: "scripts",
+}
+
+export const GAME_CATEGORY_DEFAULT_POLICIES: Record<
+  GameFileCategory,
+  SyncPolicy
+> = {
+  MOD: "NO_MODIFICABLE",
+  RESOURCE_PACK: "MODIFICABLE",
+  SHADER_PACK: "MODIFICABLE",
+  KUBEJS: "NO_MODIFICABLE",
+  SCRIPT: "NO_MODIFICABLE",
+}
+
+/**
+ * Validates PNG buffer header magic bytes and IHDR dimensions for Minecraft skins.
+ * Supported standard Minecraft skins: 64x64 or 64x32 (or valid HD multiples 128x128, etc.).
+ */
+export function validateMinecraftSkinTexture(
+  buffer: ArrayBuffer | Uint8Array,
+): { valid: boolean; width?: number; height?: number; error?: string } {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  if (bytes.length < 24) {
+    return { valid: false, error: "El archivo de skin es demasiado pequeño." }
+  }
+
+  // PNG Magic Bytes: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes[0] !== 0x89 ||
+    bytes[1] !== 0x50 ||
+    bytes[2] !== 0x4e ||
+    bytes[3] !== 0x47 ||
+    bytes[4] !== 0x0d ||
+    bytes[5] !== 0x0a ||
+    bytes[6] !== 0x1a ||
+    bytes[7] !== 0x0a
+  ) {
+    return {
+      valid: false,
+      error: "El archivo no es una imagen PNG válida.",
+    }
+  }
+
+  // Read IHDR Width (bytes 16-19) and Height (bytes 20-23) in big-endian
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const width = view.getUint32(16, false)
+  const height = view.getUint32(20, false)
+
+  // Minecraft standard dimensions: 64x64, 64x32, or power-of-two HD textures up to 1024x1024
+  const validDimensions =
+    (width === 64 && (height === 64 || height === 32)) ||
+    (width === 128 && (height === 128 || height === 64)) ||
+    (width === 256 && (height === 256 || height === 128)) ||
+    (width === 512 && (height === 512 || height === 256)) ||
+    (width === 1024 && (height === 1024 || height === 512))
+
+  if (!validDimensions) {
+    return {
+      valid: false,
+      width,
+      height,
+      error: `Dimensiones de skin no válidas (${width}x${height}). Debe ser 64x64 o 64x32 píxeles (o múltiplos HD).`,
+    }
+  }
+
+  return { valid: true, width, height }
+}
+
+/**
+ * Sanitizes a filename to prevent path traversal, control characters, and dangerous symbols.
+ */
+export function sanitizeGameFileName(filename: string): string {
+  if (typeof filename !== "string") return "file.jar"
+  // Strip paths, backslashes, null bytes, and traversal tokens
+  const base = filename
+    .replace(/^.*[\\/]/, "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/[/\\]/g, "")
+    .trim()
+
+
+  // Remove any leading periods to prevent hidden file traversal
+  const cleaned = base.replace(/^\.+/, "")
+  return cleaned || "file.jar"
+}
+
+/**
+ * Validates a game binary file buffer against category requirements.
+ * For JAR, RESOURCE_PACK, and SHADER_PACK, enforces standard ZIP/JAR header magic bytes (50 4B 03 04).
+ */
+export function validateGameFileBuffer(
+  buffer: ArrayBuffer | Uint8Array,
+  filename: string,
+  category: GameFileCategory,
+): { valid: boolean; error?: string } {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  if (bytes.length === 0) {
+    return { valid: false, error: "El archivo está vacío." }
+  }
+  if (bytes.length > MAX_GAME_FILE_SIZE_BYTES) {
+    return {
+      valid: false,
+      error: "El archivo supera el tamaño máximo permitido (100 MB).",
+    }
+  }
+
+  const cleanName = sanitizeGameFileName(filename).toLowerCase()
+
+  if (category === "MOD") {
+    if (!cleanName.endsWith(".jar")) {
+      return {
+        valid: false,
+        error: "Un mod debe tener extensión .jar.",
+      }
+    }
+    // Verify ZIP / JAR Magic Bytes (50 4B 03 04)
+    if (
+      bytes.length < 4 ||
+      bytes[0] !== 0x50 ||
+      bytes[1] !== 0x4b ||
+      bytes[2] !== 0x03 ||
+      bytes[3] !== 0x04
+    ) {
+      return {
+        valid: false,
+        error: "El archivo no es un archivo .jar o .zip válido.",
+      }
+    }
+  } else if (category === "RESOURCE_PACK" || category === "SHADER_PACK") {
+    if (!cleanName.endsWith(".zip")) {
+      return {
+        valid: false,
+        error: "El paquete debe tener extensión .zip.",
+      }
+    }
+    if (
+      bytes.length < 4 ||
+      bytes[0] !== 0x50 ||
+      bytes[1] !== 0x4b ||
+      bytes[2] !== 0x03 ||
+      bytes[3] !== 0x04
+    ) {
+      return {
+        valid: false,
+        error: "El archivo no es un archivo .zip válido.",
+      }
+    }
+  }
+
+  return { valid: true }
+}
+
+/**
+ * Resolves the logical path inside the Minecraft instance for a given category and filename.
+ */
+export function resolveGameLogicalPath(
+  category: GameFileCategory,
+  filename: string,
+): string {
+  const safeFilename = sanitizeGameFileName(filename)
+  const dir = GAME_CATEGORY_DIRECTORIES[category] || "mods"
+  return `${dir}/${safeFilename}`
+}
+
+/**
+ * Validates a semantic version string (e.g. 1.4.2).
+ */
+export function validateSemVer(version: string): boolean {
+  if (typeof version !== "string") return false
+  const trimmed = version.trim()
+  return /^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$/.test(trimmed)
+}
+
+/**
+ * Suggests the next patch version given a current SemVer string.
+ */
+export function suggestNextPatchVersion(currentVersion?: string | null): string {
+  if (!currentVersion || !validateSemVer(currentVersion)) {
+    return "1.0.0"
+  }
+  const cleanVersion = currentVersion.split("-")[0] || ""
+  const parts = cleanVersion.split(".").map(Number)
+  const major = parts[0]
+  const minor = parts[1]
+  const patch = parts[2]
+  if (
+    parts.length === 3 &&
+    major !== undefined &&
+    minor !== undefined &&
+    patch !== undefined &&
+    !isNaN(major) &&
+    !isNaN(minor) &&
+    !isNaN(patch)
+  ) {
+    return `${major}.${minor}.${patch + 1}`
+  }
+  return "1.0.0"
+}
+
+
+
 

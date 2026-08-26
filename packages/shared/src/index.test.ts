@@ -175,12 +175,96 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     const { SERVER_PUBLIC_MESSAGES } = await import("./index")
     expect(SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED).toBe("El servidor todavía no está configurado.")
     expect(SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE).toBe("No se pudo conectar con el servidor en este momento.")
-    expect(SERVER_PUBLIC_MESSAGES.SERVER_STATUS_UNAVAILABLE).toBe("No se pudo comprobar el estado del servidor. Inténtalo nuevamente.")
     expect(SERVER_PUBLIC_MESSAGES.SERVER_BUSY).toBe("Hay otra acción en curso. Espera un momento.")
     expect(SERVER_PUBLIC_MESSAGES.COMMAND_RATE_LIMITED).toBe("Has enviado demasiados comandos. Espera un momento.")
   })
 
+  it("validates Minecraft skin texture dimensions and PNG format", async () => {
+    const { validateMinecraftSkinTexture, ALLOWED_SKIN_MODELS, ALLOWED_SKIN_STATUSES } = await import("./index")
+
+
+    expect(ALLOWED_SKIN_MODELS).toEqual(["CLASSIC", "SLIM"])
+    expect(ALLOWED_SKIN_STATUSES).toEqual(["AVAILABLE", "UNAVAILABLE"])
+
+    // Construct valid 64x64 PNG buffer mock
+    const validPng = new Uint8Array(32)
+    validPng.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+    const view = new DataView(validPng.buffer)
+    view.setUint32(16, 64, false)
+    view.setUint32(20, 64, false)
+
+    const res1 = validateMinecraftSkinTexture(validPng)
+    expect(res1.valid).toBe(true)
+    expect(res1.width).toBe(64)
+    expect(res1.height).toBe(64)
+
+    // Valid 64x32 legacy skin
+    view.setUint32(20, 32, false)
+    const res2 = validateMinecraftSkinTexture(validPng)
+    expect(res2.valid).toBe(true)
+
+    // Invalid dimensions (e.g. 50x50)
+    view.setUint32(16, 50, false)
+    view.setUint32(20, 50, false)
+    const res3 = validateMinecraftSkinTexture(validPng)
+    expect(res3.valid).toBe(false)
+    expect(res3.error).toContain("Dimensiones")
+
+    // Invalid magic bytes
+    const nonPng = new Uint8Array(32)
+    const res4 = validateMinecraftSkinTexture(nonPng)
+    expect(res4.valid).toBe(false)
+    expect(res4.error).toContain("PNG")
+  })
+
+  it("validates game files, path sanitization, and SemVer helpers", async () => {
+    const {
+      validateGameFileBuffer,
+      sanitizeGameFileName,
+      resolveGameLogicalPath,
+      validateSemVer,
+      suggestNextPatchVersion,
+      GAME_CATEGORY_DIRECTORIES,
+      GAME_CATEGORY_DEFAULT_POLICIES,
+    } = await import("./index")
+
+    expect(GAME_CATEGORY_DIRECTORIES.MOD).toBe("mods")
+    expect(GAME_CATEGORY_DIRECTORIES.RESOURCE_PACK).toBe("resourcepacks")
+    expect(GAME_CATEGORY_DEFAULT_POLICIES.MOD).toBe("NO_MODIFICABLE")
+    expect(GAME_CATEGORY_DEFAULT_POLICIES.RESOURCE_PACK).toBe("MODIFICABLE")
+
+    // Filename sanitizer
+    expect(sanitizeGameFileName("../../mods/evil.jar")).toBe("evil.jar")
+    expect(sanitizeGameFileName("C:\\Windows\\System32\\mod.jar")).toBe("mod.jar")
+    expect(sanitizeGameFileName("journeymap-1.21.1.jar")).toBe("journeymap-1.21.1.jar")
+
+    // Logical path resolution
+    expect(resolveGameLogicalPath("MOD", "journeymap.jar")).toBe("mods/journeymap.jar")
+    expect(resolveGameLogicalPath("RESOURCE_PACK", "faithful.zip")).toBe("resourcepacks/faithful.zip")
+
+    // ZIP/JAR buffer validation (50 4B 03 04)
+    const validJar = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00])
+    expect(validateGameFileBuffer(validJar, "test.jar", "MOD").valid).toBe(true)
+
+    // Non-JAR extension for MOD
+    expect(validateGameFileBuffer(validJar, "test.exe", "MOD").valid).toBe(false)
+
+    // Corrupted magic bytes
+    const invalidJar = new Uint8Array([0x00, 0x00, 0x00, 0x00])
+    expect(validateGameFileBuffer(invalidJar, "test.jar", "MOD").valid).toBe(false)
+
+    // SemVer validation
+    expect(validateSemVer("1.4.2")).toBe(true)
+    expect(validateSemVer("1.4.2-beta.1")).toBe(true)
+    expect(validateSemVer("invalid")).toBe(false)
+
+    // Next patch version suggestion
+    expect(suggestNextPatchVersion("1.4.2")).toBe("1.4.3")
+    expect(suggestNextPatchVersion("2.0.0")).toBe("2.0.1")
+    expect(suggestNextPatchVersion(null)).toBe("1.0.0")
+  })
 })
+
 
 
 

@@ -7,14 +7,10 @@ import BackofficeHeader from "./components/layout/BackofficeHeader"
 import PlaceholderView from "./components/layout/PlaceholderView"
 import NewsListView from "./components/news/NewsListView"
 import ServerOverviewView from "./components/server/ServerOverviewView"
-
-import {
-  IconDashboard,
-  IconShirt,
-  IconServer,
-  IconGamepad,
-  IconSettings,
-} from "./theme/icons"
+import DashboardView from "./components/dashboard/DashboardView"
+import SkinsView from "./components/skins/SkinsView"
+import GameView from "./components/game/GameView"
+import SettingsView from "./components/settings/SettingsView"
 
 function BackofficeShell({
   theme,
@@ -24,7 +20,7 @@ function BackofficeShell({
   setTheme: (t: ThemeMode) => void
 }) {
   const { user, isAuthenticated, logout } = useAuth()
-  const [section, setSection] = useState<BackofficeSection>("news")
+  const [section, setSection] = useState<BackofficeSection>("dashboard")
   const isDark = theme === "dark"
 
   // If not authenticated, show Login View
@@ -106,48 +102,19 @@ function BackofficeShell({
         />
 
         {/* View Router */}
-        <main style={{ flex: 1, height: "calc(100vh - 64px)", overflow: "hidden", position: "relative" }}>
+        <main style={{ flex: 1, height: "calc(100vh - 64px)", overflowY: "auto", position: "relative" }}>
+          {section === "dashboard" && <DashboardView theme={theme} onNavigate={setSection} />}
           {section === "news" && <NewsListView theme={theme} />}
-
-          {section === "dashboard" && (
-            <PlaceholderView
-              title="Dashboard"
-              icon={<IconDashboard size={36} />}
-              theme={theme}
-            />
-          )}
-
-          {section === "skins" && (
-            <PlaceholderView
-              title="Skins"
-              icon={<IconShirt size={36} />}
-              theme={theme}
-            />
-          )}
-
+          {section === "skins" && <SkinsView theme={theme} />}
           {section === "server" && <ServerOverviewView theme={theme} />}
-
-
-          {section === "game" && (
-            <PlaceholderView
-              title="Juego"
-              icon={<IconGamepad size={36} />}
-              theme={theme}
-            />
-          )}
-
-          {section === "settings" && (
-            <PlaceholderView
-              title="Ajustes"
-              icon={<IconSettings size={36} />}
-              theme={theme}
-            />
-          )}
+          {section === "game" && <GameView theme={theme} />}
+          {section === "settings" && <SettingsView theme={theme} />}
         </main>
       </div>
     </div>
   )
 }
+
 
 export default function App() {
   const [theme, setThemeState] = useState<ThemeMode>(() => {

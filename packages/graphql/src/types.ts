@@ -136,3 +136,205 @@ export interface CreateContentMediaUploadInputGql {
   mimeType: string
   sizeBytes: number
 }
+
+// --- Dashboard Types (Shard 06.5) ---
+
+export interface AdminDashboardServerSummaryGql {
+  status: ServerStatusGql
+}
+
+export interface AdminDashboardNewsSummaryGql {
+  publishedCount: number
+  draftCount: number
+}
+
+export interface AdminDashboardSkinsSummaryGql {
+  totalCount: number
+  availableCount: number
+}
+
+export interface AdminDashboardGameSummaryGql {
+  publishedVersion?: string | null
+  publishedAt?: string | null
+  pendingChangesCount: number
+}
+
+export interface AdminDashboardSummaryGql {
+  server: AdminDashboardServerSummaryGql
+  news: AdminDashboardNewsSummaryGql
+  skins: AdminDashboardSkinsSummaryGql
+  game: AdminDashboardGameSummaryGql
+}
+
+// --- Skin Types (Shard 06.5) ---
+
+export type SkinModelGql = "CLASSIC" | "SLIM"
+export type SkinStatusGql = "AVAILABLE" | "UNAVAILABLE"
+
+export interface SkinGql {
+  id: string
+  name: string
+  model: SkinModelGql
+  imageUrl: string
+  status: SkinStatusGql
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SkinEdgeGql {
+  node: SkinGql
+  cursor: string
+}
+
+export interface SkinConnectionGql {
+  edges: SkinEdgeGql[]
+  items: SkinGql[]
+  pageInfo: PageInfoGql
+  totalCount: number
+}
+
+export interface CreateSkinInputGql {
+  name: string
+  model?: SkinModelGql | null
+  mediaId: string
+  status?: SkinStatusGql | null
+}
+
+export interface UpdateSkinInputGql {
+  name?: string | null
+  model?: SkinModelGql | null
+  mediaId?: string | null
+  status?: SkinStatusGql | null
+}
+
+// --- Game & Launcher Types (Shard 06.5) ---
+
+export type GameFileCategoryGql =
+  | "MOD"
+  | "RESOURCE_PACK"
+  | "SHADER_PACK"
+  | "KUBEJS"
+  | "SCRIPT"
+
+export type GameReleaseStatusGql = "DRAFT" | "PUBLISHED" | "ARCHIVED"
+export type SyncPolicyGql = "NO_MODIFICABLE" | "MODIFICABLE"
+
+export interface ClientFileGql {
+  path: string
+  sha256: string
+  sizeBytes: number
+  downloadUrl: string
+  policy: SyncPolicyGql
+}
+
+export interface PublishedModpackGql {
+  version: string
+  minecraftVersion: string
+  neoForgeVersion: string
+  mandatory: boolean
+  clientFiles: ClientFileGql[]
+}
+
+export interface AdminGameFileGql {
+  id: string
+  name: string
+  logicalPath: string
+  category: GameFileCategoryGql
+  sha256: string
+  sizeBytes: number
+  policy: SyncPolicyGql
+  createdAt: string
+}
+
+export interface GameReleaseGql {
+  id: string
+  version: string
+  minecraftVersion: string
+  neoForgeVersion: string
+  status: GameReleaseStatusGql
+  notes?: string | null
+  publishedAt?: string | null
+  files: AdminGameFileGql[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminGameOverviewGql {
+  publishedRelease?: GameReleaseGql | null
+  draftRelease?: GameReleaseGql | null
+  pendingChangesCount: number
+}
+
+export interface GameFileUploadPayloadGql {
+  uploadUrl: string
+  uploadToken: string
+  expiresAt: string
+  maxSizeBytes: number
+  expectedCategory: GameFileCategoryGql
+}
+
+export interface CreateGameFileUploadInputGql {
+  category: GameFileCategoryGql
+  originalFilename: string
+  sizeBytes: number
+}
+
+export interface AddGameFileInputGql {
+  name: string
+  category?: GameFileCategoryGql | null
+  tokenHash: string
+}
+
+export interface UpdateGameFileInputGql {
+  name?: string | null
+  category?: GameFileCategoryGql | null
+}
+
+export interface PrepareGameDraftInputGql {
+  baseReleaseId?: string | null
+}
+
+export interface PublishGameReleaseInputGql {
+  version: string
+  notes?: string | null
+}
+
+// --- Settings Types (Shard 06.5) ---
+
+export interface AdminSettingsGql {
+  projectName: string
+  maintenanceEnabled: boolean
+  maintenanceMessage: string
+  serverIp: string
+  serverPort: number
+  discordUrl?: string | null
+  websiteUrl?: string | null
+  minRamGb: number
+  recommendedRamGb: number
+  updatedAt: string
+}
+
+export interface ClientConfigurationGql {
+  projectName: string
+  serverIp: string
+  serverPort: number
+  discordUrl?: string | null
+  websiteUrl?: string | null
+  maintenanceEnabled: boolean
+  maintenanceMessage?: string | null
+  minRamGb: number
+  recommendedRamGb: number
+}
+
+export interface UpdateAdminSettingsInputGql {
+  projectName?: string | null
+  maintenanceEnabled?: boolean | null
+  maintenanceMessage?: string | null
+  serverIp?: string | null
+  serverPort?: number | null
+  discordUrl?: string | null
+  websiteUrl?: string | null
+  minRamGb?: number | null
+  recommendedRamGb?: number | null
+}
+

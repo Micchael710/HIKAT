@@ -405,4 +405,391 @@ export const serverApi = {
   },
 }
 
+// --- Dashboard API Facade (Shard 06.5) ---
+
+export const dashboardApi = {
+  async getAdminDashboard(): Promise<import("../types").AdminDashboardSummary> {
+    const query = /* GraphQL */ `
+      query AdminDashboard {
+        adminDashboard {
+          server {
+            status
+          }
+          news {
+            publishedCount
+            draftCount
+          }
+          skins {
+            totalCount
+            availableCount
+          }
+          game {
+            publishedVersion
+            publishedAt
+            pendingChangesCount
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminDashboard: import("../types").AdminDashboardSummary }>(query)
+    return data.adminDashboard
+  },
+}
+
+// --- Skins API Facade (Shard 06.5) ---
+
+export const skinsApi = {
+  async getAdminSkins(params?: { status?: string | null }): Promise<import("../types").SkinConnection> {
+    const query = /* GraphQL */ `
+      query AdminSkins($status: SkinStatus) {
+        adminSkins(status: $status) {
+          items {
+            id
+            name
+            model
+            imageUrl
+            status
+            createdAt
+            updatedAt
+          }
+          totalCount
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminSkins: import("../types").SkinConnection }>(query, {
+      status: params?.status === "ALL" ? null : params?.status,
+    })
+    return data.adminSkins
+  },
+
+  async createSkin(input: {
+    name: string
+    model?: string
+    mediaId: string
+    status?: string
+  }): Promise<import("../types").SkinItem> {
+    const mutation = /* GraphQL */ `
+      mutation CreateSkin($input: CreateSkinInput!) {
+        createSkin(input: $input) {
+          id
+          name
+          model
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ createSkin: import("../types").SkinItem }>(mutation, { input })
+    return data.createSkin
+  },
+
+  async updateSkin(
+    id: string,
+    input: { name?: string; model?: string; mediaId?: string; status?: string },
+  ): Promise<import("../types").SkinItem> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateSkin($id: ID!, $input: UpdateSkinInput!) {
+        updateSkin(id: $id, input: $input) {
+          id
+          name
+          model
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ updateSkin: import("../types").SkinItem }>(mutation, { id, input })
+    return data.updateSkin
+  },
+
+  async deleteSkin(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteSkin($id: ID!) {
+        deleteSkin(id: $id)
+      }
+    `
+    const data = await executeGraphQL<{ deleteSkin: boolean }>(mutation, { id })
+    return data.deleteSkin
+  },
+}
+
+// --- Game & Updates API Facade (Shard 06.5) ---
+
+export const gameApi = {
+  async getAdminGameOverview(): Promise<import("../types").AdminGameOverview> {
+    const query = /* GraphQL */ `
+      query AdminGameOverview {
+        adminGameOverview {
+          publishedRelease {
+            id
+            version
+            minecraftVersion
+            neoForgeVersion
+            status
+            notes
+            publishedAt
+            files {
+              id
+              name
+              logicalPath
+              category
+              sha256
+              sizeBytes
+              policy
+              createdAt
+            }
+            createdAt
+            updatedAt
+          }
+          draftRelease {
+            id
+            version
+            minecraftVersion
+            neoForgeVersion
+            status
+            notes
+            publishedAt
+            files {
+              id
+              name
+              logicalPath
+              category
+              sha256
+              sizeBytes
+              policy
+              createdAt
+            }
+            createdAt
+            updatedAt
+          }
+          pendingChangesCount
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminGameOverview: import("../types").AdminGameOverview }>(query)
+    return data.adminGameOverview
+  },
+
+  async prepareGameDraft(): Promise<import("../types").GameRelease> {
+    const mutation = /* GraphQL */ `
+      mutation PrepareGameDraft {
+        prepareGameDraft {
+          id
+          version
+          status
+          files {
+            id
+            name
+            logicalPath
+            category
+            sha256
+            sizeBytes
+            policy
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ prepareGameDraft: import("../types").GameRelease }>(mutation)
+    return data.prepareGameDraft
+  },
+
+  async discardGameDraft(): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DiscardGameDraft {
+        discardGameDraft
+      }
+    `
+    const data = await executeGraphQL<{ discardGameDraft: boolean }>(mutation)
+    return data.discardGameDraft
+  },
+
+  async createGameFileUpload(input: {
+    category: string
+    originalFilename: string
+    sizeBytes: number
+  }): Promise<{
+    uploadUrl: string
+    uploadToken: string
+    maxSizeBytes: number
+    expectedCategory: string
+  }> {
+    const mutation = /* GraphQL */ `
+      mutation CreateGameFileUpload($input: CreateGameFileUploadInput!) {
+        createGameFileUpload(input: $input) {
+          uploadUrl
+          uploadToken
+          maxSizeBytes
+          expectedCategory
+        }
+      }
+    `
+    const data = await executeGraphQL<{ createGameFileUpload: any }>(mutation, { input })
+    return data.createGameFileUpload
+  },
+
+  async uploadGameBinary(
+    file: File,
+    uploadUrl: string,
+    uploadToken: string,
+  ): Promise<{ sha256: string; tokenHash: string }> {
+    const token = authService.getAccessToken()
+    const targetUrl = uploadUrl.startsWith("http") ? uploadUrl : `${BACKEND_URL}${uploadUrl}`
+
+    const res = await fetch(targetUrl, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Upload-Token": uploadToken,
+      },
+      body: file,
+    })
+
+    if (!res.ok) {
+      let errMessage = "Error al subir el archivo de juego."
+      try {
+        const json = await res.json()
+        if (json.error) errMessage = json.error
+      } catch {}
+      throw new Error(errMessage)
+    }
+
+    return res.json()
+  },
+
+  async addGameFile(input: {
+    name: string
+    category?: string
+    tokenHash: string
+  }): Promise<import("../types").AdminGameFile> {
+    const mutation = /* GraphQL */ `
+      mutation AddGameFile($input: AddGameFileInput!) {
+        addGameFile(input: $input) {
+          id
+          name
+          logicalPath
+          category
+          sha256
+          sizeBytes
+          policy
+          createdAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ addGameFile: import("../types").AdminGameFile }>(mutation, { input })
+    return data.addGameFile
+  },
+
+  async updateGameFile(
+    id: string,
+    input: { name?: string; category?: string },
+  ): Promise<import("../types").AdminGameFile> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateGameFile($id: ID!, $input: UpdateGameFileInput!) {
+        updateGameFile(id: $id, input: $input) {
+          id
+          name
+          logicalPath
+          category
+          sha256
+          sizeBytes
+          policy
+          createdAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ updateGameFile: import("../types").AdminGameFile }>(mutation, { id, input })
+    return data.updateGameFile
+  },
+
+  async removeGameFile(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation RemoveGameFile($id: ID!) {
+        removeGameFile(id: $id)
+      }
+    `
+    const data = await executeGraphQL<{ removeGameFile: boolean }>(mutation, { id })
+    return data.removeGameFile
+  },
+
+  async publishGameRelease(input: {
+    version: string
+    notes?: string
+  }): Promise<import("../types").GameRelease> {
+    const mutation = /* GraphQL */ `
+      mutation PublishGameRelease($input: PublishGameReleaseInput!) {
+        publishGameRelease(input: $input) {
+          id
+          version
+          status
+          notes
+          publishedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ publishGameRelease: import("../types").GameRelease }>(mutation, { input })
+    return data.publishGameRelease
+  },
+}
+
+// --- Settings API Facade (Shard 06.5) ---
+
+export const settingsApi = {
+  async getAdminSettings(): Promise<import("../types").AdminSettings> {
+    const query = /* GraphQL */ `
+      query AdminSettings {
+        adminSettings {
+          projectName
+          maintenanceEnabled
+          maintenanceMessage
+          serverIp
+          serverPort
+          discordUrl
+          websiteUrl
+          minRamGb
+          recommendedRamGb
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminSettings: import("../types").AdminSettings }>(query)
+    return data.adminSettings
+  },
+
+  async updateAdminSettings(input: {
+    projectName?: string
+    maintenanceEnabled?: boolean
+    maintenanceMessage?: string
+    serverIp?: string
+    serverPort?: number
+    discordUrl?: string
+    websiteUrl?: string
+    minRamGb?: number
+    recommendedRamGb?: number
+  }): Promise<import("../types").AdminSettings> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateAdminSettings($input: UpdateAdminSettingsInput!) {
+        updateAdminSettings(input: $input) {
+          projectName
+          maintenanceEnabled
+          maintenanceMessage
+          serverIp
+          serverPort
+          discordUrl
+          websiteUrl
+          minRamGb
+          recommendedRamGb
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ updateAdminSettings: import("../types").AdminSettings }>(mutation, { input })
+    return data.updateAdminSettings
+  },
+}
+
+
 

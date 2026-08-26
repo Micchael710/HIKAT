@@ -89,3 +89,102 @@ export interface AuthState {
   error: string | null
 }
 
+// --- Dashboard Types (Shard 06.5) ---
+
+export interface AdminDashboardSummary {
+  server: {
+    status: ServerStatus
+  }
+  news: {
+    publishedCount: number
+    draftCount: number
+  }
+  skins: {
+    totalCount: number
+    availableCount: number
+  }
+  game: {
+    publishedVersion?: string | null
+    publishedAt?: string | null
+    pendingChangesCount: number
+  }
+}
+
+// --- Skin Types (Shard 06.5) ---
+
+export type SkinModel = "CLASSIC" | "SLIM"
+export type SkinStatus = "AVAILABLE" | "UNAVAILABLE"
+
+export interface SkinItem {
+  id: string
+  name: string
+  model: SkinModel
+  imageUrl: string
+  status: SkinStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SkinConnection {
+  items: SkinItem[]
+  totalCount: number
+}
+
+// --- Game & Modpack Types (Shard 06.5) ---
+
+export type GameFileCategory =
+  | "MOD"
+  | "RESOURCE_PACK"
+  | "SHADER_PACK"
+  | "KUBEJS"
+  | "SCRIPT"
+
+export type GameReleaseStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED"
+export type SyncPolicy = "NO_MODIFICABLE" | "MODIFICABLE"
+
+export interface AdminGameFile {
+  id: string
+  name: string
+  logicalPath: string
+  category: GameFileCategory
+  sha256: string
+  sizeBytes: number
+  policy: SyncPolicy
+  createdAt: string
+}
+
+export interface GameRelease {
+  id: string
+  version: string
+  minecraftVersion: string
+  neoForgeVersion: string
+  status: GameReleaseStatus
+  notes?: string | null
+  publishedAt?: string | null
+  files: AdminGameFile[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminGameOverview {
+  publishedRelease?: GameRelease | null
+  draftRelease?: GameRelease | null
+  pendingChangesCount: number
+}
+
+// --- Settings Types (Shard 06.5) ---
+
+export interface AdminSettings {
+  projectName: string
+  maintenanceEnabled: boolean
+  maintenanceMessage: string
+  serverIp: string
+  serverPort: number
+  discordUrl?: string | null
+  websiteUrl?: string | null
+  minRamGb: number
+  recommendedRamGb: number
+  updatedAt: string
+}
+
+

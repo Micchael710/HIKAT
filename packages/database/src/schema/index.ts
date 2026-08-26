@@ -12,3 +12,9 @@ export * from "./content"
 
 export * from "./serverAdmin"
 
+export * from "./skins"
+
+export * from "./game"
+
+export * from "./settings"
+

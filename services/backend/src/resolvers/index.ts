@@ -18,6 +18,26 @@ import type {
   ServerPowerActionResultGql,
   ServerCommandResultGql,
   ServerConsoleTicketPayloadGql,
+  AdminDashboardSummaryGql,
+  SkinGql,
+  SkinConnectionGql,
+  SkinStatusGql,
+  CreateSkinInputGql,
+  UpdateSkinInputGql,
+  PublishedModpackGql,
+  AdminGameOverviewGql,
+  AdminGameFileGql,
+  GameReleaseGql,
+  GameFileUploadPayloadGql,
+  CreateGameFileUploadInputGql,
+  AddGameFileInputGql,
+  UpdateGameFileInputGql,
+  PrepareGameDraftInputGql,
+  PublishGameReleaseInputGql,
+  AdminSettingsGql,
+  ClientConfigurationGql,
+  UpdateAdminSettingsInputGql,
+  GameFileCategoryGql,
 } from "@hikat/graphql"
 import {
   HIKAT_VERSION,
@@ -45,8 +65,35 @@ import {
   executeServerCommand,
   createConsoleTicket,
 } from "../services/pterodactyl/serverAdministrationService"
+import { getAdminDashboard } from "../services/dashboardService"
+import {
+  getAdminSkins,
+  getPublicSkins,
+  getSkinById,
+  createSkin,
+  updateSkin,
+  deleteSkin,
+} from "../services/skinService"
+import {
+  getPublishedModpack,
+  getAdminGameOverview,
+  prepareGameDraft,
+  discardGameDraft,
+  publishGameRelease,
+  getAdminGameFiles,
+  createGameFileUploadToken,
+  addGameFile,
+  updateGameFile,
+  removeGameFile,
+} from "../services/game"
+import {
+  getAdminSettings,
+  getClientConfiguration,
+  updateAdminSettings,
+} from "../services/settingsService"
 
 import type { BackendGraphQLContext } from "../types"
+
 
 
 export const resolvers = {
@@ -191,7 +238,126 @@ export const resolvers = {
       requireAdmin(context)
       return getServerStatus(context.env)
     },
+
+
+    // --- Dashboard Query (Require ADMIN - Shard 06.5) ---
+
+    adminDashboard: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<AdminDashboardSummaryGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminDashboard(context.db, context.env)
+    },
+
+    // --- Skins Queries (Shard 06.5) ---
+
+    skins: async (
+      _parent: unknown,
+      args: { first?: number | null; after?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<SkinConnectionGql> => {
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getPublicSkins(context.db, context.env, args)
+    },
+
+    adminSkins: async (
+      _parent: unknown,
+      args: {
+        first?: number | null
+        after?: string | null
+        status?: SkinStatusGql | null
+      },
+      context: BackendGraphQLContext,
+    ): Promise<SkinConnectionGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminSkins(context.db, context.env, args)
+    },
+
+    adminSkin: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<SkinGql | null> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getSkinById(context.db, args.id)
+    },
+
+    // --- Game & Launcher Queries (Shard 06.5) ---
+
+    publishedModpack: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<PublishedModpackGql | null> => {
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getPublishedModpack(context.db, context.env)
+    },
+
+    adminGameOverview: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameOverviewGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminGameOverview(context.db)
+    },
+
+    adminGameFiles: async (
+      _parent: unknown,
+      args: { releaseId?: string | null; category?: GameFileCategoryGql | null },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql[]> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminGameFiles(context.db, args.releaseId, args.category)
+    },
+
+    // --- Settings Queries (Shard 06.5) ---
+
+    clientConfiguration: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ClientConfigurationGql> => {
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getClientConfiguration(context.db)
+    },
+
+    adminSettings: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<AdminSettingsGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminSettings(context.db)
+    },
   },
+
 
   Mutation: {
     // --- Server Administration Mutations (Require ADMIN - Shard 06 & 06A) ---
@@ -414,5 +580,144 @@ export const resolvers = {
 
       return deleteMedia(context.db, context.env, args.id)
     },
+
+    // --- Skins Administrative Mutations (Require ADMIN - Shard 06.5) ---
+
+    createSkin: async (
+      _parent: unknown,
+      args: { input: CreateSkinInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<SkinGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createSkin(context.db, args.input, identity.userId)
+    },
+
+    updateSkin: async (
+      _parent: unknown,
+      args: { id: string; input: UpdateSkinInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<SkinGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateSkin(context.db, args.id, args.input)
+    },
+
+    deleteSkin: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteSkin(context.db, args.id, context.env)
+    },
+
+    // --- Game Administrative Mutations (Require ADMIN - Shard 06.5) ---
+
+    prepareGameDraft: async (
+      _parent: unknown,
+      args: { input?: PrepareGameDraftInputGql | null },
+      context: BackendGraphQLContext,
+    ): Promise<GameReleaseGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return prepareGameDraft(context.db, identity.userId, args.input)
+    },
+
+    discardGameDraft: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return discardGameDraft(context.db)
+    },
+
+    createGameFileUpload: async (
+      _parent: unknown,
+      args: { input: CreateGameFileUploadInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<GameFileUploadPayloadGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createGameFileUploadToken(context.db, args.input, identity.userId)
+    },
+
+    addGameFile: async (
+      _parent: unknown,
+      args: { input: AddGameFileInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return addGameFile(context.db, args.input, identity.userId, context.env)
+    },
+
+    updateGameFile: async (
+      _parent: unknown,
+      args: { id: string; input: UpdateGameFileInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateGameFile(context.db, args.id, args.input)
+    },
+
+    removeGameFile: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return removeGameFile(context.db, args.id)
+    },
+
+    publishGameRelease: async (
+      _parent: unknown,
+      args: { input: PublishGameReleaseInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<GameReleaseGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return publishGameRelease(context.db, args.input, identity.userId)
+    },
+
+    // --- Settings Administrative Mutations (Require ADMIN - Shard 06.5) ---
+
+    updateAdminSettings: async (
+      _parent: unknown,
+      args: { input: UpdateAdminSettingsInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminSettingsGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateAdminSettings(context.db, args.input, identity.userId)
+    },
   },
 }
+

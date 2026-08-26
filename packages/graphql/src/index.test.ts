@@ -249,5 +249,52 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(resourceFields).not.toContain("dockerImage")
     expect(resourceFields).not.toContain("containerId")
   })
+
+  it("builds a valid GraphQLSchema with Dashboard, Skins, Game, and Settings contracts (Shard 06.5)", () => {
+    const schema = getBaseSchema()
+    const queryType = schema.getQueryType()
+    const mutationType = schema.getMutationType()
+
+    // 1. Dashboard
+    expect(queryType?.getFields()["adminDashboard"]).toBeDefined()
+
+    // 2. Skins
+    expect(queryType?.getFields()["skins"]).toBeDefined()
+    expect(queryType?.getFields()["adminSkins"]).toBeDefined()
+    expect(queryType?.getFields()["adminSkin"]).toBeDefined()
+    expect(mutationType?.getFields()["createSkin"]).toBeDefined()
+    expect(mutationType?.getFields()["updateSkin"]).toBeDefined()
+    expect(mutationType?.getFields()["deleteSkin"]).toBeDefined()
+
+    // 3. Game & Launcher Manifest
+    expect(queryType?.getFields()["publishedModpack"]).toBeDefined()
+    expect(queryType?.getFields()["adminGameOverview"]).toBeDefined()
+    expect(queryType?.getFields()["adminGameFiles"]).toBeDefined()
+    expect(mutationType?.getFields()["prepareGameDraft"]).toBeDefined()
+    expect(mutationType?.getFields()["discardGameDraft"]).toBeDefined()
+    expect(mutationType?.getFields()["createGameFileUpload"]).toBeDefined()
+    expect(mutationType?.getFields()["addGameFile"]).toBeDefined()
+    expect(mutationType?.getFields()["updateGameFile"]).toBeDefined()
+    expect(mutationType?.getFields()["removeGameFile"]).toBeDefined()
+    expect(mutationType?.getFields()["publishGameRelease"]).toBeDefined()
+
+    // 4. Settings
+    expect(queryType?.getFields()["clientConfiguration"]).toBeDefined()
+    expect(queryType?.getFields()["adminSettings"]).toBeDefined()
+    expect(mutationType?.getFields()["updateAdminSettings"]).toBeDefined()
+
+    // Check ClientFile contract
+    const clientFileType = schema.getType("ClientFile") as GraphQLObjectType
+    expect(clientFileType).toBeDefined()
+    const clientFields = Object.keys(clientFileType.getFields())
+    expect(clientFields).toEqual(["path", "sha256", "sizeBytes", "downloadUrl", "policy"])
+
+    // Check PublishedModpack contract
+    const publishedModpackType = schema.getType("PublishedModpack") as GraphQLObjectType
+    expect(publishedModpackType).toBeDefined()
+    const modpackFields = Object.keys(publishedModpackType.getFields())
+    expect(modpackFields).toEqual(["version", "minecraftVersion", "neoForgeVersion", "mandatory", "clientFiles"])
+  })
 })
+
 
