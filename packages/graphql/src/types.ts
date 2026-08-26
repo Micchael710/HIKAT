@@ -16,3 +16,10 @@ export interface HealthStatusGql {
   version: string
   timestamp: string
 }
+
+export interface AdminStatusGql {
+  ok: boolean
+  serverTime: string
+  environment: string
+}
+

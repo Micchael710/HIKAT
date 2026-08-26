@@ -20,6 +20,7 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(typeDefs).toContain("enum Role")
     expect(typeDefs).toContain("type User")
     expect(typeDefs).toContain("type HealthStatus")
+    expect(typeDefs).toContain("type AdminStatus")
     expect(typeDefs).toContain("type Query")
   })
 
@@ -31,6 +32,8 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(queryType).toBeDefined()
     expect(queryType?.getFields()["health"]).toBeDefined()
     expect(queryType?.getFields()["version"]).toBeDefined()
+    expect(queryType?.getFields()["me"]).toBeDefined()
+    expect(queryType?.getFields()["adminStatus"]).toBeDefined()
   })
 
   it("defines Role enum with strictly PLAYER and ADMIN", () => {

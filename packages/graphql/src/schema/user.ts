@@ -9,4 +9,12 @@ export const userTypeDefs = /* GraphQL */ `
     createdAt: DateTime!
     updatedAt: DateTime!
   }
+
+  extend type Query {
+    """
+    Returns the currently authenticated user profile
+    """
+    me: User
+  }
 `
+
