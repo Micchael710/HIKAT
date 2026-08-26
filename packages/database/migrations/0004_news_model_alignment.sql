@@ -1,5 +1,51 @@
 --> statement-breakpoint
-PRAGMA foreign_keys = OFF;
+PRAGMA defer_foreign_keys = ON;
+--> statement-breakpoint
+CREATE TABLE `_news_legacy_stage` (
+	`id` text PRIMARY KEY NOT NULL,
+	`title` text NOT NULL,
+	`content` text NOT NULL,
+	`type` text NOT NULL,
+	`image_media_id` text,
+	`status` text NOT NULL,
+	`published_at` text,
+	`created_by` text NOT NULL,
+	`updated_by` text NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL
+);
+--> statement-breakpoint
+INSERT INTO `_news_legacy_stage` (
+	`id`,
+	`title`,
+	`content`,
+	`type`,
+	`image_media_id`,
+	`status`,
+	`published_at`,
+	`created_by`,
+	`updated_by`,
+	`created_at`,
+	`updated_at`
+)
+SELECT
+	`id`,
+	`title`,
+	COALESCE(`body_markdown`, `summary`, ''),
+	CASE
+		WHEN `kind` = 'ANNOUNCEMENT' THEN 'ANNOUNCEMENT'
+		ELSE 'NEWS'
+	END,
+	`cover_media_id`,
+	`status`,
+	`published_at`,
+	`created_by`,
+	`updated_by`,
+	`created_at`,
+	`updated_at`
+FROM `content_posts`;
+--> statement-breakpoint
+DROP TABLE `content_posts`;
 --> statement-breakpoint
 CREATE TABLE `content_media_new` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -105,21 +151,18 @@ INSERT INTO `news` (
 SELECT
 	`id`,
 	`title`,
-	COALESCE(`body_markdown`, `summary`, ''),
-	CASE
-		WHEN `kind` = 'ANNOUNCEMENT' THEN 'ANNOUNCEMENT'
-		ELSE 'NEWS'
-	END,
-	`cover_media_id`,
+	`content`,
+	`type`,
+	`image_media_id`,
 	`status`,
 	`published_at`,
 	`created_by`,
 	`updated_by`,
 	`created_at`,
 	`updated_at`
-FROM `content_posts`;
+FROM `_news_legacy_stage`;
 --> statement-breakpoint
-DROP TABLE `content_posts`;
+DROP TABLE `_news_legacy_stage`;
 --> statement-breakpoint
 CREATE INDEX `news_status_published_at_idx` ON `news` (`status`,`published_at`);
 --> statement-breakpoint
@@ -132,5 +175,3 @@ CREATE INDEX `news_updated_by_idx` ON `news` (`updated_by`);
 CREATE INDEX `news_image_media_id_idx` ON `news` (`image_media_id`);
 --> statement-breakpoint
 CREATE INDEX `news_video_media_id_idx` ON `news` (`video_media_id`);
---> statement-breakpoint
-PRAGMA foreign_keys = ON;
