@@ -15,7 +15,7 @@ function resolveSafePath(instanceRoot, relativePath) {
     throw new Error(`Path traversal attempt detected: "${relativePath}"`)
   }
 
-  const normalizedRelative = path.normalize(relativePath).replace(/^(\.\.[\/\\])+/, "")
+  const normalizedRelative = path.normalize(relativePath).replace(/^(\.\.[/\\])+/, "")
   if (path.isAbsolute(normalizedRelative)) {
     throw new Error(`Absolute paths are not permitted in client files: "${relativePath}"`)
   }

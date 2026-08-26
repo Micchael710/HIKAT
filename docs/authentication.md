@@ -1,42 +1,148 @@
-# HiKAT Authentication
+# HiKAT Authentication Architecture (Shard 02)
 
-## Identity & Roles
+## 1. Identity Model & Accounts
 
-El sistema de identidad de HiKAT gestiona la autenticación inicial de los usuarios y emite credenciales seguras para los servicios y el juego.
+HiKAT cuenta con un sistema propio y unificado de cuentas internas. Cada persona posee exactamente un registro en la tabla `users` (con `id`, `displayName`, `role`, `createdAt`, `updatedAt`).
+
+Los métodos de autenticación soportados que resuelven a la misma entidad `User` son:
+1. **Email + Contraseña**: Registrado en `password_credentials` (`userId`, `email`, `passwordHash`, `isEmailVerified`, `verifiedAt`).
+2. **Google OAuth / OIDC**: Registrado en `external_accounts` (`userId`, `provider = 'GOOGLE'`, `providerSubject`, `email`, `emailVerified`, `displayName`, `avatarUrl`).
+3. **Discord OAuth2**: Registrado en `external_accounts` (`userId`, `provider = 'DISCORD'`, `providerSubject`, `email`, `emailVerified`, `displayName`, `avatarUrl`).
+
+### Roles
+- `PLAYER` (Rol por defecto asignado a todo nuevo registro o autenticación externa inicial).
+- `ADMIN` (Rol con permisos administrativos en Backoffice y backend).
+
+No se utiliza RBAC complejo ni permisos adicionales.
+
+### Prevención de Account Takeover
+Si un proveedor OAuth (Google o Discord) reporta un correo electrónico que ya coincide con una cuenta existente, **NO** se vincula automáticamente la cuenta externa. El sistema rechaza el intento con `ACCOUNT_EXISTS` y requiere que el usuario inicie sesión con su credencial principal existente y realice la vinculación explícita (`/auth/me/methods`).
+
+### Regla de Último Método de Autenticación
+Un usuario nunca puede desvincular su último método de autenticación restante. Siempre debe conservarse al menos una credencial válida (contraseña o cuenta externa vinculada).
+
+---
+
+## 2. Cryptography & Security Specifications
+
+### Hashing de Contraseñas (PBKDF2-HMAC-SHA512)
+- **Algoritmo**: PBKDF2 utilizando HMAC-SHA512 implementado sobre WebCrypto nativo (`crypto.subtle`).
+- **Iteraciones mínimas**: 220,000 iteraciones (configurable y versionado por hash).
+- **Salt**: 32 bytes criptográficamente seguros por cada contraseña (`crypto.getRandomValues`).
+- **Longitud de clave derivada**: 64 bytes (512 bits).
+- **Formato persistido**: `$pbkdf2-sha512$i=<iterations>$<salt_b64url>$<hash_b64url>`
+- **Verificación**: Comparación en tiempo constante (`constantTimeEqual`) para mitigar ataques de timing.
+
+### Asymmetric JWT & JWKS (ES256)
+- **Algoritmo**: ECDSA utilizando la curva P-256 y SHA-256 (`ES256`), implementado mediante la librería estándar `jose`.
+- **Rotación y JWKS**: Publicación de claves públicas en `/.well-known/jwks.json` con identificador de clave (`kid`).
+- **En producción**: La clave privada ES256 se carga desde variables de entorno seguras (`JWT_PRIVATE_KEY_PEM` / `JWT_KID`). En desarrollo/test, se generan claves efímeras seguras en memoria si no se proporcionan secrets.
+- **Access JWT**:
+  - Duración: 15 minutos (`exp`).
+  - Claims: `sub` (userId), `sid` (sessionId), `role`, `displayName`, `iss` (`https://auth.hikat.org`), `aud` (`hikat-api`).
+- **Game JWT (Minecraft)**:
+  - Duración: 3 minutos (`exp`).
+  - Claims: `sub` (userId), `sid` (sessionId), `role`, `displayName`, `iss` (`https://auth.hikat.org`), `aud` (`hikat-minecraft`).
+  - Requisito estricto: La sesión `sid` debe estar activa en D1 y la cuenta debe tener el correo verificado si utiliza email/contraseña.
+
+---
+
+## 3. Sessions, Refresh Token Rotation & Replay Attack Detection
+
+### Almacenamiento seguro de Refresh Tokens
+- Los refresh tokens **nunca** se almacenan en texto plano en la base de datos D1.
+- Se genera un token opaco aleatorio de 32 bytes (`base64url`), y en `session_refresh_tokens` se almacena exclusivamente su hash criptográfico SHA-256 (`tokenHash`).
+
+### Rotación de Refresh Tokens segura ante Race Conditions
+- Cada llamada a `/auth/refresh` invalida el token actual y emite uno nuevo para la misma sesión.
+- El consumo del token anterior se ejecuta mediante una operación condicional atómica en SQL:
+  ```sql
+  UPDATE session_refresh_tokens
+  SET consumed_at = ?
+  WHERE id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?
+  ```
+- Si dos peticiones simultáneas presentan el mismo refresh token, solo una actualizará filas (`changes === 1`). La otra (`changes === 0`) detectará colisión y revocará la sesión.
+
+### Detección de Replay Attacks
+- Si se presenta un refresh token cuyo registro en `session_refresh_tokens` ya tiene `consumed_at` asignado (es decir, ya fue consumido con anterioridad):
+  1. Se detecta inmediatamente el intento de reutilización (`TOKEN_REUSE_DETECTED`).
+  2. Se revoca automáticamente toda la sesión y todos los tokens de la familia (`sessions.revokedAt` y `session_refresh_tokens.revokedAt`).
+  3. Se rechaza la solicitud forzando al usuario a volver a autenticarse.
+
+---
+
+## 4. Launcher PKCE & Authorization Code Flow
+
+El Launcher es un cliente público (Electron) y **no debe contener secretos de cliente**.
 
 ```text
-Google / Discord
-       │
-       ▼
-HiKAT Authentication Worker (services/auth)
-       │
-       ▼
-  Roles: PLAYER / ADMIN
+Launcher (Electron)             HiKAT Auth Service            External Provider (Google/Discord)
+      │                                 │                                     │
+      │ 1. Genera code_verifier & PKCE  │                                     │
+      │    code_challenge (S256)        │                                     │
+      │ 2. GET /oauth/authorize ───────>│                                     │
+      │    (client_id, challenge, ...)  │ 3. Redirige a OAuth externo ───────>│
+      │                                 │    (state seguro firmado en D1)     │
+      │                                 │<─── 4. Callback con auth code ──────┤
+      │                                 │     5. Valida state & resuelve User │
+      │                                 │     6. Emite Authorization Code     │
+      │                                 │        HiKAT (corto, ligado a PKCE) │
+      │<─── 7. Redirige a redirect_uri ─┤                                     │
+      │     (hikat://auth/callback?code=...)                                  │
+      │                                 │                                     │
+      │ 8. POST /oauth/token ──────────>│                                     │
+      │    (code + code_verifier)       │ 9. Valida PKCE S256 & consume code  │
+      │<─── 10. Retorna Access + Refresh┤    (emite sesión y JWTs HiKAT)      │
 ```
 
-## Flujo de Autenticación de Juego (Minecraft)
+- **Redirect URIs permitidas**:
+  - `hikat://auth/callback` (Launcher Deep Link oficial)
+  - `http://localhost:*` (Solo para desarrollo local)
+  - `https://app.hikat.org/*` (Portal web oficial)
 
-El flujo de conexión y validación de sesiones para el juego opera de la siguiente manera:
+---
 
-1. **Autenticación en Launcher**:
-   - El usuario inicia sesión en el `HiKATLauncher` vía el Authentication Worker.
-   - El Launcher mantiene la sesión de usuario activa.
+## 5. Endpoints de la API (`services/auth`)
 
-2. **Obtención del Game JWT**:
-   - Al momento de pulsar "Jugar", el Launcher solicita y obtiene un **Game JWT corto** firmado asimétricamente por el Authentication Worker utilizando la sesión existente.
+| Método | Ruta | Descripción | Auth Requerida |
+|---|---|---|---|
+| `GET` | `/health` | Chequeo de estado del servicio | Pública |
+| `GET` | `/.well-known/jwks.json` | Claves públicas ES256 para validación de JWTs | Pública |
+| `POST` | `/auth/register` | Registro con email, contraseña y displayName | Pública |
+| `POST` | `/auth/login` | Login con email y contraseña | Pública |
+| `POST` | `/auth/verify-email` | Verificación de correo mediante token | Pública |
+| `POST` | `/auth/forgot-password` | Solicitud de token de recuperación de contraseña | Pública |
+| `POST` | `/auth/reset-password` | Restablecimiento de contraseña con token | Pública |
+| `POST` | `/auth/change-password` | Cambio de contraseña con sesión activa | Bearer JWT + D1 sid check |
+| `POST` | `/auth/refresh` | Rotación de refresh token | Refresh Token |
+| `POST` | `/auth/logout` | Revocación de sesión en D1 | Bearer JWT |
+| `POST` | `/auth/game-token` | Emisión de Game JWT de corta duración (3 min) | Bearer JWT + D1 sid check |
+| `GET` | `/auth/me/methods` | Lista de métodos de autenticación vinculados | Bearer JWT + D1 sid check |
+| `DELETE` | `/auth/me/methods/:provider` | Desvinculación de método (con guard de último método) | Bearer JWT + D1 sid check |
+| `GET` | `/oauth/authorize` | Inicio de flujo PKCE OAuth para clientes | Pública |
+| `GET` | `/oauth/google/callback` | Callback de Google OAuth2/OIDC | Pública |
+| `GET` | `/oauth/discord/callback` | Callback de Discord OAuth2 | Pública |
+| `POST` | `/oauth/token` | Intercambio de código de autorización PKCE | Pública |
 
-3. **Inyección segura**:
-   - El Launcher entrega la credencial al proceso de Minecraft de forma segura en memoria o mediante archivo temporal restringido (protegido por permisos locales de OS).
-   - **NUNCA** se pasa el JWT como argumento de línea de comandos (`command-line arguments`), para evitar su exposición en procesos del sistema.
+---
 
-4. **Presentación de credencial**:
-   - Al conectar al servidor (a través del Gateway o directamente), el `client-mod` presenta esta credencial corta de juego durante el handshake de red.
-   - El `client-mod` **NO** se comunica directamente con el Auth Worker ni con el Gateway para autenticar al jugador; únicamente transporta y presenta la credencial provista por el Launcher.
+## 6. Producción: Configuración Externa y Checklist de Secrets
 
-5. **Validación en Servidor**:
-   - El `server-mod` en el servidor de juego verifica la firma asimétrica del token (mediante la clave pública / JWKS), comprueba la expiración, la audiencia (`audience`) y vincula la identidad validada al jugador.
+Para el despliegue final en producción de `services/auth`, se deben aprovisionar externamente las siguientes configuraciones y secrets en Cloudflare (sin incluir credenciales en el repositorio):
 
-## Roles del Sistema
+### Cloudflare Secrets (`wrangler secret put <KEY>`)
+1. `JWT_PRIVATE_KEY_PEM`: Clave privada ECDSA P-256 en formato PEM para la firma de tokens ES256.
+2. `JWT_KID`: Identificador de clave pública activa (ej. `hikat-key-2026-v1`).
+3. `GOOGLE_CLIENT_ID`: ID de cliente OAuth 2.0 creado en Google Cloud Console.
+4. `GOOGLE_CLIENT_SECRET`: Secreto de cliente OAuth 2.0 de Google.
+5. `DISCORD_CLIENT_ID`: Application ID creada en Discord Developer Portal.
+6. `DISCORD_CLIENT_SECRET`: Client Secret de OAuth2 de Discord.
+7. `RESEND_API_KEY` / `MAILGUN_API_KEY`: API Key del proveedor de correo transaccional para envío de verificaciones y recuperación.
 
-- `PLAYER`: Acceso estándar al cliente de juego, personalización de cosméticos (skins/capas) y consulta de noticias.
-- `ADMIN`: Acceso a operaciones administrativas en el Backoffice, gestión de noticias, modpacks y control de servidores.
+### Configuración en Proveedores Externos
+- **Google Cloud Console**:
+  - Authorized Redirect URI: `https://auth.hikat.org/oauth/google/callback`
+  - Scopes: `openid`, `email`, `profile`
+- **Discord Developer Portal**:
+  - Redirects: `https://auth.hikat.org/oauth/discord/callback`
+  - Scopes: `identify`, `email`
