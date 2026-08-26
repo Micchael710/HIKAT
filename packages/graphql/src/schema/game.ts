@@ -219,8 +219,14 @@ export const gameTypeDefs = /* GraphQL */ `
     removeGameFile(id: ID!): Boolean!
 
     """
+    Restore a removed game file back to the active draft - requires ADMIN role
+    """
+    restoreGameFile(id: ID!): AdminGameFile!
+
+    """
     Atomically publish the active draft as the new official version - requires ADMIN role
     """
     publishGameRelease(input: PublishGameReleaseInput!): GameRelease!
   }
 `
+

@@ -711,7 +711,8 @@ export const gameApi = {
     file: File,
     uploadUrl: string,
     uploadToken: string,
-  ): Promise<{ sha256: string; tokenHash: string }> {
+  ): Promise<{ tokenHash: string; originalFilename?: string; sizeBytes?: number }> {
+
     const token = authService.getAccessToken()
     const targetUrl = uploadUrl.startsWith("http") ? uploadUrl : `${BACKEND_URL}${uploadUrl}`
 
@@ -791,11 +792,31 @@ export const gameApi = {
     return data.removeGameFile
   },
 
+  async restoreGameFile(id: string): Promise<import("../types").AdminGameFile> {
+    const mutation = /* GraphQL */ `
+      mutation RestoreGameFile($id: ID!) {
+        restoreGameFile(id: $id) {
+          id
+          name
+          logicalPath
+          category
+          sha256
+          sizeBytes
+          policy
+          createdAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ restoreGameFile: import("../types").AdminGameFile }>(mutation, { id })
+    return data.restoreGameFile
+  },
+
   async publishGameRelease(input: {
     version: string
     notes?: string
   }): Promise<import("../types").GameRelease> {
     const mutation = /* GraphQL */ `
+
       mutation PublishGameRelease($input: PublishGameReleaseInput!) {
         publishGameRelease(input: $input) {
           id

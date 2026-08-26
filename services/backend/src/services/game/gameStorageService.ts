@@ -137,13 +137,10 @@ export async function handleGameFileUpload(
   const cors = getCorsHeaders(request, env)
   return new Response(
     JSON.stringify({
-      id: fileId,
       tokenHash,
       originalFilename: tokenRecord.originalFilename,
       category,
       sizeBytes: arrayBuffer.byteLength,
-      sha256,
-      objectKey,
     }),
     {
       status: 200,
@@ -154,6 +151,7 @@ export async function handleGameFileUpload(
     },
   )
 }
+
 
 /**
  * Handles binary game file downloads: GET /game/download/:fileId

@@ -169,4 +169,80 @@ describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
     expect(screen.getByText("v1.0.0")).toBeDefined()
     expect(screen.getByText("Anterior")).toBeDefined()
   })
+
+  it("renders tombstones for removed files with Se eliminará badge and allows restore", async () => {
+    const mockOverview: import("../../types").AdminGameOverview = {
+      publishedRelease: {
+        id: "rel-1",
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        status: "PUBLISHED",
+        notes: null,
+        publishedAt: new Date().toISOString(),
+        files: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      draftRelease: {
+        id: "rel-draft",
+        version: "1.0.1",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        status: "DRAFT",
+        notes: null,
+        publishedAt: null,
+        files: [
+          {
+            id: "tombstone-file-1",
+            name: "Old Mod",
+            logicalPath: "mods/old-mod.jar",
+            category: "MOD",
+            sha256: "12345",
+            sizeBytes: 1000,
+            policy: "NO_MODIFICABLE",
+            changeStatus: "REMOVED",
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      pendingChangesCount: 1,
+      changes: {
+        added: 0,
+        updated: 0,
+        removed: 1,
+        unchanged: 0,
+        total: 0,
+      },
+    }
+
+    vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue(mockOverview)
+    const restoreSpy = vi.spyOn(gameApi, "restoreGameFile").mockResolvedValue({
+      id: "file-1",
+      name: "Old Mod",
+      logicalPath: "mods/old-mod.jar",
+      category: "MOD",
+      sha256: "12345",
+      sizeBytes: 1000,
+      policy: "NO_MODIFICABLE",
+      createdAt: new Date().toISOString(),
+    })
+
+    await act(async () => {
+      render(<GameView theme="dark" />)
+    })
+
+    expect(screen.getByText("Old Mod")).toBeDefined()
+    expect(screen.getByText("− Se eliminará")).toBeDefined()
+
+    const undoBtn = screen.getByText("Deshacer")
+    await act(async () => {
+      fireEvent.click(undoBtn)
+    })
+
+    expect(restoreSpy).toHaveBeenCalledWith("tombstone-file-1")
+  })
 })
+

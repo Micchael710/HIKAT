@@ -277,7 +277,9 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(mutationType?.getFields()["addGameFile"]).toBeDefined()
     expect(mutationType?.getFields()["updateGameFile"]).toBeDefined()
     expect(mutationType?.getFields()["removeGameFile"]).toBeDefined()
+    expect(mutationType?.getFields()["restoreGameFile"]).toBeDefined()
     expect(mutationType?.getFields()["publishGameRelease"]).toBeDefined()
+
 
     // 4. Settings
     expect(queryType?.getFields()["clientConfiguration"]).toBeDefined()

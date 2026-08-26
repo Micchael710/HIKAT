@@ -251,6 +251,20 @@ export async function updateGameFile(
     throw createGraphQLError("Archivo de juego no encontrado.", "NOT_FOUND")
   }
 
+  // Backend guard: release MUST be in DRAFT status
+  const release = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(eq(schema.gameReleases.id, existing.releaseId))
+    .get()
+
+  if (!release || release.status !== "DRAFT") {
+    throw createGraphQLError(
+      "Solo puedes modificar archivos de una actualización en preparación.",
+      "VALIDATION_ERROR",
+    )
+  }
+
   const updates: Partial<schema.GameReleaseFile> = {}
   if (input.name !== undefined) {
     const trimmed = String(input.name || "").trim()
@@ -292,7 +306,6 @@ export async function updateGameFile(
     }
   }
 
-
   if (Object.keys(updates).length > 0) {
     await db
       .update(schema.gameReleaseFiles)
@@ -323,6 +336,20 @@ export async function removeGameFile(
     throw createGraphQLError("Archivo de juego no encontrado.", "NOT_FOUND")
   }
 
+  // Backend guard: release MUST be in DRAFT status
+  const release = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(eq(schema.gameReleases.id, existing.releaseId))
+    .get()
+
+  if (!release || release.status !== "DRAFT") {
+    throw createGraphQLError(
+      "Solo puedes modificar archivos de una actualización en preparación.",
+      "VALIDATION_ERROR",
+    )
+  }
+
   // Delete from active draft only (underlying R2 object is kept intact for history / published releases)
   await db
     .delete(schema.gameReleaseFiles)
@@ -330,3 +357,70 @@ export async function removeGameFile(
 
   return true
 }
+
+export async function restoreGameFile(
+  db: Database,
+  rawId: string,
+  userId: string,
+): Promise<AdminGameFileGql> {
+  const fileId = rawId.replace(/^tombstone-/, "")
+
+  const originalFile = await db
+    .select()
+    .from(schema.gameReleaseFiles)
+    .where(eq(schema.gameReleaseFiles.id, fileId))
+    .get()
+
+  if (!originalFile) {
+    throw createGraphQLError("Archivo de juego original no encontrado.", "NOT_FOUND")
+  }
+
+  // Ensure active draft
+  const draft = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .get()
+
+  if (!draft) {
+    throw createGraphQLError(
+      "Solo puedes restaurar archivos en una actualización en preparación.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  // Check if draft already has this path
+  const existingInDraft = await db
+    .select()
+    .from(schema.gameReleaseFiles)
+    .where(
+      and(
+        eq(schema.gameReleaseFiles.releaseId, draft.id),
+        eq(schema.gameReleaseFiles.logicalPath, originalFile.logicalPath),
+      ),
+    )
+    .get()
+
+  if (existingInDraft) {
+    return formatAdminGameFile(existingInDraft)
+  }
+
+  const newFileId = crypto.randomUUID()
+  const newFile = {
+    id: newFileId,
+    releaseId: draft.id,
+    name: originalFile.name,
+    logicalPath: originalFile.logicalPath,
+    category: originalFile.category,
+    sha256: originalFile.sha256,
+    sizeBytes: originalFile.sizeBytes,
+    policy: originalFile.policy,
+    objectKey: originalFile.objectKey,
+    createdAt: new Date().toISOString(),
+  }
+
+  await db.insert(schema.gameReleaseFiles).values(newFile)
+  return formatAdminGameFile(newFile)
+}
+
+

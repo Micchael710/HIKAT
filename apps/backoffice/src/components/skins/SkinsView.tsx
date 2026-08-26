@@ -103,14 +103,16 @@ export default function SkinsView({ theme }: SkinsViewProps) {
             flex: "0 1 auto",
           }}
         >
-          <div style={{ minWidth: "170px", width: "180px" }}>
+          <div style={{ width: "200px", flexShrink: 0 }}>
             <BackofficeSelect
               theme={theme}
+              width="100%"
               value={statusFilter}
               onChange={(val) => setStatusFilter(val)}
               options={STATUS_FILTER_OPTIONS}
             />
           </div>
+
 
           <button
             onClick={() => {
