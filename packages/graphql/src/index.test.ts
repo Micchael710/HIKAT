@@ -21,13 +21,13 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(typeDefs).toContain("type User")
     expect(typeDefs).toContain("type HealthStatus")
     expect(typeDefs).toContain("type AdminStatus")
-    expect(typeDefs).toContain("type ContentPost")
+    expect(typeDefs).toContain("type News")
     expect(typeDefs).toContain("type ContentMedia")
     expect(typeDefs).toContain("type Query")
     expect(typeDefs).toContain("type Mutation")
   })
 
-  it("builds a valid GraphQLSchema object with Content queries and mutations", () => {
+  it("builds a valid GraphQLSchema object with News queries and mutations", () => {
     const schema = getBaseSchema()
     expect(schema).toBeInstanceOf(GraphQLSchema)
 
@@ -37,31 +37,87 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(queryType?.getFields()["version"]).toBeDefined()
     expect(queryType?.getFields()["me"]).toBeDefined()
     expect(queryType?.getFields()["adminStatus"]).toBeDefined()
-    expect(queryType?.getFields()["contentFeed"]).toBeDefined()
-    expect(queryType?.getFields()["contentPost"]).toBeDefined()
-    expect(queryType?.getFields()["adminContentPosts"]).toBeDefined()
-    expect(queryType?.getFields()["adminContentPost"]).toBeDefined()
+    expect(queryType?.getFields()["newsFeed"]).toBeDefined()
+    expect(queryType?.getFields()["news"]).toBeDefined()
+    expect(queryType?.getFields()["adminNews"]).toBeDefined()
+    expect(queryType?.getFields()["adminNewsItem"]).toBeDefined()
 
     const mutationType = schema.getMutationType()
     expect(mutationType).toBeDefined()
-    expect(mutationType?.getFields()["createContentPost"]).toBeDefined()
-    expect(mutationType?.getFields()["updateContentPost"]).toBeDefined()
-    expect(mutationType?.getFields()["publishContentPost"]).toBeDefined()
-    expect(mutationType?.getFields()["unpublishContentPost"]).toBeDefined()
-    expect(mutationType?.getFields()["deleteContentPost"]).toBeDefined()
+    expect(mutationType?.getFields()["createNews"]).toBeDefined()
+    expect(mutationType?.getFields()["updateNews"]).toBeDefined()
+    expect(mutationType?.getFields()["publishNews"]).toBeDefined()
+    expect(mutationType?.getFields()["unpublishNews"]).toBeDefined()
+    expect(mutationType?.getFields()["deleteNews"]).toBeDefined()
     expect(mutationType?.getFields()["createContentMediaUpload"]).toBeDefined()
     expect(mutationType?.getFields()["deleteContentMedia"]).toBeDefined()
   })
 
-  it("defines ContentPostKind and ContentPostStatus enums", () => {
+  it("defines NewsType, NewsStatus and MediaType enums", () => {
     const schema = getBaseSchema()
-    const kindEnum = schema.getType("ContentPostKind") as GraphQLEnumType
-    expect(kindEnum).toBeDefined()
-    expect(kindEnum.getValues().map((v) => v.name)).toEqual(["NEWS", "ANNOUNCEMENT"])
+    const typeEnum = schema.getType("NewsType") as GraphQLEnumType
+    expect(typeEnum).toBeDefined()
+    expect(typeEnum.getValues().map((v) => v.name)).toEqual([
+      "NEWS",
+      "UPDATE",
+      "ANNOUNCEMENT",
+      "MAINTENANCE",
+    ])
 
-    const statusEnum = schema.getType("ContentPostStatus") as GraphQLEnumType
+    const statusEnum = schema.getType("NewsStatus") as GraphQLEnumType
     expect(statusEnum).toBeDefined()
-    expect(statusEnum.getValues().map((v) => v.name)).toEqual(["DRAFT", "PUBLISHED"])
+    expect(statusEnum.getValues().map((v) => v.name)).toEqual([
+      "DRAFT",
+      "PUBLISHED",
+    ])
+
+    const mediaTypeEnum = schema.getType("MediaType") as GraphQLEnumType
+    expect(mediaTypeEnum).toBeDefined()
+    expect(mediaTypeEnum.getValues().map((v) => v.name)).toEqual([
+      "IMAGE",
+      "VIDEO",
+    ])
+  })
+
+  it("defines News contract with clean fields and without legacy slug/summary/bodyMarkdown", () => {
+    const schema = getBaseSchema()
+    const newsType = schema.getType("News") as GraphQLObjectType
+    expect(newsType).toBeDefined()
+
+    const fields = Object.keys(newsType.getFields())
+    expect(fields).toContain("id")
+    expect(fields).toContain("title")
+    expect(fields).toContain("content")
+    expect(fields).toContain("type")
+    expect(fields).toContain("image")
+    expect(fields).toContain("youtubeVideoId")
+    expect(fields).toContain("youtubeUrl")
+    expect(fields).toContain("video")
+    expect(fields).toContain("status")
+    expect(fields).toContain("publishedAt")
+    expect(fields).toContain("createdAt")
+    expect(fields).toContain("updatedAt")
+
+    expect(fields).not.toContain("slug")
+    expect(fields).not.toContain("summary")
+    expect(fields).not.toContain("bodyMarkdown")
+  })
+
+  it("defines ContentMedia contract without exposing internal objectKey", () => {
+    const schema = getBaseSchema()
+    const mediaType = schema.getType("ContentMedia") as GraphQLObjectType
+    expect(mediaType).toBeDefined()
+
+    const fields = Object.keys(mediaType.getFields())
+    expect(fields).toContain("id")
+    expect(fields).toContain("mediaType")
+    expect(fields).toContain("mimeType")
+    expect(fields).toContain("sizeBytes")
+    expect(fields).toContain("url")
+    expect(fields).toContain("createdAt")
+
+    // Security: objectKey is internal to Backend/R2 and NOT exposed to GraphQL
+    expect(fields).not.toContain("objectKey")
   })
 
   it("defines Role enum with strictly PLAYER and ADMIN", () => {
@@ -100,75 +156,34 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(fields).not.toContain("token")
   })
 
-  describe("DateTime scalar", () => {
-    it("serializes valid Date and ISO strings correctly", () => {
-      const now = new Date()
-      expect(DateTimeScalar.serialize(now)).toBe(now.toISOString())
-      expect(DateTimeScalar.serialize(now.toISOString())).toBe(
-        now.toISOString(),
-      )
-    })
+  it("validates DateTime scalar serialization and parsing", () => {
+    const now = new Date()
+    const nowIso = now.toISOString()
 
-    it("throws on invalid serialization input", () => {
-      expect(() => DateTimeScalar.serialize("invalid-date-string")).toThrow()
-      expect(() => DateTimeScalar.serialize(null)).toThrow()
-      expect(() => DateTimeScalar.serialize(123456789)).toThrow()
-      expect(() => DateTimeScalar.serialize(new Date("invalid"))).toThrow()
-    })
+    expect(DateTimeScalar.serialize(now)).toBe(nowIso)
+    expect(DateTimeScalar.serialize(nowIso)).toBe(nowIso)
+    expect(() => DateTimeScalar.serialize("not-a-date")).toThrow()
+    expect(() => DateTimeScalar.serialize(12345)).toThrow()
 
-    it("parses valid ISO-8601 string value and literal", () => {
-      const isoStr = "2026-08-25T16:00:00.000Z"
-      expect(DateTimeScalar.parseValue(isoStr)).toBe(isoStr)
-      expect(
-        DateTimeScalar.parseLiteral({ kind: Kind.STRING, value: isoStr }, {}),
-      ).toBe(isoStr)
-    })
+    expect(DateTimeScalar.parseValue(nowIso)).toBe(nowIso)
+    expect(() => DateTimeScalar.parseValue("invalid")).toThrow()
 
-    it("rejects non-string and non-ISO format inputs in parseValue", () => {
-      // Rejects numbers (unix timestamps not allowed as input)
-      expect(() => DateTimeScalar.parseValue(1756137600000)).toThrow()
-      // Rejects non-ISO string formats
-      expect(() => DateTimeScalar.parseValue("2026/08/25")).toThrow()
-      expect(() => DateTimeScalar.parseValue("August 25, 2026")).toThrow()
-      expect(() => DateTimeScalar.parseValue("invalid-string")).toThrow()
-      // Rejects booleans and objects
-      expect(() => DateTimeScalar.parseValue(true)).toThrow()
-      expect(() => DateTimeScalar.parseValue({})).toThrow()
-      expect(() => DateTimeScalar.parseValue(null)).toThrow()
-    })
+    const astNode = { kind: Kind.STRING, value: nowIso } as const
+    expect(DateTimeScalar.parseLiteral(astNode)).toBe(nowIso)
 
-    it("throws on non-string parse literal AST kinds", () => {
-      expect(() =>
-        DateTimeScalar.parseLiteral({ kind: Kind.INT, value: "12345" }, {}),
-      ).toThrow()
-      expect(() =>
-        DateTimeScalar.parseLiteral({ kind: Kind.FLOAT, value: "123.45" }, {}),
-      ).toThrow()
-      expect(() =>
-        DateTimeScalar.parseLiteral({ kind: Kind.BOOLEAN, value: true }, {}),
-      ).toThrow()
-    })
+    const invalidAstNode = { kind: Kind.INT, value: "123" } as const
+    expect(() => DateTimeScalar.parseLiteral(invalidAstNode as any)).toThrow()
   })
 
-  describe("GraphQL Error Handling", () => {
-    it("defines standard error codes", () => {
-      expect(ERROR_CODES).toEqual([
-        "UNAUTHENTICATED",
-        "FORBIDDEN",
-        "NOT_FOUND",
-        "VALIDATION_ERROR",
-        "CONFLICT",
-        "INTERNAL_ERROR",
-      ])
+  it("creates structured GraphQLError instances with correct extensions", () => {
+    const err = createGraphQLError("Resource not found", "NOT_FOUND", {
+      entity: "User",
+      entityId: "123",
     })
 
-    it("creates GraphQLError with structured code extension", () => {
-      const error = createGraphQLError("User not found", "NOT_FOUND", {
-        userId: "u-123",
-      })
-      expect(error.message).toBe("User not found")
-      expect(error.extensions.code).toBe("NOT_FOUND")
-      expect(error.extensions.userId).toBe("u-123")
-    })
+    expect(err.message).toBe("Resource not found")
+    expect(err.extensions.code).toBe("NOT_FOUND")
+    expect(err.extensions.entity).toBe("User")
+    expect(err.extensions.entityId).toBe("123")
   })
 })

@@ -1,63 +1,59 @@
 /**
- * HiKAT Backend GraphQL Resolvers
- * Implements business operations, health queries, user profile fetching,
- * admin status, and Content Core public & admin operations.
+ * HiKAT GraphQL Resolvers
+ * Wires authentication guards, schema scalar definitions, user queries,
+ * admin operations, news feed & management, and media upload ticket creation.
  */
 
-import {
-  DateTimeScalar,
-  createGraphQLError,
+import { DateTimeScalar, createGraphQLError } from "@hikat/graphql"
+import type {
   UserGql,
-  AdminStatusGql,
-  HealthStatusGql,
-  ContentPostGql,
-  ContentFeedConnectionGql,
+  ServiceHealthGql,
+  NewsGql,
+  NewsConnectionGql,
+  CreateNewsInputGql,
+  UpdateNewsInputGql,
   ContentMediaUploadPayloadGql,
-  CreateContentPostInputGql,
-  UpdateContentPostInputGql,
   CreateContentMediaUploadInputGql,
 } from "@hikat/graphql"
-import {
-  HIKAT_VERSION,
-  ContentPostKind,
-  ContentPostStatus,
-} from "@hikat/shared"
-import type { BackendGraphQLContext } from "../types"
+import { HIKAT_VERSION, NewsType, NewsStatus } from "@hikat/shared"
 import { requireAuth, requireAdmin } from "../auth/guards"
 import { getUserById } from "../services/userService"
 import {
-  getContentFeed,
-  getContentPostBySlug,
-  getAdminContentPosts,
-  getAdminContentPost,
-  createContentPost,
-  updateContentPost,
-  publishContentPost,
-  unpublishContentPost,
-  deleteContentPost,
-} from "../services/contentService"
-import {
-  createContentMediaUpload,
-  deleteContentMedia,
-} from "../services/mediaService"
+  getPublicNewsFeed,
+  getPublicNewsById,
+  getAdminNews,
+  getAdminNewsById,
+  createNews,
+  updateNews,
+  publishNews,
+  unpublishNews,
+  deleteNews,
+} from "../services/newsService"
+import { createContentMediaUpload, deleteMedia } from "../services/mediaService"
+import type { BackendGraphQLContext } from "../types"
 
 export const resolvers = {
   DateTime: DateTimeScalar,
-  Query: {
-    health: (): HealthStatusGql => ({
-      status: "ok",
-      service: "hikat-backend",
-      version: HIKAT_VERSION,
-      timestamp: new Date().toISOString(),
-    }),
 
-    version: (): string => HIKAT_VERSION,
+  Query: {
+    health: (): ServiceHealthGql => {
+      return {
+        status: "ok",
+        service: "hikat-backend",
+        version: HIKAT_VERSION,
+        timestamp: new Date().toISOString(),
+      }
+    },
+
+    version: (): string => {
+      return HIKAT_VERSION
+    },
 
     me: async (
       _parent: unknown,
       _args: unknown,
       context: BackendGraphQLContext,
-    ): Promise<UserGql> => {
+    ): Promise<UserGql | null> => {
       const identity = requireAuth(context)
 
       if (!context.db) {
@@ -66,17 +62,29 @@ export const resolvers = {
 
       const user = await getUserById(context.db, identity.userId)
       if (!user) {
-        throw createGraphQLError("User profile not found", "NOT_FOUND")
+        return null
       }
 
-      return user
+      return {
+        id: user.id,
+        displayName: user.displayName,
+        role: user.role,
+        minecraftUuid: user.minecraftUuid,
+        minecraftUsername: user.minecraftUsername,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      }
     },
 
-    adminStatus: (
+    adminStatus: async (
       _parent: unknown,
       _args: unknown,
       context: BackendGraphQLContext,
-    ): AdminStatusGql => {
+    ): Promise<{
+      ok: boolean
+      serverTime: string
+      environment: string
+    }> => {
       requireAdmin(context)
 
       return {
@@ -86,96 +94,92 @@ export const resolvers = {
       }
     },
 
-    // --- Content Core Public Queries ---
+    // --- News Public Queries ---
 
-    contentFeed: async (
+    newsFeed: async (
       _parent: unknown,
       args: {
-        first?: number
-        after?: string
-        kind?: ContentPostKind
+        first?: number | null
+        after?: string | null
+        type?: NewsType | null
       },
       context: BackendGraphQLContext,
-    ): Promise<ContentFeedConnectionGql> => {
+    ): Promise<NewsConnectionGql> => {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return getContentFeed(context.db, context.env, args, context.request)
+      return getPublicNewsFeed(context.db, context.env, args, context.request)
     },
 
-    contentPost: async (
+    news: async (
       _parent: unknown,
-      args: { slug: string },
+      args: { id: string },
       context: BackendGraphQLContext,
-    ): Promise<ContentPostGql | null> => {
+    ): Promise<NewsGql | null> => {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      if (!args.slug || args.slug.trim() === "") {
-        throw createGraphQLError("Slug parameter is required", "VALIDATION_ERROR")
-      }
-
-      return getContentPostBySlug(
+      return getPublicNewsById(
         context.db,
         context.env,
-        args.slug,
+        args.id,
         context.request,
       )
     },
 
-    // --- Content Core Administrative Queries ---
+    // --- News Administrative Queries (Require ADMIN) ---
 
-    adminContentPosts: async (
+    adminNews: async (
       _parent: unknown,
       args: {
-        first?: number
-        after?: string
-        kind?: ContentPostKind
-        status?: ContentPostStatus
+        first?: number | null
+        after?: string | null
+        type?: NewsType | null
+        status?: NewsStatus | null
       },
       context: BackendGraphQLContext,
-    ): Promise<ContentFeedConnectionGql> => {
+    ): Promise<NewsConnectionGql> => {
       requireAdmin(context)
 
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return getAdminContentPosts(context.db, context.env, args, context.request)
+      return getAdminNews(context.db, context.env, args, context.request)
     },
 
-    adminContentPost: async (
+    adminNewsItem: async (
       _parent: unknown,
-      args: { id?: string; slug?: string },
+      args: { id: string },
       context: BackendGraphQLContext,
-    ): Promise<ContentPostGql | null> => {
+    ): Promise<NewsGql | null> => {
       requireAdmin(context)
 
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return getAdminContentPost(context.db, context.env, args, context.request)
+      return getAdminNewsById(context.db, context.env, args.id, context.request)
     },
   },
 
   Mutation: {
-    // --- Content Core Administrative Mutations ---
+    // --- News Administrative Mutations (Require ADMIN) ---
 
-    createContentPost: async (
+    createNews: async (
       _parent: unknown,
-      args: { input: CreateContentPostInputGql },
+      args: { input: CreateNewsInputGql },
       context: BackendGraphQLContext,
-    ): Promise<ContentPostGql> => {
+    ): Promise<NewsGql> => {
       const identity = requireAdmin(context)
 
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return createContentPost(
+      return createNews(
         context.db,
         context.env,
         identity.userId,
@@ -184,18 +188,18 @@ export const resolvers = {
       )
     },
 
-    updateContentPost: async (
+    updateNews: async (
       _parent: unknown,
-      args: { id: string; input: UpdateContentPostInputGql },
+      args: { id: string; input: UpdateNewsInputGql },
       context: BackendGraphQLContext,
-    ): Promise<ContentPostGql> => {
+    ): Promise<NewsGql> => {
       const identity = requireAdmin(context)
 
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return updateContentPost(
+      return updateNews(
         context.db,
         context.env,
         identity.userId,
@@ -205,18 +209,18 @@ export const resolvers = {
       )
     },
 
-    publishContentPost: async (
+    publishNews: async (
       _parent: unknown,
       args: { id: string },
       context: BackendGraphQLContext,
-    ): Promise<ContentPostGql> => {
+    ): Promise<NewsGql> => {
       const identity = requireAdmin(context)
 
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return publishContentPost(
+      return publishNews(
         context.db,
         context.env,
         identity.userId,
@@ -225,18 +229,18 @@ export const resolvers = {
       )
     },
 
-    unpublishContentPost: async (
+    unpublishNews: async (
       _parent: unknown,
       args: { id: string },
       context: BackendGraphQLContext,
-    ): Promise<ContentPostGql> => {
+    ): Promise<NewsGql> => {
       const identity = requireAdmin(context)
 
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return unpublishContentPost(
+      return unpublishNews(
         context.db,
         context.env,
         identity.userId,
@@ -245,7 +249,7 @@ export const resolvers = {
       )
     },
 
-    deleteContentPost: async (
+    deleteNews: async (
       _parent: unknown,
       args: { id: string },
       context: BackendGraphQLContext,
@@ -256,8 +260,10 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return deleteContentPost(context.db, args.id)
+      return deleteNews(context.db, args.id)
     },
+
+    // --- Media Administrative Mutations (Require ADMIN) ---
 
     createContentMediaUpload: async (
       _parent: unknown,
@@ -290,7 +296,7 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return deleteContentMedia(context.db, context.env, args.id)
+      return deleteMedia(context.db, context.env, args.id)
     },
   },
 }

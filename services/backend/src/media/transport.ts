@@ -6,7 +6,8 @@
 import { Database } from "@hikat/database"
 import {
   ALLOWED_MEDIA_MIME_TYPES,
-  MAX_MEDIA_SIZE_BYTES,
+  MAX_IMAGE_SIZE_BYTES,
+  MAX_VIDEO_SIZE_BYTES,
   MediaMimeType,
 } from "@hikat/shared"
 import type { Env, BackendGraphQLContext } from "../types"
@@ -98,7 +99,7 @@ async function readBodyWithLimit(
  * Requires:
  *  1. Bearer JWT authentication for an active ADMIN session
  *  2. X-Upload-Token header containing a valid single-use upload token issued to the same admin
- *  3. Binary body with allowed MIME type and size <= min(token.maxSizeBytes, MAX_MEDIA_SIZE_BYTES)
+ *  3. Binary body with allowed MIME type and size <= min(token.maxSizeBytes, MAX_IMAGE_SIZE_BYTES / MAX_VIDEO_SIZE_BYTES)
  */
 export async function handleMediaUpload(
   request: Request,
@@ -150,7 +151,11 @@ export async function handleMediaUpload(
     // 3. Initial non-consuming token validation & ownership check
     let tokenRecord
     try {
-      tokenRecord = await getAndValidateUploadToken(db, uploadToken, adminUserId)
+      tokenRecord = await getAndValidateUploadToken(
+        db,
+        uploadToken,
+        adminUserId,
+      )
     } catch (tokenErr: any) {
       const code = tokenErr.extensions?.code
       if (code === "FORBIDDEN") {
@@ -198,9 +203,14 @@ export async function handleMediaUpload(
     }
 
     // 5. Compute ticket-bound max size limit
+    const globalTypeMax =
+      tokenRecord.mediaType === "VIDEO"
+        ? MAX_VIDEO_SIZE_BYTES
+        : MAX_IMAGE_SIZE_BYTES
+
     const effectiveMaxSizeBytes = Math.min(
       tokenRecord.maxSizeBytes,
-      MAX_MEDIA_SIZE_BYTES,
+      globalTypeMax,
     )
 
     // 6. Early Content-Length check if present
@@ -232,7 +242,12 @@ export async function handleMediaUpload(
           env,
         )
       }
-      return jsonResponse({ error: "Cannot upload empty file" }, 400, request, env)
+      return jsonResponse(
+        { error: "Cannot upload empty file" },
+        400,
+        request,
+        env,
+      )
     }
 
     // 8. Atomic single-use consumption right before saving
@@ -253,6 +268,7 @@ export async function handleMediaUpload(
     // 9. Save to R2 with D1 metadata & explicit compensation rollback
     const savedMedia = await saveMediaObjectWithCompensation(db, env, {
       mimeType,
+      mediaType: tokenRecord.mediaType,
       body: bodyResult.buffer,
       createdBy: adminUserId,
     })
@@ -261,7 +277,7 @@ export async function handleMediaUpload(
     return jsonResponse(
       {
         id: formatted.id,
-        objectKey: formatted.objectKey,
+        mediaType: formatted.mediaType,
         mimeType: formatted.mimeType,
         sizeBytes: formatted.sizeBytes,
         url: formatted.url,
@@ -300,7 +316,12 @@ export async function handleMediaServe(
   try {
     // 1. Validate ID format to prevent path traversal
     if (!/^[a-zA-Z0-9_-]+$/.test(mediaId)) {
-      return jsonResponse({ error: "Invalid media ID format" }, 400, request, env)
+      return jsonResponse(
+        { error: "Invalid media ID format" },
+        400,
+        request,
+        env,
+      )
     }
 
     if (!db) {
@@ -325,7 +346,12 @@ export async function handleMediaServe(
 
     const object = await env.ASSETS.get(media.objectKey)
     if (!object) {
-      return jsonResponse({ error: "Media object not found" }, 404, request, env)
+      return jsonResponse(
+        { error: "Media object not found" },
+        404,
+        request,
+        env,
+      )
     }
 
     // 4. Return binary stream with headers

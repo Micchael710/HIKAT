@@ -9,6 +9,7 @@ export const HIKAT_VERSION = "0.1.0"
 
 export const ALLOWED_ROLES = ["PLAYER", "ADMIN"] as const
 export type AppRole = typeof ALLOWED_ROLES[number]
+export type AppRoleType = AppRole
 
 export const ALLOWED_AUTH_PROVIDERS = ["GOOGLE", "DISCORD"] as const
 export type ExternalAuthProvider = typeof ALLOWED_AUTH_PROVIDERS[number]
@@ -95,65 +96,132 @@ export interface ServiceHealth {
   timestamp: string
 }
 
-// --- HiKAT Content Core Constants & Types ---
+// --- HiKAT News & Media Content Constants & Types (Shard 04B) ---
 
-export const ALLOWED_CONTENT_KINDS = ["NEWS", "ANNOUNCEMENT"] as const
-export type ContentPostKind = typeof ALLOWED_CONTENT_KINDS[number]
+export const ALLOWED_NEWS_TYPES = [
+  "NEWS",
+  "UPDATE",
+  "ANNOUNCEMENT",
+  "MAINTENANCE",
+] as const
+export type NewsType = typeof ALLOWED_NEWS_TYPES[number]
 
-export const ALLOWED_CONTENT_STATUSES = ["DRAFT", "PUBLISHED"] as const
-export type ContentPostStatus = typeof ALLOWED_CONTENT_STATUSES[number]
+export const ALLOWED_NEWS_STATUSES = ["DRAFT", "PUBLISHED"] as const
+export type NewsStatus = typeof ALLOWED_NEWS_STATUSES[number]
 
-export const ALLOWED_MEDIA_MIME_TYPES = [
+export const MEDIA_TYPES = ["IMAGE", "VIDEO"] as const
+export type MediaType = typeof MEDIA_TYPES[number]
+
+export const ALLOWED_IMAGE_MIME_TYPES = [
   "image/png",
   "image/jpeg",
   "image/webp",
 ] as const
+export type ImageMimeType = typeof ALLOWED_IMAGE_MIME_TYPES[number]
+
+export const ALLOWED_VIDEO_MIME_TYPES = ["video/mp4", "video/webm"] as const
+export type VideoMimeType = typeof ALLOWED_VIDEO_MIME_TYPES[number]
+
+export const ALLOWED_MEDIA_MIME_TYPES = [
+  ...ALLOWED_IMAGE_MIME_TYPES,
+  ...ALLOWED_VIDEO_MIME_TYPES,
+] as const
 export type MediaMimeType = typeof ALLOWED_MEDIA_MIME_TYPES[number]
 
-export const MAX_MEDIA_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
+export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
+export const MAX_VIDEO_SIZE_BYTES = 25 * 1024 * 1024 // 25 MB
+export const MAX_MEDIA_SIZE_BYTES = MAX_VIDEO_SIZE_BYTES // 25 MB max global buffer capacity
 export const MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS = 15 * 60 // 15 minutes
 
-export const CONTENT_LIMITS = {
+export const NEWS_LIMITS = {
   TITLE_MIN_LENGTH: 3,
   TITLE_MAX_LENGTH: 200,
-  SLUG_MIN_LENGTH: 3,
-  SLUG_MAX_LENGTH: 100,
-  SUMMARY_MIN_LENGTH: 3,
-  SUMMARY_MAX_LENGTH: 500,
-  BODY_MIN_LENGTH: 1,
-  BODY_MAX_LENGTH: 100000,
+  CONTENT_MIN_LENGTH: 1,
+  CONTENT_MAX_LENGTH: 100000,
   DEFAULT_FEED_LIMIT: 20,
   MAX_FEED_LIMIT: 50,
 } as const
 
-const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+/**
+ * Returns the media type ("IMAGE" | "VIDEO") from a valid MIME type.
+ */
+export function getMediaTypeFromMime(mimeType: string): MediaType | null {
+  const normalized = mimeType.toLowerCase().trim()
+  if ((ALLOWED_IMAGE_MIME_TYPES as readonly string[]).includes(normalized)) {
+    return "IMAGE"
+  }
+  if ((ALLOWED_VIDEO_MIME_TYPES as readonly string[]).includes(normalized)) {
+    return "VIDEO"
+  }
+  return null
+}
+
+const YOUTUBE_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/
 
 /**
- * Normalizes a raw slug: converts to lowercase, removes invalid characters,
- * collapses consecutive hyphens, and trims leading/trailing hyphens.
+ * Parses, validates, and normalizes a YouTube URL into a canonical representation.
+ * Supports:
+ *  - youtube.com/watch?v={id}
+ *  - youtu.be/{id}
+ *  - youtube.com/shorts/{id}
+ *  - youtube.com/embed/{id}
+ * Returns normalized video ID and canonical URL or null if invalid/unrecognized.
  */
-export function normalizeSlug(raw: string): string {
-  return raw
-    .toLowerCase()
-    .trim()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove diacritics
-    .replace(/[^a-z0-9-]+/g, "-") // replace non-alphanumerics with -
-    .replace(/-+/g, "-") // collapse consecutive hyphens
-    .replace(/^-|-$/g, "") // trim leading/trailing hyphens
+export function parseAndNormalizeYouTubeUrl(
+  url: string | null | undefined,
+): { videoId: string; canonicalUrl: string } | null {
+  if (!url || typeof url !== "string") return null
+  const trimmed = url.trim()
+  if (!trimmed) return null
+
+  try {
+    let parsedUrl: URL
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      parsedUrl = new URL(trimmed)
+    } else {
+      parsedUrl = new URL(`https://${trimmed}`)
+    }
+
+    const host = parsedUrl.hostname.toLowerCase()
+    let videoId: string | null = null
+
+    if (
+      host === "youtube.com" ||
+      host === "www.youtube.com" ||
+      host === "m.youtube.com" ||
+      host === "music.youtube.com"
+    ) {
+      if (parsedUrl.pathname === "/watch") {
+        videoId = parsedUrl.searchParams.get("v")
+      } else if (parsedUrl.pathname.startsWith("/shorts/")) {
+        videoId = parsedUrl.pathname.split("/")[2] || null
+      } else if (parsedUrl.pathname.startsWith("/embed/")) {
+        videoId = parsedUrl.pathname.split("/")[2] || null
+      } else if (parsedUrl.pathname.startsWith("/v/")) {
+        videoId = parsedUrl.pathname.split("/")[2] || null
+      }
+    } else if (host === "youtu.be" || host === "www.youtu.be") {
+      videoId = parsedUrl.pathname.slice(1).split("/")[0] || null
+    }
+
+    if (videoId && YOUTUBE_ID_REGEX.test(videoId)) {
+      return {
+        videoId,
+        canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
 }
 
 /**
- * Validates whether a slug matches strict URL-safe format and length bounds.
+ * Validates whether a string is a recognized and well-formed YouTube URL.
  */
-export function isValidSlug(slug: string): boolean {
-  if (
-    slug.length < CONTENT_LIMITS.SLUG_MIN_LENGTH ||
-    slug.length > CONTENT_LIMITS.SLUG_MAX_LENGTH
-  ) {
-    return false
-  }
-  return SLUG_REGEX.test(slug)
+export function isValidYouTubeUrl(url: string): boolean {
+  return parseAndNormalizeYouTubeUrl(url) !== null
 }
 
 /**
@@ -167,7 +235,9 @@ export function encodeCursor<T extends object>(data: T): string {
 /**
  * Decodes a Base64 cursor string into typed structured data.
  */
-export function decodeCursor<T = Record<string, unknown>>(cursor: string): T | null {
+export function decodeCursor<T = Record<string, unknown>>(
+  cursor: string,
+): T | null {
   try {
     const json = Buffer.from(cursor, "base64url").toString("utf-8")
     const parsed = JSON.parse(json)
@@ -179,4 +249,3 @@ export function decodeCursor<T = Record<string, unknown>>(cursor: string): T | n
     return null
   }
 }
-
