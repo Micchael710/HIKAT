@@ -4,8 +4,7 @@
  */
 
 import { createYoga, createSchema } from "graphql-yoga"
-import { GraphQLError } from "graphql"
-import { typeDefs, createGraphQLError } from "@hikat/graphql"
+import { typeDefs } from "@hikat/graphql"
 import { HIKAT_VERSION } from "@hikat/shared"
 import { createDatabase } from "@hikat/database"
 import type { Env, BackendGraphQLContext } from "./types"
@@ -36,26 +35,7 @@ export const yoga = createYoga<BackendGraphQLContext>({
     typeDefs,
     resolvers,
   }),
-  maskedErrors: {
-    errorMessage: "Internal server error",
-    maskError(error: unknown, message: string, isDev?: boolean) {
-      const orig = (error as any)?.originalError ?? error
-      const code = orig?.extensions?.code ?? (error as any)?.extensions?.code
-
-      if (code && KNOWN_SAFE_CODES.includes(code)) {
-        if (error instanceof GraphQLError) {
-          return error
-        }
-        return createGraphQLError(orig?.message || message, code)
-      }
-
-      const isDevMode = isDev ?? (process.env.NODE_ENV !== "production")
-      if (isDevMode && orig instanceof Error) {
-        return createGraphQLError(orig.message, "INTERNAL_ERROR")
-      }
-      return createGraphQLError(message || "Internal server error", "INTERNAL_ERROR")
-    },
-  },
+  maskedErrors: false, // Error masking is handled by secure-by-default Worker fetch wrapper
 })
 
 export default {
@@ -95,9 +75,13 @@ export default {
 
     const response = await yoga.fetch(request, context)
 
-    // Sanitize any unexpected internal errors in production environments
+    // Secure-by-default error sanitization:
+    // Only ENVIRONMENT === 'development' explicitly preserves unexpected internal error messages.
+    // In all other cases (undefined, 'production', 'staging', etc.), unexpected errors are masked.
+    const isExplicitDev = env.ENVIRONMENT === "development"
     let finalBody: BodyInit | null = response.body
-    if (env.ENVIRONMENT === "production" && response.headers.get("Content-Type")?.includes("application/json")) {
+
+    if (response.headers.get("Content-Type")?.includes("application/json")) {
       try {
         const bodyText = await response.text()
         const json = JSON.parse(bodyText)
@@ -106,6 +90,12 @@ export default {
             const code = err.extensions?.code
             if (code && KNOWN_SAFE_CODES.includes(code)) {
               return err
+            }
+            if (isExplicitDev) {
+              return {
+                ...err,
+                extensions: { ...err.extensions, code: code || "INTERNAL_ERROR" },
+              }
             }
             return {
               message: "Internal server error",

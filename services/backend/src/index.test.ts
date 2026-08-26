@@ -1186,8 +1186,8 @@ describe("HiKAT Backend Core (Shard 03)", () => {
     })
   })
 
-  describe("11. Production Error Masking (Cloudflare Compatible)", () => {
-    it("masks unexpected errors in production environment without exposing internals", async () => {
+  describe("11. Secure-by-Default Error Masking", () => {
+    it("preserves expected domain errors (e.g. UNAUTHENTICATED) across all environments", async () => {
       const request = new Request("http://localhost/graphql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1207,18 +1207,36 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(result.errors[0].extensions.code).toBe("UNAUTHENTICATED")
     })
 
-    it("masks unexpected database failures during session check without exposing internals", async () => {
+    it("masks unexpected database failures in ENVIRONMENT=production to INTERNAL_ERROR", async () => {
       const userId = "usr_prod_err"
       const sessionId = "ses_prod_err"
       await seedUserAndSession({ userId, sessionId, role: "PLAYER" })
 
       const token = await createTestAccessToken({ userId, sessionId, role: "PLAYER" })
 
-      // Mock D1 that throws unexpected internal DB engine failure on query
+      let userQueries = 0
       const faultyD1 = {
         ...testD1,
-        prepare: () => {
-          throw new Error("CRITICAL_DATABASE_CORRUPTION_SQLITE_PANIC at /var/internal/db.sqlite")
+        prepare: (query: string) => {
+          if (query.toLowerCase().includes("users")) {
+            userQueries++
+            if (userQueries >= 2) {
+              return {
+                bind: () => ({
+                  first: () => {
+                    throw new Error("CRITICAL_INTERNAL_DATABASE_PANIC: secret connection string postgres://secret:1234@db/internal")
+                  },
+                  all: () => {
+                    throw new Error("CRITICAL_INTERNAL_DATABASE_PANIC: secret connection string postgres://secret:1234@db/internal")
+                  },
+                  run: () => {
+                    throw new Error("CRITICAL_INTERNAL_DATABASE_PANIC: secret connection string postgres://secret:1234@db/internal")
+                  },
+                }),
+              } as any
+            }
+          }
+          return (testD1 as any).prepare(query)
         },
       } as unknown as D1Database
 
@@ -1241,10 +1259,125 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const result = await getJson(response)
       expect(result.errors).toBeDefined()
-      expect(result.errors[0].extensions.code).toBe("UNAUTHENTICATED")
-      // Ensure internal database details and panic stacks are not leaked
-      expect(JSON.stringify(result.errors)).not.toContain("CRITICAL_DATABASE_CORRUPTION")
-      expect(JSON.stringify(result.errors)).not.toContain("/var/internal")
+      expect(result.errors[0].message).toBe("Internal server error")
+      expect(result.errors[0].extensions.code).toBe("INTERNAL_ERROR")
+      expect(JSON.stringify(result.errors)).not.toContain("CRITICAL_INTERNAL_DATABASE_PANIC")
+      expect(JSON.stringify(result.errors)).not.toContain("postgres://")
+    })
+
+    it("masks unexpected database failures when ENVIRONMENT is absent/undefined (secure-by-default)", async () => {
+      const userId = "usr_undef_err"
+      const sessionId = "ses_undef_err"
+      await seedUserAndSession({ userId, sessionId, role: "PLAYER" })
+
+      const token = await createTestAccessToken({ userId, sessionId, role: "PLAYER" })
+
+      let userQueries = 0
+      const faultyD1 = {
+        ...testD1,
+        prepare: (query: string) => {
+          if (query.toLowerCase().includes("users")) {
+            userQueries++
+            if (userQueries >= 2) {
+              return {
+                bind: () => ({
+                  first: () => {
+                    throw new Error("UNHANDLED_DATABASE_EXCEPTION_LEAK: secret connection string postgres://secret:1234@db/internal")
+                  },
+                  all: () => {
+                    throw new Error("UNHANDLED_DATABASE_EXCEPTION_LEAK: secret connection string postgres://secret:1234@db/internal")
+                  },
+                  run: () => {
+                    throw new Error("UNHANDLED_DATABASE_EXCEPTION_LEAK: secret connection string postgres://secret:1234@db/internal")
+                  },
+                }),
+              } as any
+            }
+          }
+          return (testD1 as any).prepare(query)
+        },
+      } as unknown as D1Database
+
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          query: "{ me { id } }",
+        }),
+      })
+      // ENVIRONMENT is undefined (secure-by-default)
+      const env: Env = {
+        AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+        DB: faultyD1,
+      }
+      const response = await worker.fetch(request, env)
+
+      const result = await getJson(response)
+      expect(result.errors).toBeDefined()
+      expect(result.errors[0].message).toBe("Internal server error")
+      expect(result.errors[0].extensions.code).toBe("INTERNAL_ERROR")
+      expect(JSON.stringify(result.errors)).not.toContain("UNHANDLED_DATABASE_EXCEPTION_LEAK")
+      expect(JSON.stringify(result.errors)).not.toContain("postgres://")
+    })
+
+    it("preserves unexpected internal error messages in ENVIRONMENT=development for debugging", async () => {
+      const userId = "usr_dev_err"
+      const sessionId = "ses_dev_err"
+      await seedUserAndSession({ userId, sessionId, role: "PLAYER" })
+
+      const token = await createTestAccessToken({ userId, sessionId, role: "PLAYER" })
+
+      let userQueries = 0
+      const faultyD1 = {
+        ...testD1,
+        prepare: (query: string) => {
+          if (query.toLowerCase().includes("users")) {
+            userQueries++
+            if (userQueries >= 2) {
+              return {
+                bind: () => ({
+                  first: () => {
+                    throw new Error("DEBUG_HELPFUL_SQL_SYNTAX_ERROR: column foo does not exist")
+                  },
+                  all: () => {
+                    throw new Error("DEBUG_HELPFUL_SQL_SYNTAX_ERROR: column foo does not exist")
+                  },
+                  run: () => {
+                    throw new Error("DEBUG_HELPFUL_SQL_SYNTAX_ERROR: column foo does not exist")
+                  },
+                }),
+              } as any
+            }
+          }
+          return (testD1 as any).prepare(query)
+        },
+      } as unknown as D1Database
+
+      const request = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          query: "{ me { id } }",
+        }),
+      })
+      const env: Env = {
+        ENVIRONMENT: "development",
+        AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+        DB: faultyD1,
+      }
+      const response = await worker.fetch(request, env)
+
+      const result = await getJson(response)
+      expect(result.errors).toBeDefined()
+      // In development, the specific debug error details are preserved with INTERNAL_ERROR code
+      expect(result.errors[0].message).toContain("Failed query:")
+      expect(result.errors[0].extensions.code).toBe("INTERNAL_ERROR")
     })
   })
 })
