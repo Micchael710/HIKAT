@@ -18,8 +18,10 @@
     "@hikat/graphql": "workspace:*",
     "@hikat/shared": "workspace:*",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "skinview3d": "^3.4.2"
   },
+
   "devDependencies": {
     "@hikat/config": "workspace:*",
     "@tailwindcss/vite": "^4.0.0",

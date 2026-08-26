@@ -262,8 +262,15 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     expect(suggestNextPatchVersion("1.4.2")).toBe("1.4.3")
     expect(suggestNextPatchVersion("2.0.0")).toBe("2.0.1")
     expect(suggestNextPatchVersion(null)).toBe("1.0.0")
+
+    // ISO-8601 Date normalization
+    const { normalizeIsoDateTime } = await import("./index")
+    expect(normalizeIsoDateTime("2026-08-26 20:24:10")).toBe("2026-08-26T20:24:10.000Z")
+    expect(normalizeIsoDateTime("2026-08-26T20:24:10.000Z")).toBe("2026-08-26T20:24:10.000Z")
+    expect(typeof normalizeIsoDateTime(null)).toBe("string")
   })
 })
+
 
 
 

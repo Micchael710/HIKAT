@@ -80,6 +80,9 @@ import {
   prepareGameDraft,
   discardGameDraft,
   publishGameRelease,
+  getGameReleaseHistory,
+} from "../services/game/releaseService"
+import {
   getAdminGameFiles,
   createGameFileUploadToken,
   addGameFile,
@@ -317,7 +320,19 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getAdminGameOverview(context.db)
+      return getAdminGameOverview(context.db, context.env)
+    },
+
+    gameReleaseHistory: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<GameReleaseGql[]> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getGameReleaseHistory(context.db)
     },
 
     adminGameFiles: async (
@@ -331,6 +346,7 @@ export const resolvers = {
       }
       return getAdminGameFiles(context.db, args.releaseId, args.category)
     },
+
 
     // --- Settings Queries (Shard 06.5) ---
 
@@ -702,8 +718,9 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return publishGameRelease(context.db, args.input, identity.userId)
+      return publishGameRelease(context.db, context.env, args.input, identity.userId)
     },
+
 
     // --- Settings Administrative Mutations (Require ADMIN - Shard 06.5) ---
 

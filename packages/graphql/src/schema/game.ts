@@ -28,6 +28,38 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
+  Draft change tracking status relative to current published version
+  """
+  enum GameDraftChangeStatus {
+    UNCHANGED
+    ADDED
+    UPDATED
+    REMOVED
+  }
+
+  """
+  Summary of file modifications between published version and active draft
+  """
+  type GameDraftChanges {
+    added: Int!
+    updated: Int!
+    removed: Int!
+    unchanged: Int!
+    total: Int!
+  }
+
+  """
+  Readiness checklist for publishing an update
+  """
+  type GameDraftReadiness {
+    isReady: Boolean!
+    validVersion: Boolean!
+    noConflicts: Boolean!
+    storageVerified: Boolean!
+    issues: [String!]!
+  }
+
+  """
   Public client file manifest entry for the HiKAT Launcher sync engine
   """
   type ClientFile {
@@ -60,6 +92,7 @@ export const gameTypeDefs = /* GraphQL */ `
     sha256: String!
     sizeBytes: Int!
     policy: SyncPolicy!
+    changeStatus: GameDraftChangeStatus
     createdAt: DateTime!
   }
 
@@ -86,6 +119,8 @@ export const gameTypeDefs = /* GraphQL */ `
     publishedRelease: GameRelease
     draftRelease: GameRelease
     pendingChangesCount: Int!
+    changes: GameDraftChanges
+    readiness: GameDraftReadiness
   }
 
   """
@@ -114,6 +149,7 @@ export const gameTypeDefs = /* GraphQL */ `
   input UpdateGameFileInput {
     name: String
     category: GameFileCategory
+    tokenHash: String
   }
 
   input PrepareGameDraftInput {
@@ -137,6 +173,11 @@ export const gameTypeDefs = /* GraphQL */ `
     adminGameOverview: AdminGameOverview!
 
     """
+    Historical releases - requires ADMIN role
+    """
+    gameReleaseHistory: [GameRelease!]!
+
+    """
     List of files associated with a release or draft - requires ADMIN role
     """
     adminGameFiles(
@@ -144,6 +185,7 @@ export const gameTypeDefs = /* GraphQL */ `
       category: GameFileCategory
     ): [AdminGameFile!]!
   }
+
 
   extend type Mutation {
     """

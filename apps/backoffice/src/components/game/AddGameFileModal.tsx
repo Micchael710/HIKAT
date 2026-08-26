@@ -1,35 +1,37 @@
 import React, { useState, useRef } from "react"
-import type { ThemeMode, GameFileCategory } from "../../types"
+import type { ThemeMode, AdminGameFile, GameFileCategory } from "../../types"
 import { sanitizeGameFileName } from "@hikat/shared"
 import { gameApi } from "../../services/graphqlClient"
-import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
+import { IconCross, IconUpload, IconSpinner, IconBox } from "../../theme/icons"
 import BackofficeSelect, { SelectOption } from "../common/BackofficeSelect"
 
 interface AddGameFileModalProps {
   theme: ThemeMode
+  targetFile?: AdminGameFile | null
   onClose: () => void
-  onAdded: () => void
+  onSaved: () => void
 }
 
 const CATEGORY_OPTIONS: SelectOption[] = [
-  { value: "MOD", label: "Mod (.jar) — mods/" },
-  { value: "RESOURCE_PACK", label: "Paquete de Recursos (.zip) — resourcepacks/" },
-  { value: "SHADER_PACK", label: "Paquete de Shaders (.zip) — shaderpacks/" },
-  { value: "KUBEJS", label: "KubeJS — kubejs/" },
-  { value: "SCRIPT", label: "Script — scripts/" },
+  { value: "MOD", label: "Mod (.jar)" },
+  { value: "RESOURCE_PACK", label: "Paquete de recursos (.zip)" },
+  { value: "SHADER_PACK", label: "Paquete de shaders (.zip)" },
+  { value: "KUBEJS", label: "KubeJS (.js / .zip)" },
+  { value: "SCRIPT", label: "Script (.js / .json)" },
 ]
 
 export default function AddGameFileModal({
   theme,
+  targetFile,
   onClose,
-  onAdded,
+  onSaved,
 }: AddGameFileModalProps) {
   const isDark = theme === "dark"
+  const isReplace = !!targetFile
 
-  const [category, setCategory] = useState<GameFileCategory>("MOD")
-  const [name, setName] = useState("")
+  const [name, setName] = useState(targetFile?.name || "")
+  const [category, setCategory] = useState<GameFileCategory>(targetFile?.category || "MOD")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [fileError, setFileError] = useState<string | null>(null)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,28 +42,12 @@ export default function AddGameFileModal({
     const file = e.target.files?.[0]
     if (!file) return
 
-    setFileError(null)
-
-    if (category === "MOD" && !file.name.toLowerCase().endsWith(".jar")) {
-      setFileError("Un mod debe ser un archivo con extensión .jar.")
-      return
-    }
-
-    if (
-      (category === "RESOURCE_PACK" || category === "SHADER_PACK") &&
-      !file.name.toLowerCase().endsWith(".zip")
-    ) {
-      setFileError("El paquete debe ser un archivo con extensión .zip.")
-      return
-    }
-
     setSelectedFile(file)
-
-    if (!name) {
-      const cleanName = sanitizeGameFileName(file.name)
-        .replace(/\.(jar|zip)$/i, "")
-        .replace(/[_-]/g, " ")
-      setName(cleanName)
+    if (!name || isReplace) {
+      const clean = sanitizeGameFileName(file.name)
+        .replace(/\.(jar|zip|json|js)$/i, "")
+        .replace(/[-_]/g, " ")
+      setName(clean)
     }
   }
 
@@ -69,43 +55,58 @@ export default function AddGameFileModal({
     e.preventDefault()
     setError(null)
 
-    if (!selectedFile) {
-      setError("Debes seleccionar un archivo para subir.")
+    if (!name.trim()) {
+      setError("El nombre del archivo es obligatorio.")
       return
     }
 
-    if (!name.trim()) {
-      setError("El nombre del mod o archivo es obligatorio.")
+    if (!isReplace && !selectedFile) {
+      setError("Debes seleccionar un archivo para subir.")
       return
     }
 
     setIsSubmitting(true)
     try {
-      // 1. Request game upload ticket
-      const ticket = await gameApi.createGameFileUpload({
-        category,
-        originalFilename: selectedFile.name,
-        sizeBytes: selectedFile.size,
-      })
+      let tokenHash: string | undefined
 
-      // 2. Upload binary payload to /game/files/upload
-      const uploaded = await gameApi.uploadGameBinary(
-        selectedFile,
-        ticket.uploadUrl,
-        ticket.uploadToken,
-      )
+      if (selectedFile) {
+        // 1. Request upload ticket
+        const ticket = await gameApi.createGameFileUpload({
+          category,
+          originalFilename: selectedFile.name,
+          sizeBytes: selectedFile.size,
+        })
 
-      // 3. Attach uploaded file to draft
-      await gameApi.addGameFile({
-        name: name.trim(),
-        category,
-        tokenHash: uploaded.tokenHash,
-      })
+        // 2. Upload binary to R2
+        const uploaded = await gameApi.uploadGameBinary(
+          selectedFile,
+          ticket.uploadUrl,
+          ticket.uploadToken,
+        )
+        tokenHash = uploaded.tokenHash
+      }
 
-      onAdded()
+      if (isReplace && targetFile) {
+        await gameApi.updateGameFile(targetFile.id, {
+          name: name.trim(),
+          category,
+          tokenHash,
+        })
+      } else {
+        if (!tokenHash) {
+          throw new Error("No se pudo completar la subida del archivo.")
+        }
+        await gameApi.addGameFile({
+          name: name.trim(),
+          category,
+          tokenHash,
+        })
+      }
+
+      onSaved()
       onClose()
     } catch (err: any) {
-      setError(err.message || "Error al subir y añadir el archivo.")
+      setError(err.message || "Error al procesar el archivo.")
     } finally {
       setIsSubmitting(false)
     }
@@ -116,8 +117,8 @@ export default function AddGameFileModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.6)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.65)",
+        backdropFilter: "blur(5px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -131,12 +132,12 @@ export default function AddGameFileModal({
           border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
           borderRadius: "16px",
           width: "100%",
-          maxWidth: "480px",
+          maxWidth: "520px",
           overflow: "hidden",
           boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
         }}
       >
-        {/* Header */}
+        {/* Modal Header */}
         <div
           style={{
             display: "flex",
@@ -146,16 +147,32 @@ export default function AddGameFileModal({
             borderBottom: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
           }}
         >
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "18px",
-              fontWeight: "600",
-              color: isDark ? "#f1f5f9" : "#0f172a",
-            }}
-          >
-            Añadir Mod / Archivo al Juego
-          </h2>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "8px",
+                backgroundColor: isDark ? "rgba(99, 102, 241, 0.15)" : "#eef2ff",
+                color: "#6366f1",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <IconBox size={20} />
+            </div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "18px",
+                fontWeight: "600",
+                color: isDark ? "#f1f5f9" : "#0f172a",
+              }}
+            >
+              {isReplace ? "Actualizar archivo" : "Añadir mod o archivo"}
+            </h2>
+          </div>
           <button
             onClick={onClose}
             style={{
@@ -171,12 +188,12 @@ export default function AddGameFileModal({
           </button>
         </div>
 
-        {/* Form Body */}
+        {/* Modal Form */}
         <form onSubmit={handleSubmit} style={{ padding: "24px" }}>
           {error && (
             <div
               style={{
-                marginBottom: "16px",
+                marginBottom: "20px",
                 padding: "10px 14px",
                 borderRadius: "8px",
                 backgroundColor: "rgba(239, 68, 68, 0.15)",
@@ -188,29 +205,8 @@ export default function AddGameFileModal({
             </div>
           )}
 
-          {/* Category Selector */}
-          <div style={{ marginBottom: "18px" }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: "13px",
-                fontWeight: "600",
-                color: isDark ? "#cbd5e1" : "#334155",
-                marginBottom: "6px",
-              }}
-            >
-              Categoría de archivo
-            </label>
-            <BackofficeSelect
-              theme={theme}
-              value={category}
-              onChange={(val) => setCategory(val as GameFileCategory)}
-              options={CATEGORY_OPTIONS}
-            />
-          </div>
-
-          {/* File Picker */}
-          <div style={{ marginBottom: "18px" }}>
+          {/* File Selector */}
+          <div style={{ marginBottom: "20px" }}>
             <label
               style={{
                 display: "block",
@@ -220,67 +216,63 @@ export default function AddGameFileModal({
                 marginBottom: "8px",
               }}
             >
-              Archivo binario
+              {isReplace ? "Reemplazar archivo (opcional si solo cambias nombre)" : "Archivo (.jar / .zip)"}
             </label>
-
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileChange}
-              accept={category === "MOD" ? ".jar" : ".zip,.jar"}
+              accept=".jar,.zip,.json,.js"
               style={{ display: "none" }}
             />
-
-            <button
-              type="button"
+            <div
               onClick={() => fileInputRef.current?.click()}
               style={{
-                width: "100%",
-                padding: "20px",
+                border: `2px dashed ${selectedFile ? "#6366f1" : isDark ? "#475569" : "#cbd5e1"}`,
                 borderRadius: "10px",
-                border: `2px dashed ${isDark ? "#475569" : "#cbd5e1"}`,
-                backgroundColor: isDark ? "rgba(15, 23, 42, 0.5)" : "#f8fafc",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "8px",
+                padding: "24px 16px",
+                textAlign: "center",
                 cursor: "pointer",
-                boxSizing: "border-box",
+                backgroundColor: selectedFile
+                  ? (isDark ? "rgba(99, 102, 241, 0.1)" : "#f5f3ff")
+                  : (isDark ? "#0f172a" : "#f8fafc"),
+                transition: "all 0.15s ease",
               }}
             >
               <div
                 style={{
-                  width: "36px",
-                  height: "36px",
-                  borderRadius: "8px",
-                  backgroundColor: isDark ? "#334155" : "#e2e8f0",
+                  color: selectedFile ? "#6366f1" : isDark ? "#64748b" : "#94a3b8",
+                  margin: "0 auto 8px auto",
                   display: "flex",
-                  alignItems: "center",
                   justifyContent: "center",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                 }}
               >
-                <IconUpload size={20} />
+                <IconUpload size={28} />
               </div>
-              <span style={{ fontSize: "13px", fontWeight: "500", color: isDark ? "#f1f5f9" : "#1e293b" }}>
-                {selectedFile ? selectedFile.name : "Haz clic para seleccionar el archivo..."}
-              </span>
-              {selectedFile && (
-                <span style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b" }}>
-                  {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
-                </span>
-              )}
-            </button>
 
-            {fileError && (
-              <div style={{ marginTop: "6px", fontSize: "12px", color: "#ef4444" }}>
-                {fileError}
+              <div
+                style={{
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  color: isDark ? "#f1f5f9" : "#0f172a",
+                }}
+              >
+                {selectedFile
+                  ? selectedFile.name
+                  : isReplace
+                    ? "Haz clic para seleccionar nuevo archivo .jar"
+                    : "Haz clic para seleccionar archivo"}
               </div>
-            )}
+              <div style={{ fontSize: "12px", color: isDark ? "#64748b" : "#94a3b8", marginTop: "4px" }}>
+                {selectedFile
+                  ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`
+                  : "Formatos permitidos: .jar, .zip (hasta 100 MB)"}
+              </div>
+            </div>
           </div>
 
           {/* Name Field */}
-          <div style={{ marginBottom: "24px" }}>
+          <div style={{ marginBottom: "18px" }}>
             <label
               style={{
                 display: "block",
@@ -296,7 +288,7 @@ export default function AddGameFileModal({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ej. JourneyMap, Sodium, Iris Shaders..."
+              placeholder="Ej. JourneyMap, Sodium, Shaders Complementary..."
               style={{
                 width: "100%",
                 padding: "10px 14px",
@@ -310,8 +302,37 @@ export default function AddGameFileModal({
             />
           </div>
 
+          {/* Category Selector */}
+          <div style={{ marginBottom: "24px" }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: "13px",
+                fontWeight: "600",
+                color: isDark ? "#cbd5e1" : "#334155",
+                marginBottom: "6px",
+              }}
+            >
+              Tipo de contenido
+            </label>
+            <BackofficeSelect
+              theme={theme}
+              value={category}
+              onChange={(val) => setCategory(val as GameFileCategory)}
+              options={CATEGORY_OPTIONS}
+            />
+          </div>
+
           {/* Footer Actions */}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: "10px",
+              paddingTop: "16px",
+              borderTop: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+            }}
+          >
             <button
               type="button"
               onClick={onClose}
@@ -347,7 +368,7 @@ export default function AddGameFileModal({
               }}
             >
               {isSubmitting && <IconSpinner size={16} />}
-              Añadir al borrador
+              {isReplace ? "Guardar cambios" : "Añadir archivo"}
             </button>
           </div>
         </form>

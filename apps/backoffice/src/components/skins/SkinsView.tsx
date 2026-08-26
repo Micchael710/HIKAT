@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react"
-import type { ThemeMode, SkinItem, SkinStatus } from "../../types"
+import type { ThemeMode, SkinItem } from "../../types"
 import { skinsApi } from "../../services/graphqlClient"
 import {
   IconPlus,
@@ -7,6 +7,7 @@ import {
   IconTrash,
   IconSpinner,
   IconShirt,
+  IconEye,
 } from "../../theme/icons"
 import SkinHeadPreview from "./SkinHeadPreview"
 import SkinFormModal from "./SkinFormModal"
@@ -32,8 +33,9 @@ export default function SkinsView({ theme }: SkinsViewProps) {
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>("ALL")
 
+  const [modalMode, setModalMode] = useState<"edit" | "view">("edit")
   const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingSkin, setEditingSkin] = useState<SkinItem | null>(null)
+  const [activeSkin, setActiveSkin] = useState<SkinItem | null>(null)
   const [deleteSkinItem, setDeleteSkinItem] = useState<SkinItem | null>(null)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
@@ -55,19 +57,20 @@ export default function SkinsView({ theme }: SkinsViewProps) {
   }, [fetchSkins])
 
   return (
-    <div style={{ padding: "28px", maxWidth: "1280px", margin: "0 auto" }}>
-      {/* Top Header */}
+    <div style={{ padding: "28px", maxWidth: "1280px", margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+      {/* Top Header - Responsive flexbox layout */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flexWrap: "wrap",
-          gap: "16px",
+          gap: "20px",
           marginBottom: "28px",
+          width: "100%",
         }}
       >
-        <div>
+        <div style={{ minWidth: "240px", flex: "1 1 300px" }}>
           <h1
             style={{
               margin: "0 0 6px 0",
@@ -90,8 +93,17 @@ export default function SkinsView({ theme }: SkinsViewProps) {
           </p>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "180px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "12px",
+            justifyContent: "flex-end",
+            flex: "0 1 auto",
+          }}
+        >
+          <div style={{ minWidth: "170px", width: "180px" }}>
             <BackofficeSelect
               theme={theme}
               value={statusFilter}
@@ -102,7 +114,8 @@ export default function SkinsView({ theme }: SkinsViewProps) {
 
           <button
             onClick={() => {
-              setEditingSkin(null)
+              setActiveSkin(null)
+              setModalMode("edit")
               setIsFormOpen(true)
             }}
             style={{
@@ -117,6 +130,8 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               fontSize: "14px",
               fontWeight: "600",
               cursor: "pointer",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             <IconPlus size={16} />
@@ -187,7 +202,8 @@ export default function SkinsView({ theme }: SkinsViewProps) {
           </p>
           <button
             onClick={() => {
-              setEditingSkin(null)
+              setActiveSkin(null)
+              setModalMode("edit")
               setIsFormOpen(true)
             }}
             style={{
@@ -233,7 +249,15 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               }}
             >
               {/* Skin Avatar Preview */}
-              <div style={{ marginBottom: "14px" }}>
+              <div
+                onClick={() => {
+                  setActiveSkin(skin)
+                  setModalMode("view")
+                  setIsFormOpen(true)
+                }}
+                style={{ marginBottom: "14px", cursor: "pointer" }}
+                title="Haz clic para ver en 3D"
+              >
                 <SkinHeadPreview imageUrl={skin.imageUrl} size={72} />
               </div>
 
@@ -265,7 +289,7 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     color: isDark ? "#cbd5e1" : "#475569",
                   }}
                 >
-                  {skin.model === "SLIM" ? "Delgado" : "Clásico"}
+                  {skin.model === "SLIM" ? "Delgado (3px)" : "Clásico (4px)"}
                 </span>
 
                 <span
@@ -290,14 +314,15 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                 style={{
                   display: "flex",
                   width: "100%",
-                  gap: "8px",
+                  gap: "6px",
                   borderTop: `1px solid ${isDark ? "#334155" : "#f1f5f9"}`,
                   paddingTop: "14px",
                 }}
               >
                 <button
                   onClick={() => {
-                    setEditingSkin(skin)
+                    setActiveSkin(skin)
+                    setModalMode("view")
                     setIsFormOpen(true)
                   }}
                   style={{
@@ -305,8 +330,35 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    gap: "6px",
-                    padding: "7px 10px",
+                    gap: "4px",
+                    padding: "7px 8px",
+                    borderRadius: "6px",
+                    border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
+                    backgroundColor: "transparent",
+                    color: isDark ? "#f1f5f9" : "#1e293b",
+                    fontSize: "12px",
+                    fontWeight: "500",
+                    cursor: "pointer",
+                  }}
+                  title="Ver en 3D"
+                >
+                  <IconEye size={14} />
+                  Ver
+                </button>
+
+                <button
+                  onClick={() => {
+                    setActiveSkin(skin)
+                    setModalMode("edit")
+                    setIsFormOpen(true)
+                  }}
+                  style={{
+                    flex: 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "4px",
+                    padding: "7px 8px",
                     borderRadius: "6px",
                     border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
                     backgroundColor: "transparent",
@@ -326,7 +378,7 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    padding: "7px 10px",
+                    padding: "7px 8px",
                     borderRadius: "6px",
                     border: `1px solid rgba(239, 68, 68, 0.3)`,
                     backgroundColor: "transparent",
@@ -334,6 +386,7 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     fontSize: "12px",
                     cursor: "pointer",
                   }}
+                  title="Eliminar skin"
                 >
                   <IconTrash size={14} />
                 </button>
@@ -343,17 +396,18 @@ export default function SkinsView({ theme }: SkinsViewProps) {
         </div>
       )}
 
-      {/* Skin Create/Edit Modal */}
+      {/* Skin Create / View / Edit Modal */}
       {isFormOpen && (
         <SkinFormModal
           theme={theme}
-          skin={editingSkin}
+          skin={activeSkin}
+          mode={modalMode}
           onClose={() => {
             setIsFormOpen(false)
-            setEditingSkin(null)
+            setActiveSkin(null)
           }}
           onSaved={() => {
-            setToastMessage(editingSkin ? "Skin actualizada correctamente." : "Skin creada exitosamente.")
+            setToastMessage(activeSkin ? "Skin actualizada correctamente." : "Skin creada exitosamente.")
             fetchSkins()
           }}
         />

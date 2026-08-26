@@ -1,4 +1,6 @@
-import React, { useEffect, useRef } from "react"
+import React, { useEffect, useRef, useState } from "react"
+import { resolveMediaUrl } from "../../services/graphqlClient"
+import { IconShirt } from "../../theme/icons"
 
 interface SkinHeadPreviewProps {
   imageUrl: string
@@ -15,23 +17,26 @@ export default function SkinHeadPreview({
   className,
 }: SkinHeadPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [hasError, setHasError] = useState(false)
+  const resolvedUrl = resolveMediaUrl(imageUrl)
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !imageUrl) return
+    if (!canvas || !resolvedUrl) return
 
+    setHasError(false)
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
     const img = new Image()
     img.crossOrigin = "anonymous"
-    img.src = imageUrl
+    img.src = resolvedUrl
 
     img.onload = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.imageSmoothingEnabled = false
 
-      // Scale factors for standard 64x64 or HD skins
+      // Scale factor for standard 64x64, 64x32, or HD skins
       const s = img.width / 64
 
       // 1. Draw base face: [8, 8, 8, 8]
@@ -40,7 +45,32 @@ export default function SkinHeadPreview({
       // 2. Draw overlay hat: [40, 8, 8, 8]
       ctx.drawImage(img, 40 * s, 8 * s, 8 * s, 8 * s, 0, 0, canvas.width, canvas.height)
     }
-  }, [imageUrl, size])
+
+    img.onerror = () => {
+      setHasError(true)
+    }
+  }, [resolvedUrl, size])
+
+  if (hasError || !resolvedUrl) {
+    return (
+      <div
+        className={className}
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          borderRadius: "8px",
+          backgroundColor: "rgba(148, 163, 184, 0.15)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#94a3b8",
+        }}
+        title="No se pudo mostrar la skin"
+      >
+        <IconShirt size={Math.round(size * 0.5)} />
+      </div>
+    )
+  }
 
   return (
     <canvas
@@ -53,7 +83,7 @@ export default function SkinHeadPreview({
         height: `${size}px`,
         imageRendering: "pixelated",
         borderRadius: "8px",
-        backgroundColor: "rgba(0,0,0,0.1)",
+        backgroundColor: "rgba(0, 0, 0, 0.08)",
       }}
     />
   )

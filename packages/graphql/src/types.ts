@@ -218,6 +218,23 @@ export type GameFileCategoryGql =
 
 export type GameReleaseStatusGql = "DRAFT" | "PUBLISHED" | "ARCHIVED"
 export type SyncPolicyGql = "NO_MODIFICABLE" | "MODIFICABLE"
+export type GameDraftChangeStatusGql = "UNCHANGED" | "ADDED" | "UPDATED" | "REMOVED"
+
+export interface GameDraftChangesGql {
+  added: number
+  updated: number
+  removed: number
+  unchanged: number
+  total: number
+}
+
+export interface GameDraftReadinessGql {
+  isReady: boolean
+  validVersion: boolean
+  noConflicts: boolean
+  storageVerified: boolean
+  issues: string[]
+}
 
 export interface ClientFileGql {
   path: string
@@ -243,6 +260,7 @@ export interface AdminGameFileGql {
   sha256: string
   sizeBytes: number
   policy: SyncPolicyGql
+  changeStatus?: GameDraftChangeStatusGql | null
   createdAt: string
 }
 
@@ -263,6 +281,8 @@ export interface AdminGameOverviewGql {
   publishedRelease?: GameReleaseGql | null
   draftRelease?: GameReleaseGql | null
   pendingChangesCount: number
+  changes?: GameDraftChangesGql | null
+  readiness?: GameDraftReadinessGql | null
 }
 
 export interface GameFileUploadPayloadGql {
@@ -288,7 +308,9 @@ export interface AddGameFileInputGql {
 export interface UpdateGameFileInputGql {
   name?: string | null
   category?: GameFileCategoryGql | null
+  tokenHash?: string | null
 }
+
 
 export interface PrepareGameDraftInputGql {
   baseReleaseId?: string | null

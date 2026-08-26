@@ -1,33 +1,40 @@
 import React, { useState } from "react"
-import type { ThemeMode } from "../../types"
+import type { ThemeMode, GameRelease, GameDraftChanges, GameDraftReadiness } from "../../types"
 import { validateSemVer, suggestNextPatchVersion } from "@hikat/shared"
 import { gameApi } from "../../services/graphqlClient"
-import { IconCross, IconSpinner, IconGamepad } from "../../theme/icons"
+import { IconCross, IconRocket, IconSpinner, IconCheck, IconWarning } from "../../theme/icons"
 
 interface PublishReleaseModalProps {
   theme: ThemeMode
-  currentPublishedVersion?: string | null
-  filesCount: number
+  draftRelease: GameRelease
+  publishedRelease?: GameRelease | null
+  changes?: GameDraftChanges | null
+  readiness?: GameDraftReadiness | null
   onClose: () => void
-  onPublished: () => void
+  onPublished: (version: string, fileCount: number) => void
 }
 
 export default function PublishReleaseModal({
   theme,
-  currentPublishedVersion,
-  filesCount,
+  draftRelease,
+  publishedRelease,
+  changes,
+  readiness,
   onClose,
   onPublished,
 }: PublishReleaseModalProps) {
   const isDark = theme === "dark"
-  const defaultVersion = suggestNextPatchVersion(currentPublishedVersion)
 
-  const [version, setVersion] = useState(defaultVersion)
+  const suggestedVersion = suggestNextPatchVersion(publishedRelease?.version)
+  const [version, setVersion] = useState(suggestedVersion)
   const [notes, setNotes] = useState("")
+
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const isReady = readiness ? readiness.isReady : draftRelease.files.length > 0
+
+  const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
 
@@ -38,20 +45,36 @@ export default function PublishReleaseModal({
     }
 
     if (!validateSemVer(trimmedVersion)) {
-      setError("Formato de versión inválido. Debe seguir el formato SemVer (ejemplo: 1.4.3).")
+      setError("Formato de versión inválido. Debe ser SemVer (ejemplo: 1.0.1).")
+      return
+    }
+
+    if (readiness && !readiness.isReady && readiness.issues.length > 0) {
+      setError(`Corrige los siguientes problemas antes de publicar: ${readiness.issues.join(". ")}`)
       return
     }
 
     setIsSubmitting(true)
     try {
-      await gameApi.publishGameRelease({
+      // 1. Execute publication mutation
+      const published = await gameApi.publishGameRelease({
         version: trimmedVersion,
         notes: notes.trim() || undefined,
       })
-      onPublished()
+
+      // 2. Post-publication verification
+      const verifyOverview = await gameApi.getAdminGameOverview()
+      if (verifyOverview.publishedRelease?.version !== trimmedVersion) {
+        throw new Error(
+          "La actualización se procesó, pero no pudimos verificar la versión activa. Recarga la página para comprobar el estado.",
+        )
+      }
+
+      onPublished(trimmedVersion, published.files.length)
       onClose()
     } catch (err: any) {
       setError(err.message || "Error al publicar la actualización.")
+    } finally {
       setIsSubmitting(false)
     }
   }
@@ -61,8 +84,8 @@ export default function PublishReleaseModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.6)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.65)",
+        backdropFilter: "blur(5px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -76,12 +99,12 @@ export default function PublishReleaseModal({
           border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
           borderRadius: "16px",
           width: "100%",
-          maxWidth: "480px",
+          maxWidth: "520px",
           overflow: "hidden",
           boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
         }}
       >
-        {/* Header */}
+        {/* Modal Header */}
         <div
           style={{
             display: "flex",
@@ -104,7 +127,7 @@ export default function PublishReleaseModal({
                 justifyContent: "center",
               }}
             >
-              <IconGamepad size={20} />
+              <IconRocket size={20} />
             </div>
             <h2
               style={{
@@ -114,7 +137,7 @@ export default function PublishReleaseModal({
                 color: isDark ? "#f1f5f9" : "#0f172a",
               }}
             >
-              Publicar Actualización
+              Publicar actualización oficial
             </h2>
           </div>
           <button
@@ -132,12 +155,12 @@ export default function PublishReleaseModal({
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} style={{ padding: "24px" }}>
+        {/* Modal Content */}
+        <form onSubmit={handlePublish} style={{ padding: "24px" }}>
           {error && (
             <div
               style={{
-                marginBottom: "16px",
+                marginBottom: "20px",
                 padding: "10px 14px",
                 borderRadius: "8px",
                 backgroundColor: "rgba(239, 68, 68, 0.15)",
@@ -149,16 +172,45 @@ export default function PublishReleaseModal({
             </div>
           )}
 
-          <p
-            style={{
-              margin: "0 0 16px 0",
-              fontSize: "14px",
-              color: isDark ? "#cbd5e1" : "#334155",
-              lineHeight: "1.5",
-            }}
-          >
-            Se publicará la nueva versión con <strong>{filesCount} archivo(s) / mod(s)</strong>. Todos los jugadores conectados al lanzador se sincronizarán automáticamente con esta versión oficial.
-          </p>
+          {/* Change Summary Card */}
+          {changes && (
+            <div
+              style={{
+                marginBottom: "20px",
+                padding: "14px 16px",
+                borderRadius: "10px",
+                backgroundColor: isDark ? "#0f172a" : "#f8fafc",
+                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  color: isDark ? "#94a3b8" : "#64748b",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  marginBottom: "8px",
+                }}
+              >
+                Resumen de cambios
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+                <span style={{ fontSize: "13px", fontWeight: "600", color: "#22c55e" }}>
+                  +{changes.added} añadidos
+                </span>
+                <span style={{ fontSize: "13px", fontWeight: "600", color: "#38bdf8" }}>
+                  ↑ {changes.updated} actualizados
+                </span>
+                <span style={{ fontSize: "13px", fontWeight: "600", color: "#ef4444" }}>
+                  − {changes.removed} eliminados
+                </span>
+                <span style={{ fontSize: "13px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                  = {changes.unchanged} sin cambios
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Version Input */}
           <div style={{ marginBottom: "18px" }}>
@@ -171,13 +223,13 @@ export default function PublishReleaseModal({
                 marginBottom: "6px",
               }}
             >
-              Número de versión
+              Versión a publicar
             </label>
             <input
               type="text"
               value={version}
               onChange={(e) => setVersion(e.target.value)}
-              placeholder="Ej. 1.4.3"
+              placeholder="Ej. 1.0.1"
               style={{
                 width: "100%",
                 padding: "10px 14px",
@@ -186,19 +238,14 @@ export default function PublishReleaseModal({
                 backgroundColor: isDark ? "#0f172a" : "#ffffff",
                 color: isDark ? "#f1f5f9" : "#0f172a",
                 fontSize: "14px",
-                boxSizing: "border-box",
                 fontWeight: "600",
+                boxSizing: "border-box",
               }}
             />
-            {currentPublishedVersion && (
-              <span style={{ display: "block", marginTop: "4px", fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b" }}>
-                Versión actual publicada: v{currentPublishedVersion}
-              </span>
-            )}
           </div>
 
-          {/* Notes / Changelog */}
-          <div style={{ marginBottom: "24px" }}>
+          {/* Release Notes */}
+          <div style={{ marginBottom: "20px" }}>
             <label
               style={{
                 display: "block",
@@ -208,13 +255,13 @@ export default function PublishReleaseModal({
                 marginBottom: "6px",
               }}
             >
-              Notas de la actualización (opcional)
+              Notas de la versión (opcional)
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              placeholder="Descripción de los cambios o novedades para los jugadores..."
               rows={3}
-              placeholder="Describe brevemente los mods añadidos o corregidos..."
               style={{
                 width: "100%",
                 padding: "10px 14px",
@@ -225,13 +272,56 @@ export default function PublishReleaseModal({
                 fontSize: "13px",
                 boxSizing: "border-box",
                 resize: "vertical",
-                fontFamily: "inherit",
               }}
             />
           </div>
 
+          {/* Readiness Status Indicator */}
+          <div
+            style={{
+              padding: "12px 14px",
+              borderRadius: "8px",
+              backgroundColor: isReady ? "rgba(34, 197, 94, 0.1)" : "rgba(239, 68, 68, 0.1)",
+              border: `1px solid ${isReady ? "rgba(34, 197, 94, 0.25)" : "rgba(239, 68, 68, 0.25)"}`,
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              marginBottom: "24px",
+            }}
+          >
+            {isReady ? (
+              <>
+                <div style={{ color: "#22c55e", display: "flex" }}>
+                  <IconCheck size={18} />
+                </div>
+                <div style={{ fontSize: "13px", fontWeight: "600", color: "#22c55e" }}>
+                  ✓ Lista para publicar inmediatamente
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ color: "#ef4444", display: "flex" }}>
+                  <IconWarning size={18} />
+                </div>
+                <div style={{ fontSize: "13px", color: "#ef4444" }}>
+                  {readiness?.issues.length
+                    ? readiness.issues.join(". ")
+                    : "No se puede publicar en este momento."}
+                </div>
+              </>
+            )}
+          </div>
+
           {/* Footer Actions */}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: "10px",
+              paddingTop: "16px",
+              borderTop: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+            }}
+          >
             <button
               type="button"
               onClick={onClose}
@@ -250,7 +340,7 @@ export default function PublishReleaseModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !isReady}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -262,12 +352,12 @@ export default function PublishReleaseModal({
                 color: "#ffffff",
                 fontSize: "13px",
                 fontWeight: "600",
-                cursor: isSubmitting ? "not-allowed" : "pointer",
-                opacity: isSubmitting ? 0.7 : 1,
+                cursor: isSubmitting || !isReady ? "not-allowed" : "pointer",
+                opacity: isSubmitting || !isReady ? 0.6 : 1,
               }}
             >
               {isSubmitting && <IconSpinner size={16} />}
-              Publicar ahora
+              Publicar actualización
             </button>
           </div>
         </form>

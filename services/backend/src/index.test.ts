@@ -5456,8 +5456,114 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(updateData.data.updateAdminSettings.serverIp).toBe("play.hikat.org")
       expect(updateData.data.updateAdminSettings.recommendedRamGb).toBe(12)
     })
+
+    it("evaluates draft change tracking, readiness check, version history, and mod replacement (Shard 06.5A)", async () => {
+      const testEnv = createCoreEnv()
+
+      // 1. Initial upload and publish release 1.4.2
+      const ticketReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+        body: JSON.stringify({
+          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "sodium-1.21.1.jar", sizeBytes: 50 }) { uploadUrl uploadToken } }`,
+        }),
+      })
+      const ticketRes = await worker.fetch(ticketReq, testEnv)
+      const ticketData = (await ticketRes.json()) as any
+      const { uploadUrl, uploadToken } = ticketData.data.createGameFileUpload
+
+      const binaryPayload = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Array(46).fill(0x00)])
+      const uploadReq = new Request(`http://localhost${uploadUrl}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${coreAdminToken}`, "X-Upload-Token": uploadToken },
+        body: binaryPayload,
+      })
+      const uploadRes = await worker.fetch(uploadReq, testEnv)
+      const uploadedInfo = (await uploadRes.json()) as any
+
+      // Add to draft and publish 1.4.2
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { addGameFile(input: { name: "Sodium", category: MOD, tokenHash: "${uploadedInfo.tokenHash}" }) { id } }`,
+          }),
+        }),
+        testEnv,
+      )
+
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+          body: JSON.stringify({
+            query: `mutation { publishGameRelease(input: { version: "1.4.2", notes: "Initial version" }) { id version } }`,
+          }),
+        }),
+        testEnv,
+      )
+
+      // 2. Prepare new draft from published 1.4.2
+      const draftReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+        body: JSON.stringify({ query: "mutation { prepareGameDraft { id version files { id name } } }" }),
+      })
+      const draftRes = await worker.fetch(draftReq, testEnv)
+      const draftData = (await draftRes.json()) as any
+      expect(draftData.errors).toBeUndefined()
+      expect(draftData.data.prepareGameDraft.files.length).toBe(1)
+
+      // 3. Query overview to verify change tracking & readiness
+      const overviewReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+        body: JSON.stringify({
+          query: `
+            query {
+              adminGameOverview {
+                draftRelease { id version files { id name changeStatus } }
+                changes { added updated removed unchanged total }
+                readiness { isReady validVersion noConflicts storageVerified issues }
+              }
+            }
+          `,
+        }),
+      })
+      const overviewRes = await worker.fetch(overviewReq, testEnv)
+      const overviewData = (await overviewRes.json()) as any
+      expect(overviewData.errors).toBeUndefined()
+      expect(overviewData.data.adminGameOverview.changes.unchanged).toBe(1)
+      expect(overviewData.data.adminGameOverview.readiness.isReady).toBe(true)
+
+      // 4. Query game release history
+      const historyReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${coreAdminToken}` },
+        body: JSON.stringify({
+          query: `
+            query {
+              gameReleaseHistory {
+                id
+                version
+                status
+                files { id name }
+              }
+            }
+          `,
+        }),
+      })
+      const historyRes = await worker.fetch(historyReq, testEnv)
+      const historyData = (await historyRes.json()) as any
+      expect(historyData.errors).toBeUndefined()
+      expect(historyData.data.gameReleaseHistory.length).toBeGreaterThanOrEqual(1)
+      expect(historyData.data.gameReleaseHistory[0].version).toBe("1.4.2")
+    })
   })
 })
+
+
 
 
 

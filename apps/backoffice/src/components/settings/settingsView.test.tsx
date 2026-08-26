@@ -5,7 +5,7 @@ import { render, screen, act, cleanup, fireEvent } from "@testing-library/react"
 import SettingsView from "./SettingsView"
 import { settingsApi } from "../../services/graphqlClient"
 
-describe("Back Office Settings Component (Shard 06.5)", () => {
+describe("Back Office Settings Component (Shard 06.5A)", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -14,7 +14,7 @@ describe("Back Office Settings Component (Shard 06.5)", () => {
     cleanup()
   })
 
-  it("loads and displays typed project and launcher settings", async () => {
+  it("loads and displays typed project settings with Dirección para jugar and hidden port", async () => {
     const mockSettings: import("../../types").AdminSettings = {
       projectName: "HiKAT Official",
       serverIp: "play.hikat.org",
@@ -34,11 +34,14 @@ describe("Back Office Settings Component (Shard 06.5)", () => {
       render(<SettingsView theme="dark" />)
     })
 
-    expect(screen.getByText("Ajustes del Proyecto")).toBeDefined()
+    expect(screen.getByText("Ajustes Generales")).toBeDefined()
+    expect(screen.getByText("Dirección para jugar")).toBeDefined()
     expect(screen.getByDisplayValue("HiKAT Official")).toBeDefined()
     expect(screen.getByDisplayValue("play.hikat.org")).toBeDefined()
     expect(screen.getByDisplayValue("Actualizando mods...")).toBeDefined()
-    expect(screen.getByText("Activado")).toBeDefined()
+
+    // Port input is hidden from UI
+    expect(screen.queryByDisplayValue("25565")).toBeNull()
   })
 
   it("allows updating settings and submits typed values", async () => {

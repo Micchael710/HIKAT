@@ -270,6 +270,29 @@ export async function updateGameFile(
     }
   }
 
+  if (input.tokenHash) {
+    const tokenRecord = await db
+      .select()
+      .from(schema.gameFileUploadTokens)
+      .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+      .get()
+
+    if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
+      throw createGraphQLError("Token de subida inválido o no completado.", "VALIDATION_ERROR")
+    }
+
+    updates.sha256 = tokenRecord.sha256
+    updates.sizeBytes = tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes
+    updates.objectKey = tokenRecord.objectKey
+
+    if (tokenRecord.originalFilename) {
+      const safeFilename = sanitizeGameFileName(tokenRecord.originalFilename)
+      const cat = (input.category || existing.category) as GameFileCategory
+      updates.logicalPath = resolveGameLogicalPath(cat, safeFilename)
+    }
+  }
+
+
   if (Object.keys(updates).length > 0) {
     await db
       .update(schema.gameReleaseFiles)

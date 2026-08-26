@@ -675,6 +675,25 @@ export function suggestNextPatchVersion(currentVersion?: string | null): string 
   return "1.0.0"
 }
 
+/**
+ * Defensively normalizes any date string (ISO-8601, SQLite space timestamp, or epoch) into a valid ISO-8601 UTC string.
+ */
+
+export function normalizeIsoDateTime(value?: string | null): string {
+  if (!value || typeof value !== "string" || !value.trim()) {
+    return new Date().toISOString()
+  }
+  const trimmed = value.trim()
+  const parsed = new Date(trimmed)
+  if (!isNaN(parsed.getTime()) && trimmed.includes("T")) {
+    return parsed.toISOString()
+  }
+  const formatted = trimmed.replace(" ", "T") + (trimmed.endsWith("Z") ? "" : "Z")
+  const fallback = new Date(formatted)
+  return !isNaN(fallback.getTime()) ? fallback.toISOString() : new Date().toISOString()
+}
+
+
 
 
 

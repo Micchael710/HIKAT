@@ -8,7 +8,7 @@ import type {
   CreateSkinInputGql,
   UpdateSkinInputGql,
 } from "@hikat/graphql"
-import { encodeCursor, decodeCursor } from "@hikat/shared"
+import { encodeCursor, decodeCursor, normalizeIsoDateTime } from "@hikat/shared"
 import type { Env } from "../types"
 import { deleteMedia } from "./mediaService"
 
@@ -22,10 +22,11 @@ export function formatSkinGql(
     model: skin.model as any,
     imageUrl: mediaUrl,
     status: skin.status as any,
-    createdAt: skin.createdAt,
-    updatedAt: skin.updatedAt,
+    createdAt: normalizeIsoDateTime(skin.createdAt),
+    updatedAt: normalizeIsoDateTime(skin.updatedAt),
   }
 }
+
 
 export async function getAdminSkins(
   db: Database,

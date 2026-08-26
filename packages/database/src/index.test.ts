@@ -493,7 +493,9 @@ describe("@hikat/database schema and D1 operations", () => {
       "0004_news_model_alignment.sql",
       "0005_server_administration_hardening.sql",
       "0006_backoffice_core.sql",
+      "0007_backoffice_core_hardening.sql",
     ])
+
 
 
     // Apply all migrations wrapped in transaction per D1 standard

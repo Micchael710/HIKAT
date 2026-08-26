@@ -3,12 +3,36 @@ import React from "react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, act, cleanup, fireEvent } from "@testing-library/react"
 import SkinsView from "./SkinsView"
+import SkinViewer3D from "./SkinViewer3D"
 import { skinsApi } from "../../services/graphqlClient"
 
-describe("Back Office Skins Components (Shard 06.5)", () => {
+// Mock skinview3d for JSDOM
+vi.mock("skinview3d", () => {
+  return {
+    SkinViewer: vi.fn().mockImplementation(() => ({
+      camera: { position: { set: vi.fn() }, lookAt: vi.fn() },
+      controls: { target: { set: vi.fn() }, update: vi.fn(), reset: vi.fn() },
+      loadSkin: vi.fn().mockResolvedValue(undefined),
+      adjustCameraDistance: vi.fn(),
+      render: vi.fn(),
+      dispose: vi.fn(),
+    })),
+    IdleAnimation: vi.fn().mockImplementation(() => ({ speed: 1 })),
+    WalkingAnimation: vi.fn().mockImplementation(() => ({ speed: 1 })),
+    RunningAnimation: vi.fn().mockImplementation(() => ({ speed: 1 })),
+  }
+})
+
+describe("Back Office Skins Components (Shard 06.5A)", () => {
   beforeEach(() => {
-    vi.restoreAllMocks()
+    vi.clearAllMocks()
+    HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+    }) as any
   })
+
+
 
   afterEach(() => {
     cleanup()
@@ -59,8 +83,8 @@ describe("Back Office Skins Components (Shard 06.5)", () => {
 
     expect(screen.getByText("Steve Clásico")).toBeDefined()
     expect(screen.getByText("Alex Aventurera")).toBeDefined()
-    expect(screen.getByText("Clásico")).toBeDefined()
-    expect(screen.getByText("Delgado")).toBeDefined()
+    expect(screen.getByText("Clásico (4px)")).toBeDefined()
+    expect(screen.getByText("Delgado (3px)")).toBeDefined()
     expect(screen.getByText("Disponible")).toBeDefined()
     expect(screen.getByText("Oculto")).toBeDefined()
   })
@@ -81,4 +105,18 @@ describe("Back Office Skins Components (Shard 06.5)", () => {
     expect(screen.getByText("Nombre de la Skin")).toBeDefined()
     expect(screen.getByText("Modelo de brazos")).toBeDefined()
   })
+
+  it("mounts and disposes 3D skin viewer cleanly", async () => {
+    let unmountFn: () => void = () => {}
+    await act(async () => {
+      const { unmount } = render(
+        <SkinViewer3D skinUrl="http://localhost:8787/media/content/test.png" model="CLASSIC" theme="dark" />,
+      )
+      unmountFn = unmount
+    })
+    expect(screen.getByTitle("Cambiar animación")).toBeDefined()
+    expect(screen.getByTitle("Rotación automática")).toBeDefined()
+    unmountFn()
+  })
 })
+

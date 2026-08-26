@@ -269,6 +269,7 @@ describe("@hikat/graphql foundation & contracts", () => {
     // 3. Game & Launcher Manifest
     expect(queryType?.getFields()["publishedModpack"]).toBeDefined()
     expect(queryType?.getFields()["adminGameOverview"]).toBeDefined()
+    expect(queryType?.getFields()["gameReleaseHistory"]).toBeDefined()
     expect(queryType?.getFields()["adminGameFiles"]).toBeDefined()
     expect(mutationType?.getFields()["prepareGameDraft"]).toBeDefined()
     expect(mutationType?.getFields()["discardGameDraft"]).toBeDefined()
@@ -282,6 +283,7 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(queryType?.getFields()["clientConfiguration"]).toBeDefined()
     expect(queryType?.getFields()["adminSettings"]).toBeDefined()
     expect(mutationType?.getFields()["updateAdminSettings"]).toBeDefined()
+
 
     // Check ClientFile contract
     const clientFileType = schema.getType("ClientFile") as GraphQLObjectType

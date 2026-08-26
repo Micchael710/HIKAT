@@ -5,7 +5,7 @@ import { render, screen, act, cleanup, fireEvent } from "@testing-library/react"
 import GameView from "./GameView"
 import { gameApi } from "../../services/graphqlClient"
 
-describe("Back Office Game & Updates Components (Shard 06.5)", () => {
+describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -14,7 +14,7 @@ describe("Back Office Game & Updates Components (Shard 06.5)", () => {
     cleanup()
   })
 
-  it("renders published release overview with mods list", async () => {
+  it("renders published release overview with read-only mods list without technical paths", async () => {
     const mockOverview: import("../../types").AdminGameOverview = {
       publishedRelease: {
         id: "rel-1",
@@ -50,14 +50,17 @@ describe("Back Office Game & Updates Components (Shard 06.5)", () => {
     })
 
     expect(screen.getByText("Juego y Actualizaciones")).toBeDefined()
-    expect(screen.getByText("Versión Oficial v1.4.2")).toBeDefined()
+    expect(screen.getByText("v1.4.2")).toBeDefined()
     expect(screen.getByText("JourneyMap")).toBeDefined()
-    expect(screen.getByText("mods/journeymap-1.21.1.jar")).toBeDefined()
-    expect(screen.getByText("2.4 MB")).toBeDefined()
+    expect(screen.getByText("Mod")).toBeDefined()
+    expect(screen.getByText("2.38 MB")).toBeDefined()
     expect(screen.getByText("Preparar actualización")).toBeDefined()
+
+    // Ensure technical logical paths are NOT displayed
+    expect(screen.queryByText("mods/journeymap-1.21.1.jar")).toBeNull()
   })
 
-  it("renders active draft banner and allows opening publish modal", async () => {
+  it("renders active draft banner, change badges, and opens publish modal with readiness", async () => {
     const mockOverview: import("../../types").AdminGameOverview = {
       publishedRelease: {
         id: "rel-1",
@@ -88,6 +91,7 @@ describe("Back Office Game & Updates Components (Shard 06.5)", () => {
             sha256: "def456",
             sizeBytes: 1500000,
             policy: "NO_MODIFICABLE",
+            changeStatus: "ADDED",
             createdAt: new Date().toISOString(),
           },
         ],
@@ -95,6 +99,20 @@ describe("Back Office Game & Updates Components (Shard 06.5)", () => {
         updatedAt: new Date().toISOString(),
       },
       pendingChangesCount: 1,
+      changes: {
+        added: 1,
+        updated: 0,
+        removed: 0,
+        unchanged: 0,
+        total: 1,
+      },
+      readiness: {
+        isReady: true,
+        validVersion: true,
+        noConflicts: true,
+        storageVerified: true,
+        issues: [],
+      },
     }
 
     vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue(mockOverview)
@@ -103,14 +121,52 @@ describe("Back Office Game & Updates Components (Shard 06.5)", () => {
       render(<GameView theme="dark" />)
     })
 
-    expect(screen.getByText("Borrador de actualización en curso")).toBeDefined()
+    expect(screen.getByText("Actualización en preparación (Borrador)")).toBeDefined()
+    expect(screen.getByText("+ Añadido")).toBeDefined()
+    expect(screen.getByText("✓ Lista para publicar")).toBeDefined()
     expect(screen.getByText("Publicar actualización")).toBeDefined()
     expect(screen.getByText("Descartar borrador")).toBeDefined()
 
     const publishBtn = screen.getByText("Publicar actualización")
     fireEvent.click(publishBtn)
 
-    expect(screen.getByText("Número de versión")).toBeDefined()
-    expect(screen.getByText("Publicar ahora")).toBeDefined()
+    expect(screen.getByText("Publicar actualización oficial")).toBeDefined()
+    expect(screen.getByText("+1 añadidos")).toBeDefined()
+    expect(screen.getByText("✓ Lista para publicar inmediatamente")).toBeDefined()
+  })
+
+  it("switches to version history tab and renders historical releases", async () => {
+    vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+      publishedRelease: null,
+      draftRelease: null,
+      pendingChangesCount: 0,
+    })
+
+    vi.spyOn(gameApi, "getGameReleaseHistory").mockResolvedValue([
+      {
+        id: "rel-hist-1",
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        status: "ARCHIVED",
+        notes: "Versión histórica",
+        publishedAt: "2026-08-20T12:00:00.000Z",
+        files: [],
+        createdAt: "2026-08-20T12:00:00.000Z",
+        updatedAt: "2026-08-20T12:00:00.000Z",
+      },
+    ])
+
+    await act(async () => {
+      render(<GameView theme="dark" />)
+    })
+
+    const historyTabBtn = screen.getByText("Historial de versiones")
+    await act(async () => {
+      fireEvent.click(historyTabBtn)
+    })
+
+    expect(screen.getByText("v1.0.0")).toBeDefined()
+    expect(screen.getByText("Anterior")).toBeDefined()
   })
 })

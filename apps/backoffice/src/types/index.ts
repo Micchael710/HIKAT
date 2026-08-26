@@ -141,6 +141,23 @@ export type GameFileCategory =
 
 export type GameReleaseStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED"
 export type SyncPolicy = "NO_MODIFICABLE" | "MODIFICABLE"
+export type GameDraftChangeStatus = "UNCHANGED" | "ADDED" | "UPDATED" | "REMOVED"
+
+export interface GameDraftChanges {
+  added: number
+  updated: number
+  removed: number
+  unchanged: number
+  total: number
+}
+
+export interface GameDraftReadiness {
+  isReady: boolean
+  validVersion: boolean
+  noConflicts: boolean
+  storageVerified: boolean
+  issues: string[]
+}
 
 export interface AdminGameFile {
   id: string
@@ -150,6 +167,7 @@ export interface AdminGameFile {
   sha256: string
   sizeBytes: number
   policy: SyncPolicy
+  changeStatus?: GameDraftChangeStatus | null
   createdAt: string
 }
 
@@ -170,7 +188,10 @@ export interface AdminGameOverview {
   publishedRelease?: GameRelease | null
   draftRelease?: GameRelease | null
   pendingChangesCount: number
+  changes?: GameDraftChanges | null
+  readiness?: GameDraftReadiness | null
 }
+
 
 // --- Settings Types (Shard 06.5) ---
 

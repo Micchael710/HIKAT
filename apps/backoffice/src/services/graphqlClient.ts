@@ -12,6 +12,23 @@ import { authService } from "./authService"
 const BACKEND_URL = import.meta.env.VITE_BACKEND_API_URL || "http://localhost:8787"
 const GRAPHQL_ENDPOINT = `${BACKEND_URL}/graphql`
 
+export function resolveMediaUrl(url?: string | null): string {
+  if (!url || typeof url !== "string" || !url.trim()) return ""
+  const trimmed = url.trim()
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("blob:") ||
+    trimmed.startsWith("data:")
+  ) {
+    return trimmed
+  }
+  const cleanBase = BACKEND_URL.replace(/\/$/, "")
+  const cleanPath = trimmed.startsWith("/") ? trimmed : `/${trimmed}`
+  return `${cleanBase}${cleanPath}`
+}
+
+
 export interface CreateNewsInput {
   title: string
   content: string
@@ -140,17 +157,31 @@ export async function executeGraphQL<T>(
     if (code === "FORBIDDEN") {
       throw new Error("No tiene permisos suficientes para realizar esta acción.")
     }
-    if (code === "VALIDATION_ERROR") {
-      throw new Error(firstErr.message || "Los datos ingresados no son válidos.")
-    }
     if (code === "NOT_FOUND") {
       throw new Error("El elemento solicitado no fue encontrado.")
     }
-    throw new Error(firstErr.message || "Ocurrió un error al procesar la solicitud.")
+
+    const KNOWN_SAFE_USER_CODES = ["VALIDATION_ERROR", "CONFLICT", "SERVER_BUSY"]
+    if (code && KNOWN_SAFE_USER_CODES.includes(code) && firstErr.message) {
+      const raw = firstErr.message.toLowerCase()
+      if (
+        !raw.includes("sql") &&
+        !raw.includes("sqlite") &&
+        !raw.includes("select ") &&
+        !raw.includes("datetime") &&
+        !raw.includes("iso-8601") &&
+        !raw.includes("database")
+      ) {
+        throw new Error(firstErr.message)
+      }
+    }
+
+    throw new Error("Ocurrió un error al procesar la solicitud.")
   }
 
   return result.data as T
 }
+
 
 export const newsApi = {
   async getAdminNews(options?: {
@@ -561,17 +592,62 @@ export const gameApi = {
               sha256
               sizeBytes
               policy
+              changeStatus
               createdAt
             }
             createdAt
             updatedAt
           }
           pendingChangesCount
+          changes {
+            added
+            updated
+            removed
+            unchanged
+            total
+          }
+          readiness {
+            isReady
+            validVersion
+            noConflicts
+            storageVerified
+            issues
+          }
         }
       }
     `
     const data = await executeGraphQL<{ adminGameOverview: import("../types").AdminGameOverview }>(query)
     return data.adminGameOverview
+  },
+
+  async getGameReleaseHistory(): Promise<import("../types").GameRelease[]> {
+    const query = /* GraphQL */ `
+      query GameReleaseHistory {
+        gameReleaseHistory {
+          id
+          version
+          minecraftVersion
+          neoForgeVersion
+          status
+          notes
+          publishedAt
+          files {
+            id
+            name
+            logicalPath
+            category
+            sha256
+            sizeBytes
+            policy
+            createdAt
+          }
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ gameReleaseHistory: import("../types").GameRelease[] }>(query)
+    return data.gameReleaseHistory
   },
 
   async prepareGameDraft(): Promise<import("../types").GameRelease> {
@@ -685,7 +761,7 @@ export const gameApi = {
 
   async updateGameFile(
     id: string,
-    input: { name?: string; category?: string },
+    input: { name?: string; category?: string; tokenHash?: string },
   ): Promise<import("../types").AdminGameFile> {
     const mutation = /* GraphQL */ `
       mutation UpdateGameFile($id: ID!, $input: UpdateGameFileInput!) {
@@ -724,9 +800,21 @@ export const gameApi = {
         publishGameRelease(input: $input) {
           id
           version
+          minecraftVersion
+          neoForgeVersion
           status
           notes
           publishedAt
+          files {
+            id
+            name
+            logicalPath
+            category
+            sha256
+            sizeBytes
+            policy
+            createdAt
+          }
         }
       }
     `
@@ -734,6 +822,7 @@ export const gameApi = {
     return data.publishGameRelease
   },
 }
+
 
 // --- Settings API Facade (Shard 06.5) ---
 

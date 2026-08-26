@@ -7,6 +7,8 @@ import type {
   UpdateAdminSettingsInputGql,
 } from "@hikat/graphql"
 
+import { normalizeIsoDateTime } from "@hikat/shared"
+
 export function formatAdminSettings(row: schema.ProjectSetting): AdminSettingsGql {
   return {
     projectName: row.projectName,
@@ -18,9 +20,10 @@ export function formatAdminSettings(row: schema.ProjectSetting): AdminSettingsGq
     websiteUrl: row.websiteUrl,
     minRamGb: row.minRamGb,
     recommendedRamGb: row.recommendedRamGb,
-    updatedAt: row.updatedAt,
+    updatedAt: normalizeIsoDateTime(row.updatedAt),
   }
 }
+
 
 export function formatClientConfiguration(row: schema.ProjectSetting): ClientConfigurationGql {
   return {

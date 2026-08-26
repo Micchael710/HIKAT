@@ -1,4 +1,4 @@
-import { eq, desc, and, sql } from "drizzle-orm"
+import { eq, desc, and, sql, inArray } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
 import type {
@@ -7,10 +7,13 @@ import type {
   GameReleaseGql,
   AdminGameOverviewGql,
   AdminGameFileGql,
+  GameDraftChangesGql,
+  GameDraftReadinessGql,
+  GameDraftChangeStatusGql,
   PublishGameReleaseInputGql,
   PrepareGameDraftInputGql,
 } from "@hikat/graphql"
-import { validateSemVer } from "@hikat/shared"
+import { validateSemVer, normalizeIsoDateTime } from "@hikat/shared"
 import type { Env } from "../../types"
 
 export function formatAdminGameFile(file: schema.GameReleaseFile): AdminGameFileGql {
@@ -22,13 +25,14 @@ export function formatAdminGameFile(file: schema.GameReleaseFile): AdminGameFile
     sha256: file.sha256,
     sizeBytes: file.sizeBytes,
     policy: file.policy as any,
-    createdAt: file.createdAt,
+    createdAt: normalizeIsoDateTime(file.createdAt),
   }
 }
 
 export function formatGameRelease(
   release: schema.GameRelease,
   files: schema.GameReleaseFile[],
+  taggedFiles?: AdminGameFileGql[],
 ): GameReleaseGql {
   return {
     id: release.id,
@@ -37,10 +41,124 @@ export function formatGameRelease(
     neoForgeVersion: release.neoForgeVersion,
     status: release.status as any,
     notes: release.notes,
-    publishedAt: release.publishedAt,
-    files: files.map(formatAdminGameFile),
-    createdAt: release.createdAt,
-    updatedAt: release.updatedAt,
+    publishedAt: release.publishedAt ? normalizeIsoDateTime(release.publishedAt) : null,
+    files: taggedFiles || files.map(formatAdminGameFile),
+    createdAt: normalizeIsoDateTime(release.createdAt),
+    updatedAt: normalizeIsoDateTime(release.updatedAt),
+  }
+}
+
+export function computeDraftChanges(
+  publishedFiles: schema.GameReleaseFile[],
+  draftFiles: schema.GameReleaseFile[],
+): {
+  changes: GameDraftChangesGql
+  taggedFiles: AdminGameFileGql[]
+} {
+  const publishedMap = new Map<string, schema.GameReleaseFile>()
+  for (const pf of publishedFiles) {
+    publishedMap.set(pf.logicalPath, pf)
+  }
+
+  let added = 0
+  let updated = 0
+  let unchanged = 0
+
+  const draftPaths = new Set<string>()
+  const taggedFiles: AdminGameFileGql[] = []
+
+  for (const df of draftFiles) {
+    draftPaths.add(df.logicalPath)
+    const base = publishedMap.get(df.logicalPath)
+    let changeStatus: GameDraftChangeStatusGql = "UNCHANGED"
+
+    if (!base) {
+      changeStatus = "ADDED"
+      added++
+    } else if (base.sha256 !== df.sha256 || base.sizeBytes !== df.sizeBytes) {
+      changeStatus = "UPDATED"
+      updated++
+    } else {
+      changeStatus = "UNCHANGED"
+      unchanged++
+    }
+
+    taggedFiles.push({
+      ...formatAdminGameFile(df),
+      changeStatus,
+    })
+  }
+
+  let removed = 0
+  for (const pf of publishedFiles) {
+    if (!draftPaths.has(pf.logicalPath)) {
+      removed++
+    }
+  }
+
+  return {
+    changes: {
+      added,
+      updated,
+      removed,
+      unchanged,
+      total: draftFiles.length,
+    },
+    taggedFiles,
+  }
+}
+
+export async function validateDraftReadiness(
+  env: Env,
+  draft: schema.GameRelease,
+  draftFiles: schema.GameReleaseFile[],
+): Promise<GameDraftReadinessGql> {
+  const issues: string[] = []
+  let noConflicts = true
+  let storageVerified = true
+  const validVersion = true
+
+  if (draftFiles.length === 0) {
+    issues.push("El borrador no contiene ningún archivo o mod.")
+  }
+
+  // Check unique logical paths
+  const pathSet = new Set<string>()
+  for (const f of draftFiles) {
+    if (pathSet.has(f.logicalPath)) {
+      noConflicts = false
+      issues.push(`Ruta duplicada en el borrador: ${f.name}`)
+    }
+    pathSet.add(f.logicalPath)
+  }
+
+  // Verify object existence in R2
+  if (env.ASSETS) {
+    for (const f of draftFiles) {
+      try {
+        const head = await env.ASSETS.head(f.objectKey)
+        if (!head) {
+          storageVerified = false
+          issues.push(`El archivo "${f.name}" no se encontró en el almacenamiento.`)
+        } else if (head.size !== f.sizeBytes) {
+          storageVerified = false
+          issues.push(`El tamaño en almacenamiento de "${f.name}" no coincide.`)
+        }
+      } catch {
+        storageVerified = false
+        issues.push(`Error al verificar almacenamiento de "${f.name}".`)
+      }
+    }
+  }
+
+  const isReady = validVersion && noConflicts && storageVerified && draftFiles.length > 0
+
+  return {
+    isReady,
+    validVersion,
+    noConflicts,
+    storageVerified,
+    issues,
   }
 }
 
@@ -81,6 +199,7 @@ export async function getPublishedModpack(
 
 export async function getAdminGameOverview(
   db: Database,
+  env: Env,
 ): Promise<AdminGameOverviewGql> {
   const published = await db
     .select()
@@ -95,8 +214,9 @@ export async function getAdminGameOverview(
     .get()
 
   let publishedGql: GameReleaseGql | null = null
+  let publishedFiles: schema.GameReleaseFile[] = []
   if (published) {
-    const publishedFiles = await db
+    publishedFiles = await db
       .select()
       .from(schema.gameReleaseFiles)
       .where(eq(schema.gameReleaseFiles.releaseId, published.id))
@@ -106,6 +226,8 @@ export async function getAdminGameOverview(
 
   let draftGql: GameReleaseGql | null = null
   let pendingChangesCount = 0
+  let changes: GameDraftChangesGql | null = null
+  let readiness: GameDraftReadinessGql | null = null
 
   if (draft) {
     const draftFiles = await db
@@ -113,15 +235,44 @@ export async function getAdminGameOverview(
       .from(schema.gameReleaseFiles)
       .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
       .all()
-    draftGql = formatGameRelease(draft, draftFiles)
-    pendingChangesCount = draftFiles.length
+
+    const changeAnalysis = computeDraftChanges(publishedFiles, draftFiles)
+    changes = changeAnalysis.changes
+    readiness = await validateDraftReadiness(env, draft, draftFiles)
+
+    draftGql = formatGameRelease(draft, draftFiles, changeAnalysis.taggedFiles)
+    pendingChangesCount = changes.added + changes.updated + changes.removed
   }
 
   return {
     publishedRelease: publishedGql,
     draftRelease: draftGql,
     pendingChangesCount,
+    changes,
+    readiness,
   }
+}
+
+export async function getGameReleaseHistory(
+  db: Database,
+): Promise<GameReleaseGql[]> {
+  const releases = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(inArray(schema.gameReleases.status, ["PUBLISHED", "ARCHIVED"]))
+    .orderBy(desc(schema.gameReleases.publishedAt), desc(schema.gameReleases.createdAt))
+    .all()
+
+  const result: GameReleaseGql[] = []
+  for (const rel of releases) {
+    const files = await db
+      .select()
+      .from(schema.gameReleaseFiles)
+      .where(eq(schema.gameReleaseFiles.releaseId, rel.id))
+      .all()
+    result.push(formatGameRelease(rel, files))
+  }
+  return result
 }
 
 export async function prepareGameDraft(
@@ -234,6 +385,7 @@ export async function discardGameDraft(db: Database): Promise<boolean> {
 
 export async function publishGameRelease(
   db: Database,
+  env: Env,
   input: PublishGameReleaseInputGql,
   userId: string,
 ): Promise<GameReleaseGql> {
@@ -259,7 +411,7 @@ export async function publishGameRelease(
     throw createGraphQLError("No hay ningún borrador de actualización pendiente para publicar.", "NOT_FOUND")
   }
 
-  // 2. Check that draft has at least 1 file
+  // 2. Fetch draft files
   const draftFiles = await db
     .select()
     .from(schema.gameReleaseFiles)
@@ -270,7 +422,14 @@ export async function publishGameRelease(
     throw createGraphQLError("No puedes publicar una versión sin archivos o mods.", "VALIDATION_ERROR")
   }
 
-  // 3. Check for existing version collision
+  // 3. Pre-publication Readiness Verification
+  const readiness = await validateDraftReadiness(env, draft, draftFiles)
+  if (!readiness.isReady) {
+    const errorMsg = readiness.issues.length > 0 ? readiness.issues.join(". ") : "El borrador no está listo para publicar."
+    throw createGraphQLError(`No se puede publicar la actualización: ${errorMsg}`, "VALIDATION_ERROR")
+  }
+
+  // 4. Check for existing version collision
   const existingVersion = await db
     .select()
     .from(schema.gameReleases)
@@ -283,7 +442,7 @@ export async function publishGameRelease(
 
   const now = new Date().toISOString()
 
-  // 4. ATOMIC PUBLICATION:
+  // 5. ATOMIC PUBLICATION:
   // Step A: Archive currently published release
   await db
     .update(schema.gameReleases)
