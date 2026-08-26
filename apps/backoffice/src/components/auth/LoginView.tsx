@@ -1,6 +1,8 @@
 import React, { useState } from "react"
 import type { ThemeMode } from "../../types"
-import { HikatLogoIcon, IconSpinner, IconMoon, IconSun } from "../../theme/icons"
+import logoWhite from "../../assets/branding/logo-white.png"
+import logoBlack from "../../assets/branding/logo-black.png"
+import { IconSpinner, IconMoon, IconSun } from "../../theme/icons"
 import { useAuth } from "../../context/AuthContext"
 
 interface LoginViewProps {
@@ -42,20 +44,21 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
         background: isDark ? "#090d12" : "#f5f7fa",
         position: "relative",
         overflow: "hidden",
+        fontFamily: "Inter, sans-serif",
       }}
     >
-      {/* Background ambient glow orbs */}
+      {/* Background glow orbs */}
       <div
         className="backoffice-bg-orb-1"
         style={{
           position: "absolute",
           top: "10%",
           left: "25%",
-          width: 600,
-          height: 600,
+          width: 500,
+          height: 500,
           background: `radial-gradient(circle, rgba(62, 196, 192, ${
-            isDark ? 0.15 : 0.08
-          }) 0%, transparent 68%)`,
+            isDark ? 0.18 : 0.09
+          }) 0%, transparent 70%)`,
           filter: "blur(60px)",
           pointerEvents: "none",
         }}
@@ -66,53 +69,64 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
           position: "absolute",
           bottom: "10%",
           right: "25%",
-          width: 500,
-          height: 500,
-          background: `radial-gradient(circle, rgba(239, 196, 54, ${
+          width: 550,
+          height: 550,
+          background: `radial-gradient(circle, rgba(62, 196, 192, ${
             isDark ? 0.12 : 0.06
-          }) 0%, transparent 68%)`,
+          }) 0%, transparent 70%)`,
           filter: "blur(60px)",
           pointerEvents: "none",
         }}
       />
 
-      {/* Theme Toggle in top-right */}
-      <div style={{ position: "absolute", top: 24, right: 24, zIndex: 10 }}>
-        <button
-          type="button"
-          onClick={() => setTheme(isDark ? "light" : "dark")}
-          title={isDark ? "Modo Claro" : "Modo Oscuro"}
-          className="launcher-btn-secondary"
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 12,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          {isDark ? <IconSun size={18} /> : <IconMoon size={18} />}
-        </button>
-      </div>
+      {/* Top right theme toggle */}
+      <button
+        onClick={() => setTheme(isDark ? "light" : "dark")}
+        style={{
+          position: "absolute",
+          top: 24,
+          right: 24,
+          width: 40,
+          height: 40,
+          borderRadius: 12,
+          border: `1px solid ${
+            isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)"
+          }`,
+          background: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.03)",
+          color: isDark ? "#ffffff" : "#111822",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          transition: "all 0.18s ease",
+          zIndex: 10,
+        }}
+        title={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+      >
+        {isDark ? <IconSun size={18} /> : <IconMoon size={18} />}
+      </button>
 
       {/* Login Card */}
       <div
+        className="launcher-card"
         style={{
           width: 420,
           maxWidth: "92vw",
-          padding: "40px 36px",
-          background: isDark ? "#121a22" : "#ffffff",
-          borderRadius: 22,
-          border: isDark
-            ? "1.5px solid rgba(255, 255, 255, 0.1)"
-            : "1.5px solid rgba(0, 0, 0, 0.08)",
+          padding: "36px 32px",
+          borderRadius: 20,
+          background: isDark
+            ? "linear-gradient(180deg, rgba(19, 28, 35, 0.95) 0%, rgba(13, 20, 26, 0.95) 100%)"
+            : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 248, 250, 0.98) 100%)",
+          border: `1px solid ${
+            isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)"
+          }`,
           boxShadow: isDark
-            ? "0 20px 60px rgba(0, 0, 0, 0.6)"
-            : "0 16px 48px rgba(0, 0, 0, 0.1)",
+            ? "0 24px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(62, 196, 192, 0.1)"
+            : "0 24px 60px rgba(0, 0, 0, 0.08), 0 0 30px rgba(62, 196, 192, 0.06)",
+          backdropFilter: "blur(20px)",
           position: "relative",
-          zIndex: 1,
-          animation: "slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) both",
+          zIndex: 5,
+          animation: "scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both",
         }}
       >
         {/* Header Branding */}
@@ -127,22 +141,23 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
         >
           <div
             style={{
-              width: 56,
-              height: 56,
-              borderRadius: 16,
-              background: isDark ? "#0d1217" : "#eef2f6",
-              border: isDark
-                ? "1.5px solid rgba(62, 196, 192, 0.4)"
-                : "1.5px solid rgba(62, 196, 192, 0.3)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: isDark ? "#ffffff" : "#111822",
               marginBottom: 16,
-              boxShadow: "0 0 20px rgba(62, 196, 192, 0.2)",
             }}
           >
-            <HikatLogoIcon size={36} />
+            <img
+              src={isDark ? logoWhite : logoBlack}
+              alt="HiKAT Logo"
+              style={{
+                height: 44,
+                maxWidth: 240,
+                objectFit: "contain",
+                userSelect: "none",
+              }}
+              draggable={false}
+            />
           </div>
 
           <h2
