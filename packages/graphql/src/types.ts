@@ -34,6 +34,12 @@ export interface ServerCommandResultGql {
   message?: string | null
 }
 
+export interface ServerConsoleTicketPayloadGql {
+  ticket: string
+  expiresAt: string
+}
+
+
 
 export interface UserGql {
   id: string

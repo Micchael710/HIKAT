@@ -1,7 +1,8 @@
 /**
- * Pterodactyl HTTP Client Adapter (Shard 06)
+ * Pterodactyl HTTP Client Adapter (Shard 06 & 06A)
  * Encapsulates communication with Pterodactyl Panel Client API v1 with strict
- * timeouts, credential protection, normalized Spanish errors, and zero secret leakage.
+ * timeouts, protocol/SSRF validation, credential protection, normalized Spanish errors,
+ * and zero secret leakage.
  */
 
 import type {
@@ -11,11 +12,25 @@ import type {
   PterodactylWebsocketData,
   PterodactylWebsocketResponse,
 } from "./types"
+import { SERVER_ERROR_CODES } from "@hikat/shared"
+
+export class ServerInfrastructureError extends Error {
+  public readonly code: string
+  public readonly extensions: { code: string }
+  constructor(message: string, code: string = SERVER_ERROR_CODES.SERVER_UNAVAILABLE) {
+    super(message)
+    this.name = "ServerInfrastructureError"
+    this.code = code
+    this.extensions = { code }
+  }
+}
+
 
 export interface PterodactylClientOptions {
   baseUrl: string
   apiKey: string
   serverId: string
+  isProduction?: boolean
   timeoutMs?: number
   fetchFn?: typeof fetch
 }
@@ -24,22 +39,44 @@ export class PterodactylHttpClient implements IPterodactylClient {
   private readonly baseUrl: string
   private readonly apiKey: string
   private readonly serverId: string
+  private readonly isProduction: boolean
   private readonly timeoutMs: number
   private readonly fetchFn: typeof fetch
 
   constructor(options: PterodactylClientOptions) {
     if (!options.baseUrl || typeof options.baseUrl !== "string") {
-      throw new Error("Pterodactyl baseUrl is required")
+      throw new ServerInfrastructureError("La URL de Pterodactyl no está configurada.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
     }
     if (!options.apiKey || typeof options.apiKey !== "string") {
-      throw new Error("Pterodactyl apiKey is required")
+      throw new ServerInfrastructureError("La API key de Pterodactyl no está configurada.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
     }
     if (!options.serverId || typeof options.serverId !== "string") {
-      throw new Error("Pterodactyl serverId is required")
+      throw new ServerInfrastructureError("El ID del servidor no está configurado.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+    }
+
+    const trimmedUrl = options.baseUrl.trim()
+    let parsed: URL
+    try {
+      parsed = new URL(trimmedUrl)
+    } catch {
+      throw new ServerInfrastructureError("La URL de Pterodactyl es inválida.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+    }
+
+    this.isProduction = options.isProduction ?? false
+
+    // SSRF & Protocol validation
+    if (this.isProduction && parsed.protocol !== "https:") {
+      throw new ServerInfrastructureError("Pterodactyl debe utilizar HTTPS en entorno de producción.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+    } else if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new ServerInfrastructureError("Protocolo de Pterodactyl inválido. Debe ser HTTP o HTTPS.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
+    }
+
+    if (parsed.username || parsed.password) {
+      throw new ServerInfrastructureError("La URL de Pterodactyl no debe contener credenciales embebidas.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
     }
 
     // Normalize baseUrl: strip trailing slashes
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "")
+    this.baseUrl = trimmedUrl.replace(/\/+$/, "")
     this.apiKey = options.apiKey.trim()
     this.serverId = options.serverId.trim()
     this.timeoutMs = options.timeoutMs ?? 8000
@@ -74,27 +111,27 @@ export class PterodactylHttpClient implements IPterodactylClient {
     } catch (err: unknown) {
       clearTimeout(timeoutId)
       if (err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))) {
-        throw new Error("Tiempo de espera agotado al conectar con el servidor.")
+        throw new ServerInfrastructureError("Tiempo de espera agotado al conectar con el servidor.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
       }
-      throw new Error("No se pudo conectar con el servidor en este momento.")
+      throw new ServerInfrastructureError("No se pudo conectar con el servidor en este momento.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
     } finally {
       clearTimeout(timeoutId)
     }
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        throw new Error("Error de autenticación con la infraestructura del servidor.")
+        throw new ServerInfrastructureError("Error de autenticación con la infraestructura del servidor.", SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED)
       }
       if (response.status === 404) {
-        throw new Error("Servidor no encontrado en la infraestructura.")
+        throw new ServerInfrastructureError("Servidor no encontrado en la infraestructura.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
       }
       if (response.status === 429) {
-        throw new Error("Límite de solicitudes alcanzado. Por favor espera un momento.")
+        throw new ServerInfrastructureError("Límite de solicitudes alcanzado. Por favor espera un momento.", SERVER_ERROR_CODES.SERVER_RATE_LIMITED)
       }
       if (response.status === 502 || response.status === 503 || response.status === 504) {
-        throw new Error("No se pudo conectar con el servidor en este momento.")
+        throw new ServerInfrastructureError("No se pudo conectar con el servidor en este momento.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
       }
-      throw new Error("Error al comunicarse con la infraestructura del servidor.")
+      throw new ServerInfrastructureError("Error al comunicarse con la infraestructura del servidor.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
     }
 
     // 204 No Content
@@ -106,7 +143,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
       const data = await response.json()
       return data as T
     } catch {
-      throw new Error("Respuesta inválida de la infraestructura del servidor.")
+      throw new ServerInfrastructureError("Respuesta inválida de la infraestructura del servidor.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
     }
   }
 
@@ -149,9 +186,23 @@ export class PterodactylHttpClient implements IPterodactylClient {
       `/api/client/servers/${encodeURIComponent(this.serverId)}/websocket`,
       { method: "GET" },
     )
-    if (!res || !res.data) {
-      throw new Error("No se pudieron obtener credenciales de consola.")
+    if (!res || !res.data || !res.data.socket || !res.data.token) {
+      throw new ServerInfrastructureError("No se pudieron obtener credenciales de consola.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
     }
+
+    // Validate Wings socket URL
+    try {
+      const socketUrl = new URL(res.data.socket)
+      if (this.isProduction && socketUrl.protocol !== "wss:") {
+        throw new ServerInfrastructureError("El WebSocket de Wings debe utilizar WSS en producción.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+      } else if (socketUrl.protocol !== "wss:" && socketUrl.protocol !== "ws:") {
+        throw new ServerInfrastructureError("Protocolo de WebSocket de Wings inválido.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+      }
+    } catch (err: unknown) {
+      if (err instanceof ServerInfrastructureError) throw err
+      throw new ServerInfrastructureError("URL de WebSocket de Wings inválida.", SERVER_ERROR_CODES.SERVER_UNAVAILABLE)
+    }
+
     return res.data
   }
 }

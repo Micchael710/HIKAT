@@ -59,9 +59,25 @@ export function getCorsHeaders(request: Request, env: Env): HeadersInit {
   return headers
 }
 
+export function isOriginAllowed(origin: string | null | undefined, env: Env): boolean {
+  if (!origin) return false
+
+  const configuredOrigins = env.CORS_ALLOW_ORIGIN
+    ? env.CORS_ALLOW_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+    : []
+
+  const isExplicitlyConfigured = configuredOrigins.includes(origin)
+  const isProductionAllowed = DEFAULT_PRODUCTION_ORIGINS.includes(origin)
+  const isDevAllowed =
+    env.ENVIRONMENT === "development" && DEFAULT_DEV_ORIGINS.includes(origin)
+
+  return isExplicitlyConfigured || isProductionAllowed || isDevAllowed
+}
+
 export function handleOptionsRequest(request: Request, env: Env): Response {
   return new Response(null, {
     status: 204,
     headers: getCorsHeaders(request, env),
   })
 }
+

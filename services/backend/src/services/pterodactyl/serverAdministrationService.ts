@@ -1,47 +1,33 @@
 /**
- * HiKAT Server Administration Service (Shard 06)
- * Orchestrates server queries, power operations, console commands, and error mapping.
+ * Server Administration Service (Shard 06 & Shard 06A)
+ * Business logic orchestrating Pterodactyl infrastructure, distributed power locks in D1,
+ * distributed command rate limits in D1, single-use console tickets, and telemetry mapping.
  */
 
-import { createGraphQLError } from "@hikat/graphql"
-import type {
-  ServerResourcesGql,
-  ServerPowerActionResultGql,
-  ServerCommandResultGql,
-} from "@hikat/graphql"
+import { eq, and, sql, lt, gt, isNull } from "drizzle-orm"
+import { createDatabase, schema } from "@hikat/database"
 import {
   mapPterodactylStateToHiKAT,
-  SERVER_LIMITS,
-  type ServerPowerAction,
+  validateServerCommand,
+  SERVER_ERROR_CODES,
+  SERVER_CONSOLE_TICKET_TTL_SECONDS,
+  SERVER_POWER_LOCK_TTL_SECONDS,
+  SERVER_COMMAND_RATE_LIMIT,
 } from "@hikat/shared"
+import type { ServerResourcesData, ServerPowerAction, ServerStatus } from "@hikat/shared"
 import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
-import { PterodactylHttpClient } from "./pterodactylClient"
+import { PterodactylHttpClient, ServerInfrastructureError } from "./pterodactylClient"
 
-// Concurrency lock to prevent simultaneous contradicting power actions
-let isPowerActionInFlight = false
-let lastPowerActionTimestamp = 0
-const POWER_ACTION_COOLDOWN_MS = 1500
-
-/**
- * Creates or resolves an IPterodactylClient from environment variables.
- */
-export function getPterodactylClient(
-  env: Env,
-  customClient?: IPterodactylClient,
-): IPterodactylClient {
-  if (customClient) {
-    return customClient
-  }
-
+export function createPterodactylClient(env: Env): IPterodactylClient {
   const baseUrl = env.PTERODACTYL_BASE_URL
   const apiKey = env.PTERODACTYL_API_KEY
   const serverId = env.PTERODACTYL_SERVER_ID
 
   if (!baseUrl || !apiKey || !serverId) {
-    throw createGraphQLError(
+    throw new ServerInfrastructureError(
       "La integración con el servidor no está configurada.",
-      "INTERNAL_ERROR",
+      SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
     )
   }
 
@@ -49,113 +35,165 @@ export function getPterodactylClient(
     baseUrl,
     apiKey,
     serverId,
+    isProduction: env.ENVIRONMENT === "production",
   })
 }
 
 /**
- * Retrieves current server status and resource metrics.
+ * Retrieves current server status and resource usage.
  */
 export async function getServerStatus(
   env: Env,
-  customClient?: IPterodactylClient,
-): Promise<ServerResourcesGql> {
-  const client = getPterodactylClient(env, customClient)
+  clientOverride?: IPterodactylClient,
+): Promise<ServerResourcesData> {
 
-  try {
-    const [statsResult, detailsResult] = await Promise.allSettled([
-      client.getServerResources(),
-      client.getServerDetails(),
-    ])
+  const client = clientOverride || createPterodactylClient(env)
 
-    if (statsResult.status === "rejected") {
-      const err = statsResult.reason as Error
-      // If Pterodactyl returned a normalized connection or not found error
-      throw createGraphQLError(
-        err?.message || "No se pudo obtener el estado del servidor.",
-        "INTERNAL_ERROR",
-      )
-    }
+  const [statsRes, detailsRes] = await Promise.all([
+    client.getServerResources(),
+    client.getServerDetails(),
+  ])
 
-    const stats = statsResult.value
-    const details =
-      detailsResult.status === "fulfilled" ? detailsResult.value : null
+  const stats = statsRes.attributes
+  const details = detailsRes.attributes
 
-    const status = mapPterodactylStateToHiKAT(
-      stats.attributes?.current_state,
-      stats.attributes?.is_suspended,
-    )
+  const isSuspended = stats.is_suspended || details.is_suspended || false
+  const status: ServerStatus = mapPterodactylStateToHiKAT(
+    stats.current_state,
+    isSuspended,
+  )
 
-    const limits = details?.attributes?.limits
+  const cpuPercent = stats.resources.cpu_absolute ?? 0
+  const cpuLimitPercent = details.limits.cpu ?? null
 
-    // Calculate memory limit in bytes (limits.memory is in MB, 0 = unlimited)
-    const memoryLimitBytes =
-      limits && limits.memory > 0 ? limits.memory * 1024 * 1024 : null
+  const memoryUsedBytes = stats.resources.memory_bytes ?? 0
+  const memoryLimitBytes =
+    details.limits.memory && details.limits.memory > 0
+      ? details.limits.memory * 1024 * 1024
+      : null
 
-    // Calculate disk limit in bytes (limits.disk is in MB, 0 = unlimited)
-    const diskLimitBytes =
-      limits && limits.disk > 0 ? limits.disk * 1024 * 1024 : null
+  const diskUsedBytes = stats.resources.disk_bytes ?? 0
+  const diskLimitBytes =
+    details.limits.disk && details.limits.disk > 0
+      ? details.limits.disk * 1024 * 1024
+      : null
 
-    // Calculate CPU limit % (0 = unlimited)
-    const cpuLimitPercent = limits && limits.cpu > 0 ? limits.cpu : null
+  const uptimeMs = stats.resources.uptime ?? null
 
-    const resources = stats.attributes?.resources
-
-    return {
-      status,
-      cpuPercent: resources?.cpu_absolute ?? 0,
-      cpuLimitPercent: cpuLimitPercent ?? null,
-      memoryUsedBytes: resources?.memory_bytes ?? 0,
-      memoryLimitBytes: memoryLimitBytes ?? null,
-      diskUsedBytes: resources?.disk_bytes ?? 0,
-      diskLimitBytes: diskLimitBytes ?? null,
-      uptimeMs: resources?.uptime ?? null,
-      isSuspended: Boolean(stats.attributes?.is_suspended),
-    }
-  } catch (err: unknown) {
-    if (err && typeof err === "object" && "extensions" in err) {
-      throw err
-    }
-    const message =
-      err instanceof Error
-        ? err.message
-        : "No se pudo obtener el estado del servidor."
-    throw createGraphQLError(message, "INTERNAL_ERROR")
+  return {
+    status,
+    cpuPercent,
+    cpuLimitPercent,
+    memoryUsedBytes,
+    memoryLimitBytes,
+    diskUsedBytes,
+    diskLimitBytes,
+    uptimeMs,
+    isSuspended,
   }
 }
 
 /**
- * Executes a server power action (START, RESTART, STOP) with concurrency guard.
+ * Acquires a distributed power action lock in D1.
+ */
+async function acquireDistributedPowerLock(
+  db: ReturnType<typeof createDatabase>,
+  action: ServerPowerAction,
+  userId: string,
+): Promise<void> {
+  const nowIso = new Date().toISOString()
+  const lockKey = "main_server_power"
+
+  // 1. Opportunistically clear expired locks
+  try {
+    await db
+      .delete(schema.serverPowerLocks)
+      .where(
+        and(
+          eq(schema.serverPowerLocks.lockKey, lockKey),
+          lt(schema.serverPowerLocks.expiresAt, nowIso),
+        ),
+      )
+  } catch {}
+
+  // 2. Check for active lock
+  const activeLock = await db
+    .select()
+    .from(schema.serverPowerLocks)
+    .where(
+      and(
+        eq(schema.serverPowerLocks.lockKey, lockKey),
+        gt(schema.serverPowerLocks.expiresAt, nowIso),
+      ),
+    )
+    .get()
+
+  if (activeLock) {
+    throw new ServerInfrastructureError(
+      "Hay otra acción en curso en el servidor. Por favor espera un momento.",
+      SERVER_ERROR_CODES.SERVER_BUSY,
+    )
+  }
+
+  // 3. Insert new lock
+  const expiresAt = new Date(
+    Date.now() + SERVER_POWER_LOCK_TTL_SECONDS * 1000,
+  ).toISOString()
+
+  try {
+    await db.insert(schema.serverPowerLocks).values({
+      lockKey,
+      action,
+      acquiredByUserId: userId,
+      acquiredAt: nowIso,
+      expiresAt,
+    })
+  } catch {
+    // Conflict on insert means another isolate concurrently acquired the lock
+    throw new ServerInfrastructureError(
+      "Hay otra acción en curso en el servidor. Por favor espera un momento.",
+      SERVER_ERROR_CODES.SERVER_BUSY,
+    )
+  }
+}
+
+/**
+ * Releases the distributed power action lock in D1.
+ */
+async function releaseDistributedPowerLock(
+  db: ReturnType<typeof createDatabase>,
+): Promise<void> {
+  try {
+    await db
+      .delete(schema.serverPowerLocks)
+      .where(eq(schema.serverPowerLocks.lockKey, "main_server_power"))
+  } catch {}
+}
+
+/**
+ * Executes a power action (START, RESTART, STOP) with distributed lock coordination.
  */
 export async function executeServerPowerAction(
   env: Env,
   action: ServerPowerAction,
-  customClient?: IPterodactylClient,
-): Promise<ServerPowerActionResultGql> {
-  const now = Date.now()
-
-  // Concurrency guard against rapid repeated clicks or race conditions
-  if (isPowerActionInFlight) {
-    throw createGraphQLError(
-      "Ya hay una acción del servidor en proceso. Por favor espera.",
-      "CONFLICT",
+  userId: string,
+  clientOverride?: IPterodactylClient,
+): Promise<{ success: boolean; status: ServerStatus; message: string }> {
+  if (!env.DB) {
+    throw new ServerInfrastructureError(
+      "La base de datos no está disponible.",
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
     )
   }
+  const client = clientOverride || createPterodactylClient(env)
+  const db = createDatabase(env.DB)
 
-  if (now - lastPowerActionTimestamp < POWER_ACTION_COOLDOWN_MS) {
-    throw createGraphQLError(
-      "Por favor espera un momento antes de enviar otra acción.",
-      "CONFLICT",
-    )
-  }
+  await acquireDistributedPowerLock(db, action, userId)
 
-  isPowerActionInFlight = true
-  lastPowerActionTimestamp = now
 
   try {
-    const client = getPterodactylClient(env, customClient)
-
     let signal: "start" | "restart" | "stop"
-    let targetStatus: "STARTING" | "STOPPING"
+    let targetStatus: ServerStatus
     let message: string
 
     switch (action) {
@@ -175,7 +213,10 @@ export async function executeServerPowerAction(
         message = "Apagando servidor..."
         break
       default:
-        throw createGraphQLError("Acción no válida.", "VALIDATION_ERROR")
+        throw new ServerInfrastructureError(
+          "Acción de servidor desconocida.",
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        )
     }
 
     await client.sendPowerAction(signal)
@@ -185,84 +226,211 @@ export async function executeServerPowerAction(
       status: targetStatus,
       message,
     }
-  } catch (err: unknown) {
-    if (err && typeof err === "object" && "extensions" in err) {
-      throw err
-    }
-    const message =
-      err instanceof Error
-        ? err.message
-        : "No se pudo ejecutar la acción en el servidor."
-    throw createGraphQLError(message, "INTERNAL_ERROR")
   } finally {
-    isPowerActionInFlight = false
+    await releaseDistributedPowerLock(db)
   }
 }
 
 /**
- * Sends a console command to the Minecraft server.
+ * Checks and increments distributed command rate limit in D1.
+ */
+export async function checkAndIncrementCommandRateLimit(
+  db: ReturnType<typeof createDatabase>,
+  userId: string,
+): Promise<void> {
+  const now = Date.now()
+  const key = `cmd_rl:${userId}`
+  const nowIso = new Date(now).toISOString()
+
+  const existing = await db
+    .select()
+    .from(schema.serverCommandRateLimits)
+    .where(eq(schema.serverCommandRateLimits.key, key))
+    .get()
+
+  if (!existing || new Date(existing.resetAt).getTime() <= now) {
+    // Start new window
+    const resetAt = new Date(
+      now + SERVER_COMMAND_RATE_LIMIT.WINDOW_SECONDS * 1000,
+    ).toISOString()
+
+    if (!existing) {
+      await db.insert(schema.serverCommandRateLimits).values({
+        key,
+        count: 1,
+        windowStart: nowIso,
+        resetAt,
+      })
+    } else {
+      await db
+        .update(schema.serverCommandRateLimits)
+        .set({
+          count: 1,
+          windowStart: nowIso,
+          resetAt,
+        })
+        .where(eq(schema.serverCommandRateLimits.key, key))
+    }
+    return
+  }
+
+  // Inside current window
+  if (existing.count >= SERVER_COMMAND_RATE_LIMIT.MAX_COMMANDS) {
+    throw new ServerInfrastructureError(
+      "Has enviado demasiados comandos. Espera un momento.",
+      SERVER_ERROR_CODES.SERVER_RATE_LIMITED,
+    )
+  }
+
+  // Increment
+  await db
+    .update(schema.serverCommandRateLimits)
+    .set({
+      count: existing.count + 1,
+    })
+    .where(eq(schema.serverCommandRateLimits.key, key))
+}
+
+/**
+ * Executes a console command with centralized validation and rate limiting.
  */
 export async function executeServerCommand(
   env: Env,
   command: string,
-  customClient?: IPterodactylClient,
-): Promise<ServerCommandResultGql> {
-  if (!command || typeof command !== "string" || command.trim().length === 0) {
-    throw createGraphQLError(
-      "El comando no puede estar vacío.",
+  userId: string,
+  clientOverride?: IPterodactylClient,
+): Promise<{ success: boolean; message: string }> {
+  const validation = validateServerCommand(command)
+  if (!validation.valid || !validation.command) {
+    throw new ServerInfrastructureError(
+      validation.error || "Comando inválido.",
       "VALIDATION_ERROR",
     )
   }
 
-  const trimmed = command.trim()
-
-  if (trimmed.length > SERVER_LIMITS.MAX_COMMAND_LENGTH) {
-    throw createGraphQLError(
-      `El comando excede la longitud máxima permitida de ${SERVER_LIMITS.MAX_COMMAND_LENGTH} caracteres.`,
-      "VALIDATION_ERROR",
+  if (!env.DB) {
+    throw new ServerInfrastructureError(
+      "La base de datos no está disponible.",
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
     )
   }
 
-  const client = getPterodactylClient(env, customClient)
+  const db = createDatabase(env.DB)
+  await checkAndIncrementCommandRateLimit(db, userId)
 
-  try {
-    await client.sendCommand(trimmed)
+  const client = clientOverride || createPterodactylClient(env)
+  await client.sendCommand(validation.command)
 
-    return {
-      success: true,
-      message: "Comando enviado correctamente.",
-    }
-  } catch (err: unknown) {
-    if (err && typeof err === "object" && "extensions" in err) {
-      throw err
-    }
-    const message =
-      err instanceof Error
-        ? err.message
-        : "No se pudo enviar el comando al servidor."
-    throw createGraphQLError(message, "INTERNAL_ERROR")
+  return {
+    success: true,
+    message: "Comando enviado correctamente.",
   }
 }
 
 /**
- * Retrieves temporary WebSocket credentials for the server console.
+ * Generates a cryptographically random, short-lived, single-use console ticket.
+ */
+export async function createConsoleTicket(
+  env: Env,
+  userId: string,
+  sessionId: string,
+): Promise<{ ticket: string; expiresAt: string }> {
+  if (!env.DB) {
+    throw new ServerInfrastructureError(
+      "La base de datos no está disponible.",
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+    )
+  }
+
+  const db = createDatabase(env.DB)
+  const now = Date.now()
+
+  const nowIso = new Date(now).toISOString()
+
+  // 1. Opportunistically delete expired tickets
+  try {
+    await db
+      .delete(schema.serverConsoleTickets)
+      .where(lt(schema.serverConsoleTickets.expiresAt, nowIso))
+  } catch {}
+
+  // 2. Generate random opaque ticket ID
+  const randomBytes = new Uint8Array(20)
+  crypto.getRandomValues(randomBytes)
+  const randomHex = Array.from(randomBytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+  const ticketId = `cstk_${randomHex}`
+
+  const expiresAt = new Date(
+    now + SERVER_CONSOLE_TICKET_TTL_SECONDS * 1000,
+  ).toISOString()
+
+  await db.insert(schema.serverConsoleTickets).values({
+    id: ticketId,
+    userId,
+    sessionId,
+    expiresAt,
+    usedAt: null,
+    createdAt: nowIso,
+  })
+
+  return {
+    ticket: ticketId,
+    expiresAt,
+  }
+}
+
+/**
+ * Atomically consumes a single-use console ticket in D1.
+ */
+export async function consumeConsoleTicket(
+  db: ReturnType<typeof createDatabase>,
+  ticketId: string,
+): Promise<{ userId: string; sessionId: string }> {
+  if (!ticketId || typeof ticketId !== "string" || !ticketId.startsWith("cstk_")) {
+    throw new ServerInfrastructureError(
+      "Ticket de consola inválido o expirado.",
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+    )
+  }
+
+  const nowIso = new Date().toISOString()
+
+  // Atomic conditional update: update used_at only if used_at IS NULL and expires_at > now
+  const updatedRow = await db
+    .update(schema.serverConsoleTickets)
+    .set({ usedAt: nowIso })
+    .where(
+      and(
+        eq(schema.serverConsoleTickets.id, ticketId),
+        isNull(schema.serverConsoleTickets.usedAt),
+        gt(schema.serverConsoleTickets.expiresAt, nowIso),
+      ),
+    )
+    .returning({
+      userId: schema.serverConsoleTickets.userId,
+      sessionId: schema.serverConsoleTickets.sessionId,
+    })
+    .get()
+
+  if (!updatedRow) {
+    throw new ServerInfrastructureError(
+      "Ticket de consola inválido o expirado.",
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+    )
+  }
+
+  return updatedRow
+}
+
+/**
+ * Retrieves upstream Wings credentials (internal use only).
  */
 export async function getServerConsoleWebsocketCredentials(
   env: Env,
-  customClient?: IPterodactylClient,
+  clientOverride?: IPterodactylClient,
 ): Promise<{ token: string; socket: string }> {
-  const client = getPterodactylClient(env, customClient)
-
-  try {
-    return await client.getWebsocketCredentials()
-  } catch (err: unknown) {
-    if (err && typeof err === "object" && "extensions" in err) {
-      throw err
-    }
-    const message =
-      err instanceof Error
-        ? err.message
-        : "No se pudieron obtener credenciales de la consola."
-    throw createGraphQLError(message, "INTERNAL_ERROR")
-  }
+  const client = clientOverride || createPterodactylClient(env)
+  return client.getWebsocketCredentials()
 }

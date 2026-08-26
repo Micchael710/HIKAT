@@ -8,7 +8,7 @@ import { createYoga, createSchema } from "graphql-yoga"
 
 import { typeDefs } from "@hikat/graphql"
 
-import { HIKAT_VERSION } from "@hikat/shared"
+import { HIKAT_VERSION, SERVER_ERROR_CODES } from "@hikat/shared"
 
 import { createDatabase } from "@hikat/database"
 
@@ -55,15 +55,16 @@ export * from "./resolvers"
 
 const KNOWN_SAFE_CODES = [
   "UNAUTHENTICATED",
-
   "FORBIDDEN",
-
   "NOT_FOUND",
-
   "VALIDATION_ERROR",
-
   "CONFLICT",
+  SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+  SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+  SERVER_ERROR_CODES.SERVER_BUSY,
+  SERVER_ERROR_CODES.SERVER_RATE_LIMITED,
 ]
+
 
 export const yoga = createYoga<BackendGraphQLContext>({
   graphqlEndpoint: "/graphql",

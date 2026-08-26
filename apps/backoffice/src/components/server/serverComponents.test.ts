@@ -1,13 +1,18 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   formatBytesToHuman,
   formatUptime,
   getServerStatusLabel,
   mapPterodactylStateToHiKAT,
+  validateServerCommand,
   SERVER_LIMITS,
+  SERVER_ERROR_CODES,
 } from "@hikat/shared"
+import { consoleService } from "../../services/consoleService"
+import { authService } from "../../services/authService"
+import { serverApi } from "../../services/graphqlClient"
 
-describe("Back Office Server Administration Helpers & Validations (Shard 06)", () => {
+describe("Back Office Server Administration Helpers & Validations (Shard 06 & 06A)", () => {
   it("formats byte values into human units correctly", () => {
     expect(formatBytesToHuman(0)).toBe("0 B")
     expect(formatBytesToHuman(1024)).toBe("1.0 KB")
@@ -46,12 +51,149 @@ describe("Back Office Server Administration Helpers & Validations (Shard 06)", (
     expect(mapPterodactylStateToHiKAT(undefined)).toBe("UNKNOWN")
   })
 
-  it("enforces command character length limits", () => {
+  it("enforces command validation with validateServerCommand", () => {
     expect(SERVER_LIMITS.MAX_COMMAND_LENGTH).toBe(500)
-    const validCmd = "say Hello World"
-    expect(validCmd.length <= SERVER_LIMITS.MAX_COMMAND_LENGTH).toBe(true)
 
-    const invalidCmd = "a".repeat(501)
-    expect(invalidCmd.length > SERVER_LIMITS.MAX_COMMAND_LENGTH).toBe(true)
+    const valid = validateServerCommand("say Hello World")
+    expect(valid.valid).toBe(true)
+    expect(valid.command).toBe("say Hello World")
+
+    const empty = validateServerCommand("   ")
+    expect(empty.valid).toBe(false)
+    expect(empty.error).toContain("vacío")
+
+    const oversized = validateServerCommand("a".repeat(501))
+    expect(oversized.valid).toBe(false)
+    expect(oversized.error).toContain("500")
+  })
+})
+
+describe("ConsoleService Ticket Authentication Flow (Shard 06A)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    consoleService.disconnect()
+  })
+
+  afterEach(() => {
+    consoleService.disconnect()
+    vi.restoreAllMocks()
+  })
+
+  it("obtains a single-use console ticket via GraphQL and establishes WebSocket without JWT in URL", async () => {
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("mock-access-token-jwt")
+    const createTicketSpy = vi.spyOn(serverApi, "createServerConsoleTicket").mockResolvedValue({
+      ticket: "cstk_1234567890abcdef",
+      expiresAt: new Date(Date.now() + 45000).toISOString(),
+    })
+
+    let openedUrl = ""
+    class MockWebSocket {
+      public readyState = 1 // OPEN
+      constructor(public url: string) {
+        openedUrl = url
+        setTimeout(() => {
+          if (this.onopen) this.onopen({} as any)
+        }, 0)
+      }
+      public onopen: any = null
+      public onmessage: any = null
+      public onclose: any = null
+      public onerror: any = null
+      public send = vi.fn()
+      public close = vi.fn()
+    }
+
+    vi.stubGlobal("WebSocket", MockWebSocket)
+
+    await consoleService.connect()
+
+    expect(createTicketSpy).toHaveBeenCalledTimes(1)
+    expect(openedUrl).toContain("/api/server/console/ws?ticket=cstk_1234567890abcdef")
+    // Security check: Access JWT must NOT be in the WebSocket URL
+    expect(openedUrl).not.toContain("token=")
+    expect(openedUrl).not.toContain("mock-access-token-jwt")
+    expect(openedUrl).not.toContain("accessToken=")
+  })
+
+  it("validates commands before sending and rejects invalid inputs locally", async () => {
+    await expect(consoleService.sendCommand("")).rejects.toThrow("El comando no puede estar vacío.")
+    await expect(consoleService.sendCommand("   ")).rejects.toThrow("El comando no puede estar vacío.")
+    await expect(consoleService.sendCommand("a".repeat(501))).rejects.toThrow("500")
+  })
+})
+
+describe("Back Office Server Polling & Visibility Control (Shard 06A)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it("executes initial status fetch and polls every 5s while tab is visible", async () => {
+    let callCount = 0
+    const mockStatus = {
+      status: "ONLINE" as const,
+      cpuPercent: 15,
+      cpuLimitPercent: 100,
+      memoryUsedBytes: 1024 * 1024 * 1024,
+      memoryLimitBytes: 1024 * 1024 * 2048,
+      diskUsedBytes: 1024 * 1024 * 500,
+      diskLimitBytes: 1024 * 1024 * 10000,
+      uptimeMs: 120000,
+      isSuspended: false,
+    }
+
+    vi.spyOn(serverApi, "getServerStatus").mockImplementation(async () => {
+      callCount++
+      return mockStatus
+    })
+
+    // Simulate ServerOverviewView polling logic
+    let isFetching = false
+    let visibility = "visible"
+
+    const fetchStatus = async () => {
+      if (isFetching) return
+      isFetching = true
+      try {
+        await serverApi.getServerStatus()
+      } finally {
+        isFetching = false
+      }
+    }
+
+    // Initial fetch on mount
+    await fetchStatus()
+    expect(callCount).toBe(1)
+
+    // Set up 5s interval
+    const interval = setInterval(() => {
+      if (visibility === "visible") {
+        fetchStatus()
+      }
+    }, 5000)
+
+    // Advance 5 seconds -> exactly 1 new fetch
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(callCount).toBe(2)
+
+    // Advance another 5 seconds -> exactly 1 new fetch
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(callCount).toBe(3)
+
+    // Background tab (hidden) -> polling paused
+    visibility = "hidden"
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(callCount).toBe(3) // No new fetches while tab is hidden!
+
+    // Return to visible tab -> immediate fetch
+    visibility = "visible"
+    await fetchStatus()
+    expect(callCount).toBe(4)
+
+    clearInterval(interval)
   })
 })

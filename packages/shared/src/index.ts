@@ -379,3 +379,46 @@ export function formatUptime(uptimeMs: number | null | undefined): string {
   return `${seconds}s`
 }
 
+// --- HiKAT Server Hardening Constants & Helpers (Shard 06A) ---
+
+export const SERVER_ERROR_CODES = {
+  SERVER_UNAVAILABLE: "SERVER_UNAVAILABLE",
+  SERVER_NOT_CONFIGURED: "SERVER_NOT_CONFIGURED",
+  SERVER_BUSY: "SERVER_BUSY",
+  SERVER_RATE_LIMITED: "SERVER_RATE_LIMITED",
+} as const
+export type ServerErrorCode = typeof SERVER_ERROR_CODES[keyof typeof SERVER_ERROR_CODES]
+
+export const SERVER_CONSOLE_TICKET_TTL_SECONDS = 45
+export const SERVER_POWER_LOCK_TTL_SECONDS = 30
+export const SERVER_POWER_LOCK_COOLDOWN_MS = 2000
+export const SERVER_COMMAND_RATE_LIMIT = {
+  MAX_COMMANDS: 10,
+  WINDOW_SECONDS: 10,
+} as const
+
+/**
+ * Validates a server command string ensuring type, non-empty, and character limit.
+ */
+export function validateServerCommand(command: unknown): {
+  valid: boolean
+  command?: string
+  error?: string
+} {
+  if (typeof command !== "string") {
+    return { valid: false, error: "El comando debe ser una cadena de texto." }
+  }
+  const trimmed = command.trim()
+  if (!trimmed) {
+    return { valid: false, error: "El comando no puede estar vacío." }
+  }
+  if (trimmed.length > SERVER_LIMITS.MAX_COMMAND_LENGTH) {
+    return {
+      valid: false,
+      error: `El comando excede la longitud máxima permitida (${SERVER_LIMITS.MAX_COMMAND_LENGTH} caracteres).`,
+    }
+  }
+  return { valid: true, command: trimmed }
+}
+
+

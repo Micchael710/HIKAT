@@ -387,5 +387,22 @@ export const serverApi = {
     }>(mutation, { command })
     return data.sendServerCommand
   },
+
+  async createServerConsoleTicket(): Promise<{ ticket: string; expiresAt: string }> {
+    const mutation = /* GraphQL */ `
+      mutation CreateServerConsoleTicket {
+        createServerConsoleTicket {
+          ticket
+          expiresAt
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{
+      createServerConsoleTicket: { ticket: string; expiresAt: string }
+    }>(mutation)
+    return data.createServerConsoleTicket
+  },
 }
+
 

@@ -145,5 +145,33 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     expect(formatUptime(3600000 * 3 + 15 * 60000)).toBe("3h 15m")
     expect(formatUptime(86400000 * 2 + 3600000 * 4)).toBe("2d 4h")
   })
+
+  it("validates server command inputs and respects character bounds", async () => {
+    const { validateServerCommand, SERVER_ERROR_CODES, SERVER_CONSOLE_TICKET_TTL_SECONDS, SERVER_POWER_LOCK_TTL_SECONDS } = await import("./index")
+
+    expect(SERVER_ERROR_CODES.SERVER_UNAVAILABLE).toBe("SERVER_UNAVAILABLE")
+    expect(SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED).toBe("SERVER_NOT_CONFIGURED")
+    expect(SERVER_ERROR_CODES.SERVER_BUSY).toBe("SERVER_BUSY")
+    expect(SERVER_ERROR_CODES.SERVER_RATE_LIMITED).toBe("SERVER_RATE_LIMITED")
+    expect(SERVER_CONSOLE_TICKET_TTL_SECONDS).toBe(45)
+    expect(SERVER_POWER_LOCK_TTL_SECONDS).toBe(30)
+
+    // Valid command
+    const res1 = validateServerCommand("say Hola mundo")
+    expect(res1.valid).toBe(true)
+    expect(res1.command).toBe("say Hola mundo")
+
+    // Empty / whitespace
+    expect(validateServerCommand("").valid).toBe(false)
+    expect(validateServerCommand("   ").valid).toBe(false)
+    expect(validateServerCommand(null).valid).toBe(false)
+    expect(validateServerCommand(123).valid).toBe(false)
+
+    // Oversized (>500 chars)
+    const bigCmd = "say " + "x".repeat(500)
+    expect(validateServerCommand(bigCmd).valid).toBe(false)
+    expect(validateServerCommand(bigCmd).error).toContain("500")
+  })
 })
+
 

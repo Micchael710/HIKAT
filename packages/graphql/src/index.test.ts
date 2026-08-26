@@ -194,11 +194,22 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(queryType?.getFields()["serverStatus"]).toBeDefined()
 
     const mutationType = schema.getMutationType()
+    expect(mutationType?.getFields()["createServerConsoleTicket"]).toBeDefined()
     expect(mutationType?.getFields()["serverPowerAction"]).toBeDefined()
     expect(mutationType?.getFields()["startServer"]).toBeDefined()
     expect(mutationType?.getFields()["restartServer"]).toBeDefined()
     expect(mutationType?.getFields()["stopServer"]).toBeDefined()
     expect(mutationType?.getFields()["sendServerCommand"]).toBeDefined()
+
+    const consoleTicketPayload = schema.getType("ServerConsoleTicketPayload") as GraphQLObjectType
+    expect(consoleTicketPayload).toBeDefined()
+    const ticketFields = Object.keys(consoleTicketPayload.getFields())
+    expect(ticketFields).toContain("ticket")
+    expect(ticketFields).toContain("expiresAt")
+    expect(ticketFields).not.toContain("token")
+    expect(ticketFields).not.toContain("socket")
+    expect(ticketFields).not.toContain("wsUrl")
+
 
     const serverStatusEnum = schema.getType("ServerStatus") as GraphQLEnumType
     expect(serverStatusEnum).toBeDefined()

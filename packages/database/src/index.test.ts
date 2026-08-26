@@ -491,6 +491,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0002_auth_oauth_hardening.sql",
       "0003_content_core.sql",
       "0004_news_model_alignment.sql",
+      "0005_server_administration_hardening.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -524,9 +525,13 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(tables).toContain("news")
     expect(tables).toContain("content_media")
     expect(tables).toContain("content_media_upload_tokens")
+    expect(tables).toContain("server_console_tickets")
+    expect(tables).toContain("server_power_locks")
+    expect(tables).toContain("server_command_rate_limits")
     expect(tables).not.toContain("content_posts")
     expect(tables).not.toContain("_news_legacy_stage")
   })
+
 
   it("migrates existing 0003 database data to 0004 with 100% data preservation and foreign key integrity", async () => {
     const sqlite = new DatabaseSync(":memory:")
@@ -656,4 +661,74 @@ describe("@hikat/database schema and D1 operations", () => {
     const fkErrors = sqlite.prepare("PRAGMA foreign_key_check;").all()
     expect(fkErrors).toEqual([])
   })
+
+  it("handles Server Administration tables: console tickets, power locks, and command rate limits", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+
+    // 1. Create admin user and session
+    await db.insert(schema.users).values({
+      id: "admin-srv-1",
+      role: "ADMIN",
+      displayName: "AdminServer",
+    })
+
+    await db.insert(schema.sessions).values({
+      id: "session-srv-1",
+      userId: "admin-srv-1",
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    })
+
+    // 2. Insert console ticket
+    await db.insert(schema.serverConsoleTickets).values({
+      id: "cstk_test_123",
+      userId: "admin-srv-1",
+      sessionId: "session-srv-1",
+      expiresAt: new Date(Date.now() + 45000).toISOString(),
+    })
+
+    const ticket = await db
+      .select()
+      .from(schema.serverConsoleTickets)
+      .where(eq(schema.serverConsoleTickets.id, "cstk_test_123"))
+      .get()
+    expect(ticket).toBeDefined()
+    expect(ticket?.userId).toBe("admin-srv-1")
+    expect(ticket?.sessionId).toBe("session-srv-1")
+    expect(ticket?.usedAt).toBeNull()
+
+    // 3. Acquire and release power lock
+    await db.insert(schema.serverPowerLocks).values({
+      lockKey: "main_server_power",
+      action: "START",
+      acquiredByUserId: "admin-srv-1",
+      expiresAt: new Date(Date.now() + 30000).toISOString(),
+    })
+
+    const lock = await db
+      .select()
+      .from(schema.serverPowerLocks)
+      .where(eq(schema.serverPowerLocks.lockKey, "main_server_power"))
+      .get()
+    expect(lock).toBeDefined()
+    expect(lock?.action).toBe("START")
+    expect(lock?.acquiredByUserId).toBe("admin-srv-1")
+
+    // 4. Test command rate limit tracking
+    await db.insert(schema.serverCommandRateLimits).values({
+      key: "cmd_rl:admin-srv-1",
+      count: 3,
+      windowStart: new Date().toISOString(),
+      resetAt: new Date(Date.now() + 10000).toISOString(),
+    })
+
+    const rl = await db
+      .select()
+      .from(schema.serverCommandRateLimits)
+      .where(eq(schema.serverCommandRateLimits.key, "cmd_rl:admin-srv-1"))
+      .get()
+    expect(rl?.count).toBe(3)
+  })
+
 })
+

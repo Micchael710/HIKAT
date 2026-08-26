@@ -52,6 +52,14 @@ export const serverTypeDefs = /* GraphQL */ `
     message: String
   }
 
+  """
+  Single-use temporary ticket for connecting to the live server console WebSocket
+  """
+  type ServerConsoleTicketPayload {
+    ticket: String!
+    expiresAt: String!
+  }
+
   extend type Query {
     """
     Retrieves current server operational status and resource metrics - requires ADMIN role
@@ -60,6 +68,11 @@ export const serverTypeDefs = /* GraphQL */ `
   }
 
   extend type Mutation {
+    """
+    Requests a short-lived single-use ticket for connecting to the live server console WebSocket - requires ADMIN role
+    """
+    createServerConsoleTicket: ServerConsoleTicketPayload!
+
     """
     Executes a power action on the server (START, RESTART, STOP) - requires ADMIN role
     """
@@ -86,3 +99,4 @@ export const serverTypeDefs = /* GraphQL */ `
     sendServerCommand(command: String!): ServerCommandResult!
   }
 `
+

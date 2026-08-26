@@ -37,9 +37,12 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
 
   const isMountedRef = useRef(true)
   const isFetchingRef = useRef(false)
+  const hasDataRef = useRef(false)
+  const isActionLoadingRef = useRef(false)
 
+  // Stable status fetcher that does not trigger re-render dependency cascades
   const fetchStatus = useCallback(async (isManual: boolean = false) => {
-    if (isFetchingRef.current) return
+    if (isFetchingRef.current || !isMountedRef.current) return
     isFetchingRef.current = true
 
     if (isManual) {
@@ -50,6 +53,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       const data = await serverApi.getServerStatus()
       if (isMountedRef.current) {
         setResources(data)
+        hasDataRef.current = true
         setError(null)
       }
     } catch (err: unknown) {
@@ -58,7 +62,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
           err instanceof Error
             ? err.message
             : "No se pudo obtener el estado del servidor."
-        if (!resources) {
+        if (!hasDataRef.current) {
           setError(msg)
         }
       }
@@ -68,21 +72,21 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       }
       isFetchingRef.current = false
     }
-  }, [resources])
+  }, [])
 
-  // Automatic Polling (every 5 seconds when tab is active and visible)
+  // Controlled polling: exactly 1 initial fetch, then maximum once per ~5s when visible
   useEffect(() => {
     isMountedRef.current = true
     fetchStatus()
 
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible" && !isActionLoading) {
+      if (document.visibilityState === "visible" && !isActionLoadingRef.current) {
         fetchStatus()
       }
     }, 5000)
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === "visible" && !isActionLoadingRef.current) {
         fetchStatus()
       }
     }
@@ -94,10 +98,11 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       clearInterval(interval)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [fetchStatus, isActionLoading])
+  }, [fetchStatus])
 
   const handlePowerAction = async (action: ServerPowerAction) => {
     setIsActionLoading(true)
+    isActionLoadingRef.current = true
     try {
       let res: { success: boolean; message?: string }
       if (action === "START") {
@@ -111,7 +116,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       setToastMessage(res.message || "Acción enviada correctamente.")
       setToastType("success")
 
-      // Immediately refresh status after action
+      // Immediate status refresh after power action dispatch
       await fetchStatus()
     } catch (err: unknown) {
       const msg =
@@ -122,8 +127,10 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       setToastType("error")
     } finally {
       setIsActionLoading(false)
+      isActionLoadingRef.current = false
     }
   }
+
 
   const currentStatus = resources?.status || (error ? "DISCONNECTED" : "UNKNOWN")
 

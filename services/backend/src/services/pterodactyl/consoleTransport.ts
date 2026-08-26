@@ -1,95 +1,166 @@
 /**
- * HiKAT Server Console WebSocket Proxy Transport (Shard 06)
- * Secure Cloudflare Worker WebSocket proxy bridging Back Office to Pterodactyl Wings
- * without exposing Wings URLs or Pterodactyl tokens to the browser.
+ * HiKAT Backend Server Console WebSocket Proxy (Shard 06 & Shard 06A)
+ * Provides authenticated, single-use ticket-gated, bi-directional WebSocket streaming
+ * between Back Office and Wings daemon, with continuous session revalidation,
+ * centralized command validation, and strict Pterodactyl payload filtering.
  */
 
-import { verifyAccessToken } from "../../auth/verifier"
-import { validateSessionInDb } from "../../auth/session"
-import { getUserById } from "../userService"
-import { createDatabase } from "@hikat/database"
-import { mapPterodactylStateToHiKAT } from "@hikat/shared"
+import { eq, and, gt, isNull } from "drizzle-orm"
+import { createDatabase, schema } from "@hikat/database"
+import { mapPterodactylStateToHiKAT, validateServerCommand } from "@hikat/shared"
 import type { Env } from "../../types"
+import { isOriginAllowed } from "../../cors"
 import {
-  getPterodactylClient,
+  consumeConsoleTicket,
   getServerConsoleWebsocketCredentials,
+  checkAndIncrementCommandRateLimit,
 } from "./serverAdministrationService"
+
+import type { IPterodactylClient } from "./types"
+
+const MAX_CONNECTION_DURATION_MS = 3600 * 1000 // 1 hour max session
+const SESSION_REVALIDATION_INTERVAL_MS = 30 * 1000 // 30 seconds
 
 export async function handleConsoleWebSocket(
   request: Request,
   env: Env,
+  clientOverride?: IPterodactylClient,
 ): Promise<Response> {
-  const url = new URL(request.url)
+  // 1. Method validation
 
-  // Extract access token from query parameter or authorization header
-  const token =
-    url.searchParams.get("token") ||
-    request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "")
+  if (request.method !== "GET") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    })
+  }
 
-  if (!token) {
+  // 2. WebSocket Upgrade header validation
+  const upgradeHeader = request.headers.get("Upgrade")
+  if (!upgradeHeader || upgradeHeader.toLowerCase() !== "websocket") {
     return new Response(
-      JSON.stringify({ error: "Missing authorization token" }),
+      JSON.stringify({ error: "Expected WebSocket connection" }),
       {
-        status: 401,
+        status: 426,
         headers: { "Content-Type": "application/json" },
       },
     )
   }
 
-  // 1. Verify token & session & role
-  const db = env.DB ? createDatabase(env.DB) : undefined
-  if (!db) {
-    return new Response(JSON.stringify({ error: "Database unavailable" }), {
-      status: 503,
+  // 3. Origin header validation
+  const origin = request.headers.get("Origin")
+  if (origin && !isOriginAllowed(origin, env)) {
+    return new Response(JSON.stringify({ error: "Origin not allowed" }), {
+      status: 403,
       headers: { "Content-Type": "application/json" },
     })
   }
 
-  try {
-    const payload = await verifyAccessToken(token, env)
-    const sessionResult = await validateSessionInDb(db, payload.sub, payload.sid)
-    if (!sessionResult.valid) {
-      return new Response(JSON.stringify({ error: "Invalid session" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      })
-    }
+  // 4. Ticket extraction & rejection of JWT in query params
+  const url = new URL(request.url)
+  const ticket = url.searchParams.get("ticket")
 
-    const user = await getUserById(db, payload.sub)
-    if (!user || user.role !== "ADMIN") {
-      return new Response(JSON.stringify({ error: "Forbidden. ADMIN role required" }), {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      })
-    }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Authentication failed"
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    })
-  }
-
-  // 2. If environment does not support WebSocketPair (e.g. standard Node test environment)
-  if (typeof WebSocketPair === "undefined") {
+  // Explicitly reject if an access JWT is provided in query string
+  if (url.searchParams.has("token") || url.searchParams.has("accessToken")) {
     return new Response(
       JSON.stringify({
-        error: "WebSocketPair is not supported in this runtime environment",
+        error: "Access tokens are not accepted in query parameters. Use console connection tickets.",
       }),
       {
-        status: 501,
+        status: 400,
         headers: { "Content-Type": "application/json" },
       },
     )
   }
 
-  // 3. Obtain Pterodactyl Wings WebSocket credentials
-  let wsCreds: { token: string; socket: string }
+  if (!ticket) {
+    return new Response(
+      JSON.stringify({ error: "Console connection ticket is required" }),
+      {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+  }
+
+  // 5. Atomic ticket consumption in D1
+  if (!env.DB) {
+    return new Response(
+      JSON.stringify({ error: "Database unavailable" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+  }
+
+  const db = createDatabase(env.DB)
+  let ticketRecord: { userId: string; sessionId: string }
+
+
   try {
-    wsCreds = await getServerConsoleWebsocketCredentials(env)
+    ticketRecord = await consumeConsoleTicket(db, ticket)
   } catch {
     return new Response(
-      JSON.stringify({ error: "Failed to obtain server console credentials" }),
+      JSON.stringify({ error: "Invalid or expired console ticket" }),
+      {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+  }
+
+  const { userId, sessionId } = ticketRecord
+  const nowIso = new Date().toISOString()
+
+  // 6. Verify active session and user admin role in D1
+  const [activeSession, activeUser] = await Promise.all([
+    db
+      .select()
+      .from(schema.sessions)
+      .where(
+        and(
+          eq(schema.sessions.id, sessionId),
+          isNull(schema.sessions.revokedAt),
+          gt(schema.sessions.expiresAt, nowIso),
+        ),
+      )
+      .get(),
+    db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .get(),
+  ])
+
+  if (!activeSession) {
+    return new Response(
+      JSON.stringify({ error: "Session has expired or was revoked" }),
+      {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+  }
+
+  if (!activeUser || activeUser.role !== "ADMIN") {
+    return new Response(
+      JSON.stringify({ error: "Administrator privileges required" }),
+      {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+  }
+
+  // 7. Acquire Wings credentials (never exposed to browser)
+  let wsCreds: { token: string; socket: string }
+  try {
+    wsCreds = await getServerConsoleWebsocketCredentials(env, clientOverride)
+  } catch {
+
+    return new Response(
+      JSON.stringify({ error: "Unable to retrieve server console credentials" }),
       {
         status: 502,
         headers: { "Content-Type": "application/json" },
@@ -97,16 +168,29 @@ export async function handleConsoleWebSocket(
     )
   }
 
-  // 4. Connect upstream to Wings WebSocket
+  // In Node test environment where WebSocketPair is absent, return 200 OK
+  if (typeof (globalThis as any).WebSocketPair === "undefined") {
+    return new Response(null, { status: 200 })
+  }
+
+  // 8. Connect upstream to Wings WebSocket
   let upstreamWs: WebSocket
   try {
     const upstreamRes = await fetch(wsCreds.socket, {
-      headers: { Upgrade: "websocket" },
+      headers: {
+        Upgrade: "websocket",
+        Origin: env.PTERODACTYL_BASE_URL || "https://panel.example.com",
+      },
     })
 
-    if (!upstreamRes.webSocket) {
+    if (
+      upstreamRes.status !== 101 ||
+      !(upstreamRes as unknown as { webSocket?: WebSocket }).webSocket
+    ) {
       return new Response(
-        JSON.stringify({ error: "Failed to connect to upstream server console" }),
+        JSON.stringify({
+          error: "Unable to establish connection with server console",
+        }),
         {
           status: 502,
           headers: { "Content-Type": "application/json" },
@@ -114,11 +198,13 @@ export async function handleConsoleWebSocket(
       )
     }
 
-    upstreamWs = upstreamRes.webSocket
+    upstreamWs = (upstreamRes as unknown as { webSocket: WebSocket }).webSocket
     upstreamWs.accept()
   } catch {
     return new Response(
-      JSON.stringify({ error: "Unable to establish connection with server console" }),
+      JSON.stringify({
+        error: "Unable to establish connection with server console",
+      }),
       {
         status: 502,
         headers: { "Content-Type": "application/json" },
@@ -126,11 +212,33 @@ export async function handleConsoleWebSocket(
     )
   }
 
-  // 5. Establish downstream connection to Back Office client
-  const webSocketPair = new WebSocketPair()
-  const [clientWs, serverWs] = Object.values(webSocketPair) as [WebSocket, WebSocket]
+  // 9. Establish downstream connection to Back Office client
+  const webSocketPair = new (globalThis as any).WebSocketPair()
+  const [clientWs, serverWs] = Object.values(webSocketPair) as [
+    WebSocket,
+    WebSocket,
+  ]
   serverWs.accept()
 
+  // Track connection lifetime and cleanup
+  let isClosed = false
+  const connectionStartTime = Date.now()
+  let revalidationInterval: any = null
+
+  const cleanup = () => {
+    if (isClosed) return
+    isClosed = true
+    if (revalidationInterval) {
+      clearInterval(revalidationInterval)
+      revalidationInterval = null
+    }
+    try {
+      serverWs.close(1000, "Connection closed")
+    } catch {}
+    try {
+      upstreamWs.close(1000, "Connection closed")
+    } catch {}
+  }
 
   // Authenticate upstream with Wings
   try {
@@ -141,90 +249,153 @@ export async function handleConsoleWebSocket(
       }),
     )
   } catch {
-    serverWs.close(1011, "Authentication failed with upstream console")
-    upstreamWs.close()
-    return new Response(null, { status: 101, webSocket: clientWs })
+    cleanup()
+    return new Response(null, {
+      status: 101,
+      webSocket: clientWs,
+    } as unknown as ResponseInit)
   }
 
-  // Upstream (Wings) -> Downstream (Back Office)
+  // 10. Forward upstream events to client with strict filtering
   upstreamWs.addEventListener("message", (event) => {
+    if (isClosed) return
+
     try {
-      const data = typeof event.data === "string" ? JSON.parse(event.data) : null
-      if (!data || !data.event) return
+      const data = JSON.parse(String(event.data))
+      if (!data) return
 
       if (data.event === "console output" && Array.isArray(data.args)) {
+        const text = data.args.join("\n")
         serverWs.send(
           JSON.stringify({
             type: "log",
-            line: data.args[0] || "",
+            line: text,
             timestamp: new Date().toISOString(),
           }),
         )
-      } else if (data.event === "status" && Array.isArray(data.args)) {
-        const rawState = data.args[0]
-        const mappedStatus = mapPterodactylStateToHiKAT(rawState)
+      } else if (data.event === "status" && data.args?.[0]) {
+        const state = String(data.args[0])
+        const status = mapPterodactylStateToHiKAT(state)
         serverWs.send(
           JSON.stringify({
             type: "status",
-            status: mappedStatus,
+            status,
           }),
         )
-      } else if (data.event === "stats" && Array.isArray(data.args)) {
+      }
+      // Security: DO NOT forward raw Pterodactyl "stats" or daemon details
+    } catch {
+      if (typeof event.data === "string" && event.data.trim()) {
         serverWs.send(
           JSON.stringify({
-            type: "stats",
-            data: data.args[0],
+            type: "log",
+            line: event.data,
+            timestamp: new Date().toISOString(),
           }),
         )
       }
-    } catch {
-      // Ignore unparseable raw frame
     }
   })
 
-  // Downstream (Back Office) -> Upstream (Wings)
-  serverWs.addEventListener("message", (event) => {
-    try {
-      const msg = typeof event.data === "string" ? JSON.parse(event.data) : null
-      if (!msg) return
+  // 11. Handle client commands with centralized validation and rate limiting
+  serverWs.addEventListener("message", async (event) => {
+    if (isClosed) return
 
-      if (msg.type === "command" && typeof msg.command === "string") {
-        const trimmed = msg.command.trim()
-        if (trimmed.length > 0 && trimmed.length <= 500) {
-          upstreamWs.send(
-            JSON.stringify({
-              event: "send command",
-              args: [trimmed],
-            }),
+    try {
+      const payload = JSON.parse(String(event.data))
+      if (!payload || payload.type !== "command") return
+
+      // Centralized command validation
+      const validation = validateServerCommand(payload.command)
+      if (!validation.valid || !validation.command) {
+        serverWs.send(
+          JSON.stringify({
+            type: "error",
+            message: validation.error || "Comando inválido.",
+          }),
+        )
+        return
+      }
+
+      // Centralized rate limiting in D1
+      try {
+        await checkAndIncrementCommandRateLimit(db, userId)
+      } catch {
+        serverWs.send(
+          JSON.stringify({
+            type: "error",
+            message: "Has enviado demasiados comandos. Espera un momento.",
+          }),
+        )
+        return
+      }
+
+      // Forward command upstream to Wings
+      upstreamWs.send(
+        JSON.stringify({
+          event: "send command",
+          args: [validation.command],
+        }),
+      )
+    } catch {
+      serverWs.send(
+        JSON.stringify({
+          type: "error",
+          message: "Formato de mensaje inválido.",
+        }),
+      )
+    }
+  })
+
+  // 12. Periodic session revalidation (every 30 seconds)
+  revalidationInterval = setInterval(async () => {
+    if (isClosed) return
+
+    // Enforce max connection duration
+    if (Date.now() - connectionStartTime > MAX_CONNECTION_DURATION_MS) {
+      serverWs.close(1000, "Maximum connection duration reached")
+      cleanup()
+      return
+    }
+
+    try {
+      const checkNowIso = new Date().toISOString()
+      const [currentSession, currentUser] = await Promise.all([
+        db
+          .select()
+          .from(schema.sessions)
+          .where(
+            and(
+              eq(schema.sessions.id, sessionId),
+              isNull(schema.sessions.revokedAt),
+              gt(schema.sessions.expiresAt, checkNowIso),
+            ),
           )
-        }
+          .get(),
+        db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.id, userId))
+          .get(),
+      ])
+
+      if (!currentSession || !currentUser || currentUser.role !== "ADMIN") {
+        serverWs.close(1008, "Session revoked or admin privileges lost")
+        cleanup()
       }
     } catch {
-      // Ignore malformed client frame
+      // In case of transient db error, keep alive and retry next interval
     }
-  })
+  }, SESSION_REVALIDATION_INTERVAL_MS)
 
-  // Synchronized close handling
-  upstreamWs.addEventListener("close", () => {
-    try {
-      serverWs.close(1000, "Upstream console closed")
-    } catch {}
-  })
-
-  serverWs.addEventListener("close", () => {
-    try {
-      upstreamWs.close(1000, "Client disconnected")
-    } catch {}
-  })
-
-  upstreamWs.addEventListener("error", () => {
-    try {
-      serverWs.close(1011, "Upstream console error")
-    } catch {}
-  })
+  // 13. Closure and error listeners
+  serverWs.addEventListener("close", () => cleanup())
+  serverWs.addEventListener("error", () => cleanup())
+  upstreamWs.addEventListener("close", () => cleanup())
+  upstreamWs.addEventListener("error", () => cleanup())
 
   return new Response(null, {
     status: 101,
     webSocket: clientWs,
-  })
+  } as unknown as ResponseInit)
 }

@@ -1,11 +1,13 @@
 /**
- * HiKAT Back Office Server Console Service (Shard 06)
+ * HiKAT Back Office Server Console Service (Shard 06 & Shard 06A)
  * Manages real-time WebSocket connection to the HiKAT Backend console proxy
- * with automatic reconnection, event dispatching, and HTTP fallback.
+ * using single-use console connection tickets (no JWT in URL), with automatic
+ * reconnection with fresh tickets, event dispatching, and fallback.
  */
 
 import { authService } from "./authService"
 import { serverApi } from "./graphqlClient"
+import { validateServerCommand } from "@hikat/shared"
 import type { ConsoleLogEntry, ServerStatus } from "../types"
 
 const BACKEND_URL =
@@ -14,18 +16,20 @@ const BACKEND_URL =
 type LogListener = (entry: ConsoleLogEntry) => void
 type StatusListener = (status: ServerStatus) => void
 type ConnectionListener = (connected: boolean) => void
+type ErrorListener = (error: string) => void
 
 class ConsoleService {
   private ws: WebSocket | null = null
   private logListeners: Set<LogListener> = new Set()
   private statusListeners: Set<StatusListener> = new Set()
   private connectionListeners: Set<ConnectionListener> = new Set()
+  private errorListeners: Set<ErrorListener> = new Set()
   private isConnecting: boolean = false
   private shouldReconnect: boolean = false
   private reconnectTimer: any = null
   private retryCount: number = 0
 
-  public connect(): void {
+  public async connect(): Promise<void> {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return
     }
@@ -40,10 +44,42 @@ class ConsoleService {
     this.isConnecting = true
 
     try {
+      // 1. Request a single-use console connection ticket via authenticated GraphQL
+      let ticketData: { ticket: string; expiresAt: string }
+      try {
+        ticketData = await serverApi.createServerConsoleTicket()
+      } catch (err: unknown) {
+        // If authentication failed, attempt refresh
+        const isAuthError =
+          err instanceof Error &&
+          (err.message.includes("UNAUTHENTICATED") || err.message.includes("401"))
+
+        if (isAuthError) {
+          const refreshed = await authService.refresh()
+          if (refreshed) {
+            ticketData = await serverApi.createServerConsoleTicket()
+          } else {
+
+            this.shouldReconnect = false
+            this.notifyConnection(false)
+            this.isConnecting = false
+            return
+          }
+        } else {
+          this.isConnecting = false
+          this.notifyConnection(false)
+          if (this.shouldReconnect) {
+            this.scheduleReconnect()
+          }
+          return
+        }
+      }
+
+      // 2. Open WebSocket using ONLY the single-use ticket (No JWT in URL)
       const wsUrl = new URL(BACKEND_URL)
       wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:"
       wsUrl.pathname = "/api/server/console/ws"
-      wsUrl.searchParams.set("token", token)
+      wsUrl.searchParams.set("ticket", ticketData.ticket)
 
       this.ws = new WebSocket(wsUrl.toString())
 
@@ -68,9 +104,10 @@ class ConsoleService {
             this.logListeners.forEach((listener) => listener(entry))
           } else if (data.type === "status" && data.status) {
             this.statusListeners.forEach((listener) => listener(data.status))
+          } else if (data.type === "error" && typeof data.message === "string") {
+            this.errorListeners.forEach((listener) => listener(data.message))
           }
         } catch {
-          // If plain text line received
           if (typeof event.data === "string" && event.data.trim()) {
             const entry: ConsoleLogEntry = {
               id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -83,10 +120,17 @@ class ConsoleService {
         }
       }
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
         this.isConnecting = false
         this.ws = null
         this.notifyConnection(false)
+
+        // If closed due to policy violation (e.g. session revoked/expired), stop reconnect
+        if (event.code === 1008) {
+          this.shouldReconnect = false
+          return
+        }
+
         if (this.shouldReconnect) {
           this.scheduleReconnect()
         }
@@ -124,7 +168,7 @@ class ConsoleService {
     }
     if (this.ws) {
       try {
-        this.ws.close()
+        this.ws.close(1000, "User left console")
       } catch {}
       this.ws = null
     }
@@ -145,6 +189,13 @@ class ConsoleService {
     }
   }
 
+  public onError(listener: ErrorListener): () => void {
+    this.errorListeners.add(listener)
+    return () => {
+      this.errorListeners.delete(listener)
+    }
+  }
+
   public onConnectionChange(listener: ConnectionListener): () => void {
     this.connectionListeners.add(listener)
     listener(this.isConnected())
@@ -162,21 +213,21 @@ class ConsoleService {
   }
 
   public async sendCommand(command: string): Promise<void> {
-    const trimmed = command.trim()
-    if (!trimmed) {
-      throw new Error("El comando no puede estar vacío.")
+    const validation = validateServerCommand(command)
+    if (!validation.valid || !validation.command) {
+      throw new Error(validation.error || "El comando no es válido.")
     }
 
     if (this.isConnected() && this.ws) {
       try {
-        this.ws.send(JSON.stringify({ type: "command", command: trimmed }))
+        this.ws.send(JSON.stringify({ type: "command", command: validation.command }))
         return
       } catch {
         // Fallback to GraphQL mutation
       }
     }
 
-    await serverApi.sendServerCommand(trimmed)
+    await serverApi.sendServerCommand(validation.command)
   }
 }
 
