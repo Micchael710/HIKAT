@@ -612,6 +612,22 @@ export const serverApi = {
     return data.replaceServerWorld
   },
 
+  /**
+   * Performs real HTTP transfer of File bytes to a Pterodactyl Wings signed upload URL.
+   * Validates HTTP response.ok before completing.
+   */
+  async uploadFileToSignedUrl(uploadUrl: string, file: File): Promise<void> {
+    const formData = new FormData()
+    formData.append("files", file, file.name)
+    const res = await fetch(uploadUrl, {
+      method: "POST",
+      body: formData,
+    })
+    if (!res.ok) {
+      throw new Error(`Fallo en la transferencia del archivo (${res.status} ${res.statusText}).`)
+    }
+  },
+
   // --- Minecraft Configuration API ---
 
   async getMinecraftServerSettings(): Promise<MinecraftServerSettings> {

@@ -365,7 +365,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       { id: "bk-1", name: "Backup Test", bytes: 52428800, createdAt: new Date().toISOString(), completedAt: new Date().toISOString(), isSuccessful: true, isLocked: false },
     ])
     vi.spyOn(serverApi, "getServerAutomations").mockResolvedValue([
-      { id: "auto-1", name: "Reinicio diario", action: "RESTART", frequency: "DAILY", time: "04:00", enabled: true, isProcessing: false },
+      { id: "auto-1", name: "Reinicio diario", action: "RESTART", frequency: "DAILY", time: "04:00", enabled: true, isProcessing: false, isAdvanced: false },
     ])
     vi.spyOn(serverApi, "getMinecraftServerSettings").mockResolvedValue({
       difficulty: "normal",
@@ -425,17 +425,21 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     expect(screen.getByText("Subir archivo")).toBeDefined()
   })
 
-  it("Shard 07: subtabs navigation bar remains mounted and accessible even if overview tab encounters error", async () => {
+  it("Shard 07A: Disconnected UI renders top-right badge, full overview, and all 7 subtabs without full-page error card", async () => {
     vi.spyOn(serverApi, "getServerStatus").mockRejectedValue(new Error("Connection refused to Pterodactyl"))
 
     await act(async () => {
       render(<ServerOverviewView theme="dark" />)
     })
 
-    // Overview displays error message
-    expect(screen.getByText("No se pudo conectar con la infraestructura del servidor")).toBeDefined()
+    // Disconnected infrastructure badge top-right is displayed
+    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
 
-    // But the 7 sub-tabs switcher remains active and reachable!
+    // Servidor overview heading & status card are displayed with '—' values (NO full page error card!)
+    expect(screen.getByText("Servidor Principal")).toBeDefined()
+    expect(screen.getByText("Disponible cuando la infraestructura esté conectada.")).toBeDefined()
+
+    // All 7 sub-tabs switcher buttons remain active and reachable!
     expect(screen.getByRole("button", { name: /Resumen/i })).toBeDefined()
     expect(screen.getByRole("button", { name: /Consola/i })).toBeDefined()
     expect(screen.getByRole("button", { name: /Mundo/i })).toBeDefined()

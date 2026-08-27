@@ -32,10 +32,13 @@ export default function ServerConsoleView({
   const terminalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const isServerOffline = serverStatus === "OFFLINE" || serverStatus === "DISCONNECTED"
+  const isDisconnected = serverStatus === "DISCONNECTED"
+  const isServerOffline = serverStatus === "OFFLINE" || isDisconnected
 
-  // Connect to console WebSocket service
+  // Connect to console WebSocket service ONLY when infrastructure is connected
   useEffect(() => {
+    if (isDisconnected) return
+
     consoleService.connect()
 
     const unsubscribeLogs = consoleService.onLog((entry) => {
@@ -46,7 +49,7 @@ export default function ServerConsoleView({
       unsubscribeLogs()
       consoleService.disconnect()
     }
-  }, [])
+  }, [isDisconnected])
 
   // Auto-scroll logic
   useEffect(() => {
@@ -231,7 +234,9 @@ export default function ServerConsoleView({
           >
             <IconTerminal size={32} />
             <div>
-              {isServerOffline
+              {isDisconnected
+                ? "Consola no disponible mientras la infraestructura esté desconectada."
+                : isServerOffline
                 ? "El servidor se encuentra apagado."
                 : "Esperando output del servidor..."}
             </div>
@@ -329,7 +334,9 @@ export default function ServerConsoleView({
             onKeyDown={handleKeyDown}
             disabled={isSending || isServerOffline}
             placeholder={
-              isServerOffline
+              isDisconnected
+                ? "Consola no disponible mientras la infraestructura esté desconectada."
+                : isServerOffline
                 ? "El servidor está apagado. Inicia el servidor para enviar comandos."
                 : "Escribe un comando... (ej. say Hola HiKAT)"
             }

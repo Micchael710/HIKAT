@@ -373,6 +373,7 @@ export interface ServerAutomationItem {
   command?: string | null
   enabled: boolean
   isProcessing: boolean
+  isAdvanced: boolean
   lastRunAt?: string | null
   nextRunAt?: string | null
 }

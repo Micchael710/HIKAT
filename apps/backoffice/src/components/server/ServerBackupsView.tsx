@@ -185,6 +185,8 @@ export default function ServerBackupsView({
 
   const isServerOffline = serverStatus === "OFFLINE"
 
+  const isDisconnected = serverStatus === "DISCONNECTED" || (Boolean(error) && backups.length === 0)
+
   if (isLoading) {
     return (
       <div
@@ -202,56 +204,6 @@ export default function ServerBackupsView({
         <span style={{ fontSize: "0.95rem", fontWeight: 500 }}>
           Cargando copias de seguridad...
         </span>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div
-        style={{
-          padding: 24,
-          borderRadius: 16,
-          background: isDark ? "rgba(239, 68, 68, 0.1)" : "#fee2e2",
-          border: `1px solid ${isDark ? "rgba(239, 68, 68, 0.25)" : "#fca5a5"}`,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-          textAlign: "center",
-          margin: "24px 0",
-        }}
-      >
-        <div style={{ color: "#ef4444" }}>
-          <IconAlertCircle size={36} />
-        </div>
-        <div>
-          <h3 style={{ margin: 0, fontSize: "1.1rem", color: isDark ? "#ffffff" : "#991b1b" }}>
-            No se pudieron cargar las copias de seguridad
-          </h3>
-          <p style={{ margin: "6px 0 0 0", fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.7)" : "#7f1d1d" }}>
-            {error}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => fetchBackups(true)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 18px",
-            borderRadius: 10,
-            border: "none",
-            background: "#ef4444",
-            color: "#ffffff",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <IconRefresh size={16} />
-          <span>Reintentar</span>
-        </button>
       </div>
     )
   }
@@ -282,12 +234,13 @@ export default function ServerBackupsView({
           <button
             type="button"
             onClick={() => fetchBackups(true)}
-            disabled={isRefreshing}
+            disabled={isRefreshing || isDisconnected}
             style={{
               border: "none",
               background: "transparent",
               color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)",
-              cursor: isRefreshing ? "not-allowed" : "pointer",
+              cursor: isRefreshing || isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
               padding: 4,
               display: "flex",
               alignItems: "center",
@@ -300,6 +253,7 @@ export default function ServerBackupsView({
         <button
           type="button"
           onClick={() => setIsCreateModalOpen(true)}
+          disabled={isDisconnected}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -311,7 +265,8 @@ export default function ServerBackupsView({
             color: "#ffffff",
             fontWeight: 700,
             fontSize: "0.9rem",
-            cursor: "pointer",
+            cursor: isDisconnected ? "not-allowed" : "pointer",
+            opacity: isDisconnected ? 0.5 : 1,
             boxShadow: "0 4px 14px rgba(62, 196, 192, 0.3)",
           }}
         >
@@ -321,7 +276,7 @@ export default function ServerBackupsView({
       </div>
 
       {/* Backups List / Table */}
-      {backups.length === 0 ? (
+      {backups.length === 0 || isDisconnected ? (
         <div
           style={{
             padding: 48,
@@ -339,10 +294,12 @@ export default function ServerBackupsView({
             <IconArchive size={48} />
           </div>
           <h3 style={{ margin: 0, fontSize: "1.1rem", color: isDark ? "#ffffff" : "#0f172a" }}>
-            No hay copias de seguridad disponibles
+            {isDisconnected ? "Servidor sin conexión" : "No hay copias de seguridad disponibles"}
           </h3>
           <p style={{ margin: 0, fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)" }}>
-            Crea una copia de seguridad manual o configura una automatización programada.
+            {isDisconnected
+              ? "Las copias aparecerán aquí cuando el servidor esté conectado."
+              : "Crea una copia de seguridad manual o configura una automatización programada."}
           </p>
         </div>
       ) : (

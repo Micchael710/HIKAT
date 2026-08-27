@@ -29,6 +29,7 @@ import {
 import {
   listServerAutomations,
   createServerAutomation,
+  updateServerAutomation,
 } from "./serverScheduleService"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
@@ -280,6 +281,7 @@ rcon.password=secret123
       getServerDetails: vi.fn().mockResolvedValue({
         attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
       }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
       createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "pre-bk-1" } }),
       decompressFile: vi.fn().mockResolvedValue(undefined),
     }
@@ -288,7 +290,7 @@ rcon.password=secret123
 
     const success = await replaceServerWorld(env, db as any, "admin-1", "uploaded_world.zip", offlineClient as any)
     expect(success).toBe(true)
-    expect(offlineClient.createBackup).toHaveBeenCalledWith("Copia automática previa a reemplazo de mundo")
+    expect(offlineClient.createBackup).toHaveBeenCalledWith("Copia previa a reemplazo de mundo (world)")
     expect(offlineClient.decompressFile).toHaveBeenCalledWith("/", "uploaded_world.zip")
   })
 
@@ -357,6 +359,7 @@ rcon.password=secret123
       getServerDetails: vi.fn().mockResolvedValue({
         attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
       }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
       createBackup: vi.fn(),
       decompressFile: vi.fn(),
     }
@@ -408,6 +411,103 @@ rcon.password=secret123
     await expect(resolvers.Mutation.restoreServerBackup({}, { id: "bk-1" }, playerContext)).rejects.toThrow("administrative privilege required")
     await expect(resolvers.Mutation.replaceServerWorld({}, { uploadedFileName: "w.zip" }, playerContext)).rejects.toThrow("administrative privilege required")
     await expect(resolvers.Mutation.updateMinecraftServerSettings({}, { input: {} as any }, playerContext)).rejects.toThrow("administrative privilege required")
+  })
+
+  // Test 11: Shard 07A - Level-Name Fail-Safe
+  it("detectActiveWorldName propagates network error and only defaults to world when file is readable without level-name", async () => {
+    const errorClient = {
+      getFileContents: vi.fn().mockRejectedValue(new Error("Pterodactyl 500 Network Error")),
+    }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    // 1. Error propagates — does NOT fallback to "world"
+    await expect(detectActiveWorldName(env, errorClient as any)).rejects.toThrow("Pterodactyl 500 Network Error")
+
+    // 2. Readable without level-name property -> defaults to "world"
+    const noLevelNameClient = {
+      getFileContents: vi.fn().mockResolvedValue("pvp=true\ndifficulty=hard\n"),
+    }
+    const worldName1 = await detectActiveWorldName(env, noLevelNameClient as any)
+    expect(worldName1).toBe("world")
+
+    // 3. Readable with level-name property -> returns level-name
+    const levelNameClient = {
+      getFileContents: vi.fn().mockResolvedValue("level-name=custom_world\n"),
+    }
+    const worldName2 = await detectActiveWorldName(env, levelNameClient as any)
+    expect(worldName2).toBe("custom_world")
+  })
+
+  // Test 12: Shard 07A - Server.properties Fail-Safe
+  it("server.properties read failure propagates error and prevents writing", async () => {
+    const writeFileSpy = vi.fn()
+    const failReadClient = {
+      getFileContents: vi.fn().mockRejectedValue(new Error("File read timeout")),
+      writeFile: writeFileSpy,
+    }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    // 1. getMinecraftServerSettings propagates error
+    await expect(getMinecraftServerSettings(env, failReadClient as any)).rejects.toThrow("File read timeout")
+
+    // 2. updateMinecraftServerSettings propagates error and NEVER calls writeFile
+    await expect(updateMinecraftServerSettings(env, { pvp: false }, failReadClient as any)).rejects.toThrow("File read timeout")
+    expect(writeFileSpy).not.toHaveBeenCalled()
+  })
+
+  // Test 13: Shard 07A - Automation Task Update
+  it("updateServerAutomation updates task action and payload in addition to schedule metadata", async () => {
+    const updateScheduleSpy = vi.fn().mockResolvedValue({
+      object: "schedule",
+      attributes: { id: 10, name: "Restart Task", is_active: true, minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*", is_processing: false },
+    })
+
+    const updateScheduleTaskSpy = vi.fn().mockResolvedValue(undefined)
+
+    const mockScheduleWithTask = {
+      object: "schedule",
+      attributes: {
+        id: 10,
+        name: "Restart Task",
+        cron: { minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        tasks: [
+          {
+            object: "task",
+            attributes: { id: 50, action: "backup", payload: "", time_offset: 0 },
+          },
+        ],
+      },
+    }
+
+    const client = {
+      updateSchedule: updateScheduleSpy,
+      getSchedule: vi.fn().mockResolvedValue(mockScheduleWithTask),
+      updateScheduleTask: updateScheduleTaskSpy,
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const result = await updateServerAutomation(
+      env,
+      "10",
+      {
+        name: "Restart Task",
+        action: "RESTART",
+        frequency: "DAILY",
+        time: "04:00",
+        enabled: true,
+      },
+      client as any,
+    )
+
+    expect(updateScheduleSpy).toHaveBeenCalledWith("10", expect.objectContaining({ name: "Restart Task" }))
+    expect(updateScheduleTaskSpy).toHaveBeenCalledWith("10", 50, expect.objectContaining({
+      action: "power",
+      payload: "restart",
+    }))
+    expect(result.id).toBe("10")
   })
 })
 

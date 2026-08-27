@@ -197,6 +197,13 @@ export interface CreateScheduleTaskInput {
   continue_on_failure?: boolean
 }
 
+export interface UpdateScheduleTaskInput {
+  action: "power" | "command" | "backup"
+  payload: string
+  time_offset?: number
+  continue_on_failure?: boolean
+}
+
 export interface IPterodactylClient {
   getServerDetails(): Promise<PterodactylServerResponse>
   getServerResources(): Promise<PterodactylStatsResponse>
@@ -233,6 +240,8 @@ export interface IPterodactylClient {
   executeSchedule(id: number | string): Promise<void>
   deleteSchedule(id: number | string): Promise<void>
   createScheduleTask(scheduleId: number | string, taskPayload: CreateScheduleTaskInput): Promise<void>
+  updateScheduleTask(scheduleId: number | string, taskId: number | string, taskPayload: UpdateScheduleTaskInput): Promise<void>
+  deleteScheduleTask(scheduleId: number | string, taskId: number | string): Promise<void>
 
   // Activity
   getServerActivity(): Promise<PterodactylActivityListResponse>

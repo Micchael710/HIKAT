@@ -157,31 +157,81 @@ export default function ServerPowerActions({
         </div>
       )}
 
-      {/* 5. Disconnected / Unknown -> Retry button */}
-      {(status === "DISCONNECTED" || status === "UNKNOWN") && onRetry && (
-        <button
-          type="button"
-          disabled={isLoading}
-          onClick={onRetry}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "10px 18px",
-            borderRadius: 12,
-            background: isDark ? "rgba(62, 196, 192, 0.15)" : "rgba(62, 196, 192, 0.12)",
-            color: isDark ? "#3ec4c0" : "#0c6e6b",
-            border: "1px solid rgba(62, 196, 192, 0.35)",
-            fontSize: "0.925rem",
-            fontWeight: 600,
-            cursor: isLoading ? "not-allowed" : "pointer",
-            opacity: isLoading ? 0.6 : 1,
-            transition: "all 0.15s ease",
-          }}
-        >
-          {isLoading ? <IconSpinner size={18} /> : <IconRefresh size={18} />}
-          <span>Reintentar conexión</span>
-        </button>
+      {/* 5. Disconnected / Unknown -> Disabled buttons with notice */}
+      {(status === "DISCONNECTED" || status === "UNKNOWN") && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              disabled
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 16px",
+                borderRadius: 10,
+                background: isDark ? "rgba(16, 185, 129, 0.1)" : "#dcfce7",
+                color: isDark ? "rgba(74, 222, 128, 0.5)" : "#86efac",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                border: "none",
+                cursor: "not-allowed",
+                opacity: 0.5,
+              }}
+            >
+              <IconPlay size={16} />
+              <span>Iniciar</span>
+            </button>
+
+            <button
+              type="button"
+              disabled
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 16px",
+                borderRadius: 10,
+                background: isDark ? "rgba(245, 158, 11, 0.1)" : "#fef3c7",
+                color: isDark ? "rgba(251, 191, 36, 0.5)" : "#fcd34d",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                border: "none",
+                cursor: "not-allowed",
+                opacity: 0.5,
+              }}
+            >
+              <IconRefresh size={16} />
+              <span>Reiniciar</span>
+            </button>
+
+            <button
+              type="button"
+              disabled
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 16px",
+                borderRadius: 10,
+                background: isDark ? "rgba(239, 68, 68, 0.1)" : "#fee2e2",
+                color: isDark ? "rgba(248, 113, 113, 0.5)" : "#fca5a5",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                border: "none",
+                cursor: "not-allowed",
+                opacity: 0.5,
+              }}
+            >
+              <IconStop size={16} />
+              <span>Apagar</span>
+            </button>
+          </div>
+
+          <span style={{ fontSize: "0.775rem", color: isDark ? "rgba(255, 255, 255, 0.4)" : "rgba(0, 0, 0, 0.4)" }}>
+            Disponible cuando la infraestructura esté conectada.
+          </span>
+        </div>
       )}
 
       {/* Confirmation Modal for Restart and Stop */}

@@ -5,6 +5,7 @@ import type {
   ServerAutomationInput,
   ServerAutomationAction,
   ServerAutomationFrequency,
+  ServerStatus,
 } from "../../types"
 import { serverApi } from "../../services/graphqlClient"
 import {
@@ -24,6 +25,7 @@ import {
 
 interface ServerAutomationsViewProps {
   theme: ThemeMode
+  serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }
 
@@ -39,6 +41,7 @@ const WEEKDAYS = [
 
 export default function ServerAutomationsView({
   theme,
+  serverStatus,
   onToast,
 }: ServerAutomationsViewProps) {
   const isDark = theme === "dark"
@@ -46,6 +49,7 @@ export default function ServerAutomationsView({
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const isDisconnected = serverStatus === "DISCONNECTED" || (Boolean(error) && automations.length === 0)
 
   // Create / Edit modal state
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -248,56 +252,6 @@ export default function ServerAutomationsView({
     )
   }
 
-  if (error) {
-    return (
-      <div
-        style={{
-          padding: 24,
-          borderRadius: 16,
-          background: isDark ? "rgba(239, 68, 68, 0.1)" : "#fee2e2",
-          border: `1px solid ${isDark ? "rgba(239, 68, 68, 0.25)" : "#fca5a5"}`,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-          textAlign: "center",
-          margin: "24px 0",
-        }}
-      >
-        <div style={{ color: "#ef4444" }}>
-          <IconAlertCircle size={36} />
-        </div>
-        <div>
-          <h3 style={{ margin: 0, fontSize: "1.1rem", color: isDark ? "#ffffff" : "#991b1b" }}>
-            No se pudieron cargar las automatizaciones
-          </h3>
-          <p style={{ margin: "6px 0 0 0", fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.7)" : "#7f1d1d" }}>
-            {error}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => fetchAutomations(true)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 18px",
-            borderRadius: 10,
-            border: "none",
-            background: "#ef4444",
-            color: "#ffffff",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <IconRefresh size={16} />
-          <span>Reintentar</span>
-        </button>
-      </div>
-    )
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Header bar */}
@@ -324,12 +278,13 @@ export default function ServerAutomationsView({
           <button
             type="button"
             onClick={() => fetchAutomations(true)}
-            disabled={isRefreshing}
+            disabled={isRefreshing || isDisconnected}
             style={{
               border: "none",
               background: "transparent",
               color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)",
-              cursor: isRefreshing ? "not-allowed" : "pointer",
+              cursor: isRefreshing || isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
               padding: 4,
               display: "flex",
               alignItems: "center",
@@ -342,6 +297,7 @@ export default function ServerAutomationsView({
         <button
           type="button"
           onClick={openCreateModal}
+          disabled={isDisconnected}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -353,7 +309,8 @@ export default function ServerAutomationsView({
             color: "#ffffff",
             fontWeight: 700,
             fontSize: "0.9rem",
-            cursor: "pointer",
+            cursor: isDisconnected ? "not-allowed" : "pointer",
+            opacity: isDisconnected ? 0.5 : 1,
             boxShadow: "0 4px 14px rgba(62, 196, 192, 0.3)",
           }}
         >
@@ -363,7 +320,7 @@ export default function ServerAutomationsView({
       </div>
 
       {/* Automations list */}
-      {automations.length === 0 ? (
+      {automations.length === 0 || isDisconnected ? (
         <div
           style={{
             padding: 48,
@@ -381,10 +338,12 @@ export default function ServerAutomationsView({
             <IconCalendar size={48} />
           </div>
           <h3 style={{ margin: 0, fontSize: "1.1rem", color: isDark ? "#ffffff" : "#0f172a" }}>
-            No hay tareas programadas
+            {isDisconnected ? "Servidor sin conexión" : "No hay tareas programadas"}
           </h3>
           <p style={{ margin: 0, fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)" }}>
-            Programa reinicios automáticos, copias de seguridad periódicas o comandos diarios.
+            {isDisconnected
+              ? "Las automatizaciones aparecerán aquí cuando la infraestructura esté disponible."
+              : "Programa reinicios automáticos, copias de seguridad periódicas o comandos diarios."}
           </p>
         </div>
       ) : (

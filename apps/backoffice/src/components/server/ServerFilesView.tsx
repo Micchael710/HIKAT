@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react"
-import type { ThemeMode, ServerFileRoot, ServerFileItem } from "../../types"
+import type { ThemeMode, ServerFileRoot, ServerFileItem, ServerStatus } from "../../types"
 import { serverApi } from "../../services/graphqlClient"
 import { formatBytesToHuman, isAllowlistedTextFile } from "@hikat/shared"
 import {
@@ -24,6 +24,7 @@ import {
 
 interface ServerFilesViewProps {
   theme: ThemeMode
+  serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }
 
@@ -34,8 +35,9 @@ const CATEGORIES: Array<{ root: ServerFileRoot; label: string; icon: React.React
   { root: "LOGS", label: "Logs", icon: <IconTerminal size={16} /> },
 ]
 
-export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps) {
+export default function ServerFilesView({ theme, serverStatus, onToast }: ServerFilesViewProps) {
   const isDark = theme === "dark"
+  const isDisconnected = serverStatus === "DISCONNECTED"
   const [selectedRoot, setSelectedRoot] = useState<ServerFileRoot>("CONFIG")
   const [currentPath, setCurrentPath] = useState("")
   const [files, setFiles] = useState<ServerFileItem[]>([])
@@ -128,7 +130,7 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
   // Create folder
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newFolderName.trim()) return
+    if (!newFolderName.trim() || isDisconnected) return
     setIsCreatingFolder(true)
     try {
       await serverApi.createServerFolder(selectedRoot, currentPath, newFolderName.trim())
@@ -149,7 +151,7 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
   // Rename
   const handleRename = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!renameTarget || !newName.trim()) return
+    if (!renameTarget || !newName.trim() || isDisconnected) return
     setIsRenaming(true)
     const targetRelative = currentPath ? `${currentPath}/${renameTarget.name}` : renameTarget.name
     try {
@@ -170,7 +172,7 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
 
   // Delete
   const handleDelete = async () => {
-    if (!deleteTarget) return
+    if (!deleteTarget || isDisconnected) return
     setIsDeleting(true)
     const targetRelative = currentPath ? `${currentPath}/${deleteTarget.name}` : deleteTarget.name
     try {
@@ -190,6 +192,7 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
 
   // Download
   const handleDownload = async (file: ServerFileItem) => {
+    if (isDisconnected) return
     const targetRelative = currentPath ? `${currentPath}/${file.name}` : file.name
     try {
       const res = await serverApi.createServerFileDownloadUrl(selectedRoot, targetRelative)
@@ -210,13 +213,17 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
     }
   }
 
-  // Upload file
+  // Upload file (Real upload to Wings signed URL)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file) return
+    if (!file || isDisconnected) return
     setIsUploading(true)
     try {
-      await serverApi.prepareServerFileUpload(selectedRoot, currentPath)
+      // 1. Request signed upload URL from backend
+      const { url } = await serverApi.prepareServerFileUpload(selectedRoot, currentPath)
+      // 2. Transfer REAL bytes to Wings signed URL and check response.ok
+      await serverApi.uploadFileToSignedUrl(url, file)
+      // 3. Notify success only after HTTP response.ok
       onToast(`Archivo "${file.name}" subido exitosamente.`, "success")
       await fetchFiles(true)
     } catch (err: unknown) {
@@ -326,6 +333,7 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
           <button
             type="button"
             onClick={() => setIsNewFolderModalOpen(true)}
+            disabled={isDisconnected}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -337,7 +345,8 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
               color: isDark ? "#ffffff" : "#0f172a",
               fontWeight: 600,
               fontSize: "0.85rem",
-              cursor: "pointer",
+              cursor: isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
             }}
           >
             <IconPlus size={16} />
@@ -356,7 +365,8 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
               color: isDark ? "#3ec4c0" : "#00897b",
               fontWeight: 700,
               fontSize: "0.85rem",
-              cursor: isUploading ? "not-allowed" : "pointer",
+              cursor: isUploading || isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
             }}
           >
             {isUploading ? <IconSpinner size={16} /> : <IconUpload size={16} />}
@@ -364,7 +374,7 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
             <input
               type="file"
               onChange={handleFileUpload}
-              disabled={isUploading}
+              disabled={isUploading || isDisconnected}
               style={{ display: "none" }}
             />
           </label>
@@ -372,12 +382,13 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
           <button
             type="button"
             onClick={() => fetchFiles(true)}
-            disabled={isRefreshing}
+            disabled={isRefreshing || isDisconnected}
             style={{
               border: "none",
               background: "transparent",
               color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)",
-              cursor: isRefreshing ? "not-allowed" : "pointer",
+              cursor: isRefreshing || isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
               padding: 4,
               display: "flex",
               alignItems: "center",
@@ -460,52 +471,7 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
             Explorando archivos...
           </span>
         </div>
-      ) : error ? (
-        <div
-          style={{
-            padding: 24,
-            borderRadius: 16,
-            background: isDark ? "rgba(239, 68, 68, 0.1)" : "#fee2e2",
-            border: `1px solid ${isDark ? "rgba(239, 68, 68, 0.25)" : "#fca5a5"}`,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 16,
-            textAlign: "center",
-          }}
-        >
-          <div style={{ color: "#ef4444" }}>
-            <IconAlertCircle size={36} />
-          </div>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "1.1rem", color: isDark ? "#ffffff" : "#991b1b" }}>
-              Error al listar archivos
-            </h3>
-            <p style={{ margin: "6px 0 0 0", fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.7)" : "#7f1d1d" }}>
-              {error}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => fetchFiles(true)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 18px",
-              borderRadius: 10,
-              border: "none",
-              background: "#ef4444",
-              color: "#ffffff",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            <IconRefresh size={16} />
-            <span>Reintentar</span>
-          </button>
-        </div>
-      ) : files.length === 0 ? (
+      ) : files.length === 0 || isDisconnected ? (
         <div
           style={{
             padding: 48,
@@ -523,10 +489,12 @@ export default function ServerFilesView({ theme, onToast }: ServerFilesViewProps
             <IconFolder size={48} />
           </div>
           <h3 style={{ margin: 0, fontSize: "1.1rem", color: isDark ? "#ffffff" : "#0f172a" }}>
-            Esta carpeta está vacía
+            {isDisconnected ? "Servidor sin conexión" : "Esta carpeta está vacía"}
           </h3>
           <p style={{ margin: 0, fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)" }}>
-            Sube un archivo o crea una subcarpeta para comenzar.
+            {isDisconnected
+              ? "Los archivos aparecerán aquí cuando el servidor esté conectado."
+              : "Sube un archivo o crea una subcarpeta para comenzar."}
           </p>
         </div>
       ) : (

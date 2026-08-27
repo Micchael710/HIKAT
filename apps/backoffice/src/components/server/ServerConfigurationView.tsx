@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react"
-import type { ThemeMode, MinecraftServerSettings, UpdateMinecraftServerSettingsInput } from "../../types"
+import type { ThemeMode, MinecraftServerSettings, UpdateMinecraftServerSettingsInput, ServerStatus } from "../../types"
 import { serverApi } from "../../services/graphqlClient"
 import {
   IconSliders,
@@ -12,11 +12,13 @@ import {
 
 interface ServerConfigurationViewProps {
   theme: ThemeMode
+  serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }
 
 export default function ServerConfigurationView({
   theme,
+  serverStatus,
   onToast,
 }: ServerConfigurationViewProps) {
   const isDark = theme === "dark"
@@ -24,6 +26,7 @@ export default function ServerConfigurationView({
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const isDisconnected = serverStatus === "DISCONNECTED" || (Boolean(error) && !settings)
 
   // Form state
   const [formData, setFormData] = useState<UpdateMinecraftServerSettingsInput>({
@@ -85,6 +88,7 @@ export default function ServerConfigurationView({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isDisconnected) return
     setIsSaving(true)
     setSavedSuccess(false)
     try {
@@ -121,56 +125,6 @@ export default function ServerConfigurationView({
         <span style={{ fontSize: "0.95rem", fontWeight: 500 }}>
           Cargando configuración del servidor...
         </span>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div
-        style={{
-          padding: 24,
-          borderRadius: 16,
-          background: isDark ? "rgba(239, 68, 68, 0.1)" : "#fee2e2",
-          border: `1px solid ${isDark ? "rgba(239, 68, 68, 0.25)" : "#fca5a5"}`,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-          textAlign: "center",
-          margin: "24px 0",
-        }}
-      >
-        <div style={{ color: "#ef4444" }}>
-          <IconAlertCircle size={36} />
-        </div>
-        <div>
-          <h3 style={{ margin: 0, fontSize: "1.1rem", color: isDark ? "#ffffff" : "#991b1b" }}>
-            No se pudo cargar la configuración
-          </h3>
-          <p style={{ margin: "6px 0 0 0", fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.7)" : "#7f1d1d" }}>
-            {error}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => fetchSettings(true)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 18px",
-            borderRadius: 10,
-            border: "none",
-            background: "#ef4444",
-            color: "#ffffff",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <IconRefresh size={16} />
-          <span>Reintentar</span>
-        </button>
       </div>
     )
   }
@@ -233,24 +187,43 @@ export default function ServerConfigurationView({
       </div>
 
       {/* Restart Advice Banner */}
-      <div
-        style={{
-          padding: 16,
-          borderRadius: 14,
-          background: isDark ? "rgba(59, 130, 246, 0.1)" : "#eff6ff",
-          border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.25)" : "#bfdbfe"}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          color: isDark ? "#93c5fd" : "#1d4ed8",
-          fontSize: "0.875rem",
-        }}
-      >
-        <IconSliders size={20} />
-        <span>
-          Los cambios en la configuración se guardarán de inmediato y <strong>se aplicarán completamente al reiniciar el servidor</strong>.
-        </span>
-      </div>
+      {isDisconnected ? (
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 14,
+            background: isDark ? "rgba(245, 158, 11, 0.1)" : "#fffbeb",
+            border: `1px solid ${isDark ? "rgba(245, 158, 11, 0.25)" : "#fde68a"}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            color: isDark ? "#fbbf24" : "#b45309",
+            fontSize: "0.875rem",
+          }}
+        >
+          <IconWarning size={20} />
+          <span>La configuración se cargará cuando el servidor esté conectado.</span>
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 14,
+            background: isDark ? "rgba(59, 130, 246, 0.1)" : "#eff6ff",
+            border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.25)" : "#bfdbfe"}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            color: isDark ? "#93c5fd" : "#1d4ed8",
+            fontSize: "0.875rem",
+          }}
+        >
+          <IconWarning size={20} />
+          <span>
+            Los cambios surtirán efecto tras reiniciar el servidor de Minecraft.
+          </span>
+        </div>
+      )}
 
       {/* Configuration Form Card */}
       <form
@@ -471,7 +444,7 @@ export default function ServerConfigurationView({
 
           <button
             type="submit"
-            disabled={isSaving}
+            disabled={isSaving || isDisconnected}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -483,7 +456,8 @@ export default function ServerConfigurationView({
               color: "#ffffff",
               fontWeight: 700,
               fontSize: "0.95rem",
-              cursor: isSaving ? "not-allowed" : "pointer",
+              cursor: isSaving || isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
               boxShadow: "0 4px 14px rgba(62, 196, 192, 0.3)",
             }}
           >

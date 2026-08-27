@@ -144,6 +144,7 @@ export const serverTypeDefs = /* GraphQL */ `
     command: String
     enabled: Boolean!
     isProcessing: Boolean!
+    isAdvanced: Boolean!
     lastRunAt: String
     nextRunAt: String
   }

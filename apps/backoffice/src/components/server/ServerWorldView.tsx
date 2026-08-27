@@ -120,10 +120,13 @@ export default function ServerWorldView({
     setIsUploading(true)
 
     try {
-      // 1. Prepare upload ticket / url
-      await serverApi.prepareServerWorldUpload()
+      // 1. Prepare signed upload URL
+      const { url } = await serverApi.prepareServerWorldUpload()
 
-      // 2. Call replace world mutation
+      // 2. Transfer REAL bytes to Wings signed URL and check response.ok
+      await serverApi.uploadFileToSignedUrl(url, selectedFile)
+
+      // 3. Call replace world mutation ONLY after real upload completes
       await serverApi.replaceServerWorld(selectedFile.name)
 
       onToast("Mundo reemplazado exitosamente.", "success")
@@ -140,6 +143,7 @@ export default function ServerWorldView({
     }
   }
 
+  const isDisconnected = serverStatus === "DISCONNECTED" || (Boolean(error) && !worldInfo)
   const isServerOffline = serverStatus === "OFFLINE"
 
   if (isLoading) {
@@ -159,56 +163,6 @@ export default function ServerWorldView({
         <span style={{ fontSize: "0.95rem", fontWeight: 500 }}>
           Cargando información del mundo...
         </span>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div
-        style={{
-          padding: 24,
-          borderRadius: 16,
-          background: isDark ? "rgba(239, 68, 68, 0.1)" : "#fee2e2",
-          border: `1px solid ${isDark ? "rgba(239, 68, 68, 0.25)" : "#fca5a5"}`,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-          textAlign: "center",
-          margin: "24px 0",
-        }}
-      >
-        <div style={{ color: "#ef4444" }}>
-          <IconAlertCircle size={36} />
-        </div>
-        <div>
-          <h3 style={{ margin: 0, fontSize: "1.1rem", color: isDark ? "#ffffff" : "#991b1b" }}>
-            No se pudo cargar la información del mundo
-          </h3>
-          <p style={{ margin: "6px 0 0 0", fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.7)" : "#7f1d1d" }}>
-            {error}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => fetchWorld(true)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 18px",
-            borderRadius: 10,
-            border: "none",
-            background: "#ef4444",
-            color: "#ffffff",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <IconRefresh size={16} />
-          <span>Reintentar</span>
-        </button>
       </div>
     )
   }
@@ -249,7 +203,7 @@ export default function ServerWorldView({
                 Mundo activo detectado
               </div>
               <h2 style={{ margin: "2px 0 0 0", fontSize: "1.5rem", fontWeight: 800, color: isDark ? "#ffffff" : "#0f172a" }}>
-                {worldInfo?.name || "world"}
+                {isDisconnected ? "—" : (worldInfo?.name || "world")}
               </h2>
             </div>
           </div>
@@ -257,7 +211,7 @@ export default function ServerWorldView({
           <button
             type="button"
             onClick={() => fetchWorld(true)}
-            disabled={isRefreshing}
+            disabled={isRefreshing || isDisconnected}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -267,7 +221,8 @@ export default function ServerWorldView({
               border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"}`,
               background: "transparent",
               color: isDark ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.8)",
-              cursor: isRefreshing ? "not-allowed" : "pointer",
+              cursor: isRefreshing || isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.6 : 1,
               fontSize: "0.85rem",
               fontWeight: 600,
             }}
@@ -279,7 +234,7 @@ export default function ServerWorldView({
 
         {/* World metadata pills */}
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          {worldInfo?.sizeBytes !== null && worldInfo?.sizeBytes !== undefined && (
+          {!isDisconnected && worldInfo?.sizeBytes !== null && worldInfo?.sizeBytes !== undefined && (
             <div
               style={{
                 padding: "6px 14px",
@@ -293,7 +248,7 @@ export default function ServerWorldView({
               Tamaño: <strong>{formatBytesToHuman(worldInfo.sizeBytes)}</strong>
             </div>
           )}
-          {worldInfo?.lastModified && (
+          {!isDisconnected && worldInfo?.lastModified && (
             <div
               style={{
                 padding: "6px 14px",
@@ -314,7 +269,7 @@ export default function ServerWorldView({
           <button
             type="button"
             onClick={handleCreateBackup}
-            disabled={isBackupLoading}
+            disabled={isBackupLoading || isDisconnected}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -326,7 +281,8 @@ export default function ServerWorldView({
               color: isDark ? "#3ec4c0" : "#00897b",
               fontWeight: 700,
               fontSize: "0.9rem",
-              cursor: isBackupLoading ? "not-allowed" : "pointer",
+              cursor: isBackupLoading || isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
               transition: "all 0.15s ease",
             }}
           >
@@ -337,7 +293,7 @@ export default function ServerWorldView({
           <button
             type="button"
             onClick={handleDownloadWorld}
-            disabled={isDownloadLoading}
+            disabled={isDownloadLoading || isDisconnected}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -349,7 +305,8 @@ export default function ServerWorldView({
               color: isDark ? "#60a5fa" : "#2563eb",
               fontWeight: 700,
               fontSize: "0.9rem",
-              cursor: isDownloadLoading ? "not-allowed" : "pointer",
+              cursor: isDownloadLoading || isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
               transition: "all 0.15s ease",
             }}
           >
@@ -360,6 +317,7 @@ export default function ServerWorldView({
           <button
             type="button"
             onClick={() => setIsReplaceModalOpen(true)}
+            disabled={isDisconnected}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -371,7 +329,8 @@ export default function ServerWorldView({
               color: isDark ? "#fbbf24" : "#d97706",
               fontWeight: 700,
               fontSize: "0.9rem",
-              cursor: "pointer",
+              cursor: isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
               transition: "all 0.15s ease",
             }}
           >
@@ -379,6 +338,18 @@ export default function ServerWorldView({
             <span>Reemplazar mundo</span>
           </button>
         </div>
+
+        {isDisconnected && (
+          <p
+            style={{
+              margin: "4px 0 0 0",
+              fontSize: "0.85rem",
+              color: isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
+            }}
+          >
+            Conecta la infraestructura para administrar el mundo.
+          </p>
+        )}
       </div>
 
       {/* Replace World Modal */}

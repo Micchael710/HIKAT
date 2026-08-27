@@ -184,6 +184,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
   }
 
   const currentStatus = resources?.status || (error ? "DISCONNECTED" : "UNKNOWN")
+  const infraState = isLoading ? "CHECKING" : resources ? "CONNECTED" : "DISCONNECTED"
 
   // RAM calculations
   const memUsed = resources?.memoryUsedBytes ?? 0
@@ -226,7 +227,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
         onClose={() => setToastMessage(null)}
       />
 
-      {/* Top Header & Sub-Navigation (Always mounted and accessible) */}
+      {/* Top Header & Sub-Navigation */}
       <div
         style={{
           display: "flex",
@@ -238,17 +239,99 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
         }}
       >
         <div>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "1.75rem",
-              fontWeight: 800,
-              color: isDark ? "#ffffff" : "#0f172a",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            Servidor
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "1.75rem",
+                fontWeight: 800,
+                color: isDark ? "#ffffff" : "#0f172a",
+                letterSpacing: "-0.02em",
+              }}
+            >
+              Servidor
+            </h1>
+
+            {/* Small Infrastructure Status Badge Top Right */}
+            {infraState === "CHECKING" && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 12px",
+                  borderRadius: 999,
+                  background: isDark ? "rgba(255, 255, 255, 0.08)" : "#e2e8f0",
+                  color: isDark ? "rgba(255, 255, 255, 0.65)" : "#64748b",
+                  fontSize: "0.775rem",
+                  fontWeight: 600,
+                }}
+              >
+                <IconSpinner size={12} />
+                <span>Comprobando infraestructura...</span>
+              </span>
+            )}
+
+            {infraState === "CONNECTED" && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 12px",
+                  borderRadius: 999,
+                  background: isDark ? "rgba(34, 197, 94, 0.15)" : "#dcfce7",
+                  color: isDark ? "#4ade80" : "#15803d",
+                  fontSize: "0.775rem",
+                  fontWeight: 600,
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: isDark ? "#4ade80" : "#16a34a",
+                  }}
+                />
+                <span>Infraestructura conectada</span>
+              </span>
+            )}
+
+            {infraState === "DISCONNECTED" && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "4px 12px",
+                  borderRadius: 999,
+                  background: isDark ? "rgba(239, 68, 68, 0.15)" : "#fee2e2",
+                  color: isDark ? "#f87171" : "#b91c1c",
+                  fontSize: "0.775rem",
+                  fontWeight: 600,
+                }}
+              >
+                <span>Infraestructura no conectada</span>
+                <button
+                  type="button"
+                  onClick={() => fetchStatus(true)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "inherit",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    padding: 0,
+                    textDecoration: "underline",
+                    fontSize: "0.775rem",
+                  }}
+                >
+                  Reintentar
+                </button>
+              </span>
+            )}
+          </div>
           <p
             style={{
               margin: "4px 0 0 0",
@@ -345,70 +428,6 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                 Conectando con el servidor...
               </span>
             </div>
-          ) : error && !resources ? (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 16,
-                padding: 32,
-                borderRadius: 20,
-                background: isDark ? "rgba(19, 28, 35, 0.7)" : "#ffffff",
-                border: `1px solid ${
-                  isDark ? "rgba(239, 68, 68, 0.2)" : "rgba(239, 68, 68, 0.15)"
-                }`,
-                textAlign: "center",
-              }}
-            >
-              <div style={{ color: "#ef4444" }}>
-                <IconAlertCircle size={48} />
-              </div>
-              <div>
-                <h3
-                  style={{
-                    margin: 0,
-                    fontSize: "1.2rem",
-                    fontWeight: 700,
-                    color: isDark ? "#ffffff" : "#0f172a",
-                  }}
-                >
-                  No se pudo conectar con la infraestructura del servidor
-                </h3>
-                <p
-                  style={{
-                    margin: "6px 0 0 0",
-                    fontSize: "0.9rem",
-                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.6)",
-                    maxWidth: 420,
-                  }}
-                >
-                  La infraestructura del servidor no respondió. Puedes consultar las demás pestañas o intentar reconectar.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => fetchStatus(true)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "10px 22px",
-                  borderRadius: 12,
-                  background: "linear-gradient(135deg, #3ec4c0 0%, #2ba5a1 100%)",
-                  color: "#0a0e14",
-                  fontSize: "0.925rem",
-                  fontWeight: 700,
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                <IconRefresh size={18} />
-                <span>Reintentar</span>
-              </button>
-            </div>
           ) : (
             <>
               {/* Server Primary Status Card */}
@@ -483,7 +502,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                     >
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                         <IconClock size={14} />
-                        Tiempo encendido: {formatUptime(resources?.uptimeMs)}
+                        Tiempo encendido: {resources ? formatUptime(resources.uptimeMs) : "—"}
                       </span>
                     </div>
                   </div>
@@ -510,9 +529,9 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                 <ServerResourceCard
                   label="CPU"
                   icon={<IconCpu size={20} />}
-                  value={`${cpuVal.toFixed(1)} %`}
-                  subValue={cpuLimit ? `/ ${cpuLimit} %` : undefined}
-                  percentage={cpuVal}
+                  value={resources ? `${cpuVal.toFixed(1)} %` : "—"}
+                  subValue={resources && cpuLimit ? `/ ${cpuLimit} %` : undefined}
+                  percentage={resources ? cpuVal : null}
                   theme={theme}
                   accentColor="#3ec4c0"
                 />
@@ -520,9 +539,9 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                 <ServerResourceCard
                   label="Memoria RAM"
                   icon={<IconRam size={20} />}
-                  value={formatBytesToHuman(memUsed)}
-                  subValue={memLimit ? `/ ${formatBytesToHuman(memLimit)}` : undefined}
-                  percentage={memPercent}
+                  value={resources ? formatBytesToHuman(memUsed) : "—"}
+                  subValue={resources && memLimit ? `/ ${formatBytesToHuman(memLimit)}` : undefined}
+                  percentage={resources ? memPercent : null}
                   theme={theme}
                   accentColor="#818cf8"
                 />
@@ -530,9 +549,9 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                 <ServerResourceCard
                   label="Disco"
                   icon={<IconDisk size={20} />}
-                  value={formatBytesToHuman(diskUsed)}
-                  subValue={diskLimit ? `/ ${formatBytesToHuman(diskLimit)}` : undefined}
-                  percentage={diskPercent}
+                  value={resources ? formatBytesToHuman(diskUsed) : "—"}
+                  subValue={resources && diskLimit ? `/ ${formatBytesToHuman(diskLimit)}` : undefined}
+                  percentage={resources ? diskPercent : null}
                   theme={theme}
                   accentColor="#f59e0b"
                 />
@@ -540,7 +559,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                 <ServerResourceCard
                   label="Tráfico recibido (RX)"
                   icon={<IconDownload size={20} />}
-                  value={formatBytesToHuman(rxBytes)}
+                  value={resources ? formatBytesToHuman(rxBytes) : "—"}
                   theme={theme}
                   accentColor="#38bdf8"
                 />
@@ -548,7 +567,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                 <ServerResourceCard
                   label="Tráfico enviado (TX)"
                   icon={<IconUpload size={20} />}
-                  value={formatBytesToHuman(txBytes)}
+                  value={resources ? formatBytesToHuman(txBytes) : "—"}
                   theme={theme}
                   accentColor="#a78bfa"
                 />
@@ -673,6 +692,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
         <div style={{ animation: "fadeIn 0.2s ease" }}>
           <ServerAutomationsView
             theme={theme}
+            serverStatus={currentStatus}
             onToast={showToast}
           />
         </div>
@@ -683,6 +703,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
         <div style={{ animation: "fadeIn 0.2s ease" }}>
           <ServerConfigurationView
             theme={theme}
+            serverStatus={currentStatus}
             onToast={showToast}
           />
         </div>
@@ -693,6 +714,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
         <div style={{ animation: "fadeIn 0.2s ease" }}>
           <ServerFilesView
             theme={theme}
+            serverStatus={currentStatus}
             onToast={showToast}
           />
         </div>

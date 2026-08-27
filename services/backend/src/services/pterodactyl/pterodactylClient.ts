@@ -21,6 +21,7 @@ import type {
   PterodactylActivityListResponse,
   CreateScheduleInput,
   CreateScheduleTaskInput,
+  UpdateScheduleTaskInput,
 } from "./types"
 import { SERVER_ERROR_CODES, SERVER_PUBLIC_MESSAGES } from "@hikat/shared"
 
@@ -573,6 +574,35 @@ export class PterodactylHttpClient implements IPterodactylClient {
           continue_on_failure: taskPayload.continue_on_failure ?? false,
         },
       },
+    )
+  }
+
+  async updateScheduleTask(
+    scheduleId: number | string,
+    taskId: number | string,
+    taskPayload: UpdateScheduleTaskInput,
+  ): Promise<void> {
+    await this.request<void>(
+      `/api/client/servers/${encodeURIComponent(this.serverId)}/schedules/${encodeURIComponent(String(scheduleId))}/tasks/${encodeURIComponent(String(taskId))}`,
+      {
+        method: "POST",
+        body: {
+          action: taskPayload.action,
+          payload: taskPayload.payload,
+          time_offset: taskPayload.time_offset ?? 0,
+          continue_on_failure: taskPayload.continue_on_failure ?? false,
+        },
+      },
+    )
+  }
+
+  async deleteScheduleTask(
+    scheduleId: number | string,
+    taskId: number | string,
+  ): Promise<void> {
+    await this.request<void>(
+      `/api/client/servers/${encodeURIComponent(this.serverId)}/schedules/${encodeURIComponent(String(scheduleId))}/tasks/${encodeURIComponent(String(taskId))}`,
+      { method: "DELETE" },
     )
   }
 

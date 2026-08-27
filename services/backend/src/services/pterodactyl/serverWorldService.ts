@@ -29,20 +29,22 @@ export interface ServerWorldInfoData {
 
 /**
  * Detects the active world name by reading server.properties.
+ *
+ * FAIL-SAFE: If server.properties is successfully read but does not contain
+ * `level-name`, returns the Minecraft default "world".
+ * If reading server.properties FAILS (network, timeout, auth, infrastructure),
+ * the error is PROPAGATED — we never act on a potentially wrong directory.
  */
 export async function detectActiveWorldName(
   env: Env,
   clientOverride?: IPterodactylClient,
 ): Promise<string> {
   const client = clientOverride || createPterodactylClient(env)
-  try {
-    const content = await client.getFileContents("server.properties")
-    const props = parseServerProperties(content)
-    const rawLevelName = props.get("level-name")
-    return sanitizeWorldName(rawLevelName)
-  } catch {
-    return "world"
-  }
+  // Let infrastructure errors propagate — do NOT catch them
+  const content = await client.getFileContents("server.properties")
+  const props = parseServerProperties(content)
+  const rawLevelName = props.get("level-name")
+  return sanitizeWorldName(rawLevelName)
 }
 
 /**
@@ -109,8 +111,13 @@ export async function prepareServerWorldUpload(
 
 /**
  * Safely replaces the server world.
- * Requires server to be OFFLINE, creates an automatic pre-backup,
- * and acquires a distributed operation lock.
+ * Requires server to be strictly OFFLINE (rejects ONLINE, STARTING, STOPPING, UNKNOWN, DISCONNECTED),
+ * detects active world name, creates an automatic pre-backup, acquires a distributed operation lock,
+ * and extracts the uploaded world archive.
+ *
+ * NOTE ON ATOMICITY: Pterodactyl Panel / Wings API does not guarantee atomic filesystem swaps.
+ * We create an automatic pre-backup before extracting the world archive so administrators
+ * can restore if a failure occurs during extraction.
  */
 export async function replaceServerWorld(
   env: Env,
@@ -128,23 +135,26 @@ export async function replaceServerWorld(
     )
   }
 
-  // 1. Guard: Check server is OFFLINE
+  // 1. Guard: Check server is strictly OFFLINE
   const status = await getServerStatus(env, client)
   if (status.status !== "OFFLINE") {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_BUSY,
-      "Para reemplazar el mundo el servidor debe estar completamente apagado.",
+      "Para reemplazar el mundo el servidor debe estar completamente apagado (OFFLINE).",
       `Server state is ${status.status}, expected OFFLINE`,
     )
   }
 
-  // 2. Guard: Acquire distributed operation lock
+  // 2. Detect active world name before operation
+  const activeWorldName = await detectActiveWorldName(env, client)
+
+  // 3. Guard: Acquire distributed operation lock
   const lockKey = await acquireServerOperationLock(db, "REPLACE_WORLD", userId)
 
   try {
-    // 3. Step: Create automatic pre-backup
+    // 4. Step: Create automatic pre-backup
     try {
-      await client.createBackup("Copia automática previa a reemplazo de mundo")
+      await client.createBackup(`Copia previa a reemplazo de mundo (${activeWorldName})`)
     } catch (backupErr: unknown) {
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
@@ -153,7 +163,7 @@ export async function replaceServerWorld(
       )
     }
 
-    // 4. Step: Decompress / extract uploaded world into server root
+    // 5. Step: Decompress / extract uploaded world into server root
     const cleanFileName = uploadedFileName.trim().replace(/^[/\\.]+/g, "")
     await client.decompressFile("/", cleanFileName)
 
