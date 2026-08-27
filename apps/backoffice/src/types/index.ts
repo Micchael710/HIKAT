@@ -197,8 +197,6 @@ export interface AdminPlayerSkinConnection {
 }
 
 export interface UpdateAdminPlayerSkinInput {
-  model?: SkinModel | null
-
   mediaId?: string | null
 }
 

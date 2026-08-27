@@ -46,6 +46,7 @@ import {
 } from "./serverScheduleService"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
+import { eq } from "drizzle-orm"
 
 function createMockD1() {
   const d1 = createTestD1()
@@ -483,6 +484,26 @@ rcon.password=secret123
 
   // Test 13: Shard 07A - Automation Task Update
   it("updateServerAutomation updates task action and payload in addition to schedule metadata", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.serverTasks).values({
+      id: "task-rec-10",
+      scheduleId: "10",
+      template: "CUSTOM",
+      action: "BACKUP",
+      name: "Restart Task",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      enabled: true,
+      templateVersion: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
     const updateScheduleSpy = vi.fn().mockResolvedValue({
       object: "schedule",
       attributes: { id: 10, name: "Restart Task", is_active: true, minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*", is_processing: false },
@@ -526,6 +547,7 @@ rcon.password=secret123
         enabled: true,
       },
       client as any,
+      db as any,
     )
 
     expect(updateScheduleSpy).toHaveBeenCalledWith("10", expect.objectContaining({ name: "Restart Task" }))
@@ -656,6 +678,7 @@ rcon.password=secret123
 
   // Test 17: Shard 07B - Advanced Multi-task Schedule Read-Only Protection
   it("updateServerAutomation and deleteServerAutomation reject multi-task advanced schedules without making changes", async () => {
+    const { db } = createMockD1()
     const updateScheduleSpy = vi.fn()
     const deleteScheduleSpy = vi.fn()
     const mockAdvancedSchedule = {
@@ -683,14 +706,14 @@ rcon.password=secret123
 
     // 1. updateServerAutomation throws and skips updateSchedule
     await expect(
-      updateServerAutomation(env, "99", { name: "Hack", action: "RESTART", frequency: "DAILY", time: "03:00", enabled: true }, mockClient as any),
-    ).rejects.toThrow("Esta automatización es avanzada (contiene múltiples tareas)")
+      updateServerAutomation(env, "99", { name: "Hack", action: "RESTART", frequency: "DAILY", time: "03:00", enabled: true }, mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue configurada fuera de HiKAT y es de solo lectura.")
     expect(updateScheduleSpy).not.toHaveBeenCalled()
 
     // 2. deleteServerAutomation throws and skips deleteSchedule
     await expect(
-      deleteServerAutomation(env, "99", mockClient as any),
-    ).rejects.toThrow("Esta automatización es avanzada (contiene múltiples tareas)")
+      deleteServerAutomation(env, "99", mockClient as any, db as any),
+    ).rejects.toThrow("No puedes eliminar tareas configuradas fuera de HiKAT.")
     expect(deleteScheduleSpy).not.toHaveBeenCalled()
   })
 
@@ -1451,6 +1474,219 @@ rcon.password=secret123
 
     // Verify rollback restored original schedule metadata
     expect(updateScheduleSpy).toHaveBeenCalledWith("777", expect.objectContaining({ name: "Original Task" }))
+  })
+
+  // Test 41: CUSTOM START, STOP, RESTART, BACKUP, COMMAND persist action in D1 and reconstruct correctly
+  it("Phase 07 Hardening: CUSTOM tasks persist their specific action in D1 and reconstruct correctly", async () => {
+    const { db } = createMockD1()
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const actions = ["START", "STOP", "RESTART", "BACKUP", "COMMAND"] as const
+
+    for (let i = 0; i < actions.length; i++) {
+      const act = actions[i]!
+      const scheduleId = String(100 + i)
+      const mockClient = {
+        createSchedule: vi.fn().mockResolvedValue({
+          object: "server_schedule",
+          attributes: { id: 100 + i },
+        }),
+        createScheduleTask: vi.fn().mockResolvedValue(undefined),
+      }
+
+      const res = await createServerAutomation(
+        env,
+        {
+          name: `Custom ${act}`,
+          template: "CUSTOM",
+          action: act,
+          command: act === "COMMAND" ? "say Hello World" : undefined,
+          frequency: "DAILY",
+          time: "04:00",
+          enabled: true,
+        },
+        mockClient as any,
+        db as any,
+      )
+
+      expect(res.action).toBe(act)
+
+      // Verify directly in D1
+      const d1Row = await db
+        .select()
+        .from(schema.serverTasks)
+        .where(eq(schema.serverTasks.scheduleId, scheduleId))
+        .get()
+
+      expect(d1Row).toBeDefined()
+      expect(d1Row?.action).toBe(act)
+    }
+  })
+
+  // Test 42: Out-of-sync tasks (modified externally in Pterodactyl tasks) reject update, run, and delete
+  it("Phase 07 Hardening: Out-of-sync task rejects update, run, and delete", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.serverTasks).values({
+      id: "task-rec-sync",
+      scheduleId: "555",
+      template: "AUTO_BACKUP",
+      action: "BACKUP",
+      name: "Backup Task",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      enabled: true,
+      templateVersion: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Remote schedule has modified tasks that DO NOT match AUTO_BACKUP (e.g. power command instead of backup)
+    const outOfSyncSchedule = {
+      object: "server_schedule",
+      attributes: {
+        id: 555,
+        name: "Backup Task",
+        cron: { minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        only_when_online: true,
+        tasks: [
+          { attributes: { id: 1, action: "power", payload: "stop", time_offset: 0 } },
+        ],
+      },
+    }
+
+    const mockClient = {
+      getSchedule: vi.fn().mockResolvedValue(outOfSyncSchedule),
+      updateSchedule: vi.fn(),
+      executeSchedule: vi.fn(),
+      deleteSchedule: vi.fn(),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    // 1. update fails
+    await expect(
+      updateServerAutomation(
+        env,
+        "555",
+        { name: "Attempt Update", template: "AUTO_BACKUP", frequency: "DAILY", enabled: true },
+        mockClient as any,
+        db as any,
+      ),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+
+    // 2. run fails
+    await expect(
+      runServerAutomation(env, "555", mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+
+    // 3. delete fails
+    await expect(
+      deleteServerAutomation(env, "555", mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+  })
+
+  // Test 43: Missing DB blocks all task mutations fail-closed
+  it("Phase 07 Hardening: Missing DB blocks all task mutations fail-closed", async () => {
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+    const mockClient = {
+      createSchedule: vi.fn(),
+      getSchedule: vi.fn(),
+      updateSchedule: vi.fn(),
+      executeSchedule: vi.fn(),
+      deleteSchedule: vi.fn(),
+    }
+
+    // 1. create without DB
+    await expect(
+      createServerAutomation(env, { name: "Test", template: "AUTO_BACKUP", frequency: "DAILY", enabled: true }, mockClient as any, undefined),
+    ).rejects.toThrow("La base de datos no está disponible")
+
+    // 2. update without DB
+    await expect(
+      updateServerAutomation(env, "123", { name: "Test", template: "AUTO_BACKUP", frequency: "DAILY", enabled: true }, mockClient as any, undefined),
+    ).rejects.toThrow("La base de datos no está disponible")
+
+    // 3. run without DB
+    await expect(
+      runServerAutomation(env, "123", mockClient as any, undefined),
+    ).rejects.toThrow("La base de datos no está disponible")
+
+    // 4. delete without DB
+    await expect(
+      deleteServerAutomation(env, "123", mockClient as any, undefined),
+    ).rejects.toThrow("La base de datos no está disponible")
+  })
+
+  // Test 44: Failed rollback is explicitly reported
+  it("Phase 07 Hardening: Failed rollback during task update is explicitly reported in error", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.serverTasks).values({
+      id: "task-rec-fail-rb",
+      scheduleId: "444",
+      template: "AUTO_BACKUP",
+      action: "BACKUP",
+      name: "Original Backup",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      enabled: true,
+      templateVersion: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const originalSchedule = {
+      object: "server_schedule",
+      attributes: {
+        id: 444,
+        name: "Original Backup",
+        cron: { minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        only_when_online: true,
+        tasks: [
+          { attributes: { id: 10, action: "backup", payload: "", time_offset: 0 } },
+        ],
+      },
+    }
+
+    const mockClient = {
+      getSchedule: vi.fn().mockResolvedValue(originalSchedule),
+      updateSchedule: vi.fn()
+        .mockResolvedValueOnce(originalSchedule) // Update during main execution
+        .mockRejectedValueOnce(new Error("Pterodactyl Unreachable during Rollback")), // Rollback metadata update fails!
+      deleteScheduleTask: vi.fn().mockResolvedValue(undefined),
+      createScheduleTask: vi.fn().mockRejectedValue(new Error("Creation Failed")),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      updateServerAutomation(
+        env,
+        "444",
+        {
+          name: "New Name",
+          template: "AUTO_BACKUP",
+          frequency: "DAILY",
+          time: "04:00",
+          enabled: true,
+        },
+        mockClient as any,
+        db as any,
+      ),
+    ).rejects.toThrow("ATENCIÓN: El rollback falló")
   })
 })
 

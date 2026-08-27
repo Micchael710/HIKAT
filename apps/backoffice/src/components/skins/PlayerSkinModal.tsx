@@ -86,7 +86,6 @@ export default function PlayerSkinModal({
       }
 
       await skinsApi.updateAdminPlayerSkin(skin.id, {
-        model,
         mediaId,
       })
 

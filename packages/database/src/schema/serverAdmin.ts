@@ -71,6 +71,7 @@ export const serverTasks = sqliteTable(
     id: text("id").primaryKey(),
     scheduleId: text("schedule_id").notNull(),
     template: text("template").notNull(),
+    action: text("action"),
     name: text("name").notNull(),
     frequency: text("frequency").notNull(),
     cronMinute: text("cron_minute").notNull().default("0"),

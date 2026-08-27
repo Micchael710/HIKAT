@@ -588,4 +588,74 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(invalidErrors.length).toBeGreaterThan(0)
     expect(invalidErrors[0]?.message).toContain('Cannot query field "globalSkinId"')
   })
+
+  it("Shard 07 Hardening: Back Office skin mutations are valid and model is not defined on inputs", () => {
+    const schema = getBaseSchema()
+
+    // 1. Back Office createSkin mutation
+    const createSkinDoc = /* GraphQL */ `
+      mutation CreateSkin($input: CreateSkinInput!) {
+        createSkin(input: $input) {
+          id
+          name
+          model
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    expect(validate(schema, parse(createSkinDoc))).toHaveLength(0)
+
+    // 2. Back Office updateSkin mutation
+    const updateSkinDoc = /* GraphQL */ `
+      mutation UpdateSkin($id: ID!, $input: UpdateSkinInput!) {
+        updateSkin(id: $id, input: $input) {
+          id
+          name
+          model
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    expect(validate(schema, parse(updateSkinDoc))).toHaveLength(0)
+
+    // 3. Back Office updateAdminPlayerSkin mutation
+    const updateAdminPlayerSkinDoc = /* GraphQL */ `
+      mutation UpdateAdminPlayerSkin($id: ID!, $input: UpdateAdminPlayerSkinInput!) {
+        updateAdminPlayerSkin(id: $id, input: $input) {
+          id
+          userId
+          userDisplayName
+          model
+          imageUrl
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    expect(validate(schema, parse(updateAdminPlayerSkinDoc))).toHaveLength(0)
+
+    // 4. Verify model field does not exist on CreateSkinInput, UpdateSkinInput, UpdateAdminPlayerSkinInput, SetPlayerSkinInput
+    const createSkinType = schema.getType("CreateSkinInput") as any
+    expect(createSkinType.getFields().model).toBeUndefined()
+    expect(createSkinType.getFields().name).toBeDefined()
+    expect(createSkinType.getFields().mediaId).toBeDefined()
+
+    const updateSkinType = schema.getType("UpdateSkinInput") as any
+    expect(updateSkinType.getFields().model).toBeUndefined()
+    expect(updateSkinType.getFields().name).toBeDefined()
+
+    const updateAdminPlayerSkinType = schema.getType("UpdateAdminPlayerSkinInput") as any
+    expect(updateAdminPlayerSkinType.getFields().model).toBeUndefined()
+    expect(updateAdminPlayerSkinType.getFields().mediaId).toBeDefined()
+
+    const setPlayerSkinType = schema.getType("SetPlayerSkinInput") as any
+    expect(setPlayerSkinType.getFields().model).toBeUndefined()
+    expect(setPlayerSkinType.getFields().mediaId).toBeDefined()
+  })
 })

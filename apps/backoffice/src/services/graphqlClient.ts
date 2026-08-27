@@ -949,7 +949,6 @@ export const skinsApi = {
 
   async createSkin(input: {
     name: string
-    model?: string
     mediaId: string
     status?: string
   }): Promise<import("../types").SkinItem> {
@@ -972,7 +971,7 @@ export const skinsApi = {
 
   async updateSkin(
     id: string,
-    input: { name?: string; model?: string; mediaId?: string; status?: string },
+    input: { name?: string; mediaId?: string; status?: string },
   ): Promise<import("../types").SkinItem> {
     const mutation = /* GraphQL */ `
       mutation UpdateSkin($id: ID!, $input: UpdateSkinInput!) {

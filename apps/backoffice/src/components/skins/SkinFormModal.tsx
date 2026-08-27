@@ -104,7 +104,6 @@ export default function SkinFormModal({
       if (isEdit) {
         await skinsApi.updateSkin(skin.id, {
           name: name.trim(),
-          model,
           status,
           mediaId,
         })
@@ -114,7 +113,6 @@ export default function SkinFormModal({
         }
         await skinsApi.createSkin({
           name: name.trim(),
-          model,
           status,
           mediaId,
         })

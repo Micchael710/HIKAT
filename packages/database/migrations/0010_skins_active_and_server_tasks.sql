@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS `server_tasks` (
 	`id` text PRIMARY KEY NOT NULL,
 	`schedule_id` text NOT NULL,
 	`template` text NOT NULL,
+	`action` text,
 	`name` text NOT NULL,
 	`frequency` text NOT NULL,
 	`cron_minute` text DEFAULT '0' NOT NULL,

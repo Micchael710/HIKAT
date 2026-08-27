@@ -387,16 +387,21 @@ export async function listServerAutomations(
 
     if (d1Record) {
       const template = d1Record.template as ServerTaskTemplate
+      const storedAction =
+        (d1Record.action as ServerAutomationAction) ||
+        (d1Record.command ? "COMMAND" : action)
       const plan = buildTemplatePlan({
         template,
-        action: d1Record.command ? "COMMAND" : action,
+        action: storedAction,
         command: d1Record.command,
         delaySeconds: d1Record.delaySeconds,
       })
 
       const isMatching = checkTasksMatchTemplate(attr.tasks, plan)
       if (isMatching) {
-        const parsedWeekdays = d1Record.weekdays ? JSON.parse(d1Record.weekdays) : weekdays
+        const parsedWeekdays = d1Record.weekdays
+          ? JSON.parse(d1Record.weekdays)
+          : weekdays
         const humanSchedule = formatScheduleHumanDescription({
           frequency: d1Record.frequency as ServerAutomationFrequency,
           time: d1Record.time || time,
@@ -409,7 +414,7 @@ export async function listServerAutomations(
           id: scheduleId,
           name: d1Record.name,
           template,
-          action: plan.action,
+          action: storedAction,
           frequency: d1Record.frequency as ServerAutomationFrequency,
           time: d1Record.time || time,
           intervalHours: d1Record.intervalHours ?? intervalHours,
@@ -440,9 +445,15 @@ export async function listServerAutomations(
 
     return {
       id: scheduleId,
-      name: isMultiTask ? `${attr.name || "Tarea"} (Avanzada)` : (attr.name || "Tarea"),
-      template: null,
-      action,
+      name: d1Record
+        ? d1Record.name
+        : isMultiTask
+          ? `${attr.name || "Tarea"} (Avanzada)`
+          : attr.name || "Tarea",
+      template: d1Record ? (d1Record.template as ServerTaskTemplate) : null,
+      action: d1Record
+        ? (d1Record.action as ServerAutomationAction) || action
+        : action,
       frequency,
       time,
       intervalHours,
@@ -452,7 +463,7 @@ export async function listServerAutomations(
       humanSchedule,
       enabled: attr.is_active,
       isProcessing: attr.is_processing,
-      isAdvanced: true,
+      isAdvanced: isMultiTask || Boolean(d1Record),
       isManaged: false,
       lastRunAt: attr.last_run_at,
       nextRunAt: attr.next_run_at,
@@ -469,9 +480,15 @@ export async function createServerAutomation(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<ServerAutomationItemData> {
-  const client = clientOverride || createPterodactylClient(env)
-  validateTaskInput(input)
+  if (!db) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "La base de datos no está disponible para registrar la tarea.",
+    )
+  }
 
+  validateTaskInput(input)
+  const client = clientOverride || createPterodactylClient(env)
   const plan = buildTemplatePlan(input)
   const cron = convertAutomationToPterodactylCron(
     input.frequency,
@@ -506,49 +523,54 @@ export async function createServerAutomation(
     }
   } catch (taskErr: any) {
     // Rollback created schedule
+    let delErrDetail = ""
     try {
       await client.deleteSchedule(scheduleId)
-    } catch {}
+    } catch (delErr: any) {
+      delErrDetail = `. ATENCIÓN: Falló la eliminación compensatoria en Pterodactyl: ${delErr.message || delErr}`
+    }
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-      `Error al configurar los pasos de la tarea: ${taskErr.message || "Fallo en la comunicación con el servidor"}`,
+      `Error al configurar los pasos de la tarea: ${taskErr.message || "Fallo en la comunicación con el servidor"}${delErrDetail}`,
     )
   }
 
   // 3. Persist HiKAT metadata in D1 with Rollback
-  if (db) {
+  try {
+    const now = new Date().toISOString()
+    await db.insert(schema.serverTasks).values({
+      id: crypto.randomUUID(),
+      scheduleId,
+      template: plan.template,
+      action: plan.action,
+      name: input.name.trim(),
+      frequency: input.frequency,
+      cronMinute: cron.minute,
+      cronHour: cron.hour,
+      cronDayOfWeek: cron.day_of_week,
+      time: input.time || null,
+      intervalHours: input.intervalHours || null,
+      weekday: input.weekday ?? null,
+      weekdays: input.weekdays ? JSON.stringify(input.weekdays) : null,
+      command: input.command || null,
+      delaySeconds: input.delaySeconds || null,
+      enabled: input.enabled ?? true,
+      templateVersion: 1,
+      createdAt: now,
+      updatedAt: now,
+    })
+  } catch (dbErr: any) {
+    // Rollback created schedule
+    let delErrDetail = ""
     try {
-      const now = new Date().toISOString()
-      await db.insert(schema.serverTasks).values({
-        id: crypto.randomUUID(),
-        scheduleId,
-        template: plan.template,
-        name: input.name.trim(),
-        frequency: input.frequency,
-        cronMinute: cron.minute,
-        cronHour: cron.hour,
-        cronDayOfWeek: cron.day_of_week,
-        time: input.time || null,
-        intervalHours: input.intervalHours || null,
-        weekday: input.weekday ?? null,
-        weekdays: input.weekdays ? JSON.stringify(input.weekdays) : null,
-        command: input.command || null,
-        delaySeconds: input.delaySeconds || null,
-        enabled: input.enabled ?? true,
-        templateVersion: 1,
-        createdAt: now,
-        updatedAt: now,
-      })
-    } catch (dbErr: any) {
-      // Rollback created schedule
-      try {
-        await client.deleteSchedule(scheduleId)
-      } catch {}
-      throw new ServerInfrastructureError(
-        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-        `Error al registrar la tarea en la base de datos: ${dbErr.message || "Fallo en la persistencia"}`,
-      )
+      await client.deleteSchedule(scheduleId)
+    } catch (delErr: any) {
+      delErrDetail = `. ATENCIÓN: Falló la eliminación compensatoria en Pterodactyl: ${delErr.message || delErr}`
     }
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      `Error al registrar la tarea en la base de datos: ${dbErr.message || "Fallo en la persistencia"}${delErrDetail}`,
+    )
   }
 
   const humanSchedule = formatScheduleHumanDescription({
@@ -589,6 +611,13 @@ export async function updateServerAutomation(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<ServerAutomationItemData> {
+  if (!db) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "La base de datos no está disponible para modificar la tarea.",
+    )
+  }
+
   const client = clientOverride || createPterodactylClient(env)
 
   // 1. Fetch full schedule from Pterodactyl FIRST
@@ -596,44 +625,33 @@ export async function updateServerAutomation(
   const existingTasks = fullSchedule.attributes.tasks || []
 
   // 2. Check if schedule is managed in D1
-  let d1Record: schema.ServerTaskRecord | undefined
-  if (db) {
-    d1Record = await db
-      .select()
-      .from(schema.serverTasks)
-      .where(eq(schema.serverTasks.scheduleId, id))
-      .get()
-  }
+  const d1Record = await db
+    .select()
+    .from(schema.serverTasks)
+    .where(eq(schema.serverTasks.scheduleId, id))
+    .get()
 
-  // Strictly fail-closed if no D1 metadata exists
-  if (db && !d1Record) {
+  if (!d1Record) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
       "Esta tarea fue configurada fuera de HiKAT y es de solo lectura.",
     )
   }
 
-  if (!d1Record && existingTasks.length > 1) {
+  // Also verify that current remote tasks match D1 template definition
+  const currentPlan = buildTemplatePlan({
+    template: d1Record.template as ServerTaskTemplate,
+    action:
+      (d1Record.action as ServerAutomationAction) ||
+      (d1Record.command ? "COMMAND" : "BACKUP"),
+    command: d1Record.command,
+    delaySeconds: d1Record.delaySeconds,
+  })
+  if (!checkTasksMatchTemplate(existingTasks, currentPlan)) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-      "Esta automatización es avanzada (contiene múltiples tareas) y no puede ser modificada desde HiKAT.",
+      "Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.",
     )
-  }
-
-  // Also verify that current remote tasks match D1 template definition
-  if (d1Record) {
-    const currentPlan = buildTemplatePlan({
-      template: d1Record.template as ServerTaskTemplate,
-      action: d1Record.command ? "COMMAND" : undefined,
-      command: d1Record.command,
-      delaySeconds: d1Record.delaySeconds,
-    })
-    if (!checkTasksMatchTemplate(existingTasks, currentPlan)) {
-      throw new ServerInfrastructureError(
-        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-        "Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.",
-      )
-    }
   }
 
   validateTaskInput(input)
@@ -655,9 +673,10 @@ export async function updateServerAutomation(
   }))
   const originalD1 = { ...d1Record }
 
+  const rollbackErrors: string[] = []
   const rollback = async () => {
+    // 1. Restore schedule metadata
     try {
-      // 1. Restore schedule metadata
       await client.updateSchedule(id, {
         name: originalSchedule.name,
         is_active: originalSchedule.is_active,
@@ -668,53 +687,75 @@ export async function updateServerAutomation(
         day_of_week: originalSchedule.cron?.day_of_week || "*",
         only_when_online: originalSchedule.only_when_online,
       })
+    } catch (e: any) {
+      rollbackErrors.push(
+        `Fallo al restaurar metadatos en Pterodactyl: ${e.message || e}`,
+      )
+    }
 
-      // 2. Clean up current tasks
-      const current = await client.getSchedule(id).catch(() => null)
+    // 2. Clean up current tasks
+    try {
+      const current = await client.getSchedule(id)
       if (current?.attributes?.tasks) {
         for (const t of current.attributes.tasks) {
           if (t.attributes?.id && client.deleteScheduleTask) {
-            await client.deleteScheduleTask(id, t.attributes.id).catch(() => {})
+            try {
+              await client.deleteScheduleTask(id, t.attributes.id)
+            } catch (e: any) {
+              rollbackErrors.push(
+                `Fallo al eliminar tarea modificada ${t.attributes.id}: ${e.message || e}`,
+              )
+            }
           }
         }
       }
+    } catch (e: any) {
+      rollbackErrors.push(
+        `Fallo al consultar tareas actuales durante rollback: ${e.message || e}`,
+      )
+    }
 
-      // 3. Recreate original tasks
-      for (const t of originalTasks) {
-        if (client.createScheduleTask) {
+    // 3. Recreate original tasks
+    for (const t of originalTasks) {
+      if (client.createScheduleTask) {
+        try {
           await client.createScheduleTask(id, {
             action: t.action,
             payload: t.payload,
             time_offset: t.time_offset,
-          }).catch(() => {})
+          })
+        } catch (e: any) {
+          rollbackErrors.push(
+            `Fallo al recrear tarea original (${t.action}): ${e.message || e}`,
+          )
         }
       }
+    }
 
-      // 4. Restore D1 record
-      if (db && originalD1) {
-        await db
-          .update(schema.serverTasks)
-          .set({
-            template: originalD1.template,
-            name: originalD1.name,
-            frequency: originalD1.frequency,
-            cronMinute: originalD1.cronMinute,
-            cronHour: originalD1.cronHour,
-            cronDayOfWeek: originalD1.cronDayOfWeek,
-            time: originalD1.time,
-            intervalHours: originalD1.intervalHours,
-            weekday: originalD1.weekday,
-            weekdays: originalD1.weekdays,
-            command: originalD1.command,
-            delaySeconds: originalD1.delaySeconds,
-            enabled: originalD1.enabled,
-            updatedAt: originalD1.updatedAt,
-          })
-          .where(eq(schema.serverTasks.scheduleId, id))
-          .catch(() => {})
-      }
-    } catch {
-      // Best-effort rollback
+    // 4. Restore D1 record
+    try {
+      await db
+        .update(schema.serverTasks)
+        .set({
+          template: originalD1.template,
+          action: originalD1.action,
+          name: originalD1.name,
+          frequency: originalD1.frequency,
+          cronMinute: originalD1.cronMinute,
+          cronHour: originalD1.cronHour,
+          cronDayOfWeek: originalD1.cronDayOfWeek,
+          time: originalD1.time,
+          intervalHours: originalD1.intervalHours,
+          weekday: originalD1.weekday,
+          weekdays: originalD1.weekdays,
+          command: originalD1.command,
+          delaySeconds: originalD1.delaySeconds,
+          enabled: originalD1.enabled,
+          updatedAt: originalD1.updatedAt,
+        })
+        .where(eq(schema.serverTasks.scheduleId, id))
+    } catch (e: any) {
+      rollbackErrors.push(`Fallo al restaurar registro en D1: ${e.message || e}`)
     }
   }
 
@@ -766,33 +807,36 @@ export async function updateServerAutomation(
     }
 
     // 5. Update D1 record
-    if (db) {
-      const now = new Date().toISOString()
-      await db
-        .update(schema.serverTasks)
-        .set({
-          template: plan.template,
-          name: input.name.trim(),
-          frequency: input.frequency,
-          cronMinute: cron.minute,
-          cronHour: cron.hour,
-          cronDayOfWeek: cron.day_of_week,
-          time: input.time || null,
-          intervalHours: input.intervalHours || null,
-          weekday: input.weekday ?? null,
-          weekdays: input.weekdays ? JSON.stringify(input.weekdays) : null,
-          command: input.command || null,
-          delaySeconds: input.delaySeconds || null,
-          enabled: input.enabled ?? true,
-          updatedAt: now,
-        })
-        .where(eq(schema.serverTasks.scheduleId, id))
-    }
+    const now = new Date().toISOString()
+    await db
+      .update(schema.serverTasks)
+      .set({
+        template: plan.template,
+        action: plan.action,
+        name: input.name.trim(),
+        frequency: input.frequency,
+        cronMinute: cron.minute,
+        cronHour: cron.hour,
+        cronDayOfWeek: cron.day_of_week,
+        time: input.time || null,
+        intervalHours: input.intervalHours || null,
+        weekday: input.weekday ?? null,
+        weekdays: input.weekdays ? JSON.stringify(input.weekdays) : null,
+        command: input.command || null,
+        delaySeconds: input.delaySeconds || null,
+        enabled: input.enabled ?? true,
+        updatedAt: now,
+      })
+      .where(eq(schema.serverTasks.scheduleId, id))
   } catch (err: any) {
     await rollback()
+    let errorMsg = `Error al actualizar la tarea programada: ${err.message || "Fallo en la comunicación con el servidor"}`
+    if (rollbackErrors.length > 0) {
+      errorMsg += `. ATENCIÓN: El rollback falló (${rollbackErrors.join("; ")}). El estado de la tarea puede requerir reconciliación manual.`
+    }
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-      `Error al actualizar la tarea programada: ${err.message || "Fallo en la comunicación con el servidor"}`,
+      errorMsg,
     )
   }
 
@@ -833,22 +877,45 @@ export async function runServerAutomation(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<boolean> {
-  if (db) {
-    const d1Record = await db
-      .select()
-      .from(schema.serverTasks)
-      .where(eq(schema.serverTasks.scheduleId, id))
-      .get()
-
-    if (!d1Record) {
-      throw new ServerInfrastructureError(
-        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-        "No puedes ejecutar manualmente tareas no gestionadas por HiKAT.",
-      )
-    }
+  if (!db) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "La base de datos no está disponible para ejecutar la tarea.",
+    )
   }
 
   const client = clientOverride || createPterodactylClient(env)
+  const fullSchedule = await client.getSchedule(id)
+  const existingTasks = fullSchedule.attributes.tasks || []
+
+  const d1Record = await db
+    .select()
+    .from(schema.serverTasks)
+    .where(eq(schema.serverTasks.scheduleId, id))
+    .get()
+
+  if (!d1Record) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "No puedes ejecutar manualmente tareas no gestionadas por HiKAT.",
+    )
+  }
+
+  const currentPlan = buildTemplatePlan({
+    template: d1Record.template as ServerTaskTemplate,
+    action:
+      (d1Record.action as ServerAutomationAction) ||
+      (d1Record.command ? "COMMAND" : "BACKUP"),
+    command: d1Record.command,
+    delaySeconds: d1Record.delaySeconds,
+  })
+  if (!checkTasksMatchTemplate(existingTasks, currentPlan)) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.",
+    )
+  }
+
   await client.executeSchedule(id)
   return true
 }
@@ -862,42 +929,50 @@ export async function deleteServerAutomation(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<boolean> {
+  if (!db) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "La base de datos no está disponible para eliminar la tarea.",
+    )
+  }
+
   const client = clientOverride || createPterodactylClient(env)
   const fullSchedule = await client.getSchedule(id)
   const existingTasks = fullSchedule.attributes.tasks || []
 
-  let d1Record: schema.ServerTaskRecord | undefined
-  if (db) {
-    d1Record = await db
-      .select()
-      .from(schema.serverTasks)
-      .where(eq(schema.serverTasks.scheduleId, id))
-      .get()
+  const d1Record = await db
+    .select()
+    .from(schema.serverTasks)
+    .where(eq(schema.serverTasks.scheduleId, id))
+    .get()
 
-    if (!d1Record) {
-      throw new ServerInfrastructureError(
-        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-        "No puedes eliminar tareas configuradas fuera de HiKAT.",
-      )
-    }
-  }
-
-  if (!d1Record && existingTasks.length > 1) {
+  if (!d1Record) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-      "Esta automatización es avanzada (contiene múltiples tareas) y no puede ser eliminada desde HiKAT.",
+      "No puedes eliminar tareas configuradas fuera de HiKAT.",
+    )
+  }
+
+  const currentPlan = buildTemplatePlan({
+    template: d1Record.template as ServerTaskTemplate,
+    action:
+      (d1Record.action as ServerAutomationAction) ||
+      (d1Record.command ? "COMMAND" : "BACKUP"),
+    command: d1Record.command,
+    delaySeconds: d1Record.delaySeconds,
+  })
+  if (!checkTasksMatchTemplate(existingTasks, currentPlan)) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.",
     )
   }
 
   await client.deleteSchedule(id)
 
-  if (db) {
-    try {
-      await db
-        .delete(schema.serverTasks)
-        .where(eq(schema.serverTasks.scheduleId, id))
-    } catch {}
-  }
+  await db
+    .delete(schema.serverTasks)
+    .where(eq(schema.serverTasks.scheduleId, id))
 
   return true
 }

@@ -8419,8 +8419,20 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(setGlobalActiveJson.data.setMyActiveSkin.model).toBe("CLASSIC")
       expect(setGlobalActiveJson.data.setMyActiveSkin.name).toBe("Caballero Real")
 
-      // 8. Test Fallback: Admin deletes global skin -> querying myActiveSkin falls back to CUSTOM
-      await db.delete(skins).where(eq(skins.id, globalSkinId))
+      // 8. Test Fallback: Admin deletes global skin via deleteSkin -> D1 selection immediately reconciles to CUSTOM
+      const { deleteSkin, updateSkin } = await import("./services/skinService")
+      await deleteSkin(db, globalSkinId, testEnv)
+
+      // Direct inspection of D1 immediately after deletion (before any query)
+      const d1Selection = await db
+        .select()
+        .from(playerSkinSelections)
+        .where(eq(playerSkinSelections.userId, playerId))
+        .get()
+
+      expect(d1Selection).toBeDefined()
+      expect(d1Selection?.type).toBe("CUSTOM")
+      expect(d1Selection?.skinId).toBeNull()
 
       const fallbackRes = await worker.fetch(
         new Request("http://localhost/graphql", {
@@ -8439,6 +8451,140 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(fallbackJson.errors).toBeUndefined()
       expect(fallbackJson.data.myActiveSkin.type).toBe("CUSTOM")
       expect(fallbackJson.data.myActiveSkin.model).toBe("SLIM")
+    })
+
+    it("Phase 07 Hardening: deleteSkin without custom skin removes D1 selection row immediately", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const player2Id = "player-2-" + crypto.randomUUID()
+      const adminId = "admin-2-" + crypto.randomUUID()
+
+      await db.insert(users).values([
+        { id: player2Id, displayName: "PlayerTwo", role: "PLAYER" },
+        { id: adminId, displayName: "AdminTwo", role: "ADMIN" },
+      ])
+
+      // Create a global skin
+      const global2Id = "skin-global-2-" + crypto.randomUUID()
+      const media2Id = "media-global-2-" + crypto.randomUUID()
+      await db.insert(contentMedia).values({
+        id: media2Id,
+        objectKey: `content/${media2Id}.png`,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 100,
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+      })
+      await db.insert(skins).values({
+        id: global2Id,
+        name: "Global Skin 2",
+        model: "CLASSIC",
+        mediaId: media2Id,
+        status: "AVAILABLE",
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Player 2 selects this global skin (has NO custom skin)
+      await db.insert(playerSkinSelections).values({
+        userId: player2Id,
+        type: "GLOBAL",
+        skinId: global2Id,
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Admin deletes global skin
+      const { deleteSkin } = await import("./services/skinService")
+      await deleteSkin(db, global2Id, testEnv)
+
+      // Direct inspection of D1 immediately after deletion
+      const d1Selection = await db
+        .select()
+        .from(playerSkinSelections)
+        .where(eq(playerSkinSelections.userId, player2Id))
+        .get()
+
+      expect(d1Selection).toBeUndefined()
+
+      // Verify D1 never has type = GLOBAL with skinId = null
+      const invalidRows = await db
+        .select()
+        .from(playerSkinSelections)
+        .where(eq(playerSkinSelections.type, "GLOBAL"))
+        .all()
+      for (const row of invalidRows) {
+        expect(row.skinId).not.toBeNull()
+      }
+    })
+
+    it("Phase 07 Hardening: updateSkin to UNAVAILABLE reconciles D1 selection immediately", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const player3Id = "player-3-" + crypto.randomUUID()
+      const adminId = "admin-3-" + crypto.randomUUID()
+
+      await db.insert(users).values([
+        { id: player3Id, displayName: "PlayerThree", role: "PLAYER" },
+        { id: adminId, displayName: "AdminThree", role: "ADMIN" },
+      ])
+
+      // Create a global skin
+      const global3Id = "skin-global-3-" + crypto.randomUUID()
+      const media3Id = "media-global-3-" + crypto.randomUUID()
+      await db.insert(contentMedia).values({
+        id: media3Id,
+        objectKey: `content/${media3Id}.png`,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 100,
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+      })
+      await db.insert(skins).values({
+        id: global3Id,
+        name: "Global Skin 3",
+        model: "CLASSIC",
+        mediaId: media3Id,
+        status: "AVAILABLE",
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Player 3 selects this global skin (and has custom skin)
+      await db.insert(playerSkinSelections).values({
+        userId: player3Id,
+        type: "GLOBAL",
+        skinId: global3Id,
+        updatedAt: new Date().toISOString(),
+      })
+      await db.insert(playerSkins).values({
+        id: crypto.randomUUID(),
+        userId: player3Id,
+        mediaId: media3Id,
+        model: "SLIM",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Admin marks skin as UNAVAILABLE
+      const { updateSkin } = await import("./services/skinService")
+      await updateSkin(db, testEnv, global3Id, { status: "UNAVAILABLE" })
+
+      // Direct inspection of D1 immediately after update
+      const d1Selection = await db
+        .select()
+        .from(playerSkinSelections)
+        .where(eq(playerSkinSelections.userId, player3Id))
+        .get()
+
+      expect(d1Selection).toBeDefined()
+      expect(d1Selection?.type).toBe("CUSTOM")
+      expect(d1Selection?.skinId).toBeNull()
     })
   })
 })

@@ -678,7 +678,7 @@ export default function ServerTasksView({
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {tasks.map((task) => {
             const tmpl = TASK_TEMPLATES.find((t) => t.id === task.template)
-            const isUnmanaged = task.isAdvanced && task.isManaged === false
+            const isUnmanaged = task.isManaged === false
             const isRunningThis = actionLoadingMap[`run-${task.id}`]
             const isTogglingThis = actionLoadingMap[task.id]
 
@@ -745,7 +745,7 @@ export default function ServerTasksView({
                             fontWeight: 700,
                           }}
                         >
-                          Avanzada / Externa
+                          {task.template ? "Modificada fuera de HiKAT" : "Tarea externa"}
                         </span>
                       )}
 
@@ -815,7 +815,7 @@ export default function ServerTasksView({
                     type="button"
                     onClick={() => handleToggleEnabled(task)}
                     disabled={isUnmanaged || isTogglingThis}
-                    title={task.enabled ? "Desactivar tarea" : "Activar tarea"}
+                    title={isUnmanaged ? "No modificable desde HiKAT" : task.enabled ? "Desactivar tarea" : "Activar tarea"}
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
@@ -836,6 +836,7 @@ export default function ServerTasksView({
                       fontSize: "0.8rem",
                       fontWeight: 700,
                       cursor: isUnmanaged ? "not-allowed" : "pointer",
+                      opacity: isUnmanaged ? 0.4 : 1,
                     }}
                   >
                     {isTogglingThis ? (
@@ -857,8 +858,8 @@ export default function ServerTasksView({
                   <button
                     type="button"
                     onClick={() => handleRunNow(task)}
-                    disabled={isRunningThis}
-                    title="Ejecutar ahora"
+                    disabled={isUnmanaged || isRunningThis}
+                    title={isUnmanaged ? "No ejecutable para tareas no gestionadas" : "Ejecutar ahora"}
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
@@ -872,7 +873,8 @@ export default function ServerTasksView({
                       color: isDark ? "#ffffff" : "#0f172a",
                       fontSize: "0.8rem",
                       fontWeight: 600,
-                      cursor: "pointer",
+                      cursor: isUnmanaged ? "not-allowed" : "pointer",
+                      opacity: isUnmanaged ? 0.4 : 1,
                     }}
                   >
                     {isRunningThis ? (

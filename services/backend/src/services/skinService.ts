@@ -279,6 +279,44 @@ export async function createSkin(
   }
 }
 
+/**
+ * Immediately reconciles player skin selections when a global skin is about to be deleted or marked UNAVAILABLE.
+ * MUST be executed BEFORE updating/deleting the global skin in D1.
+ */
+export async function reconcileSelectionsForGlobalSkin(
+  db: Database,
+  skinId: string,
+): Promise<void> {
+  const affectedSelections = await db
+    .select()
+    .from(schema.playerSkinSelections)
+    .where(eq(schema.playerSkinSelections.skinId, skinId))
+    .all()
+
+  for (const sel of affectedSelections) {
+    const pskin = await db
+      .select()
+      .from(schema.playerSkins)
+      .where(eq(schema.playerSkins.userId, sel.userId))
+      .get()
+
+    if (pskin) {
+      await db
+        .update(schema.playerSkinSelections)
+        .set({
+          type: "CUSTOM",
+          skinId: null,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.playerSkinSelections.userId, sel.userId))
+    } else {
+      await db
+        .delete(schema.playerSkinSelections)
+        .where(eq(schema.playerSkinSelections.userId, sel.userId))
+    }
+  }
+}
+
 export async function updateSkin(
   db: Database,
   env: Env,
@@ -311,8 +349,12 @@ export async function updateSkin(
   }
 
   if (input.status !== undefined && input.status !== null) {
-    updates.status =
+    const nextStatus =
       input.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE"
+    if (nextStatus === "UNAVAILABLE" && existing.status !== "UNAVAILABLE") {
+      await reconcileSelectionsForGlobalSkin(db, id)
+    }
+    updates.status = nextStatus
   }
 
   if (input.mediaId !== undefined && input.mediaId !== null) {
@@ -348,38 +390,12 @@ export async function deleteSkin(
 
   const mediaId = existing.mediaId
 
-  // 1. Delete skin record first
+  // 1. Safely reconcile affected player_skin_selections BEFORE deleting the skin record
+  await reconcileSelectionsForGlobalSkin(db, id)
+
+  // 2. Delete skin record
   await db.delete(schema.skins).where(eq(schema.skins.id, id))
 
-  // 2. Safely reconcile affected player_skin_selections
-  const affectedSelections = await db
-    .select()
-    .from(schema.playerSkinSelections)
-    .where(eq(schema.playerSkinSelections.skinId, id))
-    .all()
-
-  for (const sel of affectedSelections) {
-    const pskin = await db
-      .select()
-      .from(schema.playerSkins)
-      .where(eq(schema.playerSkins.userId, sel.userId))
-      .get()
-
-    if (pskin) {
-      await db
-        .update(schema.playerSkinSelections)
-        .set({
-          type: "CUSTOM",
-          skinId: null,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(schema.playerSkinSelections.userId, sel.userId))
-    } else {
-      await db
-        .delete(schema.playerSkinSelections)
-        .where(eq(schema.playerSkinSelections.userId, sel.userId))
-    }
-  }
 
   // 3. Check if media is orphaned
   const otherSkin = await db

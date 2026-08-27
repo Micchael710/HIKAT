@@ -113,23 +113,38 @@ export function useLauncherState() {
   }, [])
 
   /**
-   * Applies and persists the active skin selection
+   * Applies and persists the active skin selection with optimistic update and rollback on failure
    */
-  const handleApplySkin = useCallback(async (skinId: string) => {
-    setAppliedSkin(skinId)
-    const token = authService.getStoredToken()
-    if (!token) return
+  const handleApplySkin = useCallback(
+    async (skinId: string) => {
+      const previousSkin = appliedSkin
+      setAppliedSkin(skinId)
+      const token = authService.getStoredToken()
+      if (!token) return
 
-    try {
-      if (skinId === "player-custom") {
-        await setMyActiveSkin("CUSTOM")
-      } else if (skinId && skinId !== "none") {
-        await setMyActiveSkin("GLOBAL", skinId)
+      try {
+        let res: { success: boolean; data?: any; error?: string }
+        if (skinId === "player-custom") {
+          res = await setMyActiveSkin("CUSTOM")
+        } else if (skinId && skinId !== "none") {
+          res = await setMyActiveSkin("GLOBAL", skinId)
+        } else {
+          return
+        }
+
+        if (!res.success) {
+          setAppliedSkin(previousSkin)
+          setSkinsError(res.error || "No se pudo actualizar la skin activa")
+        } else {
+          setSkinsError(null)
+        }
+      } catch (err: any) {
+        setAppliedSkin(previousSkin)
+        setSkinsError(err?.message || "Error al actualizar la skin activa")
       }
-    } catch {
-      // Background sync
-    }
-  }, [])
+    },
+    [appliedSkin],
+  )
 
   // Initial load: fetch global catalog on mount, and player skin if authenticated
   useEffect(() => {
