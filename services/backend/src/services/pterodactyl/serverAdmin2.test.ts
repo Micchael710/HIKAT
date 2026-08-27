@@ -27,9 +27,13 @@ import {
   updateMinecraftServerSettings,
 } from "./serverConfigService"
 import {
+  prepareServerFileUploadUrl,
+} from "./serverFileService"
+import {
   listServerAutomations,
   createServerAutomation,
   updateServerAutomation,
+  deleteServerAutomation,
 } from "./serverScheduleService"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
@@ -282,8 +286,17 @@ rcon.password=secret123
         attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
       }),
       getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir === "/") {
+          return Promise.resolve({ data: [{ attributes: { name: "uploaded_world.zip", is_file: true } }] })
+        }
+        return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
+      }),
       createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "pre-bk-1" } }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
       decompressFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+      renameFile: vi.fn().mockResolvedValue(undefined),
     }
 
     const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
@@ -291,7 +304,7 @@ rcon.password=secret123
     const success = await replaceServerWorld(env, db as any, "admin-1", "uploaded_world.zip", offlineClient as any)
     expect(success).toBe(true)
     expect(offlineClient.createBackup).toHaveBeenCalledWith("Copia previa a reemplazo de mundo (world)")
-    expect(offlineClient.decompressFile).toHaveBeenCalledWith("/", "uploaded_world.zip")
+    expect(offlineClient.decompressFile).toHaveBeenCalledWith(expect.stringMatching(/^\/_staging_world_/), "uploaded_world.zip")
   })
 
   // Test 7: Human Automation Translation to Pterodactyl Cron & Kill Command Guard
@@ -508,6 +521,154 @@ rcon.password=secret123
       payload: "restart",
     }))
     expect(result.id).toBe("10")
+  })
+
+  // Test 14: Shard 07B - World Replacement Staging Validation Rejects Invalid ZIP Without Touching Active World
+  it("replaceServerWorld rejects ZIP without level.dat in staging and leaves active world untouched", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const deleteFilesSpy = vi.fn().mockResolvedValue(undefined)
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", is_suspended: false, resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({ attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } } }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=survival_world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir === "/") {
+          return Promise.resolve({ data: [{ attributes: { name: "invalid.zip", is_file: true } }] })
+        }
+        // Staging directory contains NO level.dat
+        return Promise.resolve({ data: [{ attributes: { name: "random.txt", is_file: true } }] })
+      }),
+      createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "pre-bk-100" } }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      decompressFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: deleteFilesSpy,
+      renameFile: vi.fn(),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      replaceServerWorld(env, db as any, "admin-1", "invalid.zip", mockClient as any),
+    ).rejects.toThrow("El archivo ZIP no contiene una estructura de mundo de Minecraft válida")
+
+    // Active world "survival_world" must NOT have been deleted or touched!
+    expect(deleteFilesSpy).not.toHaveBeenCalledWith("/", ["survival_world"])
+  })
+
+  // Test 15: Shard 07B - World Swap Failure Triggers Conservative Rollback Attempt
+  it("replaceServerWorld triggers pre-backup restore attempt if swap phase fails after active world deletion", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const restoreBackupSpy = vi.fn().mockResolvedValue(undefined)
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", is_suspended: false, resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({ attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } } }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir === "/") {
+          return Promise.resolve({ data: [{ attributes: { name: "world.zip", is_file: true } }] })
+        }
+        // Valid staging directory containing level.dat
+        return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
+      }),
+      createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "pre-bk-200" } }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      decompressFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+      renameFile: vi.fn().mockRejectedValue(new Error("Wings 500 Rename Failed")),
+      restoreBackup: restoreBackupSpy,
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      replaceServerWorld(env, db as any, "admin-1", "world.zip", mockClient as any),
+    ).rejects.toThrow("Error al reemplazar el mundo activo en el sistema de archivos")
+
+    // Must have attempted restore of pre-backup!
+    expect(restoreBackupSpy).toHaveBeenCalledWith("pre-bk-200")
+  })
+
+  // Test 16: Shard 07B - File Upload Signed URL Directory Parameter & Sandbox Traversal Protection
+  it("prepareServerFileUploadUrl appends official directory parameter and blocks path traversal attempts", async () => {
+    const mockClient = {
+      getFileUploadUrl: vi.fn().mockResolvedValue({
+        attributes: { url: "https://wings.hikat.net:8080/upload/file?token=jwt_xyz" },
+      }),
+      listDirectory: vi.fn().mockResolvedValue({ data: [] }),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    // 1. Valid subfolder upload URL
+    const res = await prepareServerFileUploadUrl(env, "CONFIG", "subfolder", mockClient as any)
+    expect(res.url).toContain("&directory=config%2Fsubfolder")
+
+    // 2. Traversal attempt throws error before asking Wings
+    await expect(
+      prepareServerFileUploadUrl(env, "CONFIG", "../../etc/passwd", mockClient as any),
+    ).rejects.toThrow("no permitida")
+  })
+
+  // Test 17: Shard 07B - Advanced Multi-task Schedule Read-Only Protection
+  it("updateServerAutomation and deleteServerAutomation reject multi-task advanced schedules without making changes", async () => {
+    const updateScheduleSpy = vi.fn()
+    const deleteScheduleSpy = vi.fn()
+    const mockAdvancedSchedule = {
+      object: "schedule",
+      attributes: {
+        id: 99,
+        name: "Complex Schedule",
+        cron: { minute: "0", hour: "3", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        tasks: [
+          { object: "task", attributes: { id: 1, action: "command", payload: "say Step 1", time_offset: 0 } },
+          { object: "task", attributes: { id: 2, action: "power", payload: "restart", time_offset: 60 } },
+        ],
+      },
+    }
+
+    const mockClient = {
+      getSchedule: vi.fn().mockResolvedValue(mockAdvancedSchedule),
+      updateSchedule: updateScheduleSpy,
+      deleteSchedule: deleteScheduleSpy,
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    // 1. updateServerAutomation throws and skips updateSchedule
+    await expect(
+      updateServerAutomation(env, "99", { name: "Hack", action: "RESTART", frequency: "DAILY", time: "03:00", enabled: true }, mockClient as any),
+    ).rejects.toThrow("Esta automatización es avanzada (contiene múltiples tareas)")
+    expect(updateScheduleSpy).not.toHaveBeenCalled()
+
+    // 2. deleteServerAutomation throws and skips deleteSchedule
+    await expect(
+      deleteServerAutomation(env, "99", mockClient as any),
+    ).rejects.toThrow("Esta automatización es avanzada (contiene múltiples tareas)")
+    expect(deleteScheduleSpy).not.toHaveBeenCalled()
   })
 })
 

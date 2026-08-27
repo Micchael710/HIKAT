@@ -106,18 +106,33 @@ export async function prepareServerWorldUpload(
 ): Promise<{ url: string }> {
   const client = clientOverride || createPterodactylClient(env)
   const res = await client.getFileUploadUrl()
-  return { url: res.attributes.url }
+  const separator = res.attributes.url.includes("?") ? "&" : "?"
+  return { url: `${res.attributes.url}${separator}directory=/` }
 }
 
 /**
- * Safely replaces the server world.
- * Requires server to be strictly OFFLINE (rejects ONLINE, STARTING, STOPPING, UNKNOWN, DISCONNECTED),
- * detects active world name, creates an automatic pre-backup, acquires a distributed operation lock,
- * and extracts the uploaded world archive.
+ * Safely replaces the server world with a multi-stage validation and rollback process.
  *
- * NOTE ON ATOMICITY: Pterodactyl Panel / Wings API does not guarantee atomic filesystem swaps.
- * We create an automatic pre-backup before extracting the world archive so administrators
- * can restore if a failure occurs during extraction.
+ * Flujo conservador:
+ * 1. Exige estado strictly OFFLINE.
+ * 2. Adquiere lock de operación D1 (REPLACE_WORLD).
+ * 3. Detecta el nombre del mundo activo real (vía server.properties).
+ * 4. Valida que el archivo ZIP subido exista físicamente en la raíz del servidor.
+ * 5. Crea una copia de seguridad previa (pre-backup).
+ * 6. Crea un directorio de staging con nombre impredecible dentro del contenedor.
+ * 7. Extrae el ZIP ÚNICAMENTE dentro del directorio de staging.
+ * 8. Analiza la estructura del staging:
+ *    - Acepta si level.dat está en la raíz de staging.
+ *    - Acepta si hay un único directorio contenedor con level.dat dentro.
+ *    - Rechaza si no existe level.dat o si la estructura es ambigua/múltiple (sin tocar el mundo actual).
+ * 9. Reemplaza el mundo activo mediante Pterodactyl Files API.
+ * 10. Si ocurre un fallo en la fase de reemplazo del mundo activo, ejecuta un intento de rollback restaurando el pre-backup.
+ * 11. Limpia directorio de staging y archivo ZIP subido en el bloque finally.
+ * 12. Libera el lock de operación D1 en el bloque finally.
+ *
+ * LIMITACIÓN DE ATOMICIDAD EN PTERODACTYL:
+ * Pterodactyl Panel / Wings API no soporta swaps atómicos de directorio a nivel de sistema de archivos.
+ * Si ocurre una falla grave durante el renombrado/borrado final del mundo activo, la atomicidad no puede ser garantizada al 100% por Pterodactyl, por lo que HiKAT realiza un rollback automático restaurando el pre-backup creado.
  */
 export async function replaceServerWorld(
   env: Env,
@@ -135,6 +150,8 @@ export async function replaceServerWorld(
     )
   }
 
+  const cleanFileName = uploadedFileName.trim().split("/").pop() || ""
+
   // 1. Guard: Check server is strictly OFFLINE
   const status = await getServerStatus(env, client)
   if (status.status !== "OFFLINE") {
@@ -151,10 +168,28 @@ export async function replaceServerWorld(
   // 3. Guard: Acquire distributed operation lock
   const lockKey = await acquireServerOperationLock(db, "REPLACE_WORLD", userId)
 
+  // Unpredictable staging directory name
+  const stagingDirName = `_staging_world_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  let preBackupUuid: string | null = null
+  let stagingCreated = false
+
   try {
-    // 4. Step: Create automatic pre-backup
+    // 4. Validate that uploaded ZIP file exists in root directory
+    const rootFiles = await client.listDirectory("/").catch(() => null)
+    if (rootFiles?.data) {
+      const fileExists = rootFiles.data.some((f) => f.attributes.name === cleanFileName)
+      if (!fileExists) {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          `El archivo subido "${cleanFileName}" no fue encontrado en el servidor.`,
+        )
+      }
+    }
+
+    // 5. Create automatic pre-backup
     try {
-      await client.createBackup(`Copia previa a reemplazo de mundo (${activeWorldName})`)
+      const backupRes = await client.createBackup(`Copia previa a reemplazo de mundo (${activeWorldName})`)
+      preBackupUuid = backupRes.attributes.uuid
     } catch (backupErr: unknown) {
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
@@ -163,12 +198,109 @@ export async function replaceServerWorld(
       )
     }
 
-    // 5. Step: Decompress / extract uploaded world into server root
-    const cleanFileName = uploadedFileName.trim().replace(/^[/\\.]+/g, "")
-    await client.decompressFile("/", cleanFileName)
+    // 6. Create unpredictable staging directory inside container
+    await client.createFolder("/", stagingDirName)
+    stagingCreated = true
+
+    // 7. Extract uploaded ZIP ONLY into staging directory
+    try {
+      await client.decompressFile(`/${stagingDirName}`, cleanFileName)
+    } catch (decompressErr: unknown) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        "Fallo al descomprimir el archivo ZIP en el directorio de pruebas (staging). El mundo actual no fue modificado.",
+        `Decompress failed: ${decompressErr instanceof Error ? decompressErr.message : String(decompressErr)}`,
+      )
+    }
+
+    // 8. Inspect and validate staging directory contents
+    const stagingFiles = await client.listDirectory(`/${stagingDirName}`).catch(() => null)
+    if (!stagingFiles || !stagingFiles.data || stagingFiles.data.length === 0) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        "El archivo ZIP extraído en staging está vacío. Operación cancelada sin modificar el mundo actual.",
+      )
+    }
+
+    let hasLevelDat = false
+    let innerWorldFolder: string | null = null
+
+    // Check Case A: level.dat directly in root of staging
+    const directLevelDat = stagingFiles.data.some(
+      (item) => item.attributes.name.toLowerCase() === "level.dat",
+    )
+
+    if (directLevelDat) {
+      hasLevelDat = true
+    } else {
+      // Check Case B: single container directory containing level.dat
+      const directories = stagingFiles.data.filter(
+        (item) => !item.attributes.is_file || item.attributes.mimetype === "directory",
+      )
+
+      if (directories.length === 1 && directories[0]?.attributes?.name) {
+        const subDirName = directories[0].attributes.name
+        const subDirFiles = await client.listDirectory(`/${stagingDirName}/${subDirName}`).catch(() => null)
+
+        if (subDirFiles?.data) {
+          const subLevelDat = subDirFiles.data.some(
+            (item) => item.attributes.name.toLowerCase() === "level.dat",
+          )
+          if (subLevelDat) {
+            hasLevelDat = true
+            innerWorldFolder = subDirName
+          }
+        }
+      }
+    }
+
+    // Reject Case C: No level.dat found or ambiguous folder structure
+    if (!hasLevelDat) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        "El archivo ZIP no contiene una estructura de mundo de Minecraft válida (falta level.dat en la raíz o en una carpeta contenedora única). Operación cancelada sin modificar el mundo actual.",
+      )
+    }
+
+    // 9. Execute world replacement phase (active world touched ONLY after staging is fully validated)
+    try {
+      // Delete existing active world directory
+      await client.deleteFiles("/", [activeWorldName]).catch(() => {})
+
+      if (innerWorldFolder) {
+        // Case B: Move/Rename inner world directory from staging to activeWorldName
+        await client.renameFile(`/${stagingDirName}`, innerWorldFolder, activeWorldName)
+      } else {
+        // Case A: Rename entire staging directory to activeWorldName
+        await client.renameFile("/", stagingDirName, activeWorldName)
+        stagingCreated = false // Staging directory was renamed to activeWorldName
+      }
+    } catch (swapErr: unknown) {
+      // 10. Attempt conservative rollback if swap phase fails
+      if (preBackupUuid) {
+        try {
+          await client.restoreBackup(preBackupUuid)
+        } catch {
+          // Ignore secondary restore error and report primary failure
+        }
+      }
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        "Error al reemplazar el mundo activo en el sistema de archivos. Se ejecutó un intento de restauración automática de la copia de seguridad previa.",
+        `Swap failed: ${swapErr instanceof Error ? swapErr.message : String(swapErr)}`,
+      )
+    }
 
     return true
   } finally {
+    // 11. Clean up staging directory if it still exists
+    if (stagingCreated) {
+      await client.deleteFiles("/", [stagingDirName]).catch(() => {})
+    }
+    // Clean up uploaded ZIP archive from root
+    await client.deleteFiles("/", [cleanFileName]).catch(() => {})
+
+    // 12. Always release distributed operation lock
     await releaseServerOperationLock(db, lockKey)
   }
 }

@@ -223,7 +223,19 @@ export async function updateServerAutomation(
     input.weekdays,
   )
 
-  // 1. Update schedule metadata (name, cron, enabled)
+  // 1. Fetch full schedule FIRST to inspect BEFORE making any modifications
+  const fullSchedule = await client.getSchedule(id)
+  const existingTasks = fullSchedule.attributes.tasks || []
+
+  // 2. Reject modifications if schedule is advanced (multi-task)
+  if (existingTasks.length > 1) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "Esta automatización es avanzada (contiene múltiples tareas) y no puede ser modificada desde HiKAT.",
+    )
+  }
+
+  // 3. Update schedule metadata (name, cron, enabled)
   await client.updateSchedule(id, {
     name: input.name.trim(),
     is_active: input.enabled ?? true,
@@ -234,15 +246,10 @@ export async function updateServerAutomation(
     day_of_week: cron.day_of_week,
   })
 
-  // 2. Fetch full schedule to get current tasks
-  const fullSchedule = await client.getSchedule(id)
-  const existingTasks = fullSchedule.attributes.tasks || []
-
-  // 3. If the schedule has exactly 1 task (HiKAT's simple model), update the task
+  // 4. Update existing task
   if (existingTasks.length === 1 && existingTasks[0]?.attributes?.id) {
     const taskId = existingTasks[0].attributes.id
 
-    // Determine new task action and payload
     let taskAction: "power" | "command" | "backup"
     let taskPayload = ""
 
@@ -260,15 +267,12 @@ export async function updateServerAutomation(
       taskPayload = ""
     }
 
-    // Update the existing task
     await client.updateScheduleTask(id, taskId, {
       action: taskAction,
       payload: taskPayload,
       time_offset: 0,
     })
-  }
-  // If 0 tasks, create the task
-  else if (existingTasks.length === 0) {
+  } else if (existingTasks.length === 0) {
     if (input.action === "BACKUP") {
       await client.createScheduleTask(id, { action: "backup", payload: "", time_offset: 0 })
     } else if (input.action === "RESTART" || input.action === "START" || input.action === "STOP") {
@@ -277,8 +281,6 @@ export async function updateServerAutomation(
       await client.createScheduleTask(id, { action: "command", payload: input.command.trim(), time_offset: 0 })
     }
   }
-  // If >1 tasks (complex/advanced schedule): do NOT modify tasks — only schedule metadata was updated
-  // This preserves externally-created multi-task schedules
 
   const refreshed = await client.getSchedule(id)
   return parsePterodactylScheduleToHuman(refreshed)
@@ -306,6 +308,16 @@ export async function deleteServerAutomation(
   clientOverride?: IPterodactylClient,
 ): Promise<boolean> {
   const client = clientOverride || createPterodactylClient(env)
+  const fullSchedule = await client.getSchedule(id)
+  const existingTasks = fullSchedule.attributes.tasks || []
+
+  if (existingTasks.length > 1) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "Esta automatización es avanzada (contiene múltiples tareas) y no puede ser eliminada desde HiKAT.",
+    )
+  }
+
   await client.deleteSchedule(id)
   return true
 }

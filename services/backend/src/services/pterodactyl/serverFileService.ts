@@ -232,10 +232,11 @@ export async function prepareServerFileUploadUrl(
   clientOverride?: IPterodactylClient,
 ): Promise<{ url: string }> {
   const client = clientOverride || createPterodactylClient(env)
-  // Ensure path is valid
-  await resolveSafePath(env, root, relativePath, client)
+  // Ensure path is valid and resolved within virtual sandbox (blocks traversal ../)
+  const fullPath = await resolveSafePath(env, root, relativePath, client)
   const res = await client.getFileUploadUrl()
-  return { url: res.attributes.url }
+  const separator = res.attributes.url.includes("?") ? "&" : "?"
+  return { url: `${res.attributes.url}${separator}directory=${encodeURIComponent(fullPath)}` }
 }
 
 /**

@@ -238,8 +238,8 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
           gap: 16,
         }}
       >
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+          <div>
             <h1
               style={{
                 margin: 0,
@@ -251,8 +251,19 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
             >
               Servidor
             </h1>
+            <p
+              style={{
+                margin: "4px 0 0 0",
+                fontSize: "0.9rem",
+                color: isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              Administración completa del servidor principal de Minecraft HiKAT
+            </p>
+          </div>
 
-            {/* Small Infrastructure Status Badge Top Right */}
+          {/* Small Infrastructure Status Badge Top Right */}
+          <div>
             {infraState === "CHECKING" && (
               <span
                 style={{
@@ -332,15 +343,6 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
               </span>
             )}
           </div>
-          <p
-            style={{
-              margin: "4px 0 0 0",
-              fontSize: "0.9rem",
-              color: isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
-            }}
-          >
-            Administración completa del servidor principal de Minecraft HiKAT
-          </p>
         </div>
 
         {/* Extended 7 Sub-tabs switcher with responsive wrap */}

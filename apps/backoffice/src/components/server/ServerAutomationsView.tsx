@@ -398,6 +398,20 @@ export default function ServerAutomationsView({
                         >
                           {badge.label}
                         </span>
+                        {item.isAdvanced && (
+                          <span
+                            style={{
+                              padding: "3px 8px",
+                              borderRadius: 6,
+                              background: isDark ? "rgba(168, 85, 247, 0.2)" : "#f3e8ff",
+                              color: isDark ? "#c084fc" : "#7e22ce",
+                              fontSize: "0.75rem",
+                              fontWeight: 700,
+                            }}
+                          >
+                            Automatización avanzada
+                          </span>
+                        )}
                         {!item.enabled && (
                           <span
                             style={{
@@ -463,43 +477,45 @@ export default function ServerAutomationsView({
                     <span>Ejecutar ahora</span>
                   </button>
 
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button
-                      type="button"
-                      title="Editar"
-                      onClick={() => openEditModal(item)}
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 8,
-                        border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
-                        background: "transparent",
-                        color: isDark ? "#ffffff" : "#334155",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                      }}
-                    >
-                      <IconEdit size={16} />
-                    </button>
+                  {!item.isAdvanced && (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        title="Editar"
+                        onClick={() => openEditModal(item)}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: 8,
+                          border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
+                          background: "transparent",
+                          color: isDark ? "#ffffff" : "#334155",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                        }}
+                      >
+                        <IconEdit size={16} />
+                      </button>
 
-                    <button
-                      type="button"
-                      title="Eliminar"
-                      onClick={() => setDeleteTarget(item)}
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 8,
-                        border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
-                        background: "transparent",
-                        color: "#ef4444",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                      }}
-                    >
-                      <IconTrash size={16} />
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        title="Eliminar"
+                        onClick={() => setDeleteTarget(item)}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: 8,
+                          border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
+                          background: "transparent",
+                          color: "#ef4444",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                        }}
+                      >
+                        <IconTrash size={16} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )

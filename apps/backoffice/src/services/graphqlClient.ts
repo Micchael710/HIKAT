@@ -686,6 +686,7 @@ export const serverApi = {
           command
           enabled
           isProcessing
+          isAdvanced
           lastRunAt
           nextRunAt
         }
@@ -710,6 +711,7 @@ export const serverApi = {
           command
           enabled
           isProcessing
+          isAdvanced
           lastRunAt
           nextRunAt
         }
@@ -734,6 +736,7 @@ export const serverApi = {
           command
           enabled
           isProcessing
+          isAdvanced
           lastRunAt
           nextRunAt
         }
