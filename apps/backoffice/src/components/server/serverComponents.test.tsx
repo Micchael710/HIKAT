@@ -458,7 +458,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Initially CONNECTED
-    expect(screen.getByText("Infraestructura conectada")).toBeDefined()
+    expect(screen.getByText("Servidor disponible")).toBeDefined()
 
     // Trigger 2nd poll via timer interval -> fails
     await act(async () => {
@@ -504,7 +504,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Transitions back to CONNECTED
-    expect(screen.getByText("Infraestructura conectada")).toBeDefined()
+    expect(screen.getByText("Servidor disponible")).toBeDefined()
     expect(screen.getByText("En línea")).toBeDefined()
   })
 })

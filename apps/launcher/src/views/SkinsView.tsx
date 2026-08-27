@@ -26,7 +26,7 @@ interface SkinsViewProps {
   setAppliedCape: (id: string) => void
   allSkins?: SkinItem[]
   playerSkin?: PlayerSkin | null
-  onUploadSkin?: (file: File, model?: "CLASSIC" | "SLIM") => Promise<PlayerSkin>
+  onUploadSkin?: (file: File) => Promise<PlayerSkin>
   onDeleteSkin?: () => Promise<boolean>
   customCapes: CapeItem[]
   setCustomCapes: React.Dispatch<React.SetStateAction<CapeItem[]>>

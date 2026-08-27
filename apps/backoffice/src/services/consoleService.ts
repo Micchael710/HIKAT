@@ -165,7 +165,7 @@ class ConsoleService {
           return
         }
 
-        if (this.shouldReconnect) {
+        if (this.shouldReconnect && this.subscriberCount > 0) {
           this.scheduleReconnect()
         }
       }
@@ -177,7 +177,7 @@ class ConsoleService {
     } catch {
       this.isConnecting = false
       this.notifyConnection(false)
-      if (this.shouldReconnect) {
+      if (this.shouldReconnect && this.subscriberCount > 0) {
         this.scheduleReconnect()
       }
     }
@@ -185,10 +185,12 @@ class ConsoleService {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    if (!this.shouldReconnect || this.subscriberCount <= 0) return
+
     const delay = Math.min(1000 * Math.pow(1.5, this.retryCount), 8000)
     this.retryCount++
     this.reconnectTimer = setTimeout(() => {
-      if (this.shouldReconnect) {
+      if (this.shouldReconnect && this.subscriberCount > 0) {
         this.connect()
       }
     }, delay)

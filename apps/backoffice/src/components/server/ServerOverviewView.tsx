@@ -286,7 +286,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                     background: isDark ? "#4ade80" : "#16a34a",
                   }}
                 />
-                <span>Infraestructura conectada</span>
+                <span>Servidor disponible</span>
               </span>
             )}
 

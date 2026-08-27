@@ -229,7 +229,7 @@ export default function ServerPowerActions({
           </div>
 
           <span style={{ fontSize: "0.775rem", color: isDark ? "rgba(255, 255, 255, 0.4)" : "rgba(0, 0, 0, 0.4)" }}>
-            Disponible cuando la infraestructura esté conectada.
+            Disponible cuando el servidor esté conectado.
           </span>
         </div>
       )}

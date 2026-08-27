@@ -114,7 +114,7 @@ export async function fetchMyActiveSkin(): Promise<ActiveSkinSelection | null> {
     query MyActiveSkin {
       myActiveSkin {
         type
-        globalSkinId
+        skinId
         skin {
           id
           name
@@ -144,13 +144,13 @@ export async function fetchMyActiveSkin(): Promise<ActiveSkinSelection | null> {
  */
 export async function setMyActiveSkin(
   type: "GLOBAL" | "CUSTOM",
-  globalSkinId?: string | null,
+  skinId?: string | null,
 ): Promise<{ success: boolean; data?: ActiveSkinSelection; error?: string }> {
   const mutation = /* GraphQL */ `
     mutation SetMyActiveSkin($input: SetActiveSkinInput!) {
       setMyActiveSkin(input: $input) {
         type
-        globalSkinId
+        skinId
         skin {
           id
           name
@@ -161,7 +161,7 @@ export async function setMyActiveSkin(
     }
   `
   const res = await graphqlClient<{ setMyActiveSkin: ActiveSkinSelection }>(mutation, {
-    input: { type, globalSkinId },
+    input: { type, skinId },
   })
   if (res.success && res.data?.setMyActiveSkin) {
     return {
@@ -221,7 +221,6 @@ export async function createPlayerSkinUploadTicket(): Promise<{
  */
 export async function setMyPlayerSkin(
   mediaId: string,
-  model: "CLASSIC" | "SLIM" = "CLASSIC",
 ): Promise<{ success: boolean; data?: PlayerSkin; error?: string }> {
   const mutation = /* GraphQL */ `
     mutation SetMyPlayerSkin($input: SetPlayerSkinInput!) {
@@ -236,7 +235,7 @@ export async function setMyPlayerSkin(
     }
   `
   const res = await graphqlClient<{ setMyPlayerSkin: PlayerSkin }>(mutation, {
-    input: { mediaId, model },
+    input: { mediaId },
   })
   if (res.success && res.data?.setMyPlayerSkin) {
     return {
@@ -286,7 +285,6 @@ export async function deleteMyPlayerSkin(): Promise<{
  */
 export async function uploadPlayerSkin(
   file: File,
-  model?: "CLASSIC" | "SLIM",
 ): Promise<PlayerSkin> {
   // 1. Client-side validation: format and max size
   if (!file.type.includes("png") && !file.name.toLowerCase().endsWith(".png")) {
@@ -352,8 +350,7 @@ export async function uploadPlayerSkin(
   }
 
   // 5. Link texture to player skin in D1 (backend authoritatively computes model)
-  const chosenModel = model || inspection.model || "CLASSIC"
-  const setRes = await setMyPlayerSkin(mediaId, chosenModel)
+  const setRes = await setMyPlayerSkin(mediaId)
   if (!setRes.success || !setRes.data) {
     throw new Error(setRes.error || "No se pudo asociar la skin a tu cuenta")
   }

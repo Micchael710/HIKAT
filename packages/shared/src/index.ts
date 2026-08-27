@@ -1066,7 +1066,12 @@ export const SERVER_AUTOMATION_FREQUENCIES = [
 export type ServerAutomationFrequency =
   typeof SERVER_AUTOMATION_FREQUENCIES[number]
 
-export const DEFAULT_SERVER_TIMEZONE = "America/Santo_Domingo"
+/**
+ * Default administration timezone for HiKAT server tasks.
+ * HiKAT operations and schedule displays are standardized on America/Santo_Domingo (UTC-4, no Daylight Saving Time changes).
+ * Pterodactyl daemon instances evaluate cron expressions in their local host time, which matches the admin timezone.
+ */
+export const DEFAULT_SERVER_TIMEZONE = "America/Santo_Domingo" as const
 
 export interface ServerTaskTemplateConfig {
   template: ServerTaskTemplate

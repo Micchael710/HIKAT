@@ -5802,8 +5802,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             input: {
               name: "Alex Aventurera",
 
-              model: "SLIM",
-
               mediaId,
 
               status: "AVAILABLE",
@@ -7577,8 +7575,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             variables: {
               input: {
                 mediaId: mediaId1,
-
-                model: "CLASSIC",
               },
             },
           }),
@@ -7713,7 +7709,27 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         "SteveMiner",
       )
 
-      // 13. Admin updates player skin model (e.g. SLIM)
+      // 13. Admin updates player skin texture to SLIM texture
+      const slimData = new Uint8Array(64 * 64 * 4).fill(255)
+      for (let y = 16; y < 20; y++) {
+        for (let x = 50; x < 52; x++) {
+          slimData[(y * 64 + x) * 4 + 3] = 0
+        }
+      }
+      const slimPng = encode({ width: 64, height: 64, data: slimData, channels: 4, depth: 8 })
+      const slimMediaId = "media-slim-" + crypto.randomUUID()
+      await db.insert(contentMedia).values({
+        id: slimMediaId,
+        objectKey: `content/${slimMediaId}.png`,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: slimPng.byteLength,
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+      })
+      await mockR2.put(`content/${slimMediaId}.png`, slimPng.buffer as ArrayBuffer, {
+        httpMetadata: { contentType: "image/png" },
+      })
 
       const adminUpdateRes = await worker.fetch(
         new Request("http://localhost/graphql", {
@@ -7730,7 +7746,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
               updateAdminPlayerSkin(id: $id, input: $input) { id model }
             }`,
 
-            variables: { id: playerSkinId, input: { model: "SLIM" } },
+            variables: { id: playerSkinId, input: { mediaId: slimMediaId } },
           }),
         }),
 
@@ -7814,8 +7830,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             variables: {
               input: {
                 mediaId: mediaId2,
-
-                model: "CLASSIC",
               },
             },
           }),
@@ -8000,7 +8014,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
               query: `mutation SetSkin($input: SetPlayerSkinInput!) {
                 setMyPlayerSkin(input: $input) { id model }
               }`,
-              variables: { input: { mediaId: media.id, model: "CLASSIC" } },
+              variables: { input: { mediaId: media.id } },
             }),
           }),
           testEnv,
@@ -8016,7 +8030,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
               query: `mutation SetSkin($input: SetPlayerSkinInput!) {
                 setMyPlayerSkin(input: $input) { id model }
               }`,
-              variables: { input: { mediaId: media.id, model: "SLIM" } },
+              variables: { input: { mediaId: media.id } },
             }),
           }),
           testEnv,

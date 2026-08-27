@@ -89,7 +89,7 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
       data: {
         myActiveSkin: {
           type: "CUSTOM",
-          globalSkinId: null,
+          skinId: null,
           skin: {
             id: "pskin-123",
             name: "Mi Skin",
@@ -113,7 +113,7 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
       data: {
         setMyActiveSkin: {
           type: "GLOBAL",
-          globalSkinId: "skin-1",
+          skinId: "skin-1",
           skin: {
             id: "skin-1",
             name: "Steve",
@@ -127,7 +127,7 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
     const res = await setMyActiveSkin("GLOBAL", "skin-1")
     expect(res.success).toBe(true)
     expect(res.data?.type).toBe("GLOBAL")
-    expect(res.data?.globalSkinId).toBe("skin-1")
+    expect(res.data?.skinId).toBe("skin-1")
   })
 
   it("returns null for fetchMyPlayerSkin when unauthenticated", async () => {
@@ -153,7 +153,7 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
     expect(res.data?.uploadToken).toBe("tok-abc-123")
   })
 
-  it("sets player skin after upload with model selection", async () => {
+  it("sets player skin after upload with authoritative backend model", async () => {
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
@@ -168,7 +168,7 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
       },
     })
 
-    const res = await setMyPlayerSkin("media-789", "SLIM")
+    const res = await setMyPlayerSkin("media-789")
     expect(res.success).toBe(true)
     expect(res.data?.model).toBe("SLIM")
   })

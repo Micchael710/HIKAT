@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core"
 import { users } from "./users"
 import { sessions } from "./sessions"
 
@@ -91,7 +91,7 @@ export const serverTasks = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
   },
-  (table) => [index("server_tasks_schedule_id_idx").on(table.scheduleId)],
+  (table) => [uniqueIndex("server_tasks_schedule_id_idx").on(table.scheduleId)],
 )
 
 export type ServerConsoleTicket = typeof serverConsoleTickets.$inferSelect

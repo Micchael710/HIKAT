@@ -103,28 +103,33 @@ export async function inspectSkinMedia(
     )
   }
 
-  if (env.ASSETS) {
-    const object = await env.ASSETS.get(media.objectKey)
-    if (object) {
-      const buffer = await object.arrayBuffer()
-      const inspection = inspectMinecraftSkinTexture(buffer)
-      if (!inspection.valid) {
-        throw createGraphQLError(
-          inspection.error ||
-            "Dimensiones de skin inválidas. Se requiere PNG de 64x64 o 64x32.",
-          "VALIDATION_ERROR",
-        )
-      }
+  if (!env.ASSETS) {
+    throw createGraphQLError(
+      "El almacenamiento de texturas (ASSETS) no está configurado o disponible.",
+      "INTERNAL_ERROR",
+    )
+  }
 
-      return {
-        model: inspection.model || "CLASSIC",
-        media,
-      }
-    }
+  const object = await env.ASSETS.get(media.objectKey)
+  if (!object) {
+    throw createGraphQLError(
+      "El archivo de la textura no fue encontrado en el almacenamiento.",
+      "NOT_FOUND",
+    )
+  }
+
+  const buffer = await object.arrayBuffer()
+  const inspection = inspectMinecraftSkinTexture(buffer)
+  if (!inspection.valid || !inspection.model) {
+    throw createGraphQLError(
+      inspection.error ||
+        "Dimensiones de skin inválidas. Se requiere PNG de 64x64 o 64x32.",
+      "VALIDATION_ERROR",
+    )
   }
 
   return {
-    model: "CLASSIC",
+    model: inspection.model,
     media,
   }
 }
@@ -1045,10 +1050,6 @@ export async function updateAdminPlayerSkin(
 
   const updates: Partial<schema.PlayerSkin> = {
     updatedAt: new Date().toISOString(),
-  }
-
-  if (input.model !== undefined && input.model !== null) {
-    updates.model = input.model === "SLIM" ? "SLIM" : "CLASSIC"
   }
 
   if (input.mediaId !== undefined && input.mediaId !== null) {

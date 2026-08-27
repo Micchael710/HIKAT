@@ -761,7 +761,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return runServerAutomation(context.env, args.id)
+      return runServerAutomation(context.env, args.id, undefined, context.db)
     },
 
     deleteServerAutomation: async (

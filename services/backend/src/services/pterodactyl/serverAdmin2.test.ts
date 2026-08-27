@@ -40,6 +40,9 @@ import {
   createServerAutomation,
   updateServerAutomation,
   deleteServerAutomation,
+  runServerAutomation,
+  buildTemplatePlan,
+  checkTasksMatchTemplate,
 } from "./serverScheduleService"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
@@ -1238,6 +1241,216 @@ rcon.password=secret123
 
     const dlRes = await createServerFileDownloadUrl(env, "SERVER", "server.properties", mockClient as any)
     expect(dlRes.url).toBe("https://wings.hikat.net/download/sp")
+  })
+
+  // Test 36: Custom Task validation requires action and valid commands
+  it("Phase 07 Hardening: Custom Task validation enforces explicit action and command", () => {
+    // Missing action throws
+    expect(() => buildTemplatePlan({ template: "CUSTOM" })).toThrow(
+      "Debes especificar el tipo de acción para una tarea personalizada.",
+    )
+
+    // Action COMMAND without command throws
+    expect(() => buildTemplatePlan({ template: "CUSTOM", action: "COMMAND", command: "   " })).toThrow(
+      "El comando a ejecutar es obligatorio para tareas personalizadas de tipo comando.",
+    )
+
+    // Action COMMAND with command builds single command task
+    const cmdPlan = buildTemplatePlan({ template: "CUSTOM", action: "COMMAND", command: "say Hola" })
+    expect(cmdPlan.action).toBe("COMMAND")
+    expect(cmdPlan.onlyWhenOnline).toBe(true)
+    expect(cmdPlan.tasks).toEqual([{ action: "command", payload: "say Hola", time_offset: 0 }])
+
+    // Action START builds power start task with onlyWhenOnline false
+    const startPlan = buildTemplatePlan({ template: "CUSTOM", action: "START" })
+    expect(startPlan.action).toBe("START")
+    expect(startPlan.onlyWhenOnline).toBe(false)
+    expect(startPlan.tasks).toEqual([{ action: "power", payload: "start", time_offset: 0 }])
+
+    // Action STOP builds power stop task
+    const stopPlan = buildTemplatePlan({ template: "CUSTOM", action: "STOP" })
+    expect(stopPlan.action).toBe("STOP")
+    expect(stopPlan.onlyWhenOnline).toBe(true)
+    expect(stopPlan.tasks).toEqual([{ action: "power", payload: "stop", time_offset: 0 }])
+
+    // Action BACKUP builds backup task
+    const bkPlan = buildTemplatePlan({ template: "CUSTOM", action: "BACKUP" })
+    expect(bkPlan.action).toBe("BACKUP")
+    expect(bkPlan.tasks).toEqual([{ action: "backup", payload: "", time_offset: 0 }])
+  })
+
+  // Test 37: checkTasksMatchTemplate validates action, payload, time_offset, and sequence count
+  it("Phase 07 Hardening: checkTasksMatchTemplate validates full task sequence and offsets", () => {
+    const plan = buildTemplatePlan({ template: "BACKUP_AND_RESTART", delaySeconds: 60 })
+
+    // Exact match
+    const exactPteroTasks = [
+      { attributes: { id: 1, sequence_id: 1, action: "backup" as const, payload: "", time_offset: 0, is_queued: false, continue_on_failure: false } },
+      { attributes: { id: 2, sequence_id: 2, action: "power" as const, payload: "restart", time_offset: 60, is_queued: false, continue_on_failure: false } },
+    ]
+    expect(checkTasksMatchTemplate(exactPteroTasks, plan)).toBe(true)
+
+    // Mismatched time_offset returns false
+    const wrongOffsetTasks = [
+      { attributes: { id: 1, sequence_id: 1, action: "backup" as const, payload: "", time_offset: 0, is_queued: false, continue_on_failure: false } },
+      { attributes: { id: 2, sequence_id: 2, action: "power" as const, payload: "restart", time_offset: 30, is_queued: false, continue_on_failure: false } },
+    ]
+    expect(checkTasksMatchTemplate(wrongOffsetTasks, plan)).toBe(false)
+
+    // Mismatched payload returns false
+    const wrongPayloadTasks = [
+      { attributes: { id: 1, sequence_id: 1, action: "backup" as const, payload: "", time_offset: 0, is_queued: false, continue_on_failure: false } },
+      { attributes: { id: 2, sequence_id: 2, action: "power" as const, payload: "stop", time_offset: 60, is_queued: false, continue_on_failure: false } },
+    ]
+    expect(checkTasksMatchTemplate(wrongPayloadTasks, plan)).toBe(false)
+
+    // Mismatched task count returns false
+    expect(checkTasksMatchTemplate([exactPteroTasks[0]!], plan)).toBe(false)
+  })
+
+  // Test 38: External schedules without D1 metadata reject update, delete, and manual execution
+  it("Phase 07 Hardening: External schedules without D1 metadata are strictly read-only", async () => {
+    const { db } = createMockD1()
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const mockSchedule = {
+      object: "server_schedule",
+      attributes: {
+        id: 999,
+        name: "External Schedule",
+        cron: { minute: "0", hour: "0", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        tasks: [{ attributes: { id: 1, action: "backup", payload: "", time_offset: 0 } }],
+      },
+    }
+
+    const mockClient = {
+      getSchedule: vi.fn().mockResolvedValue(mockSchedule),
+      updateSchedule: vi.fn(),
+      deleteSchedule: vi.fn(),
+      executeSchedule: vi.fn(),
+    }
+
+    // 1. updateServerAutomation fails closed with FORBIDDEN
+    await expect(
+      updateServerAutomation(env, "999", { name: "Update Attempt", template: "AUTO_BACKUP", frequency: "DAILY", enabled: true }, mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue configurada fuera de HiKAT y es de solo lectura.")
+
+    // 2. deleteServerAutomation fails closed with FORBIDDEN
+    await expect(
+      deleteServerAutomation(env, "999", mockClient as any, db as any),
+    ).rejects.toThrow("No puedes eliminar tareas configuradas fuera de HiKAT.")
+
+    // 3. runServerAutomation fails closed with FORBIDDEN
+    await expect(
+      runServerAutomation(env, "999", mockClient as any, db as any),
+    ).rejects.toThrow("No puedes ejecutar manualmente tareas no gestionadas por HiKAT.")
+  })
+
+  // Test 39: createServerAutomation deletes Pterodactyl schedule if D1 insert throws
+  it("Phase 07 Hardening: createServerAutomation rolls back Pterodactyl schedule on D1 failure", async () => {
+    const deleteScheduleSpy = vi.fn().mockResolvedValue(undefined)
+    const mockClient = {
+      createSchedule: vi.fn().mockResolvedValue({
+        object: "server_schedule",
+        attributes: { id: 888 },
+      }),
+      createScheduleTask: vi.fn().mockResolvedValue(undefined),
+      deleteSchedule: deleteScheduleSpy,
+    }
+
+    const failingDb = {
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockRejectedValue(new Error("D1 Unique Constraint Violation")),
+      }),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      createServerAutomation(
+        env,
+        { name: "New Task", template: "AUTO_BACKUP", frequency: "DAILY", enabled: true },
+        mockClient as any,
+        failingDb as any,
+      ),
+    ).rejects.toThrow("Error al registrar la tarea en la base de datos")
+
+    expect(deleteScheduleSpy).toHaveBeenCalledWith("888")
+  })
+
+  // Test 40: updateServerAutomation restores previous state on task modification failure
+  it("Phase 07 Hardening: updateServerAutomation restores previous tasks on error", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.serverTasks).values({
+      id: "task-rec-1",
+      scheduleId: "777",
+      template: "AUTO_BACKUP",
+      name: "Original Task",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      enabled: true,
+      templateVersion: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const originalSchedule = {
+      object: "server_schedule",
+      attributes: {
+        id: 777,
+        name: "Original Task",
+        cron: { minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        only_when_online: true,
+        tasks: [
+          { attributes: { id: 10, action: "backup", payload: "", time_offset: 0 } },
+        ],
+      },
+    }
+
+    const updateScheduleSpy = vi.fn().mockResolvedValue(originalSchedule)
+    const deleteScheduleTaskSpy = vi.fn().mockResolvedValue(undefined)
+    const createScheduleTaskSpy = vi
+      .fn()
+      .mockResolvedValueOnce(undefined) // First task creation succeeds
+      .mockRejectedValueOnce(new Error("Pterodactyl Network Dropout")) // Second fails!
+
+    const mockClient = {
+      getSchedule: vi.fn().mockResolvedValue(originalSchedule),
+      updateSchedule: updateScheduleSpy,
+      deleteScheduleTask: deleteScheduleTaskSpy,
+      createScheduleTask: createScheduleTaskSpy,
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      updateServerAutomation(
+        env,
+        "777",
+        {
+          name: "Updated Task",
+          template: "BACKUP_AND_RESTART",
+          delaySeconds: 60,
+          frequency: "DAILY",
+          time: "04:00",
+          enabled: true,
+        },
+        mockClient as any,
+        db as any,
+      ),
+    ).rejects.toThrow("Error al actualizar la tarea programada")
+
+    // Verify rollback restored original schedule metadata
+    expect(updateScheduleSpy).toHaveBeenCalledWith("777", expect.objectContaining({ name: "Original Task" }))
   })
 })
 

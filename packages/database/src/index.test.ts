@@ -1554,5 +1554,24 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(taskRec).toBeDefined()
     expect(taskRec?.template).toBe("BACKUP_AND_RESTART")
     expect(taskRec?.delaySeconds).toBe(60)
+
+    // Verify UNIQUE constraint on serverTasks.scheduleId
+    await expect(
+      db.insert(schema.serverTasks).values({
+        id: crypto.randomUUID(),
+        scheduleId: "101", // duplicate scheduleId
+        template: "DAILY_BACKUP",
+        name: "Duplicate Schedule",
+        frequency: "DAILY",
+        cronMinute: "0",
+        cronHour: "4",
+        cronDayOfWeek: "*",
+        time: "04:00",
+        enabled: true,
+        templateVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
   })
 })

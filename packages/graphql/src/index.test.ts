@@ -5,6 +5,8 @@ import {
   GraphQLEnumType,
   GraphQLObjectType,
   Kind,
+  parse,
+  validate,
 } from "graphql"
 
 import {
@@ -532,5 +534,58 @@ describe("@hikat/graphql foundation & contracts", () => {
       "mandatory",
       "clientFiles",
     ])
+  })
+
+  it("validates real Launcher active skin queries and mutations against schema", () => {
+    const schema = getBaseSchema()
+
+    // 1. Valid Launcher MyActiveSkin Query
+    const validMyActiveSkinQuery = /* GraphQL */ `
+      query MyActiveSkin {
+        myActiveSkin {
+          type
+          skinId
+          skin {
+            id
+            name
+            model
+            imageUrl
+          }
+        }
+      }
+    `
+    const errors1 = validate(schema, parse(validMyActiveSkinQuery))
+    expect(errors1).toHaveLength(0)
+
+    // 2. Valid Launcher SetMyActiveSkin Mutation
+    const validSetMyActiveSkinMutation = /* GraphQL */ `
+      mutation SetMyActiveSkin($input: SetActiveSkinInput!) {
+        setMyActiveSkin(input: $input) {
+          type
+          skinId
+          skin {
+            id
+            name
+            model
+            imageUrl
+          }
+        }
+      }
+    `
+    const errors2 = validate(schema, parse(validSetMyActiveSkinMutation))
+    expect(errors2).toHaveLength(0)
+
+    // 3. Reject invalid query asking for non-existent globalSkinId
+    const invalidQuery = /* GraphQL */ `
+      query BadActiveSkin {
+        myActiveSkin {
+          type
+          globalSkinId
+        }
+      }
+    `
+    const invalidErrors = validate(schema, parse(invalidQuery))
+    expect(invalidErrors.length).toBeGreaterThan(0)
+    expect(invalidErrors[0]?.message).toContain('Cannot query field "globalSkinId"')
   })
 })

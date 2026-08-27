@@ -4,6 +4,7 @@ import type {
   ServerAutomationItem,
   ServerAutomationInput,
   ServerTaskTemplate,
+  ServerAutomationAction,
   ServerAutomationFrequency,
   ServerStatus,
 } from "../../types"
@@ -36,6 +37,7 @@ interface TemplateMeta {
   description: string
   defaultName: string
   icon: string
+  action?: ServerAutomationAction
   needsCommand?: boolean
   needsDelay?: boolean
   needsMessage?: boolean
@@ -48,6 +50,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Apaga el servidor de forma segura según el horario establecido.",
     defaultName: "Apagado automático",
     icon: "⏹",
+    action: "STOP",
   },
   {
     id: "AUTO_START",
@@ -55,6 +58,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Inicia el servidor automáticamente a una hora específica.",
     defaultName: "Encendido automático",
     icon: "▶",
+    action: "START",
   },
   {
     id: "AUTO_RESTART",
@@ -62,6 +66,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Reinicia el servidor en horarios de baja actividad para mantener el rendimiento.",
     defaultName: "Reinicio programado",
     icon: "🔄",
+    action: "RESTART",
   },
   {
     id: "AUTO_BACKUP",
@@ -69,6 +74,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Crea una copia de seguridad periódica sin interrumpir el juego.",
     defaultName: "Backup automático",
     icon: "💾",
+    action: "BACKUP",
   },
   {
     id: "RUN_COMMAND",
@@ -76,6 +82,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Envía un comando de consola de Minecraft de manera programada.",
     defaultName: "Comando programado",
     icon: "💻",
+    action: "COMMAND",
     needsCommand: true,
   },
   {
@@ -84,6 +91,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Genera una copia de seguridad y tras unos segundos reinicia el servidor.",
     defaultName: "Backup y reinicio",
     icon: "📦",
+    action: "RESTART",
     needsDelay: true,
   },
   {
@@ -92,6 +100,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Genera una copia de seguridad y tras unos segundos apaga el servidor.",
     defaultName: "Backup y apagado",
     icon: "🛑",
+    action: "STOP",
     needsDelay: true,
   },
   {
@@ -100,6 +109,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Envía un mensaje de advertencia al chat y reinicia el servidor.",
     defaultName: "Aviso y reinicio",
     icon: "📢",
+    action: "RESTART",
     needsMessage: true,
     needsDelay: true,
   },
@@ -109,6 +119,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Envía un mensaje de advertencia al chat y apaga el servidor.",
     defaultName: "Aviso y apagado",
     icon: "⚠️",
+    action: "STOP",
     needsMessage: true,
     needsDelay: true,
   },
@@ -118,6 +129,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Fuerza el guardado del mundo (save-all flush) y luego genera el backup.",
     defaultName: "Guardado y backup",
     icon: "🛡️",
+    action: "BACKUP",
     needsDelay: true,
   },
   {
@@ -126,6 +138,7 @@ const TASK_TEMPLATES: TemplateMeta[] = [
     description: "Configuración personalizada de comandos u operaciones.",
     defaultName: "Tarea personalizada",
     icon: "⚙️",
+    action: "COMMAND",
     needsCommand: true,
   },
 ]
@@ -177,11 +190,13 @@ export default function ServerTasksView({
     weekdays: number[]
     command: string
     delaySeconds: number
+    action: ServerAutomationAction
     warnMessage: string
     enabled: boolean
   }>({
     name: "",
     template: "AUTO_BACKUP",
+    action: "BACKUP",
     frequency: "DAILY",
     time: "04:00",
     intervalHours: 6,
@@ -241,6 +256,7 @@ export default function ServerTasksView({
     setFormData({
       name: tmpl.defaultName,
       template: initialTemplate,
+      action: tmpl.action || "COMMAND",
       frequency: "DAILY",
       time: "04:00",
       intervalHours: 6,
@@ -268,6 +284,7 @@ export default function ServerTasksView({
     setFormData({
       name: task.name,
       template: tmplId,
+      action: task.action || (task.command ? "COMMAND" : "BACKUP"),
       frequency: task.frequency || "DAILY",
       time: task.time || "04:00",
       intervalHours: task.intervalHours || 6,
@@ -286,6 +303,7 @@ export default function ServerTasksView({
     setFormData((prev) => ({
       ...prev,
       template: newTemplate,
+      action: tmpl?.action || (newTemplate === "CUSTOM" ? prev.action : "COMMAND"),
       name: prev.name === "" || TASK_TEMPLATES.some((t) => t.defaultName === prev.name)
         ? (tmpl?.defaultName || "Nueva tarea")
         : prev.name,
@@ -312,7 +330,11 @@ export default function ServerTasksView({
     }
 
     const currentTmpl = TASK_TEMPLATES.find((t) => t.id === formData.template)
-    if (currentTmpl?.needsCommand && !formData.command.trim()) {
+    if (formData.template === "RUN_COMMAND" && !formData.command.trim()) {
+      onToast("Introduce el comando de Minecraft que deseas ejecutar.", "error")
+      return
+    }
+    if (formData.template === "CUSTOM" && formData.action === "COMMAND" && !formData.command.trim()) {
       onToast("Introduce el comando de Minecraft que deseas ejecutar.", "error")
       return
     }
@@ -320,8 +342,12 @@ export default function ServerTasksView({
     setIsSaving(true)
     try {
       let finalCommand: string | undefined = undefined
-      if (formData.template === "RUN_COMMAND" || formData.template === "CUSTOM") {
+      if (formData.template === "RUN_COMMAND") {
         finalCommand = formData.command.trim()
+      } else if (formData.template === "CUSTOM") {
+        if (formData.action === "COMMAND") {
+          finalCommand = formData.command.trim()
+        }
       } else if (formData.template === "WARN_AND_RESTART" || formData.template === "WARN_AND_STOP") {
         finalCommand = formData.warnMessage.trim() ? `say ${formData.warnMessage.trim()}` : "say Reinicio programado en breves momentos"
       }
@@ -329,6 +355,7 @@ export default function ServerTasksView({
       const input: ServerAutomationInput = {
         name: formData.name.trim(),
         template: formData.template,
+        action: formData.template === "CUSTOM" ? formData.action : undefined,
         frequency: formData.frequency,
         time: formData.frequency !== "INTERVAL" ? formData.time : undefined,
         intervalHours: formData.frequency === "INTERVAL" ? formData.intervalHours : undefined,
@@ -1333,7 +1360,10 @@ export default function ServerTasksView({
                         color: isDark ? "rgba(255, 255, 255, 0.8)" : "rgba(0, 0, 0, 0.8)",
                       }}
                     >
-                      Hora de ejecución (HH:MM):
+                      Hora de ejecución (HH:MM):{" "}
+                      <span style={{ fontSize: "0.75rem", fontWeight: 500, color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)" }}>
+                        · Hora de Santo Domingo (UTC-4)
+                      </span>
                     </label>
                     <input
                       type="time"
@@ -1356,8 +1386,48 @@ export default function ServerTasksView({
                 </div>
               )}
 
+              {/* Custom Action Selector */}
+              {formData.template === "CUSTOM" && (
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.825rem",
+                      fontWeight: 700,
+                      marginBottom: 6,
+                      color: isDark ? "rgba(255, 255, 255, 0.8)" : "rgba(0, 0, 0, 0.8)",
+                    }}
+                  >
+                    Tipo de acción a ejecutar:
+                  </label>
+                  <select
+                    value={formData.action}
+                    onChange={(e) => setFormData({ ...formData, action: e.target.value as ServerAutomationAction })}
+                    style={{
+                      width: "100%",
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: `1px solid ${
+                        isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)"
+                      }`,
+                      background: isDark ? "#0f172a" : "#ffffff",
+                      color: isDark ? "#ffffff" : "#0f172a",
+                      fontSize: "0.9rem",
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <option value="COMMAND">Ejecutar comando de Minecraft</option>
+                    <option value="BACKUP">Crear copia de seguridad (backup)</option>
+                    <option value="START">Encender servidor</option>
+                    <option value="STOP">Apagar servidor</option>
+                    <option value="RESTART">Reiniciar servidor</option>
+                  </select>
+                </div>
+              )}
+
               {/* Command parameter for templates that need it */}
-              {(formData.template === "RUN_COMMAND" || formData.template === "CUSTOM") && (
+              {(formData.template === "RUN_COMMAND" || (formData.template === "CUSTOM" && formData.action === "COMMAND")) && (
                 <div>
                   <label
                     style={{

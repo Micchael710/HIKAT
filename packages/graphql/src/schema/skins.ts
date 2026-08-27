@@ -80,26 +80,22 @@ export const skinsTypeDefs = /* GraphQL */ `
 
   input CreateSkinInput {
     name: String!
-    model: SkinModel
     mediaId: ID!
     status: SkinStatus
   }
 
   input UpdateSkinInput {
     name: String
-    model: SkinModel
     mediaId: ID
     status: SkinStatus
   }
 
   input SetPlayerSkinInput {
     mediaId: ID!
-    model: SkinModel
   }
 
   input UpdateAdminPlayerSkinInput {
-    model: SkinModel
-    mediaId: ID
+    mediaId: ID!
   }
 
   """

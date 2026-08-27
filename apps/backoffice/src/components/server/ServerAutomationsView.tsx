@@ -342,7 +342,7 @@ export default function ServerAutomationsView({
           </h3>
           <p style={{ margin: 0, fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)" }}>
             {isDisconnected
-              ? "Las automatizaciones aparecerán aquí cuando la infraestructura esté disponible."
+              ? "Las tareas aparecerán aquí cuando el servidor esté disponible."
               : "Programa reinicios automáticos, copias de seguridad periódicas o comandos diarios."}
           </p>
         </div>

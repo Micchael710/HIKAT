@@ -379,21 +379,13 @@ export interface SkinConnectionGql {
 
 export interface CreateSkinInputGql {
   name: string
-
-  model?: SkinModelGql | null
-
   mediaId: string
-
   status?: SkinStatusGql | null
 }
 
 export interface UpdateSkinInputGql {
   name?: string | null
-
-  model?: SkinModelGql | null
-
   mediaId?: string | null
-
   status?: SkinStatusGql | null
 }
 
@@ -408,42 +400,30 @@ export interface PlayerSkinGql {
   updatedAt: string
 }
 
-
 export interface AdminPlayerSkinGql {
   id: string
-
   userId: string
-
   userDisplayName: string
-
   model: SkinModelGql
-
   imageUrl: string
-
   createdAt: string
-
   updatedAt: string
 }
 
 export interface AdminPlayerSkinEdgeGql {
   node: AdminPlayerSkinGql
-
   cursor: string
 }
 
 export interface AdminPlayerSkinConnectionGql {
   edges: AdminPlayerSkinEdgeGql[]
-
   items: AdminPlayerSkinGql[]
-
   pageInfo: PageInfoGql
-
   totalCount: number
 }
 
 export interface SetPlayerSkinInputGql {
   mediaId: string
-  model?: SkinModelGql | null
 }
 
 export type ActiveSkinTypeGql = "CUSTOM" | "GLOBAL"
@@ -465,8 +445,7 @@ export interface SetActiveSkinInputGql {
 }
 
 export interface UpdateAdminPlayerSkinInputGql {
-  model?: SkinModelGql | null
-  mediaId?: string | null
+  mediaId: string
 }
 
 // --- Game & Launcher Types (Shard 06.5) ---

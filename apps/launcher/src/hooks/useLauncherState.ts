@@ -98,8 +98,8 @@ export function useLauncherState() {
       if (active) {
         if (active.type === "CUSTOM") {
           setAppliedSkin("player-custom")
-        } else if (active.type === "GLOBAL" && active.globalSkinId) {
-          setAppliedSkin(active.globalSkinId)
+        } else if (active.type === "GLOBAL" && active.skinId) {
+          setAppliedSkin(active.skinId)
         }
       } else if (mine) {
         setAppliedSkin("player-custom")
@@ -214,8 +214,8 @@ export function useLauncherState() {
    * Upload and link a player custom skin with safe replacement
    */
   const handleUploadSkin = useCallback(
-    async (file: File, model?: "CLASSIC" | "SLIM"): Promise<PlayerSkin> => {
-      const uploaded = await uploadPlayerSkin(file, model)
+    async (file: File): Promise<PlayerSkin> => {
+      const uploaded = await uploadPlayerSkin(file)
       setPlayerSkin(uploaded)
       setAppliedSkin("player-custom")
       return uploaded
