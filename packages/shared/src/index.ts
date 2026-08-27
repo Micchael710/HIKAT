@@ -493,20 +493,87 @@ export const GAME_CATEGORY_DEFAULT_POLICIES: Record<
   SCRIPT: "NO_MODIFICABLE",
 }
 
+import { decode as decodePng } from "fast-png"
+
 /**
- * Validates PNG buffer header magic bytes and IHDR dimensions for Minecraft skins.
- * Supported standard Minecraft skins: strict 64x64 or 64x32 dimensions.
+ * Result of inspecting a Minecraft skin texture PNG.
  */
-export function validateMinecraftSkinTexture(
+export interface MinecraftSkinInspectionResult {
+  valid: boolean
+  width?: number
+  height?: number
+  model?: "CLASSIC" | "SLIM"
+  error?: string
+  reason?: string
+}
+
+function hasAnyTransparencyInBox(
+  data: ArrayLike<number>,
+  width: number,
+  channels: number,
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
+): boolean {
+  if (channels < 4) return false
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w; x++) {
+      const idx = (y * width + x) * channels
+      const alpha = data[idx + 3]
+      if (alpha !== 255) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function isBoxSolidColor(
+  data: ArrayLike<number>,
+  width: number,
+  channels: number,
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
+  targetR: number,
+  targetG: number,
+  targetB: number,
+): boolean {
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w; x++) {
+      const idx = (y * width + x) * channels
+      const r = data[idx]
+      const g = data[idx + 1]
+      const b = data[idx + 2]
+      const a = channels >= 4 ? data[idx + 3] : 255
+      if (r !== targetR || g !== targetG || b !== targetB || a !== 255) {
+        return false
+      }
+    }
+  }
+  return true
+}
+
+/**
+ * Inspects a Minecraft skin texture PNG buffer.
+ * Replicates skinview-utils / skinview3d inferModelType() logic:
+ * - Checks PNG signature and IHDR dimensions (64x64 or 64x32).
+ * - 64x32 skins are legacy CLASSIC (Steve).
+ * - 64x64 skins: checks the 4 indicator boxes (50,16,2,4), (54,20,2,12), (42,48,2,4), (46,52,2,12):
+ *   - Any non-255 alpha (transparency) in any box -> SLIM
+ *   - ALL 4 boxes solid black (0,0,0,255) -> SLIM
+ *   - ALL 4 boxes solid white (255,255,255,255) -> SLIM
+ *   - Otherwise -> CLASSIC
+ */
+export function inspectMinecraftSkinTexture(
   buffer: ArrayBuffer | Uint8Array,
-): { valid: boolean; width?: number; height?: number; error?: string; reason?: string } {
+): MinecraftSkinInspectionResult {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
   if (bytes.length < 24) {
-    return {
-      valid: false,
-      error: "El archivo de skin es demasiado pequeño o está incompleto.",
-      reason: "El archivo de skin es demasiado pequeño o está incompleto.",
-    }
+    const msg = "El archivo de skin es demasiado pequeño o está incompleto."
+    return { valid: false, error: msg, reason: msg }
   }
 
   // PNG Magic Bytes: 89 50 4E 47 0D 0A 1A 0A
@@ -520,33 +587,81 @@ export function validateMinecraftSkinTexture(
     bytes[6] !== 0x1a ||
     bytes[7] !== 0x0a
   ) {
-    return {
-      valid: false,
-      error: "El archivo no es una imagen PNG válida.",
-      reason: "El archivo no es una imagen PNG válida.",
-    }
+    const msg = "El archivo no es una imagen PNG válida."
+    return { valid: false, error: msg, reason: msg }
   }
 
-  // Read IHDR Width (bytes 16-19) and Height (bytes 20-23) in big-endian
+  // Read IHDR dimensions in big-endian
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const width = view.getUint32(16, false)
   const height = view.getUint32(20, false)
 
-  // Minecraft standard dimensions: strictly 64x64 (modern) or 64x32 (classic)
   const validDimensions = width === 64 && (height === 64 || height === 32)
-
   if (!validDimensions) {
     const msg = `Dimensiones de skin inválidas (${width}x${height}). Se requiere PNG de 64x64 o 64x32.`
-    return {
-      valid: false,
-      width,
-      height,
-      error: msg,
-      reason: msg,
-    }
+    return { valid: false, width, height, error: msg, reason: msg }
   }
 
-  return { valid: true, width, height }
+  // 64x32 legacy skins are always CLASSIC
+  if (height === 32) {
+    return { valid: true, width, height, model: "CLASSIC" }
+  }
+
+  // Decode PNG image pixels for 64x64 textures
+  try {
+    const decoded = decodePng(bytes)
+    const { data, channels, width: imgW, height: imgH } = decoded
+    if (imgW !== 64 || imgH !== 64 || !data || data.length === 0) {
+      const msg = "Error al decodificar la textura de la skin."
+      return { valid: false, error: msg, reason: msg }
+    }
+
+    const hasAnyTransparency =
+      hasAnyTransparencyInBox(data, 64, channels, 50, 16, 2, 4) ||
+      hasAnyTransparencyInBox(data, 64, channels, 54, 20, 2, 12) ||
+      hasAnyTransparencyInBox(data, 64, channels, 42, 48, 2, 4) ||
+      hasAnyTransparencyInBox(data, 64, channels, 46, 52, 2, 12)
+
+    const allSolidBlack =
+      isBoxSolidColor(data, 64, channels, 50, 16, 2, 4, 0, 0, 0) &&
+      isBoxSolidColor(data, 64, channels, 54, 20, 2, 12, 0, 0, 0) &&
+      isBoxSolidColor(data, 64, channels, 42, 48, 2, 4, 0, 0, 0) &&
+      isBoxSolidColor(data, 64, channels, 46, 52, 2, 12, 0, 0, 0)
+
+    const allSolidWhite =
+      isBoxSolidColor(data, 64, channels, 50, 16, 2, 4, 255, 255, 255) &&
+      isBoxSolidColor(data, 64, channels, 54, 20, 2, 12, 255, 255, 255) &&
+      isBoxSolidColor(data, 64, channels, 42, 48, 2, 4, 255, 255, 255) &&
+      isBoxSolidColor(data, 64, channels, 46, 52, 2, 12, 255, 255, 255)
+
+    const isSlim = hasAnyTransparency || allSolidBlack || allSolidWhite
+    return {
+      valid: true,
+      width: 64,
+      height: 64,
+      model: isSlim ? "SLIM" : "CLASSIC",
+    }
+  } catch (err: any) {
+    const msg = err?.message || "No se pudo leer la textura de la skin."
+    return { valid: false, error: msg, reason: msg }
+  }
+}
+
+/**
+ * Validates PNG buffer header magic bytes and IHDR dimensions for Minecraft skins.
+ * Supported standard Minecraft skins: strict 64x64 or 64x32 dimensions.
+ */
+export function validateMinecraftSkinTexture(
+  buffer: ArrayBuffer | Uint8Array,
+): { valid: boolean; width?: number; height?: number; error?: string; reason?: string } {
+  const res = inspectMinecraftSkinTexture(buffer)
+  return {
+    valid: res.valid,
+    width: res.width,
+    height: res.height,
+    error: res.error,
+    reason: res.reason,
+  }
 }
 
 
@@ -918,28 +1033,169 @@ export function serializeServerProperties(
   return newLines.join("\n")
 }
 
-export const SERVER_AUTOMATION_ACTIONS = ["BACKUP", "RESTART", "START", "STOP", "COMMAND"] as const
+export const ALLOWED_SERVER_TASK_TEMPLATES = [
+  "AUTO_STOP",
+  "AUTO_START",
+  "AUTO_RESTART",
+  "AUTO_BACKUP",
+  "RUN_COMMAND",
+  "BACKUP_AND_RESTART",
+  "BACKUP_AND_STOP",
+  "WARN_AND_RESTART",
+  "WARN_AND_STOP",
+  "SAVE_AND_BACKUP",
+  "CUSTOM",
+] as const
+export type ServerTaskTemplate = typeof ALLOWED_SERVER_TASK_TEMPLATES[number]
+
+export const SERVER_AUTOMATION_ACTIONS = [
+  "BACKUP",
+  "RESTART",
+  "START",
+  "STOP",
+  "COMMAND",
+] as const
 export type ServerAutomationAction = typeof SERVER_AUTOMATION_ACTIONS[number]
 
-export const SERVER_AUTOMATION_FREQUENCIES = ["DAILY", "WEEKLY", "SELECTED_DAYS"] as const
-export type ServerAutomationFrequency = typeof SERVER_AUTOMATION_FREQUENCIES[number]
+export const SERVER_AUTOMATION_FREQUENCIES = [
+  "DAILY",
+  "WEEKLY",
+  "SELECTED_DAYS",
+  "INTERVAL",
+] as const
+export type ServerAutomationFrequency =
+  typeof SERVER_AUTOMATION_FREQUENCIES[number]
+
+export const DEFAULT_SERVER_TIMEZONE = "America/Santo_Domingo"
+
+export interface ServerTaskTemplateConfig {
+  template: ServerTaskTemplate
+  label: string
+  description: string
+  defaultName: string
+  onlyWhenOnline: boolean
+  requiresCommand?: boolean
+  requiresDelay?: boolean
+  defaultDelaySeconds?: number
+}
+
+export const SERVER_TASK_TEMPLATE_DEFS: Record<
+  ServerTaskTemplate,
+  ServerTaskTemplateConfig
+> = {
+  AUTO_STOP: {
+    template: "AUTO_STOP",
+    label: "Apagado automático",
+    description: "Detiene el servidor de forma segura a la hora programada.",
+    defaultName: "Apagado nocturno",
+    onlyWhenOnline: true,
+  },
+  AUTO_START: {
+    template: "AUTO_START",
+    label: "Encendido automático",
+    description: "Inicia el servidor automáticamente si se encuentra apagado.",
+    defaultName: "Encendido matutino",
+    onlyWhenOnline: false,
+  },
+  AUTO_RESTART: {
+    template: "AUTO_RESTART",
+    label: "Reinicio programado",
+    description: "Reinicia el servidor en el horario especificado.",
+    defaultName: "Reinicio programado",
+    onlyWhenOnline: true,
+  },
+  AUTO_BACKUP: {
+    template: "AUTO_BACKUP",
+    label: "Backup automático",
+    description: "Genera una copia de seguridad periódica.",
+    defaultName: "Backup automático",
+    onlyWhenOnline: true,
+  },
+  RUN_COMMAND: {
+    template: "RUN_COMMAND",
+    label: "Ejecutar comando",
+    description: "Envía un comando de Minecraft a la consola del servidor.",
+    defaultName: "Comando programado",
+    onlyWhenOnline: true,
+    requiresCommand: true,
+  },
+  BACKUP_AND_RESTART: {
+    template: "BACKUP_AND_RESTART",
+    label: "Backup antes de reiniciar",
+    description: "Crea una copia de seguridad y tras una breve espera reinicia el servidor.",
+    defaultName: "Backup y reinicio seguro",
+    onlyWhenOnline: true,
+    requiresDelay: true,
+    defaultDelaySeconds: 60,
+  },
+  BACKUP_AND_STOP: {
+    template: "BACKUP_AND_STOP",
+    label: "Backup antes de apagar",
+    description: "Crea una copia de seguridad y tras una breve espera detiene el servidor.",
+    defaultName: "Backup y apagado seguro",
+    onlyWhenOnline: true,
+    requiresDelay: true,
+    defaultDelaySeconds: 60,
+  },
+  WARN_AND_RESTART: {
+    template: "WARN_AND_RESTART",
+    label: "Avisar y reiniciar",
+    description: "Envía un aviso en el chat a los jugadores y reinicia tras el tiempo de espera.",
+    defaultName: "Avisar y reiniciar",
+    onlyWhenOnline: true,
+    requiresCommand: true,
+    requiresDelay: true,
+    defaultDelaySeconds: 300,
+  },
+  WARN_AND_STOP: {
+    template: "WARN_AND_STOP",
+    label: "Avisar y apagar",
+    description: "Envía un aviso en el chat a los jugadores y apaga tras el tiempo de espera.",
+    defaultName: "Avisar y apagar",
+    onlyWhenOnline: true,
+    requiresCommand: true,
+    requiresDelay: true,
+    defaultDelaySeconds: 300,
+  },
+  SAVE_AND_BACKUP: {
+    template: "SAVE_AND_BACKUP",
+    label: "Guardar mundo + crear backup",
+    description: "Fuerza el guardado del mundo en disco (save-all flush) y crea la copia de seguridad.",
+    defaultName: "Guardar mundo y backup",
+    onlyWhenOnline: true,
+    requiresDelay: true,
+    defaultDelaySeconds: 10,
+  },
+  CUSTOM: {
+    template: "CUSTOM",
+    label: "Task personalizada",
+    description: "Configuración personalizada para administradores avanzados.",
+    defaultName: "Task personalizada",
+    onlyWhenOnline: true,
+    requiresCommand: false,
+  },
+}
 
 export interface ServerAutomationModel {
   name: string
-  action: ServerAutomationAction
+  action?: ServerAutomationAction
+  template?: ServerTaskTemplate
   frequency: ServerAutomationFrequency
-  time: string // "HH:mm" e.g. "04:00"
+  time?: string | null // "HH:mm" e.g. "04:00"
+  intervalHours?: number | null // e.g. 1, 2, 4, 6, 8, 12
   weekday?: number | null // 0-6 (0=Sunday, 1=Monday... 6=Saturday)
   weekdays?: number[] | null
   command?: string | null
+  delaySeconds?: number | null
   enabled: boolean
 }
 
 export function convertAutomationToPterodactylCron(
   frequency: ServerAutomationFrequency,
-  time: string,
+  time?: string | null,
   weekday?: number | null,
   weekdays?: number[] | null,
+  intervalHours?: number | null,
 ): {
   minute: string
   hour: string
@@ -947,16 +1203,31 @@ export function convertAutomationToPterodactylCron(
   month: string
   day_of_week: string
 } {
+  if (frequency === "INTERVAL") {
+    const rawInterval = Number(intervalHours) || 6
+    const safeInterval = Math.max(1, Math.min(24, rawInterval))
+    const hour = safeInterval === 1 ? "*" : `*/${safeInterval}`
+    return {
+      minute: "0",
+      hour,
+      day_of_month: "*",
+      month: "*",
+      day_of_week: "*",
+    }
+  }
+
   const [hStr, mStr] = (time || "04:00").split(":")
-  const hour = String(parseInt(hStr || "4", 10) || 0).padStart(2, "0")
-  const minute = String(parseInt(mStr || "0", 10) || 0).padStart(2, "0")
+  const hour = hStr || "04"
+  const minute = mStr || "00"
 
   let dayOfWeek = "*"
   if (frequency === "WEEKLY") {
     const w = weekday !== undefined && weekday !== null ? weekday : 1
     dayOfWeek = String(Math.max(0, Math.min(6, w)))
   } else if (frequency === "SELECTED_DAYS" && weekdays && weekdays.length > 0) {
-    const safeDays = [...new Set(weekdays.map((d) => Math.max(0, Math.min(6, d))))].sort()
+    const safeDays = [
+      ...new Set(weekdays.map((d) => Math.max(0, Math.min(6, d)))),
+    ].sort((a, b) => a - b)
     dayOfWeek = safeDays.join(",")
   }
 
@@ -967,6 +1238,70 @@ export function convertAutomationToPterodactylCron(
     month: "*",
     day_of_week: dayOfWeek,
   }
+}
+
+const WEEKDAY_NAMES: Record<number, string> = {
+  0: "Domingo",
+  1: "Lunes",
+  2: "Martes",
+  3: "Miércoles",
+  4: "Jueves",
+  5: "Viernes",
+  6: "Sábado",
+}
+
+function format12Hour(timeStr?: string | null): string {
+  if (!timeStr) return "4:00 AM"
+  const [hStr, mStr] = timeStr.split(":")
+  const h = parseInt(hStr || "4", 10) || 0
+  const m = parseInt(mStr || "0", 10) || 0
+  const period = h >= 12 ? "PM" : "AM"
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  const mFmt = String(m).padStart(2, "0")
+  return `${h12}:${mFmt} ${period}`
+}
+
+/**
+ * Formats a schedule model into human-friendly Spanish text.
+ */
+export function formatScheduleHumanDescription(params: {
+  frequency: ServerAutomationFrequency
+  time?: string | null
+  weekday?: number | null
+  weekdays?: number[] | null
+  intervalHours?: number | null
+}): string {
+  const { frequency, time, weekday, weekdays, intervalHours } = params
+
+  if (frequency === "INTERVAL") {
+    const iv = Number(intervalHours) || 6
+    if (iv === 1) return "Cada hora"
+    return `Cada ${iv} horas`
+  }
+
+  const timeFmt = format12Hour(time)
+
+  if (frequency === "DAILY") {
+    return `Todos los días · ${timeFmt}`
+  }
+
+  if (frequency === "WEEKLY") {
+    const dayName = WEEKDAY_NAMES[weekday ?? 1] || "Lunes"
+    return `Cada ${dayName.toLowerCase()} · ${timeFmt}`
+  }
+
+  if (frequency === "SELECTED_DAYS" && weekdays && weekdays.length > 0) {
+    const dayNames = weekdays
+      .map((d) => WEEKDAY_NAMES[d])
+      .filter((d): d is string => Boolean(d))
+    if (dayNames.length === 1 && dayNames[0]) {
+      return `Cada ${dayNames[0].toLowerCase()} · ${timeFmt}`
+    }
+    const last = dayNames.pop()
+    return `${dayNames.join(", ")} y ${last} · ${timeFmt}`
+  }
+
+  return `Todos los días · ${timeFmt}`
 }
 
 export function mapPterodactylActivityEvent(event: string | null | undefined): {

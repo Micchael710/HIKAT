@@ -9,6 +9,7 @@ import type {
   ServerFileRoot,
   ServerAutomationAction,
   ServerAutomationFrequency,
+  ServerTaskTemplate,
 } from "@hikat/shared"
 
 export type ServerStatusGql = ServerStatus
@@ -20,6 +21,8 @@ export type ServerFileRootGql = ServerFileRoot
 export type ServerAutomationActionGql = ServerAutomationAction
 
 export type ServerAutomationFrequencyGql = ServerAutomationFrequency
+
+export type ServerTaskTemplateGql = ServerTaskTemplate
 
 export interface ServerResourcesGql {
   status: ServerStatusGql
@@ -41,21 +44,22 @@ export interface ServerPowerActionResultGql {
   message?: string | null
 }
 
+export interface ServerConsoleTicketGql {
+  ticket: string
+  expiresAt: string
+}
+
 export interface ServerCommandResultGql {
   success: boolean
   message?: string | null
 }
 
-export interface ServerConsoleTicketPayloadGql {
-  ticket: string
-  expiresAt: string
-}
-
 export interface ServerActivityItemGql {
   id: string
-  description: string
   eventType: string
+  description: string
   timestamp: string
+  metadata?: Record<string, unknown> | null
 }
 
 export interface ServerBackupItemGql {
@@ -100,26 +104,36 @@ export interface ServerAutomationItemGql {
   id: string
   name: string
   action: ServerAutomationActionGql
+  template?: ServerTaskTemplateGql | null
   frequency: ServerAutomationFrequencyGql
   time: string
+  intervalHours?: number | null
   weekday?: number | null
   weekdays?: number[] | null
   command?: string | null
+  delaySeconds?: number | null
+  message?: string | null
+  humanSchedule?: string | null
   enabled: boolean
   isProcessing: boolean
   isAdvanced: boolean
+  isManaged: boolean
   lastRunAt?: string | null
   nextRunAt?: string | null
 }
 
 export interface ServerAutomationInputGql {
   name: string
-  action: ServerAutomationActionGql
+  action?: ServerAutomationActionGql | null
+  template?: ServerTaskTemplateGql | null
   frequency: ServerAutomationFrequencyGql
-  time: string
+  time?: string | null
+  intervalHours?: number | null
   weekday?: number | null
   weekdays?: number[] | null
   command?: string | null
+  delaySeconds?: number | null
+  message?: string | null
   enabled?: boolean | null
 }
 
@@ -429,13 +443,29 @@ export interface AdminPlayerSkinConnectionGql {
 
 export interface SetPlayerSkinInputGql {
   mediaId: string
+  model?: SkinModelGql | null
+}
 
+export type ActiveSkinTypeGql = "CUSTOM" | "GLOBAL"
+
+export interface ActiveSkinSelectionGql {
+  type: ActiveSkinTypeGql
+  skinId?: string | null
+  skin?: SkinGql | null
+  playerSkin?: PlayerSkinGql | null
   model: SkinModelGql
+  imageUrl: string
+  name?: string | null
+  updatedAt: string
+}
+
+export interface SetActiveSkinInputGql {
+  type: ActiveSkinTypeGql
+  skinId?: string | null
 }
 
 export interface UpdateAdminPlayerSkinInputGql {
   model?: SkinModelGql | null
-
   mediaId?: string | null
 }
 

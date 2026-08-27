@@ -386,47 +386,35 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       render(<ServerOverviewView theme="dark" />)
     })
 
-    // 1. Initial overview tab is rendered with Rx / Tx
-    expect(screen.getByText("Tráfico recibido (RX)")).toBeDefined()
-    expect(screen.getByText("Tráfico enviado (TX)")).toBeDefined()
-    expect(screen.getByText("Actividad reciente")).toBeDefined()
+    // 1. Initial General tab is rendered with live console and clean metrics (CPU, RAM, Disco)
+    expect(screen.getByText("CPU")).toBeDefined()
+    expect(screen.getByText("Memoria RAM")).toBeDefined()
+    expect(screen.getByText("Disco")).toBeDefined()
+    expect(screen.getByText("Consola en vivo")).toBeDefined()
 
-    // 2. Click "Mundo"
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Mundo/i }))
-    })
-    expect(screen.getByText("Mundo activo detectado")).toBeDefined()
-
-    // 3. Click "Copias"
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Copias/i }))
-    })
-    expect(screen.getByText(/Copias de seguridad/i)).toBeDefined()
-    expect(screen.getByText("Crear copia ahora")).toBeDefined()
-
-    // 4. Click "Automatizaciones"
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Automatizaciones/i }))
-    })
-    expect(screen.getByText(/Automatizaciones programadas/i)).toBeDefined()
-    expect(screen.getByText("Nueva automatización")).toBeDefined()
-
-    // 5. Click "Configuración"
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Configuración/i }))
-    })
-    expect(screen.getByText("Configuración de Minecraft")).toBeDefined()
-    expect(screen.getByText("Dificultad del juego:")).toBeDefined()
-
-    // 6. Click "Archivos"
+    // 2. Click "Archivos"
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Archivos/i }))
     })
     expect(screen.getByText("Nueva carpeta")).toBeDefined()
     expect(screen.getByText("Subir archivo")).toBeDefined()
+
+    // 3. Click "Backups"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Backups/i }))
+    })
+    expect(screen.getByText(/Copias de seguridad/i)).toBeDefined()
+    expect(screen.getByText("Crear copia ahora")).toBeDefined()
+
+    // 4. Click "Tasks"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Tasks/i }))
+    })
+    expect(screen.getByText(/Tasks Programadas/i)).toBeDefined()
+    expect(screen.getByText("Nueva Task")).toBeDefined()
   })
 
-  it("Shard 07A: Disconnected UI renders top-right badge, full overview, and all 7 subtabs without full-page error card", async () => {
+  it("Phase 07: Disconnected UI renders top-right badge and exactly 5 subtabs without crash", async () => {
     vi.spyOn(serverApi, "getServerStatus").mockRejectedValue(new Error("Connection refused to Pterodactyl"))
 
     await act(async () => {
@@ -434,20 +422,17 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Disconnected infrastructure badge top-right is displayed
-    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
+    expect(screen.getByText("Servidor no disponible")).toBeDefined()
 
-    // Servidor overview heading & status card are displayed with '—' values (NO full page error card!)
+    // Servidor overview heading is displayed
     expect(screen.getByText("Servidor Principal")).toBeDefined()
-    expect(screen.getByText("Disponible cuando la infraestructura esté conectada.")).toBeDefined()
 
-    // All 7 sub-tabs switcher buttons remain active and reachable!
-    expect(screen.getByRole("button", { name: /Resumen/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Consola/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Mundo/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Copias/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Automatizaciones/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Configuración/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Archivos/i })).toBeDefined()
+    // Exactly 5 sub-tabs switcher buttons remain active and reachable!
+    expect(screen.getByRole("button", { name: "General" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Consola" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Archivos" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Backups" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Tasks" })).toBeDefined()
   })
 
   it("Shard 07D Test 1: Infra transitions to DISCONNECTED if polling fails after prior success and disables power actions", async () => {
@@ -481,7 +466,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Badge updates to DISCONNECTED
-    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
+    expect(screen.getByText("Servidor no disponible")).toBeDefined()
 
     // Power buttons are disabled
     const startBtns = screen.getAllByRole("button", { name: /Iniciar/i })
@@ -511,7 +496,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Initially DISCONNECTED
-    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
+    expect(screen.getByText("Servidor no disponible")).toBeDefined()
 
     // Click Reintentar -> succeeds
     await act(async () => {

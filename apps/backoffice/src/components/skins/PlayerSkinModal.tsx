@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react"
 import type { ThemeMode, AdminPlayerSkin, SkinModel } from "../../types"
-import { validateMinecraftSkinTexture } from "@hikat/shared"
+import { inspectMinecraftSkinTexture } from "@hikat/shared"
 import { skinsApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
 import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
@@ -51,13 +51,16 @@ export default function PlayerSkinModal({
 
     try {
       const buffer = await file.arrayBuffer()
-      const validation = validateMinecraftSkinTexture(buffer)
-      if (!validation.valid) {
-        setFileError(validation.error || "Dimensiones de skin no válidas.")
+      const inspection = inspectMinecraftSkinTexture(buffer)
+      if (!inspection.valid) {
+        setFileError(inspection.error || "Dimensiones de skin no válidas.")
         return
       }
 
       setSelectedFile(file)
+      if (inspection.model) {
+        setModel(inspection.model)
+      }
       const url = URL.createObjectURL(file)
       setPreviewUrl(url)
     } catch {
@@ -274,7 +277,7 @@ export default function PlayerSkinModal({
                 </div>
               </div>
 
-              {/* Model Selection */}
+              {/* Auto-detected Model Badge */}
               <div>
                 <label
                   style={{
@@ -285,83 +288,23 @@ export default function PlayerSkinModal({
                     marginBottom: "6px",
                   }}
                 >
-                  Modelo de brazos
+                  Modelo detectado
                 </label>
                 <div
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "10px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    backgroundColor: isDark ? "rgba(62, 196, 192, 0.15)" : "#e6fffa",
+                    color: isDark ? "#3ec4c0" : "#0c6e6b",
+                    fontSize: "13px",
+                    fontWeight: "600",
                   }}
                 >
-                  <button
-                    type="button"
-                    disabled={isViewOnly}
-                    onClick={() => setModel("CLASSIC")}
-                    style={{
-                      padding: "10px",
-                      borderRadius: "8px",
-                      border: `1px solid ${
-                        model === "CLASSIC"
-                          ? "#6366f1"
-                          : isDark
-                            ? "#334155"
-                            : "#cbd5e1"
-                      }`,
-                      backgroundColor:
-                        model === "CLASSIC"
-                          ? isDark
-                            ? "rgba(99, 102, 241, 0.2)"
-                            : "#eef2ff"
-                          : "transparent",
-                      color:
-                        model === "CLASSIC"
-                          ? "#6366f1"
-                          : isDark
-                            ? "#94a3b8"
-                            : "#64748b",
-                      fontSize: "13px",
-                      fontWeight: "600",
-                      cursor: isViewOnly ? "default" : "pointer",
-                      textAlign: "center",
-                    }}
-                  >
-                    Clásico (4px)
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isViewOnly}
-                    onClick={() => setModel("SLIM")}
-                    style={{
-                      padding: "10px",
-                      borderRadius: "8px",
-                      border: `1px solid ${
-                        model === "SLIM"
-                          ? "#6366f1"
-                          : isDark
-                            ? "#334155"
-                            : "#cbd5e1"
-                      }`,
-                      backgroundColor:
-                        model === "SLIM"
-                          ? isDark
-                            ? "rgba(99, 102, 241, 0.2)"
-                            : "#eef2ff"
-                          : "transparent",
-                      color:
-                        model === "SLIM"
-                          ? "#6366f1"
-                          : isDark
-                            ? "#94a3b8"
-                            : "#64748b",
-                      fontSize: "13px",
-                      fontWeight: "600",
-                      cursor: isViewOnly ? "default" : "pointer",
-                      textAlign: "center",
-                    }}
-                  >
-                    Delgado (3px / Alex)
-                  </button>
+                  <span>{model === "SLIM" ? "Alex / Slim (3px)" : "Steve / Clásico (4px)"}</span>
+                  <span style={{ fontSize: "11px", opacity: 0.8 }}>(automático)</span>
                 </div>
               </div>
 

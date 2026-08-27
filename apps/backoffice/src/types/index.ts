@@ -360,32 +360,52 @@ export interface UpdateMinecraftServerSettingsInput {
 }
 
 export type ServerAutomationAction = "BACKUP" | "RESTART" | "START" | "STOP" | "COMMAND"
-export type ServerAutomationFrequency = "DAILY" | "WEEKLY" | "SELECTED_DAYS"
+export type ServerAutomationFrequency = "DAILY" | "WEEKLY" | "SELECTED_DAYS" | "INTERVAL"
+export type ServerTaskTemplate =
+  | "AUTO_STOP"
+  | "AUTO_START"
+  | "AUTO_RESTART"
+  | "AUTO_BACKUP"
+  | "RUN_COMMAND"
+  | "BACKUP_AND_RESTART"
+  | "BACKUP_AND_STOP"
+  | "WARN_AND_RESTART"
+  | "WARN_AND_STOP"
+  | "SAVE_AND_BACKUP"
+  | "CUSTOM"
 
 export interface ServerAutomationItem {
   id: string
   name: string
+  template?: ServerTaskTemplate | null
   action: ServerAutomationAction
   frequency: ServerAutomationFrequency
   time: string
+  intervalHours?: number | null
   weekday?: number | null
   weekdays?: number[] | null
   command?: string | null
+  delaySeconds?: number | null
+  humanSchedule?: string | null
   enabled: boolean
   isProcessing: boolean
   isAdvanced: boolean
+  isManaged?: boolean
   lastRunAt?: string | null
   nextRunAt?: string | null
 }
 
 export interface ServerAutomationInput {
   name: string
-  action: ServerAutomationAction
+  template?: ServerTaskTemplate | null
+  action?: ServerAutomationAction | null
   frequency: ServerAutomationFrequency
-  time: string
+  time?: string | null
+  intervalHours?: number | null
   weekday?: number | null
   weekdays?: number[] | null
   command?: string | null
+  delaySeconds?: number | null
   enabled?: boolean
 }
 

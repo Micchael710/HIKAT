@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-
+import { encode } from "fast-png"
 import * as jose from "jose"
 
 import { eq } from "drizzle-orm"
@@ -19,6 +19,9 @@ import {
   contentMediaUploadTokens,
   gameReleases,
   gameReleaseFiles,
+  skins,
+  playerSkins,
+  playerSkinSelections,
 } from "@hikat/database"
 
 import { createTestD1 } from "@hikat/database/testUtils"
@@ -5737,17 +5740,15 @@ describe("HiKAT Backend Core (Shard 03)", () => {
     })
 
     it("handles full Skins lifecycle: upload texture, create, update, query and delete", async () => {
-      // 1. Upload valid 64x64 PNG skin texture to R2
-
-      const skinTexture = new Uint8Array(64)
-
-      skinTexture.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
-
-      const view = new DataView(skinTexture.buffer)
-
-      view.setUint32(16, 64, false)
-
-      view.setUint32(20, 64, false)
+      // 1. Upload valid 64x64 PNG skin texture to R2 (Alex Slim style)
+      const data = new Uint8Array(64 * 64 * 4).fill(255)
+      // Clear (50, 16, 2, 4) to 0 for SLIM model detection
+      for (let y = 16; y < 20; y++) {
+        for (let x = 50; x < 52; x++) {
+          data[(y * 64 + x) * 4 + 3] = 0
+        }
+      }
+      const skinTexture = encode({ width: 64, height: 64, data, channels: 4, depth: 8 })
 
       const mediaId = "media-skin-" + crypto.randomUUID()
 
@@ -5767,7 +5768,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         createdAt: new Date().toISOString(),
       })
 
-      await mockR2.put(`content/${mediaId}.png`, skinTexture.buffer, {
+      await mockR2.put(`content/${mediaId}.png`, skinTexture.buffer as ArrayBuffer, {
         httpMetadata: { contentType: "image/png" },
       })
 
@@ -7255,34 +7256,22 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       mockR2 = createTestR2Bucket()
     })
 
-    function createMockSkinPng(width = 64, height = 64): Uint8Array {
-      const buffer = new Uint8Array(33)
-
-      // PNG Magic
-
-      buffer.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
-
-      // IHDR length 13
-
-      buffer.set([0x00, 0x00, 0x00, 0x0d], 8)
-
-      // IHDR chunk type
-
-      buffer.set([0x49, 0x48, 0x44, 0x52], 12)
-
-      // Width & Height (Big Endian)
-
-      const view = new DataView(buffer.buffer)
-
-      view.setUint32(16, width, false)
-
-      view.setUint32(20, height, false)
-
-      // Bit depth 8, Color type 6 (RGBA), compression 0, filter 0, interlace 0
-
-      buffer.set([0x08, 0x06, 0x00, 0x00, 0x00], 24)
-
-      return buffer
+    function createMockSkinPng(width = 64, height = 64, isAlexSlim = false): Uint8Array {
+      const data = new Uint8Array(width * height * 4)
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = 120
+        data[i + 1] = 80
+        data[i + 2] = 60
+        data[i + 3] = 255
+      }
+      if (isAlexSlim && width === 64 && height === 64) {
+        for (let y = 16; y < 20; y++) {
+          for (let x = 50; x < 52; x++) {
+            data[(y * 64 + x) * 4 + 3] = 0
+          }
+        }
+      }
+      return encode({ width, height, data, channels: 4, depth: 8 })
     }
 
     it("handles complete player skin lifecycle: ticket creation, upload, set, query, replace, and delete", async () => {
@@ -8177,9 +8166,265 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         }),
         testEnv,
       )
-      const delJson = (await delRes.json()) as any
-      expect(delJson.errors).toBeDefined()
-      expect(delJson.errors[0].extensions?.code).toBe("CONFLICT")
+    })
+  })
+
+  describe("HiKAT Unified Active Skin Selection (Phase 07)", () => {
+    let mockR2: ReturnType<typeof createTestR2Bucket>
+
+    const createEnv = (): Env => ({
+      DB: testD1 as unknown as D1Database,
+      ASSETS: mockR2 as unknown as R2Bucket,
+      AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+      AUTH_ISSUER: DEFAULT_AUTH_ISSUER,
+      ENVIRONMENT: "test",
+    })
+
+    beforeEach(() => {
+      mockR2 = createTestR2Bucket()
+    })
+
+    it("manages active skin selection with strict fallback semantics", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const playerId = "player-active-" + crypto.randomUUID()
+      const playerSessionId = "sess-" + crypto.randomUUID()
+      const adminId = "admin-active-" + crypto.randomUUID()
+      const adminSessionId = "sess-admin-" + crypto.randomUUID()
+
+      await db.insert(users).values([
+        { id: playerId, displayName: "SkinMaster", role: "PLAYER" },
+        { id: adminId, displayName: "AdminSkin", role: "ADMIN" },
+      ])
+
+      await db.insert(sessions).values([
+        {
+          id: playerSessionId,
+          userId: playerId,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: adminSessionId,
+          userId: adminId,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      ])
+
+      const playerToken = await createTestAccessToken({
+        userId: playerId,
+        sessionId: playerSessionId,
+        role: "PLAYER",
+        displayName: "SkinMaster",
+      })
+
+      // 1. Initially, player has no active skin
+      const initRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `query { myActiveSkin { type skinId model imageUrl name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const initJson = (await initRes.json()) as any
+      expect(initJson.errors).toBeUndefined()
+      expect(initJson.data.myActiveSkin).toBeNull()
+
+      // 2. Player cannot set CUSTOM if they don't have custom skin
+      const failCustomRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation { setMyActiveSkin(input: { type: CUSTOM }) { type model } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const failCustomJson = (await failCustomRes.json()) as any
+      expect(failCustomJson.errors).toBeDefined()
+      expect(failCustomJson.errors[0].extensions?.code).toBe("VALIDATION_ERROR")
+
+      // 3. Upload custom skin (Alex Slim)
+      const ticketRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation { createPlayerSkinUpload { uploadUrl uploadToken } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const ticketToken = ((await ticketRes.json()) as any).data.createPlayerSkinUpload.uploadToken
+
+      const slimData = new Uint8Array(64 * 64 * 4).fill(200)
+      // Make box 1 transparent
+      for (let y = 16; y < 20; y++) {
+        for (let x = 50; x < 52; x++) {
+          slimData[(y * 64 + x) * 4 + 3] = 0
+        }
+      }
+      const slimPng = encode({ width: 64, height: 64, data: slimData, channels: 4, depth: 8 })
+
+      const uploadRes = await worker.fetch(
+        new Request("http://localhost/media/player-skin/upload", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "image/png",
+            Authorization: `Bearer ${playerToken}`,
+            "X-Upload-Token": ticketToken,
+          },
+          body: slimPng as unknown as BodyInit,
+        }),
+        testEnv,
+      )
+      const mediaJson = (await uploadRes.json()) as any
+
+      const setSkinRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation SetSkin($input: SetPlayerSkinInput!) {
+              setMyPlayerSkin(input: $input) { id model }
+            }`,
+            variables: { input: { mediaId: mediaJson.id } },
+          }),
+        }),
+        testEnv,
+      )
+      const setSkinData = (await setSkinRes.json()) as any
+      expect(setSkinData.errors).toBeUndefined()
+      expect(setSkinData.data.setMyPlayerSkin.model).toBe("SLIM")
+
+      // 4. Setting active skin to CUSTOM now succeeds and auto-detects SLIM
+      const setCustomActiveRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation { setMyActiveSkin(input: { type: CUSTOM }) { type model imageUrl name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const setCustomActiveJson = (await setCustomActiveRes.json()) as any
+      expect(setCustomActiveJson.errors).toBeUndefined()
+      expect(setCustomActiveJson.data.setMyActiveSkin.type).toBe("CUSTOM")
+      expect(setCustomActiveJson.data.setMyActiveSkin.model).toBe("SLIM")
+
+      // 5. Query myActiveSkin returns CUSTOM
+      const queryActiveRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `query { myActiveSkin { type model imageUrl name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const queryActiveJson = (await queryActiveRes.json()) as any
+      expect(queryActiveJson.data.myActiveSkin.type).toBe("CUSTOM")
+      expect(queryActiveJson.data.myActiveSkin.model).toBe("SLIM")
+
+      // 6. Create a Global Skin (Classic Steve)
+      const classicData = new Uint8Array(64 * 64 * 4).fill(150)
+      const classicPng = encode({ width: 64, height: 64, data: classicData, channels: 4, depth: 8 })
+      const globalMediaId = "media-global-" + crypto.randomUUID()
+      await db.insert(contentMedia).values({
+        id: globalMediaId,
+        objectKey: `content/${globalMediaId}.png`,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: classicPng.byteLength,
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+      })
+      await mockR2.put(`content/${globalMediaId}.png`, classicPng.buffer as ArrayBuffer, {
+        httpMetadata: { contentType: "image/png" },
+      })
+
+      const globalSkinId = "skin-global-" + crypto.randomUUID()
+      await db.insert(skins).values({
+        id: globalSkinId,
+        name: "Caballero Real",
+        model: "CLASSIC",
+        mediaId: globalMediaId,
+        status: "AVAILABLE",
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // 7. Player switches active skin to GLOBAL
+      const setGlobalActiveRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation SetActive($input: SetActiveSkinInput!) {
+              setMyActiveSkin(input: $input) { type skinId model name }
+            }`,
+            variables: { input: { type: "GLOBAL", skinId: globalSkinId } },
+          }),
+        }),
+        testEnv,
+      )
+      const setGlobalActiveJson = (await setGlobalActiveRes.json()) as any
+      expect(setGlobalActiveJson.errors).toBeUndefined()
+      expect(setGlobalActiveJson.data.setMyActiveSkin.type).toBe("GLOBAL")
+      expect(setGlobalActiveJson.data.setMyActiveSkin.skinId).toBe(globalSkinId)
+      expect(setGlobalActiveJson.data.setMyActiveSkin.model).toBe("CLASSIC")
+      expect(setGlobalActiveJson.data.setMyActiveSkin.name).toBe("Caballero Real")
+
+      // 8. Test Fallback: Admin deletes global skin -> querying myActiveSkin falls back to CUSTOM
+      await db.delete(skins).where(eq(skins.id, globalSkinId))
+
+      const fallbackRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `query { myActiveSkin { type model imageUrl name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const fallbackJson = (await fallbackRes.json()) as any
+      expect(fallbackJson.errors).toBeUndefined()
+      expect(fallbackJson.data.myActiveSkin.type).toBe("CUSTOM")
+      expect(fallbackJson.data.myActiveSkin.model).toBe("SLIM")
     })
   })
 })

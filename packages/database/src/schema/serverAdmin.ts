@@ -65,6 +65,35 @@ export const serverOperationLocks = sqliteTable(
   },
 )
 
+export const serverTasks = sqliteTable(
+  "server_tasks",
+  {
+    id: text("id").primaryKey(),
+    scheduleId: text("schedule_id").notNull(),
+    template: text("template").notNull(),
+    name: text("name").notNull(),
+    frequency: text("frequency").notNull(),
+    cronMinute: text("cron_minute").notNull().default("0"),
+    cronHour: text("cron_hour").notNull().default("4"),
+    cronDayOfWeek: text("cron_day_of_week").notNull().default("*"),
+    time: text("time"),
+    intervalHours: integer("interval_hours"),
+    weekday: integer("weekday"),
+    weekdays: text("weekdays"), // JSON string
+    command: text("command"),
+    delaySeconds: integer("delay_seconds"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    templateVersion: integer("template_version").notNull().default(1),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("server_tasks_schedule_id_idx").on(table.scheduleId)],
+)
+
 export type ServerConsoleTicket = typeof serverConsoleTickets.$inferSelect
 export type NewServerConsoleTicket = typeof serverConsoleTickets.$inferInsert
 
@@ -76,4 +105,7 @@ export type NewServerCommandRateLimit = typeof serverCommandRateLimits.$inferIns
 
 export type ServerOperationLock = typeof serverOperationLocks.$inferSelect
 export type NewServerOperationLock = typeof serverOperationLocks.$inferInsert
+
+export type ServerTaskRecord = typeof serverTasks.$inferSelect
+export type NewServerTaskRecord = typeof serverTasks.$inferInsert
 

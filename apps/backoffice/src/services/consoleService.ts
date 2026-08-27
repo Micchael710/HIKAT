@@ -28,6 +28,33 @@ class ConsoleService {
   private shouldReconnect: boolean = false
   private reconnectTimer: any = null
   private retryCount: number = 0
+  private subscriberCount: number = 0
+  private recentLogs: ConsoleLogEntry[] = []
+
+  /**
+   * Reference-counted retention of the console WebSocket connection.
+   * Returns an unregister function.
+   */
+  public retain(): () => void {
+    this.subscriberCount++
+    if (this.subscriberCount === 1) {
+      this.connect()
+    }
+    return () => {
+      this.release()
+    }
+  }
+
+  public release(): void {
+    this.subscriberCount = Math.max(0, this.subscriberCount - 1)
+    if (this.subscriberCount === 0) {
+      this.disconnect()
+    }
+  }
+
+  public getRecentLogs(limit: number = 15): ConsoleLogEntry[] {
+    return this.recentLogs.slice(-limit)
+  }
 
   public async connect(): Promise<void> {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
@@ -59,7 +86,6 @@ class ConsoleService {
           if (refreshed) {
             ticketData = await serverApi.createServerConsoleTicket()
           } else {
-
             this.shouldReconnect = false
             this.notifyConnection(false)
             this.isConnecting = false
@@ -101,6 +127,10 @@ class ConsoleService {
               timestamp: data.timestamp || new Date().toISOString(),
               type: "stdout",
             }
+            this.recentLogs.push(entry)
+            if (this.recentLogs.length > 200) {
+              this.recentLogs.splice(0, this.recentLogs.length - 200)
+            }
             this.logListeners.forEach((listener) => listener(entry))
           } else if (data.type === "status" && data.status) {
             this.statusListeners.forEach((listener) => listener(data.status))
@@ -114,6 +144,10 @@ class ConsoleService {
               line: event.data,
               timestamp: new Date().toISOString(),
               type: "stdout",
+            }
+            this.recentLogs.push(entry)
+            if (this.recentLogs.length > 200) {
+              this.recentLogs.splice(0, this.recentLogs.length - 200)
             }
             this.logListeners.forEach((listener) => listener(entry))
           }
@@ -224,6 +258,5 @@ class ConsoleService {
     }
   }
 }
-
 
 export const consoleService = new ConsoleService()

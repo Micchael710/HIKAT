@@ -14,6 +14,8 @@ import { CANVAS_W, MIN_WINDOW_W, MIN_WINDOW_H, hexToRGB } from "../theme/tokens"
 import {
   fetchGlobalSkins,
   fetchMyPlayerSkin,
+  fetchMyActiveSkin,
+  setMyActiveSkin,
   uploadPlayerSkin,
   deleteMyPlayerSkin,
 } from "../services/skinService"
@@ -78,7 +80,7 @@ export function useLauncherState() {
   }, [])
 
   /**
-   * Refreshes the authenticated player's personal custom skin
+   * Refreshes the authenticated player's personal custom skin and active selection
    */
   const refreshPlayerSkin = useCallback(async () => {
     const token = authService.getStoredToken()
@@ -88,13 +90,44 @@ export function useLauncherState() {
     }
     try {
       setSkinsLoading(true)
-      const mine = await fetchMyPlayerSkin()
+      const [mine, active] = await Promise.all([
+        fetchMyPlayerSkin(),
+        fetchMyActiveSkin(),
+      ])
       setPlayerSkin(mine)
+      if (active) {
+        if (active.type === "CUSTOM") {
+          setAppliedSkin("player-custom")
+        } else if (active.type === "GLOBAL" && active.globalSkinId) {
+          setAppliedSkin(active.globalSkinId)
+        }
+      } else if (mine) {
+        setAppliedSkin("player-custom")
+      }
       setSkinsError(null)
     } catch (err: any) {
       setSkinsError(err?.message || "No se pudo sincronizar la skin del jugador.")
     } finally {
       setSkinsLoading(false)
+    }
+  }, [])
+
+  /**
+   * Applies and persists the active skin selection
+   */
+  const handleApplySkin = useCallback(async (skinId: string) => {
+    setAppliedSkin(skinId)
+    const token = authService.getStoredToken()
+    if (!token) return
+
+    try {
+      if (skinId === "player-custom") {
+        await setMyActiveSkin("CUSTOM")
+      } else if (skinId && skinId !== "none") {
+        await setMyActiveSkin("GLOBAL", skinId)
+      }
+    } catch {
+      // Background sync
     }
   }, [])
 
@@ -181,7 +214,7 @@ export function useLauncherState() {
    * Upload and link a player custom skin with safe replacement
    */
   const handleUploadSkin = useCallback(
-    async (file: File, model: "CLASSIC" | "SLIM"): Promise<PlayerSkin> => {
+    async (file: File, model?: "CLASSIC" | "SLIM"): Promise<PlayerSkin> => {
       const uploaded = await uploadPlayerSkin(file, model)
       setPlayerSkin(uploaded)
       setAppliedSkin("player-custom")
@@ -198,12 +231,12 @@ export function useLauncherState() {
     if (res.success) {
       setPlayerSkin(null)
       if (appliedSkin === "player-custom") {
-        setAppliedSkin(globalSkins[0]?.id || "none")
+        setAppliedSkin("none")
       }
       return true
     }
     return false
-  }, [appliedSkin, globalSkins])
+  }, [appliedSkin])
 
   /**
    * Handle user login success
@@ -240,7 +273,7 @@ export function useLauncherState() {
     theme,
     setTheme,
     appliedSkin,
-    setAppliedSkin,
+    setAppliedSkin: handleApplySkin,
     appliedCape,
     setAppliedCape,
     globalSkins,

@@ -119,6 +119,20 @@ export const serverTypeDefs = /* GraphQL */ `
     allowFlight: Boolean
   }
 
+  enum ServerTaskTemplate {
+    AUTO_STOP
+    AUTO_START
+    AUTO_RESTART
+    AUTO_BACKUP
+    RUN_COMMAND
+    BACKUP_AND_RESTART
+    BACKUP_AND_STOP
+    WARN_AND_RESTART
+    WARN_AND_STOP
+    SAVE_AND_BACKUP
+    CUSTOM
+  }
+
   enum ServerAutomationAction {
     BACKUP
     RESTART
@@ -131,32 +145,43 @@ export const serverTypeDefs = /* GraphQL */ `
     DAILY
     WEEKLY
     SELECTED_DAYS
+    INTERVAL
   }
 
   type ServerAutomationItem {
     id: ID!
     name: String!
     action: ServerAutomationAction!
+    template: ServerTaskTemplate
     frequency: ServerAutomationFrequency!
     time: String!
+    intervalHours: Int
     weekday: Int
     weekdays: [Int!]
     command: String
+    delaySeconds: Int
+    message: String
+    humanSchedule: String
     enabled: Boolean!
     isProcessing: Boolean!
     isAdvanced: Boolean!
+    isManaged: Boolean!
     lastRunAt: String
     nextRunAt: String
   }
 
   input ServerAutomationInput {
     name: String!
-    action: ServerAutomationAction!
+    action: ServerAutomationAction
+    template: ServerTaskTemplate
     frequency: ServerAutomationFrequency!
-    time: String!
+    time: String
+    intervalHours: Int
     weekday: Int
     weekdays: [Int!]
     command: String
+    delaySeconds: Int
+    message: String
     enabled: Boolean
   }
 

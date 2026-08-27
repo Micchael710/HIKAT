@@ -94,12 +94,39 @@ export const skinsTypeDefs = /* GraphQL */ `
 
   input SetPlayerSkinInput {
     mediaId: ID!
-    model: SkinModel!
+    model: SkinModel
   }
 
   input UpdateAdminPlayerSkinInput {
     model: SkinModel
     mediaId: ID
+  }
+
+  """
+  Active Skin Selection Type: CUSTOM or GLOBAL
+  """
+  enum ActiveSkinType {
+    CUSTOM
+    GLOBAL
+  }
+
+  """
+  Resolved active skin representation for the player
+  """
+  type ActiveSkinSelection {
+    type: ActiveSkinType!
+    skinId: ID
+    skin: Skin
+    playerSkin: PlayerSkin
+    model: SkinModel!
+    imageUrl: String!
+    name: String
+    updatedAt: DateTime!
+  }
+
+  input SetActiveSkinInput {
+    type: ActiveSkinType!
+    skinId: ID
   }
 
   extend type Query {
@@ -126,6 +153,11 @@ export const skinsTypeDefs = /* GraphQL */ `
     Personal custom skin of the currently authenticated player - requires auth
     """
     myPlayerSkin: PlayerSkin
+
+    """
+    Current active skin selection of the authenticated player - requires auth
+    """
+    myActiveSkin: ActiveSkinSelection
 
     """
     Administrative list of all player personal skins with optional search by player name - requires ADMIN role
@@ -172,6 +204,11 @@ export const skinsTypeDefs = /* GraphQL */ `
     Delete the current authenticated player's personal custom skin - requires auth
     """
     deleteMyPlayerSkin: Boolean!
+
+    """
+    Set the active skin for the authenticated player (CUSTOM or GLOBAL) - requires auth
+    """
+    setMyActiveSkin(input: SetActiveSkinInput!): ActiveSkinSelection!
 
     """
     Update a player's custom skin model or texture - requires ADMIN role

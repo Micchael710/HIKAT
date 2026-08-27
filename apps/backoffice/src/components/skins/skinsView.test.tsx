@@ -142,7 +142,7 @@ describe("Back Office Skins Components (Shard 06.5A)", () => {
 
     expect(screen.getByText("Nombre de la Skin")).toBeDefined()
 
-    expect(screen.getByText("Modelo de brazos")).toBeDefined()
+    expect(screen.getByText("Modelo detectado")).toBeDefined()
   })
 
   it("mounts and disposes 3D skin viewer cleanly", async () => {

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react"
 import type { ThemeMode, SkinItem, SkinModel, SkinStatus } from "../../types"
-import { validateMinecraftSkinTexture } from "@hikat/shared"
+import { inspectMinecraftSkinTexture } from "@hikat/shared"
 import { skinsApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
 import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
@@ -51,13 +51,16 @@ export default function SkinFormModal({
 
     try {
       const buffer = await file.arrayBuffer()
-      const validation = validateMinecraftSkinTexture(buffer)
-      if (!validation.valid) {
-        setFileError(validation.error || "Dimensiones de skin no válidas.")
+      const inspection = inspectMinecraftSkinTexture(buffer)
+      if (!inspection.valid) {
+        setFileError(inspection.error || "Dimensiones de skin no válidas.")
         return
       }
 
       setSelectedFile(file)
+      if (inspection.model) {
+        setModel(inspection.model)
+      }
       const url = URL.createObjectURL(file)
       setPreviewUrl(url)
 
@@ -328,7 +331,7 @@ export default function SkinFormModal({
                 )}
               </div>
 
-              {/* Model Selector */}
+              {/* Auto-detected Model Badge */}
               <div style={{ marginBottom: "18px" }}>
                 <label
                   style={{
@@ -339,60 +342,24 @@ export default function SkinFormModal({
                     marginBottom: "8px",
                   }}
                 >
-                  Modelo de brazos
+                  Modelo detectado
                 </label>
-                {isViewOnly ? (
-                  <span
-                    style={{
-                      display: "inline-block",
-                      padding: "4px 10px",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      fontWeight: "600",
-                      backgroundColor: isDark ? "#334155" : "#f1f5f9",
-                      color: isDark ? "#f1f5f9" : "#1e293b",
-                    }}
-                  >
-                    {model === "SLIM" ? "Delgado (3px)" : "Clásico (4px)"}
-                  </span>
-                ) : (
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <button
-                      type="button"
-                      onClick={() => setModel("CLASSIC")}
-                      style={{
-                        flex: 1,
-                        padding: "8px 12px",
-                        borderRadius: "8px",
-                        border: `1px solid ${model === "CLASSIC" ? "#6366f1" : isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: model === "CLASSIC" ? (isDark ? "rgba(99, 102, 241, 0.2)" : "#eef2ff") : "transparent",
-                        color: model === "CLASSIC" ? "#6366f1" : isDark ? "#94a3b8" : "#64748b",
-                        fontSize: "13px",
-                        fontWeight: "600",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Clásico (4px)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setModel("SLIM")}
-                      style={{
-                        flex: 1,
-                        padding: "8px 12px",
-                        borderRadius: "8px",
-                        border: `1px solid ${model === "SLIM" ? "#6366f1" : isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: model === "SLIM" ? (isDark ? "rgba(99, 102, 241, 0.2)" : "#eef2ff") : "transparent",
-                        color: model === "SLIM" ? "#6366f1" : isDark ? "#94a3b8" : "#64748b",
-                        fontSize: "13px",
-                        fontWeight: "600",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Delgado / Slim (3px)
-                    </button>
-                  </div>
-                )}
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "6px 12px",
+                    borderRadius: "8px",
+                    backgroundColor: isDark ? "rgba(62, 196, 192, 0.15)" : "#e6fffa",
+                    color: isDark ? "#3ec4c0" : "#0c6e6b",
+                    fontSize: "13px",
+                    fontWeight: "600",
+                  }}
+                >
+                  <span>{model === "SLIM" ? "Alex / Slim (3px)" : "Steve / Clásico (4px)"}</span>
+                  <span style={{ fontSize: "11px", opacity: 0.8 }}>(automático)</span>
+                </div>
               </div>
 
               {/* Status Selector */}

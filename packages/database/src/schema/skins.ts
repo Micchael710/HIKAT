@@ -90,10 +90,26 @@ export const playerSkins = sqliteTable(
   ],
 )
 
+export const playerSkinSelections = sqliteTable(
+  "player_skin_selections",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // "CUSTOM" | "GLOBAL"
+    skinId: text("skin_id").references(() => skins.id, {
+      onDelete: "set null",
+    }),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index("player_skin_selections_skin_id_idx").on(table.skinId)],
+)
+
 export type Skin = typeof skins.$inferSelect
-
 export type NewSkin = typeof skins.$inferInsert
-
 export type PlayerSkin = typeof playerSkins.$inferSelect
-
 export type NewPlayerSkin = typeof playerSkins.$inferInsert
+export type PlayerSkinSelection = typeof playerSkinSelections.$inferSelect
+export type NewPlayerSkinSelection = typeof playerSkinSelections.$inferInsert

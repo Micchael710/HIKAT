@@ -604,7 +604,7 @@ export default function ServerAutomationsView({
                   Acción a ejecutar:
                 </label>
                 <select
-                  value={formData.action}
+                  value={formData.action || "RESTART"}
                   onChange={(e) => setFormData({ ...formData, action: e.target.value as ServerAutomationAction })}
                   style={{
                     width: "100%",
@@ -742,7 +742,7 @@ export default function ServerAutomationsView({
                 <input
                   type="time"
                   required
-                  value={formData.time}
+                  value={formData.time || "04:00"}
                   onChange={(e) => setFormData({ ...formData, time: e.target.value })}
                   style={{
                     width: "100%",

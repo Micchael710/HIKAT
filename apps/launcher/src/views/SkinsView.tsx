@@ -26,7 +26,7 @@ interface SkinsViewProps {
   setAppliedCape: (id: string) => void
   allSkins?: SkinItem[]
   playerSkin?: PlayerSkin | null
-  onUploadSkin?: (file: File, model: "CLASSIC" | "SLIM") => Promise<PlayerSkin>
+  onUploadSkin?: (file: File, model?: "CLASSIC" | "SLIM") => Promise<PlayerSkin>
   onDeleteSkin?: () => Promise<boolean>
   customCapes: CapeItem[]
   setCustomCapes: React.Dispatch<React.SetStateAction<CapeItem[]>>
@@ -49,7 +49,6 @@ export default function SkinsView({
 }: SkinsViewProps) {
   const { t } = useTranslation()
   const [skinType, setSkinType] = useState<"skin" | "capa">("skin")
-  const [uploadModel, setUploadModel] = useState<"CLASSIC" | "SLIM">("CLASSIC")
   const [isUploading, setIsUploading] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [toastState, setToastState] = useState<{
@@ -168,7 +167,7 @@ export default function SkinsView({
         }
 
         if (onUploadSkin) {
-          const uploaded = await onUploadSkin(file, uploadModel)
+          await onUploadSkin(file)
           showToast("¡Skin personalizada subida y aplicada con éxito!", "success", "#38bdf8")
         }
       } catch (err: any) {
@@ -447,94 +446,8 @@ export default function SkinsView({
             })}
           </div>
 
-          {/* Right Action Tools: Arm Model Selector + Upload Button */}
+          {/* Right Action Tools: Upload Button */}
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {skinType === "skin" && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  background: isDark ? "#0d1217" : "#e6ebf0",
-                  border: isDark
-                    ? "1.5px solid rgba(255,255,255,0.08)"
-                    : "1.5px solid rgba(0,0,0,0.08)",
-                  borderRadius: 12,
-                  padding: 3,
-                  gap: 3,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setUploadModel("CLASSIC")}
-                  title="Brazos clásicos (4px de ancho)"
-                  style={{
-                    padding: "7px 14px",
-                    borderRadius: 9,
-                    background:
-                      uploadModel === "CLASSIC"
-                        ? isDark
-                          ? "#1c2630"
-                          : "#ffffff"
-                        : "transparent",
-                    border:
-                      uploadModel === "CLASSIC"
-                        ? isDark
-                          ? "1.5px solid rgba(255,255,255,0.14)"
-                          : "1.5px solid rgba(0,0,0,0.08)"
-                        : "1.5px solid transparent",
-                    color:
-                      uploadModel === "CLASSIC"
-                        ? isDark
-                          ? "white"
-                          : "#111822"
-                        : isDark
-                          ? "#7a8b9e"
-                          : "#667788",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  Clásico (4px)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUploadModel("SLIM")}
-                  title="Brazos delgados / Alex (3px de ancho)"
-                  style={{
-                    padding: "7px 14px",
-                    borderRadius: 9,
-                    background:
-                      uploadModel === "SLIM"
-                        ? isDark
-                          ? "#1c2630"
-                          : "#ffffff"
-                        : "transparent",
-                    border:
-                      uploadModel === "SLIM"
-                        ? isDark
-                          ? "1.5px solid rgba(255,255,255,0.14)"
-                          : "1.5px solid rgba(0,0,0,0.08)"
-                        : "1.5px solid transparent",
-                    color:
-                      uploadModel === "SLIM"
-                        ? isDark
-                          ? "white"
-                          : "#111822"
-                        : isDark
-                          ? "#7a8b9e"
-                          : "#667788",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  Delgado (3px)
-                </button>
-              </div>
-            )}
 
             {/* Upload Button */}
             <button

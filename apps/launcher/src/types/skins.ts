@@ -76,16 +76,23 @@ export interface SkinUploadTicket {
   maxSizeBytes: number
 }
 
+export interface ActiveSkinSelection {
+  type: "GLOBAL" | "CUSTOM"
+  globalSkinId?: string | null
+  skin?: {
+    id: string
+    name?: string | null
+    model: "CLASSIC" | "SLIM"
+    imageUrl: string
+  } | null
+}
+
 export const DEFAULT_SKINS: SkinItem[] = [
   {
     id: "none",
-
     name: "Sin Skin",
-
     shirt: "",
-
     badge: "N/A",
-
     accent: "#64748b",
   },
 ]
@@ -93,13 +100,9 @@ export const DEFAULT_SKINS: SkinItem[] = [
 export const DEFAULT_CAPES: CapeItem[] = [
   {
     id: "none",
-
     name: "Sin Capa",
-
     color: "",
-
     badge: "N/A",
-
     accent: "#64748b",
   },
 ]

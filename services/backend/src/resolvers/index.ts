@@ -17,7 +17,7 @@ import type {
   ServerResourcesGql,
   ServerPowerActionResultGql,
   ServerCommandResultGql,
-  ServerConsoleTicketPayloadGql,
+  ServerConsoleTicketGql,
   ServerActivityItemGql,
   ServerBackupItemGql,
   ServerWorldInfoGql,
@@ -54,6 +54,8 @@ import type {
   AdminPlayerSkinConnectionGql,
   SetPlayerSkinInputGql,
   UpdateAdminPlayerSkinInputGql,
+  ActiveSkinSelectionGql,
+  SetActiveSkinInputGql,
 } from "@hikat/graphql"
 
 import {
@@ -132,6 +134,8 @@ import {
   createPlayerSkinUpload,
   setMyPlayerSkin,
   deleteMyPlayerSkin,
+  getMyActiveSkin,
+  setMyActiveSkin,
   getAdminPlayerSkins,
   getAdminPlayerSkinById,
   updateAdminPlayerSkin,
@@ -350,7 +354,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql[]> => {
       requireAdmin(context)
-      return listServerAutomations(context.env)
+      return listServerAutomations(context.env, context.db)
     },
 
     serverFiles: async (
@@ -437,6 +441,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return getMyPlayerSkin(context.db, identity.userId)
+    },
+
+    myActiveSkin: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ActiveSkinSelectionGql | null> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getMyActiveSkin(context.db, context.env, identity.userId)
     },
 
     adminPlayerSkins: async (
@@ -552,7 +568,7 @@ export const resolvers = {
       _parent: unknown,
       _args: unknown,
       context: BackendGraphQLContext,
-    ): Promise<ServerConsoleTicketPayloadGql> => {
+    ): Promise<ServerConsoleTicketGql> => {
       const identity = requireAdmin(context)
       if (!identity.sessionId) {
         throw createGraphQLError(
@@ -727,7 +743,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql> => {
       requireAdmin(context)
-      return createServerAutomation(context.env, args.input as any)
+      return createServerAutomation(context.env, args.input as any, undefined, context.db)
     },
 
     updateServerAutomation: async (
@@ -736,7 +752,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql> => {
       requireAdmin(context)
-      return updateServerAutomation(context.env, args.id, args.input as any)
+      return updateServerAutomation(context.env, args.id, args.input as any, undefined, context.db)
     },
 
     runServerAutomation: async (
@@ -754,7 +770,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return deleteServerAutomation(context.env, args.id)
+      return deleteServerAutomation(context.env, args.id, undefined, context.db)
     },
 
     createServerFolder: async (
@@ -958,7 +974,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return createSkin(context.db, args.input, identity.userId)
+      return createSkin(context.db, context.env, args.input, identity.userId)
     },
 
     updateSkin: async (
@@ -970,7 +986,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return updateSkin(context.db, args.id, args.input)
+      return updateSkin(context.db, context.env, args.id, args.input)
     },
 
     deleteSkin: async (
@@ -1026,6 +1042,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return deleteMyPlayerSkin(context.db, context.env, identity.userId)
+    },
+
+    setMyActiveSkin: async (
+      _parent: unknown,
+      args: { input: SetActiveSkinInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ActiveSkinSelectionGql> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return setMyActiveSkin(context.db, context.env, identity.userId, args.input)
     },
 
     updateAdminPlayerSkin: async (

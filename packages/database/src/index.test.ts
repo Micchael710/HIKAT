@@ -759,6 +759,7 @@ describe("@hikat/database schema and D1 operations", () => {
 
       "0008_player_skins.sql",
       "0009_server_operation_locks.sql",
+      "0010_skins_active_and_server_tasks.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -1461,5 +1462,97 @@ describe("@hikat/database schema and D1 operations", () => {
         .where(eq(schema.playerSkins.userId, testUserCascadeId))
         .get(),
     ).toBeUndefined()
+  })
+
+  it("supports playerSkinSelections and serverTasks with referential integrity", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const now = new Date().toISOString()
+
+    const userId = "user-skins-test"
+    await db.insert(schema.users).values({
+      id: userId,
+      displayName: "Skin Test Player",
+      role: "PLAYER",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const mediaId = "media-skin-global-1"
+    await db.insert(schema.contentMedia).values({
+      id: mediaId,
+      mediaType: "IMAGE",
+      objectKey: "skins/global1.png",
+      mimeType: "image/png",
+      sizeBytes: 1024,
+      createdBy: userId,
+      createdAt: now,
+    })
+
+    const globalSkinId = "skin-global-1"
+    await db.insert(schema.skins).values({
+      id: globalSkinId,
+      name: "Global Astronaut",
+      model: "SLIM",
+      mediaId,
+      status: "AVAILABLE",
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // Insert active skin selection (GLOBAL)
+    await db.insert(schema.playerSkinSelections).values({
+      userId,
+      type: "GLOBAL",
+      skinId: globalSkinId,
+      updatedAt: now,
+    })
+
+    const sel = await db
+      .select()
+      .from(schema.playerSkinSelections)
+      .where(eq(schema.playerSkinSelections.userId, userId))
+      .get()
+    expect(sel).toBeDefined()
+    expect(sel?.type).toBe("GLOBAL")
+    expect(sel?.skinId).toBe(globalSkinId)
+
+    // Deleting the skin sets skin_id to null via ON DELETE SET NULL
+    await db.delete(schema.skins).where(eq(schema.skins.id, globalSkinId))
+    const selAfterDelete = await db
+      .select()
+      .from(schema.playerSkinSelections)
+      .where(eq(schema.playerSkinSelections.userId, userId))
+      .get()
+    expect(selAfterDelete?.skinId).toBeNull()
+
+    // Test serverTasks table
+    const taskId = crypto.randomUUID()
+    await db.insert(schema.serverTasks).values({
+      id: taskId,
+      scheduleId: "101",
+      template: "BACKUP_AND_RESTART",
+      name: "Nightly Safe Restart",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      delaySeconds: 60,
+      enabled: true,
+      templateVersion: 1,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const taskRec = await db
+      .select()
+      .from(schema.serverTasks)
+      .where(eq(schema.serverTasks.scheduleId, "101"))
+      .get()
+    expect(taskRec).toBeDefined()
+    expect(taskRec?.template).toBe("BACKUP_AND_RESTART")
+    expect(taskRec?.delaySeconds).toBe(60)
   })
 })

@@ -678,15 +678,20 @@ export const serverApi = {
         serverAutomations {
           id
           name
+          template
           action
           frequency
           time
+          intervalHours
           weekday
           weekdays
           command
+          delaySeconds
+          humanSchedule
           enabled
           isProcessing
           isAdvanced
+          isManaged
           lastRunAt
           nextRunAt
         }
@@ -703,15 +708,20 @@ export const serverApi = {
         createServerAutomation(input: $input) {
           id
           name
+          template
           action
           frequency
           time
+          intervalHours
           weekday
           weekdays
           command
+          delaySeconds
+          humanSchedule
           enabled
           isProcessing
           isAdvanced
+          isManaged
           lastRunAt
           nextRunAt
         }
@@ -728,15 +738,20 @@ export const serverApi = {
         updateServerAutomation(id: $id, input: $input) {
           id
           name
+          template
           action
           frequency
           time
+          intervalHours
           weekday
           weekdays
           command
+          delaySeconds
+          humanSchedule
           enabled
           isProcessing
           isAdvanced
+          isManaged
           lastRunAt
           nextRunAt
         }

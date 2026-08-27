@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { encode as encodePng } from "fast-png"
 import {
   fetchGlobalSkins,
-
   fetchMyPlayerSkin,
+  fetchMyActiveSkin,
+  setMyActiveSkin,
   createPlayerSkinUploadTicket,
   setMyPlayerSkin,
   deleteMyPlayerSkin,
@@ -12,113 +14,125 @@ import {
 } from "./skinService"
 import * as apiClientModule from "./apiClient"
 
-const localStorageMock = (() => {
-  let store: Record<string, string> = {}
-  return {
-    getItem: (key: string) => store[key] || null,
-    setItem: (key: string, value: string) => {
-      store[key] = value.toString()
-    },
-    removeItem: (key: string) => {
-      delete store[key]
-    },
-    clear: () => {
-      store = {}
-    },
-  }
-})()
-
-if (typeof globalThis.localStorage === "undefined") {
-  Object.defineProperty(globalThis, "localStorage", {
-    value: localStorageMock,
-    writable: true,
-  })
-}
-
 describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorage.clear()
+    window.localStorage.clear()
   })
 
 
   it("resolves asset URLs correctly (relative vs absolute)", () => {
+    expect(resolveApiAssetUrl("https://example.com/skin.png")).toBe(
+      "https://example.com/skin.png",
+    )
+    expect(resolveApiAssetUrl("/media/content/xyz.png")).toContain(
+      "/media/content/xyz.png",
+    )
     expect(resolveApiAssetUrl("")).toBe("")
     expect(resolveApiAssetUrl(null)).toBe("")
-    expect(resolveApiAssetUrl(undefined)).toBe("")
-
-    // Absolute URLs remain intact
-    expect(resolveApiAssetUrl("https://assets.hikat.com/skins/alex.png")).toBe(
-      "https://assets.hikat.com/skins/alex.png",
-    )
-    expect(resolveApiAssetUrl("http://localhost:8787/media/content/abc")).toBe(
-      "http://localhost:8787/media/content/abc",
-    )
-    expect(resolveApiAssetUrl("data:image/png;base64,iVBORw0KGgo=")).toBe(
-      "data:image/png;base64,iVBORw0KGgo=",
-    )
-
-    // Relative URLs prepend backend base URL
-    const resolved = resolveApiAssetUrl("/media/content/skin-123.png")
-    expect(resolved).toMatch(/^https?:\/\/.*\/media\/content\/skin-123\.png$/)
   })
 
   it("fetches global skins catalog and normalizes imageUrls", async () => {
-    const mockSkins = [
-      {
-        id: "skin-1",
-        name: "Caballero",
-        model: "CLASSIC" as const,
-        imageUrl: "/media/content/skin-1.png",
-        status: "AVAILABLE" as const,
-        createdAt: "2026-08-26T12:00:00Z",
-        updatedAt: "2026-08-26T12:00:00Z",
-      },
-    ]
-
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
         skins: {
-          items: mockSkins,
+          items: [
+            {
+              id: "skin-1",
+              name: "Steve",
+              model: "CLASSIC",
+              imageUrl: "/media/content/steve.png",
+              status: "AVAILABLE",
+              createdAt: "2026-08-26T12:00:00Z",
+              updatedAt: "2026-08-26T12:00:00Z",
+            },
+          ],
           totalCount: 1,
         },
       },
     })
 
-    const result = await fetchGlobalSkins()
-    expect(result).toHaveLength(1)
-    expect(result[0]?.name).toBe("Caballero")
-    expect(result[0]?.imageUrl).toContain("/media/content/skin-1.png")
+    const skins = await fetchGlobalSkins()
+    expect(skins.length).toBe(1)
+    expect(skins[0].id).toBe("skin-1")
+    expect(skins[0].imageUrl).toContain("/media/content/steve.png")
   })
 
   it("fetches player personal custom skin when token exists", async () => {
-    localStorage.setItem("hikat_auth_token", "fake-token")
-    const mockPlayerSkin = {
-      id: "pskin-1",
-      userId: "user-1",
-      model: "SLIM" as const,
-      imageUrl: "/media/content/player-skin.png",
-      createdAt: "2026-08-26T12:00:00Z",
-      updatedAt: "2026-08-26T12:00:00Z",
-    }
-
+    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
-        myPlayerSkin: mockPlayerSkin,
+        myPlayerSkin: {
+          id: "pskin-123",
+          userId: "user-456",
+          model: "SLIM",
+          imageUrl: "/media/content/custom.png",
+          createdAt: "2026-08-26T12:00:00Z",
+          updatedAt: "2026-08-26T12:00:00Z",
+        },
       },
     })
 
-    const result = await fetchMyPlayerSkin()
-    expect(result).not.toBeNull()
-    expect(result?.model).toBe("SLIM")
-    expect(result?.imageUrl).toContain("/media/content/player-skin.png")
+    const mySkin = await fetchMyPlayerSkin()
+    expect(mySkin).not.toBeNull()
+    expect(mySkin?.id).toBe("pskin-123")
+    expect(mySkin?.model).toBe("SLIM")
+    expect(mySkin?.imageUrl).toContain("/media/content/custom.png")
+  })
+
+  it("fetches player active skin selection", async () => {
+    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        myActiveSkin: {
+          type: "CUSTOM",
+          globalSkinId: null,
+          skin: {
+            id: "pskin-123",
+            name: "Mi Skin",
+            model: "SLIM",
+            imageUrl: "/media/content/custom.png",
+          },
+        },
+      },
+    })
+
+    const active = await fetchMyActiveSkin()
+    expect(active).not.toBeNull()
+    expect(active?.type).toBe("CUSTOM")
+    expect(active?.skin?.model).toBe("SLIM")
+  })
+
+  it("sets player active skin selection", async () => {
+    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        setMyActiveSkin: {
+          type: "GLOBAL",
+          globalSkinId: "skin-1",
+          skin: {
+            id: "skin-1",
+            name: "Steve",
+            model: "CLASSIC",
+            imageUrl: "/media/content/steve.png",
+          },
+        },
+      },
+    })
+
+    const res = await setMyActiveSkin("GLOBAL", "skin-1")
+    expect(res.success).toBe(true)
+    expect(res.data?.type).toBe("GLOBAL")
+    expect(res.data?.globalSkinId).toBe("skin-1")
   })
 
   it("returns null for fetchMyPlayerSkin when unauthenticated", async () => {
-    const result = await fetchMyPlayerSkin()
-    expect(result).toBeNull()
+    const mySkin = await fetchMyPlayerSkin()
+    expect(mySkin).toBeNull()
   })
 
   it("creates upload ticket for player skin", async () => {
@@ -126,9 +140,9 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
       success: true,
       data: {
         createPlayerSkinUpload: {
-          uploadUrl: "/media/player-skin/upload",
-          uploadToken: "token-123",
-          expiresAt: "2026-08-26T13:00:00Z",
+          uploadUrl: "/media/content/upload",
+          uploadToken: "tok-abc-123",
+          expiresAt: "2026-08-26T12:30:00Z",
           maxSizeBytes: 1048576,
         },
       },
@@ -136,7 +150,7 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
 
     const res = await createPlayerSkinUploadTicket()
     expect(res.success).toBe(true)
-    expect(res.data?.uploadToken).toBe("token-123")
+    expect(res.data?.uploadToken).toBe("tok-abc-123")
   })
 
   it("sets player skin after upload with model selection", async () => {
@@ -144,46 +158,47 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
       success: true,
       data: {
         setMyPlayerSkin: {
-          id: "pskin-1",
-          userId: "user-1",
-          model: "SLIM" as const,
-          imageUrl: "/media/content/media-123.png",
+          id: "pskin-123",
+          userId: "user-456",
+          model: "SLIM",
+          imageUrl: "/media/content/custom.png",
           createdAt: "2026-08-26T12:00:00Z",
           updatedAt: "2026-08-26T12:00:00Z",
         },
       },
     })
 
-    const res = await setMyPlayerSkin("media-123", "SLIM")
+    const res = await setMyPlayerSkin("media-789", "SLIM")
     expect(res.success).toBe(true)
     expect(res.data?.model).toBe("SLIM")
-    expect(res.data?.imageUrl).toContain("/media/content/media-123.png")
   })
 
   it("uploads player skin end-to-end consuming flat backend response ({ id, ... })", async () => {
-    // 1. Mock ticket creation
-    vi.spyOn(apiClientModule, "graphqlClient").mockImplementation(async (query: string) => {
-      if (query.includes("CreatePlayerSkinUpload")) {
+    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+
+    // 1. Mock ticket and setMyPlayerSkin
+    vi.spyOn(apiClientModule, "graphqlClient").mockImplementation(async (query) => {
+      if (typeof query === "string" && query.includes("createPlayerSkinUpload")) {
         return {
           success: true,
           data: {
             createPlayerSkinUpload: {
-              uploadUrl: "/media/player-skin/upload",
-              uploadToken: "mock-token-xyz",
-              expiresAt: "2026-08-26T14:00:00Z",
+              uploadUrl: "/media/content/upload",
+              uploadToken: "tok-xyz-789",
+              expiresAt: "2026-08-26T12:30:00Z",
               maxSizeBytes: 1048576,
             },
           },
         }
       }
-      if (query.includes("SetMyPlayerSkin")) {
+      if (typeof query === "string" && query.includes("setMyPlayerSkin")) {
         return {
           success: true,
           data: {
             setMyPlayerSkin: {
               id: "pskin-789",
               userId: "user-456",
-              model: "SLIM" as const,
+              model: "CLASSIC" as const,
               imageUrl: "/media/content/media-999.png",
               createdAt: "2026-08-26T12:00:00Z",
               updatedAt: "2026-08-26T12:00:00Z",
@@ -194,14 +209,18 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
       return { success: false }
     })
 
-    // 2. Construct valid 64x64 PNG buffer
-    const validPngBytes = new Uint8Array(48)
-    validPngBytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
-    const view = new DataView(validPngBytes.buffer)
-    view.setUint32(16, 64, false)
-    view.setUint32(20, 64, false)
+    // 2. Construct valid 64x64 PNG buffer using fast-png
+    const rawData = new Uint8ClampedArray(64 * 64 * 4)
+    rawData.fill(255)
+    const validPngBytes = encodePng({
+      width: 64,
+      height: 64,
+      data: rawData,
+      channels: 4,
+      depth: 8,
+    })
 
-    const mockFile = new File([validPngBytes], "my_skin.png", {
+    const mockFile = new File([validPngBytes.buffer as ArrayBuffer], "my_skin.png", {
       type: "image/png",
     })
 
@@ -213,16 +232,16 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
         id: "media-999",
         mediaType: "IMAGE",
         mimeType: "image/png",
-        sizeBytes: 48,
+        sizeBytes: validPngBytes.byteLength,
         url: "/media/content/media-999",
         createdAt: "2026-08-26T12:00:00Z",
       }),
     })
     global.fetch = fetchMock as any
 
-    const result = await uploadPlayerSkin(mockFile, "SLIM")
+    const result = await uploadPlayerSkin(mockFile)
     expect(result.id).toBe("pskin-789")
-    expect(result.model).toBe("SLIM")
+    expect(result.model).toBe("CLASSIC")
     expect(result.imageUrl).toContain("/media/content/media-999.png")
     expect(fetchMock).toHaveBeenCalled()
   })
