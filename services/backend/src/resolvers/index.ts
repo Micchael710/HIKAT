@@ -18,6 +18,17 @@ import type {
   ServerPowerActionResultGql,
   ServerCommandResultGql,
   ServerConsoleTicketPayloadGql,
+  ServerActivityItemGql,
+  ServerBackupItemGql,
+  ServerWorldInfoGql,
+  MinecraftServerSettingsGql,
+  UpdateMinecraftServerSettingsInputGql,
+  ServerAutomationItemGql,
+  ServerAutomationInputGql,
+  ServerFileRootGql,
+  ServerFileItemGql,
+  ServerFileContentGql,
+  ServerSignedUrlPayloadGql,
   AdminDashboardSummaryGql,
   SkinGql,
   SkinConnectionGql,
@@ -50,6 +61,7 @@ import {
   NewsType,
   NewsStatus,
   type ServerPowerAction,
+  type ServerFileRoot,
 } from "@hikat/shared"
 import { requireAuth, requireAdmin } from "../auth/guards"
 import { getUserById } from "../services/userService"
@@ -70,8 +82,45 @@ import {
   executeServerPowerAction,
   executeServerCommand,
   createConsoleTicket,
+  getServerActivity,
 } from "../services/pterodactyl/serverAdministrationService"
+import {
+  listServerBackups,
+  createServerBackup,
+  restoreServerBackup,
+  deleteServerBackup,
+  toggleServerBackupLock,
+  getServerBackupDownloadUrl,
+} from "../services/pterodactyl/serverBackupService"
+import {
+  getServerWorldInfo,
+  createServerWorldDownloadUrl,
+  prepareServerWorldUpload,
+  replaceServerWorld,
+} from "../services/pterodactyl/serverWorldService"
+import {
+  getMinecraftServerSettings,
+  updateMinecraftServerSettings,
+} from "../services/pterodactyl/serverConfigService"
+import {
+  listServerAutomations,
+  createServerAutomation,
+  updateServerAutomation,
+  runServerAutomation,
+  deleteServerAutomation,
+} from "../services/pterodactyl/serverScheduleService"
+import {
+  listServerFiles,
+  readServerTextFile,
+  writeServerTextFile,
+  createServerFolder,
+  renameServerFile,
+  deleteServerFile,
+  prepareServerFileUploadUrl,
+  createServerFileDownloadUrl,
+} from "../services/pterodactyl/serverFileService"
 import { getAdminDashboard } from "../services/dashboardService"
+
 import {
   getAdminSkins,
   getPublicSkins,
@@ -248,7 +297,7 @@ export const resolvers = {
       return getAdminNewsById(context.db, context.env, args.id, context.request)
     },
 
-    // --- Server Administration Queries (Require ADMIN - Shard 06) ---
+    // --- Server Administration Queries (Require ADMIN - Shard 06 & Shard 07) ---
 
     serverStatus: async (
       _parent: unknown,
@@ -257,6 +306,69 @@ export const resolvers = {
     ): Promise<ServerResourcesGql> => {
       requireAdmin(context)
       return getServerStatus(context.env)
+    },
+
+    serverActivity: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerActivityItemGql[]> => {
+      requireAdmin(context)
+      return getServerActivity(context.env)
+    },
+
+    serverBackups: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerBackupItemGql[]> => {
+      requireAdmin(context)
+      return listServerBackups(context.env)
+    },
+
+    serverWorld: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerWorldInfoGql> => {
+      requireAdmin(context)
+      return getServerWorldInfo(context.env)
+    },
+
+    serverMinecraftSettings: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<MinecraftServerSettingsGql> => {
+      requireAdmin(context)
+      return getMinecraftServerSettings(context.env)
+    },
+
+    serverAutomations: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerAutomationItemGql[]> => {
+      requireAdmin(context)
+      return listServerAutomations(context.env)
+    },
+
+    serverFiles: async (
+      _parent: unknown,
+      args: { root: ServerFileRoot; relativePath?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<ServerFileItemGql[]> => {
+      requireAdmin(context)
+      return listServerFiles(context.env, args.root, args.relativePath)
+    },
+
+    serverTextFile: async (
+      _parent: unknown,
+      args: { root: ServerFileRoot; relativePath: string },
+      context: BackendGraphQLContext,
+    ): Promise<ServerFileContentGql> => {
+      requireAdmin(context)
+      return readServerTextFile(context.env, args.root, args.relativePath)
     },
 
 
@@ -519,6 +631,186 @@ export const resolvers = {
         identity.userId,
       )
     },
+
+    // --- Server Administration II Mutations (Require ADMIN - Shard 07) ---
+
+    createServerBackup: async (
+      _parent: unknown,
+      args: { name?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<ServerBackupItemGql> => {
+      requireAdmin(context)
+      return createServerBackup(context.env, args.name)
+    },
+
+    restoreServerBackup: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return restoreServerBackup(context.env, context.db, identity.userId, args.id)
+    },
+
+    deleteServerBackup: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      return deleteServerBackup(context.env, args.id)
+    },
+
+    toggleServerBackupLock: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<ServerBackupItemGql> => {
+      requireAdmin(context)
+      return toggleServerBackupLock(context.env, args.id)
+    },
+
+    createServerBackupDownloadUrl: async (
+      _parent: unknown,
+      args: { id: string; name?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<ServerSignedUrlPayloadGql> => {
+      requireAdmin(context)
+      return getServerBackupDownloadUrl(context.env, args.id)
+    },
+
+    createServerWorldDownloadUrl: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerSignedUrlPayloadGql> => {
+      requireAdmin(context)
+      return createServerWorldDownloadUrl(context.env)
+    },
+
+    prepareServerWorldUpload: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerSignedUrlPayloadGql> => {
+      requireAdmin(context)
+      return prepareServerWorldUpload(context.env)
+    },
+
+    replaceServerWorld: async (
+      _parent: unknown,
+      args: { uploadedFileName: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return replaceServerWorld(context.env, context.db, identity.userId, args.uploadedFileName)
+    },
+
+    updateMinecraftServerSettings: async (
+      _parent: unknown,
+      args: { input: UpdateMinecraftServerSettingsInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<MinecraftServerSettingsGql> => {
+      requireAdmin(context)
+      return updateMinecraftServerSettings(context.env, args.input as any)
+    },
+
+    createServerAutomation: async (
+      _parent: unknown,
+      args: { input: ServerAutomationInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ServerAutomationItemGql> => {
+      requireAdmin(context)
+      return createServerAutomation(context.env, args.input as any)
+    },
+
+    updateServerAutomation: async (
+      _parent: unknown,
+      args: { id: string; input: ServerAutomationInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ServerAutomationItemGql> => {
+      requireAdmin(context)
+      return updateServerAutomation(context.env, args.id, args.input as any)
+    },
+
+    runServerAutomation: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      return runServerAutomation(context.env, args.id)
+    },
+
+    deleteServerAutomation: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      return deleteServerAutomation(context.env, args.id)
+    },
+
+    createServerFolder: async (
+      _parent: unknown,
+      args: { root: ServerFileRoot; relativePath: string; folderName: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      return createServerFolder(context.env, args.root, args.relativePath, args.folderName)
+    },
+
+    renameServerFile: async (
+      _parent: unknown,
+      args: { root: ServerFileRoot; relativePath: string; newName: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      return renameServerFile(context.env, args.root, args.relativePath, args.newName)
+    },
+
+    deleteServerFile: async (
+      _parent: unknown,
+      args: { root: ServerFileRoot; relativePath: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      return deleteServerFile(context.env, args.root, args.relativePath)
+    },
+
+    writeServerTextFile: async (
+      _parent: unknown,
+      args: { root: ServerFileRoot; relativePath: string; content: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      return writeServerTextFile(context.env, args.root, args.relativePath, args.content)
+    },
+
+    prepareServerFileUpload: async (
+      _parent: unknown,
+      args: { root: ServerFileRoot; relativePath: string },
+      context: BackendGraphQLContext,
+    ): Promise<ServerSignedUrlPayloadGql> => {
+      requireAdmin(context)
+      return prepareServerFileUploadUrl(context.env, args.root, args.relativePath)
+    },
+
+    createServerFileDownloadUrl: async (
+      _parent: unknown,
+      args: { root: ServerFileRoot; relativePath: string },
+      context: BackendGraphQLContext,
+    ): Promise<ServerSignedUrlPayloadGql> => {
+      requireAdmin(context)
+      return createServerFileDownloadUrl(context.env, args.root, args.relativePath)
+    },
+
 
 
     // --- News Administrative Mutations (Require ADMIN) ---

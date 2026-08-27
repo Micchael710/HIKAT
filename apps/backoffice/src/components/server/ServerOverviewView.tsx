@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from "react"
-import type { ThemeMode, ServerResources, ServerPowerAction } from "../../types"
+import type { ThemeMode, ServerResources, ServerPowerAction, ServerActivityItem } from "../../types"
 import { serverApi } from "../../services/graphqlClient"
 import { formatBytesToHuman, formatUptime } from "@hikat/shared"
 import ServerStatusBadge from "./ServerStatusBadge"
 import ServerResourceCard from "./ServerResourceCard"
 import ServerPowerActions from "./ServerPowerActions"
 import ServerConsoleView from "./ServerConsoleView"
+import ServerWorldView from "./ServerWorldView"
+import ServerBackupsView from "./ServerBackupsView"
+import ServerAutomationsView from "./ServerAutomationsView"
+import ServerConfigurationView from "./ServerConfigurationView"
+import ServerFilesView from "./ServerFilesView"
 import LiveToast from "../common/LiveToast"
 import {
   IconServer,
@@ -17,19 +22,46 @@ import {
   IconRefresh,
   IconSpinner,
   IconAlertCircle,
+  IconGlobe,
+  IconArchive,
+  IconCalendar,
+  IconSliders,
+  IconFolder,
+  IconDownload,
+  IconUpload,
+  IconHistory,
 } from "../../theme/icons"
 
 interface ServerOverviewViewProps {
   theme: ThemeMode
 }
 
-type ServerSubTab = "overview" | "console"
+export type ServerSubTab =
+  | "overview"
+  | "console"
+  | "world"
+  | "backups"
+  | "automations"
+  | "configuration"
+  | "files"
+
+const SUB_TABS: Array<{ id: ServerSubTab; label: string; icon: React.ReactNode }> = [
+  { id: "overview", label: "Resumen", icon: <IconServer size={18} /> },
+  { id: "console", label: "Consola", icon: <IconTerminal size={18} /> },
+  { id: "world", label: "Mundo", icon: <IconGlobe size={18} /> },
+  { id: "backups", label: "Copias", icon: <IconArchive size={18} /> },
+  { id: "automations", label: "Automatizaciones", icon: <IconCalendar size={18} /> },
+  { id: "configuration", label: "Configuración", icon: <IconSliders size={18} /> },
+  { id: "files", label: "Archivos", icon: <IconFolder size={18} /> },
+]
 
 export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
   const isDark = theme === "dark"
   const [activeTab, setActiveTab] = useState<ServerSubTab>("overview")
   const [resources, setResources] = useState<ServerResources | null>(null)
+  const [activity, setActivity] = useState<ServerActivityItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isActivityLoading, setIsActivityLoading] = useState(false)
   const [isActionLoading, setIsActionLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -40,7 +72,12 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
   const hasDataRef = useRef(false)
   const isActionLoadingRef = useRef(false)
 
-  // Stable status fetcher that does not trigger re-render dependency cascades
+  const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
+    setToastMessage(message)
+    setToastType(type)
+  }, [])
+
+  // Stable status fetcher
   const fetchStatus = useCallback(async (isManual: boolean = false) => {
     if (isFetchingRef.current || !isMountedRef.current) return
     isFetchingRef.current = true
@@ -74,10 +111,28 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
     }
   }, [])
 
+  // Activity fetcher
+  const fetchActivity = useCallback(async () => {
+    setIsActivityLoading(true)
+    try {
+      const list = await serverApi.getServerActivity()
+      if (isMountedRef.current) {
+        setActivity(list)
+      }
+    } catch {
+      // Non-critical, ignore
+    } finally {
+      if (isMountedRef.current) {
+        setIsActivityLoading(false)
+      }
+    }
+  }, [])
+
   // Controlled polling: exactly 1 initial fetch, then maximum once per ~5s when visible
   useEffect(() => {
     isMountedRef.current = true
     fetchStatus()
+    fetchActivity()
 
     const interval = setInterval(() => {
       if (document.visibilityState === "visible" && !isActionLoadingRef.current) {
@@ -98,7 +153,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       clearInterval(interval)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [fetchStatus])
+  }, [fetchStatus, fetchActivity])
 
   const handlePowerAction = async (action: ServerPowerAction) => {
     setIsActionLoading(true)
@@ -113,24 +168,20 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
         res = await serverApi.stopServer()
       }
 
-      setToastMessage(res.message || "Acción enviada correctamente.")
-      setToastType("success")
-
-      // Immediate status refresh after power action dispatch
+      showToast(res.message || "Acción enviada correctamente.", "success")
       await fetchStatus()
+      await fetchActivity()
     } catch (err: unknown) {
       const msg =
         err instanceof Error
           ? err.message
           : "No se pudo ejecutar la acción del servidor."
-      setToastMessage(msg)
-      setToastType("error")
+      showToast(msg, "error")
     } finally {
       setIsActionLoading(false)
       isActionLoadingRef.current = false
     }
   }
-
 
   const currentStatus = resources?.status || (error ? "DISCONNECTED" : "UNKNOWN")
 
@@ -149,6 +200,10 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
   // CPU calculations
   const cpuVal = resources?.cpuPercent ?? 0
   const cpuLimit = resources?.cpuLimitPercent ?? null
+
+  // Network calculations
+  const rxBytes = resources?.networkRxBytes ?? 0
+  const txBytes = resources?.networkTxBytes ?? 0
 
   return (
     <div
@@ -171,8 +226,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
         onClose={() => setToastMessage(null)}
       />
 
-
-      {/* Top Header & Sub-Navigation */}
+      {/* Top Header & Sub-Navigation (Always mounted and accessible) */}
       <div
         style={{
           display: "flex",
@@ -202,15 +256,17 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
               color: isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
             }}
           >
-            Administración del servidor principal de Minecraft HiKAT
+            Administración completa del servidor principal de Minecraft HiKAT
           </p>
         </div>
 
-        {/* Sub-tabs switcher */}
+        {/* Extended 7 Sub-tabs switcher with responsive wrap */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
+            flexWrap: "wrap",
+            gap: 4,
             padding: 4,
             borderRadius: 14,
             background: isDark ? "rgba(19, 28, 35, 0.85)" : "#e2e8f0",
@@ -219,178 +275,142 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
             }`,
           }}
         >
-          <button
-            type="button"
-            onClick={() => setActiveTab("overview")}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 18px",
-              borderRadius: 10,
-              border: "none",
-              background:
-                activeTab === "overview"
-                  ? isDark
-                    ? "rgba(62, 196, 192, 0.2)"
-                    : "#ffffff"
-                  : "transparent",
-              color:
-                activeTab === "overview"
-                  ? isDark
-                    ? "#3ec4c0"
-                    : "#0c6e6b"
-                  : isDark
-                  ? "rgba(255, 255, 255, 0.6)"
-                  : "rgba(0, 0, 0, 0.6)",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              cursor: "pointer",
-              boxShadow:
-                activeTab === "overview" && !isDark
-                  ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                  : "none",
-              transition: "all 0.15s ease",
-            }}
-          >
-            <IconServer size={18} />
-            <span>Resumen</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("console")}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 18px",
-              borderRadius: 10,
-              border: "none",
-              background:
-                activeTab === "console"
-                  ? isDark
-                    ? "rgba(62, 196, 192, 0.2)"
-                    : "#ffffff"
-                  : "transparent",
-              color:
-                activeTab === "console"
-                  ? isDark
-                    ? "#3ec4c0"
-                    : "#0c6e6b"
-                  : isDark
-                  ? "rgba(255, 255, 255, 0.6)"
-                  : "rgba(0, 0, 0, 0.6)",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              cursor: "pointer",
-              boxShadow:
-                activeTab === "console" && !isDark
-                  ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                  : "none",
-              transition: "all 0.15s ease",
-            }}
-          >
-            <IconTerminal size={18} />
-            <span>Consola</span>
-          </button>
+          {SUB_TABS.map((tab) => {
+            const isActive = activeTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 14px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: isActive
+                    ? isDark
+                      ? "rgba(62, 196, 192, 0.2)"
+                      : "#ffffff"
+                    : "transparent",
+                  color: isActive
+                    ? isDark
+                      ? "#3ec4c0"
+                      : "#0c6e6b"
+                    : isDark
+                    ? "rgba(255, 255, 255, 0.6)"
+                    : "rgba(0, 0, 0, 0.6)",
+                  fontSize: "0.85rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  boxShadow:
+                    isActive && !isDark
+                      ? "0 2px 8px rgba(0, 0, 0, 0.08)"
+                      : "none",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {/* Main Content Area */}
-      {isLoading ? (
+      {/* Main Subtab View Content */}
+      {activeTab === "overview" && (
         <div
           style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 12,
-            color: isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
-          }}
-        >
-          <IconSpinner size={28} />
-          <span style={{ fontSize: "1rem", fontWeight: 500 }}>
-            Conectando con el servidor...
-          </span>
-        </div>
-      ) : error && !resources ? (
-        <div
-          style={{
-            flex: 1,
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 16,
-            padding: 32,
-            borderRadius: 20,
-            background: isDark ? "rgba(19, 28, 35, 0.7)" : "#ffffff",
-            border: `1px solid ${
-              isDark ? "rgba(239, 68, 68, 0.2)" : "rgba(239, 68, 68, 0.15)"
-            }`,
-            textAlign: "center",
+            gap: 20,
+            animation: "fadeIn 0.2s ease",
           }}
         >
-          <div style={{ color: "#ef4444" }}>
-            <IconAlertCircle size={48} />
-          </div>
-          <div>
-            <h3
+          {isLoading ? (
+            <div
               style={{
-                margin: 0,
-                fontSize: "1.2rem",
-                fontWeight: 700,
-                color: isDark ? "#ffffff" : "#0f172a",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "64px 0",
+                gap: 12,
+                color: isDark ? "#3ec4c0" : "#0c6e6b",
               }}
             >
-              No se pudo obtener el estado del servidor
-            </h3>
-            <p
-              style={{
-                margin: "6px 0 0 0",
-                fontSize: "0.9rem",
-                color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.6)",
-                maxWidth: 400,
-              }}
-            >
-              Verifica que la infraestructura del servidor esté encendida o intenta nuevamente.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => fetchStatus(true)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "10px 22px",
-              borderRadius: 12,
-              background: "linear-gradient(135deg, #3ec4c0 0%, #2ba5a1 100%)",
-              color: "#0a0e14",
-              fontSize: "0.925rem",
-              fontWeight: 700,
-              border: "none",
-              cursor: "pointer",
-            }}
-          >
-            <IconRefresh size={18} />
-            <span>Reintentar</span>
-          </button>
-        </div>
-      ) : (
-        <>
-          {/* TAB 1: OVERVIEW */}
-          {activeTab === "overview" && (
+              <IconSpinner size={28} />
+              <span style={{ fontSize: "1rem", fontWeight: 500 }}>
+                Conectando con el servidor...
+              </span>
+            </div>
+          ) : error && !resources ? (
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
-                gap: 20,
-                animation: "fadeIn 0.2s ease",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 16,
+                padding: 32,
+                borderRadius: 20,
+                background: isDark ? "rgba(19, 28, 35, 0.7)" : "#ffffff",
+                border: `1px solid ${
+                  isDark ? "rgba(239, 68, 68, 0.2)" : "rgba(239, 68, 68, 0.15)"
+                }`,
+                textAlign: "center",
               }}
             >
+              <div style={{ color: "#ef4444" }}>
+                <IconAlertCircle size={48} />
+              </div>
+              <div>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: "1.2rem",
+                    fontWeight: 700,
+                    color: isDark ? "#ffffff" : "#0f172a",
+                  }}
+                >
+                  No se pudo conectar con la infraestructura del servidor
+                </h3>
+                <p
+                  style={{
+                    margin: "6px 0 0 0",
+                    fontSize: "0.9rem",
+                    color: isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.6)",
+                    maxWidth: 420,
+                  }}
+                >
+                  La infraestructura del servidor no respondió. Puedes consultar las demás pestañas o intentar reconectar.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => fetchStatus(true)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 22px",
+                  borderRadius: 12,
+                  background: "linear-gradient(135deg, #3ec4c0 0%, #2ba5a1 100%)",
+                  color: "#0a0e14",
+                  fontSize: "0.925rem",
+                  fontWeight: 700,
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                <IconRefresh size={18} />
+                <span>Reintentar</span>
+              </button>
+            </div>
+          ) : (
+            <>
               {/* Server Primary Status Card */}
               <div
                 style={{
@@ -479,11 +499,11 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                 />
               </div>
 
-              {/* Resource Metrics Grid */}
+              {/* Resource Metrics Grid including Rx/Tx */}
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
                   gap: 16,
                 }}
               >
@@ -516,28 +536,166 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                   theme={theme}
                   accentColor="#f59e0b"
                 />
-              </div>
-            </div>
-          )}
 
-          {/* TAB 2: CONSOLE */}
-          {activeTab === "console" && (
-            <div
-              style={{
-                flex: 1,
-                minHeight: 480,
-                display: "flex",
-                flexDirection: "column",
-                animation: "fadeIn 0.2s ease",
-              }}
-            >
-              <ServerConsoleView
-                serverStatus={currentStatus}
-                theme={theme}
-              />
-            </div>
+                <ServerResourceCard
+                  label="Tráfico recibido (RX)"
+                  icon={<IconDownload size={20} />}
+                  value={formatBytesToHuman(rxBytes)}
+                  theme={theme}
+                  accentColor="#38bdf8"
+                />
+
+                <ServerResourceCard
+                  label="Tráfico enviado (TX)"
+                  icon={<IconUpload size={20} />}
+                  value={formatBytesToHuman(txBytes)}
+                  theme={theme}
+                  accentColor="#a78bfa"
+                />
+              </div>
+
+              {/* Recent Activity Card */}
+              <div
+                style={{
+                  padding: "20px 24px",
+                  borderRadius: 18,
+                  background: isDark ? "rgba(19, 28, 35, 0.85)" : "#ffffff",
+                  border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)"}`,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 16,
+                  boxShadow: isDark ? "0 4px 16px rgba(0,0,0,0.15)" : "0 2px 8px rgba(0,0,0,0.03)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ color: isDark ? "#3ec4c0" : "#0c6e6b" }}>
+                      <IconHistory size={20} />
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: isDark ? "#ffffff" : "#0f172a" }}>
+                      Actividad reciente
+                    </h3>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={fetchActivity}
+                    disabled={isActivityLoading}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)",
+                      cursor: isActivityLoading ? "not-allowed" : "pointer",
+                      padding: 4,
+                    }}
+                  >
+                    {isActivityLoading ? <IconSpinner size={16} /> : <IconRefresh size={16} />}
+                  </button>
+                </div>
+
+                {activity.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)" }}>
+                    No hay eventos recientes registrados.
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {activity.map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          background: isDark ? "rgba(255,255,255,0.03)" : "#f8fafc",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, color: isDark ? "#ffffff" : "#0f172a" }}>
+                          {item.description}
+                        </span>
+                        <span style={{ color: isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)", fontSize: "0.8rem" }}>
+                          {new Date(item.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
           )}
-        </>
+        </div>
+      )}
+
+      {/* TAB 2: CONSOLE */}
+      {activeTab === "console" && (
+        <div
+          style={{
+            flex: 1,
+            minHeight: 480,
+            display: "flex",
+            flexDirection: "column",
+            animation: "fadeIn 0.2s ease",
+          }}
+        >
+          <ServerConsoleView
+            serverStatus={currentStatus}
+            theme={theme}
+          />
+        </div>
+      )}
+
+      {/* TAB 3: WORLD */}
+      {activeTab === "world" && (
+        <div style={{ animation: "fadeIn 0.2s ease" }}>
+          <ServerWorldView
+            theme={theme}
+            serverStatus={currentStatus}
+            onToast={showToast}
+          />
+        </div>
+      )}
+
+      {/* TAB 4: BACKUPS */}
+      {activeTab === "backups" && (
+        <div style={{ animation: "fadeIn 0.2s ease" }}>
+          <ServerBackupsView
+            theme={theme}
+            serverStatus={currentStatus}
+            onToast={showToast}
+          />
+        </div>
+      )}
+
+      {/* TAB 5: AUTOMATIONS */}
+      {activeTab === "automations" && (
+        <div style={{ animation: "fadeIn 0.2s ease" }}>
+          <ServerAutomationsView
+            theme={theme}
+            onToast={showToast}
+          />
+        </div>
+      )}
+
+      {/* TAB 6: CONFIGURATION */}
+      {activeTab === "configuration" && (
+        <div style={{ animation: "fadeIn 0.2s ease" }}>
+          <ServerConfigurationView
+            theme={theme}
+            onToast={showToast}
+          />
+        </div>
+      )}
+
+      {/* TAB 7: FILES */}
+      {activeTab === "files" && (
+        <div style={{ animation: "fadeIn 0.2s ease" }}>
+          <ServerFilesView
+            theme={theme}
+            onToast={showToast}
+          />
+        </div>
       )}
     </div>
   )

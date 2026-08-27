@@ -281,9 +281,12 @@ export interface ServerResourcesData {
   memoryLimitBytes?: number | null
   diskUsedBytes: number
   diskLimitBytes?: number | null
+  networkRxBytes?: number | null
+  networkTxBytes?: number | null
   uptimeMs?: number | null
   isSuspended: boolean
 }
+
 
 /**
  * Maps raw Pterodactyl server states to human-friendly HiKAT ServerStatus.
@@ -695,6 +698,310 @@ export function normalizeIsoDateTime(value?: string | null): string {
   const fallback = new Date(formatted)
   return !isNaN(fallback.getTime()) ? fallback.toISOString() : new Date().toISOString()
 }
+
+// --- HiKAT Server Administration II & Pterodactyl Integration Constants & Types (Shard 07) ---
+
+export const SERVER_OPERATION_LOCK_TTL_SECONDS = 180 // 3 minutes
+
+export const SERVER_OPERATION_TYPES = [
+  "RESTORE_BACKUP",
+  "REPLACE_WORLD",
+] as const
+export type ServerOperationType = typeof SERVER_OPERATION_TYPES[number]
+
+export const SERVER_FILE_ROOTS = ["WORLD", "CONFIG", "MODS", "LOGS"] as const
+export type ServerFileRoot = typeof SERVER_FILE_ROOTS[number]
+
+export const ALLOWED_TEXT_FILE_EXTENSIONS = [
+  ".txt",
+  ".properties",
+  ".json",
+  ".yml",
+  ".yaml",
+  ".toml",
+  ".cfg",
+  ".conf",
+  ".log",
+] as const
+
+export const MAX_TEXT_FILE_SIZE_BYTES = 256 * 1024 // 256 KB
+
+export function isAllowlistedTextFile(filename: string): boolean {
+  if (!filename || typeof filename !== "string") return false
+  const lower = filename.toLowerCase()
+  return ALLOWED_TEXT_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
+
+export function sanitizeWorldName(name: string | null | undefined): string {
+  if (!name || typeof name !== "string") return "world"
+  const cleaned = name.trim().replace(/[/\\:*?"<>|\x00-\x1F]/g, "").replace(/\.\.+/g, "")
+  return cleaned || "world"
+}
+
+export function sanitizeVirtualPath(
+  root: ServerFileRoot,
+  relativePath?: string | null,
+  worldName: string = "world",
+): {
+  valid: boolean
+  sanitizedRelativePath: string
+  fullPath: string
+  error?: string
+} {
+  const safeWorld = sanitizeWorldName(worldName)
+  let rootDir = ""
+  switch (root) {
+    case "WORLD":
+      rootDir = safeWorld
+      break
+    case "CONFIG":
+      rootDir = "config"
+      break
+    case "MODS":
+      rootDir = "mods"
+      break
+    case "LOGS":
+      rootDir = "logs"
+      break
+    default:
+      return { valid: false, sanitizedRelativePath: "", fullPath: "", error: "Categoría de archivo no válida." }
+  }
+
+  const rawPath = (relativePath || "").trim()
+  if (rawPath.includes("\0") || rawPath.includes("\\") || rawPath.includes("..")) {
+    return { valid: false, sanitizedRelativePath: "", fullPath: "", error: "Ruta de archivo no permitida." }
+  }
+
+  // Normalize path segments
+  const segments = rawPath
+    .split("/")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s !== ".")
+
+  for (const seg of segments) {
+    if (seg === ".." || seg.includes("..") || /[/\\:*?"<>|\x00-\x1F]/.test(seg)) {
+      return { valid: false, sanitizedRelativePath: "", fullPath: "", error: "Ruta de archivo contiene caracteres inválidos." }
+    }
+  }
+
+  const sanitizedRelative = segments.join("/")
+  const fullPath = sanitizedRelative ? `${rootDir}/${sanitizedRelative}` : rootDir
+
+  return {
+    valid: true,
+    sanitizedRelativePath: sanitizedRelative,
+    fullPath,
+  }
+}
+
+export const MINECRAFT_ALLOWED_SETTINGS = [
+  "difficulty",
+  "max-players",
+  "pvp",
+  "white-list",
+  "view-distance",
+  "simulation-distance",
+  "motd",
+  "allow-flight",
+] as const
+
+export interface MinecraftServerSettingsData {
+  difficulty: "peaceful" | "easy" | "normal" | "hard"
+  maxPlayers: number
+  pvp: boolean
+  whitelist: boolean
+  viewDistance: number
+  simulationDistance: number
+  motd: string
+  allowFlight: boolean
+}
+
+export function parseServerProperties(content: string): Map<string, string> {
+  const map = new Map<string, string>()
+  if (!content || typeof content !== "string") return map
+
+  const lines = content.split(/\r?\n/)
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("!")) {
+      continue
+    }
+    const eqIdx = line.indexOf("=")
+    if (eqIdx !== -1) {
+      const key = line.slice(0, eqIdx).trim()
+      const value = line.slice(eqIdx + 1).trim()
+      if (key) {
+        map.set(key, value)
+      }
+    }
+  }
+  return map
+}
+
+export function extractMinecraftSettings(content: string): MinecraftServerSettingsData {
+  const props = parseServerProperties(content)
+  const diffRaw = props.get("difficulty")?.toLowerCase()
+  const difficulty = (["peaceful", "easy", "normal", "hard"] as const).includes(diffRaw as any)
+    ? (diffRaw as "peaceful" | "easy" | "normal" | "hard")
+    : "normal"
+
+  const maxPlayersParsed = parseInt(props.get("max-players") || "20", 10)
+  const maxPlayers = isNaN(maxPlayersParsed) || maxPlayersParsed < 1 ? 20 : Math.min(maxPlayersParsed, 1000)
+
+  const pvp = props.get("pvp") !== "false"
+  const whitelist = props.get("white-list") === "true"
+
+  const vdParsed = parseInt(props.get("view-distance") || "10", 10)
+  const viewDistance = isNaN(vdParsed) || vdParsed < 2 ? 10 : Math.min(vdParsed, 32)
+
+  const sdParsed = parseInt(props.get("simulation-distance") || "10", 10)
+  const simulationDistance = isNaN(sdParsed) || sdParsed < 2 ? 10 : Math.min(sdParsed, 32)
+
+  const motd = (props.get("motd") || "A HiKAT Minecraft Server").slice(0, 256)
+  const allowFlight = props.get("allow-flight") === "true"
+
+  return {
+    difficulty,
+    maxPlayers,
+    pvp,
+    whitelist,
+    viewDistance,
+    simulationDistance,
+    motd,
+    allowFlight,
+  }
+}
+
+export function serializeServerProperties(
+  originalContent: string,
+  updates: Partial<MinecraftServerSettingsData>,
+): string {
+  const lines = (originalContent || "").split(/\r?\n/)
+  const mappedUpdates: Record<string, string> = {}
+
+  if (updates.difficulty !== undefined) mappedUpdates["difficulty"] = String(updates.difficulty)
+  if (updates.maxPlayers !== undefined) mappedUpdates["max-players"] = String(Math.max(1, Math.min(1000, updates.maxPlayers)))
+  if (updates.pvp !== undefined) mappedUpdates["pvp"] = updates.pvp ? "true" : "false"
+  if (updates.whitelist !== undefined) mappedUpdates["white-list"] = updates.whitelist ? "true" : "false"
+  if (updates.viewDistance !== undefined) mappedUpdates["view-distance"] = String(Math.max(2, Math.min(32, updates.viewDistance)))
+  if (updates.simulationDistance !== undefined) mappedUpdates["simulation-distance"] = String(Math.max(2, Math.min(32, updates.simulationDistance)))
+  if (updates.motd !== undefined) mappedUpdates["motd"] = updates.motd.trim().slice(0, 256)
+  if (updates.allowFlight !== undefined) mappedUpdates["allow-flight"] = updates.allowFlight ? "true" : "false"
+
+  const updatedKeys = new Set<string>()
+  const newLines = lines.map((line) => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("!")) {
+      return line
+    }
+    const eqIdx = line.indexOf("=")
+    if (eqIdx !== -1) {
+      const key = line.slice(0, eqIdx).trim()
+      if (key in mappedUpdates) {
+        updatedKeys.add(key)
+        return `${key}=${mappedUpdates[key]}`
+      }
+    }
+    return line
+  })
+
+  // Append any keys that were not already in original file
+  for (const [k, v] of Object.entries(mappedUpdates)) {
+    if (!updatedKeys.has(k)) {
+      newLines.push(`${k}=${v}`)
+    }
+  }
+
+  return newLines.join("\n")
+}
+
+export const SERVER_AUTOMATION_ACTIONS = ["BACKUP", "RESTART", "START", "STOP", "COMMAND"] as const
+export type ServerAutomationAction = typeof SERVER_AUTOMATION_ACTIONS[number]
+
+export const SERVER_AUTOMATION_FREQUENCIES = ["DAILY", "WEEKLY", "SELECTED_DAYS"] as const
+export type ServerAutomationFrequency = typeof SERVER_AUTOMATION_FREQUENCIES[number]
+
+export interface ServerAutomationModel {
+  name: string
+  action: ServerAutomationAction
+  frequency: ServerAutomationFrequency
+  time: string // "HH:mm" e.g. "04:00"
+  weekday?: number | null // 0-6 (0=Sunday, 1=Monday... 6=Saturday)
+  weekdays?: number[] | null
+  command?: string | null
+  enabled: boolean
+}
+
+export function convertAutomationToPterodactylCron(
+  frequency: ServerAutomationFrequency,
+  time: string,
+  weekday?: number | null,
+  weekdays?: number[] | null,
+): {
+  minute: string
+  hour: string
+  day_of_month: string
+  month: string
+  day_of_week: string
+} {
+  const [hStr, mStr] = (time || "04:00").split(":")
+  const hour = String(parseInt(hStr || "4", 10) || 0).padStart(2, "0")
+  const minute = String(parseInt(mStr || "0", 10) || 0).padStart(2, "0")
+
+  let dayOfWeek = "*"
+  if (frequency === "WEEKLY") {
+    const w = weekday !== undefined && weekday !== null ? weekday : 1
+    dayOfWeek = String(Math.max(0, Math.min(6, w)))
+  } else if (frequency === "SELECTED_DAYS" && weekdays && weekdays.length > 0) {
+    const safeDays = [...new Set(weekdays.map((d) => Math.max(0, Math.min(6, d))))].sort()
+    dayOfWeek = safeDays.join(",")
+  }
+
+  return {
+    minute,
+    hour,
+    day_of_month: "*",
+    month: "*",
+    day_of_week: dayOfWeek,
+  }
+}
+
+export function mapPterodactylActivityEvent(event: string | null | undefined): {
+  eventType: string
+  description: string
+} {
+  if (!event || typeof event !== "string") {
+    return { eventType: "SERVER_ACTIVITY", description: "Actividad del servidor" }
+  }
+
+  const lower = event.toLowerCase()
+  if (lower.includes("power.start") || lower === "server:power.start") {
+    return { eventType: "START", description: "Servidor iniciado" }
+  }
+  if (lower.includes("power.stop") || lower === "server:power.stop") {
+    return { eventType: "STOP", description: "Servidor detenido" }
+  }
+  if (lower.includes("power.restart") || lower === "server:power.restart") {
+    return { eventType: "RESTART", description: "Servidor reiniciado" }
+  }
+  if (lower.includes("backup.create") || lower === "server:backup.create") {
+    return { eventType: "BACKUP_CREATE", description: "Copia creada" }
+  }
+  if (lower.includes("backup.restore") || lower === "server:backup.restore") {
+    return { eventType: "BACKUP_RESTORE", description: "Copia restaurada" }
+  }
+  if (lower.includes("backup.delete") || lower === "server:backup.delete") {
+    return { eventType: "BACKUP_DELETE", description: "Copia eliminada" }
+  }
+  if (lower.includes("file.write") || lower.includes("file.create") || lower.includes("file.upload")) {
+    return { eventType: "FILE_UPDATE", description: "Archivo actualizado" }
+  }
+  if (lower.includes("file.delete")) {
+    return { eventType: "FILE_DELETE", description: "Archivo eliminado" }
+  }
+  return { eventType: "SERVER_ACTIVITY", description: "Actividad del servidor" }
+}
+
 
 
 

@@ -79,6 +79,9 @@ export async function getServerStatus(
       ? details.limits.disk * 1024 * 1024
       : null
 
+  const networkRxBytes = stats.resources.network_rx_bytes ?? 0
+  const networkTxBytes = stats.resources.network_tx_bytes ?? 0
+
   const uptimeMs = stats.resources.uptime ?? null
 
   return {
@@ -89,10 +92,13 @@ export async function getServerStatus(
     memoryLimitBytes,
     diskUsedBytes,
     diskLimitBytes,
+    networkRxBytes,
+    networkTxBytes,
     uptimeMs,
     isSuspended,
   }
 }
+
 
 /**
  * Acquires a distributed power action lock in D1.
@@ -484,3 +490,116 @@ export async function getServerConsoleWebsocketCredentials(
   const client = clientOverride || createPterodactylClient(env)
   return client.getWebsocketCredentials()
 }
+
+/**
+ * Acquires a distributed operation lock in D1 for destructive operations (RESTORE_BACKUP, REPLACE_WORLD).
+ */
+export async function acquireServerOperationLock(
+  db: ReturnType<typeof createDatabase>,
+  operation: "RESTORE_BACKUP" | "REPLACE_WORLD",
+  userId: string,
+): Promise<string> {
+  const nowIso = new Date().toISOString()
+  const lockKey = "server_destructive_operation"
+
+  // 1. Clear expired locks
+  try {
+    await db
+      .delete(schema.serverOperationLocks)
+      .where(
+        and(
+          eq(schema.serverOperationLocks.lockKey, lockKey),
+          lt(schema.serverOperationLocks.expiresAt, nowIso),
+        ),
+      )
+  } catch {}
+
+  // 2. Check for active lock
+  const activeLock = await db
+    .select()
+    .from(schema.serverOperationLocks)
+    .where(
+      and(
+        eq(schema.serverOperationLocks.lockKey, lockKey),
+        gt(schema.serverOperationLocks.expiresAt, nowIso),
+      ),
+    )
+    .get()
+
+  if (activeLock) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_BUSY,
+      "Hay otra operación del servidor en curso. Espera a que finalice.",
+      `Operation ${activeLock.operation} currently holding lock ${lockKey}`,
+    )
+  }
+
+  // 3. Insert new lock
+  const expiresAt = new Date(
+    Date.now() + 180 * 1000, // 3 minutes TTL
+  ).toISOString()
+
+  try {
+    await db.insert(schema.serverOperationLocks).values({
+      lockKey,
+      operation,
+      acquiredByUserId: userId,
+      acquiredAt: nowIso,
+      expiresAt,
+    })
+  } catch (err: unknown) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_BUSY,
+      "Hay otra operación del servidor en curso. Espera a que finalice.",
+      `Failed to insert server operation lock: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+
+  return lockKey
+}
+
+/**
+ * Releases a distributed operation lock in D1.
+ */
+export async function releaseServerOperationLock(
+  db: ReturnType<typeof createDatabase>,
+  lockKey: string = "server_destructive_operation",
+): Promise<void> {
+  try {
+    await db
+      .delete(schema.serverOperationLocks)
+      .where(eq(schema.serverOperationLocks.lockKey, lockKey))
+  } catch {}
+}
+
+/**
+ * Retrieves recent human-friendly server activity.
+ */
+export async function getServerActivity(
+  env: Env,
+  clientOverride?: IPterodactylClient,
+): Promise<Array<{ id: string; description: string; eventType: string; timestamp: string }>> {
+  const client = clientOverride || createPterodactylClient(env)
+  try {
+    const res = await client.getServerActivity()
+    if (!res || !res.data || !Array.isArray(res.data)) {
+      return []
+    }
+
+    const { mapPterodactylActivityEvent } = await import("@hikat/shared")
+
+    return res.data.slice(0, 10).map((item, idx) => {
+      const attr = item.attributes
+      const mapped = mapPterodactylActivityEvent(attr.event)
+      return {
+        id: attr.id || `act_${idx}_${Date.now()}`,
+        description: mapped.description,
+        eventType: mapped.eventType,
+        timestamp: attr.timestamp,
+      }
+    })
+  } catch {
+    return []
+  }
+}
+

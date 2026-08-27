@@ -50,6 +50,21 @@ export const serverCommandRateLimits = sqliteTable(
   },
 )
 
+export const serverOperationLocks = sqliteTable(
+  "server_operation_locks",
+  {
+    lockKey: text("lock_key").primaryKey(),
+    operation: text("operation").notNull(),
+    acquiredByUserId: text("acquired_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    acquiredAt: text("acquired_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    expiresAt: text("expires_at").notNull(),
+  },
+)
+
 export type ServerConsoleTicket = typeof serverConsoleTickets.$inferSelect
 export type NewServerConsoleTicket = typeof serverConsoleTickets.$inferInsert
 
@@ -58,3 +73,7 @@ export type NewServerPowerLock = typeof serverPowerLocks.$inferInsert
 
 export type ServerCommandRateLimit = typeof serverCommandRateLimits.$inferSelect
 export type NewServerCommandRateLimit = typeof serverCommandRateLimits.$inferInsert
+
+export type ServerOperationLock = typeof serverOperationLocks.$inferSelect
+export type NewServerOperationLock = typeof serverOperationLocks.$inferInsert
+

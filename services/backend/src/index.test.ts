@@ -4850,7 +4850,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             token: "ws-token",
             socket: "wss://wings.test/ws",
           }),
-        }
+        } as any
 
         const metrics = await getServerStatus(createServerEnv(), mockClient)
 
@@ -4881,7 +4881,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         const createMockClientWithState = (
           state: any,
           isSuspended = false,
-        ) => ({
+        ): any => ({
           getServerResources: async () => ({
             object: "stats" as const,
 
@@ -4942,6 +4942,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             socket: "wss://wings.test/ws",
           }),
         })
+
 
         const starting = await getServerStatus(
           createServerEnv(),
@@ -5033,7 +5034,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           sendCommand: async () => {},
 
           getWebsocketCredentials: async () => ({}) as any,
-        })
+        }) as any
 
         // 1. If server is already ONLINE, START must be rejected
 
@@ -5100,7 +5101,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         const unknownClient = createMockClientWithStatus("invalid_state")
 
-        const disconnectedClient = {
+        const disconnectedClient: any = {
           ...createMockClientWithStatus("running"),
 
           getServerResources: async () => ({
@@ -5125,7 +5126,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         let powerActionCalled = false
 
-        const trackingUnknownClient = {
+        const trackingUnknownClient: any = {
           ...unknownClient,
 
           sendPowerAction: async () => {
@@ -5133,7 +5134,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
         }
 
-        const trackingDisconnectedClient = {
+        const trackingDisconnectedClient: any = {
           ...disconnectedClient,
 
           sendPowerAction: async () => {
@@ -5227,7 +5228,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         // getServerStatus() network / infrastructure failure rejection
 
-        const failingStatusClient = {
+        const failingStatusClient: any = {
           ...unknownClient,
 
           getServerResources: async () => {
@@ -5250,6 +5251,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           "No se pudo comprobar el estado del servidor. Inténtalo nuevamente.",
         )
 
+
         expect(powerActionCalled).toBe(false)
 
         // 6. Valid actions execute successfully
@@ -5258,7 +5260,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           createServerEnv(),
           "START",
           adminId,
-          offlineClient,
+          offlineClient as any,
         )
 
         expect(startRes.success).toBe(true)
@@ -5271,7 +5273,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           createServerEnv(),
           "RESTART",
           adminId,
-          onlineClient,
+          onlineClient as any,
         )
 
         expect(restartRes.success).toBe(true)
@@ -5284,7 +5286,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           createServerEnv(),
           "STOP",
           adminId,
-          onlineClient,
+          onlineClient as any,
         )
 
         expect(stopRes.success).toBe(true)
@@ -5332,7 +5334,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             createServerEnv(),
             "STOP",
             adminId,
-            mockClient,
+            mockClient as any,
           ),
         ).rejects.toThrow(
           "Hay otra acción en curso. Espera un momento.",
@@ -5371,13 +5373,13 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         // Empty command -> rejected
 
         await expect(
-          executeServerCommand(createServerEnv(), "", adminId, mockClient),
+          executeServerCommand(createServerEnv(), "", adminId, mockClient as any),
         ).rejects.toThrow(
           "El comando no puede estar vacío.",
         )
 
         await expect(
-          executeServerCommand(createServerEnv(), "   ", adminId, mockClient),
+          executeServerCommand(createServerEnv(), "   ", adminId, mockClient as any),
         ).rejects.toThrow(
           "El comando no puede estar vacío.",
         )
@@ -5387,7 +5389,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         const hugeCmd = "say " + "a".repeat(510)
 
         await expect(
-          executeServerCommand(createServerEnv(), hugeCmd, adminId, mockClient),
+          executeServerCommand(createServerEnv(), hugeCmd, adminId, mockClient as any),
         ).rejects.toThrow(
           "El comando excede la longitud máxima permitida",
         )
@@ -5403,8 +5405,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             createServerEnv(),
             `say concurrent command ${idx}`,
             adminId,
-            mockClient,
+            mockClient as any,
           )
+
 
             .then(() => ({ success: true, error: null }))
 
