@@ -28,7 +28,12 @@ import {
 } from "./serverConfigService"
 import {
   listServerFiles,
+  readServerTextFile,
+  writeServerTextFile,
+  renameServerFile,
+  deleteServerFile,
   prepareServerFileUploadUrl,
+  createServerFileDownloadUrl,
 } from "./serverFileService"
 import {
   listServerAutomations,
@@ -1002,10 +1007,10 @@ rcon.password=secret123
     expect(renameFileSpy).not.toHaveBeenCalledWith("/", expect.stringMatching(/^_staging_world_/), "world")
   })
 
-  // --- Phase 07E: Full Server File Browser (SERVER Root) Tests ---
+  // --- Phase 07E & 07F: Full Server File Browser (SERVER Root) & Symlink Hardening Tests ---
 
-  // Test 24: SERVER Root listing queries server root directory without category prefix
-  it("Phase 07E: listServerFiles with SERVER root and empty path queries real root directory", async () => {
+  // Test 24: SERVER Root listing queries server root directory as canonical "/"
+  it("Phase 07F: listServerFiles with SERVER root and empty path queries canonical '/' directory", async () => {
     const listDirSpy = vi.fn().mockResolvedValue({
       object: "list",
       data: [
@@ -1018,7 +1023,7 @@ rcon.password=secret123
     const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
 
     const files = await listServerFiles(env, "SERVER", "", mockClient as any)
-    expect(listDirSpy).toHaveBeenCalledWith("")
+    expect(listDirSpy).toHaveBeenCalledWith("/")
     expect(files).toHaveLength(2)
     expect(files[0]?.name).toBe("world")
     expect(files[0]?.isFile).toBe(false)
@@ -1050,8 +1055,8 @@ rcon.password=secret123
     expect(files.map((f) => f.name)).toContain("kubejs")
   })
 
-  // Test 26: Folder navigation for SERVER root queries subfolder cleanly
-  it("Phase 07E: SERVER root with relativePath='mods' queries subfolder cleanly", async () => {
+  // Test 26: Folder navigation for SERVER root queries subfolder with canonical leading slash (/mods)
+  it("Phase 07F: SERVER root with relativePath='mods' queries subfolder as canonical '/mods'", async () => {
     const listDirSpy = vi.fn().mockResolvedValue({
       object: "list",
       data: [
@@ -1064,12 +1069,12 @@ rcon.password=secret123
     const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
 
     const files = await listServerFiles(env, "SERVER", "mods", mockClient as any)
-    expect(listDirSpy).toHaveBeenCalledWith("mods")
+    expect(listDirSpy).toHaveBeenCalledWith("/mods")
     expect(files).toHaveLength(2)
   })
 
-  // Test 27: Upload destination resolves to exact open directory for SERVER root
-  it("Phase 07E: prepareServerFileUploadUrl prepares upload target for current open subfolder", async () => {
+  // Test 27: Upload destination resolves to directory=%2F for root and directory=%2Fmods%2Fsubfolder for subfolder
+  it("Phase 07F: prepareServerFileUploadUrl prepares upload target with canonical leading slash directory param", async () => {
     const mockClient = {
       getFileUploadUrl: vi.fn().mockResolvedValue({
         attributes: { url: "https://wings.hikat.net:8080/upload/file" },
@@ -1078,25 +1083,26 @@ rcon.password=secret123
     const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
 
     const resRoot = await prepareServerFileUploadUrl(env, "SERVER", "", mockClient as any)
-    expect(resRoot.url).toBe("https://wings.hikat.net:8080/upload/file?directory=")
+    expect(resRoot.url).toBe("https://wings.hikat.net:8080/upload/file?directory=%2F")
 
     const resSub = await prepareServerFileUploadUrl(env, "SERVER", "mods/subfolder", mockClient as any)
-    expect(resSub.url).toBe("https://wings.hikat.net:8080/upload/file?directory=mods%2Fsubfolder")
+    expect(resSub.url).toBe("https://wings.hikat.net:8080/upload/file?directory=%2Fmods%2Fsubfolder")
   })
 
-  // Test 28: Path Traversal attempts are rejected for SERVER root
-  it("Phase 07E: SERVER root rejects directory traversal attempts", async () => {
+  // Test 28: Path Traversal attempts and leading slash relativePaths are rejected
+  it("Phase 07F: SERVER root rejects directory traversal attempts and leading slash relativePaths", async () => {
     const mockClient = { listDirectory: vi.fn() }
     const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
 
     await expect(listServerFiles(env, "SERVER", "../../", mockClient as any)).rejects.toThrow("no permitida")
+    await expect(listServerFiles(env, "SERVER", "/etc/passwd", mockClient as any)).rejects.toThrow("no permitida")
     await expect(listServerFiles(env, "SERVER", "../config", mockClient as any)).rejects.toThrow("no permitida")
     await expect(listServerFiles(env, "SERVER", "..\\..\\windows", mockClient as any)).rejects.toThrow("no permitida")
     await expect(prepareServerFileUploadUrl(env, "SERVER", "mods/../../etc", mockClient as any)).rejects.toThrow("no permitida")
   })
 
-  // Test 29: Symlink handling fail-closed
-  it("Phase 07E: Symlinks fail closed by setting isFile=true to block unsafe folder navigation", async () => {
+  // Test 29: Symlink mapping returns isSymlink: true and isFile: true (fail closed)
+  it("Phase 07F: Symlinks set isSymlink=true and isFile=true (fail closed)", async () => {
     const listDirSpy = vi.fn().mockResolvedValue({
       object: "list",
       data: [
@@ -1114,8 +1120,43 @@ rcon.password=secret123
     const symlinkDir = files.find((f) => f.name === "symlink_dir")
 
     expect(safeDir?.isFile).toBe(false)
-    // Symlink dir is treated as isFile=true (fail closed)
+    expect(safeDir?.isSymlink).toBe(false)
     expect(symlinkDir?.isFile).toBe(true)
+    expect(symlinkDir?.isSymlink).toBe(true)
+  })
+
+  // Test 30: Rename and Delete on root items pass parentPath='/' and fileName='server.properties'
+  it("Phase 07F: renameServerFile and deleteServerFile on root item pass parentPath='/' and correct fileName", async () => {
+    const renameFileSpy = vi.fn().mockResolvedValue(undefined)
+    const deleteFilesSpy = vi.fn().mockResolvedValue(undefined)
+    const mockClient = { renameFile: renameFileSpy, deleteFiles: deleteFilesSpy }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await renameServerFile(env, "SERVER", "server.properties", "new.properties", mockClient as any)
+    expect(renameFileSpy).toHaveBeenCalledWith("/", "server.properties", "new.properties")
+
+    await deleteServerFile(env, "SERVER", "server.properties", mockClient as any)
+    expect(deleteFilesSpy).toHaveBeenCalledWith("/", ["server.properties"])
+  })
+
+  // Test 31: Backend symlink guards block read/write/download operations on symlinks
+  it("Phase 07F: Backend symlink guards block read, write, and download operations on symlinks", async () => {
+    const mockClient = {
+      listDirectory: vi.fn().mockResolvedValue({
+        object: "list",
+        data: [
+          { attributes: { name: "symlink.json", is_file: true, is_symlink: true } },
+        ],
+      }),
+      getFileContents: vi.fn(),
+      writeFile: vi.fn(),
+      getFileDownload: vi.fn(),
+    }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(readServerTextFile(env, "SERVER", "symlink.json", mockClient as any)).rejects.toThrow("No se puede abrir este enlace desde HiKAT por seguridad.")
+    await expect(writeServerTextFile(env, "SERVER", "symlink.json", "data", mockClient as any)).rejects.toThrow("No se puede abrir este enlace desde HiKAT por seguridad.")
+    await expect(createServerFileDownloadUrl(env, "SERVER", "symlink.json", mockClient as any)).rejects.toThrow("No se puede abrir este enlace desde HiKAT por seguridad.")
   })
 })
 

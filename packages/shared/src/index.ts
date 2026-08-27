@@ -748,11 +748,16 @@ export function sanitizeVirtualPath(
   fullPath: string
   error?: string
 } {
+  const rawPath = (relativePath || "").trim()
+  if (rawPath.startsWith("/") || rawPath.includes("\0") || rawPath.includes("\\") || rawPath.includes("..")) {
+    return { valid: false, sanitizedRelativePath: "", fullPath: "", error: "Ruta de archivo no permitida." }
+  }
+
   const safeWorld = sanitizeWorldName(worldName)
   let rootDir: string | null = null
   switch (root) {
     case "SERVER":
-      rootDir = ""
+      rootDir = "/"
       break
     case "WORLD":
       rootDir = safeWorld
@@ -770,11 +775,6 @@ export function sanitizeVirtualPath(
       return { valid: false, sanitizedRelativePath: "", fullPath: "", error: "Categoría de archivo no válida." }
   }
 
-  const rawPath = (relativePath || "").trim()
-  if (rawPath.includes("\0") || rawPath.includes("\\") || rawPath.includes("..")) {
-    return { valid: false, sanitizedRelativePath: "", fullPath: "", error: "Ruta de archivo no permitida." }
-  }
-
   // Normalize path segments
   const segments = rawPath
     .split("/")
@@ -788,7 +788,7 @@ export function sanitizeVirtualPath(
   }
 
   const sanitizedRelative = segments.join("/")
-  const fullPath = rootDir !== "" ? (sanitizedRelative ? `${rootDir}/${sanitizedRelative}` : rootDir) : sanitizedRelative
+  const fullPath = root === "SERVER" ? (sanitizedRelative ? `/${sanitizedRelative}` : "/") : (sanitizedRelative ? `${rootDir}/${sanitizedRelative}` : rootDir)
 
   return {
     valid: true,

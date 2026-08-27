@@ -485,7 +485,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
             </thead>
             <tbody>
               {files.map((file) => {
-                const isEditable = file.isFile && isAllowlistedTextFile(file.name)
+                const isEditable = file.isFile && !file.isSymlink && isAllowlistedTextFile(file.name)
                 return (
                   <tr
                     key={file.name}
@@ -509,6 +509,20 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
                           {!file.isFile ? <IconFolder size={20} /> : isEditable ? <IconFileText size={20} /> : <IconFile size={20} />}
                         </div>
                         <span>{file.name}</span>
+                        {file.isSymlink && (
+                          <span
+                            style={{
+                              fontSize: "0.72rem",
+                              padding: "2px 6px",
+                              borderRadius: 6,
+                              background: isDark ? "rgba(234, 179, 8, 0.15)" : "#fef9c3",
+                              color: isDark ? "#facc15" : "#854d0e",
+                              fontWeight: 700,
+                            }}
+                          >
+                            Enlace
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td style={{ padding: "12px 20px", fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.7)" : "#475569" }}>
@@ -539,7 +553,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
                           </button>
                         )}
 
-                        {file.isFile && (
+                        {file.isFile && !file.isSymlink && (
                           <button
                             type="button"
                             title="Descargar"

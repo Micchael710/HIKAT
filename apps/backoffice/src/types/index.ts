@@ -394,6 +394,7 @@ export type ServerFileRoot = "SERVER" | "WORLD" | "CONFIG" | "MODS" | "LOGS"
 export interface ServerFileItem {
   name: string
   isFile: boolean
+  isSymlink: boolean
   sizeBytes: number
   mimeType?: string | null
   modifiedAt: string

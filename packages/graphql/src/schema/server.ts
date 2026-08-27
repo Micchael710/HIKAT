@@ -171,6 +171,7 @@ export const serverTypeDefs = /* GraphQL */ `
   type ServerFileItem {
     name: String!
     isFile: Boolean!
+    isSymlink: Boolean!
     sizeBytes: Float!
     mimeType: String
     modifiedAt: String!

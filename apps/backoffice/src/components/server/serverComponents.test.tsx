@@ -379,7 +379,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       allowFlight: false,
     })
     vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
-      { name: "server.properties", isFile: true, sizeBytes: 1024, mimeType: "text/plain", modifiedAt: new Date().toISOString() },
+      { name: "server.properties", isFile: true, isSymlink: false, sizeBytes: 1024, mimeType: "text/plain", modifiedAt: new Date().toISOString() },
     ])
 
     await act(async () => {
@@ -538,8 +538,8 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
 
   it("Phase 07E Test 1: Old category chips (Mundo, Configuración, Mods del servidor, Logs) do NOT exist as internal filters in ServerFilesView", async () => {
     vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
-      { name: "world", isFile: false, sizeBytes: 0, modifiedAt: new Date().toISOString() },
-      { name: "server.properties", isFile: true, sizeBytes: 1024, modifiedAt: new Date().toISOString() },
+      { name: "world", isFile: false, isSymlink: false, sizeBytes: 0, modifiedAt: new Date().toISOString() },
+      { name: "server.properties", isFile: true, isSymlink: false, sizeBytes: 1024, modifiedAt: new Date().toISOString() },
     ])
 
     await act(async () => {
@@ -558,12 +558,12 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
     const getServerFilesSpy = vi.spyOn(serverApi, "getServerFiles").mockImplementation(async (_root, path) => {
       if (path === "mods") {
         return [
-          { name: "voicechat.jar", isFile: true, sizeBytes: 5242880, modifiedAt: new Date().toISOString() },
+          { name: "voicechat.jar", isFile: true, isSymlink: false, sizeBytes: 5242880, modifiedAt: new Date().toISOString() },
         ]
       }
       return [
-        { name: "mods", isFile: false, sizeBytes: 0, modifiedAt: new Date().toISOString() },
-        { name: "server.properties", isFile: true, sizeBytes: 1024, modifiedAt: new Date().toISOString() },
+        { name: "mods", isFile: false, isSymlink: false, sizeBytes: 0, modifiedAt: new Date().toISOString() },
+        { name: "server.properties", isFile: true, isSymlink: false, sizeBytes: 1024, modifiedAt: new Date().toISOString() },
       ]
     })
 
@@ -609,6 +609,28 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
 
     const newFolderBtn = screen.getByRole("button", { name: /Nueva carpeta/i }) as HTMLButtonElement
     expect(newFolderBtn.disabled).toBe(true)
+  })
+
+  it("Phase 07F Test 4: Symlinks display 'Enlace' badge and hide 'Editar texto' and 'Descargar' action buttons", async () => {
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
+      { name: "normal.json", isFile: true, isSymlink: false, sizeBytes: 100, modifiedAt: new Date().toISOString() },
+      { name: "symlink.json", isFile: true, isSymlink: true, sizeBytes: 0, modifiedAt: new Date().toISOString() },
+    ])
+
+    await act(async () => {
+      render(<ServerFilesView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+    })
+
+    // Symlink renders "Enlace" badge
+    expect(screen.getByText("Enlace")).toBeDefined()
+
+    // Normal file has Download button
+    const downloadBtns = screen.getAllByTitle("Descargar")
+    expect(downloadBtns).toHaveLength(1)
+
+    // Normal file has Edit button
+    const editBtns = screen.getAllByTitle("Editar texto")
+    expect(editBtns).toHaveLength(1)
   })
 })
 

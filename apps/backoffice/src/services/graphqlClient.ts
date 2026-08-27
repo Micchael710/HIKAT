@@ -777,6 +777,7 @@ export const serverApi = {
         serverFiles(root: $root, relativePath: $relativePath) {
           name
           isFile
+          isSymlink
           sizeBytes
           mimeType
           modifiedAt

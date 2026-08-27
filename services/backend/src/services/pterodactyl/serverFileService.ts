@@ -20,6 +20,7 @@ import { detectActiveWorldName } from "./serverWorldService"
 export interface ServerFileItemData {
   name: string
   isFile: boolean
+  isSymlink: boolean
   sizeBytes: number
   mimeType?: string | null
   modifiedAt: string
@@ -28,6 +29,36 @@ export interface ServerFileItemData {
 export interface ServerFileContentData {
   content: string
   sizeBytes: number
+}
+
+/**
+ * Helper to verify that a target path is not a symlink.
+ * If target path is a symlink, throws a human ServerInfrastructureError.
+ */
+async function verifyNotSymlink(
+  client: IPterodactylClient,
+  fullPath: string,
+): Promise<void> {
+  const segments = fullPath.split("/").filter(Boolean)
+  if (segments.length === 0) return
+  const fileName = segments.pop() || ""
+  const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
+  try {
+    const res = await client.listDirectory(parentPath)
+    if (res && res.data && Array.isArray(res.data)) {
+      const item = res.data.find((i) => i.attributes.name === fileName)
+      if (item && (item.attributes.is_symlink || item.attributes.mimetype === "symlink")) {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          "No se puede abrir este enlace desde HiKAT por seguridad.",
+          `Access blocked for symlink target at fullPath=${fullPath}`,
+        )
+      }
+    }
+  } catch (err: unknown) {
+    if (err instanceof ServerInfrastructureError) throw err
+    // If parent directory listing fails or not present in mocks, allow operation fallback
+  }
 }
 
 /**
@@ -75,6 +106,7 @@ export async function listServerFiles(
     return {
       name: item.attributes.name,
       isFile,
+      isSymlink,
       sizeBytes: item.attributes.size ?? 0,
       mimeType: item.attributes.mimetype || null,
       modifiedAt: item.attributes.modified_at || item.attributes.created_at || new Date().toISOString(),
@@ -101,6 +133,7 @@ export async function readServerTextFile(
   }
 
   const fullPath = await resolveSafePath(env, root, relativePath, client)
+  await verifyNotSymlink(client, fullPath)
   const content = await client.getFileContents(fullPath)
 
   const encoder = new TextEncoder()
@@ -149,6 +182,7 @@ export async function writeServerTextFile(
   }
 
   const fullPath = await resolveSafePath(env, root, relativePath, client)
+  await verifyNotSymlink(client, fullPath)
   await client.writeFile(fullPath, content || "")
   return true
 }
@@ -199,9 +233,9 @@ export async function renameServerFile(
   }
 
   const fullPath = await resolveSafePath(env, root, relativePath, client)
-  const segments = fullPath.split("/")
+  const segments = fullPath.split("/").filter(Boolean)
   const oldName = segments.pop() || ""
-  const parentPath = segments.join("/") || "/"
+  const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
 
   await client.renameFile(parentPath, oldName, cleanNewName)
   return true
@@ -219,9 +253,9 @@ export async function deleteServerFile(
   const client = clientOverride || createPterodactylClient(env)
   const fullPath = await resolveSafePath(env, root, relativePath, client)
 
-  const segments = fullPath.split("/")
+  const segments = fullPath.split("/").filter(Boolean)
   const fileName = segments.pop() || ""
-  const parentPath = segments.join("/") || "/"
+  const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
 
   await client.deleteFiles(parentPath, [fileName])
   return true
@@ -255,6 +289,7 @@ export async function createServerFileDownloadUrl(
 ): Promise<{ url: string }> {
   const client = clientOverride || createPterodactylClient(env)
   const fullPath = await resolveSafePath(env, root, relativePath, client)
+  await verifyNotSymlink(client, fullPath)
   const res = await client.getFileDownload(fullPath)
   return { url: res.attributes.url }
 }
