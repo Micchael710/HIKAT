@@ -172,18 +172,34 @@ export async function replaceServerWorld(
   const stagingDirName = `_staging_world_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
   let preBackupUuid: string | null = null
   let stagingCreated = false
+  let zipMovedToStaging = false
 
   try {
-    // 4. Validate that uploaded ZIP file exists in root directory
-    const rootFiles = await client.listDirectory("/").catch(() => null)
-    if (rootFiles?.data) {
-      const fileExists = rootFiles.data.some((f) => f.attributes.name === cleanFileName)
-      if (!fileExists) {
-        throw new ServerInfrastructureError(
-          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-          `El archivo subido "${cleanFileName}" no fue encontrado en el servidor.`,
-        )
-      }
+    // 4. Validate that uploaded ZIP file exists in root directory (fail closed)
+    let rootFiles: Awaited<ReturnType<IPterodactylClient["listDirectory"]>>
+    try {
+      rootFiles = await client.listDirectory("/")
+    } catch (listErr: unknown) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        "No se pudo consultar el directorio raíz del servidor para verificar el archivo subido.",
+        `listDirectory(/) failed: ${listErr instanceof Error ? listErr.message : String(listErr)}`,
+      )
+    }
+
+    if (!rootFiles || !rootFiles.data) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        "La respuesta del servidor no contiene una lista de archivos válida.",
+      )
+    }
+
+    const fileExists = rootFiles.data.some((f: { attributes: { name: string } }) => f.attributes.name === cleanFileName)
+    if (!fileExists) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        `El archivo subido "${cleanFileName}" no fue encontrado en el servidor.`,
+      )
     }
 
     // 5. Create automatic pre-backup
@@ -202,7 +218,11 @@ export async function replaceServerWorld(
     await client.createFolder("/", stagingDirName)
     stagingCreated = true
 
-    // 7. Extract uploaded ZIP ONLY into staging directory
+    // Move uploaded ZIP file from / into /stagingDirName/cleanFileName so decompress receives root where ZIP exists
+    await client.renameFile("/", cleanFileName, `${stagingDirName}/${cleanFileName}`)
+    zipMovedToStaging = true
+
+    // 7. Extract uploaded ZIP inside staging directory (root = /stagingDirName, file = cleanFileName)
     try {
       await client.decompressFile(`/${stagingDirName}`, cleanFileName)
     } catch (decompressErr: unknown) {
@@ -222,11 +242,14 @@ export async function replaceServerWorld(
       )
     }
 
+    // Filter out the ZIP archive itself when validating world files
+    const extractedItems = stagingFiles.data.filter((item) => item.attributes.name !== cleanFileName)
+
     let hasLevelDat = false
     let innerWorldFolder: string | null = null
 
     // Check Case A: level.dat directly in root of staging
-    const directLevelDat = stagingFiles.data.some(
+    const directLevelDat = extractedItems.some(
       (item) => item.attributes.name.toLowerCase() === "level.dat",
     )
 
@@ -234,7 +257,7 @@ export async function replaceServerWorld(
       hasLevelDat = true
     } else {
       // Check Case B: single container directory containing level.dat
-      const directories = stagingFiles.data.filter(
+      const directories = extractedItems.filter(
         (item) => !item.attributes.is_file || item.attributes.mimetype === "directory",
       )
 
@@ -264,14 +287,17 @@ export async function replaceServerWorld(
 
     // 9. Execute world replacement phase (active world touched ONLY after staging is fully validated)
     try {
-      // Delete existing active world directory
+      // Delete zip inside staging before moving/renaming world
+      await client.deleteFiles(`/${stagingDirName}`, [cleanFileName]).catch(() => {})
+
+      // Delete existing active world directory at root /
       await client.deleteFiles("/", [activeWorldName]).catch(() => {})
 
       if (innerWorldFolder) {
-        // Case B: Move/Rename inner world directory from staging to activeWorldName
-        await client.renameFile(`/${stagingDirName}`, innerWorldFolder, activeWorldName)
+        // Case B: Move/Rename inner world directory from /stagingDirName/innerWorldFolder to /activeWorldName
+        await client.renameFile("/", `${stagingDirName}/${innerWorldFolder}`, activeWorldName)
       } else {
-        // Case A: Rename entire staging directory to activeWorldName
+        // Case A: Rename entire staging directory /stagingDirName to /activeWorldName
         await client.renameFile("/", stagingDirName, activeWorldName)
         stagingCreated = false // Staging directory was renamed to activeWorldName
       }
@@ -293,12 +319,14 @@ export async function replaceServerWorld(
 
     return true
   } finally {
-    // 11. Clean up staging directory if it still exists
+    // 11. Clean up uploaded ZIP archive if it wasn't moved
+    if (!zipMovedToStaging) {
+      await client.deleteFiles("/", [cleanFileName]).catch(() => {})
+    }
+    // Clean up staging directory if it still exists
     if (stagingCreated) {
       await client.deleteFiles("/", [stagingDirName]).catch(() => {})
     }
-    // Clean up uploaded ZIP archive from root
-    await client.deleteFiles("/", [cleanFileName]).catch(() => {})
 
     // 12. Always release distributed operation lock
     await releaseServerOperationLock(db, lockKey)

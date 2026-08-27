@@ -596,7 +596,9 @@ rcon.password=secret123
       createFolder: vi.fn().mockResolvedValue(undefined),
       decompressFile: vi.fn().mockResolvedValue(undefined),
       deleteFiles: vi.fn().mockResolvedValue(undefined),
-      renameFile: vi.fn().mockRejectedValue(new Error("Wings 500 Rename Failed")),
+      renameFile: vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("Wings 500 Rename Failed")),
       restoreBackup: restoreBackupSpy,
     }
 
@@ -669,6 +671,144 @@ rcon.password=secret123
       deleteServerAutomation(env, "99", mockClient as any),
     ).rejects.toThrow("Esta automatización es avanzada (contiene múltiples tareas)")
     expect(deleteScheduleSpy).not.toHaveBeenCalled()
+  })
+
+  // Test 18: Shard 07C - Archive Location Semantics (moves ZIP into staging before decompressing)
+  it("replaceServerWorld moves uploaded ZIP into staging directory before invoking decompressFile inside staging root", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const renameFileSpy = vi.fn().mockResolvedValue(undefined)
+    const decompressFileSpy = vi.fn().mockResolvedValue(undefined)
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", is_suspended: false, resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({ attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } } }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir === "/") {
+          return Promise.resolve({ data: [{ attributes: { name: "world.zip", is_file: true } }] })
+        }
+        return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
+      }),
+      createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "bk-1" } }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      renameFile: renameFileSpy,
+      decompressFile: decompressFileSpy,
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const success = await replaceServerWorld(env, db as any, "admin-1", "world.zip", mockClient as any)
+    expect(success).toBe(true)
+
+    // 1. ZIP is moved to _staging_world_xxx/world.zip
+    expect(renameFileSpy).toHaveBeenNthCalledWith(
+      1,
+      "/",
+      "world.zip",
+      expect.stringMatching(/^_staging_world_.*\/world\.zip$/),
+    )
+
+    // 2. decompress is called on staging root where ZIP physically exists
+    expect(decompressFileSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/_staging_world_/),
+      "world.zip",
+    )
+  })
+
+  // Test 19: Shard 07C - Wrapped Folder Destination (moves /staging/MiMundo directly to /activeWorldName)
+  it("replaceServerWorld moves wrapped inner folder directly to root active world path", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const renameFileSpy = vi.fn().mockResolvedValue(undefined)
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", is_suspended: false, resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({ attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } } }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=survival_world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir === "/") {
+          return Promise.resolve({ data: [{ attributes: { name: "custom_pack.zip", is_file: true } }] })
+        }
+        if (dir.includes("MiMundo")) {
+          return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
+        }
+        // Staging root contains wrapped folder "MiMundo"
+        return Promise.resolve({ data: [{ attributes: { name: "MiMundo", is_file: false, mimetype: "directory" } }] })
+      }),
+      createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "bk-2" } }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      decompressFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+      renameFile: renameFileSpy,
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const success = await replaceServerWorld(env, db as any, "admin-1", "custom_pack.zip", mockClient as any)
+    expect(success).toBe(true)
+
+    // Inner folder _staging_xxx/MiMundo is moved to survival_world in server root /
+    expect(renameFileSpy).toHaveBeenLastCalledWith(
+      "/",
+      expect.stringMatching(/^_staging_world_.*\/MiMundo$/),
+      "survival_world",
+    )
+  })
+
+  // Test 20: Shard 07C - Fail Closed on listDirectory("/") Failure
+  it("replaceServerWorld fails closed and aborts immediately if listDirectory(/) fails", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const createBackupSpy = vi.fn()
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", is_suspended: false, resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({ attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } } }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockRejectedValue(new Error("Wings 500 Network Timeout")),
+      createBackup: createBackupSpy,
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      replaceServerWorld(env, db as any, "admin-1", "world.zip", mockClient as any),
+    ).rejects.toThrow("No se pudo consultar el directorio raíz del servidor")
+
+    // Operations MUST NOT have proceeded!
+    expect(createBackupSpy).not.toHaveBeenCalled()
   })
 })
 
