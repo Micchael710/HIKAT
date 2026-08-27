@@ -1139,8 +1139,11 @@ rcon.password=secret123
     expect(deleteFilesSpy).toHaveBeenCalledWith("/", ["server.properties"])
   })
 
-  // Test 31: Backend symlink guards block read/write/download operations on symlinks
-  it("Phase 07F: Backend symlink guards block read, write, and download operations on symlinks", async () => {
+  // Test 31: Backend symlink guards block read/write/download operations on confirmed symlinks
+  it("Phase 07G: Backend symlink guards block read, write, and download operations on confirmed symlinks", async () => {
+    const getFileContentsSpy = vi.fn()
+    const writeFileSpy = vi.fn()
+    const getFileDownloadSpy = vi.fn()
     const mockClient = {
       listDirectory: vi.fn().mockResolvedValue({
         object: "list",
@@ -1148,15 +1151,93 @@ rcon.password=secret123
           { attributes: { name: "symlink.json", is_file: true, is_symlink: true } },
         ],
       }),
-      getFileContents: vi.fn(),
-      writeFile: vi.fn(),
-      getFileDownload: vi.fn(),
+      getFileContents: getFileContentsSpy,
+      writeFile: writeFileSpy,
+      getFileDownload: getFileDownloadSpy,
     }
     const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
 
     await expect(readServerTextFile(env, "SERVER", "symlink.json", mockClient as any)).rejects.toThrow("No se puede abrir este enlace desde HiKAT por seguridad.")
+    expect(getFileContentsSpy).not.toHaveBeenCalled()
+
     await expect(writeServerTextFile(env, "SERVER", "symlink.json", "data", mockClient as any)).rejects.toThrow("No se puede abrir este enlace desde HiKAT por seguridad.")
+    expect(writeFileSpy).not.toHaveBeenCalled()
+
     await expect(createServerFileDownloadUrl(env, "SERVER", "symlink.json", mockClient as any)).rejects.toThrow("No se puede abrir este enlace desde HiKAT por seguridad.")
+    expect(getFileDownloadSpy).not.toHaveBeenCalled()
+  })
+
+  // Test 32: listDirectory failure fails closed for read, write, and download
+  it("Phase 07G: listDirectory failure fails closed without calling underlying read/write/download primitives", async () => {
+    const getFileContentsSpy = vi.fn()
+    const writeFileSpy = vi.fn()
+    const getFileDownloadSpy = vi.fn()
+    const mockClient = {
+      listDirectory: vi.fn().mockRejectedValue(new Error("Pterodactyl Network Timeout")),
+      getFileContents: getFileContentsSpy,
+      writeFile: writeFileSpy,
+      getFileDownload: getFileDownloadSpy,
+    }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(readServerTextFile(env, "SERVER", "server.properties", mockClient as any)).rejects.toThrow("No se pudo verificar este archivo de forma segura. Inténtalo de nuevo.")
+    expect(getFileContentsSpy).not.toHaveBeenCalled()
+
+    await expect(writeServerTextFile(env, "SERVER", "server.properties", "motd=test", mockClient as any)).rejects.toThrow("No se pudo verificar este archivo de forma segura. Inténtalo de nuevo.")
+    expect(writeFileSpy).not.toHaveBeenCalled()
+
+    await expect(createServerFileDownloadUrl(env, "SERVER", "server.properties", mockClient as any)).rejects.toThrow("No se pudo verificar este archivo de forma segura. Inténtalo de nuevo.")
+    expect(getFileDownloadSpy).not.toHaveBeenCalled()
+  })
+
+  // Test 33: Invalid response structure fails closed
+  it("Phase 07G: Invalid listDirectory response structure fails closed", async () => {
+    const mockClient = {
+      listDirectory: vi.fn().mockResolvedValue({ data: null }),
+      getFileContents: vi.fn(),
+    }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(readServerTextFile(env, "SERVER", "server.properties", mockClient as any)).rejects.toThrow("No se pudo verificar este archivo de forma segura. Inténtalo de nuevo.")
+  })
+
+  // Test 34: Target item missing from parent directory fails closed
+  it("Phase 07G: Target item missing from parent directory fails closed", async () => {
+    const mockClient = {
+      listDirectory: vi.fn().mockResolvedValue({
+        object: "list",
+        data: [{ attributes: { name: "other_file.txt", is_file: true } }],
+      }),
+      getFileContents: vi.fn(),
+    }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(readServerTextFile(env, "SERVER", "server.properties", mockClient as any)).rejects.toThrow("No se pudo verificar este archivo de forma segura. Inténtalo de nuevo.")
+  })
+
+  // Test 35: Verified normal file succeeds and invokes Pterodactyl primitives
+  it("Phase 07G: Verified normal file succeeds and invokes read/write/download primitives", async () => {
+    const mockClient = {
+      listDirectory: vi.fn().mockResolvedValue({
+        object: "list",
+        data: [
+          { attributes: { name: "server.properties", is_file: true, is_symlink: false } },
+        ],
+      }),
+      getFileContents: vi.fn().mockResolvedValue("motd=HiKAT"),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      getFileDownload: vi.fn().mockResolvedValue({ attributes: { url: "https://wings.hikat.net/download/sp" } }),
+    }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const readRes = await readServerTextFile(env, "SERVER", "server.properties", mockClient as any)
+    expect(readRes.content).toBe("motd=HiKAT")
+
+    const writeRes = await writeServerTextFile(env, "SERVER", "server.properties", "motd=HiKAT", mockClient as any)
+    expect(writeRes).toBe(true)
+
+    const dlRes = await createServerFileDownloadUrl(env, "SERVER", "server.properties", mockClient as any)
+    expect(dlRes.url).toBe("https://wings.hikat.net/download/sp")
   })
 })
 

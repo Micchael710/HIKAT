@@ -32,8 +32,9 @@ export interface ServerFileContentData {
 }
 
 /**
- * Helper to verify that a target path is not a symlink.
- * If target path is a symlink, throws a human ServerInfrastructureError.
+ * Helper to verify that a target path exists and is not a symlink.
+ * Fail-closed: If listDirectory fails, response structure is invalid, item is not found,
+ * or target is a symlink, throws a human ServerInfrastructureError.
  */
 async function verifyNotSymlink(
   client: IPterodactylClient,
@@ -43,21 +44,43 @@ async function verifyNotSymlink(
   if (segments.length === 0) return
   const fileName = segments.pop() || ""
   const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
+
+  let res
   try {
-    const res = await client.listDirectory(parentPath)
-    if (res && res.data && Array.isArray(res.data)) {
-      const item = res.data.find((i) => i.attributes.name === fileName)
-      if (item && (item.attributes.is_symlink || item.attributes.mimetype === "symlink")) {
-        throw new ServerInfrastructureError(
-          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-          "No se puede abrir este enlace desde HiKAT por seguridad.",
-          `Access blocked for symlink target at fullPath=${fullPath}`,
-        )
-      }
-    }
+    res = await client.listDirectory(parentPath)
   } catch (err: unknown) {
     if (err instanceof ServerInfrastructureError) throw err
-    // If parent directory listing fails or not present in mocks, allow operation fallback
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "No se pudo verificar este archivo de forma segura. Inténtalo de nuevo.",
+      `Symlink safety check failed while listing parent directory=${parentPath} for fullPath=${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+
+  if (!res || !res.data || !Array.isArray(res.data)) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "No se pudo verificar este archivo de forma segura. Inténtalo de nuevo.",
+      `Invalid directory response structure during symlink verification for fullPath=${fullPath}`,
+    )
+  }
+
+  const item = res.data.find((i) => i && i.attributes && i.attributes.name === fileName)
+
+  if (!item) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "No se pudo verificar este archivo de forma segura. Inténtalo de nuevo.",
+      `Target file=${fileName} not found in parent directory=${parentPath} for fullPath=${fullPath}`,
+    )
+  }
+
+  if (item.attributes.is_symlink || item.attributes.mimetype === "symlink") {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      "No se puede abrir este enlace desde HiKAT por seguridad.",
+      `Access blocked for symlink target at fullPath=${fullPath}`,
+    )
   }
 }
 
