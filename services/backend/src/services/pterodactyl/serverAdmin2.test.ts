@@ -27,6 +27,7 @@ import {
   updateMinecraftServerSettings,
 } from "./serverConfigService"
 import {
+  listServerFiles,
   prepareServerFileUploadUrl,
 } from "./serverFileService"
 import {
@@ -999,6 +1000,122 @@ rcon.password=secret123
     expect(restoreBackupSpy).toHaveBeenCalledWith("bk-swap-fail")
     // Must NOT have called renameFile for world swap
     expect(renameFileSpy).not.toHaveBeenCalledWith("/", expect.stringMatching(/^_staging_world_/), "world")
+  })
+
+  // --- Phase 07E: Full Server File Browser (SERVER Root) Tests ---
+
+  // Test 24: SERVER Root listing queries server root directory without category prefix
+  it("Phase 07E: listServerFiles with SERVER root and empty path queries real root directory", async () => {
+    const listDirSpy = vi.fn().mockResolvedValue({
+      object: "list",
+      data: [
+        { attributes: { name: "world", is_file: false, size: 0, mimetype: "directory" } },
+        { attributes: { name: "server.properties", is_file: true, size: 1024, mimetype: "text/plain" } },
+      ],
+    })
+
+    const mockClient = { listDirectory: listDirSpy }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const files = await listServerFiles(env, "SERVER", "", mockClient as any)
+    expect(listDirSpy).toHaveBeenCalledWith("")
+    expect(files).toHaveLength(2)
+    expect(files[0]?.name).toBe("world")
+    expect(files[0]?.isFile).toBe(false)
+    expect(files[1]?.name).toBe("server.properties")
+    expect(files[1]?.isFile).toBe(true)
+  })
+
+  // Test 25: Dynamic Folders listing returns all folders returned by Pterodactyl dynamically without hardcoded list
+  it("Phase 07E: SERVER root dynamically returns custom folders returned by Pterodactyl", async () => {
+    const listDirSpy = vi.fn().mockResolvedValue({
+      object: "list",
+      data: [
+        { attributes: { name: "world", is_file: false, size: 0 } },
+        { attributes: { name: "plugins", is_file: false, size: 0 } },
+        { attributes: { name: "mods", is_file: false, size: 0 } },
+        { attributes: { name: "config", is_file: false, size: 0 } },
+        { attributes: { name: "custom-folder", is_file: false, size: 0 } },
+        { attributes: { name: "kubejs", is_file: false, size: 0 } },
+        { attributes: { name: "neoforge-server.toml", is_file: true, size: 2048 } },
+      ],
+    })
+
+    const mockClient = { listDirectory: listDirSpy }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const files = await listServerFiles(env, "SERVER", undefined, mockClient as any)
+    expect(files).toHaveLength(7)
+    expect(files.map((f) => f.name)).toContain("custom-folder")
+    expect(files.map((f) => f.name)).toContain("kubejs")
+  })
+
+  // Test 26: Folder navigation for SERVER root queries subfolder cleanly
+  it("Phase 07E: SERVER root with relativePath='mods' queries subfolder cleanly", async () => {
+    const listDirSpy = vi.fn().mockResolvedValue({
+      object: "list",
+      data: [
+        { attributes: { name: "mod1.jar", is_file: true, size: 1048576 } },
+        { attributes: { name: "subfolder", is_file: false, size: 0 } },
+      ],
+    })
+
+    const mockClient = { listDirectory: listDirSpy }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const files = await listServerFiles(env, "SERVER", "mods", mockClient as any)
+    expect(listDirSpy).toHaveBeenCalledWith("mods")
+    expect(files).toHaveLength(2)
+  })
+
+  // Test 27: Upload destination resolves to exact open directory for SERVER root
+  it("Phase 07E: prepareServerFileUploadUrl prepares upload target for current open subfolder", async () => {
+    const mockClient = {
+      getFileUploadUrl: vi.fn().mockResolvedValue({
+        attributes: { url: "https://wings.hikat.net:8080/upload/file" },
+      }),
+    }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const resRoot = await prepareServerFileUploadUrl(env, "SERVER", "", mockClient as any)
+    expect(resRoot.url).toBe("https://wings.hikat.net:8080/upload/file?directory=")
+
+    const resSub = await prepareServerFileUploadUrl(env, "SERVER", "mods/subfolder", mockClient as any)
+    expect(resSub.url).toBe("https://wings.hikat.net:8080/upload/file?directory=mods%2Fsubfolder")
+  })
+
+  // Test 28: Path Traversal attempts are rejected for SERVER root
+  it("Phase 07E: SERVER root rejects directory traversal attempts", async () => {
+    const mockClient = { listDirectory: vi.fn() }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(listServerFiles(env, "SERVER", "../../", mockClient as any)).rejects.toThrow("no permitida")
+    await expect(listServerFiles(env, "SERVER", "../config", mockClient as any)).rejects.toThrow("no permitida")
+    await expect(listServerFiles(env, "SERVER", "..\\..\\windows", mockClient as any)).rejects.toThrow("no permitida")
+    await expect(prepareServerFileUploadUrl(env, "SERVER", "mods/../../etc", mockClient as any)).rejects.toThrow("no permitida")
+  })
+
+  // Test 29: Symlink handling fail-closed
+  it("Phase 07E: Symlinks fail closed by setting isFile=true to block unsafe folder navigation", async () => {
+    const listDirSpy = vi.fn().mockResolvedValue({
+      object: "list",
+      data: [
+        { attributes: { name: "safe_dir", is_file: false, is_symlink: false } },
+        { attributes: { name: "symlink_dir", is_file: false, is_symlink: true } },
+        { attributes: { name: "symlink_file", is_file: true, is_symlink: true } },
+      ],
+    })
+
+    const mockClient = { listDirectory: listDirSpy }
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const files = await listServerFiles(env, "SERVER", "", mockClient as any)
+    const safeDir = files.find((f) => f.name === "safe_dir")
+    const symlinkDir = files.find((f) => f.name === "symlink_dir")
+
+    expect(safeDir?.isFile).toBe(false)
+    // Symlink dir is treated as isFile=true (fail closed)
+    expect(symlinkDir?.isFile).toBe(true)
   })
 })
 

@@ -41,7 +41,7 @@ async function resolveSafePath(
 ): Promise<string> {
   const worldName = root === "WORLD" ? await detectActiveWorldName(env, client) : "world"
   const check = sanitizeVirtualPath(root, relativePath, worldName)
-  if (!check.valid || !check.fullPath) {
+  if (!check.valid || check.fullPath === undefined) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
       check.error || "Ruta de archivo no permitida.",
@@ -68,13 +68,18 @@ export async function listServerFiles(
     return []
   }
 
-  return res.data.map((item) => ({
-    name: item.attributes.name,
-    isFile: item.attributes.is_file,
-    sizeBytes: item.attributes.size ?? 0,
-    mimeType: item.attributes.mimetype || null,
-    modifiedAt: item.attributes.modified_at || item.attributes.created_at || new Date().toISOString(),
-  }))
+  return res.data.map((item) => {
+    const isSymlink = Boolean(item.attributes.is_symlink || item.attributes.mimetype === "symlink")
+    // Fail closed for symlinks: if it's a symlink, treat as file so client cannot navigate into it as a directory
+    const isFile = item.attributes.is_file || isSymlink
+    return {
+      name: item.attributes.name,
+      isFile,
+      sizeBytes: item.attributes.size ?? 0,
+      mimeType: item.attributes.mimetype || null,
+      modifiedAt: item.attributes.modified_at || item.attributes.created_at || new Date().toISOString(),
+    }
+  })
 }
 
 /**

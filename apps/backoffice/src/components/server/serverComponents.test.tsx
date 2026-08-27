@@ -14,6 +14,7 @@ import {
 } from "@hikat/shared"
 import ServerOverviewView from "./ServerOverviewView"
 import ServerConsoleView from "./ServerConsoleView"
+import ServerFilesView from "./ServerFilesView"
 import { consoleService } from "../../services/consoleService"
 import { authService } from "../../services/authService"
 import { serverApi } from "../../services/graphqlClient"
@@ -520,6 +521,94 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     // Transitions back to CONNECTED
     expect(screen.getByText("Infraestructura conectada")).toBeDefined()
     expect(screen.getByText("En línea")).toBeDefined()
+  })
+})
+
+describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
+  const onToastMock = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it("Phase 07E Test 1: Old category chips (Mundo, Configuración, Mods del servidor, Logs) do NOT exist as internal filters in ServerFilesView", async () => {
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
+      { name: "world", isFile: false, sizeBytes: 0, modifiedAt: new Date().toISOString() },
+      { name: "server.properties", isFile: true, sizeBytes: 1024, modifiedAt: new Date().toISOString() },
+    ])
+
+    await act(async () => {
+      render(<ServerFilesView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+    })
+
+    // Header title "Archivos del servidor" is present
+    expect(screen.getAllByText("Archivos del servidor")).toBeDefined()
+
+    // Old virtual subcategory chips MUST NOT exist inside ServerFilesView
+    expect(screen.queryByRole("button", { name: "Mods del servidor" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Logs" })).toBeNull()
+  })
+
+  it("Phase 07E Test 2: Folder navigation updates current path, breadcrumbs, and fetches subfolder files", async () => {
+    const getServerFilesSpy = vi.spyOn(serverApi, "getServerFiles").mockImplementation(async (_root, path) => {
+      if (path === "mods") {
+        return [
+          { name: "voicechat.jar", isFile: true, sizeBytes: 5242880, modifiedAt: new Date().toISOString() },
+        ]
+      }
+      return [
+        { name: "mods", isFile: false, sizeBytes: 0, modifiedAt: new Date().toISOString() },
+        { name: "server.properties", isFile: true, sizeBytes: 1024, modifiedAt: new Date().toISOString() },
+      ]
+    })
+
+    await act(async () => {
+      render(<ServerFilesView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+    })
+
+    // Initial root call
+    expect(getServerFilesSpy).toHaveBeenCalledWith("SERVER", undefined)
+    expect(screen.getByText("mods")).toBeDefined()
+    expect(screen.getByText("server.properties")).toBeDefined()
+
+    // Click folder "mods"
+    await act(async () => {
+      fireEvent.click(screen.getByText("mods"))
+    })
+
+    // Subfolder fetch call
+    expect(getServerFilesSpy).toHaveBeenCalledWith("SERVER", "mods")
+    expect(screen.getByText("voicechat.jar")).toBeDefined()
+
+    // Breadcrumb updated: "Archivos del servidor > mods"
+    expect(screen.getByRole("button", { name: "Archivos del servidor" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "mods" })).toBeDefined()
+
+    // Click root breadcrumb "Archivos del servidor" to return
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Archivos del servidor" }))
+    })
+
+    expect(getServerFilesSpy).toHaveBeenLastCalledWith("SERVER", undefined)
+  })
+
+  it("Phase 07E Test 3: Disconnected state shows human-friendly message and disables directory action buttons", async () => {
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([])
+
+    await act(async () => {
+      render(<ServerFilesView theme="dark" serverStatus="DISCONNECTED" onToast={onToastMock} />)
+    })
+
+    expect(screen.getByText("Servidor sin conexión")).toBeDefined()
+    expect(screen.getByText("Los archivos aparecerán aquí cuando el servidor esté conectado.")).toBeDefined()
+
+    const newFolderBtn = screen.getByRole("button", { name: /Nueva carpeta/i }) as HTMLButtonElement
+    expect(newFolderBtn.disabled).toBe(true)
   })
 })
 

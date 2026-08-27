@@ -161,6 +161,7 @@ export const serverTypeDefs = /* GraphQL */ `
   }
 
   enum ServerFileRoot {
+    SERVER
     WORLD
     CONFIG
     MODS

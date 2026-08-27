@@ -389,7 +389,7 @@ export interface ServerAutomationInput {
   enabled?: boolean
 }
 
-export type ServerFileRoot = "WORLD" | "CONFIG" | "MODS" | "LOGS"
+export type ServerFileRoot = "SERVER" | "WORLD" | "CONFIG" | "MODS" | "LOGS"
 
 export interface ServerFileItem {
   name: string

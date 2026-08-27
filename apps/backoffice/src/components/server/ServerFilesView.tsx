@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react"
-import type { ThemeMode, ServerFileRoot, ServerFileItem, ServerStatus } from "../../types"
+import type { ThemeMode, ServerFileItem, ServerStatus } from "../../types"
 import { serverApi } from "../../services/graphqlClient"
 import { formatBytesToHuman, isAllowlistedTextFile } from "@hikat/shared"
 import {
@@ -16,10 +16,6 @@ import {
   IconAlertCircle,
   IconCheck,
   IconCross,
-  IconGlobe,
-  IconSettings,
-  IconBox,
-  IconTerminal,
 } from "../../theme/icons"
 
 interface ServerFilesViewProps {
@@ -28,17 +24,9 @@ interface ServerFilesViewProps {
   onToast: (message: string, type: "success" | "error") => void
 }
 
-const CATEGORIES: Array<{ root: ServerFileRoot; label: string; icon: React.ReactNode }> = [
-  { root: "WORLD", label: "Mundo", icon: <IconGlobe size={16} /> },
-  { root: "CONFIG", label: "Configuración", icon: <IconSettings size={16} /> },
-  { root: "MODS", label: "Mods del servidor", icon: <IconBox size={16} /> },
-  { root: "LOGS", label: "Logs", icon: <IconTerminal size={16} /> },
-]
-
 export default function ServerFilesView({ theme, serverStatus, onToast }: ServerFilesViewProps) {
   const isDark = theme === "dark"
   const isDisconnected = serverStatus === "DISCONNECTED"
-  const [selectedRoot, setSelectedRoot] = useState<ServerFileRoot>("CONFIG")
   const [currentPath, setCurrentPath] = useState("")
   const [files, setFiles] = useState<ServerFileItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -72,12 +60,12 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     if (manual) setIsRefreshing(true)
     setError(null)
     try {
-      const data = await serverApi.getServerFiles(selectedRoot, currentPath || undefined)
+      const data = await serverApi.getServerFiles("SERVER", currentPath || undefined)
       if (isMountedRef.current) {
         // Sort directories first, then alphabetically
         const sorted = [...data].sort((a, b) => {
           if (a.isFile === b.isFile) {
-            return a.name.localeCompare(b.name)
+            return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
           }
           return a.isFile ? 1 : -1
         })
@@ -97,7 +85,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
         setIsRefreshing(false)
       }
     }
-  }, [selectedRoot, currentPath])
+  }, [currentPath])
 
   useEffect(() => {
     isMountedRef.current = true
@@ -107,11 +95,6 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
       isMountedRef.current = false
     }
   }, [fetchFiles])
-
-  const handleRootChange = (root: ServerFileRoot) => {
-    setSelectedRoot(root)
-    setCurrentPath("")
-  }
 
   const navigateToFolder = (folderName: string) => {
     setCurrentPath((prev) => (prev ? `${prev}/${folderName}` : folderName))
@@ -133,7 +116,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     if (!newFolderName.trim() || isDisconnected) return
     setIsCreatingFolder(true)
     try {
-      await serverApi.createServerFolder(selectedRoot, currentPath, newFolderName.trim())
+      await serverApi.createServerFolder("SERVER", currentPath, newFolderName.trim())
       onToast("Carpeta creada exitosamente.", "success")
       setIsNewFolderModalOpen(false)
       setNewFolderName("")
@@ -155,7 +138,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     setIsRenaming(true)
     const targetRelative = currentPath ? `${currentPath}/${renameTarget.name}` : renameTarget.name
     try {
-      await serverApi.renameServerFile(selectedRoot, targetRelative, newName.trim())
+      await serverApi.renameServerFile("SERVER", targetRelative, newName.trim())
       onToast("Elemento renombrado exitosamente.", "success")
       setRenameTarget(null)
       setNewName("")
@@ -176,7 +159,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     setIsDeleting(true)
     const targetRelative = currentPath ? `${currentPath}/${deleteTarget.name}` : deleteTarget.name
     try {
-      await serverApi.deleteServerFile(selectedRoot, targetRelative)
+      await serverApi.deleteServerFile("SERVER", targetRelative)
       onToast("Elemento eliminado exitosamente.", "success")
       setDeleteTarget(null)
       await fetchFiles(true)
@@ -195,7 +178,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     if (isDisconnected) return
     const targetRelative = currentPath ? `${currentPath}/${file.name}` : file.name
     try {
-      const res = await serverApi.createServerFileDownloadUrl(selectedRoot, targetRelative)
+      const res = await serverApi.createServerFileDownloadUrl("SERVER", targetRelative)
       if (res && res.url) {
         const link = document.createElement("a")
         link.href = res.url
@@ -219,8 +202,8 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     if (!file || isDisconnected) return
     setIsUploading(true)
     try {
-      // 1. Request signed upload URL from backend
-      const { url } = await serverApi.prepareServerFileUpload(selectedRoot, currentPath)
+      // 1. Request signed upload URL from backend for current directory
+      const { url } = await serverApi.prepareServerFileUpload("SERVER", currentPath)
       // 2. Transfer REAL bytes to Wings signed URL and check response.ok
       await serverApi.uploadFileToSignedUrl(url, file)
       // 3. Notify success only after HTTP response.ok
@@ -243,7 +226,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     setEditingFile({ path: targetRelative, name: file.name })
     setIsEditorLoading(true)
     try {
-      const res = await serverApi.getServerTextFile(selectedRoot, targetRelative)
+      const res = await serverApi.getServerTextFile("SERVER", targetRelative)
       setEditorContent(res.content)
     } catch (err: unknown) {
       onToast(
@@ -260,7 +243,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     if (!editingFile) return
     setIsEditorSaving(true)
     try {
-      await serverApi.writeServerTextFile(selectedRoot, editingFile.path, editorContent)
+      await serverApi.writeServerTextFile("SERVER", editingFile.path, editorContent)
       onToast("Archivo guardado exitosamente.", "success")
       setEditingFile(null)
       await fetchFiles(true)
@@ -278,7 +261,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Category Pills Header */}
+      {/* Header Actions Bar */}
       <div
         style={{
           display: "flex",
@@ -288,45 +271,16 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
           gap: 16,
         }}
       >
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {CATEGORIES.map((cat) => {
-            const isSelected = selectedRoot === cat.root
-            return (
-              <button
-                key={cat.root}
-                type="button"
-                onClick={() => handleRootChange(cat.root)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "8px 18px",
-                  borderRadius: 12,
-                  border: "none",
-                  background: isSelected
-                    ? isDark
-                      ? "#3ec4c0"
-                      : "#0c6e6b"
-                    : isDark
-                    ? "rgba(255, 255, 255, 0.05)"
-                    : "#e2e8f0",
-                  color: isSelected
-                    ? "#ffffff"
-                    : isDark
-                    ? "rgba(255, 255, 255, 0.8)"
-                    : "#334155",
-                  fontWeight: 700,
-                  fontSize: "0.875rem",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                {cat.icon}
-                <span>{cat.label}</span>
-              </button>
-            )
-          })}
-        </div>
+        <h2
+          style={{
+            margin: 0,
+            fontSize: "1.25rem",
+            fontWeight: 700,
+            color: isDark ? "#ffffff" : "#0f172a",
+          }}
+        >
+          Archivos del servidor
+        </h2>
 
         {/* Global Directory Actions */}
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -426,14 +380,14 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
             padding: 0,
           }}
         >
-          {CATEGORIES.find((c) => c.root === selectedRoot)?.label || selectedRoot}
+          Archivos del servidor
         </button>
 
         {pathSegments.map((segment, idx) => {
           const isLast = idx === pathSegments.length - 1
           return (
             <React.Fragment key={idx}>
-              <span>/</span>
+              <span>&gt;</span>
               <button
                 type="button"
                 onClick={() => navigateToBreadcrumb(idx)}

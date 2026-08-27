@@ -709,7 +709,7 @@ export const SERVER_OPERATION_TYPES = [
 ] as const
 export type ServerOperationType = typeof SERVER_OPERATION_TYPES[number]
 
-export const SERVER_FILE_ROOTS = ["WORLD", "CONFIG", "MODS", "LOGS"] as const
+export const SERVER_FILE_ROOTS = ["SERVER", "WORLD", "CONFIG", "MODS", "LOGS"] as const
 export type ServerFileRoot = typeof SERVER_FILE_ROOTS[number]
 
 export const ALLOWED_TEXT_FILE_EXTENSIONS = [
@@ -749,8 +749,11 @@ export function sanitizeVirtualPath(
   error?: string
 } {
   const safeWorld = sanitizeWorldName(worldName)
-  let rootDir = ""
+  let rootDir: string | null = null
   switch (root) {
+    case "SERVER":
+      rootDir = ""
+      break
     case "WORLD":
       rootDir = safeWorld
       break
@@ -785,7 +788,7 @@ export function sanitizeVirtualPath(
   }
 
   const sanitizedRelative = segments.join("/")
-  const fullPath = sanitizedRelative ? `${rootDir}/${sanitizedRelative}` : rootDir
+  const fullPath = rootDir !== "" ? (sanitizedRelative ? `${rootDir}/${sanitizedRelative}` : rootDir) : sanitizedRelative
 
   return {
     valid: true,
