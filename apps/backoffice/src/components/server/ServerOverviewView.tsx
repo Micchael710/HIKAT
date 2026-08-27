@@ -58,6 +58,7 @@ const SUB_TABS: Array<{ id: ServerSubTab; label: string; icon: React.ReactNode }
 export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
   const isDark = theme === "dark"
   const [activeTab, setActiveTab] = useState<ServerSubTab>("overview")
+  const [infraState, setInfraState] = useState<"CHECKING" | "CONNECTED" | "DISCONNECTED">("CHECKING")
   const [resources, setResources] = useState<ServerResources | null>(null)
   const [activity, setActivity] = useState<ServerActivityItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -84,12 +85,14 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
 
     if (isManual) {
       setError(null)
+      setInfraState("CHECKING")
     }
 
     try {
       const data = await serverApi.getServerStatus()
       if (isMountedRef.current) {
         setResources(data)
+        setInfraState("CONNECTED")
         hasDataRef.current = true
         setError(null)
       }
@@ -99,9 +102,9 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
           err instanceof Error
             ? err.message
             : "No se pudo obtener el estado del servidor."
-        if (!hasDataRef.current) {
-          setError(msg)
-        }
+        setResources(null)
+        setInfraState("DISCONNECTED")
+        setError(msg)
       }
     } finally {
       if (isMountedRef.current) {
@@ -183,8 +186,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
     }
   }
 
-  const currentStatus = resources?.status || (error ? "DISCONNECTED" : "UNKNOWN")
-  const infraState = isLoading ? "CHECKING" : resources ? "CONNECTED" : "DISCONNECTED"
+  const currentStatus = infraState === "CONNECTED" && resources ? resources.status : "DISCONNECTED"
 
   // RAM calculations
   const memUsed = resources?.memoryUsedBytes ?? 0

@@ -111,6 +111,48 @@ export async function prepareServerWorldUpload(
 }
 
 /**
+ * Helper to wait for pre-backup completion using client.getBackup(uuid).
+ * Polls until completed_at != null.
+ */
+export async function waitForBackupCompletion(
+  client: IPterodactylClient,
+  uuid: string,
+  options: {
+    maxAttempts?: number
+    intervalMs?: number
+  } = {},
+): Promise<void> {
+  const maxAttempts = options.maxAttempts ?? 60
+  const intervalMs = options.intervalMs ?? 1000
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const backupRes = await client.getBackup(uuid)
+    const attr = backupRes.attributes
+
+    if (attr.completed_at !== null && attr.completed_at !== undefined) {
+      if (attr.is_successful === true) {
+        return // Backup finished successfully!
+      }
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        "No se pudo completar la copia de seguridad previa. El mundo no fue modificado.",
+        `Backup ${uuid} finished with is_successful = false`,
+      )
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
+  }
+
+  throw new ServerInfrastructureError(
+    SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+    "No se pudo completar la copia de seguridad previa (tiempo de espera agotado). El mundo no fue modificado.",
+    `Backup ${uuid} timed out after ${maxAttempts} attempts`,
+  )
+}
+
+/**
  * Safely replaces the server world with a multi-stage validation and rollback process.
  *
  * Flujo conservador:
@@ -118,21 +160,14 @@ export async function prepareServerWorldUpload(
  * 2. Adquiere lock de operación D1 (REPLACE_WORLD).
  * 3. Detecta el nombre del mundo activo real (vía server.properties).
  * 4. Valida que el archivo ZIP subido exista físicamente en la raíz del servidor.
- * 5. Crea una copia de seguridad previa (pre-backup).
+ * 5. Crea una copia de seguridad previa (pre-backup) y espera a que finalice completamente.
  * 6. Crea un directorio de staging con nombre impredecible dentro del contenedor.
- * 7. Extrae el ZIP ÚNICAMENTE dentro del directorio de staging.
- * 8. Analiza la estructura del staging:
- *    - Acepta si level.dat está en la raíz de staging.
- *    - Acepta si hay un único directorio contenedor con level.dat dentro.
- *    - Rechaza si no existe level.dat o si la estructura es ambigua/múltiple (sin tocar el mundo actual).
- * 9. Reemplaza el mundo activo mediante Pterodactyl Files API.
+ * 7. Traslada el ZIP a staging y lo extrae ÚNICAMENTE dentro de staging.
+ * 8. Analiza la estructura del staging (level.dat en raíz o en carpeta contenedora única).
+ * 9. Reemplaza el mundo activo mediante Pterodactyl Files API (no tolera errores en borrado activo).
  * 10. Si ocurre un fallo en la fase de reemplazo del mundo activo, ejecuta un intento de rollback restaurando el pre-backup.
  * 11. Limpia directorio de staging y archivo ZIP subido en el bloque finally.
  * 12. Libera el lock de operación D1 en el bloque finally.
- *
- * LIMITACIÓN DE ATOMICIDAD EN PTERODACTYL:
- * Pterodactyl Panel / Wings API no soporta swaps atómicos de directorio a nivel de sistema de archivos.
- * Si ocurre una falla grave durante el renombrado/borrado final del mundo activo, la atomicidad no puede ser garantizada al 100% por Pterodactyl, por lo que HiKAT realiza un rollback automático restaurando el pre-backup creado.
  */
 export async function replaceServerWorld(
   env: Env,
@@ -140,6 +175,7 @@ export async function replaceServerWorld(
   userId: string,
   uploadedFileName: string,
   clientOverride?: IPterodactylClient,
+  backupOptions?: { maxAttempts?: number; intervalMs?: number },
 ): Promise<boolean> {
   const client = clientOverride || createPterodactylClient(env)
 
@@ -213,6 +249,9 @@ export async function replaceServerWorld(
         `Pre-backup failed: ${backupErr instanceof Error ? backupErr.message : String(backupErr)}`,
       )
     }
+
+    // 5b. Wait for pre-backup to finish completely before touching world or creating staging
+    await waitForBackupCompletion(client, preBackupUuid, backupOptions)
 
     // 6. Create unpredictable staging directory inside container
     await client.createFolder("/", stagingDirName)
@@ -290,8 +329,8 @@ export async function replaceServerWorld(
       // Delete zip inside staging before moving/renaming world
       await client.deleteFiles(`/${stagingDirName}`, [cleanFileName]).catch(() => {})
 
-      // Delete existing active world directory at root /
-      await client.deleteFiles("/", [activeWorldName]).catch(() => {})
+      // Delete existing active world directory at root / (MUST NOT SWALLOW ERRORS)
+      await client.deleteFiles("/", [activeWorldName])
 
       if (innerWorldFolder) {
         // Case B: Move/Rename inner world directory from /stagingDirName/innerWorldFolder to /activeWorldName

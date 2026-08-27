@@ -293,6 +293,10 @@ rcon.password=secret123
         return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
       }),
       createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "pre-bk-1" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "pre-bk-1", completed_at: new Date().toISOString(), is_successful: true },
+      }),
       createFolder: vi.fn().mockResolvedValue(undefined),
       decompressFile: vi.fn().mockResolvedValue(undefined),
       deleteFiles: vi.fn().mockResolvedValue(undefined),
@@ -550,6 +554,10 @@ rcon.password=secret123
         return Promise.resolve({ data: [{ attributes: { name: "random.txt", is_file: true } }] })
       }),
       createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "pre-bk-100" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "pre-bk-100", completed_at: nowIso, is_successful: true },
+      }),
       createFolder: vi.fn().mockResolvedValue(undefined),
       decompressFile: vi.fn().mockResolvedValue(undefined),
       deleteFiles: deleteFilesSpy,
@@ -593,6 +601,10 @@ rcon.password=secret123
         return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
       }),
       createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "pre-bk-200" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "pre-bk-200", completed_at: nowIso, is_successful: true },
+      }),
       createFolder: vi.fn().mockResolvedValue(undefined),
       decompressFile: vi.fn().mockResolvedValue(undefined),
       deleteFiles: vi.fn().mockResolvedValue(undefined),
@@ -701,6 +713,10 @@ rcon.password=secret123
         return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
       }),
       createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "bk-1" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "bk-1", completed_at: nowIso, is_successful: true },
+      }),
       createFolder: vi.fn().mockResolvedValue(undefined),
       renameFile: renameFileSpy,
       decompressFile: decompressFileSpy,
@@ -758,6 +774,10 @@ rcon.password=secret123
         return Promise.resolve({ data: [{ attributes: { name: "MiMundo", is_file: false, mimetype: "directory" } }] })
       }),
       createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "bk-2" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "bk-2", completed_at: nowIso, is_successful: true },
+      }),
       createFolder: vi.fn().mockResolvedValue(undefined),
       decompressFile: vi.fn().mockResolvedValue(undefined),
       deleteFiles: vi.fn().mockResolvedValue(undefined),
@@ -809,6 +829,176 @@ rcon.password=secret123
 
     // Operations MUST NOT have proceeded!
     expect(createBackupSpy).not.toHaveBeenCalled()
+  })
+
+  // Test 21: Shard 07D - Pre-backup polling (pending then success)
+  it("replaceServerWorld polls getBackup until completed_at != null and proceeds only on success", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const getBackupSpy = vi.fn()
+      .mockResolvedValueOnce({ object: "backup", attributes: { uuid: "bk-77", completed_at: null, is_successful: false } })
+      .mockResolvedValueOnce({ object: "backup", attributes: { uuid: "bk-77", completed_at: nowIso, is_successful: true } })
+
+    const createFolderSpy = vi.fn().mockResolvedValue(undefined)
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", is_suspended: false, resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({ attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } } }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir === "/") {
+          return Promise.resolve({ data: [{ attributes: { name: "world.zip", is_file: true } }] })
+        }
+        return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
+      }),
+      createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "bk-77" } }),
+      getBackup: getBackupSpy,
+      createFolder: createFolderSpy,
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      decompressFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const success = await replaceServerWorld(
+      env,
+      db as any,
+      "admin-1",
+      "world.zip",
+      mockClient as any,
+      { maxAttempts: 5, intervalMs: 1 },
+    )
+
+    expect(success).toBe(true)
+    expect(getBackupSpy).toHaveBeenCalledTimes(2)
+    expect(createFolderSpy).toHaveBeenCalled()
+  })
+
+  // Test 22: Shard 07D - Pre-backup failure/timeout aborts without creating staging or touching active world
+  it("replaceServerWorld aborts if pre-backup fails or times out without touching active world", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const createFolderSpy = vi.fn()
+    const deleteFilesSpy = vi.fn().mockResolvedValue(undefined)
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", is_suspended: false, resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({ attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } } }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir === "/") {
+          return Promise.resolve({ data: [{ attributes: { name: "world.zip", is_file: true } }] })
+        }
+        return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
+      }),
+      createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "bk-failed" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "bk-failed", completed_at: nowIso, is_successful: false },
+      }),
+      createFolder: createFolderSpy,
+      deleteFiles: deleteFilesSpy,
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      replaceServerWorld(
+        env,
+        db as any,
+        "admin-1",
+        "world.zip",
+        mockClient as any,
+        { maxAttempts: 2, intervalMs: 1 },
+      ),
+    ).rejects.toThrow("No se pudo completar la copia de seguridad previa")
+
+    expect(createFolderSpy).not.toHaveBeenCalled()
+    expect(deleteFilesSpy).not.toHaveBeenCalledWith("/", ["world"])
+  })
+
+  // Test 23: Shard 07D - Active world delete failure triggers restoreBackup
+  it("replaceServerWorld triggers restoreBackup if active world delete fails during swap phase", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const restoreBackupSpy = vi.fn().mockResolvedValue(undefined)
+    const renameFileSpy = vi.fn().mockResolvedValue(undefined)
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", is_suspended: false, resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({ attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } } }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir === "/") {
+          return Promise.resolve({ data: [{ attributes: { name: "world.zip", is_file: true } }] })
+        }
+        return Promise.resolve({ data: [{ attributes: { name: "level.dat", is_file: true } }] })
+      }),
+      createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "bk-swap-fail" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "bk-swap-fail", completed_at: nowIso, is_successful: true },
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      decompressFile: vi.fn().mockResolvedValue(undefined),
+      renameFile: renameFileSpy,
+      deleteFiles: vi.fn().mockImplementation((dir: string, files: string[]) => {
+        if (dir === "/" && files.includes("world")) {
+          return Promise.reject(new Error("Wings Permission Denied on active world delete"))
+        }
+        return Promise.resolve(undefined)
+      }),
+      restoreBackup: restoreBackupSpy,
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      replaceServerWorld(
+        env,
+        db as any,
+        "admin-1",
+        "world.zip",
+        mockClient as any,
+        { maxAttempts: 1, intervalMs: 1 },
+      ),
+    ).rejects.toThrow("Error al reemplazar el mundo activo en el sistema de archivos")
+
+    // Must have attempted restoreBackup
+    expect(restoreBackupSpy).toHaveBeenCalledWith("bk-swap-fail")
+    // Must NOT have called renameFile for world swap
+    expect(renameFileSpy).not.toHaveBeenCalledWith("/", expect.stringMatching(/^_staging_world_/), "world")
   })
 })
 

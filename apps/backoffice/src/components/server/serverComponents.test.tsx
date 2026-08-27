@@ -448,5 +448,78 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     expect(screen.getByRole("button", { name: /Configuración/i })).toBeDefined()
     expect(screen.getByRole("button", { name: /Archivos/i })).toBeDefined()
   })
+
+  it("Shard 07D Test 1: Infra transitions to DISCONNECTED if polling fails after prior success and disables power actions", async () => {
+    vi.useFakeTimers()
+    const localMockResources = {
+      status: "ONLINE" as const,
+      cpuPercent: 12.5,
+      cpuLimitPercent: 100,
+      memoryUsedBytes: 2147483648,
+      memoryLimitBytes: 4294967296,
+      diskUsedBytes: 10737418240,
+      diskLimitBytes: 53687091200,
+      uptimeMs: 3600000,
+      isSuspended: false,
+    }
+
+    vi.spyOn(serverApi, "getServerStatus")
+      .mockResolvedValueOnce(localMockResources)
+      .mockRejectedValueOnce(new Error("Pterodactyl Network Timeout"))
+
+    await act(async () => {
+      render(<ServerOverviewView theme="dark" />)
+    })
+
+    // Initially CONNECTED
+    expect(screen.getByText("Infraestructura conectada")).toBeDefined()
+
+    // Trigger 2nd poll via timer interval -> fails
+    await act(async () => {
+      vi.advanceTimersByTime(5000)
+    })
+
+    // Badge updates to DISCONNECTED
+    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
+
+    // Power buttons are disabled
+    const startBtns = screen.getAllByRole("button", { name: /Iniciar/i })
+    expect((startBtns[0] as HTMLButtonElement).disabled).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it("Shard 07D Test 2: Reconnect transitions from DISCONNECTED back to CONNECTED on successful poll", async () => {
+    const localMockResources = {
+      status: "ONLINE" as const,
+      cpuPercent: 12.5,
+      cpuLimitPercent: 100,
+      memoryUsedBytes: 2147483648,
+      memoryLimitBytes: 4294967296,
+      diskUsedBytes: 10737418240,
+      diskLimitBytes: 53687091200,
+      uptimeMs: 3600000,
+      isSuspended: false,
+    }
+
+    vi.spyOn(serverApi, "getServerStatus")
+      .mockRejectedValueOnce(new Error("Offline Pterodactyl"))
+      .mockResolvedValueOnce(localMockResources)
+
+    await act(async () => {
+      render(<ServerOverviewView theme="dark" />)
+    })
+
+    // Initially DISCONNECTED
+    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
+
+    // Click Reintentar -> succeeds
+    await act(async () => {
+      fireEvent.click(screen.getByText("Reintentar"))
+    })
+
+    // Transitions back to CONNECTED
+    expect(screen.getByText("Infraestructura conectada")).toBeDefined()
+    expect(screen.getByText("En línea")).toBeDefined()
+  })
 })
 
