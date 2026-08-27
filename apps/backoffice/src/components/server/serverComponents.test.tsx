@@ -338,4 +338,111 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       screen.getByText("Has enviado demasiados comandos. Espera un momento."),
     ).toBeDefined()
   })
+
+  it("Shard 07: provides 7 sub-tabs and allows seamless navigation across all server management domains", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue({
+      status: "ONLINE",
+      cpuPercent: 12.5,
+      cpuLimitPercent: 200,
+      memoryUsedBytes: 2147483648,
+      memoryLimitBytes: 4294967296,
+      diskUsedBytes: 10737418240,
+      diskLimitBytes: 53687091200,
+      networkRxBytes: 1048576,
+      networkTxBytes: 2097152,
+      uptimeMs: 3600000,
+      isSuspended: false,
+    })
+    vi.spyOn(serverApi, "getServerActivity").mockResolvedValue([
+      { id: "act-1", description: "Servidor iniciado", eventType: "server:power.start", timestamp: new Date().toISOString() },
+    ])
+    vi.spyOn(serverApi, "getServerWorld").mockResolvedValue({
+      name: "world",
+      sizeBytes: 104857600,
+      lastModified: new Date().toISOString(),
+    })
+    vi.spyOn(serverApi, "getServerBackups").mockResolvedValue([
+      { id: "bk-1", name: "Backup Test", bytes: 52428800, createdAt: new Date().toISOString(), completedAt: new Date().toISOString(), isSuccessful: true, isLocked: false },
+    ])
+    vi.spyOn(serverApi, "getServerAutomations").mockResolvedValue([
+      { id: "auto-1", name: "Reinicio diario", action: "RESTART", frequency: "DAILY", time: "04:00", enabled: true, isProcessing: false },
+    ])
+    vi.spyOn(serverApi, "getMinecraftServerSettings").mockResolvedValue({
+      difficulty: "normal",
+      maxPlayers: 20,
+      pvp: true,
+      whitelist: false,
+      viewDistance: 10,
+      simulationDistance: 10,
+      motd: "HiKAT Server",
+      allowFlight: false,
+    })
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
+      { name: "server.properties", isFile: true, sizeBytes: 1024, mimeType: "text/plain", modifiedAt: new Date().toISOString() },
+    ])
+
+    await act(async () => {
+      render(<ServerOverviewView theme="dark" />)
+    })
+
+    // 1. Initial overview tab is rendered with Rx / Tx
+    expect(screen.getByText("Tráfico recibido (RX)")).toBeDefined()
+    expect(screen.getByText("Tráfico enviado (TX)")).toBeDefined()
+    expect(screen.getByText("Actividad reciente")).toBeDefined()
+
+    // 2. Click "Mundo"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Mundo/i }))
+    })
+    expect(screen.getByText("Mundo activo detectado")).toBeDefined()
+
+    // 3. Click "Copias"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Copias/i }))
+    })
+    expect(screen.getByText(/Copias de seguridad/i)).toBeDefined()
+    expect(screen.getByText("Crear copia ahora")).toBeDefined()
+
+    // 4. Click "Automatizaciones"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Automatizaciones/i }))
+    })
+    expect(screen.getByText(/Automatizaciones programadas/i)).toBeDefined()
+    expect(screen.getByText("Nueva automatización")).toBeDefined()
+
+    // 5. Click "Configuración"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Configuración/i }))
+    })
+    expect(screen.getByText("Configuración de Minecraft")).toBeDefined()
+    expect(screen.getByText("Dificultad del juego:")).toBeDefined()
+
+    // 6. Click "Archivos"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Archivos/i }))
+    })
+    expect(screen.getByText("Nueva carpeta")).toBeDefined()
+    expect(screen.getByText("Subir archivo")).toBeDefined()
+  })
+
+  it("Shard 07: subtabs navigation bar remains mounted and accessible even if overview tab encounters error", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockRejectedValue(new Error("Connection refused to Pterodactyl"))
+
+    await act(async () => {
+      render(<ServerOverviewView theme="dark" />)
+    })
+
+    // Overview displays error message
+    expect(screen.getByText("No se pudo conectar con la infraestructura del servidor")).toBeDefined()
+
+    // But the 7 sub-tabs switcher remains active and reachable!
+    expect(screen.getByRole("button", { name: /Resumen/i })).toBeDefined()
+    expect(screen.getByRole("button", { name: /Consola/i })).toBeDefined()
+    expect(screen.getByRole("button", { name: /Mundo/i })).toBeDefined()
+    expect(screen.getByRole("button", { name: /Copias/i })).toBeDefined()
+    expect(screen.getByRole("button", { name: /Automatizaciones/i })).toBeDefined()
+    expect(screen.getByRole("button", { name: /Configuración/i })).toBeDefined()
+    expect(screen.getByRole("button", { name: /Archivos/i })).toBeDefined()
+  })
 })
+

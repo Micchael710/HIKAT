@@ -4,9 +4,20 @@ import type {
   ContentMedia,
   ServerResources,
   ServerStatus,
+  ServerActivityItem,
+  ServerBackupItem,
+  ServerWorldInfo,
+  MinecraftServerSettings,
+  UpdateMinecraftServerSettingsInput,
+  ServerAutomationItem,
+  ServerAutomationInput,
+  ServerFileRoot,
+  ServerFileItem,
+  ServerFileContent,
 } from "../types"
 
 import type { NewsType, NewsStatus } from "@hikat/shared"
+
 import { authService } from "./authService"
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_API_URL || "http://localhost:8787"
@@ -340,6 +351,8 @@ export const serverApi = {
           memoryLimitBytes
           diskUsedBytes
           diskLimitBytes
+          networkRxBytes
+          networkTxBytes
           uptimeMs
           isSuspended
         }
@@ -348,6 +361,22 @@ export const serverApi = {
 
     const data = await executeGraphQL<{ serverStatus: ServerResources }>(query)
     return data.serverStatus
+  },
+
+  async getServerActivity(): Promise<ServerActivityItem[]> {
+    const query = /* GraphQL */ `
+      query ServerActivity {
+        serverActivity {
+          id
+          description
+          eventType
+          timestamp
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ serverActivity: ServerActivityItem[] }>(query)
+    return data.serverActivity || []
   },
 
   async startServer(): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
@@ -434,7 +463,397 @@ export const serverApi = {
     }>(mutation)
     return data.createServerConsoleTicket
   },
+
+  // --- Backups API ---
+
+  async getServerBackups(): Promise<ServerBackupItem[]> {
+    const query = /* GraphQL */ `
+      query ServerBackups {
+        serverBackups {
+          id
+          name
+          bytes
+          createdAt
+          completedAt
+          isSuccessful
+          isLocked
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ serverBackups: ServerBackupItem[] }>(query)
+    return data.serverBackups || []
+  },
+
+  async createServerBackup(name?: string): Promise<ServerBackupItem> {
+    const mutation = /* GraphQL */ `
+      mutation CreateServerBackup($name: String) {
+        createServerBackup(name: $name) {
+          id
+          name
+          bytes
+          createdAt
+          completedAt
+          isSuccessful
+          isLocked
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ createServerBackup: ServerBackupItem }>(mutation, { name })
+    return data.createServerBackup
+  },
+
+  async restoreServerBackup(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation RestoreServerBackup($id: ID!) {
+        restoreServerBackup(id: $id)
+      }
+    `
+
+    const data = await executeGraphQL<{ restoreServerBackup: boolean }>(mutation, { id })
+    return data.restoreServerBackup
+  },
+
+  async deleteServerBackup(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteServerBackup($id: ID!) {
+        deleteServerBackup(id: $id)
+      }
+    `
+
+    const data = await executeGraphQL<{ deleteServerBackup: boolean }>(mutation, { id })
+    return data.deleteServerBackup
+  },
+
+  async toggleServerBackupLock(id: string): Promise<ServerBackupItem> {
+    const mutation = /* GraphQL */ `
+      mutation ToggleServerBackupLock($id: ID!) {
+        toggleServerBackupLock(id: $id) {
+          id
+          name
+          bytes
+          createdAt
+          completedAt
+          isSuccessful
+          isLocked
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ toggleServerBackupLock: ServerBackupItem }>(mutation, { id })
+    return data.toggleServerBackupLock
+  },
+
+  async createServerBackupDownloadUrl(id: string, name?: string): Promise<{ url: string }> {
+    const mutation = /* GraphQL */ `
+      mutation CreateServerBackupDownloadUrl($id: ID!, $name: String) {
+        createServerBackupDownloadUrl(id: $id, name: $name) {
+          url
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ createServerBackupDownloadUrl: { url: string } }>(mutation, { id, name })
+    return data.createServerBackupDownloadUrl
+  },
+
+  // --- World API ---
+
+  async getServerWorld(): Promise<ServerWorldInfo> {
+    const query = /* GraphQL */ `
+      query ServerWorld {
+        serverWorld {
+          name
+          sizeBytes
+          lastModified
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ serverWorld: ServerWorldInfo }>(query)
+    return data.serverWorld
+  },
+
+  async createServerWorldDownloadUrl(): Promise<{ url: string }> {
+    const mutation = /* GraphQL */ `
+      mutation CreateServerWorldDownloadUrl {
+        createServerWorldDownloadUrl {
+          url
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ createServerWorldDownloadUrl: { url: string } }>(mutation)
+    return data.createServerWorldDownloadUrl
+  },
+
+  async prepareServerWorldUpload(): Promise<{ url: string }> {
+    const mutation = /* GraphQL */ `
+      mutation PrepareServerWorldUpload {
+        prepareServerWorldUpload {
+          url
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ prepareServerWorldUpload: { url: string } }>(mutation)
+    return data.prepareServerWorldUpload
+  },
+
+  async replaceServerWorld(uploadedFileName: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation ReplaceServerWorld($uploadedFileName: String!) {
+        replaceServerWorld(uploadedFileName: $uploadedFileName)
+      }
+    `
+
+    const data = await executeGraphQL<{ replaceServerWorld: boolean }>(mutation, { uploadedFileName })
+    return data.replaceServerWorld
+  },
+
+  // --- Minecraft Configuration API ---
+
+  async getMinecraftServerSettings(): Promise<MinecraftServerSettings> {
+    const query = /* GraphQL */ `
+      query ServerMinecraftSettings {
+        serverMinecraftSettings {
+          difficulty
+          maxPlayers
+          pvp
+          whitelist
+          viewDistance
+          simulationDistance
+          motd
+          allowFlight
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ serverMinecraftSettings: MinecraftServerSettings }>(query)
+    return data.serverMinecraftSettings
+  },
+
+  async updateMinecraftServerSettings(input: UpdateMinecraftServerSettingsInput): Promise<MinecraftServerSettings> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateMinecraftServerSettings($input: UpdateMinecraftServerSettingsInput!) {
+        updateMinecraftServerSettings(input: $input) {
+          difficulty
+          maxPlayers
+          pvp
+          whitelist
+          viewDistance
+          simulationDistance
+          motd
+          allowFlight
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ updateMinecraftServerSettings: MinecraftServerSettings }>(mutation, { input })
+    return data.updateMinecraftServerSettings
+  },
+
+  // --- Automations / Schedules API ---
+
+  async getServerAutomations(): Promise<ServerAutomationItem[]> {
+    const query = /* GraphQL */ `
+      query ServerAutomations {
+        serverAutomations {
+          id
+          name
+          action
+          frequency
+          time
+          weekday
+          weekdays
+          command
+          enabled
+          isProcessing
+          lastRunAt
+          nextRunAt
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ serverAutomations: ServerAutomationItem[] }>(query)
+    return data.serverAutomations || []
+  },
+
+  async createServerAutomation(input: ServerAutomationInput): Promise<ServerAutomationItem> {
+    const mutation = /* GraphQL */ `
+      mutation CreateServerAutomation($input: ServerAutomationInput!) {
+        createServerAutomation(input: $input) {
+          id
+          name
+          action
+          frequency
+          time
+          weekday
+          weekdays
+          command
+          enabled
+          isProcessing
+          lastRunAt
+          nextRunAt
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ createServerAutomation: ServerAutomationItem }>(mutation, { input })
+    return data.createServerAutomation
+  },
+
+  async updateServerAutomation(id: string, input: ServerAutomationInput): Promise<ServerAutomationItem> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateServerAutomation($id: ID!, $input: ServerAutomationInput!) {
+        updateServerAutomation(id: $id, input: $input) {
+          id
+          name
+          action
+          frequency
+          time
+          weekday
+          weekdays
+          command
+          enabled
+          isProcessing
+          lastRunAt
+          nextRunAt
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ updateServerAutomation: ServerAutomationItem }>(mutation, { id, input })
+    return data.updateServerAutomation
+  },
+
+  async runServerAutomation(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation RunServerAutomation($id: ID!) {
+        runServerAutomation(id: $id)
+      }
+    `
+
+    const data = await executeGraphQL<{ runServerAutomation: boolean }>(mutation, { id })
+    return data.runServerAutomation
+  },
+
+  async deleteServerAutomation(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteServerAutomation($id: ID!) {
+        deleteServerAutomation(id: $id)
+      }
+    `
+
+    const data = await executeGraphQL<{ deleteServerAutomation: boolean }>(mutation, { id })
+    return data.deleteServerAutomation
+  },
+
+  // --- Files API ---
+
+  async getServerFiles(root: ServerFileRoot, relativePath?: string): Promise<ServerFileItem[]> {
+    const query = /* GraphQL */ `
+      query ServerFiles($root: ServerFileRoot!, $relativePath: String) {
+        serverFiles(root: $root, relativePath: $relativePath) {
+          name
+          isFile
+          sizeBytes
+          mimeType
+          modifiedAt
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ serverFiles: ServerFileItem[] }>(query, { root, relativePath })
+    return data.serverFiles || []
+  },
+
+  async getServerTextFile(root: ServerFileRoot, relativePath: string): Promise<ServerFileContent> {
+    const query = /* GraphQL */ `
+      query ServerTextFile($root: ServerFileRoot!, $relativePath: String!) {
+        serverTextFile(root: $root, relativePath: $relativePath) {
+          content
+          sizeBytes
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ serverTextFile: ServerFileContent }>(query, { root, relativePath })
+    return data.serverTextFile
+  },
+
+  async writeServerTextFile(root: ServerFileRoot, relativePath: string, content: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation WriteServerTextFile($root: ServerFileRoot!, $relativePath: String!, $content: String!) {
+        writeServerTextFile(root: $root, relativePath: $relativePath, content: $content)
+      }
+    `
+
+    const data = await executeGraphQL<{ writeServerTextFile: boolean }>(mutation, { root, relativePath, content })
+    return data.writeServerTextFile
+  },
+
+  async createServerFolder(root: ServerFileRoot, relativePath: string, folderName: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation CreateServerFolder($root: ServerFileRoot!, $relativePath: String!, $folderName: String!) {
+        createServerFolder(root: $root, relativePath: $relativePath, folderName: $folderName)
+      }
+    `
+
+    const data = await executeGraphQL<{ createServerFolder: boolean }>(mutation, { root, relativePath, folderName })
+    return data.createServerFolder
+  },
+
+  async renameServerFile(root: ServerFileRoot, relativePath: string, newName: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation RenameServerFile($root: ServerFileRoot!, $relativePath: String!, $newName: String!) {
+        renameServerFile(root: $root, relativePath: $relativePath, newName: $newName)
+      }
+    `
+
+    const data = await executeGraphQL<{ renameServerFile: boolean }>(mutation, { root, relativePath, newName })
+    return data.renameServerFile
+  },
+
+  async deleteServerFile(root: ServerFileRoot, relativePath: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteServerFile($root: ServerFileRoot!, $relativePath: String!) {
+        deleteServerFile(root: $root, relativePath: $relativePath)
+      }
+    `
+
+    const data = await executeGraphQL<{ deleteServerFile: boolean }>(mutation, { root, relativePath })
+    return data.deleteServerFile
+  },
+
+  async prepareServerFileUpload(root: ServerFileRoot, relativePath: string): Promise<{ url: string }> {
+    const mutation = /* GraphQL */ `
+      mutation PrepareServerFileUpload($root: ServerFileRoot!, $relativePath: String!) {
+        prepareServerFileUpload(root: $root, relativePath: $relativePath) {
+          url
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ prepareServerFileUpload: { url: string } }>(mutation, { root, relativePath })
+    return data.prepareServerFileUpload
+  },
+
+  async createServerFileDownloadUrl(root: ServerFileRoot, relativePath: string): Promise<{ url: string }> {
+    const mutation = /* GraphQL */ `
+      mutation CreateServerFileDownloadUrl($root: ServerFileRoot!, $relativePath: String!) {
+        createServerFileDownloadUrl(root: $root, relativePath: $relativePath) {
+          url
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{ createServerFileDownloadUrl: { url: string } }>(mutation, { root, relativePath })
+    return data.createServerFileDownloadUrl
+  },
 }
+
 
 // --- Dashboard API Facade (Shard 06.5) ---
 

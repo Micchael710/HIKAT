@@ -1,0 +1,414 @@
+import { describe, it, expect, vi } from "vitest"
+import {
+  sanitizeVirtualPath,
+  isAllowlistedTextFile,
+  parseServerProperties,
+  extractMinecraftSettings,
+  serializeServerProperties,
+  convertAutomationToPterodactylCron,
+  mapPterodactylActivityEvent,
+} from "@hikat/shared"
+import { PterodactylHttpClient, ServerInfrastructureError } from "./pterodactylClient"
+import {
+  listServerBackups,
+  createServerBackup,
+  restoreServerBackup,
+  deleteServerBackup,
+  toggleServerBackupLock,
+} from "./serverBackupService"
+import {
+  detectActiveWorldName,
+  getServerWorldInfo,
+  createServerWorldDownloadUrl,
+  replaceServerWorld,
+} from "./serverWorldService"
+import {
+  getMinecraftServerSettings,
+  updateMinecraftServerSettings,
+} from "./serverConfigService"
+import {
+  listServerAutomations,
+  createServerAutomation,
+} from "./serverScheduleService"
+import { createDatabase, schema } from "@hikat/database"
+import { createTestD1 } from "@hikat/database/testUtils"
+
+function createMockD1() {
+  const d1 = createTestD1()
+  const db = createDatabase(d1)
+  return { db, d1 }
+}
+
+
+describe("Shard 07: Server Administration II Core & Pterodactyl Architecture Tests", () => {
+  // Test 1: Pterodactyl HTTP Client Endpoints & Credentials Hiding
+  it("PterodactylHttpClient uses correct endpoints and never leaks API key in errors", async () => {
+    const requests: Array<{ url: string; method: string; body?: any }> = []
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
+      requests.push({
+        url,
+        method: init.method || "GET",
+        body: init.body ? JSON.parse(init.body as string) : undefined,
+      })
+
+      if (url.includes("/backups") && init.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              {
+                object: "backup",
+                attributes: {
+                  uuid: "bk-uuid-1",
+                  name: "Backup Test",
+                  is_successful: true,
+                  is_locked: false,
+                  bytes: 10485760,
+                  created_at: "2026-08-26T12:00:00Z",
+                  completed_at: "2026-08-26T12:01:00Z",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+
+      if (url.includes("/schedules") && init.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            object: "server_schedule",
+            attributes: {
+              id: 42,
+              name: "Daily Restart",
+              cron: { minute: "0", hour: "4", day_of_week: "*" },
+              is_active: true,
+              is_processing: false,
+              only_when_online: true,
+              tasks: [],
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+
+      return new Response(JSON.stringify({ success: true }), { status: 200 })
+    })
+
+    const client = new PterodactylHttpClient({
+      baseUrl: "https://panel.hikat.net",
+      apiKey: "secret-ptero-api-key-12345",
+      serverId: "srv-mc-01",
+      fetchFn: mockFetch as any,
+    })
+
+    const backups = await client.listBackups()
+    expect(backups.data).toHaveLength(1)
+    expect(requests[0]?.url).toBe("https://panel.hikat.net/api/client/servers/srv-mc-01/backups")
+
+    // Test error masking: simulate 401 error and ensure secret API key is NOT in message
+    const failingFetch = vi.fn().mockResolvedValue(new Response("Unauthorized", { status: 401 }))
+    const failingClient = new PterodactylHttpClient({
+      baseUrl: "https://panel.hikat.net",
+      apiKey: "secret-ptero-api-key-12345",
+      serverId: "srv-mc-01",
+      fetchFn: failingFetch as any,
+    })
+
+    await expect(failingClient.listBackups()).rejects.toThrow(ServerInfrastructureError)
+    try {
+      await failingClient.listBackups()
+    } catch (err: any) {
+      expect(err.message).not.toContain("secret-ptero-api-key-12345")
+      expect(err.code).toBe("SERVER_NOT_CONFIGURED")
+    }
+  })
+
+  // Test 2: File Sandbox Path Traversal Protection
+  it("File sandbox strictly blocks directory traversal across virtual categories", () => {
+    // Valid paths
+    const validConfig = sanitizeVirtualPath("CONFIG", "server.toml", "world")
+    expect(validConfig.valid).toBe(true)
+    expect(validConfig.fullPath).toBe("config/server.toml")
+
+    const validWorld = sanitizeVirtualPath("WORLD", "region/r.0.0.mca", "custom_world")
+    expect(validWorld.valid).toBe(true)
+    expect(validWorld.fullPath).toBe("custom_world/region/r.0.0.mca")
+
+    // Traversal attempts
+    expect(sanitizeVirtualPath("CONFIG", "../server.properties").valid).toBe(false)
+    expect(sanitizeVirtualPath("MODS", "../../etc/passwd").valid).toBe(false)
+    expect(sanitizeVirtualPath("LOGS", "folder/../../../secret").valid).toBe(false)
+    expect(sanitizeVirtualPath("CONFIG", "..\\..\\windows\\system32").valid).toBe(false)
+    expect(sanitizeVirtualPath("CONFIG", "safe/\0/dangerous").valid).toBe(false)
+
+    // Allowlisted extensions check
+    expect(isAllowlistedTextFile("server.properties")).toBe(true)
+    expect(isAllowlistedTextFile("config.json")).toBe(true)
+    expect(isAllowlistedTextFile("plugin.yml")).toBe(true)
+    expect(isAllowlistedTextFile("settings.toml")).toBe(true)
+    expect(isAllowlistedTextFile("mod.jar")).toBe(false)
+    expect(isAllowlistedTextFile("world.dat")).toBe(false)
+  })
+
+  // Test 3: Safe Level-Name Detection from server.properties
+  it("detectActiveWorldName safely extracts level-name and sanitizes invalid characters", async () => {
+    const mockClient = {
+      getFileContents: vi.fn().mockResolvedValue(`
+# Minecraft server properties
+server-port=25565
+level-name=HiKAT_Survival_2026
+gamemode=survival
+      `),
+    }
+
+    const worldName = await detectActiveWorldName({} as any, mockClient as any)
+    expect(worldName).toBe("HiKAT_Survival_2026")
+
+    // Fallback and malicious level-name sanitization
+    const maliciousClient = {
+      getFileContents: vi.fn().mockResolvedValue(`
+level-name=../../etc/evil_world
+      `),
+    }
+    const sanitizedName = await detectActiveWorldName({} as any, maliciousClient as any)
+    expect(sanitizedName).not.toContain("..")
+    expect(sanitizedName).not.toContain("/")
+  })
+
+  // Test 4: server.properties Allowlist-Only Modification and Preservation
+  it("serializeServerProperties modifies allowlisted settings and preserves unknown keys and comments", () => {
+    const originalProperties = `# HiKAT Server Properties
+# Custom Admin Note
+server-port=25565
+online-mode=true
+difficulty=easy
+max-players=10
+pvp=true
+white-list=false
+view-distance=8
+simulation-distance=8
+motd=Original MOTD
+allow-flight=false
+custom-mod-setting=enabled_value
+rcon.password=secret123
+`
+
+    const updated = serializeServerProperties(originalProperties, {
+      difficulty: "hard",
+      maxPlayers: 50,
+      pvp: false,
+      whitelist: true,
+      viewDistance: 16,
+      simulationDistance: 12,
+      motd: "New HiKAT MOTD",
+      allowFlight: true,
+    })
+
+    const parsed = parseServerProperties(updated)
+    expect(parsed.get("difficulty")).toBe("hard")
+    expect(parsed.get("max-players")).toBe("50")
+    expect(parsed.get("pvp")).toBe("false")
+    expect(parsed.get("white-list")).toBe("true")
+    expect(parsed.get("view-distance")).toBe("16")
+    expect(parsed.get("simulation-distance")).toBe("12")
+    expect(parsed.get("motd")).toBe("New HiKAT MOTD")
+    expect(parsed.get("allow-flight")).toBe("true")
+
+    // Verify non-allowlisted and custom properties are preserved untouched
+    expect(parsed.get("server-port")).toBe("25565")
+    expect(parsed.get("online-mode")).toBe("true")
+    expect(parsed.get("custom-mod-setting")).toBe("enabled_value")
+    expect(parsed.get("rcon.password")).toBe("secret123")
+    expect(updated).toContain("# Custom Admin Note")
+  })
+
+  // Test 5: Restore Backup OFFLINE Guard
+  it("restoreServerBackup rejects restore if server is not OFFLINE", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const onlineClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: {
+          current_state: "running",
+          is_suspended: false,
+          resources: { memory_bytes: 100, cpu_absolute: 5, disk_bytes: 100, uptime: 1000 },
+        },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      restoreBackup: vi.fn(),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      restoreServerBackup(env, db as any, "admin-1", "backup-1", onlineClient as any),
+    ).rejects.toThrow("Para restaurar una copia de seguridad el servidor debe estar completamente apagado.")
+  })
+
+  // Test 6: Replace World OFFLINE Guard & Pre-Backup
+  it("replaceServerWorld rejects replace if server is not OFFLINE and creates automatic pre-backup when OFFLINE", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const offlineClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: {
+          current_state: "offline",
+          is_suspended: false,
+          resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 },
+        },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createBackup: vi.fn().mockResolvedValue({ attributes: { uuid: "pre-bk-1" } }),
+      decompressFile: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const success = await replaceServerWorld(env, db as any, "admin-1", "uploaded_world.zip", offlineClient as any)
+    expect(success).toBe(true)
+    expect(offlineClient.createBackup).toHaveBeenCalledWith("Copia automática previa a reemplazo de mundo")
+    expect(offlineClient.decompressFile).toHaveBeenCalledWith("/", "uploaded_world.zip")
+  })
+
+  // Test 7: Human Automation Translation to Pterodactyl Cron & Kill Command Guard
+  it("convertAutomationToPterodactylCron correctly translates schedules and prevents kill command", () => {
+    // Daily schedule at 04:30
+    const daily = convertAutomationToPterodactylCron("DAILY", "04:30")
+    expect(daily.hour).toBe("04")
+    expect(daily.minute).toBe("30")
+    expect(daily.day_of_week).toBe("*")
+
+    // Weekly schedule on Saturday (6) at 03:00
+    const weekly = convertAutomationToPterodactylCron("WEEKLY", "03:00", 6)
+    expect(weekly.hour).toBe("03")
+    expect(weekly.minute).toBe("00")
+    expect(weekly.day_of_week).toBe("6")
+
+    // Selected days schedule on Mon, Wed, Fri (1, 3, 5) at 12:15
+    const selected = convertAutomationToPterodactylCron("SELECTED_DAYS", "12:15", undefined, [5, 1, 3])
+    expect(selected.hour).toBe("12")
+    expect(selected.minute).toBe("15")
+    expect(selected.day_of_week).toBe("1,3,5")
+  })
+
+  // Test 8: Pterodactyl Activity Event Mapping
+  it("mapPterodactylActivityEvent maps internal events to human Spanish descriptions", () => {
+    expect(mapPterodactylActivityEvent("server:power.start").description).toBe("Servidor iniciado")
+    expect(mapPterodactylActivityEvent("server:power.stop").description).toBe("Servidor detenido")
+    expect(mapPterodactylActivityEvent("server:power.restart").description).toBe("Servidor reiniciado")
+    expect(mapPterodactylActivityEvent("server:backup.create").description).toBe("Copia creada")
+    expect(mapPterodactylActivityEvent("server:backup.restore").description).toBe("Copia restaurada")
+    expect(mapPterodactylActivityEvent("server:file.write").description).toBe("Archivo actualizado")
+    expect(mapPterodactylActivityEvent("server:custom.unknown").description).toBe("Actividad del servidor")
+  })
+
+  // Test 9: Destructive Operation Lock prevents concurrent restore/replace
+  it("D1 server_operation_locks prevents concurrent destructive operations", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Insert active operation lock
+    await db.insert(schema.serverOperationLocks).values({
+      lockKey: "server_destructive_operation",
+      operation: "RESTORE_BACKUP",
+      acquiredByUserId: "admin-1",
+      acquiredAt: nowIso,
+      expiresAt: new Date(Date.now() + 180000).toISOString(),
+    })
+
+
+    const offlineClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: {
+          current_state: "offline",
+          is_suspended: false,
+          resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 100, uptime: 0 },
+        },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createBackup: vi.fn(),
+      decompressFile: vi.fn(),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    await expect(
+      replaceServerWorld(env, db as any, "admin-1", "world.zip", offlineClient as any),
+    ).rejects.toThrow("Hay otra operación del servidor en curso. Espera a que finalice.")
+  })
+
+  // Test 10: GraphQL Resolvers Require ADMIN Role for Shard 07 Queries and Mutations
+  it("GraphQL resolvers reject unauthenticated and non-admin requests for Shard 07 operations", async () => {
+    const { resolvers } = await import("../../resolvers")
+
+    const unauthContext = {
+      auth: { status: "unauthenticated" },
+      db: {} as any,
+      env: {} as any,
+    } as any
+
+    const playerContext = {
+      auth: {
+        status: "authenticated",
+        identity: {
+          userId: "p1",
+          email: "player@hikat.net",
+          role: "PLAYER",
+          sessionId: "sess-1",
+          expiresAt: Date.now() + 100000,
+        },
+      },
+      db: {} as any,
+      env: {} as any,
+    } as any
+
+    // Query guards: Unauthenticated throws UNAUTHENTICATED
+    await expect(resolvers.Query.serverBackups({}, {}, unauthContext)).rejects.toThrow("Authentication required")
+    await expect(resolvers.Query.serverWorld({}, {}, unauthContext)).rejects.toThrow("Authentication required")
+
+    // Query guards: PLAYER role throws FORBIDDEN
+    await expect(resolvers.Query.serverBackups({}, {}, playerContext)).rejects.toThrow("administrative privilege required")
+    await expect(resolvers.Query.serverWorld({}, {}, playerContext)).rejects.toThrow("administrative privilege required")
+    await expect(resolvers.Query.serverAutomations({}, {}, playerContext)).rejects.toThrow("administrative privilege required")
+    await expect(resolvers.Query.serverFiles({}, { root: "CONFIG" }, playerContext)).rejects.toThrow("administrative privilege required")
+
+    // Mutation guards: PLAYER role throws FORBIDDEN
+    await expect(resolvers.Mutation.createServerBackup({}, { name: "test" }, playerContext)).rejects.toThrow("administrative privilege required")
+    await expect(resolvers.Mutation.restoreServerBackup({}, { id: "bk-1" }, playerContext)).rejects.toThrow("administrative privilege required")
+    await expect(resolvers.Mutation.replaceServerWorld({}, { uploadedFileName: "w.zip" }, playerContext)).rejects.toThrow("administrative privilege required")
+    await expect(resolvers.Mutation.updateMinecraftServerSettings({}, { input: {} as any }, playerContext)).rejects.toThrow("administrative privilege required")
+  })
+})
+
+

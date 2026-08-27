@@ -758,6 +758,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0007_backoffice_core_hardening.sql",
 
       "0008_player_skins.sql",
+      "0009_server_operation_locks.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -1131,7 +1132,26 @@ describe("@hikat/database schema and D1 operations", () => {
       .get()
 
     expect(rl?.count).toBe(3)
+
+    // 5. Test server operation locks (RESTORE_BACKUP, REPLACE_WORLD)
+    await db.insert(schema.serverOperationLocks).values({
+      lockKey: "server_restore_backup",
+      operation: "RESTORE_BACKUP",
+      acquiredByUserId: "admin-srv-1",
+      expiresAt: new Date(Date.now() + 180000).toISOString(),
+    })
+
+    const opLock = await db
+      .select()
+      .from(schema.serverOperationLocks)
+      .where(eq(schema.serverOperationLocks.lockKey, "server_restore_backup"))
+      .get()
+
+    expect(opLock).toBeDefined()
+    expect(opLock?.operation).toBe("RESTORE_BACKUP")
+    expect(opLock?.acquiredByUserId).toBe("admin-srv-1")
   })
+
 
   it("supports skins, game releases, single published unique index, and project settings", async () => {
     const d1 = createTestD1()

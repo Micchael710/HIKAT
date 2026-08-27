@@ -6,51 +6,139 @@ import type {
   MediaMimeType,
   ServerStatus,
   ServerPowerAction,
+  ServerFileRoot,
+  ServerAutomationAction,
+  ServerAutomationFrequency,
 } from "@hikat/shared"
 
 export type ServerStatusGql = ServerStatus
 
 export type ServerPowerActionGql = ServerPowerAction
 
+export type ServerFileRootGql = ServerFileRoot
+
+export type ServerAutomationActionGql = ServerAutomationAction
+
+export type ServerAutomationFrequencyGql = ServerAutomationFrequency
+
 export interface ServerResourcesGql {
   status: ServerStatusGql
-
   cpuPercent: number
-
   cpuLimitPercent?: number | null
-
   memoryUsedBytes: number
-
   memoryLimitBytes?: number | null
-
   diskUsedBytes: number
-
   diskLimitBytes?: number | null
-
+  networkRxBytes?: number | null
+  networkTxBytes?: number | null
   uptimeMs?: number | null
-
   isSuspended: boolean
 }
 
 export interface ServerPowerActionResultGql {
   success: boolean
-
   status: ServerStatusGql
-
   message?: string | null
 }
 
 export interface ServerCommandResultGql {
   success: boolean
-
   message?: string | null
 }
 
 export interface ServerConsoleTicketPayloadGql {
   ticket: string
-
   expiresAt: string
 }
+
+export interface ServerActivityItemGql {
+  id: string
+  description: string
+  eventType: string
+  timestamp: string
+}
+
+export interface ServerBackupItemGql {
+  id: string
+  name: string
+  bytes: number
+  createdAt: string
+  completedAt?: string | null
+  isSuccessful: boolean
+  isLocked: boolean
+}
+
+export interface ServerWorldInfoGql {
+  name: string
+  sizeBytes?: number | null
+  lastModified?: string | null
+}
+
+export interface MinecraftServerSettingsGql {
+  difficulty: string
+  maxPlayers: number
+  pvp: boolean
+  whitelist: boolean
+  viewDistance: number
+  simulationDistance: number
+  motd: string
+  allowFlight: boolean
+}
+
+export interface UpdateMinecraftServerSettingsInputGql {
+  difficulty?: string | null
+  maxPlayers?: number | null
+  pvp?: boolean | null
+  whitelist?: boolean | null
+  viewDistance?: number | null
+  simulationDistance?: number | null
+  motd?: string | null
+  allowFlight?: boolean | null
+}
+
+export interface ServerAutomationItemGql {
+  id: string
+  name: string
+  action: ServerAutomationActionGql
+  frequency: ServerAutomationFrequencyGql
+  time: string
+  weekday?: number | null
+  weekdays?: number[] | null
+  command?: string | null
+  enabled: boolean
+  isProcessing: boolean
+  lastRunAt?: string | null
+  nextRunAt?: string | null
+}
+
+export interface ServerAutomationInputGql {
+  name: string
+  action: ServerAutomationActionGql
+  frequency: ServerAutomationFrequencyGql
+  time: string
+  weekday?: number | null
+  weekdays?: number[] | null
+  command?: string | null
+  enabled?: boolean | null
+}
+
+export interface ServerFileItemGql {
+  name: string
+  isFile: boolean
+  sizeBytes: number
+  mimeType?: string | null
+  modifiedAt: string
+}
+
+export interface ServerFileContentGql {
+  content: string
+  sizeBytes: number
+}
+
+export interface ServerSignedUrlPayloadGql {
+  url: string
+}
+
 
 export interface UserGql {
   id: string

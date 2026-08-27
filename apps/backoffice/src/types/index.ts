@@ -69,23 +69,18 @@ export interface NewsConnection {
 
 export interface ServerResources {
   status: ServerStatus
-
   cpuPercent: number
-
   cpuLimitPercent?: number | null
-
   memoryUsedBytes: number
-
   memoryLimitBytes?: number | null
-
   diskUsedBytes: number
-
   diskLimitBytes?: number | null
-
+  networkRxBytes?: number | null
+  networkTxBytes?: number | null
   uptimeMs?: number | null
-
   isSuspended: boolean
 }
+
 
 export interface ConsoleLogEntry {
   id: string
@@ -309,12 +304,106 @@ export interface AdminSettings {
   serverPort: number
 
   discordUrl?: string | null
-
   websiteUrl?: string | null
-
   minRamGb: number
-
   recommendedRamGb: number
-
   updatedAt: string
 }
+
+
+
+// --- Server Administration II Types (Shard 07) ---
+
+export interface ServerActivityItem {
+  id: string
+  description: string
+  eventType: string
+  timestamp: string
+}
+
+export interface ServerBackupItem {
+  id: string
+  name: string
+  bytes: number
+  createdAt: string
+  completedAt?: string | null
+  isSuccessful: boolean
+  isLocked: boolean
+}
+
+export interface ServerWorldInfo {
+  name: string
+  sizeBytes?: number | null
+  lastModified?: string | null
+}
+
+export interface MinecraftServerSettings {
+  difficulty: string
+  maxPlayers: number
+  pvp: boolean
+  whitelist: boolean
+  viewDistance: number
+  simulationDistance: number
+  motd: string
+  allowFlight: boolean
+}
+
+export interface UpdateMinecraftServerSettingsInput {
+  difficulty?: string
+  maxPlayers?: number
+  pvp?: boolean
+  whitelist?: boolean
+  viewDistance?: number
+  simulationDistance?: number
+  motd?: string
+  allowFlight?: boolean
+}
+
+export type ServerAutomationAction = "BACKUP" | "RESTART" | "START" | "STOP" | "COMMAND"
+export type ServerAutomationFrequency = "DAILY" | "WEEKLY" | "SELECTED_DAYS"
+
+export interface ServerAutomationItem {
+  id: string
+  name: string
+  action: ServerAutomationAction
+  frequency: ServerAutomationFrequency
+  time: string
+  weekday?: number | null
+  weekdays?: number[] | null
+  command?: string | null
+  enabled: boolean
+  isProcessing: boolean
+  lastRunAt?: string | null
+  nextRunAt?: string | null
+}
+
+export interface ServerAutomationInput {
+  name: string
+  action: ServerAutomationAction
+  frequency: ServerAutomationFrequency
+  time: string
+  weekday?: number | null
+  weekdays?: number[] | null
+  command?: string | null
+  enabled?: boolean
+}
+
+export type ServerFileRoot = "WORLD" | "CONFIG" | "MODS" | "LOGS"
+
+export interface ServerFileItem {
+  name: string
+  isFile: boolean
+  sizeBytes: number
+  mimeType?: string | null
+  modifiedAt: string
+}
+
+export interface ServerFileContent {
+  content: string
+  sizeBytes: number
+}
+
+export interface ServerSignedUrlPayload {
+  url: string
+}
+
