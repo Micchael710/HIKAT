@@ -17,7 +17,6 @@ import {
   sanitizeGameFileName,
   sanitizeGamePath,
   inferGameCategory,
-  isEditableTextFile,
   isUtf8TextBuffer,
   validateJsonContent,
   validateGameTreeInvariants,
@@ -34,7 +33,7 @@ import {
 /**
  * Safely deletes an R2 object if and only if NO record in game_release_files references it.
  * This guarantees published and shared objects are never accidentally removed,
- * while draft-exclusive orphans are cleanly purged.
+ * while draft-exclusive orphans and unassociated uploads are cleanly purged.
  */
 export async function deleteR2ObjectIfUnreferenced(
   env: Env,
@@ -183,174 +182,185 @@ export async function addGameFile(
     originalFilename: string
   },
 ): Promise<AdminGameFileGql> {
-  const name = String(input.name || "").trim()
-  if (!name) {
-    throw createGraphQLError("El nombre del archivo o mod es obligatorio.", "VALIDATION_ERROR")
-  }
+  let objectKeyToCompensate: string | undefined
 
-  // 1. Ensure active DRAFT release
-  let draft = await db
-    .select()
-    .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
-    .get()
+  try {
+    const name = String(input.name || "").trim()
+    if (!name) {
+      throw createGraphQLError("El nombre del archivo o mod es obligatorio.", "VALIDATION_ERROR")
+    }
 
-  if (!draft) {
-    await prepareGameDraft(db, userId)
-    draft = await db
+    // 1. Ensure active DRAFT release
+    let draft = await db
       .select()
       .from(schema.gameReleases)
       .where(eq(schema.gameReleases.status, "DRAFT"))
       .get()
-  }
 
-  if (!draft) {
-    throw createGraphQLError("No se pudo inicializar el borrador de actualización.", "INTERNAL_ERROR")
-  }
-
-  // 2. Validate token or metadata
-  let sha256: string
-  let sizeBytes: number
-  let objectKey: string
-  let originalFilename: string
-  let category: GameFileCategory = input.category as GameFileCategory || "GENERAL"
-
-  if (uploadedMetadata) {
-    sha256 = uploadedMetadata.sha256
-    sizeBytes = uploadedMetadata.sizeBytes
-    objectKey = uploadedMetadata.objectKey
-    originalFilename = uploadedMetadata.originalFilename
-  } else {
-    if (!input.tokenHash) {
-      throw createGraphQLError("Token de subida requerido.", "VALIDATION_ERROR")
+    if (!draft) {
+      await prepareGameDraft(db, userId)
+      draft = await db
+        .select()
+        .from(schema.gameReleases)
+        .where(eq(schema.gameReleases.status, "DRAFT"))
+        .get()
     }
 
-    const tokenRecord = await db
+    if (!draft) {
+      throw createGraphQLError("No se pudo inicializar el borrador de actualización.", "INTERNAL_ERROR")
+    }
+
+    // 2. Validate token or metadata
+    let sha256: string
+    let sizeBytes: number
+    let objectKey: string
+    let originalFilename: string
+    let category: GameFileCategory = (input.category as GameFileCategory) || "GENERAL"
+
+    if (uploadedMetadata) {
+      sha256 = uploadedMetadata.sha256
+      sizeBytes = uploadedMetadata.sizeBytes
+      objectKey = uploadedMetadata.objectKey
+      originalFilename = uploadedMetadata.originalFilename
+      objectKeyToCompensate = objectKey
+    } else {
+      if (!input.tokenHash) {
+        throw createGraphQLError("Token de subida requerido.", "VALIDATION_ERROR")
+      }
+
+      const tokenRecord = await db
+        .select()
+        .from(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+        .get()
+
+      if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
+        throw createGraphQLError(
+          "El archivo aún no se ha subido o el token es inválido.",
+          "VALIDATION_ERROR",
+        )
+      }
+
+      sha256 = tokenRecord.sha256
+      sizeBytes = tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes
+      objectKey = tokenRecord.objectKey
+      originalFilename = tokenRecord.originalFilename
+      objectKeyToCompensate = objectKey
+      if (!input.category && tokenRecord.category) {
+        category = tokenRecord.category as GameFileCategory
+      }
+    }
+
+    // Determine default folder prefix if only a filename was provided without subdirectories
+    const defaultDir =
+      category === "CONFIG"
+        ? "config"
+        : category === "RESOURCE_PACK"
+        ? "resourcepacks"
+        : category === "SHADER_PACK"
+        ? "shaderpacks"
+        : category === "KUBEJS"
+        ? "kubejs"
+        : category === "SCRIPT"
+        ? "scripts"
+        : category === "MOD"
+        ? "mods"
+        : ""
+
+    const logicalPath = input.logicalPath
+      ? sanitizeGamePath(input.logicalPath)
+      : originalFilename && originalFilename.includes("/")
+      ? sanitizeGamePath(originalFilename)
+      : originalFilename
+      ? sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(originalFilename)}` : sanitizeGameFileName(originalFilename))
+      : sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(name)}` : sanitizeGameFileName(name))
+
+    if (!input.category) {
+      category = inferGameCategory(logicalPath)
+    }
+
+    const explicitPolicy = input.explicitPolicy || null
+
+    // Fetch all existing files in draft for tree invariant validation
+    const draftFiles = await db
       .select()
-      .from(schema.gameFileUploadTokens)
-      .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
-      .get()
+      .from(schema.gameReleaseFiles)
+      .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
+      .all()
 
-    if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
-      throw createGraphQLError(
-        "El archivo aún no se ha subido o el token es inválido.",
-        "VALIDATION_ERROR",
-      )
+    // Validate tree invariants
+    const treeCheck = validateGameTreeInvariants(
+      draftFiles.map((f) => ({ logicalPath: f.logicalPath, isDirectory: Boolean(f.isDirectory) })),
+      [{ logicalPath, isDirectory: false }],
+      {
+        ignoredExistingPaths: new Set([logicalPath]),
+      },
+    )
+
+    if (!treeCheck.valid) {
+      throw createGraphQLError(treeCheck.error || "Estructura de árbol de archivos inválida.", "VALIDATION_ERROR")
     }
 
-    sha256 = tokenRecord.sha256
-    sizeBytes = tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes
-    objectKey = tokenRecord.objectKey
-    originalFilename = tokenRecord.originalFilename
-    if (!input.category && tokenRecord.category) {
-      category = tokenRecord.category as GameFileCategory
-    }
-  }
+    const existing = draftFiles.find((f) => f.logicalPath === logicalPath)
+    const oldObjectKey = existing?.objectKey
+    const now = new Date().toISOString()
 
-  // Determine logical path
-  const defaultDir =
-    category === "CONFIG"
-      ? "config"
-      : category === "RESOURCE_PACK"
-      ? "resourcepacks"
-      : category === "SHADER_PACK"
-      ? "shaderpacks"
-      : category === "KUBEJS"
-      ? "kubejs"
-      : category === "SCRIPT"
-      ? "scripts"
-      : category === "MOD"
-      ? "mods"
-      : ""
+    let record: schema.GameReleaseFile
 
-  const logicalPath = input.logicalPath
-    ? sanitizeGamePath(input.logicalPath)
-    : originalFilename && originalFilename.includes("/")
-    ? sanitizeGamePath(originalFilename)
-    : originalFilename
-    ? sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(originalFilename)}` : sanitizeGameFileName(originalFilename))
-    : sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(name)}` : sanitizeGameFileName(name))
+    if (existing) {
+      if (existing.isDirectory) {
+        throw createGraphQLError("No se puede sobrescribir una carpeta existente con un archivo.", "VALIDATION_ERROR")
+      }
 
-  if (!input.category) {
-    category = inferGameCategory(logicalPath)
-  }
+      await db
+        .update(schema.gameReleaseFiles)
+        .set({
+          name,
+          category,
+          sha256,
+          sizeBytes,
+          policy: explicitPolicy,
+          isDirectory: 0,
+          objectKey,
+        })
+        .where(eq(schema.gameReleaseFiles.id, existing.id))
 
-  const explicitPolicy = input.explicitPolicy || null
+      record = (await db
+        .select()
+        .from(schema.gameReleaseFiles)
+        .where(eq(schema.gameReleaseFiles.id, existing.id))
+        .get())!
 
-  // Fetch all existing files in draft for tree invariant validation
-  const draftFiles = await db
-    .select()
-    .from(schema.gameReleaseFiles)
-    .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
-    .all()
-
-  // Validate tree invariants
-  const treeCheck = validateGameTreeInvariants(
-    draftFiles.map((f) => ({ logicalPath: f.logicalPath, isDirectory: Boolean(f.isDirectory) })),
-    [{ logicalPath, isDirectory: false }],
-    {
-      ignoredExistingPaths: new Set([logicalPath]),
-    },
-  )
-
-  if (!treeCheck.valid) {
-    throw createGraphQLError(treeCheck.error || "Estructura de árbol de archivos inválida.", "VALIDATION_ERROR")
-  }
-
-  const existing = draftFiles.find((f) => f.logicalPath === logicalPath)
-  const oldObjectKey = existing?.objectKey
-  const now = new Date().toISOString()
-
-  let record: schema.GameReleaseFile
-
-  if (existing) {
-    if (existing.isDirectory) {
-      throw createGraphQLError("No se puede sobrescribir una carpeta existente con un archivo.", "VALIDATION_ERROR")
-    }
-
-    await db
-      .update(schema.gameReleaseFiles)
-      .set({
+      if (oldObjectKey && oldObjectKey !== objectKey) {
+        await deleteR2ObjectIfUnreferenced(env, db, oldObjectKey)
+      }
+    } else {
+      const fileId = crypto.randomUUID()
+      const newFile = {
+        id: fileId,
+        releaseId: draft.id,
         name,
+        logicalPath,
         category,
         sha256,
         sizeBytes,
         policy: explicitPolicy,
         isDirectory: 0,
         objectKey,
-      })
-      .where(eq(schema.gameReleaseFiles.id, existing.id))
+        createdAt: now,
+      }
 
-    record = (await db
-      .select()
-      .from(schema.gameReleaseFiles)
-      .where(eq(schema.gameReleaseFiles.id, existing.id))
-      .get())!
-
-    if (oldObjectKey && oldObjectKey !== objectKey) {
-      await deleteR2ObjectIfUnreferenced(env, db, oldObjectKey)
-    }
-  } else {
-    const fileId = crypto.randomUUID()
-    const newFile = {
-      id: fileId,
-      releaseId: draft.id,
-      name,
-      logicalPath,
-      category,
-      sha256,
-      sizeBytes,
-      policy: explicitPolicy,
-      isDirectory: 0,
-      objectKey,
-      createdAt: now,
+      await db.insert(schema.gameReleaseFiles).values(newFile)
+      record = newFile
     }
 
-    await db.insert(schema.gameReleaseFiles).values(newFile)
-    record = newFile
+    return formatAdminFileWithTree(db, draft.id, record)
+  } catch (err) {
+    if (env && objectKeyToCompensate) {
+      await deleteR2ObjectIfUnreferenced(env, db, objectKeyToCompensate)
+    }
+    throw err
   }
-
-  return formatAdminFileWithTree(db, draft.id, record)
 }
 
 export async function updateGameFile(
@@ -359,103 +369,113 @@ export async function updateGameFile(
   input: UpdateGameFileInputGql,
   env?: Env,
 ): Promise<AdminGameFileGql> {
-  const existing = await db
-    .select()
-    .from(schema.gameReleaseFiles)
-    .where(eq(schema.gameReleaseFiles.id, id))
-    .get()
+  let objectKeyToCompensate: string | undefined
 
-  if (!existing) {
-    throw createGraphQLError("Archivo de juego no encontrado.", "NOT_FOUND")
-  }
-
-  const release = await db
-    .select()
-    .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.id, existing.releaseId))
-    .get()
-
-  if (!release || release.status !== "DRAFT") {
-    throw createGraphQLError(
-      "Solo puedes modificar archivos de una actualización en preparación.",
-      "VALIDATION_ERROR",
-    )
-  }
-
-  const updates: Partial<schema.GameReleaseFile> = {}
-  if (input.name !== undefined && input.name !== null) {
-    const trimmed = String(input.name || "").trim()
-    if (!trimmed) {
-      throw createGraphQLError("El nombre no puede estar vacío.", "VALIDATION_ERROR")
-    }
-    updates.name = trimmed
-  }
-
-  if (input.logicalPath !== undefined && input.logicalPath !== null) {
-    const newPath = sanitizeGamePath(input.logicalPath)
-    if (newPath !== existing.logicalPath) {
-      const draftFiles = await db
-        .select()
-        .from(schema.gameReleaseFiles)
-        .where(eq(schema.gameReleaseFiles.releaseId, release.id))
-        .all()
-
-      const treeCheck = validateGameTreeInvariants(
-        draftFiles.map((f) => ({ logicalPath: f.logicalPath, isDirectory: Boolean(f.isDirectory) })),
-        [{ logicalPath: newPath, isDirectory: Boolean(existing.isDirectory) }],
-        { ignoredExistingPaths: new Set([existing.logicalPath]) },
-      )
-      if (!treeCheck.valid) {
-        throw createGraphQLError(treeCheck.error || "Estructura de árbol inválida.", "VALIDATION_ERROR")
-      }
-      updates.logicalPath = newPath
-    }
-  }
-
-  if (input.category !== undefined && input.category !== null) {
-    updates.category = input.category
-  }
-
-  if (input.explicitPolicy !== undefined) {
-    updates.policy = input.explicitPolicy
-  }
-
-  let oldObjectKey: string | undefined
-  if (input.tokenHash) {
-    const tokenRecord = await db
+  try {
+    const existing = await db
       .select()
-      .from(schema.gameFileUploadTokens)
-      .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+      .from(schema.gameReleaseFiles)
+      .where(eq(schema.gameReleaseFiles.id, id))
       .get()
 
-    if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
-      throw createGraphQLError("Token de subida inválido o no completado.", "VALIDATION_ERROR")
+    if (!existing) {
+      throw createGraphQLError("Archivo de juego no encontrado.", "NOT_FOUND")
     }
 
-    oldObjectKey = existing.objectKey
-    updates.sha256 = tokenRecord.sha256
-    updates.sizeBytes = tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes
-    updates.objectKey = tokenRecord.objectKey
-  }
+    const release = await db
+      .select()
+      .from(schema.gameReleases)
+      .where(eq(schema.gameReleases.id, existing.releaseId))
+      .get()
 
-  if (Object.keys(updates).length > 0) {
-    await db
-      .update(schema.gameReleaseFiles)
-      .set(updates)
+    if (!release || release.status !== "DRAFT") {
+      throw createGraphQLError(
+        "Solo puedes modificar archivos de una actualización en preparación.",
+        "VALIDATION_ERROR",
+      )
+    }
+
+    const updates: Partial<schema.GameReleaseFile> = {}
+    if (input.name !== undefined && input.name !== null) {
+      const trimmed = String(input.name || "").trim()
+      if (!trimmed) {
+        throw createGraphQLError("El nombre no puede estar vacío.", "VALIDATION_ERROR")
+      }
+      updates.name = trimmed
+    }
+
+    if (input.logicalPath !== undefined && input.logicalPath !== null) {
+      const newPath = sanitizeGamePath(input.logicalPath)
+      if (newPath !== existing.logicalPath) {
+        const draftFiles = await db
+          .select()
+          .from(schema.gameReleaseFiles)
+          .where(eq(schema.gameReleaseFiles.releaseId, release.id))
+          .all()
+
+        const treeCheck = validateGameTreeInvariants(
+          draftFiles.map((f) => ({ logicalPath: f.logicalPath, isDirectory: Boolean(f.isDirectory) })),
+          [{ logicalPath: newPath, isDirectory: Boolean(existing.isDirectory) }],
+          { ignoredExistingPaths: new Set([existing.logicalPath]) },
+        )
+        if (!treeCheck.valid) {
+          throw createGraphQLError(treeCheck.error || "Estructura de árbol inválida.", "VALIDATION_ERROR")
+        }
+        updates.logicalPath = newPath
+      }
+    }
+
+    if (input.category !== undefined && input.category !== null) {
+      updates.category = input.category
+    }
+
+    if (input.explicitPolicy !== undefined) {
+      updates.policy = input.explicitPolicy
+    }
+
+    let oldObjectKey: string | undefined
+    if (input.tokenHash) {
+      const tokenRecord = await db
+        .select()
+        .from(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+        .get()
+
+      if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
+        throw createGraphQLError("Token de subida inválido o no completado.", "VALIDATION_ERROR")
+      }
+
+      oldObjectKey = existing.objectKey
+      objectKeyToCompensate = tokenRecord.objectKey
+      updates.sha256 = tokenRecord.sha256
+      updates.sizeBytes = tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes
+      updates.objectKey = tokenRecord.objectKey
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await db
+        .update(schema.gameReleaseFiles)
+        .set(updates)
+        .where(eq(schema.gameReleaseFiles.id, id))
+    }
+
+    if (env && oldObjectKey && updates.objectKey && oldObjectKey !== updates.objectKey) {
+      await deleteR2ObjectIfUnreferenced(env, db, oldObjectKey)
+    }
+
+    const updated = (await db
+      .select()
+      .from(schema.gameReleaseFiles)
       .where(eq(schema.gameReleaseFiles.id, id))
+      .get())!
+
+    return formatAdminFileWithTree(db, release.id, updated)
+  } catch (err) {
+    if (env && objectKeyToCompensate) {
+      await deleteR2ObjectIfUnreferenced(env, db, objectKeyToCompensate)
+    }
+    throw err
   }
-
-  if (env && oldObjectKey && updates.objectKey && oldObjectKey !== updates.objectKey) {
-    await deleteR2ObjectIfUnreferenced(env, db, oldObjectKey)
-  }
-
-  const updated = (await db
-    .select()
-    .from(schema.gameReleaseFiles)
-    .where(eq(schema.gameReleaseFiles.id, id))
-    .get())!
-
-  return formatAdminFileWithTree(db, release.id, updated)
 }
 
 export async function saveGameFileContent(
@@ -467,18 +487,11 @@ export async function saveGameFileContent(
   const logicalPath = sanitizeGamePath(input.logicalPath)
   const filename = logicalPath.split("/").pop() || "file.txt"
 
-  // 1. Authoritative Backend Binary Rejection
+  // 1. Authoritative Backend Binary Rejection (known binaries are strictly forbidden)
   const lowerPath = logicalPath.toLowerCase()
   if (KNOWN_BINARY_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))) {
     throw createGraphQLError(
       "No se puede crear ni guardar contenido de texto en un archivo con formato binario (.jar, .zip, imágenes, audio, etc.).",
-      "VALIDATION_ERROR",
-    )
-  }
-
-  if (!isEditableTextFile(filename)) {
-    throw createGraphQLError(
-      "El archivo especificado no corresponde a un formato de texto o configuración editable.",
       "VALIDATION_ERROR",
     )
   }
@@ -690,8 +703,8 @@ export async function readGameFileContent(
   const arrayBuffer = await r2Object.arrayBuffer()
   const bytes = new Uint8Array(arrayBuffer)
 
-  if (!isEditableTextFile(record.name, bytes)) {
-    throw createGraphQLError("El archivo seleccionado no es un archivo de texto editable.", "VALIDATION_ERROR")
+  if (!isUtf8TextBuffer(bytes)) {
+    throw createGraphQLError("El archivo seleccionado contiene datos binarios no editables.", "VALIDATION_ERROR")
   }
 
   const decoder = new TextDecoder("utf-8")
@@ -868,15 +881,23 @@ export async function renameGamePath(
   }
 
   // Execute atomic batch
-  for (const item of proposedItems) {
-    await db
+  const statements = proposedItems.map((item) =>
+    db
       .update(schema.gameReleaseFiles)
       .set({
         name: item.name,
         logicalPath: item.newPath,
         category: inferGameCategory(item.newPath),
       })
-      .where(eq(schema.gameReleaseFiles.id, item.id))
+      .where(eq(schema.gameReleaseFiles.id, item.id)),
+  )
+
+  if (typeof (db as any).batch === "function" && statements.length > 0) {
+    await (db as any).batch(statements)
+  } else {
+    for (const stmt of statements) {
+      await stmt
+    }
   }
 
   return true
@@ -1001,16 +1022,24 @@ export async function moveGamePaths(
     throw createGraphQLError(treeCheck.error || "Estructura de árbol inválida.", "VALIDATION_ERROR")
   }
 
-  // Execute all updates atomically
-  for (const move of plannedMoves) {
-    await db
+  // Execute all updates atomically via D1 batch
+  const statements = plannedMoves.map((move) =>
+    db
       .update(schema.gameReleaseFiles)
       .set({
         name: move.name,
         logicalPath: move.newPath,
         category: inferGameCategory(move.newPath),
       })
-      .where(eq(schema.gameReleaseFiles.id, move.id))
+      .where(eq(schema.gameReleaseFiles.id, move.id)),
+  )
+
+  if (typeof (db as any).batch === "function" && statements.length > 0) {
+    await (db as any).batch(statements)
+  } else {
+    for (const stmt of statements) {
+      await stmt
+    }
   }
 
   return true
@@ -1119,6 +1148,18 @@ export async function copyGamePaths(
     }
   }
 
+  // Check collision within planned inserts themselves (e.g. copying a/foo.txt and b/foo.txt into dest -> both target dest/foo.txt)
+  const plannedTargetSet = new Set<string>()
+  for (const item of plannedInserts) {
+    if (plannedTargetSet.has(item.logicalPath)) {
+      throw createGraphQLError(
+        `Conflicto en la operación de copia: múltiples elementos intentan ocupar la misma ruta de destino "${item.logicalPath}".`,
+        "VALIDATION_ERROR",
+      )
+    }
+    plannedTargetSet.add(item.logicalPath)
+  }
+
   // Check collision with existing files
   for (const item of plannedInserts) {
     if (draftFiles.some((f) => f.logicalPath === item.logicalPath)) {
@@ -1139,9 +1180,17 @@ export async function copyGamePaths(
     throw createGraphQLError(treeCheck.error || "Estructura de árbol inválida.", "VALIDATION_ERROR")
   }
 
-  // Execute inserts atomically
-  for (const insertItem of plannedInserts) {
-    await db.insert(schema.gameReleaseFiles).values(insertItem)
+  // Execute inserts atomically via D1 batch
+  const statements = plannedInserts.map((insertItem) =>
+    db.insert(schema.gameReleaseFiles).values(insertItem),
+  )
+
+  if (typeof (db as any).batch === "function" && statements.length > 0) {
+    await (db as any).batch(statements)
+  } else {
+    for (const stmt of statements) {
+      await stmt
+    }
   }
 
   return true

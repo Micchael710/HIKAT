@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import { eq } from "drizzle-orm"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
@@ -475,5 +475,169 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
     expect(fileRes.status).toBe(200)
     const text = await fileRes.text()
     expect(text).toBe("Hello HiKAT")
+  })
+
+  it("handles atomic rollback on batch execution failure (simulated D1 batch error)", async () => {
+    await prepareGameDraft(db, adminId)
+    await createGameFolder(db, "atomic_src", adminId)
+    await saveGameFileContent(db, { logicalPath: "atomic_src/f1.txt", content: "f1" }, adminId, env)
+    await saveGameFileContent(db, { logicalPath: "atomic_src/f2.txt", content: "f2" }, adminId, env)
+
+    // Mock db.batch to throw during execution
+    const originalBatch = (db as any).batch
+    ;(db as any).batch = vi.fn().mockRejectedValue(new Error("SIMULATED_D1_BATCH_ERROR"))
+
+    await expect(
+      moveGamePaths(db, ["atomic_src/f1.txt", "atomic_src/f2.txt"], "atomic_dest", adminId),
+    ).rejects.toThrow("SIMULATED_D1_BATCH_ERROR")
+
+    // Restore original batch
+    ;(db as any).batch = originalBatch
+
+    // Verify 0 changes occurred: both files still exist in atomic_src/ and NOT in atomic_dest/
+    const files = await getAdminGameFiles(db)
+    const paths = files.map((f) => f.logicalPath)
+    expect(paths).toContain("atomic_src/f1.txt")
+    expect(paths).toContain("atomic_src/f2.txt")
+    expect(paths).not.toContain("atomic_dest/f1.txt")
+    expect(paths).not.toContain("atomic_dest/f2.txt")
+  })
+
+  it("rejects planned duplicate copy targets before executing any inserts", async () => {
+    await prepareGameDraft(db, adminId)
+    await createGameFolder(db, "dir_a", adminId)
+    await createGameFolder(db, "dir_b", adminId)
+    await createGameFolder(db, "dest_dir", adminId)
+
+    await saveGameFileContent(db, { logicalPath: "dir_a/foo.txt", content: "from a" }, adminId, env)
+    await saveGameFileContent(db, { logicalPath: "dir_b/foo.txt", content: "from b" }, adminId, env)
+
+    // Copying dir_a/foo.txt and dir_b/foo.txt into dest_dir would both target dest_dir/foo.txt
+    await expect(
+      copyGamePaths(db, ["dir_a/foo.txt", "dir_b/foo.txt"], "dest_dir", adminId),
+    ).rejects.toThrow(/múltiples elementos intentan ocupar la misma ruta de destino/i)
+
+    // Verify 0 inserts occurred in dest_dir
+    const files = await getAdminGameFiles(db)
+    expect(files.some((f) => f.logicalPath.startsWith("dest_dir/"))).toBe(false)
+  })
+
+  it("supports UTF-8 text in extensionless files and custom extensions, while rejecting binaries", async () => {
+    await prepareGameDraft(db, adminId)
+
+    // 1. Extensionless file containing valid UTF-8
+    const extless = await saveGameFileContent(
+      db,
+      { logicalPath: "custom_conf", content: "key=value\nmode=strict" },
+      adminId,
+      env,
+    )
+    expect(extless.logicalPath).toBe("custom_conf")
+
+    const extlessRead = await readGameFileContent(db, extless.id, env)
+    expect(extlessRead).toBe("key=value\nmode=strict")
+
+    // 2. Custom extension file (.customconfig) containing UTF-8
+    const customExt = await saveGameFileContent(
+      db,
+      { logicalPath: "config/settings.customconfig", content: "{\"custom\": 123}" },
+      adminId,
+      env,
+    )
+    expect(customExt.logicalPath).toBe("config/settings.customconfig")
+
+    const customRead = await readGameFileContent(db, customExt.id, env)
+    expect(customRead).toBe("{\"custom\": 123}")
+
+    // 3. Binary payload uploaded with unknown extension -> reading as text must fail
+    const binBytes = new Uint8Array([0x00, 0xff, 0xfe, 0x00, 0x12, 0x34])
+    await mockR2.put("game-files/binary-unknown-1", binBytes)
+    const binFile = await addGameFile(
+      db,
+      { name: "data.unknown_bin", logicalPath: "data.unknown_bin", tokenHash: "token-bin-1" },
+      adminId,
+      env,
+      {
+        sha256: "binhash123",
+        sizeBytes: binBytes.length,
+        objectKey: "game-files/binary-unknown-1",
+        originalFilename: "data.unknown_bin",
+      },
+    )
+
+    await expect(readGameFileContent(db, binFile.id, env)).rejects.toThrow(
+      /contiene datos binarios no editables/i,
+    )
+
+    // 4. .jar file is rejected immediately on save and read
+    await expect(
+      saveGameFileContent(db, { logicalPath: "mods/example.jar", content: "not a jar" }, adminId, env),
+    ).rejects.toThrow(/binario/i)
+  })
+
+  it("compensates and cleans up unassociated R2 uploads if addGameFile or updateGameFile fails", async () => {
+    await prepareGameDraft(db, adminId)
+    await saveGameFileContent(db, { logicalPath: "config/config.txt", content: "existing" }, adminId, env)
+
+    // 1. Put unassociated object in R2
+    const orphanKey = "game-files/unassociated-upload-1"
+    await mockR2.put(orphanKey, new TextEncoder().encode("orphan payload"))
+    expect(await mockR2.get(orphanKey)).toBeDefined()
+
+    // 2. Call addGameFile with tree hierarchy violation (creating a child inside a file config.txt/child.txt)
+    await expect(
+      addGameFile(
+        db,
+        { name: "child.txt", logicalPath: "config/config.txt/child.txt", tokenHash: "orphan-tok" },
+        adminId,
+        env,
+        {
+          sha256: "somehash",
+          sizeBytes: 20,
+          objectKey: orphanKey,
+          originalFilename: "child.txt",
+        },
+      ),
+    ).rejects.toThrow(/no puede contener/i)
+
+    // 3. Verify compensation cleaned up the orphan object from R2!
+    expect(await mockR2.get(orphanKey)).toBeNull()
+
+    // 4. If the objectKey is already referenced by a published release, compensation must NEVER delete it
+    const sharedKey = "game-files/shared-published-key"
+    await mockR2.put(sharedKey, new TextEncoder().encode("shared payload"))
+    const published = await publishGameRelease(db, env, { version: "1.1.0" }, adminId)
+    await db.insert(schema.gameReleaseFiles).values({
+      id: crypto.randomUUID(),
+      releaseId: published.id,
+      name: "shared.txt",
+      logicalPath: "shared.txt",
+      category: "CONFIG",
+      sha256: "sharedhash",
+      sizeBytes: 30,
+      isDirectory: 0,
+      objectKey: sharedKey,
+      createdAt: new Date().toISOString(),
+    })
+
+    // Now attempt addGameFile in new draft using sharedKey with tree collision
+    await prepareGameDraft(db, adminId)
+    await expect(
+      addGameFile(
+        db,
+        { name: "bad.txt", logicalPath: "config/config.txt/bad.txt", tokenHash: "shared-tok" },
+        adminId,
+        env,
+        {
+          sha256: "sharedhash",
+          sizeBytes: 30,
+          objectKey: sharedKey,
+          originalFilename: "bad.txt",
+        },
+      ),
+    ).rejects.toThrow(/no puede contener/i)
+
+    // Shared object must still exist in R2!
+    expect(await mockR2.get(sharedKey)).toBeDefined()
   })
 })

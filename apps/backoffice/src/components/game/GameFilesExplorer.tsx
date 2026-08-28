@@ -7,6 +7,7 @@ import {
   inferGameCategory,
   resolveEffectiveGamePolicy,
   GAME_TEXT_FILE_EXTENSIONS,
+  KNOWN_BINARY_EXTENSIONS,
 } from "@hikat/shared"
 import {
   IconFolder,
@@ -54,9 +55,6 @@ interface ExplorerItem {
   rawFile?: AdminGameFile
 }
 
-/**
- * Recursively traverses a FileSystemEntry hierarchy from drag-and-drop.
- */
 async function traverseFileSystemEntry(
   entry: any,
   currentRelPath: string,
@@ -80,15 +78,14 @@ async function traverseFileSystemEntry(
     return new Promise((resolve) => {
       const readNextBatch = () => {
         dirReader.readEntries(
-          async (entries: any[]) => {
+          (entries: any[]) => {
             if (!entries || entries.length === 0) {
               resolve()
               return
             }
-            for (const child of entries) {
-              await traverseFileSystemEntry(child, dirPath, collected)
-            }
-            readNextBatch()
+            Promise.all(entries.map((child: any) => traverseFileSystemEntry(child, dirPath, collected))).then(() => {
+              readNextBatch()
+            })
           },
           () => resolve(),
         )
@@ -133,6 +130,7 @@ export default function GameFilesExplorer({
     isNew?: boolean
     initialPath?: string
     logicalPath?: string
+    initialContent?: string
   } | null>(null)
 
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false)
@@ -343,18 +341,48 @@ export default function GameFilesExplorer({
   }
 
   // Double click handler
-  const handleItemDoubleClick = (item: ExplorerItem) => {
+  const handleItemDoubleClick = async (item: ExplorerItem) => {
     if (item.changeStatus === "REMOVED") return
     if (item.isDirectory) {
       handleOpenFolder(item.logicalPath)
     } else if (item.rawFile) {
-      if (isEditableTextFile(item.name)) {
-        setEditorModal({
-          isOpen: true,
-          file: item.rawFile,
-          logicalPath: item.logicalPath,
-        })
-      }
+      await handleOpenFileOrInspect(item)
+    }
+  }
+
+  // Open file editor or inspect unknown text with backend
+  const handleOpenFileOrInspect = async (item: ExplorerItem) => {
+    if (item.changeStatus === "REMOVED" || item.isDirectory || !item.rawFile) return
+    const lowerName = item.name.toLowerCase()
+    if (KNOWN_BINARY_EXTENSIONS.some((ext) => lowerName.endsWith(ext))) {
+      return
+    }
+
+    if (isEditableTextFile(item.name)) {
+      setEditorModal({
+        isOpen: true,
+        file: item.rawFile,
+        logicalPath: item.logicalPath,
+      })
+      return
+    }
+
+    // Unknown extension or extensionless file: verify with backend first
+    try {
+      const content = await gameApi.readGameFileContent(item.rawFile.id)
+      setEditorModal({
+        isOpen: true,
+        file: item.rawFile,
+        logicalPath: item.logicalPath,
+        initialContent: content,
+      })
+    } catch (err: unknown) {
+      onToast(
+        err instanceof Error
+          ? err.message
+          : "El archivo seleccionado contiene datos binarios no editables.",
+        "error",
+      )
     }
   }
 
@@ -463,17 +491,25 @@ export default function GameFilesExplorer({
 
   // Binary upload handler with selected folder root stripping
   const handleUploadFiles = async (
-    fileList: FileList | null | Array<{ file: File; relativePath?: string }>,
+    fileList: FileList | null | Array<File | { file: File; relativePath?: string }>,
     stripFirstFolder = false,
   ) => {
-    if (!fileList || (Array.isArray(fileList) ? fileList.length === 0 : fileList.length === 0) || !isDraft) return
+    if (!fileList || fileList.length === 0 || !isDraft) return
     setIsUploading(true)
-    const itemsToUpload = Array.isArray(fileList)
-      ? fileList
-      : Array.from(fileList).map((f) => ({
-          file: f,
-          relativePath: (f as any).webkitRelativePath as string | undefined,
-        }))
+
+    const itemsToUpload: Array<{ file: File; relativePath?: string }> = []
+    for (let i = 0; i < fileList.length; i++) {
+      const item = fileList[i]
+      if (item && typeof item === "object" && "file" in item && Boolean((item as any).file)) {
+        itemsToUpload.push(item as { file: File; relativePath?: string })
+      } else if (item) {
+        const fileObj = item as File
+        itemsToUpload.push({
+          file: fileObj,
+          relativePath: (fileObj as any).webkitRelativePath || undefined,
+        })
+      }
+    }
 
     try {
       for (let i = 0; i < itemsToUpload.length; i++) {
@@ -604,6 +640,8 @@ export default function GameFilesExplorer({
     <div
       ref={explorerContainerRef}
       onContextMenu={(e) => handleContextMenu(e, null)}
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1158,23 +1196,19 @@ export default function GameFilesExplorer({
                     <IconFolder style={{ width: 14, height: 14 }} />
                     <span>Abrir Carpeta</span>
                   </button>
-                ) : isEditableTextFile(contextMenu.target.name) ? (
+                ) : !KNOWN_BINARY_EXTENSIONS.some((ext) => contextMenu.target!.name.toLowerCase().endsWith(ext)) ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (contextMenu.target?.rawFile) {
-                        setEditorModal({
-                          isOpen: true,
-                          file: contextMenu.target.rawFile,
-                          logicalPath: contextMenu.target.logicalPath,
-                        })
+                    onClick={async () => {
+                      if (contextMenu.target) {
+                        await handleOpenFileOrInspect(contextMenu.target)
                       }
                       setContextMenu(null)
                     }}
                     style={contextMenuItemStyle(isDark)}
                   >
                     <IconFileText style={{ width: 14, height: 14 }} />
-                    <span>Editar Archivo</span>
+                    <span>{isEditableTextFile(contextMenu.target.name) ? "Editar Archivo" : "Editar Archivo (Texto)"}</span>
                   </button>
                 ) : null}
 
@@ -1327,6 +1361,7 @@ export default function GameFilesExplorer({
           fileId={editorModal.file?.id}
           logicalPath={editorModal.initialPath || editorModal.logicalPath || editorModal.file?.logicalPath || "nuevo_archivo.txt"}
           isNew={editorModal.isNew}
+          initialContent={editorModal.initialContent}
           onClose={() => setEditorModal(null)}
           onSaveSuccess={async () => {
             await onRefresh()

@@ -351,4 +351,334 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(onToast).toHaveBeenCalledWith("Elemento restaurado exitosamente.", "success")
     expect(onRefresh).toHaveBeenCalled()
   })
+
+  it("handles folder upload via webkitdirectory and strips common root directory", async () => {
+    const onToast = vi.fn()
+    const onRefresh = vi.fn()
+
+    const createUploadSpy = vi.spyOn(gameApi, "createGameFileUpload").mockResolvedValue({
+      uploadUrl: "/game/upload",
+      uploadToken: "tok-1",
+      maxSizeBytes: 1000000,
+      expectedCategory: "MOD",
+    })
+    const uploadBinarySpy = vi.spyOn(gameApi, "uploadGameBinary").mockResolvedValue({
+      tokenHash: "hash-tok",
+    })
+    const addFileSpy = vi.spyOn(gameApi, "addGameFile").mockResolvedValue({
+      id: "f-new",
+      name: "a.jar",
+      logicalPath: "mods/a.jar",
+      category: "MOD",
+      sha256: "h",
+      sizeBytes: 10,
+      policy: "NO_MODIFICABLE",
+      effectivePolicy: "NO_MODIFICABLE",
+      isInherited: true,
+      isDirectory: false,
+      createdAt: new Date().toISOString(),
+    })
+
+    const { container } = render(
+      <GameFilesExplorer
+        theme="dark"
+        files={[]}
+        isDraft={true}
+        onRefresh={onRefresh}
+        onToast={onToast}
+      />,
+    )
+
+    // Find the folder upload input (with webkitdirectory)
+    const inputs = container.querySelectorAll("input[type=\"file\"]")
+    const folderInput = Array.from(inputs).find((i) => i.hasAttribute("webkitdirectory")) as HTMLInputElement
+    expect(folderInput).toBeDefined()
+
+    const fileA = new File(["dummy jar"], "a.jar", { type: "application/java-archive" })
+    Object.defineProperty(fileA, "webkitRelativePath", { value: "MiActualizacion/mods/a.jar" })
+
+    const fileB = new File(["dummy toml"], "a.toml", { type: "text/plain" })
+    Object.defineProperty(fileB, "webkitRelativePath", { value: "MiActualizacion/config/a.toml" })
+
+    await act(async () => {
+      fireEvent.change(folderInput, {
+        target: {
+          files: [fileA, fileB],
+        },
+      })
+    })
+
+    // Assert that the common root 'MiActualizacion' was stripped!
+    expect(createUploadSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ logicalPath: "mods/a.jar", originalFilename: "a.jar" }),
+    )
+    expect(createUploadSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ logicalPath: "config/a.toml", originalFilename: "a.toml" }),
+    )
+    expect(addFileSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ logicalPath: "mods/a.jar", name: "a.jar" }),
+    )
+    expect(addFileSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ logicalPath: "config/a.toml", name: "a.toml" }),
+    )
+    expect(onToast).toHaveBeenCalledWith("2 archivo(s) subido(s) exitosamente.", "success")
+  })
+
+  it("handles recursive drag and drop of folders with FileSystemEntry and fallback", async () => {
+    const onToast = vi.fn()
+    const onRefresh = vi.fn()
+
+    vi.spyOn(gameApi, "createGameFileUpload").mockResolvedValue({
+      uploadUrl: "/game/upload",
+      uploadToken: "tok-2",
+      maxSizeBytes: 1000000,
+      expectedCategory: "MOD",
+    })
+    vi.spyOn(gameApi, "uploadGameBinary").mockResolvedValue({
+      tokenHash: "hash-tok",
+    })
+    const addFileSpy = vi.spyOn(gameApi, "addGameFile").mockResolvedValue({
+      id: "f-drag",
+      name: "a.jar",
+      logicalPath: "mods/a.jar",
+      category: "MOD",
+      sha256: "h",
+      sizeBytes: 10,
+      policy: "NO_MODIFICABLE",
+      effectivePolicy: "NO_MODIFICABLE",
+      isInherited: true,
+      isDirectory: false,
+      createdAt: new Date().toISOString(),
+    })
+
+    const { container } = render(
+      <GameFilesExplorer
+        theme="dark"
+        files={[]}
+        isDraft={true}
+        onRefresh={onRefresh}
+        onToast={onToast}
+      />,
+    )
+
+    const explorerDiv = container.firstChild as HTMLElement
+
+    // Mock FileSystemEntry hierarchy:
+    // Root folder 'Pack'
+    //   -> mods/a.jar
+    //   -> config/sub/a.toml
+    const fileA = new File(["jar content"], "a.jar")
+    const fileB = new File(["toml content"], "a.toml")
+
+    const fileEntryA = {
+      isFile: true,
+      isDirectory: false,
+      name: "a.jar",
+      file: (cb: (f: File) => void) => cb(fileA),
+    }
+
+    const fileEntryB = {
+      isFile: true,
+      isDirectory: false,
+      name: "a.toml",
+      file: (cb: (f: File) => void) => cb(fileB),
+    }
+
+    const subDirEntry = {
+      isFile: false,
+      isDirectory: true,
+      name: "sub",
+      createReader: () => {
+        let read = false
+        return {
+          readEntries: (cb: (entries: any[]) => void) => {
+            if (!read) {
+              read = true
+              cb([fileEntryB])
+            } else {
+              cb([])
+            }
+          },
+        }
+      },
+    }
+
+    const configDirEntry = {
+      isFile: false,
+      isDirectory: true,
+      name: "config",
+      createReader: () => {
+        let read = false
+        return {
+          readEntries: (cb: (entries: any[]) => void) => {
+            if (!read) {
+              read = true
+              cb([subDirEntry])
+            } else {
+              cb([])
+            }
+          },
+        }
+      },
+    }
+
+    const modsDirEntry = {
+      isFile: false,
+      isDirectory: true,
+      name: "mods",
+      createReader: () => {
+        let read = false
+        return {
+          readEntries: (cb: (entries: any[]) => void) => {
+            if (!read) {
+              read = true
+              cb([fileEntryA])
+            } else {
+              cb([])
+            }
+          },
+        }
+      },
+    }
+
+    const topFolderEntry = {
+      isFile: false,
+      isDirectory: true,
+      name: "Pack",
+      createReader: () => {
+        let read = false
+        return {
+          readEntries: (cb: (entries: any[]) => void) => {
+            if (!read) {
+              read = true
+              cb([modsDirEntry, configDirEntry])
+            } else {
+              cb([])
+            }
+          },
+        }
+      },
+    }
+
+    // Drop folder onto explorer
+    await act(async () => {
+      fireEvent.drop(explorerDiv, {
+        dataTransfer: {
+          items: [
+            {
+              webkitGetAsEntry: () => topFolderEntry,
+            },
+          ],
+          files: [],
+        },
+      })
+    })
+
+    // Top folder 'Pack' is stripped; mods/a.jar and config/sub/a.toml are added
+    await vi.waitFor(() => {
+      expect(addFileSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ logicalPath: "mods/a.jar" }),
+      )
+    })
+    await vi.waitFor(() => {
+      expect(addFileSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ logicalPath: "config/sub/a.toml" }),
+      )
+    })
+
+    // Test fallback when webkitGetAsEntry is not available
+    const fallbackFile = new File(["text"], "plain.txt")
+    await act(async () => {
+      fireEvent.drop(explorerDiv, {
+        dataTransfer: {
+          items: [],
+          files: [fallbackFile],
+        },
+      })
+    })
+
+    await vi.waitFor(() => {
+      expect(addFileSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ logicalPath: "plain.txt" }),
+      )
+    })
+  })
+
+  it("inspects unknown extension files via backend on double click and opens editor if UTF-8", async () => {
+    const onToast = vi.fn()
+    const onRefresh = vi.fn()
+
+    const mockFiles: import("../../types").AdminGameFile[] = [
+      {
+        id: "custom-file-1",
+        name: "custom_conf",
+        logicalPath: "custom_conf",
+        category: "GENERAL",
+        sha256: "hash123",
+        sizeBytes: 15,
+        policy: "MODIFICABLE",
+        explicitPolicy: null,
+        effectivePolicy: "MODIFICABLE",
+        isInherited: true,
+        isDirectory: false,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "bin-unknown-1",
+        name: "data.bin_raw",
+        logicalPath: "data.bin_raw",
+        category: "GENERAL",
+        sha256: "hashbin",
+        sizeBytes: 15,
+        policy: "MODIFICABLE",
+        explicitPolicy: null,
+        effectivePolicy: "MODIFICABLE",
+        isInherited: true,
+        isDirectory: false,
+        createdAt: new Date().toISOString(),
+      },
+    ]
+
+    const readSpy = vi.spyOn(gameApi, "readGameFileContent").mockImplementation(async (id: string) => {
+      if (id === "custom-file-1") {
+        return "custom=true\nsetting=1"
+      }
+      throw new Error("El archivo seleccionado contiene datos binarios no editables.")
+    })
+
+    render(
+      <GameFilesExplorer
+        theme="dark"
+        files={mockFiles}
+        isDraft={true}
+        onRefresh={onRefresh}
+        onToast={onToast}
+      />,
+    )
+
+    // 1. Double clicking custom_conf calls backend and opens modal with content
+    const textRow = screen.getByText("custom_conf")
+    await act(async () => {
+      fireEvent.doubleClick(textRow)
+    })
+
+    expect(readSpy).toHaveBeenCalledWith("custom-file-1")
+    expect(screen.getByText("Guardar")).toBeDefined()
+
+    // Close modal
+    const closeBtn = screen.getByTitle("Cerrar (Esc)")
+    await act(async () => {
+      fireEvent.click(closeBtn)
+    })
+
+    // 2. Double clicking data.bin_raw causes backend to reject -> toast error, no modal
+    const binRow = screen.getByText("data.bin_raw")
+    await act(async () => {
+      fireEvent.doubleClick(binRow)
+    })
+
+    expect(readSpy).toHaveBeenCalledWith("bin-unknown-1")
+    expect(onToast).toHaveBeenCalledWith("El archivo seleccionado contiene datos binarios no editables.", "error")
+    expect(screen.queryByText("Guardar")).toBeNull()
+  })
 })

@@ -86,11 +86,18 @@ export function createTestD1(): D1Database & { _sqlite: DatabaseSync } {
       } as unknown as D1PreparedStatement
     },
     async batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> {
-      const results: D1Result<T>[] = []
-      for (const stmt of statements) {
-        results.push(await stmt.all<T>())
+      sqlite.exec("BEGIN TRANSACTION;")
+      try {
+        const results: D1Result<T>[] = []
+        for (const stmt of statements) {
+          results.push(await stmt.all<T>())
+        }
+        sqlite.exec("COMMIT;")
+        return results
+      } catch (err) {
+        sqlite.exec("ROLLBACK;")
+        throw err
       }
-      return results
     },
     async exec(query: string): Promise<D1ExecResult> {
       sqlite.exec(query)
