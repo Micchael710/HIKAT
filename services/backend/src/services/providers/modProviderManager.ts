@@ -293,6 +293,21 @@ export class ModProviderManager {
       )
     }
 
+    // 1. Authoritatively validate supported content types in current draft environment
+    let supportedTypes: ContentTypeGql[] = []
+    if (typeof adapter.getSupportedContentTypes === "function") {
+      supportedTypes = await adapter
+        .getSupportedContentTypes(env, projectId, minecraftVersion)
+        .catch(() => [])
+    }
+
+    if (supportedTypes.length > 0 && !supportedTypes.includes(contentType)) {
+      throw createGraphQLError(
+        `El proyecto no es compatible con el tipo solicitado (${contentType}) en Minecraft ${minecraftVersion}. Tipos disponibles: ${supportedTypes.join(", ")}.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
     const [project, compatibleVersions] = await Promise.all([
       adapter.getProject(env, projectId, contentType),
       adapter.getCompatibleVersions(env, projectId, minecraftVersion, loader, contentType),
@@ -302,7 +317,7 @@ export class ModProviderManager {
       throw createGraphQLError("Proyecto no encontrado en el proveedor.", "NOT_FOUND")
     }
 
-    if (project.contentType && project.contentType !== contentType) {
+    if (supportedTypes.length === 0 && project.contentType && project.contentType !== contentType) {
       throw createGraphQLError(
         `El proyecto "${project.name}" es de tipo ${project.contentType}, no corresponde al tipo solicitado ${contentType}.`,
         "VALIDATION_ERROR",
@@ -413,19 +428,34 @@ export class ModProviderManager {
     const conflicts: string[] = []
     const visitedBranches = new Set<string>()
     const incompatibleRules: Array<{
+      provider: ModProviderGql
       sourceName: string
       targetProjectId: string
       targetVersionId?: string | null
       targetFileId?: number | string | null
     }> = []
 
-    // 2. Fetch root project and validate content type
+    // 2. Authoritatively validate supported content types for root project
+    let rootSupportedTypes: ContentTypeGql[] = []
+    if (typeof adapter.getSupportedContentTypes === "function") {
+      rootSupportedTypes = await adapter
+        .getSupportedContentTypes(env, input.projectId, minecraftVersion)
+        .catch(() => [])
+    }
+
+    if (rootSupportedTypes.length > 0 && !rootSupportedTypes.includes(contentType)) {
+      throw createGraphQLError(
+        `El proyecto no es compatible con el tipo solicitado (${contentType}) en Minecraft ${minecraftVersion}. Tipos disponibles: ${rootSupportedTypes.join(", ")}.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
     const rootProject = await adapter.getProject(env, input.projectId, contentType)
     if (!rootProject) {
       throw createGraphQLError("Proyecto no encontrado en el proveedor.", "NOT_FOUND")
     }
 
-    if (rootProject.contentType && rootProject.contentType !== contentType) {
+    if (rootSupportedTypes.length === 0 && rootProject.contentType && rootProject.contentType !== contentType) {
       throw createGraphQLError(
         `El proyecto "${rootProject.name}" es de tipo ${rootProject.contentType}, no corresponde al tipo solicitado ${contentType}.`,
         "VALIDATION_ERROR",
@@ -559,9 +589,20 @@ export class ModProviderManager {
 
         // A. Accumulate INCOMPATIBLE restrictions (evaluated at end of traversal)
         if (dep.dependencyType === "INCOMPATIBLE") {
+          let targetProjectId = dep.projectId || ""
+          const pinnedId = dep.versionId || dep.fileId || null
+          if (!targetProjectId && pinnedId) {
+            const depAdapter = this.getAdapter(current.provider)
+            const pinnedVer = await depAdapter.getVersion(env, pinnedId, null).catch(() => null)
+            if (pinnedVer?.projectId) {
+              targetProjectId = pinnedVer.projectId
+            }
+          }
+
           incompatibleRules.push({
+            provider: current.provider,
             sourceName: current.parentName,
-            targetProjectId: dep.projectId || "",
+            targetProjectId,
             targetVersionId: dep.versionId || null,
             targetFileId: dep.fileId || null,
           })
@@ -867,9 +908,11 @@ export class ModProviderManager {
     for (const rule of incompatibleRules) {
       if (!rule.targetProjectId) continue
 
-      // Check DRAFT files
+      // Check DRAFT files (scoped to the same provider)
       const draftMatch = draftFiles.find(
-        (f) => f.sourceProjectId === rule.targetProjectId || f.id === rule.targetProjectId,
+        (f) =>
+          f.sourceProvider === rule.provider &&
+          (f.sourceProjectId === rule.targetProjectId || f.id === rule.targetProjectId),
       )
       if (draftMatch) {
         if (rule.targetVersionId || rule.targetFileId) {
@@ -888,8 +931,10 @@ export class ModProviderManager {
         }
       }
 
-      // Check resolved plan items
-      const planMatches = Array.from(itemsMap.values()).filter((i) => i.projectId === rule.targetProjectId)
+      // Check resolved plan items (scoped to the same provider)
+      const planMatches = Array.from(itemsMap.values()).filter(
+        (i) => i.provider === rule.provider && i.projectId === rule.targetProjectId,
+      )
       for (const planMatch of planMatches) {
         if (rule.targetVersionId || rule.targetFileId) {
           const isSameVersion =

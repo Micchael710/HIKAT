@@ -20,8 +20,11 @@ function mapModrinthProjectTypeToContentType(
   allProjectTypes?: string[],
   categories?: string[],
   additionalCategories?: string[],
-  requestedContentType: ContentTypeGql = "MOD",
+  requestedContentType?: ContentTypeGql,
 ): ContentTypeGql {
+  if (requestedContentType) {
+    return requestedContentType
+  }
   const allTypes = new Set([
     ...(allProjectTypes || []).map((t) => t.toLowerCase()),
     (projectType || "").toLowerCase(),
@@ -31,33 +34,12 @@ function mapModrinthProjectTypeToContentType(
     ...(additionalCategories || []).map((c) => c.toLowerCase()),
   ])
 
-  // If the project explicitly supports the requested content type, return it
-  if (requestedContentType === "DATA_PACK" && (allTypes.has("datapack") || cats.has("datapack"))) {
-    return "DATA_PACK"
-  }
-  if (requestedContentType === "MOD" && (allTypes.has("mod") || projectType?.toLowerCase() === "mod")) {
-    return "MOD"
-  }
-  if (
-    requestedContentType === "RESOURCE_PACK" &&
-    (allTypes.has("resourcepack") || projectType?.toLowerCase() === "resourcepack")
-  ) {
-    return "RESOURCE_PACK"
-  }
-  if (
-    requestedContentType === "SHADER" &&
-    (allTypes.has("shader") || projectType?.toLowerCase() === "shader")
-  ) {
-    return "SHADER"
-  }
-
-  // Fallback inferred from primary project type
+  if (allTypes.has("datapack") || cats.has("datapack")) return "DATA_PACK"
   const pt = projectType?.toLowerCase()
-  if (pt === "mod") return "MOD"
   if (pt === "resourcepack") return "RESOURCE_PACK"
   if (pt === "shader") return "SHADER"
-  if (allTypes.has("datapack") || cats.has("datapack")) return "DATA_PACK"
-  return requestedContentType
+  if (pt === "mod") return "MOD"
+  return "MOD"
 }
 
 function mapModrinthEnvironment(clientSide?: string, serverSide?: string): ModEnvironmentGql {
@@ -351,16 +333,13 @@ export class ModrinthAdapter implements ModProviderAdapter {
 
         for (const v of versions) {
           const rawLoaders = (v.loaders || []).map((l: string) => l.toLowerCase())
-          if (rawLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
+          if (rawLoaders.some((l) => l === "neoforge")) {
             hasModVersion = true
           }
           if (rawLoaders.includes("datapack")) {
             hasDpVersion = true
           }
-          if (
-            rawLoaders.includes("minecraft") &&
-            (pt === "resourcepack" || allTypes.includes("resourcepack") || cats.includes("resourcepack"))
-          ) {
+          if (rawLoaders.includes("minecraft")) {
             hasRpVersion = true
           }
         }
@@ -432,7 +411,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
         if (contentType === "MOD") {
           return (
             v.contentType === "MOD" &&
-            v.loaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l.toLowerCase()))
+            v.loaders.some((l) => l.toLowerCase() === "neoforge")
           )
         }
         if (contentType === "DATA_PACK") {
