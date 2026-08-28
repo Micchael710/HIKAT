@@ -46,6 +46,10 @@ export const gameReleaseFiles = sqliteTable(
     policy: text("policy"),
     isDirectory: integer("is_directory").notNull().default(0),
     objectKey: text("object_key").notNull().default(""),
+    sourceProvider: text("source_provider"),
+    sourceProjectId: text("source_project_id"),
+    sourceVersionId: text("source_version_id"),
+    sourceFileId: text("source_file_id"),
     createdAt: text("created_at")
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
@@ -54,6 +58,10 @@ export const gameReleaseFiles = sqliteTable(
     index("game_release_files_release_id_idx").on(table.releaseId),
     index("game_release_files_category_idx").on(table.category),
     index("game_release_files_sha256_idx").on(table.sha256),
+    index("game_release_files_source_idx").on(
+      table.sourceProvider,
+      table.sourceProjectId,
+    ),
     uniqueIndex("game_release_files_release_path_idx").on(
       table.releaseId,
       table.logicalPath,

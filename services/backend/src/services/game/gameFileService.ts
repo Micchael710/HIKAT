@@ -366,6 +366,10 @@ export async function addGameFile(
         policy: explicitPolicy,
         isDirectory: 0,
         objectKey,
+        sourceProvider: null,
+        sourceProjectId: null,
+        sourceVersionId: null,
+        sourceFileId: null,
         createdAt: now,
       }
 
@@ -449,6 +453,12 @@ export async function updateGameFile(
     }
 
     const updates: Partial<schema.GameReleaseFile> = { ...tokenUpdates }
+    if (tokenUpdates.objectKey) {
+      updates.sourceProvider = null
+      updates.sourceProjectId = null
+      updates.sourceVersionId = null
+      updates.sourceFileId = null
+    }
     if (input.name !== undefined && input.name !== null) {
       const trimmed = String(input.name || "").trim()
       if (!trimmed) {
@@ -648,6 +658,10 @@ export async function saveGameFileContent(
         sizeBytes: utf8Bytes.byteLength,
         objectKey,
         isDirectory: 0,
+        sourceProvider: null,
+        sourceProjectId: null,
+        sourceVersionId: null,
+        sourceFileId: null,
       }
       if (input.explicitPolicy !== undefined) {
         updatePayload.policy = input.explicitPolicy
@@ -675,6 +689,10 @@ export async function saveGameFileContent(
         policy: input.explicitPolicy || null,
         isDirectory: 0,
         objectKey,
+        sourceProvider: null,
+        sourceProjectId: null,
+        sourceVersionId: null,
+        sourceFileId: null,
         createdAt: now,
       }
 
@@ -809,6 +827,10 @@ export async function createGameFolder(
     policy: null,
     isDirectory: 1,
     objectKey: "",
+    sourceProvider: null,
+    sourceProjectId: null,
+    sourceVersionId: null,
+    sourceFileId: null,
     createdAt: new Date().toISOString(),
   }
 
@@ -1169,6 +1191,10 @@ export async function copyGamePaths(
         policy: f.policy,
         isDirectory: f.isDirectory,
         objectKey: f.objectKey,
+        sourceProvider: f.sourceProvider || null,
+        sourceProjectId: f.sourceProjectId || null,
+        sourceVersionId: f.sourceVersionId || null,
+        sourceFileId: f.sourceFileId || null,
         createdAt: now,
       })
     }
@@ -1472,6 +1498,10 @@ export async function restoreGameFile(
     policy: originalFile.policy,
     isDirectory: originalFile.isDirectory,
     objectKey: originalFile.objectKey,
+    sourceProvider: originalFile.sourceProvider || null,
+    sourceProjectId: originalFile.sourceProjectId || null,
+    sourceVersionId: originalFile.sourceVersionId || null,
+    sourceFileId: originalFile.sourceFileId || null,
     createdAt: now,
   }
 
@@ -1502,6 +1532,10 @@ export async function restoreGameFile(
           policy: pf.policy,
           isDirectory: pf.isDirectory,
           objectKey: pf.objectKey,
+          sourceProvider: pf.sourceProvider || null,
+          sourceProjectId: pf.sourceProjectId || null,
+          sourceVersionId: pf.sourceVersionId || null,
+          sourceFileId: pf.sourceFileId || null,
           createdAt: now,
         })
         draftPathSet.add(pf.logicalPath)

@@ -1710,6 +1710,34 @@ export const gameApi = {
     const data = await executeGraphQL<{ publishGameRelease: import("../types").GameRelease }>(mutation, { input })
     return data.publishGameRelease
   },
+
+  async searchMods(
+    query: string,
+    provider?: import("../types").ModProvider | null,
+    limit?: number,
+    offset?: number,
+  ): Promise<import("../types").ModSearchPayload> {
+    return graphqlClient.searchMods(query, provider, limit, offset)
+  },
+
+  async getModProjectDetail(
+    provider: import("../types").ModProvider,
+    projectId: string,
+  ): Promise<import("../types").ModProjectDetail> {
+    return graphqlClient.getModProjectDetail(provider, projectId)
+  },
+
+  async resolveModInstallationPlan(
+    input: import("../types").ResolveModPlanInput,
+  ): Promise<import("../types").ModInstallationPlan> {
+    return graphqlClient.resolveModInstallationPlan(input)
+  },
+
+  async installModPlan(
+    input: import("../types").InstallModPlanInput,
+  ): Promise<import("../types").AdminGameFile[]> {
+    return graphqlClient.installModPlan(input)
+  },
 }
 
 
@@ -1768,6 +1796,207 @@ export const settingsApi = {
     return data.updateAdminSettings
   },
 }
+
+// --- Mod Providers API Facade (Shard 08B) ---
+
+export const modProvidersApi = {
+  async searchMods(
+    query: string,
+    provider?: import("../types").ModProvider | null,
+    limit?: number,
+    offset?: number,
+  ): Promise<import("../types").ModSearchPayload> {
+    const gqlQuery = /* GraphQL */ `
+      query SearchMods($query: String!, $provider: ModProvider, $limit: Int, $offset: Int) {
+        searchMods(query: $query, provider: $provider, limit: $limit, offset: $offset) {
+          items {
+            provider
+            projectId
+            slug
+            name
+            summary
+            description
+            author
+            iconUrl
+            downloads
+            follows
+            categories
+            latestVersion
+            publishedAt
+            updatedAt
+          }
+          totalCount
+          providersStatus {
+            provider
+            available
+            error
+          }
+          minecraftVersion
+          neoForgeVersion
+        }
+      }
+    `
+    const data = await executeGraphQL<{ searchMods: import("../types").ModSearchPayload }>(gqlQuery, {
+      query,
+      provider,
+      limit,
+      offset,
+    })
+    return data.searchMods
+  },
+
+  async getModProjectDetail(
+    provider: import("../types").ModProvider,
+    projectId: string,
+  ): Promise<import("../types").ModProjectDetail> {
+    const gqlQuery = /* GraphQL */ `
+      query GetModProjectDetail($provider: ModProvider!, $projectId: String!) {
+        getModProjectDetail(provider: $provider, projectId: $projectId) {
+          provider
+          projectId
+          slug
+          name
+          summary
+          description
+          author
+          iconUrl
+          downloads
+          compatibleVersions {
+            id
+            fileId
+            versionNumber
+            name
+            releaseType
+            gameVersions
+            loaders
+            publishedAt
+            downloads
+            filename
+            sizeBytes
+            sha256
+            dependencies {
+              projectId
+              versionId
+              fileId
+              dependencyType
+              projectName
+              fileName
+            }
+          }
+          installedVersion
+          isInstalled
+          minecraftVersion
+          neoForgeVersion
+        }
+      }
+    `
+    const data = await executeGraphQL<{ getModProjectDetail: import("../types").ModProjectDetail }>(gqlQuery, {
+      provider,
+      projectId,
+    })
+    return data.getModProjectDetail
+  },
+
+  async resolveModInstallationPlan(
+    input: import("../types").ResolveModPlanInput,
+  ): Promise<import("../types").ModInstallationPlan> {
+    const gqlQuery = /* GraphQL */ `
+      query ResolveModInstallationPlan($input: ResolveModPlanInput!) {
+        resolveModInstallationPlan(input: $input) {
+          items {
+            provider
+            projectId
+            projectName
+            versionId
+            fileId
+            versionNumber
+            filename
+            sizeBytes
+            sha256
+            isRoot
+            isDependency
+            isRequired
+            isInstalled
+            action
+            installedFileId
+            installedVersionNumber
+            availableCompatibleVersions {
+              id
+              fileId
+              versionNumber
+              name
+              releaseType
+              gameVersions
+              loaders
+              publishedAt
+              downloads
+              filename
+              sizeBytes
+            }
+          }
+          totalDownloadSizeBytes
+          conflicts
+          optionalDependencies {
+            provider
+            projectId
+            projectName
+            versionId
+            fileId
+            versionNumber
+            filename
+            sizeBytes
+            isInstalled
+          }
+          isValid
+        }
+      }
+    `
+    const data = await executeGraphQL<{ resolveModInstallationPlan: import("../types").ModInstallationPlan }>(gqlQuery, {
+      input,
+    })
+    return data.resolveModInstallationPlan
+  },
+
+  async installModPlan(
+    input: import("../types").InstallModPlanInput,
+  ): Promise<import("../types").AdminGameFile[]> {
+    const mutation = /* GraphQL */ `
+      mutation InstallModPlan($input: InstallModPlanInput!) {
+        installModPlan(input: $input) {
+          id
+          name
+          logicalPath
+          category
+          sha256
+          sizeBytes
+          policy
+          explicitPolicy
+          effectivePolicy
+          isInherited
+          isDirectory
+          changeStatus
+          sourceProvider
+          sourceProjectId
+          sourceVersionId
+          sourceFileId
+          createdAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ installModPlan: import("../types").AdminGameFile[] }>(mutation, { input })
+    return data.installModPlan
+  },
+}
+
+export const graphqlClient = {
+  ...newsApi,
+  ...serverApi,
+  ...skinsApi,
+  ...gameApi,
+  ...settingsApi,
+  ...modProvidersApi,
+}
+
 
 
 

@@ -29,6 +29,7 @@ import NewFolderModal from "./NewFolderModal"
 import RenameModal from "./RenameModal"
 import PolicyModal from "./PolicyModal"
 import ConfirmDeleteModal from "./ConfirmDeleteModal"
+import { ModSearchModal } from "./providers/ModSearchModal"
 
 interface GameFilesExplorerProps {
   theme: ThemeMode
@@ -137,6 +138,7 @@ export default function GameFilesExplorer({
   const [renameTarget, setRenameTarget] = useState<ExplorerItem | null>(null)
   const [policyTarget, setPolicyTarget] = useState<ExplorerItem | null>(null)
   const [deleteTargets, setDeleteTargets] = useState<string[] | null>(null)
+  const [isModSearchOpen, setIsModSearchOpen] = useState(false)
 
   // Uploading state
   const [isUploading, setIsUploading] = useState(false)
@@ -672,9 +674,26 @@ export default function GameFilesExplorer({
             <>
               <button
                 type="button"
+                data-testid="button-open-mod-providers"
+                onClick={() => setIsModSearchOpen(true)}
+                style={{
+                  ...actionButtonStyle(isDark, "primary"),
+                  background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                  color: "#ffffff",
+                  border: "none",
+                  fontWeight: "600",
+                }}
+                title="Buscar e instalar mods desde Modrinth y CurseForge"
+              >
+                <span style={{ fontSize: "14px" }}>🧩</span>
+                <span>Añadir Mods</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setIsNewFolderOpen(true)}
-                style={actionButtonStyle(isDark, "primary")}
-                title="Crear una nueva carpeta lógica"
+                style={actionButtonStyle(isDark, "default")}
+                title="Crear una nueva carpeta en el directorio actual"
               >
                 <IconFolder style={{ width: 16, height: 16 }} />
                 <span>Nueva Carpeta</span>
@@ -1427,6 +1446,16 @@ export default function GameFilesExplorer({
             await gameApi.deleteGamePaths(deleteTargets)
             onToast(`${deleteTargets.length} elemento(s) eliminado(s).`, "success")
             setSelectedPaths(new Set())
+            await onRefresh()
+          }}
+        />
+      )}
+
+      {isModSearchOpen && (
+        <ModSearchModal
+          onClose={() => setIsModSearchOpen(false)}
+          onSuccess={async () => {
+            onToast("Mods y dependencias instalados exitosamente en el borrador.", "success")
             await onRefresh()
           }}
         />

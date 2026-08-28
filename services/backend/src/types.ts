@@ -14,6 +14,9 @@ export interface Env {
   PTERODACTYL_BASE_URL?: string
   PTERODACTYL_API_KEY?: string
   PTERODACTYL_SERVER_ID?: string
+  CURSEFORGE_API_KEY?: string
+  CURSEFORGE_API_BASE_URL?: string
+  MODRINTH_API_BASE_URL?: string
 }
 
 

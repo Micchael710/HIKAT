@@ -69,6 +69,11 @@ export function formatAdminGameFile(
     effectivePolicy: effective,
     isInherited: !file.policy,
     isDirectory: Boolean(file.isDirectory),
+    changeStatus: null,
+    sourceProvider: file.sourceProvider ? (file.sourceProvider as any) : null,
+    sourceProjectId: file.sourceProjectId || null,
+    sourceVersionId: file.sourceVersionId || null,
+    sourceFileId: file.sourceFileId || null,
     createdAt: normalizeIsoDateTime(file.createdAt),
   }
 }
@@ -421,6 +426,10 @@ export async function prepareGameDraft(
         policy: bf.policy,
         isDirectory: bf.isDirectory ?? 0,
         objectKey: bf.objectKey, // Immutable reference to identical R2 object
+        sourceProvider: bf.sourceProvider || null,
+        sourceProjectId: bf.sourceProjectId || null,
+        sourceVersionId: bf.sourceVersionId || null,
+        sourceFileId: bf.sourceFileId || null,
         createdAt: now,
       }
       await db.insert(schema.gameReleaseFiles).values(newFile)

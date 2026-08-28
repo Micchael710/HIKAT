@@ -775,6 +775,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0011_server_tasks_action.sql",
       "0012_remove_skin_model_and_add_capes.sql",
       "0013_game_files_enhancements.sql",
+      "0014_mod_providers_metadata.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -2064,6 +2065,74 @@ describe("@hikat/database schema and D1 operations", () => {
     sqlite.exec(`DELETE FROM game_releases WHERE id = '${releaseId}';`)
     const orphanedFiles = sqlite.prepare("SELECT * FROM game_release_files WHERE release_id = ?").all(releaseId)
     expect(orphanedFiles.length).toBe(0)
+  })
+
+  it("performs real D1-safe upgrade from migration 0013 to 0014, adding mod provider metadata columns and index", () => {
+    const sqlite = new DatabaseSync(":memory:")
+    sqlite.exec("PRAGMA foreign_keys = ON;")
+
+    const migrationsDir = join(__dirname, "../migrations")
+    const sqlFiles = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort()
+
+    // 1. Run migrations up to 0013
+    for (const file of sqlFiles) {
+      if (file.startsWith("0014_")) break
+      const sqlContent = readFileSync(join(migrationsDir, file), "utf-8")
+      for (const statement of sqlContent.split("--> statement-breakpoint")) {
+        const trimmed = statement.trim()
+        if (trimmed) sqlite.exec(trimmed)
+      }
+    }
+
+    // 2. Insert test user, release, and file before 0014
+    const userId = "admin-test-0014"
+    const releaseId = "rel-test-0014"
+    const fileId = "file-test-0014"
+    const now = new Date().toISOString()
+
+    sqlite.exec(`
+      INSERT INTO users (id, display_name, role, created_at, updated_at) VALUES ('${userId}', 'Admin', 'ADMIN', '${now}', '${now}');
+      INSERT INTO game_releases (id, version, status, created_by, created_at, updated_at) VALUES ('${releaseId}', '1.0.0', 'DRAFT', '${userId}', '${now}', '${now}');
+      INSERT INTO game_release_files (id, release_id, name, logical_path, category, sha256, size_bytes, is_directory, object_key, created_at)
+      VALUES ('${fileId}', '${releaseId}', 'create.jar', 'mods/create.jar', 'MOD', 'sha256-create', 1024, 0, 'game-files/create', '${now}');
+    `)
+
+    // 3. Apply migration 0014
+    const file0014 = sqlFiles.find((f) => f.startsWith("0014_"))
+    expect(file0014).toBeDefined()
+    const sql0014 = readFileSync(join(migrationsDir, file0014!), "utf-8")
+    for (const statement of sql0014.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim()
+      if (trimmed) sqlite.exec(trimmed)
+    }
+
+    // 4. Verify existing record has NULL metadata
+    const fileBefore = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(fileId) as any
+    expect(fileBefore.source_provider).toBeNull()
+    expect(fileBefore.source_project_id).toBeNull()
+    expect(fileBefore.source_version_id).toBeNull()
+    expect(fileBefore.source_file_id).toBeNull()
+
+    // 5. Update with provider metadata and insert new provider-tracked file
+    sqlite.exec(`
+      UPDATE game_release_files
+      SET source_provider = 'MODRINTH', source_project_id = 'LNytGWDc', source_version_id = 'ver-123'
+      WHERE id = '${fileId}';
+    `)
+    const updated = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(fileId) as any
+    expect(updated.source_provider).toBe("MODRINTH")
+    expect(updated.source_project_id).toBe("LNytGWDc")
+    expect(updated.source_version_id).toBe("ver-123")
+
+    const fileId2 = "file-curseforge-2"
+    sqlite.exec(`
+      INSERT INTO game_release_files (id, release_id, name, logical_path, category, sha256, size_bytes, is_directory, object_key, source_provider, source_project_id, source_file_id, created_at)
+      VALUES ('${fileId2}', '${releaseId}', 'jei.jar', 'mods/jei.jar', 'MOD', 'sha256-jei', 2048, 0, 'game-files/jei', 'CURSEFORGE', '238222', '554433', '${now}');
+    `)
+    const file2 = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(fileId2) as any
+    expect(file2.source_provider).toBe("CURSEFORGE")
+    expect(file2.source_project_id).toBe("238222")
+    expect(file2.source_file_id).toBe("554433")
   })
 })
 

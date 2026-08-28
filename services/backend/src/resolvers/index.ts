@@ -71,6 +71,12 @@ import type {
   UpdateAdminPlayerCapeInputGql,
   ActiveCapeSelectionGql,
   SetActiveCapeInputGql,
+  ModProviderGql,
+  ModSearchPayloadGql,
+  ModProjectDetailGql,
+  ModInstallationPlanGql,
+  ResolveModPlanInputGql,
+  InstallModPlanInputGql,
 } from "@hikat/graphql"
 
 import {
@@ -206,6 +212,9 @@ import {
   getClientConfiguration,
   updateAdminSettings,
 } from "../services/settingsService"
+
+import { modProviderManager } from "../services/providers/modProviderManager"
+import { installModPlan } from "../services/providers/modInstallationService"
 
 import type { BackendGraphQLContext } from "../types"
 
@@ -678,6 +687,59 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return readGameFileContent(context.db, args.id, context.env)
+    },
+
+    searchMods: async (
+      _parent: unknown,
+      args: {
+        query: string
+        provider?: ModProviderGql | null
+        limit?: number | null
+        offset?: number | null
+      },
+      context: BackendGraphQLContext,
+    ): Promise<ModSearchPayloadGql> => {
+      requireAdmin(context)
+      return modProviderManager.searchMods(
+        context.env,
+        args.query,
+        args.provider,
+        args.limit || 20,
+        args.offset || 0,
+      )
+    },
+
+    getModProjectDetail: async (
+      _parent: unknown,
+      args: { provider: ModProviderGql; projectId: string },
+      context: BackendGraphQLContext,
+    ): Promise<ModProjectDetailGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return modProviderManager.getProjectDetail(
+        context.env,
+        context.db,
+        args.provider,
+        args.projectId,
+      )
+    },
+
+    resolveModInstallationPlan: async (
+      _parent: unknown,
+      args: { input: ResolveModPlanInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ModInstallationPlanGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return modProviderManager.resolveInstallationPlan(
+        context.env,
+        context.db,
+        args.input,
+      )
     },
 
 
@@ -1526,6 +1588,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return publishGameRelease(context.db, context.env, args.input, identity.userId)
+    },
+
+    installModPlan: async (
+      _parent: unknown,
+      args: { input: InstallModPlanInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql[]> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return installModPlan(context.db, context.env, args.input, identity.userId)
     },
 
     // --- Settings Administrative Mutations (Require ADMIN - Shard 06.5) ---

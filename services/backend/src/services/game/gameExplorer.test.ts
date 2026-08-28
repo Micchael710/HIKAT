@@ -1338,10 +1338,11 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
     expect(createdKeys.length).toBe(2)
 
     // Fetch the winning token record in D1
+    const allTokens = await db.select().from(schema.gameFileUploadTokens).all()
     const tokenRec = (await db
       .select()
       .from(schema.gameFileUploadTokens)
-      .where(eq(schema.gameFileUploadTokens.id, (await db.select().from(schema.gameFileUploadTokens).all())[0].id))
+      .where(eq(schema.gameFileUploadTokens.id, allTokens[0]!.id))
       .get())!
 
     const winnerKey = tokenRec.objectKey!

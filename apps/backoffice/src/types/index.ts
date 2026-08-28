@@ -271,7 +271,139 @@ export interface AdminGameFile {
   isInherited: boolean
   isDirectory: boolean
   changeStatus?: GameDraftChangeStatus | null
+  sourceProvider?: ModProvider | null
+  sourceProjectId?: string | null
+  sourceVersionId?: string | null
+  sourceFileId?: string | null
   createdAt: string
+}
+
+// --- Mod Provider Types (Shard 08B) ---
+
+export type ModProvider = "MODRINTH" | "CURSEFORGE"
+export type ModDependencyType = "REQUIRED" | "OPTIONAL" | "INCOMPATIBLE" | "EMBEDDED"
+export type ModReleaseType = "RELEASE" | "BETA" | "ALPHA"
+export type ModPlanAction = "INSTALL" | "UPDATE" | "ALREADY_INSTALLED" | "CONFLICT"
+
+export interface ModProviderStatus {
+  provider: ModProvider
+  available: boolean
+  error?: string | null
+}
+
+export interface ModSearchResultItem {
+  provider: ModProvider
+  projectId: string
+  slug?: string | null
+  name: string
+  summary: string
+  description?: string | null
+  author: string
+  iconUrl?: string | null
+  downloads: number
+  follows?: number | null
+  categories: string[]
+  latestVersion?: string | null
+  publishedAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface ModSearchPayload {
+  items: ModSearchResultItem[]
+  totalCount: number
+  providersStatus: ModProviderStatus[]
+  minecraftVersion: string
+  neoForgeVersion: string
+}
+
+export interface ModDependency {
+  projectId?: string | null
+  versionId?: string | null
+  fileId?: string | null
+  dependencyType: ModDependencyType
+  projectName?: string | null
+  fileName?: string | null
+}
+
+export interface ModProjectVersion {
+  id: string
+  fileId?: string | null
+  versionNumber: string
+  name: string
+  releaseType: ModReleaseType
+  gameVersions: string[]
+  loaders: string[]
+  publishedAt: string
+  downloads: number
+  filename: string
+  sizeBytes: number
+  sha256?: string | null
+  dependencies: ModDependency[]
+}
+
+export interface ModProjectDetail {
+  provider: ModProvider
+  projectId: string
+  slug?: string | null
+  name: string
+  summary: string
+  description?: string | null
+  author: string
+  iconUrl?: string | null
+  downloads: number
+  compatibleVersions: ModProjectVersion[]
+  installedVersion?: string | null
+  isInstalled: boolean
+  minecraftVersion: string
+  neoForgeVersion: string
+}
+
+export interface ModInstallationPlanItem {
+  provider: ModProvider
+  projectId: string
+  projectName: string
+  versionId: string
+  fileId?: string | null
+  versionNumber: string
+  filename: string
+  sizeBytes: number
+  sha256?: string | null
+  isRoot: boolean
+  isDependency: boolean
+  isRequired: boolean
+  isInstalled: boolean
+  action: ModPlanAction
+  installedFileId?: string | null
+  installedVersionNumber?: string | null
+  availableCompatibleVersions: ModProjectVersion[]
+}
+
+export interface ModInstallationPlan {
+  items: ModInstallationPlanItem[]
+  totalDownloadSizeBytes: number
+  conflicts: string[]
+  optionalDependencies: ModInstallationPlanItem[]
+  isValid: boolean
+}
+
+export interface ModVersionOverrideInput {
+  provider: ModProvider
+  projectId: string
+  versionId: string
+}
+
+export interface ResolveModPlanInput {
+  provider: ModProvider
+  projectId: string
+  versionId: string
+  manualOverrides?: ModVersionOverrideInput[] | null
+}
+
+export interface InstallModPlanInput {
+  provider: ModProvider
+  projectId: string
+  versionId: string
+  manualOverrides?: ModVersionOverrideInput[] | null
 }
 
 export interface GameRelease {

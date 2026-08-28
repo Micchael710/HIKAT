@@ -40,6 +40,43 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
+  External mod repository providers supported by HiKAT
+  """
+  enum ModProvider {
+    MODRINTH
+    CURSEFORGE
+  }
+
+  """
+  Relation type of declared mod dependencies
+  """
+  enum ModDependencyType {
+    REQUIRED
+    OPTIONAL
+    INCOMPATIBLE
+    EMBEDDED
+  }
+
+  """
+  Release channel/stability type
+  """
+  enum ModReleaseType {
+    RELEASE
+    BETA
+    ALPHA
+  }
+
+  """
+  Planned installation action for an individual mod or dependency in draft
+  """
+  enum ModPlanAction {
+    INSTALL
+    UPDATE
+    ALREADY_INSTALLED
+    CONFLICT
+  }
+
+  """
   Summary of file modifications between published version and active draft
   """
   type GameDraftChanges {
@@ -99,6 +136,10 @@ export const gameTypeDefs = /* GraphQL */ `
     isInherited: Boolean!
     isDirectory: Boolean!
     changeStatus: GameDraftChangeStatus
+    sourceProvider: ModProvider
+    sourceProjectId: String
+    sourceVersionId: String
+    sourceFileId: String
     createdAt: DateTime!
   }
 
@@ -140,6 +181,131 @@ export const gameTypeDefs = /* GraphQL */ `
     expectedCategory: GameFileCategory!
   }
 
+  """
+  Status of individual mod repository provider
+  """
+  type ModProviderStatus {
+    provider: ModProvider!
+    available: Boolean!
+    error: String
+  }
+
+  """
+  Single mod search result item normalized across providers
+  """
+  type ModSearchResultItem {
+    provider: ModProvider!
+    projectId: String!
+    slug: String
+    name: String!
+    summary: String!
+    description: String
+    author: String!
+    iconUrl: String
+    downloads: Int!
+    follows: Int
+    categories: [String!]!
+    latestVersion: String
+    publishedAt: String
+    updatedAt: String
+  }
+
+  """
+  Normalized payload returned from searching mod repositories
+  """
+  type ModSearchPayload {
+    items: [ModSearchResultItem!]!
+    totalCount: Int!
+    providersStatus: [ModProviderStatus!]!
+    minecraftVersion: String!
+    neoForgeVersion: String!
+  }
+
+  """
+  Declared dependency for a mod version
+  """
+  type ModDependency {
+    projectId: String
+    versionId: String
+    fileId: String
+    dependencyType: ModDependencyType!
+    projectName: String
+    fileName: String
+  }
+
+  """
+  Compatible version file for a mod project
+  """
+  type ModProjectVersion {
+    id: String!
+    fileId: String
+    versionNumber: String!
+    name: String!
+    releaseType: ModReleaseType!
+    gameVersions: [String!]!
+    loaders: [String!]!
+    publishedAt: String!
+    downloads: Int!
+    filename: String!
+    sizeBytes: Int!
+    sha256: String
+    dependencies: [ModDependency!]!
+  }
+
+  """
+  Detailed mod project information with compatible versions
+  """
+  type ModProjectDetail {
+    provider: ModProvider!
+    projectId: String!
+    slug: String
+    name: String!
+    summary: String!
+    description: String
+    author: String!
+    iconUrl: String
+    downloads: Int!
+    compatibleVersions: [ModProjectVersion!]!
+    installedVersion: String
+    isInstalled: Boolean!
+    minecraftVersion: String!
+    neoForgeVersion: String!
+  }
+
+  """
+  Single mod or dependency entry in the installation plan
+  """
+  type ModInstallationPlanItem {
+    provider: ModProvider!
+    projectId: String!
+    projectName: String!
+    versionId: String!
+    fileId: String
+    versionNumber: String!
+    filename: String!
+    sizeBytes: Int!
+    sha256: String
+    isRoot: Boolean!
+    isDependency: Boolean!
+    isRequired: Boolean!
+    isInstalled: Boolean!
+    action: ModPlanAction!
+    installedFileId: String
+    installedVersionNumber: String
+    availableCompatibleVersions: [ModProjectVersion!]!
+  }
+
+  """
+  Complete dependency installation plan calculated prior to download
+  """
+  type ModInstallationPlan {
+    items: [ModInstallationPlanItem!]!
+    totalDownloadSizeBytes: Int!
+    conflicts: [String!]!
+    optionalDependencies: [ModInstallationPlanItem!]!
+    isValid: Boolean!
+  }
+
   input CreateGameFileUploadInput {
     category: GameFileCategory
     originalFilename: String!
@@ -178,6 +344,26 @@ export const gameTypeDefs = /* GraphQL */ `
     notes: String
   }
 
+  input ModVersionOverrideInput {
+    provider: ModProvider!
+    projectId: String!
+    versionId: String!
+  }
+
+  input ResolveModPlanInput {
+    provider: ModProvider!
+    projectId: String!
+    versionId: String!
+    manualOverrides: [ModVersionOverrideInput!]
+  }
+
+  input InstallModPlanInput {
+    provider: ModProvider!
+    projectId: String!
+    versionId: String!
+    manualOverrides: [ModVersionOverrideInput!]
+  }
+
   extend type Query {
     """
     Authoritative active published modpack manifest for Launcher
@@ -206,6 +392,31 @@ export const gameTypeDefs = /* GraphQL */ `
     Read text content of a game file from active draft/release - requires ADMIN role
     """
     readGameFileContent(id: ID!): String!
+
+    """
+    Search mods across Modrinth and/or CurseForge filtered by Minecraft version & NeoForge - requires ADMIN role
+    """
+    searchMods(
+      query: String!
+      provider: ModProvider
+      limit: Int
+      offset: Int
+    ): ModSearchPayload!
+
+    """
+    Get detailed information and compatible versions of a mod project - requires ADMIN role
+    """
+    getModProjectDetail(
+      provider: ModProvider!
+      projectId: String!
+    ): ModProjectDetail!
+
+    """
+    Resolve and preview complete dependency plan before installing - requires ADMIN role
+    """
+    resolveModInstallationPlan(
+      input: ResolveModPlanInput!
+    ): ModInstallationPlan!
   }
 
   extend type Mutation {
@@ -283,6 +494,12 @@ export const gameTypeDefs = /* GraphQL */ `
     Atomically publish the active draft as the new official version - requires ADMIN role
     """
     publishGameRelease(input: PublishGameReleaseInput!): GameRelease!
+
+    """
+    Download, validate, and install a mod and its required dependencies into the active draft - requires ADMIN role
+    """
+    installModPlan(
+      input: InstallModPlanInput!
+    ): [AdminGameFile!]!
   }
 `
-

@@ -5,7 +5,7 @@ import { render, screen, act, cleanup, fireEvent, waitFor } from "@testing-libra
 import GameView from "./GameView"
 import GameFilesExplorer from "./GameFilesExplorer"
 import TextFileEditorModal from "./TextFileEditorModal"
-import { gameApi } from "../../services/graphqlClient"
+import { gameApi, graphqlClient } from "../../services/graphqlClient"
 
 describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
   beforeEach(() => {
@@ -681,4 +681,278 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(onToast).toHaveBeenCalledWith("El archivo seleccionado contiene datos binarios no editables.", "error")
     expect(screen.queryByText("Guardar")).toBeNull()
   })
+
+  describe("Shard 8B — Mod Providers UI Integration", () => {
+    it("renders 'Añadir Mods' button in draft toolbar and opens unified ModSearchModal", async () => {
+      const onRefresh = vi.fn().mockResolvedValue(undefined)
+      const onToast = vi.fn()
+
+      const searchSpy = vi.spyOn(graphqlClient, "searchMods").mockResolvedValue({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "create-id",
+            name: "Create",
+            summary: "Building Tools and Aesthetic Technology",
+            author: "simibubi",
+            downloads: 12000000,
+            categories: ["technology"],
+          },
+          {
+            provider: "CURSEFORGE",
+            projectId: "238222",
+            name: "Just Enough Items",
+            summary: "View Items and Recipes",
+            author: "mezz",
+            downloads: 250000000,
+            categories: ["utility"],
+          },
+        ],
+        totalCount: 2,
+        providersStatus: [
+          { provider: "MODRINTH", available: true, error: null },
+          { provider: "CURSEFORGE", available: true, error: null },
+        ],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+
+      render(
+        <GameFilesExplorer
+          theme="dark"
+          files={[]}
+          isDraft={true}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />,
+      )
+
+      // 1. Verify "Añadir Mods" button is present
+      const addModsBtn = screen.getByTestId("button-open-mod-providers")
+      expect(addModsBtn).toBeDefined()
+      expect(addModsBtn.textContent).toContain("Añadir Mods")
+
+      // 2. Click button to open modal
+      await act(async () => {
+        fireEvent.click(addModsBtn)
+      })
+
+      // 3. Verify modal opened with environment indicator and search input
+      expect(screen.getByTestId("mod-search-modal")).toBeDefined()
+      expect(screen.getByTestId("compatible-env-indicator").textContent).toContain("Minecraft 1.21.1")
+      expect(screen.getByTestId("compatible-env-indicator").textContent).toContain("NeoForge")
+
+      // 4. Verify provider tabs
+      expect(screen.getByTestId("tab-provider-all")).toBeDefined()
+      expect(screen.getByTestId("tab-provider-modrinth")).toBeDefined()
+      expect(screen.getByTestId("tab-provider-curseforge")).toBeDefined()
+
+      // 5. Verify cards rendered for both providers
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-card-modrinth-create-id")).toBeDefined()
+        expect(screen.getByTestId("mod-card-curseforge-238222")).toBeDefined()
+      })
+
+      expect(screen.getByTestId("badge-provider-modrinth").textContent).toBe("Modrinth")
+      expect(screen.getByTestId("badge-provider-curseforge").textContent).toBe("CurseForge")
+    })
+
+    it("opens ModDetailModal, displays compatible versions and dependency preview, and calls installModPlan", async () => {
+      const onRefresh = vi.fn().mockResolvedValue(undefined)
+      const onToast = vi.fn()
+
+      vi.spyOn(graphqlClient, "searchMods").mockResolvedValue({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "create-id",
+            name: "Create",
+            summary: "Building Tools and Aesthetic Technology",
+            author: "simibubi",
+            downloads: 12000000,
+            categories: ["technology"],
+          },
+        ],
+        totalCount: 1,
+        providersStatus: [{ provider: "MODRINTH", available: true }],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+
+      const getDetailSpy = vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "MODRINTH",
+        projectId: "create-id",
+        name: "Create",
+        summary: "Building Tools and Aesthetic Technology",
+        author: "simibubi",
+        downloads: 12000000,
+        isInstalled: false,
+        compatibleVersions: [
+          {
+            id: "ver-create-606",
+            versionNumber: "6.0.6",
+            name: "Create 6.0.6",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: "2024-08-20T00:00:00Z",
+            downloads: 1000,
+            filename: "create-1.21.1-6.0.6.jar",
+            sizeBytes: 15000000,
+            dependencies: [{ projectId: "flywheel-id", dependencyType: "REQUIRED" }],
+          },
+          {
+            id: "ver-create-605",
+            versionNumber: "6.0.5",
+            name: "Create 6.0.5",
+            releaseType: "BETA",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: "2024-08-15T00:00:00Z",
+            downloads: 800,
+            filename: "create-1.21.1-6.0.5.jar",
+            sizeBytes: 14000000,
+            dependencies: [],
+          },
+        ],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+
+      const resolvePlanSpy = vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "create-id",
+            projectName: "Create",
+            versionId: "ver-create-606",
+            versionNumber: "6.0.6",
+            filename: "create-1.21.1-6.0.6.jar",
+            sizeBytes: 15000000,
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            availableCompatibleVersions: [],
+          },
+          {
+            provider: "MODRINTH",
+            projectId: "flywheel-id",
+            projectName: "Flywheel",
+            versionId: "ver-flywheel-100",
+            versionNumber: "1.0.0",
+            filename: "flywheel-1.21.1-1.0.0.jar",
+            sizeBytes: 3000000,
+            isRoot: false,
+            isDependency: true,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            availableCompatibleVersions: [
+              {
+                id: "ver-flywheel-100",
+                versionNumber: "1.0.0",
+                name: "Flywheel 1.0.0",
+                releaseType: "RELEASE",
+                gameVersions: ["1.21.1"],
+                loaders: ["neoforge"],
+                publishedAt: "2024-08-10T00:00:00Z",
+                downloads: 500,
+                filename: "flywheel.jar",
+                sizeBytes: 3000000,
+                dependencies: [],
+              },
+            ],
+          },
+        ],
+        totalDownloadSizeBytes: 18000000,
+        conflicts: [],
+        optionalDependencies: [],
+        isValid: true,
+      })
+
+      const installSpy = vi.spyOn(graphqlClient, "installModPlan").mockResolvedValue([
+        {
+          id: "file-created-1",
+          name: "create-1.21.1-6.0.6.jar",
+          logicalPath: "mods/create-1.21.1-6.0.6.jar",
+          category: "MOD",
+          sha256: "sha256create",
+          sizeBytes: 15000000,
+          policy: "NO_MODIFICABLE",
+          effectivePolicy: "NO_MODIFICABLE",
+          isInherited: true,
+          isDirectory: false,
+          sourceProvider: "MODRINTH",
+          sourceProjectId: "create-id",
+          sourceVersionId: "ver-create-606",
+          createdAt: new Date().toISOString(),
+        },
+      ])
+
+      render(
+        <GameFilesExplorer
+          theme="dark"
+          files={[]}
+          isDraft={true}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />,
+      )
+
+      // 1. Open search modal
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("button-open-mod-providers"))
+      })
+
+      // 2. Click Create mod card
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-card-modrinth-create-id")).toBeDefined()
+      })
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("mod-card-modrinth-create-id"))
+      })
+
+      // 3. Verify detail modal opened
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
+      })
+
+      expect(getDetailSpy).toHaveBeenCalledWith("MODRINTH", "create-id")
+      expect(resolvePlanSpy).toHaveBeenCalled()
+
+      // 4. Verify version selector preselected with latest release
+      const versionSelect = screen.getByTestId("select-mod-version") as HTMLSelectElement
+      expect(versionSelect.value).toBe("ver-create-606")
+
+      // 5. Verify dependency listed
+      await waitFor(() => {
+        expect(screen.getByTestId("dependency-item-flywheel-id")).toBeDefined()
+        expect(screen.getByText("Flywheel")).toBeDefined()
+      })
+
+      // 6. Click Install Button
+      const installBtn = screen.getByTestId("button-confirm-install-mod")
+      expect(installBtn.textContent).toContain("Añadir 2 mods")
+
+      await act(async () => {
+        fireEvent.click(installBtn)
+      })
+
+      expect(installSpy).toHaveBeenCalledWith({
+        provider: "MODRINTH",
+        projectId: "create-id",
+        versionId: "ver-create-606",
+        manualOverrides: null,
+      })
+
+      await waitFor(() => {
+        expect(onToast).toHaveBeenCalledWith("Mods y dependencias instalados exitosamente en el borrador.", "success")
+        expect(onRefresh).toHaveBeenCalled()
+      })
+    })
+  })
 })
+
