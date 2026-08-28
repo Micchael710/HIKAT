@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm"
+import { eq, and, sql } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   validateGameFileBuffer,
@@ -122,9 +122,10 @@ export async function handleGameFileUpload(
     },
   })
 
-  // 8. Atomically mark upload token as used and record immutable storage metadata
+  // 8. Atomically mark upload token as used ONLY IF it is currently unused (usedAt IS NULL)
+  let updatedRecord: typeof schema.gameFileUploadTokens.$inferSelect | undefined
   try {
-    await db
+    updatedRecord = await db
       .update(schema.gameFileUploadTokens)
       .set({
         usedAt: new Date().toISOString(),
@@ -132,11 +133,30 @@ export async function handleGameFileUpload(
         objectKey,
         uploadedSizeBytes: arrayBuffer.byteLength,
       })
-      .where(eq(schema.gameFileUploadTokens.id, tokenRecord.id))
+      .where(
+        and(
+          eq(schema.gameFileUploadTokens.id, tokenRecord.id),
+          sql`${schema.gameFileUploadTokens.usedAt} IS NULL`,
+        ),
+      )
+      .returning()
+      .get()
   } catch (dbErr) {
     // Compensate: delete new R2 object if D1 token update fails
-    await env.ASSETS.delete(objectKey).catch(() => {})
+    await env.ASSETS.delete(objectKey)
     throw dbErr
+  }
+
+  if (!updatedRecord) {
+    // Another concurrent PUT claimed this upload token first.
+    // Compensate by deleting OUR new R2 object and returning conflict error.
+    await env.ASSETS.delete(objectKey)
+    return jsonResponse(
+      { error: "El token de subida ya fue utilizado por otra solicitud concurrente." },
+      409,
+      request,
+      env,
+    )
   }
 
 

@@ -30,6 +30,8 @@ import {
   resolveReleaseEffectivePolicies,
 } from "./releaseService"
 
+type BatchArray = [any, ...any[]]
+
 /**
  * Safely deletes an R2 object if and only if NO record in game_release_files references it.
  * This guarantees published and shared objects are never accidentally removed,
@@ -183,7 +185,6 @@ export async function addGameFile(
   },
 ): Promise<AdminGameFileGql> {
   let objectKeyToCompensate: string | undefined
-  let tokenHashToInvalidate: string | undefined
 
   try {
     let sha256: string
@@ -192,7 +193,7 @@ export async function addGameFile(
     let originalFilename: string
     let category: GameFileCategory = (input.category as GameFileCategory) || "GENERAL"
 
-    // 1. Early token / metadata lookup
+    // 1. Single-use atomic token claim
     if (uploadedMetadata) {
       sha256 = uploadedMetadata.sha256
       sizeBytes = uploadedMetadata.sizeBytes
@@ -204,28 +205,35 @@ export async function addGameFile(
         throw createGraphQLError("Token de subida requerido.", "VALIDATION_ERROR")
       }
 
-      const tokenRecord = await db
-        .select()
-        .from(schema.gameFileUploadTokens)
-        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+      // Atomically claim and delete token. Only ONE concurrent request can successfully claim it.
+      const claimedToken = await db
+        .delete(schema.gameFileUploadTokens)
+        .where(
+          and(
+            eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash),
+            sql`${schema.gameFileUploadTokens.usedAt} IS NOT NULL`,
+            sql`${schema.gameFileUploadTokens.objectKey} IS NOT NULL`,
+            sql`${schema.gameFileUploadTokens.sha256} IS NOT NULL`,
+          ),
+        )
+        .returning()
         .get()
 
-      if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
+      if (!claimedToken || !claimedToken.objectKey || !claimedToken.sha256) {
         throw createGraphQLError(
-          "El archivo aún no se ha subido o el token es inválido.",
+          "El archivo aún no se ha subido, el token es inválido o ya fue utilizado por otra operación.",
           "VALIDATION_ERROR",
         )
       }
 
-      sha256 = tokenRecord.sha256
-      sizeBytes = tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes
-      objectKey = tokenRecord.objectKey
-      originalFilename = tokenRecord.originalFilename
+      sha256 = claimedToken.sha256
+      sizeBytes = claimedToken.uploadedSizeBytes || claimedToken.expectedSizeBytes
+      objectKey = claimedToken.objectKey
+      originalFilename = claimedToken.originalFilename
       objectKeyToCompensate = objectKey
-      tokenHashToInvalidate = input.tokenHash
 
-      if (!input.category && tokenRecord.category) {
-        category = tokenRecord.category as GameFileCategory
+      if (!input.category && claimedToken.category) {
+        category = claimedToken.category as GameFileCategory
       }
     }
 
@@ -357,24 +365,10 @@ export async function addGameFile(
       record = newFile
     }
 
-    // Permanently consume token on successful attach
-    if (input.tokenHash) {
-      await db
-        .delete(schema.gameFileUploadTokens)
-        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
-        .catch(() => {})
-    }
-
     return formatAdminFileWithTree(db, draft.id, record)
   } catch (err) {
     if (env && objectKeyToCompensate) {
       await deleteR2ObjectIfUnreferenced(env, db, objectKeyToCompensate)
-    }
-    if (tokenHashToInvalidate) {
-      await db
-        .delete(schema.gameFileUploadTokens)
-        .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHashToInvalidate))
-        .catch(() => {})
     }
     throw err
   }
@@ -387,29 +381,37 @@ export async function updateGameFile(
   env?: Env,
 ): Promise<AdminGameFileGql> {
   let objectKeyToCompensate: string | undefined
-  let tokenHashToInvalidate: string | undefined
 
   try {
     let tokenUpdates: Partial<schema.GameReleaseFile> = {}
 
-    // Early token lookup
+    // 1. Single-use atomic token claim
     if (input.tokenHash) {
-      const tokenRecord = await db
-        .select()
-        .from(schema.gameFileUploadTokens)
-        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+      const claimedToken = await db
+        .delete(schema.gameFileUploadTokens)
+        .where(
+          and(
+            eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash),
+            sql`${schema.gameFileUploadTokens.usedAt} IS NOT NULL`,
+            sql`${schema.gameFileUploadTokens.objectKey} IS NOT NULL`,
+            sql`${schema.gameFileUploadTokens.sha256} IS NOT NULL`,
+          ),
+        )
+        .returning()
         .get()
 
-      if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
-        throw createGraphQLError("Token de subida inválido o no completado.", "VALIDATION_ERROR")
+      if (!claimedToken || !claimedToken.objectKey || !claimedToken.sha256) {
+        throw createGraphQLError(
+          "Token de subida inválido, no completado o ya utilizado por otra operación.",
+          "VALIDATION_ERROR",
+        )
       }
 
-      objectKeyToCompensate = tokenRecord.objectKey
-      tokenHashToInvalidate = input.tokenHash
+      objectKeyToCompensate = claimedToken.objectKey
       tokenUpdates = {
-        sha256: tokenRecord.sha256,
-        sizeBytes: tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes,
-        objectKey: tokenRecord.objectKey,
+        sha256: claimedToken.sha256,
+        sizeBytes: claimedToken.uploadedSizeBytes || claimedToken.expectedSizeBytes,
+        objectKey: claimedToken.objectKey,
       }
     }
 
@@ -487,14 +489,6 @@ export async function updateGameFile(
       await deleteR2ObjectIfUnreferenced(env, db, oldObjectKey)
     }
 
-    // Permanently consume token on successful attach
-    if (input.tokenHash) {
-      await db
-        .delete(schema.gameFileUploadTokens)
-        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
-        .catch(() => {})
-    }
-
     const updated = (await db
       .select()
       .from(schema.gameReleaseFiles)
@@ -505,12 +499,6 @@ export async function updateGameFile(
   } catch (err) {
     if (env && objectKeyToCompensate) {
       await deleteR2ObjectIfUnreferenced(env, db, objectKeyToCompensate)
-    }
-    if (tokenHashToInvalidate) {
-      await db
-        .delete(schema.gameFileUploadTokens)
-        .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHashToInvalidate))
-        .catch(() => {})
     }
     throw err
   }
@@ -688,7 +676,7 @@ export async function saveGameFileContent(
   } catch (err) {
     // If D1 fails after R2 write, compensate by removing the new R2 object
     if (env.ASSETS) {
-      await env.ASSETS.delete(objectKey).catch(() => {})
+      await env.ASSETS.delete(objectKey)
     }
     throw err
   }
@@ -931,7 +919,7 @@ export async function renameGamePath(
   )
 
   if (statements.length > 0) {
-    await (db as any).batch(statements)
+    await db.batch(statements as unknown as BatchArray)
   }
 
   return true
@@ -1069,7 +1057,7 @@ export async function moveGamePaths(
   )
 
   if (statements.length > 0) {
-    await (db as any).batch(statements)
+    await db.batch(statements as unknown as BatchArray)
   }
 
   return true
@@ -1216,7 +1204,7 @@ export async function copyGamePaths(
   )
 
   if (statements.length > 0) {
-    await (db as any).batch(statements)
+    await db.batch(statements as unknown as BatchArray)
   }
 
   return true

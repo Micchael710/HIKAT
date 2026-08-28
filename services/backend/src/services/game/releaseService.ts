@@ -543,37 +543,15 @@ export async function publishGameRelease(
 
   // 5. ATOMIC PUBLICATION:
   // Execute both queries atomically in a single D1 batch
-  if (typeof (db as any).batch === "function") {
-    await (db as any).batch([
-      db
-        .update(schema.gameReleases)
-        .set({
-          status: "ARCHIVED",
-          updatedAt: now,
-        })
-        .where(eq(schema.gameReleases.status, "PUBLISHED")),
-      db
-        .update(schema.gameReleases)
-        .set({
-          version,
-          status: "PUBLISHED",
-          notes: input.notes?.trim() || null,
-          publishedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(schema.gameReleases.id, draft.id)),
-    ])
-  } else {
-    // Fallback for test environments without batch support
-    await db
+  await db.batch([
+    db
       .update(schema.gameReleases)
       .set({
         status: "ARCHIVED",
         updatedAt: now,
       })
-      .where(eq(schema.gameReleases.status, "PUBLISHED"))
-
-    await db
+      .where(eq(schema.gameReleases.status, "PUBLISHED")),
+    db
       .update(schema.gameReleases)
       .set({
         version,
@@ -582,8 +560,8 @@ export async function publishGameRelease(
         publishedAt: now,
         updatedAt: now,
       })
-      .where(eq(schema.gameReleases.id, draft.id))
-  }
+      .where(eq(schema.gameReleases.id, draft.id)),
+  ])
 
 
   const published = await db

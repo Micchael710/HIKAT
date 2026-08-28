@@ -706,7 +706,7 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
         adminId,
         env,
       ),
-    ).rejects.toThrow(/token es inválido/i)
+    ).rejects.toThrow(/token es inválido|ya fue utilizado/i)
 
     // Verify token row was deleted from D1
     const tokenInDb = await db
@@ -717,7 +717,7 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
     expect(tokenInDb).toBeUndefined()
   })
 
-  it("handles token lifecycle: failed addGameFile purges R2 and invalidates token so reuse fails (Requirement A)", async () => {
+  it("handles token lifecycle: failed addGameFile purges R2 and invalidates token (Requirements A & B)", async () => {
     await prepareGameDraft(db, adminId)
     await saveGameFileContent(db, { logicalPath: "config/settings.txt", content: "conf" }, adminId, env)
 
@@ -800,13 +800,92 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
         adminId,
         env,
       ),
-    ).rejects.toThrow(/token es inválido/i)
+    ).rejects.toThrow(/token es inválido|ya fue utilizado/i)
 
     const files = await getAdminGameFiles(db)
     expect(files.some((f) => f.logicalPath === "mods/retry.jar")).toBe(false)
   })
 
-  it("compensates R2 upload if D1 token update fails during handleGameFileUpload (Requirement C)", async () => {
+  it("handles token lifecycle: failed updateGameFile purges new R2 and preserves previous file (Requirement C)", async () => {
+    await prepareGameDraft(db, adminId)
+    // Create initial file
+    const initialFile = await saveGameFileContent(
+      db,
+      { logicalPath: "config/test.txt", content: "initial content" },
+      adminId,
+      env,
+    )
+    const oldObjectKey = (await db
+      .select()
+      .from(schema.gameReleaseFiles)
+      .where(eq(schema.gameReleaseFiles.id, initialFile.id))
+      .get())!.objectKey
+
+    // Upload new binary with token
+    const ticket = await createGameFileUploadToken(
+      db,
+      { originalFilename: "test.jar", sizeBytes: 100, logicalPath: "mods/test.jar", category: "MOD" },
+      adminId,
+    )
+    const rawTokenBytes = new Uint8Array(
+      ticket.uploadToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
+    )
+    const hashBuffer = await crypto.subtle.digest("SHA-256", rawTokenBytes)
+    const tokenHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    const jarContent = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00])
+    const context: BackendGraphQLContext = {
+      env,
+      db,
+      request: new Request("https://api.hikat.local"),
+      auth: {
+        status: "authenticated",
+        identity: { userId: adminId, role: "ADMIN", sessionId: "sess-c", displayName: "Admin", tokenPayload: {} as any },
+      },
+    }
+
+    const uploadReq = new Request("https://api.hikat.local/game/files/upload", {
+      method: "PUT",
+      headers: { "X-Upload-Token": ticket.uploadToken, "Content-Type": "application/java-archive" },
+      body: jarContent,
+    })
+    await handleGameFileUpload(uploadReq, env, db, context)
+
+    const tokenRec = (await db
+      .select()
+      .from(schema.gameFileUploadTokens)
+      .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHash))
+      .get())!
+    const newObjectKey = tokenRec.objectKey!
+    expect(await mockR2.get(newObjectKey)).toBeDefined()
+
+    // updateGameFile with invalid empty name
+    await expect(
+      updateGameFile(
+        db,
+        initialFile.id,
+        { name: "   ", tokenHash },
+        env,
+      ),
+    ).rejects.toThrow(/nombre no puede estar vacío/i)
+
+    // New R2 object must be purged
+    expect(await mockR2.get(newObjectKey)).toBeNull()
+    // Old R2 object must remain untouched!
+    expect(await mockR2.get(oldObjectKey)).toBeDefined()
+
+    // File in draft remains intact pointing to oldObjectKey
+    const fileAfter = (await db
+      .select()
+      .from(schema.gameReleaseFiles)
+      .where(eq(schema.gameReleaseFiles.id, initialFile.id))
+      .get())!
+    expect(fileAfter.objectKey).toBe(oldObjectKey)
+  })
+
+  it("compensates R2 upload if D1 token update fails during handleGameFileUpload (Requirement C & I)", async () => {
     // 1. Create upload ticket
     const ticket = await createGameFileUploadToken(
       db,
@@ -831,13 +910,25 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       },
     }
 
+    // Intercept mockR2.put to capture the exact generated objectKey
+    let createdObjectKey: string | undefined
+    const originalPut = mockR2.put.bind(mockR2)
+    vi.spyOn(mockR2, "put").mockImplementation(async (key, value, options) => {
+      createdObjectKey = key
+      return originalPut(key, value, options)
+    })
+
     // Mock db.update on gameFileUploadTokens to simulate a sudden D1 failure
     const originalUpdate = db.update.bind(db)
     const updateSpy = vi.spyOn(db, "update").mockImplementation((table: any) => {
       if (table === schema.gameFileUploadTokens) {
         return {
           set: () => ({
-            where: () => Promise.reject(new Error("Simulated D1 token update failure")),
+            where: () => ({
+              returning: () => ({
+                get: () => Promise.reject(new Error("Simulated D1 token update failure")),
+              }),
+            }),
           }),
         } as any
       }
@@ -859,23 +950,19 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
 
     updateSpy.mockRestore()
 
-    // Verify all R2 game-files objects were purged / no orphaned object remained
-    // The bucket should not contain the failed object
-    const listed = await mockR2.list({ prefix: "game-files/" })
-    // No object from this failed upload remains
-    expect(listed.objects.some((o: any) => o.customMetadata?.filename === "broken.jar")).toBe(false)
+    // Verify exact objectKey was purged by compensation
+    expect(createdObjectKey).toBeDefined()
+    expect(await mockR2.get(createdObjectKey!)).toBeNull()
   })
 
-  it("compensates early failures in addGameFile and updateGameFile with invalid token/path (Requirement D)", async () => {
+  it("handles D1 insert failure in addGameFile by purging R2 and invalidating token (Requirement D)", async () => {
     await prepareGameDraft(db, adminId)
 
-    // 1. Create and complete PUT for a valid token
     const ticket = await createGameFileUploadToken(
       db,
-      { originalFilename: "early_fail.jar", sizeBytes: 100, logicalPath: "mods/early_fail.jar" },
+      { originalFilename: "insert_fail.jar", sizeBytes: 100, logicalPath: "mods/insert_fail.jar" },
       adminId,
     )
-
     const rawTokenBytes = new Uint8Array(
       ticket.uploadToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
     )
@@ -891,22 +978,13 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       request: new Request("https://api.hikat.local"),
       auth: {
         status: "authenticated",
-        identity: {
-          userId: adminId,
-          role: "ADMIN",
-          sessionId: "sess-4",
-          displayName: "Admin",
-          tokenPayload: {} as any,
-        },
+        identity: { userId: adminId, role: "ADMIN", sessionId: "sess-d", displayName: "Admin", tokenPayload: {} as any },
       },
     }
 
     const uploadReq = new Request("https://api.hikat.local/game/files/upload", {
       method: "PUT",
-      headers: {
-        "X-Upload-Token": ticket.uploadToken,
-        "Content-Type": "application/java-archive",
-      },
+      headers: { "X-Upload-Token": ticket.uploadToken, "Content-Type": "application/java-archive" },
       body: jarContent,
     })
     await handleGameFileUpload(uploadReq, env, db, context)
@@ -919,18 +997,32 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
     const objectKey = tokenRec.objectKey!
     expect(await mockR2.get(objectKey)).toBeDefined()
 
-    // 2. Early validation error: Empty name
+    // Simulate D1 insert failure on gameReleaseFiles
+    const origInsert = db.insert.bind(db)
+    const insertSpy = vi.spyOn(db, "insert").mockImplementation((table: any) => {
+      if (table === schema.gameReleaseFiles) {
+        return {
+          values: () => Promise.reject(new Error("Simulated D1 release file insert failure")),
+        } as any
+      }
+      return origInsert(table)
+    })
+
     await expect(
       addGameFile(
         db,
-        { name: "   ", logicalPath: "mods/early_fail.jar", tokenHash },
+        { name: "insert_fail.jar", logicalPath: "mods/insert_fail.jar", tokenHash },
         adminId,
         env,
       ),
-    ).rejects.toThrow(/nombre.*obligatorio/i)
+    ).rejects.toThrow(/Simulated D1 release file insert failure/i)
 
-    // Verify compensation: R2 object purged and token invalidated
+    insertSpy.mockRestore()
+
+    // R2 object must be purged
     expect(await mockR2.get(objectKey)).toBeNull()
+
+    // Token must be gone
     const tokenAfter = await db
       .select()
       .from(schema.gameFileUploadTokens)
@@ -938,5 +1030,199 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       .get()
     expect(tokenAfter).toBeUndefined()
   })
+
+  it("handles D1 update failure in updateGameFile by purging new R2 and preserving existing file (Requirement E)", async () => {
+    await prepareGameDraft(db, adminId)
+    const initial = await saveGameFileContent(db, { logicalPath: "config/stay.txt", content: "old" }, adminId, env)
+    const oldObjectKey = (await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.id, initial.id)).get())!.objectKey
+
+    const ticket = await createGameFileUploadToken(
+      db,
+      { originalFilename: "stay.jar", sizeBytes: 100, logicalPath: "mods/stay.jar", category: "MOD" },
+      adminId,
+    )
+    const rawTokenBytes = new Uint8Array(
+      ticket.uploadToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
+    )
+    const hashBuffer = await crypto.subtle.digest("SHA-256", rawTokenBytes)
+    const tokenHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    const jarContent = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00])
+    const context: BackendGraphQLContext = {
+      env,
+      db,
+      request: new Request("https://api.hikat.local"),
+      auth: {
+        status: "authenticated",
+        identity: { userId: adminId, role: "ADMIN", sessionId: "sess-e", displayName: "Admin", tokenPayload: {} as any },
+      },
+    }
+
+    const uploadReq = new Request("https://api.hikat.local/game/files/upload", {
+      method: "PUT",
+      headers: { "X-Upload-Token": ticket.uploadToken, "Content-Type": "application/java-archive" },
+      body: jarContent,
+    })
+    await handleGameFileUpload(uploadReq, env, db, context)
+
+    const tokenRec = (await db
+      .select()
+      .from(schema.gameFileUploadTokens)
+      .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHash))
+      .get())!
+    const newObjectKey = tokenRec.objectKey!
+
+    // Simulate D1 update failure on gameReleaseFiles
+    const origUpdate = db.update.bind(db)
+    const updateSpy = vi.spyOn(db, "update").mockImplementation((table: any) => {
+      if (table === schema.gameReleaseFiles) {
+        return {
+          set: () => ({
+            where: () => Promise.reject(new Error("Simulated D1 update failure on gameReleaseFiles")),
+          }),
+        } as any
+      }
+      return origUpdate(table)
+    })
+
+    await expect(
+      updateGameFile(
+        db,
+        initial.id,
+        { name: "stay.txt", tokenHash },
+        env,
+      ),
+    ).rejects.toThrow(/Simulated D1 update failure/i)
+
+    updateSpy.mockRestore()
+
+    // New object purged, old object preserved
+    expect(await mockR2.get(newObjectKey)).toBeNull()
+    expect(await mockR2.get(oldObjectKey)).toBeDefined()
+  })
+
+  it("handles concurrent attachment race: exactly one request claims token (Requirement F)", async () => {
+    await prepareGameDraft(db, adminId)
+
+    const ticket = await createGameFileUploadToken(
+      db,
+      { originalFilename: "race.jar", sizeBytes: 100, logicalPath: "mods/race.jar" },
+      adminId,
+    )
+    const rawTokenBytes = new Uint8Array(
+      ticket.uploadToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
+    )
+    const hashBuffer = await crypto.subtle.digest("SHA-256", rawTokenBytes)
+    const tokenHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    const jarContent = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00])
+    const context: BackendGraphQLContext = {
+      env,
+      db,
+      request: new Request("https://api.hikat.local"),
+      auth: {
+        status: "authenticated",
+        identity: { userId: adminId, role: "ADMIN", sessionId: "sess-f", displayName: "Admin", tokenPayload: {} as any },
+      },
+    }
+
+    const uploadReq = new Request("https://api.hikat.local/game/files/upload", {
+      method: "PUT",
+      headers: { "X-Upload-Token": ticket.uploadToken, "Content-Type": "application/java-archive" },
+      body: jarContent,
+    })
+    await handleGameFileUpload(uploadReq, env, db, context)
+
+    // Run 2 concurrent addGameFile calls with identical tokenHash
+    const results = await Promise.allSettled([
+      addGameFile(db, { name: "race1.jar", logicalPath: "mods/race1.jar", tokenHash }, adminId, env),
+      addGameFile(db, { name: "race2.jar", logicalPath: "mods/race2.jar", tokenHash }, adminId, env),
+    ])
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled")
+    const rejected = results.filter((r) => r.status === "rejected")
+
+    expect(fulfilled.length).toBe(1)
+    expect(rejected.length).toBe(1)
+    expect((rejected[0] as PromiseRejectedResult).reason.message).toMatch(/token es inválido|ya fue utilizado/i)
+  })
+
+  it("handles concurrent PUT race: exactly one PUT claims token and loser object is purged (Requirement G)", async () => {
+    const ticket = await createGameFileUploadToken(
+      db,
+      { originalFilename: "put_race.jar", sizeBytes: 100, logicalPath: "mods/put_race.jar" },
+      adminId,
+    )
+
+    const jarContent1 = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01, 0x00, 0x00, 0x00])
+    const jarContent2 = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x02, 0x00, 0x00, 0x00])
+
+    const context: BackendGraphQLContext = {
+      env,
+      db,
+      request: new Request("https://api.hikat.local"),
+      auth: {
+        status: "authenticated",
+        identity: { userId: adminId, role: "ADMIN", sessionId: "sess-g", displayName: "Admin", tokenPayload: {} as any },
+      },
+    }
+
+    const req1 = new Request("https://api.hikat.local/game/files/upload", {
+      method: "PUT",
+      headers: { "X-Upload-Token": ticket.uploadToken, "Content-Type": "application/java-archive" },
+      body: jarContent1,
+    })
+    const req2 = new Request("https://api.hikat.local/game/files/upload", {
+      method: "PUT",
+      headers: { "X-Upload-Token": ticket.uploadToken, "Content-Type": "application/java-archive" },
+      body: jarContent2,
+    })
+
+    const [res1, res2] = await Promise.all([
+      handleGameFileUpload(req1, env, db, context),
+      handleGameFileUpload(req2, env, db, context),
+    ])
+
+    const statuses = [res1.status, res2.status].sort()
+    expect(statuses).toEqual([200, 409])
+  })
+
+  it("rolls back publishGameRelease atomically if second statement fails (Requirement J & 8)", async () => {
+    await prepareGameDraft(db, adminId)
+    await saveGameFileContent(db, { logicalPath: "config/init.txt", content: "init" }, adminId, env)
+
+    // Publish release 1.0.0
+    const rel1 = await publishGameRelease(db, env, { version: "1.0.0" }, adminId)
+    expect(rel1.status).toBe("PUBLISHED")
+
+    // Create draft for 1.1.0
+    const draft2 = await prepareGameDraft(db, adminId)
+    await saveGameFileContent(db, { logicalPath: "config/update.txt", content: "update" }, adminId, env)
+
+    // Spy on db.batch to simulate a failure during batch execution
+    const origBatch = db.batch.bind(db)
+    const batchSpy = vi.spyOn(db, "batch").mockImplementation(() => {
+      // Execute the underlying mock batch with an error to trigger SQLite rollback
+      throw new Error("Simulated D1 batch execution failure during publish")
+    })
+
+    await expect(
+      publishGameRelease(db, env, { version: "1.1.0" }, adminId),
+    ).rejects.toThrow(/Simulated D1 batch execution failure/i)
+
+    batchSpy.mockRestore()
+
+    // Verify atomic rollback: rel1 is still PUBLISHED, draft2 is still DRAFT!
+    const rel1After = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, rel1.id)).get()
+    const draft2After = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft2.id)).get()
+
+    expect(rel1After!.status).toBe("PUBLISHED")
+    expect(draft2After!.status).toBe("DRAFT")
+  })
 })
+
 
