@@ -521,27 +521,63 @@ export class ModProviderManager {
 
         const depAdapter = this.getAdapter(current.provider)
         let depProjectId = dep.projectId
+        const pinnedId = dep.versionId || dep.fileId || null
+        let pinnedVersionObj: NormalizedModVersion | null = null
 
-        // If only versionId is given (e.g. Modrinth specific file dependency), resolve its real project ID
-        if (!depProjectId && dep.versionId) {
-          const fetchedVer = await depAdapter.getVersion(env, dep.versionId)
-          if (fetchedVer?.projectId) {
-            depProjectId = fetchedVer.projectId
-          } else if (fetchedVer?.id) {
-            depProjectId = fetchedVer.id
+        // 1. If pinned versionId is given, resolve the pinned version directly first
+        if (pinnedId) {
+          pinnedVersionObj = await depAdapter.getVersion(env, pinnedId, depProjectId).catch(() => null)
+          if (!depProjectId && pinnedVersionObj?.projectId) {
+            depProjectId = pinnedVersionObj.projectId
           }
         }
 
         if (!depProjectId) continue
         const depKey = `${current.provider}:${depProjectId}`
 
+        // 2. Determine target contentType for the dependency without assuming MOD:
+        let depContentType: ContentTypeGql | null = null
+
+        if (pinnedVersionObj?.contentType) {
+          // If we resolved the pinned version, its metadata/loaders is authoritative
+          depContentType = pinnedVersionObj.contentType
+        } else if (typeof depAdapter.getSupportedContentTypes === "function") {
+          const supportedTypes: ContentTypeGql[] = await depAdapter.getSupportedContentTypes(env, depProjectId)
+          if (supportedTypes.length === 1) {
+            depContentType = supportedTypes[0]!
+          } else if (supportedTypes.length > 1) {
+            // Multi-type ambiguity without pinned versionId -> safe conflict instead of silent guess
+            conflicts.push(
+              `Conflicto: la dependencia "${dep.projectName || depProjectId}" es multi-tipo y ambigua (soporta ${supportedTypes.join(", ")}); se requiere especificar versión o resolver manualmente.`,
+            )
+            continue
+          } else {
+            const candidate = await depAdapter.getProject(env, depProjectId).catch(() => null)
+            depContentType = candidate?.contentType || null
+            if (!depContentType) {
+              conflicts.push(
+                `No se pudo determinar el tipo de contenido para la dependencia "${dep.projectName || depProjectId}".`,
+              )
+              continue
+            }
+          }
+        } else {
+          const candidate = await depAdapter.getProject(env, depProjectId).catch(() => null)
+          depContentType = candidate?.contentType || null
+          if (!depContentType) {
+            conflicts.push(
+              `No se pudo determinar el tipo de contenido para la dependencia "${dep.projectName || depProjectId}".`,
+            )
+            continue
+          }
+        }
+
         // B. Handle OPTIONAL dependencies (do NOT automatically install)
         if (dep.dependencyType === "OPTIONAL" || dep.dependencyType === "EMBEDDED") {
           if (!optionalDepsMap.has(depKey) && !itemsMap.has(depKey)) {
             try {
-              const depProj = await depAdapter.getProject(env, depProjectId, "MOD")
-              const depFilename = dep.fileName || "optional.jar"
-              const depContentType: ContentTypeGql = depProj?.contentType || "MOD"
+              const depProj = await depAdapter.getProject(env, depProjectId, depContentType)
+              const depFilename = dep.fileName || (depContentType === "MOD" ? "optional.jar" : "optional.zip")
               optionalDepsMap.set(depKey, {
                 provider: current.provider,
                 projectId: depProjectId,
@@ -586,12 +622,11 @@ export class ModProviderManager {
         }
         visitedBranches.add(depKey)
 
-        // Fetch compatible versions for the required dependency (assume MOD unless project specifies otherwise)
+        // Fetch compatible versions for the required dependency using its discovered depContentType
         let depCompatibleVersions: NormalizedModVersion[] = []
         let depProject: NormalizedModProject | null = null
         try {
-          depProject = await depAdapter.getProject(env, depProjectId, "MOD").catch(() => null)
-          const depContentType: ContentTypeGql = depProject?.contentType || "MOD"
+          depProject = await depAdapter.getProject(env, depProjectId, depContentType).catch(() => null)
           const depLoader = depContentType === "MOD" ? "NeoForge" : ""
           depCompatibleVersions = await depAdapter.getCompatibleVersions(
             env,
@@ -619,18 +654,32 @@ export class ModProviderManager {
             )
             continue
           }
-        } else if (dep.versionId || dep.fileId) {
+        } else if (pinnedId) {
           // Priority 2: Explicitly pinned versionId by provider -> MUST MATCH pinned version, NO silent fallback!
-          const pinnedId = dep.versionId || dep.fileId!
           selectedDepVersion = depCompatibleVersions.find((v) => v.id === pinnedId || v.fileId === pinnedId)
 
           if (!selectedDepVersion) {
-            // Check direct getVersion to confirm incompatibility
-            const directDepVer = await depAdapter.getVersion(env, pinnedId, depProjectId).catch(() => null)
-            if (directDepVer) {
-              conflicts.push(
-                `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con Minecraft ${minecraftVersion}.`,
-              )
+            if (pinnedVersionObj) {
+              if (pinnedVersionObj.contentType && pinnedVersionObj.contentType !== depContentType) {
+                conflicts.push(
+                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" es de tipo ${pinnedVersionObj.contentType}, no ${depContentType}.`,
+                )
+              } else if (!pinnedVersionObj.gameVersions.includes(minecraftVersion)) {
+                conflicts.push(
+                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con Minecraft ${minecraftVersion}.`,
+                )
+              } else if (
+                depContentType === "MOD" &&
+                !pinnedVersionObj.loaders.map((l) => l.toLowerCase()).includes("neoforge")
+              ) {
+                conflicts.push(
+                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con el loader NeoForge.`,
+                )
+              } else {
+                conflicts.push(
+                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con Minecraft ${minecraftVersion}.`,
+                )
+              }
             } else {
               conflicts.push(
                 `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no fue encontrada.`,
@@ -661,10 +710,10 @@ export class ModProviderManager {
           continue
         }
 
-        const depContentType: ContentTypeGql = depProject?.contentType || selectedDepVersion.contentType || "MOD"
+        const finalDepContentType: ContentTypeGql = selectedDepVersion.contentType || depContentType
         const depProjectName = depProject?.name || dep.projectName || selectedDepVersion.name || "Dependencia"
-        const depLogicalPath = getLogicalPathForContent(depContentType, selectedDepVersion.filename)
-        const depTargetCategory = depContentType === "SHADER" ? "SHADER_PACK" : depContentType
+        const depLogicalPath = getLogicalPathForContent(finalDepContentType, selectedDepVersion.filename)
+        const depTargetCategory = finalDepContentType === "SHADER" ? "SHADER_PACK" : finalDepContentType
 
         const existingDep = draftFiles.find(
           (f) =>
@@ -701,7 +750,7 @@ export class ModProviderManager {
           filename: selectedDepVersion.filename,
           sizeBytes: selectedDepVersion.sizeBytes,
           sha256: selectedDepVersion.sha256 || null,
-          contentType: depContentType,
+          contentType: finalDepContentType,
           environment: depProject?.environment || selectedDepVersion.environment || null,
           logicalPath: depLogicalPath,
           isRoot: false,

@@ -259,6 +259,43 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     }
   }
 
+  async getSupportedContentTypes(env: Env, projectId: string): Promise<ContentTypeGql[]> {
+    if (!this.isConfigured(env)) return []
+
+    const baseUrl = this.getBaseUrl(env)
+    const url = `${baseUrl}/mods/${encodeURIComponent(projectId)}`
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+    try {
+      const res = await fetch(url, {
+        headers: this.getHeaders(env),
+        signal: controller.signal,
+      })
+
+      if (!res.ok) return []
+
+      const data = (await res.json()) as {
+        data?: {
+          classId?: number
+          mainCategoryId?: number
+        }
+      }
+
+      const classId = data.data?.classId || data.data?.mainCategoryId
+      if (classId === 6) return ["MOD"]
+      if (classId === 12) return ["RESOURCE_PACK"]
+      if (classId === 6945) return ["DATA_PACK"]
+      if (classId === 6552) return ["SHADER"]
+      return ["MOD"]
+    } catch {
+      return []
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   async getCompatibleVersions(
     env: Env,
     projectId: string,

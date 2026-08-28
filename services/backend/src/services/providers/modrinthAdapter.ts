@@ -276,6 +276,49 @@ export class ModrinthAdapter implements ModProviderAdapter {
     }
   }
 
+  async getSupportedContentTypes(env: Env, projectId: string): Promise<ContentTypeGql[]> {
+    const baseUrl = this.getBaseUrl(env)
+    const url = `${baseUrl}/project/${encodeURIComponent(projectId)}`
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+      })
+
+      if (!res.ok) return []
+
+      const data = (await res.json()) as {
+        project_type?: string
+        all_project_types?: string[]
+        categories?: string[]
+        additional_categories?: string[]
+      }
+
+      const types = new Set<ContentTypeGql>()
+      const allTypes = (data.all_project_types || []).map((t) => t.toLowerCase())
+      const cats = [...(data.categories || []), ...(data.additional_categories || [])].map((c) => c.toLowerCase())
+      const pt = (data.project_type || "").toLowerCase()
+
+      if (allTypes.includes("mod") || pt === "mod") types.add("MOD")
+      if (allTypes.includes("datapack") || cats.includes("datapack")) types.add("DATA_PACK")
+      if (allTypes.includes("resourcepack") || pt === "resourcepack") types.add("RESOURCE_PACK")
+      if (allTypes.includes("shader") || pt === "shader") types.add("SHADER")
+
+      return Array.from(types)
+    } catch {
+      return []
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   async getCompatibleVersions(
     env: Env,
     projectId: string,

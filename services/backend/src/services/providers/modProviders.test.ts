@@ -1668,4 +1668,360 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(res.providersStatus.find((p) => p.provider === "CURSEFORGE")?.available).toBe(true)
     })
   })
+
+  describe("7. Cross-Content Dependency Resolution & Multi-Type Ambiguity", () => {
+    it("resolves MOD -> MOD dependency cleanly into mods/", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/m-root/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-m-root",
+                name: "Mod Root",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "m-root.jar", size: 1000, url: "https://cdn/m-root.jar" }],
+                dependencies: [{ project_id: "m-dep", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/m-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-m-dep",
+                name: "Mod Dep",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "m-dep.jar", size: 500, url: "https://cdn/m-dep.jar" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/m-root")) {
+          return { ok: true, status: 200, json: async () => ({ id: "m-root", title: "Mod Root", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("/project/m-dep")) {
+          return { ok: true, status: 200, json: async () => ({ id: "m-dep", title: "Mod Dep", project_type: "mod", categories: [] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "m-root", versionId: "ver-m-root", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[0]!.logicalPath).toBe("mods/m-root.jar")
+      expect(plan.items[0]!.contentType).toBe("MOD")
+      expect(plan.items[1]!.logicalPath).toBe("mods/m-dep.jar")
+      expect(plan.items[1]!.contentType).toBe("MOD")
+    })
+
+    it("resolves DATA_PACK -> DATA_PACK dependency cleanly into datapacks/", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/dp-parent/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-dp-parent",
+                name: "DP Parent",
+                game_versions: ["1.21.1"],
+                loaders: ["datapack"],
+                files: [{ filename: "dp-parent.zip", size: 2000, url: "https://cdn/dp-parent.zip" }],
+                dependencies: [{ project_id: "dp-child", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/dp-child/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-dp-child",
+                name: "DP Child",
+                game_versions: ["1.21.1"],
+                loaders: ["datapack"],
+                files: [{ filename: "dp-child.zip", size: 1500, url: "https://cdn/dp-child.zip" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/dp-parent")) {
+          return { ok: true, status: 200, json: async () => ({ id: "dp-parent", title: "DP Parent", all_project_types: ["datapack"], categories: ["datapack"] }) }
+        }
+        if (u.includes("/project/dp-child")) {
+          return { ok: true, status: 200, json: async () => ({ id: "dp-child", title: "DP Child", all_project_types: ["datapack"], categories: ["datapack"] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "dp-parent", versionId: "ver-dp-parent", contentType: "DATA_PACK" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[0]!.logicalPath).toBe("datapacks/dp-parent.zip")
+      expect(plan.items[0]!.contentType).toBe("DATA_PACK")
+      expect(plan.items[1]!.logicalPath).toBe("datapacks/dp-child.zip")
+      expect(plan.items[1]!.contentType).toBe("DATA_PACK")
+    })
+
+    it("resolves DATA_PACK -> MOD dependency into respective directories (datapacks/ and mods/)", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/dp-with-mod-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-dp-root",
+                name: "DP With Mod Dep",
+                game_versions: ["1.21.1"],
+                loaders: ["datapack"],
+                files: [{ filename: "dp-root.zip", size: 2000, url: "https://cdn/dp-root.zip" }],
+                dependencies: [{ project_id: "mod-cloth", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/mod-cloth/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-mod-cloth",
+                name: "Cloth Config",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "cloth.jar", size: 3000, url: "https://cdn/cloth.jar" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/dp-with-mod-dep")) {
+          return { ok: true, status: 200, json: async () => ({ id: "dp-with-mod-dep", title: "DP With Mod Dep", all_project_types: ["datapack"], categories: ["datapack"] }) }
+        }
+        if (u.includes("/project/mod-cloth")) {
+          return { ok: true, status: 200, json: async () => ({ id: "mod-cloth", title: "Cloth Config", project_type: "mod", categories: ["technology"] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "dp-with-mod-dep", versionId: "ver-dp-root", contentType: "DATA_PACK" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[0]!.logicalPath).toBe("datapacks/dp-root.zip")
+      expect(plan.items[0]!.contentType).toBe("DATA_PACK")
+      expect(plan.items[1]!.logicalPath).toBe("mods/cloth.jar")
+      expect(plan.items[1]!.contentType).toBe("MOD")
+    })
+
+    it("resolves SHADER -> MOD dependency into shaderpacks/ and mods/", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/sh-parent/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-sh-parent",
+                name: "Complementary Shaders",
+                game_versions: ["1.21.1"],
+                loaders: [],
+                files: [{ filename: "complementary.zip", size: 5000, url: "https://cdn/comp.zip" }],
+                dependencies: [{ project_id: "mod-iris", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/mod-iris/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-mod-iris",
+                name: "Iris Shaders Mod",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "iris.jar", size: 4000, url: "https://cdn/iris.jar" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/sh-parent")) {
+          return { ok: true, status: 200, json: async () => ({ id: "sh-parent", title: "Complementary", project_type: "shader", categories: [] }) }
+        }
+        if (u.includes("/project/mod-iris")) {
+          return { ok: true, status: 200, json: async () => ({ id: "mod-iris", title: "Iris", project_type: "mod", categories: [] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "sh-parent", versionId: "ver-sh-parent", contentType: "SHADER" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[0]!.logicalPath).toBe("shaderpacks/complementary.zip")
+      expect(plan.items[0]!.contentType).toBe("SHADER")
+      expect(plan.items[1]!.logicalPath).toBe("mods/iris.jar")
+      expect(plan.items[1]!.contentType).toBe("MOD")
+    })
+
+    it("resolves pinned dependency whose version determines DATA_PACK", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-with-pinned/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-pin",
+                name: "Root With Pin",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root-pin.jar", size: 1000, url: "https://cdn/root.jar" }],
+                dependencies: [{ project_id: "hybrid-dep", version_id: "ver-pinned-dp", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/ver-pinned-dp")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-pinned-dp",
+              project_id: "hybrid-dep",
+              name: "Hybrid DP",
+              game_versions: ["1.21.1"],
+              loaders: ["datapack"],
+              files: [{ filename: "hybrid.zip", size: 800, url: "https://cdn/hybrid.zip" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/hybrid-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-pinned-dp",
+                name: "Hybrid DP",
+                game_versions: ["1.21.1"],
+                loaders: ["datapack"],
+                files: [{ filename: "hybrid.zip", size: 800, url: "https://cdn/hybrid.zip" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-with-pinned")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-with-pinned", title: "Root Pin", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("/project/hybrid-dep")) {
+          return { ok: true, status: 200, json: async () => ({ id: "hybrid-dep", title: "Hybrid Dep", project_type: "mod", all_project_types: ["mod", "datapack"], categories: [] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "root-with-pinned", versionId: "ver-root-pin", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[0]!.logicalPath).toBe("mods/root-pin.jar")
+      expect(plan.items[0]!.contentType).toBe("MOD")
+      expect(plan.items[1]!.logicalPath).toBe("datapacks/hybrid.zip")
+      expect(plan.items[1]!.contentType).toBe("DATA_PACK")
+    })
+
+    it("flags conflict for ambiguous multi-type dependency without silently guessing MOD", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-with-ambig/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-ambig",
+                name: "Root With Ambig",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root-ambig.jar", size: 1000, url: "https://cdn/root.jar" }],
+                dependencies: [{ project_id: "hybrid-dep-ambig", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-with-ambig")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-with-ambig", title: "Root Ambig", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("/project/hybrid-dep-ambig")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "hybrid-dep-ambig",
+              title: "Hybrid Ambiguous",
+              project_type: "mod",
+              all_project_types: ["mod", "datapack"],
+              categories: ["datapack"],
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "root-with-ambig", versionId: "ver-root-ambig", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.length).toBe(1)
+      expect(plan.conflicts[0]).toContain("es multi-tipo y ambigua")
+    })
+  })
 })

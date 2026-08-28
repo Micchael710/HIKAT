@@ -78,6 +78,10 @@ export interface ModProviderAdapter {
     projectId: string,
     contentType?: ContentTypeGql,
   ): Promise<NormalizedModProject | null>
+  getSupportedContentTypes?(
+    env: Env,
+    projectId: string,
+  ): Promise<ContentTypeGql[]>
   getCompatibleVersions(
     env: Env,
     projectId: string,
