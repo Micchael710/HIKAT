@@ -386,7 +386,7 @@ export class ModProviderManager {
       )
     }
 
-    // Fetch compatible versions with strict compatibility validation
+    // Fetch compatible versions with strict compatibility validation (authoritative collection)
     const rootCompatibleVersions = await adapter.getCompatibleVersions(
       env,
       input.projectId,
@@ -395,30 +395,46 @@ export class ModProviderManager {
       contentType,
     )
 
-    let rootVersion = rootCompatibleVersions.find((v) => v.id === input.versionId || v.fileId === input.versionId)
-    if (!rootVersion) {
-      // Check if version exists at all to provide authoritative error / direct resolution
-      const directVersion = await adapter.getVersion(env, input.versionId, input.projectId, contentType)
-      if (directVersion) {
-        // Validate compatibility (fail-closed: empty loaders is NOT compatible for MOD)
-        const isMcCompatible = directVersion.gameVersions.includes(minecraftVersion)
-        const isLoaderCompatible =
-          contentType !== "MOD"
-            ? true
-            : directVersion.loaders.length > 0 &&
-              directVersion.loaders.map((l) => l.toLowerCase()).includes("neoforge")
+    const rootVersion = rootCompatibleVersions.find(
+      (v) => v.id === input.versionId || v.fileId === input.versionId,
+    )
 
-        if (!isMcCompatible || !isLoaderCompatible) {
+    if (!rootVersion) {
+      // Check if version exists to provide authoritative descriptive error (fail-closed: getVersion never turns it valid)
+      const directVersion = await adapter
+        .getVersion(env, input.versionId, input.projectId, contentType)
+        .catch(() => null)
+
+      if (directVersion) {
+        if (directVersion.contentType && directVersion.contentType !== contentType) {
           throw createGraphQLError(
-            `La versión seleccionada no es compatible con el entorno actual (Minecraft ${minecraftVersion}${contentType === "MOD" ? " · NeoForge" : ""}).`,
+            `La versión "${input.versionId}" es de tipo ${directVersion.contentType}, no corresponde al tipo solicitado ${contentType}.`,
             "VALIDATION_ERROR",
           )
         }
-        rootVersion = directVersion
+        if (!directVersion.gameVersions.includes(minecraftVersion)) {
+          throw createGraphQLError(
+            `La versión "${input.versionId}" no es compatible con Minecraft ${minecraftVersion}.`,
+            "VALIDATION_ERROR",
+          )
+        }
+        if (
+          contentType === "MOD" &&
+          (!directVersion.loaders ||
+            directVersion.loaders.length === 0 ||
+            !directVersion.loaders.map((l) => l.toLowerCase()).includes("neoforge"))
+        ) {
+          throw createGraphQLError(
+            `La versión "${input.versionId}" no es compatible con el loader NeoForge.`,
+            "VALIDATION_ERROR",
+          )
+        }
+        throw createGraphQLError(
+          `La versión "${input.versionId}" no es compatible con el entorno actual (Minecraft ${minecraftVersion}${contentType === "MOD" ? " · NeoForge" : ""}).`,
+          "VALIDATION_ERROR",
+        )
       }
-    }
 
-    if (!rootVersion) {
       throw createGraphQLError(
         `La versión seleccionada no fue encontrada o no es compatible con Minecraft ${minecraftVersion}.`,
         "NOT_FOUND",

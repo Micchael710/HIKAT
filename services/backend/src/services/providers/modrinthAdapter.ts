@@ -402,8 +402,11 @@ export class ModrinthAdapter implements ModProviderAdapter {
     })
 
     let versionContentType = fallbackContentType
-    if (loaders.includes("datapack") || rawLoaders.map((l: string) => l.toLowerCase()).includes("datapack")) {
+    const lowerLoaders = rawLoaders.map((l: string) => l.toLowerCase())
+    if (lowerLoaders.includes("datapack")) {
       versionContentType = "DATA_PACK"
+    } else if (lowerLoaders.some((l: string) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
+      versionContentType = "MOD"
     }
 
     const hashes = primaryFile.hashes || {}

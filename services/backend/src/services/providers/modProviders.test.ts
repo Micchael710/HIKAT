@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
-import { eq, and } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import type { Env } from "../../types"
 import { ModrinthAdapter } from "./modrinthAdapter"
 import { CurseForgeAdapter } from "./curseforgeAdapter"
 import { ModProviderManager, getLogicalPathForContent } from "./modProviderManager"
 import { installModPlan } from "./modInstallationService"
 import { prepareGameDraft, getPublishedModpack, publishGameRelease } from "../game/releaseService"
-import { saveGameFileContent, addGameFile, updateGameFile } from "../game/gameFileService"
+import { addGameFile } from "../game/gameFileService"
 import { validateGameFileBuffer } from "@hikat/shared"
 
 // Mock global fetch for provider API calls and binary downloads
@@ -188,7 +188,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
         if (u.includes("/project/hybrid-proj/version")) {
-          if (u.includes("loaders=%5B%22neoforge%22%5D") || u.includes("loaders=%5B%22neoforge%22%5D")) {
+          if (u.includes("loaders=%5B%22neoforge%22%5D")) {
             return {
               ok: true,
               status: 200,
@@ -219,6 +219,36 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
                 },
               ],
             }
+          }
+        }
+        if (u.includes("/version/ver-mod-jar")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-mod-jar",
+              project_id: "hybrid-proj",
+              name: "Hybrid Mod 1.0",
+              loaders: ["neoforge"],
+              game_versions: ["1.21.1"],
+              files: [{ filename: "hybrid-mod.jar", size: 5000, url: "https://cdn/mod.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/version/ver-dp-zip")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-dp-zip",
+              project_id: "hybrid-proj",
+              name: "Hybrid DataPack 1.0",
+              loaders: ["datapack"],
+              game_versions: ["1.21.1"],
+              files: [{ filename: "hybrid-dp.zip", size: 3000, url: "https://cdn/dp.zip" }],
+              dependencies: [],
+            }),
           }
         }
         if (u.includes("/project/hybrid-proj")) {
@@ -252,6 +282,44 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(dpVersions.length).toBe(1)
       expect(dpVersions[0]!.contentType).toBe("DATA_PACK")
       expect(dpVersions[0]!.filename).toBe("hybrid-dp.zip")
+
+      // Manager integration: Requesting DATA_PACK with MOD versionId -> REJECT
+      await expect(
+        manager.resolveInstallationPlan(
+          env,
+          db,
+          { provider: "MODRINTH", projectId: "hybrid-proj", versionId: "ver-mod-jar", contentType: "DATA_PACK" },
+        ),
+      ).rejects.toThrow(/no corresponde al tipo solicitado/)
+
+      // Manager integration: Requesting MOD with DATA_PACK versionId -> REJECT
+      await expect(
+        manager.resolveInstallationPlan(
+          env,
+          db,
+          { provider: "MODRINTH", projectId: "hybrid-proj", versionId: "ver-dp-zip", contentType: "MOD" },
+        ),
+      ).rejects.toThrow(/no corresponde al tipo solicitado/)
+
+      // Manager integration: Requesting MOD with MOD versionId -> ACCEPT
+      const validModPlan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "hybrid-proj", versionId: "ver-mod-jar", contentType: "MOD" },
+      )
+      expect(validModPlan.isValid).toBe(true)
+      expect(validModPlan.items[0]!.contentType).toBe("MOD")
+      expect(validModPlan.items[0]!.logicalPath).toBe("mods/hybrid-mod.jar")
+
+      // Manager integration: Requesting DATA_PACK with DATA_PACK versionId -> ACCEPT
+      const validDpPlan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "hybrid-proj", versionId: "ver-dp-zip", contentType: "DATA_PACK" },
+      )
+      expect(validDpPlan.isValid).toBe(true)
+      expect(validDpPlan.items[0]!.contentType).toBe("DATA_PACK")
+      expect(validDpPlan.items[0]!.logicalPath).toBe("datapacks/hybrid-dp.zip")
     })
 
     it("parses SHA-512 and SHA-1 hashes from Modrinth without inventing SHA-256", async () => {
@@ -464,6 +532,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     it("rejects root version if it does not support the draft's Minecraft version", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
+        if (u.includes("/project/mod-x/version")) {
+          return { ok: true, status: 200, json: async () => [] } // None compatible
+        }
         if (u.includes("/version/ver-incompat-mc")) {
           return {
             ok: true,
@@ -497,12 +568,15 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           db,
           { provider: "MODRINTH", projectId: "mod-x", versionId: "ver-incompat-mc" },
         ),
-      ).rejects.toThrow(/no es compatible con el entorno actual/)
+      ).rejects.toThrow(/no es compatible con Minecraft 1.21.1/)
     })
 
     it("fails closed when loaders is empty (loaders=[]) or unknown for contentType=MOD", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
+        if (u.includes("/project/mod-no-loader/version")) {
+          return { ok: true, status: 200, json: async () => [] }
+        }
         if (u.includes("/version/ver-no-loaders")) {
           return {
             ok: true,
@@ -512,7 +586,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
               project_id: "mod-no-loader",
               name: "No Loader Mod",
               game_versions: ["1.21.1"],
-              loaders: [], // Empty loaders!
+              loaders: [],
               files: [{ filename: "mod.jar", size: 1000, url: "https://cdn/mod.jar" }],
               dependencies: [],
             }),
@@ -534,12 +608,15 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           db,
           { provider: "MODRINTH", projectId: "mod-no-loader", versionId: "ver-no-loaders" },
         ),
-      ).rejects.toThrow(/no es compatible con el entorno actual/)
+      ).rejects.toThrow(/no es compatible con el loader NeoForge/)
     })
 
     it("fails closed when loader is Fabric for contentType=MOD", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
+        if (u.includes("/project/mod-fabric/version")) {
+          return { ok: true, status: 200, json: async () => [] }
+        }
         if (u.includes("/version/ver-fabric-only")) {
           return {
             ok: true,
@@ -571,26 +648,27 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           db,
           { provider: "MODRINTH", projectId: "mod-fabric", versionId: "ver-fabric-only" },
         ),
-      ).rejects.toThrow(/no es compatible con el entorno actual/)
+      ).rejects.toThrow(/no es compatible con el loader NeoForge/)
     })
 
     it("resolves project with 0 dependencies cleanly into a single valid item", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.includes("/version/ver-zero-dep")) {
+        if (u.includes("/project/zero-dep-proj/version")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({
-              id: "ver-zero-dep",
-              project_id: "zero-dep-proj",
-              name: "Solo Mod",
-              version_number: "1.0.0",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "solo.jar", size: 1000, url: "https://cdn/solo.jar" }],
-              dependencies: [], // 0 dependencies
-            }),
+            json: async () => [
+              {
+                id: "ver-zero-dep",
+                name: "Solo Mod",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "solo.jar", size: 1000, url: "https://cdn/solo.jar" }],
+                dependencies: [],
+              },
+            ],
           }
         }
         if (u.includes("/project/zero-dep-proj")) {
@@ -617,20 +695,21 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     it("treats OPTIONAL dependencies as non-auto-installed", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.includes("/version/ver-opt-root")) {
+        if (u.includes("/project/opt-root-proj/version")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({
-              id: "ver-opt-root",
-              project_id: "opt-root-proj",
-              name: "Opt Root",
-              version_number: "1.0.0",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "opt-root.jar", size: 1000, url: "https://cdn/opt-root.jar" }],
-              dependencies: [{ project_id: "opt-dep", dependency_type: "optional" }],
-            }),
+            json: async () => [
+              {
+                id: "ver-opt-root",
+                name: "Opt Root",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "opt-root.jar", size: 1000, url: "https://cdn/opt-root.jar" }],
+                dependencies: [{ project_id: "opt-dep", dependency_type: "optional" }],
+              },
+            ],
           }
         }
         if (u.includes("/project/opt-root-proj")) {
@@ -649,28 +728,29 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       )
 
       expect(plan.isValid).toBe(true)
-      expect(plan.items.length).toBe(1) // Only root item in install items
-      expect(plan.optionalDependencies.length).toBe(1) // Optional dependency present in optional list
+      expect(plan.items.length).toBe(1)
+      expect(plan.optionalDependencies.length).toBe(1)
       expect(plan.optionalDependencies[0]!.projectId).toBe("opt-dep")
     })
 
     it("flags INCOMPATIBLE dependency as a conflict", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.includes("/version/ver-incomp-root")) {
+        if (u.includes("/project/incomp-root-proj/version")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({
-              id: "ver-incomp-root",
-              project_id: "incomp-root-proj",
-              name: "Incomp Root",
-              version_number: "1.0.0",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "incomp-root.jar", size: 1000, url: "https://cdn/incomp-root.jar" }],
-              dependencies: [{ project_id: "bad-mod", dependency_type: "incompatible" }],
-            }),
+            json: async () => [
+              {
+                id: "ver-incomp-root",
+                name: "Incomp Root",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "incomp-root.jar", size: 1000, url: "https://cdn/incomp-root.jar" }],
+                dependencies: [{ project_id: "bad-mod", dependency_type: "incompatible" }],
+              },
+            ],
           }
         }
         if (u.includes("/project/incomp-root-proj")) {
@@ -693,21 +773,28 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     it("enforces pinned dependencies and flags conflict if pinned version is incompatible without fallback", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.includes("/version/ver-root")) {
+        if (u.includes("/project/root-proj/version")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({
-              id: "ver-root",
-              project_id: "root-proj",
-              name: "Root 1.0",
-              version_number: "1.0.0",
-              version_type: "release",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar" }],
-              dependencies: [{ version_id: "ver-pinned-incompat", dependency_type: "required" }],
-            }),
+            json: async () => [
+              {
+                id: "ver-root",
+                name: "Root 1.0",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar" }],
+                dependencies: [{ version_id: "ver-pinned-incompat", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/dep-proj/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [],
           }
         }
         if (u.includes("/version/ver-pinned-incompat")) {
@@ -758,57 +845,6 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     it("resolves transitive dependencies, handles deduplication and skips cycles cleanly", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.includes("/version/ver-a")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              id: "ver-a",
-              project_id: "proj-a",
-              name: "A",
-              version_number: "1.0",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "a.jar", size: 100, url: "https://cdn/a.jar" }],
-              dependencies: [
-                { project_id: "proj-b", dependency_type: "required" },
-                { project_id: "proj-c", dependency_type: "required" },
-              ],
-            }),
-          }
-        }
-        if (u.includes("/version/ver-b")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              id: "ver-b",
-              project_id: "proj-b",
-              name: "B",
-              version_number: "1.0",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "b.jar", size: 100, url: "https://cdn/b.jar" }],
-              dependencies: [{ project_id: "proj-a", dependency_type: "required" }],
-            }),
-          }
-        }
-        if (u.includes("/version/ver-c")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              id: "ver-c",
-              project_id: "proj-c",
-              name: "C",
-              version_number: "1.0",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "c.jar", size: 100, url: "https://cdn/c.jar" }],
-              dependencies: [{ project_id: "proj-b", dependency_type: "required" }],
-            }),
-          }
-        }
         if (u.includes("/project/proj-a/version")) {
           return {
             ok: true,
@@ -901,34 +937,28 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
 
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.includes("/version/ver-1.0")) {
+        if (u.includes("/project/test-mod-id/version")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({
-              id: "ver-1.0",
-              project_id: "test-mod-id",
-              name: "Mod 1.0",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "mod.jar", size: 1000, url: "https://cdn/mod.jar" }],
-              dependencies: [],
-            }),
-          }
-        }
-        if (u.includes("/version/ver-2.0")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              id: "ver-2.0",
-              project_id: "test-mod-id",
-              name: "Mod 2.0",
-              game_versions: ["1.21.1"],
-              loaders: ["neoforge"],
-              files: [{ filename: "mod.jar", size: 1200, url: "https://cdn/mod.jar" }],
-              dependencies: [],
-            }),
+            json: async () => [
+              {
+                id: "ver-1.0",
+                name: "Mod 1.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "mod.jar", size: 1000, url: "https://cdn/mod.jar" }],
+                dependencies: [],
+              },
+              {
+                id: "ver-2.0",
+                name: "Mod 2.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "mod.jar", size: 1200, url: "https://cdn/mod.jar" }],
+                dependencies: [],
+              },
+            ],
           }
         }
         if (u.includes("/project/test-mod-id")) {
@@ -976,6 +1006,22 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     it("installs real root MOD + required dependency into mods/", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
+        if (u.includes("/project/proj-root-mod/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-mod",
+                name: "Root Mod",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar" }],
+                dependencies: [{ project_id: "proj-dep-mod", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
         if (u.includes("/version/ver-root-mod")) {
           return {
             ok: true,
@@ -1053,6 +1099,22 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     it("installs Resource Pack, Data Pack, and Shader individually into their respective directories and policies", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
+        if (u.includes("/project/rp-proj/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-rp",
+                name: "Faithful",
+                game_versions: ["1.21.1"],
+                loaders: [],
+                files: [{ filename: "faithful.zip", size: 5000, url: "https://cdn/faithful.zip" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
         if (u.includes("/version/ver-rp")) {
           return {
             ok: true,
@@ -1068,6 +1130,22 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
             }),
           }
         }
+        if (u.includes("/project/dp-proj/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-dp",
+                name: "Terralith",
+                game_versions: ["1.21.1"],
+                loaders: ["datapack"],
+                files: [{ filename: "terralith.zip", size: 4000, url: "https://cdn/terralith.zip" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
         if (u.includes("/version/ver-dp")) {
           return {
             ok: true,
@@ -1081,6 +1159,22 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
               files: [{ filename: "terralith.zip", size: 4000, url: "https://cdn/terralith.zip" }],
               dependencies: [],
             }),
+          }
+        }
+        if (u.includes("/project/shader-proj/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-shader",
+                name: "Complementary",
+                game_versions: ["1.21.1"],
+                loaders: [],
+                files: [{ filename: "complementary.zip", size: 6000, url: "https://cdn/shader.zip" }],
+                dependencies: [],
+              },
+            ],
           }
         }
         if (u.includes("/version/ver-shader")) {
@@ -1192,6 +1286,78 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
   })
 
   describe("5. Hash Fallback Verification (MD5) & D1 Rollback", () => {
+    it("successfully installs when provider supplies valid MD5 checksum (calculated independently)", async () => {
+      // Buffer with content "Hello HiKAT MD5 Test Binary"
+      // Precomputed independent MD5: 813b93947fd25d4d3744bca32172edc3
+      const knownValidBuffer = createSampleJarBuffer("Hello HiKAT MD5 Test Binary")
+      const expectedMd5 = "813b93947fd25d4d3744bca32172edc3"
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/328085/files/7777")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: {
+                id: 7777,
+                fileName: "md5valid.jar",
+                downloadUrl: "https://cdn/md5valid.jar",
+                gameVersions: ["1.21.1", "NeoForge"],
+                hashes: [{ algo: 2, value: expectedMd5 }],
+                dependencies: [],
+              },
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/328085/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 7777,
+                  fileName: "md5valid.jar",
+                  downloadUrl: "https://cdn/md5valid.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 2, value: expectedMd5 }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/328085")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 328085, name: "MD5 Valid Mod", classId: 6 } }),
+          }
+        }
+        if (u.includes("https://cdn/md5valid.jar")) {
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => knownValidBuffer.buffer,
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const installed = await installModPlan(
+        db,
+        env,
+        { provider: "CURSEFORGE", projectId: "328085", versionId: "7777" },
+        adminUserId,
+      )
+
+      expect(installed.length).toBe(1)
+      expect(installed[0]!.name).toBe("md5valid.jar")
+      expect(installed[0]!.logicalPath).toBe("mods/md5valid.jar")
+      expect(installed[0]!.sha256).toBeDefined()
+    })
+
     it("verifies MD5 checksum correctly when only MD5 is provided, and rejects on mismatch", async () => {
       const validBuffer = createSampleJarBuffer("test content for md5")
       mockFetch.mockImplementation(async (url: string) => {
@@ -1280,6 +1446,22 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
 
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
+        if (u.includes("/project/batch-root/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-batch-root",
+                name: "Batch Root",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root.jar", size: 100, url: "https://cdn/root.jar" }],
+                dependencies: [{ project_id: "batch-dep", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
         if (u.includes("/version/ver-batch-root")) {
           return {
             ok: true,
