@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react"
 import type { ThemeMode, SkinItem, SkinStatus } from "../../types"
-import { validateMinecraftSkinTexture } from "@hikat/shared"
+import { validateMinecraftSkinTexture, MAX_SKIN_SIZE_BYTES } from "@hikat/shared"
 import { skinsApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
 import { IconCross, IconUpload } from "../../theme/icons"
@@ -42,6 +42,11 @@ export default function SkinFormModal({
     if (!file) return
 
     setFileError(null)
+
+    if (file.size > MAX_SKIN_SIZE_BYTES) {
+      setFileError("El archivo supera el tamaño máximo permitido de 1 MB.")
+      return
+    }
 
     if (file.type !== "image/png" && !file.name.toLowerCase().endsWith(".png")) {
       setFileError("El archivo debe ser una imagen PNG.")

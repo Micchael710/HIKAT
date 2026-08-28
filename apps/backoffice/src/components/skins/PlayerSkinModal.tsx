@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react"
 import type { ThemeMode, AdminPlayerSkin } from "../../types"
-import { validateMinecraftSkinTexture } from "@hikat/shared"
+import { validateMinecraftSkinTexture, MAX_SKIN_SIZE_BYTES } from "@hikat/shared"
 import { skinsApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
 import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
@@ -39,6 +39,11 @@ export default function PlayerSkinModal({
     if (!file) return
 
     setFileError(null)
+
+    if (file.size > MAX_SKIN_SIZE_BYTES) {
+      setFileError("El archivo supera el tamaño máximo permitido de 1 MB.")
+      return
+    }
 
     if (
       file.type !== "image/png" &&

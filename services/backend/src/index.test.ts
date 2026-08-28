@@ -8640,6 +8640,99 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(selectionAfter?.type).toBe("GLOBAL")
       expect(selectionAfter?.skinId).toBe(global4Id)
     })
+
+    it("Phase 07 Micro-Hardening: inspectSkinMedia and createSkin reject skin PNG > 1 MB even with valid 64x64 dimensions", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const adminId = "admin-size-" + crypto.randomUUID()
+      await db.insert(users).values({
+        id: adminId,
+        displayName: "AdminSize",
+        role: "ADMIN",
+      })
+
+      const skinData = new Uint8Array(64 * 64 * 4)
+      for (let i = 0; i < skinData.length; i += 4) {
+        skinData[i] = 100
+        skinData[i + 1] = 120
+        skinData[i + 2] = 140
+        skinData[i + 3] = 255
+      }
+      const validPngBytes = encode({ width: 64, height: 64, data: skinData, channels: 4, depth: 8 })
+
+      // 1. Oversized media record (> 1 MB) with valid 64x64 PNG in R2
+      const oversizedMediaId = "media-oversized-" + crypto.randomUUID()
+      const oversizedObjectKey = `content/${oversizedMediaId}.png`
+      await testEnv.ASSETS!.put(oversizedObjectKey, validPngBytes)
+
+      await db.insert(contentMedia).values({
+        id: oversizedMediaId,
+        objectKey: oversizedObjectKey,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 1024 * 1024 + 500, // 1.0005 MB (> 1 MB)
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+      })
+
+      const { inspectSkinMedia, createSkin, updateSkin } = await import("./services/skinService")
+
+      // inspectSkinMedia should reject fail-closed
+      await expect(
+        inspectSkinMedia(db, testEnv, oversizedMediaId),
+      ).rejects.toThrow("La textura de skin supera el tamaño máximo permitido de 1 MB.")
+
+      // createSkin should reject fail-closed
+      await expect(
+        createSkin(
+          db,
+          testEnv,
+          {
+            name: "Oversized Global Skin",
+            mediaId: oversizedMediaId,
+          },
+          adminId,
+        ),
+      ).rejects.toThrow("La textura de skin supera el tamaño máximo permitido de 1 MB.")
+
+      // 2. Valid sized media record (<= 1 MB)
+      const validMediaId = "media-valid-" + crypto.randomUUID()
+      const validObjectKey = `content/${validMediaId}.png`
+      await testEnv.ASSETS!.put(validObjectKey, validPngBytes)
+
+      await db.insert(contentMedia).values({
+        id: validMediaId,
+        objectKey: validObjectKey,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: validPngBytes.length, // Valid ~1KB
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+      })
+
+      const inspected = await inspectSkinMedia(db, testEnv, validMediaId)
+      expect(inspected.media.id).toBe(validMediaId)
+
+      const created = await createSkin(
+        db,
+        testEnv,
+        {
+          name: "Valid Global Skin",
+          mediaId: validMediaId,
+        },
+        adminId,
+      )
+      expect(created.name).toBe("Valid Global Skin")
+      expect(created.imageUrl).toBe(`/media/content/${validMediaId}`)
+
+      // Updating with oversized media should also reject fail-closed
+      await expect(
+        updateSkin(db, testEnv, created.id, {
+          mediaId: oversizedMediaId,
+        }),
+      ).rejects.toThrow("La textura de skin supera el tamaño máximo permitido de 1 MB.")
+    })
   })
 
   describe("HiKAT Capes Management & Selection (Phase 07 Hardening)", () => {

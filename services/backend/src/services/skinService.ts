@@ -93,6 +93,13 @@ export async function inspectSkinMedia(
     )
   }
 
+  if (media.sizeBytes > MAX_SKIN_SIZE_BYTES) {
+    throw createGraphQLError(
+      "La textura de skin supera el tamaño máximo permitido de 1 MB.",
+      "VALIDATION_ERROR",
+    )
+  }
+
   if (media.mimeType !== "image/png") {
     throw createGraphQLError(
       "La textura de skin debe ser un archivo PNG.",

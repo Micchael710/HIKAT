@@ -245,5 +245,69 @@ describe("Back Office Skins & Capes Components (Phase 07 Hardening)", () => {
     expect(canvas).toBeDefined()
     expect(canvas?.getAttribute("aria-label")).toBe("Capa Minecraft")
   })
+
+  it("SkinFormModal rejects files > 1 MB before uploading", async () => {
+    const { default: SkinFormModal } = await import("./SkinFormModal")
+    const onSaved = vi.fn()
+    const onClose = vi.fn()
+
+    await act(async () => {
+      render(<SkinFormModal theme="dark" skin={null} onClose={onClose} onSaved={onSaved} />)
+    })
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    expect(fileInput).toBeDefined()
+
+    // 1.5 MB mock file
+    const oversizedFile = new File([new Uint8Array(1.5 * 1024 * 1024)], "oversized.png", {
+      type: "image/png",
+    })
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [oversizedFile] } })
+    })
+
+    expect(screen.getByText("El archivo supera el tamaño máximo permitido de 1 MB.")).toBeDefined()
+  })
+
+  it("PlayerSkinModal rejects files > 1 MB before uploading", async () => {
+    const { default: PlayerSkinModal } = await import("./PlayerSkinModal")
+    const onSaved = vi.fn()
+    const onClose = vi.fn()
+
+    const mockSkin = {
+      id: "pskin-test",
+      userId: "user-123",
+      userDisplayName: "PlayerTest",
+      imageUrl: "/media/content/test.png",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    await act(async () => {
+      render(
+        <PlayerSkinModal
+          theme="dark"
+          skin={mockSkin}
+          mode="edit"
+          onClose={onClose}
+          onSaved={onSaved}
+        />,
+      )
+    })
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    expect(fileInput).toBeDefined()
+
+    const oversizedFile = new File([new Uint8Array(2 * 1024 * 1024)], "oversized-player.png", {
+      type: "image/png",
+    })
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [oversizedFile] } })
+    })
+
+    expect(screen.getByText("El archivo supera el tamaño máximo permitido de 1 MB.")).toBeDefined()
+  })
 })
 
