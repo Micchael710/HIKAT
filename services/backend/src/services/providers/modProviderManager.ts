@@ -538,10 +538,10 @@ export class ModProviderManager {
         // 2. Determine target contentType for the dependency without assuming MOD:
         let depContentType: ContentTypeGql | null = null
 
-        // Query supported types for project
+        // Query supported types for project scoped to draft minecraftVersion
         let supportedTypes: ContentTypeGql[] = []
         if (typeof depAdapter.getSupportedContentTypes === "function") {
-          supportedTypes = await depAdapter.getSupportedContentTypes(env, depProjectId).catch(() => [])
+          supportedTypes = await depAdapter.getSupportedContentTypes(env, depProjectId, minecraftVersion).catch(() => [])
         } else {
           const candidate = await depAdapter.getProject(env, depProjectId).catch(() => null)
           if (candidate?.contentType) {

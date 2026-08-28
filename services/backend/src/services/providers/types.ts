@@ -81,6 +81,7 @@ export interface ModProviderAdapter {
   getSupportedContentTypes?(
     env: Env,
     projectId: string,
+    minecraftVersion?: string,
   ): Promise<ContentTypeGql[]>
   getCompatibleVersions(
     env: Env,

@@ -263,7 +263,11 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     }
   }
 
-  async getSupportedContentTypes(env: Env, projectId: string): Promise<ContentTypeGql[]> {
+  async getSupportedContentTypes(
+    env: Env,
+    projectId: string,
+    _minecraftVersion?: string,
+  ): Promise<ContentTypeGql[]> {
     if (!this.isConfigured(env)) return []
 
     const baseUrl = this.getBaseUrl(env)

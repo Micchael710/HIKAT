@@ -2315,20 +2315,13 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     })
   })
 
-  describe("8. Modrinth Authoritative Version-Level Type Metadata (Without all_project_types)", () => {
+  describe("8. Modrinth Authoritative Version-Level Type Metadata (Without all_project_types & Scoped to Game Version)", () => {
     const adapter = new ModrinthAdapter()
 
     it("1. determines DATA_PACK when project_type is mod but versions only have datapack loaders (no all_project_types)", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.endsWith("/project/dp-only-mod")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ id: "dp-only-mod", title: "DP Only Mod", project_type: "mod" }),
-          }
-        }
-        if (u.endsWith("/project/dp-only-mod/version")) {
+        if (u.includes("/project/dp-only-mod/version")) {
           return {
             ok: true,
             status: 200,
@@ -2337,14 +2330,21 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
             ],
           }
         }
+        if (u.includes("/project/dp-only-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "dp-only-mod", title: "DP Only Mod", project_type: "mod" }),
+          }
+        }
         return { ok: false, status: 404 }
       })
 
-      const types = await adapter.getSupportedContentTypes(env, "dp-only-mod")
+      const types = await adapter.getSupportedContentTypes(env, "dp-only-mod", "1.21.1")
       expect(types).toEqual(["DATA_PACK"])
     })
 
-    it("2. detects [MOD, DATA_PACK] on project_type: mod with NeoForge + Data Pack versions, generating ambiguity conflict for unpinned dep", async () => {
+    it("2. detects [MOD, DATA_PACK] on project_type: mod with NeoForge + Data Pack versions for 1.21.1, generating ambiguity conflict for unpinned dep", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
         if (u.includes("/project/root-parent/version")) {
@@ -2366,6 +2366,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           return { ok: true, status: 200, json: async () => ({ id: "root-parent", project_type: "mod" }) }
         }
         if (u.includes("/project/hybrid-proj/version")) {
+          expect(u).toContain("game_versions=")
           return {
             ok: true,
             status: 200,
@@ -2381,7 +2382,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         return { ok: false, status: 404 }
       })
 
-      const supported = await adapter.getSupportedContentTypes(env, "hybrid-proj")
+      const supported = await adapter.getSupportedContentTypes(env, "hybrid-proj", "1.21.1")
       expect(supported).toContain("MOD")
       expect(supported).toContain("DATA_PACK")
 
@@ -2398,14 +2399,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     it("3. determines RESOURCE_PACK for resourcepack project without all_project_types and loader minecraft", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.endsWith("/project/faithful-rp")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ id: "faithful-rp", title: "Faithful RP", project_type: "resourcepack" }),
-          }
-        }
-        if (u.endsWith("/project/faithful-rp/version")) {
+        if (u.includes("/project/faithful-rp/version")) {
           return {
             ok: true,
             status: 200,
@@ -2414,24 +2408,24 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
             ],
           }
         }
+        if (u.includes("/project/faithful-rp")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "faithful-rp", title: "Faithful RP", project_type: "resourcepack" }),
+          }
+        }
         return { ok: false, status: 404 }
       })
 
-      const types = await adapter.getSupportedContentTypes(env, "faithful-rp")
+      const types = await adapter.getSupportedContentTypes(env, "faithful-rp", "1.21.1")
       expect(types).toEqual(["RESOURCE_PACK"])
     })
 
     it("4. determines SHADER for shader project without all_project_types", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.endsWith("/project/bsl-shader")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ id: "bsl-shader", title: "BSL Shader", project_type: "shader" }),
-          }
-        }
-        if (u.endsWith("/project/bsl-shader/version")) {
+        if (u.includes("/project/bsl-shader/version")) {
           return {
             ok: true,
             status: 200,
@@ -2440,24 +2434,24 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
             ],
           }
         }
+        if (u.includes("/project/bsl-shader")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "bsl-shader", title: "BSL Shader", project_type: "shader" }),
+          }
+        }
         return { ok: false, status: 404 }
       })
 
-      const types = await adapter.getSupportedContentTypes(env, "bsl-shader")
+      const types = await adapter.getSupportedContentTypes(env, "bsl-shader", "1.21.1")
       expect(types).toEqual(["SHADER"])
     })
 
     it("5. determines MOD for normal NeoForge mod project", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.endsWith("/project/jei-mod")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ id: "jei-mod", title: "JEI Mod", project_type: "mod" }),
-          }
-        }
-        if (u.endsWith("/project/jei-mod/version")) {
+        if (u.includes("/project/jei-mod/version")) {
           return {
             ok: true,
             status: 200,
@@ -2466,11 +2460,99 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
             ],
           }
         }
+        if (u.includes("/project/jei-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "jei-mod", title: "JEI Mod", project_type: "mod" }),
+          }
+        }
         return { ok: false, status: 404 }
       })
 
-      const types = await adapter.getSupportedContentTypes(env, "jei-mod")
+      const types = await adapter.getSupportedContentTypes(env, "jei-mod", "1.21.1")
       expect(types).toEqual(["MOD"])
+    })
+
+    it("6. scopes versions to 1.21.1 avoiding false ambiguity from historic 1.20.1 DATA_PACK (resolving MOD)", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/historic-dp-mod/version")) {
+          // Verify request includes game_versions filter for 1.21.1
+          expect(u).toContain(encodeURIComponent(JSON.stringify(["1.21.1"])))
+          // The API returns only 1.21.1 NeoForge version
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: "v-1211", loaders: ["neoforge"], game_versions: ["1.21.1"] },
+            ],
+          }
+        }
+        if (u.includes("/project/historic-dp-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "historic-dp-mod", title: "Historic DP Mod", project_type: "mod" }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const types = await adapter.getSupportedContentTypes(env, "historic-dp-mod", "1.21.1")
+      expect(types).toEqual(["MOD"])
+    })
+
+    it("7. scopes versions to 1.21.1 avoiding false ambiguity from historic 1.20.1 MOD (resolving DATA_PACK)", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/historic-mod-dp/version")) {
+          expect(u).toContain(encodeURIComponent(JSON.stringify(["1.21.1"])))
+          // The API returns only 1.21.1 Data Pack version
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: "v-1211-dp", loaders: ["datapack"], game_versions: ["1.21.1"] },
+            ],
+          }
+        }
+        if (u.includes("/project/historic-mod-dp")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "historic-mod-dp", title: "Historic Mod DP", project_type: "mod" }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const types = await adapter.getSupportedContentTypes(env, "historic-mod-dp", "1.21.1")
+      expect(types).toEqual(["DATA_PACK"])
+    })
+
+    it("8. returns empty array when project has no versions compatible with 1.21.1", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/incompatible-proj/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [], // No versions for 1.21.1!
+          }
+        }
+        if (u.includes("/project/incompatible-proj")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "incompatible-proj", title: "Incompatible Proj", project_type: "mod" }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const types = await adapter.getSupportedContentTypes(env, "incompatible-proj", "1.21.1")
+      expect(types).toEqual([])
     })
   })
 })

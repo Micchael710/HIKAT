@@ -276,10 +276,19 @@ export class ModrinthAdapter implements ModProviderAdapter {
     }
   }
 
-  async getSupportedContentTypes(env: Env, projectId: string): Promise<ContentTypeGql[]> {
+  async getSupportedContentTypes(
+    env: Env,
+    projectId: string,
+    minecraftVersion?: string,
+  ): Promise<ContentTypeGql[]> {
     const baseUrl = this.getBaseUrl(env)
     const projectUrl = `${baseUrl}/project/${encodeURIComponent(projectId)}`
-    const versionsUrl = `${baseUrl}/project/${encodeURIComponent(projectId)}/version`
+    let versionsUrl = `${baseUrl}/project/${encodeURIComponent(projectId)}/version?include_changelog=false`
+    if (minecraftVersion) {
+      versionsUrl = `${baseUrl}/project/${encodeURIComponent(projectId)}/version?game_versions=${encodeURIComponent(
+        JSON.stringify([minecraftVersion]),
+      )}&include_changelog=false`
+    }
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 15000)
@@ -307,7 +316,8 @@ export class ModrinthAdapter implements ModProviderAdapter {
       const pt = (data.project_type || "").toLowerCase()
 
       // Fetch versions to inspect authorative version loaders
-      let versions: Array<{ loaders?: string[] }> = []
+      let versionsFetched = false
+      let versions: Array<{ loaders?: string[]; game_versions?: string[] }> = []
       try {
         const vRes = await fetch(versionsUrl, {
           headers: {
@@ -320,15 +330,21 @@ export class ModrinthAdapter implements ModProviderAdapter {
           const vData = await vRes.json()
           if (Array.isArray(vData)) {
             versions = vData
+            versionsFetched = true
           }
         }
       } catch {
-        // Ignore error and use project metadata fallback
+        // Ignore error and use project metadata fallback if no minecraftVersion was specified
+      }
+
+      // If minecraftVersion was explicitly requested and Modrinth returned 200 with 0 versions, do not guess
+      if (versionsFetched && minecraftVersion && versions.length === 0) {
+        return []
       }
 
       const types = new Set<ContentTypeGql>()
 
-      if (versions.length > 0) {
+      if (versionsFetched && versions.length > 0) {
         let hasModVersion = false
         let hasDpVersion = false
         let hasRpVersion = false
