@@ -1,5 +1,8 @@
 -- Migration 0012: Remove model column from skins and player_skins, and add capes domain tables
 
+PRAGMA foreign_keys = OFF;
+--> statement-breakpoint
+
 -- 1. Recreate skins without model column and without skins_model_check
 CREATE TABLE `skins_new` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -96,7 +99,13 @@ CREATE TABLE `player_cape_selections` (
 	`cape_id` text,
 	`player_cape_id` text,
 	`updated_at` text NOT NULL,
-	CONSTRAINT "player_cape_selections_type_check" CHECK("player_cape_selections"."type" IN ('NONE', 'GLOBAL', 'CUSTOM')),
+	CONSTRAINT "player_cape_selections_type_check" CHECK(
+		(`type` = 'NONE' AND `cape_id` IS NULL AND `player_cape_id` IS NULL)
+		OR
+		(`type` = 'GLOBAL' AND `cape_id` IS NOT NULL AND `player_cape_id` IS NULL)
+		OR
+		(`type` = 'CUSTOM' AND `cape_id` IS NULL AND `player_cape_id` IS NOT NULL)
+	),
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`cape_id`) REFERENCES `capes`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`player_cape_id`) REFERENCES `player_capes`(`id`) ON UPDATE no action ON DELETE set null
@@ -105,3 +114,6 @@ CREATE TABLE `player_cape_selections` (
 CREATE INDEX `player_cape_selections_cape_id_idx` ON `player_cape_selections` (`cape_id`);
 --> statement-breakpoint
 CREATE INDEX `player_cape_selections_player_cape_id_idx` ON `player_cape_selections` (`player_cape_id`);
+--> statement-breakpoint
+
+PRAGMA foreign_keys = ON;

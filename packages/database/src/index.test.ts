@@ -1591,4 +1591,212 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(activeCapeSel?.type).toBe("GLOBAL")
     expect(activeCapeSel?.capeId).toBe(globalCapeId)
   })
+
+  it("enforces CHECK constraint on player_cape_selections rejecting invalid combinations directly in SQLite", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const now = new Date().toISOString()
+
+    const adminId = "admin-check-user"
+    const playerId = "player-check-user"
+    await db.insert(schema.users).values([
+      { id: adminId, displayName: "Cape Admin", role: "ADMIN", createdAt: now, updatedAt: now },
+      { id: playerId, displayName: "Cape Player", role: "PLAYER", createdAt: now, updatedAt: now },
+    ])
+
+    const capeMedia1 = "media-check-1"
+    const capeMedia2 = "media-check-2"
+    await db.insert(schema.contentMedia).values([
+      { id: capeMedia1, mediaType: "IMAGE", objectKey: "capes/chk1.png", mimeType: "image/png", sizeBytes: 2048, createdBy: adminId, createdAt: now },
+      { id: capeMedia2, mediaType: "IMAGE", objectKey: "capes/chk2.png", mimeType: "image/png", sizeBytes: 4096, createdBy: playerId, createdAt: now },
+    ])
+
+    const globalCapeId = "cape-check-global"
+    await db.insert(schema.capes).values({
+      id: globalCapeId,
+      name: "Global Cape",
+      mediaId: capeMedia1,
+      status: "AVAILABLE",
+      createdBy: adminId,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const playerCapeId = "pcape-check-custom"
+    await db.insert(schema.playerCapes).values({
+      id: playerCapeId,
+      userId: playerId,
+      name: "Custom Cape",
+      mediaId: capeMedia2,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // 1. Invalid: NONE with cape_id != null
+    await expect(
+      db.insert(schema.playerCapeSelections).values({
+        userId: playerId,
+        type: "NONE",
+        capeId: globalCapeId,
+        playerCapeId: null,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
+
+    // 2. Invalid: NONE with player_cape_id != null
+    await expect(
+      db.insert(schema.playerCapeSelections).values({
+        userId: playerId,
+        type: "NONE",
+        capeId: null,
+        playerCapeId: playerCapeId,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
+
+    // 3. Invalid: GLOBAL with cape_id == null
+    await expect(
+      db.insert(schema.playerCapeSelections).values({
+        userId: playerId,
+        type: "GLOBAL",
+        capeId: null,
+        playerCapeId: null,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
+
+    // 4. Invalid: GLOBAL with player_cape_id != null
+    await expect(
+      db.insert(schema.playerCapeSelections).values({
+        userId: playerId,
+        type: "GLOBAL",
+        capeId: globalCapeId,
+        playerCapeId: playerCapeId,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
+
+    // 5. Invalid: CUSTOM with player_cape_id == null
+    await expect(
+      db.insert(schema.playerCapeSelections).values({
+        userId: playerId,
+        type: "CUSTOM",
+        capeId: null,
+        playerCapeId: null,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
+
+    // 6. Invalid: CUSTOM with cape_id != null
+    await expect(
+      db.insert(schema.playerCapeSelections).values({
+        userId: playerId,
+        type: "CUSTOM",
+        capeId: globalCapeId,
+        playerCapeId: playerCapeId,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
+
+    // 7. Invalid: Unknown type
+    await expect(
+      db.insert(schema.playerCapeSelections).values({
+        userId: playerId,
+        type: "INVALID",
+        capeId: null,
+        playerCapeId: null,
+        updatedAt: now,
+      }),
+    ).rejects.toThrow()
+  })
+
+  it("performs real upgrade from migration 0011 to 0012 preserving existing global skin selection in player_skin_selections", async () => {
+    const sqlite = new DatabaseSync(":memory:")
+    sqlite.exec("PRAGMA foreign_keys = ON;")
+
+    const migrationsDir = join(__dirname, "../migrations")
+    const sqlFiles = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort()
+
+    // 1. Apply migrations up to 0011
+    const upTo0011 = sqlFiles.filter((f) => !f.startsWith("0012_"))
+    for (const file of upTo0011) {
+      const sqlContent = readFileSync(join(migrationsDir, file), "utf-8")
+      const statements = sqlContent.split("--> statement-breakpoint")
+      for (const statement of statements) {
+        const trimmed = statement.trim()
+        if (trimmed) {
+          sqlite.exec(trimmed)
+        }
+      }
+    }
+
+    const now = new Date().toISOString()
+    const adminId = "admin-upgrade-user"
+    const playerId = "player-upgrade-user"
+    const mediaId = "media-skin-upgrade"
+    const skinId = "skin-global-upgrade-123"
+
+    // 2. Create users
+    sqlite.exec(`
+      INSERT INTO users (id, display_name, role, created_at, updated_at)
+      VALUES ('${adminId}', 'Upgrade Admin', 'ADMIN', '${now}', '${now}'),
+             ('${playerId}', 'Upgrade Player', 'PLAYER', '${now}', '${now}');
+    `)
+
+    // 3. Create content media
+    sqlite.exec(`
+      INSERT INTO content_media (id, media_type, object_key, mime_type, size_bytes, created_by, created_at)
+      VALUES ('${mediaId}', 'IMAGE', 'skins/upgrade.png', 'image/png', 2048, '${adminId}', '${now}');
+    `)
+
+    // 4. Create global skin with model (0011 schema had model)
+    sqlite.exec(`
+      INSERT INTO skins (id, name, model, media_id, status, created_by, created_at, updated_at)
+      VALUES ('${skinId}', 'Steve Upgrade Skin', 'CLASSIC', '${mediaId}', 'AVAILABLE', '${adminId}', '${now}', '${now}');
+    `)
+
+    // 5. Player selects that global skin in player_skin_selections
+    sqlite.exec(`
+      INSERT INTO player_skin_selections (user_id, type, skin_id, updated_at)
+      VALUES ('${playerId}', 'GLOBAL', '${skinId}', '${now}');
+    `)
+
+    // Verify state BEFORE 0012 migration
+    const beforeSel = sqlite.prepare("SELECT * FROM player_skin_selections WHERE user_id = ?").get(playerId) as any
+    expect(beforeSel.type).toBe("GLOBAL")
+    expect(beforeSel.skin_id).toBe(skinId)
+
+    // 6. Apply migration 0012
+    const file0012 = sqlFiles.find((f) => f.startsWith("0012_"))
+    expect(file0012).toBeDefined()
+    const sql0012 = readFileSync(join(migrationsDir, file0012!), "utf-8")
+    const statements0012 = sql0012.split("--> statement-breakpoint")
+    for (const statement of statements0012) {
+      const trimmed = statement.trim()
+      if (trimmed) {
+        sqlite.exec(trimmed)
+      }
+    }
+
+    // 7. Verify state AFTER 0012 migration:
+    // a) Skin still exists
+    const afterSkin = sqlite.prepare("SELECT * FROM skins WHERE id = ?").get(skinId) as any
+    expect(afterSkin).toBeDefined()
+    expect(afterSkin.id).toBe(skinId)
+    expect(afterSkin.name).toBe("Steve Upgrade Skin")
+    expect(afterSkin.model).toBeUndefined() // model column was dropped!
+
+    // b) player_skin_selections is PRESERVED and skin_id is NOT null
+    const afterSel = sqlite.prepare("SELECT * FROM player_skin_selections WHERE user_id = ?").get(playerId) as any
+    expect(afterSel).toBeDefined()
+    expect(afterSel.type).toBe("GLOBAL")
+    expect(afterSel.skin_id).toBe(skinId)
+
+    // c) foreign keys are active
+    const fkStatus = sqlite.prepare("PRAGMA foreign_keys;").get() as any
+    expect(fkStatus.foreign_keys).toBe(1)
+  })
 })
+

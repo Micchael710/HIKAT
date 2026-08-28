@@ -637,6 +637,31 @@ export function validateCapeTextureBuffer(
   }
 }
 
+/**
+ * Computes the scale factor for a Minecraft cape texture layout.
+ * Supports standard Minecraft 2:1 ratio (64x32 and HD multiples: 128x64, 256x128, etc.),
+ * 22x17, and 46x22 (and multiples like 92x44) as supported by skinview3d/skinview-utils.
+ * Returns null if the layout/aspect ratio is incompatible.
+ */
+export function computeCapeScale(width: number, height: number): number | null {
+  if (width <= 0 || height <= 0) return null
+  if (width === 2 * height) {
+    return width / 64
+  } else if (width * 17 === height * 22) {
+    return width / 22
+  } else if (width * 11 === height * 23) {
+    return width / 46
+  }
+  return null
+}
+
+/**
+ * Validates whether dimensions represent a cape layout compatible with skinview3d.
+ */
+export function isCompatibleCapeDimensions(width: number, height: number): boolean {
+  return computeCapeScale(width, height) !== null
+}
+
 
 /**
  * Sanitizes a filename to prevent path traversal, control characters, and dangerous symbols.

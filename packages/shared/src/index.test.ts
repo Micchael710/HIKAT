@@ -272,6 +272,24 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     // 4. Corrupted / non-PNG buffer
     expect(validateCapeTextureBuffer(new Uint8Array(10)).valid).toBe(false)
     expect(validateCapeTextureBuffer(new Uint8Array(40)).valid).toBe(false)
+
+    // 5. Visual compatibility helper (computeCapeScale / isCompatibleCapeDimensions)
+    const { computeCapeScale, isCompatibleCapeDimensions } = await import("./index")
+    expect(computeCapeScale(64, 32)).toBe(1)
+    expect(computeCapeScale(128, 64)).toBe(2)
+    expect(computeCapeScale(256, 128)).toBe(4)
+    expect(computeCapeScale(512, 256)).toBe(8)
+    expect(computeCapeScale(46, 22)).toBe(1)
+    expect(computeCapeScale(92, 44)).toBe(2)
+    expect(computeCapeScale(22, 17)).toBe(1)
+    expect(computeCapeScale(500, 500)).toBeNull()
+    expect(computeCapeScale(100, 200)).toBeNull()
+
+    expect(isCompatibleCapeDimensions(64, 32)).toBe(true)
+    expect(isCompatibleCapeDimensions(128, 64)).toBe(true)
+    expect(isCompatibleCapeDimensions(512, 256)).toBe(true)
+    expect(isCompatibleCapeDimensions(46, 22)).toBe(true)
+    expect(isCompatibleCapeDimensions(500, 500)).toBe(false)
   })
 
   it("validates server task templates, only_when_online policy, and schedule cron formatting", async () => {

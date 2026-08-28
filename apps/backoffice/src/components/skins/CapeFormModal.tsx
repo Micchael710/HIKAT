@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react"
 import type { ThemeMode, CapeItem, CapeStatus } from "../../types"
 import { validateCapeTextureBuffer, MAX_CAPE_SIZE_BYTES } from "@hikat/shared"
+import { loadCapeToCanvas } from "skinview-utils"
 import { capesApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
 import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
@@ -29,7 +30,7 @@ export default function CapeFormModal({
   const [status, setStatus] = useState<CapeStatus>(cape?.status || "AVAILABLE")
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string>(cape?.imageUrl || "")
+  const [previewUrl, setPreviewUrl] = useState<string | null>(cape?.imageUrl || null)
   const [fileError, setFileError] = useState<string | null>(null)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -58,6 +59,23 @@ export default function CapeFormModal({
       const validation = validateCapeTextureBuffer(buffer)
       if (!validation.valid) {
         setFileError(validation.error || "Textura de capa PNG no válida.")
+        return
+      }
+
+      try {
+        const url = URL.createObjectURL(file)
+        const img = new Image()
+        img.src = url
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve()
+          img.onerror = () => reject(new Error("No se pudo cargar la imagen"))
+        })
+        URL.revokeObjectURL(url)
+
+        const tempCanvas = document.createElement("canvas")
+        loadCapeToCanvas(tempCanvas, img)
+      } catch {
+        setFileError("Esta imagen no tiene un formato de capa compatible.")
         return
       }
 

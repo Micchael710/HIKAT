@@ -12,6 +12,7 @@ import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens"
 import SkinViewer3D from "../components/minecraft/SkinViewer3D"
 import SkinCardPreview from "../components/minecraft/SkinCardPreview"
 import CapeCardPreview from "../components/minecraft/CapeCardPreview"
+import { loadCapeToCanvas } from "skinview-utils"
 import LiveToast from "../components/common/LiveToast"
 import { useTranslation } from "../context/LanguageContext"
 import {
@@ -217,6 +218,24 @@ export default function SkinsView({
             validation.error || "El archivo no contiene una textura de capa PNG válida.",
             "error",
           )
+          return
+        }
+
+        // Visual compatibility validation with skinview-utils
+        try {
+          const imgUrl = URL.createObjectURL(file)
+          const img = new Image()
+          img.src = imgUrl
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve()
+            img.onerror = () => reject(new Error("No se pudo cargar la imagen"))
+          })
+          URL.revokeObjectURL(imgUrl)
+
+          const tempCanvas = document.createElement("canvas")
+          loadCapeToCanvas(tempCanvas, img)
+        } catch {
+          showToast("Esta imagen no tiene un formato de capa compatible.", "error")
           return
         }
 
@@ -601,7 +620,6 @@ export default function SkinsView({
                     }
                     width={380}
                     height={520}
-                    model="auto-detect"
                     isCapeMode={skinType === "capa"}
                   />
                 ) : (

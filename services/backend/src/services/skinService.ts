@@ -360,12 +360,21 @@ export async function updateSkin(
     updates.status = nextStatus
   }
 
+  const oldMediaId = existing.mediaId
+
   // 4. All validations passed: reconcile player selections if transitioning to UNAVAILABLE
   if (shouldReconcileStatus) {
     await reconcileSelectionsForGlobalSkin(db, id)
   }
 
   await db.update(schema.skins).set(updates).where(eq(schema.skins.id, id))
+
+  // Clean up old media if texture was replaced
+  if (updates.mediaId && updates.mediaId !== oldMediaId && env.ASSETS) {
+    try {
+      await deleteMedia(db, env, oldMediaId)
+    } catch (_) {}
+  }
 
   const updated = await getSkinById(db, id)
   if (!updated) {

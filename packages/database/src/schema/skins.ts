@@ -1,4 +1,5 @@
-import { sqliteTable, text, index, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text, index, uniqueIndex, check } from "drizzle-orm/sqlite-core"
+import { sql } from "drizzle-orm"
 import { users } from "./users"
 import { contentMedia } from "./content"
 
@@ -22,6 +23,7 @@ export const skins = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
+    check("skins_status_check", sql`${table.status} IN ('AVAILABLE', 'UNAVAILABLE')`),
     index("skins_status_idx").on(table.status),
     index("skins_created_by_idx").on(table.createdBy),
     index("skins_media_id_idx").on(table.mediaId),
@@ -88,6 +90,7 @@ export const capes = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
+    check("capes_status_check", sql`${table.status} IN ('AVAILABLE', 'UNAVAILABLE')`),
     index("capes_status_idx").on(table.status),
     index("capes_created_by_idx").on(table.createdBy),
     index("capes_media_id_idx").on(table.mediaId),
@@ -136,6 +139,10 @@ export const playerCapeSelections = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
+    check(
+      "player_cape_selections_type_check",
+      sql`(${table.type} = 'NONE' AND ${table.capeId} IS NULL AND ${table.playerCapeId} IS NULL) OR (${table.type} = 'GLOBAL' AND ${table.capeId} IS NOT NULL AND ${table.playerCapeId} IS NULL) OR (${table.type} = 'CUSTOM' AND ${table.capeId} IS NULL AND ${table.playerCapeId} IS NOT NULL)`,
+    ),
     index("player_cape_selections_cape_id_idx").on(table.capeId),
     index("player_cape_selections_player_cape_id_idx").on(table.playerCapeId),
   ],

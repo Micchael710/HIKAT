@@ -65,6 +65,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
+      skinview-utils:
+        specifier: ^0.7.1
+        version: 0.7.1
       skinview3d:
         specifier: ^3.4.2
         version: 3.4.2
@@ -126,6 +129,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
+      skinview-utils:
+        specifier: ^0.7.1
+        version: 0.7.1
       skinview3d:
         specifier: ^3.4.2
         version: 3.4.2

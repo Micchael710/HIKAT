@@ -5,6 +5,7 @@ import {
   validateCapeTextureBuffer,
   MAX_CAPE_SIZE_BYTES,
 } from "@hikat/shared"
+import { loadCapeToCanvas } from "skinview-utils"
 
 /**
  * Fetches the public global cape catalog (status: AVAILABLE) from HiKAT Backend.
@@ -325,6 +326,23 @@ export async function uploadPlayerCape(
     throw new Error(
       validation.error || "El archivo no contiene una textura de capa PNG válida.",
     )
+  }
+
+  // Visual compatibility check with skinview-utils
+  try {
+    const imgUrl = URL.createObjectURL(file)
+    const img = new Image()
+    img.src = imgUrl
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error("No se pudo cargar la imagen"))
+    })
+    URL.revokeObjectURL(imgUrl)
+
+    const tempCanvas = document.createElement("canvas")
+    loadCapeToCanvas(tempCanvas, img)
+  } catch {
+    throw new Error("Esta imagen no tiene un formato de capa compatible.")
   }
 
   // 2. Request upload ticket

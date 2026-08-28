@@ -17,6 +17,7 @@ import {
   IconUser,
 } from "../../theme/icons"
 import SkinHeadPreview from "./SkinHeadPreview"
+import CapeCardPreview from "./CapeCardPreview"
 import SkinFormModal from "./SkinFormModal"
 import DeleteSkinModal from "./DeleteSkinModal"
 import PlayerSkinModal from "./PlayerSkinModal"
@@ -616,23 +617,13 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                       cursor: "pointer",
                       width: "64px",
                       height: "96px",
-                      borderRadius: "8px",
-                      overflow: "hidden",
-                      backgroundColor: isDark ? "#0f172a" : "#f1f5f9",
-                      border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                     title="Haz clic para ver en 3D"
                   >
-                    <img
-                      src={cape.imageUrl}
-                      alt={cape.name}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        imageRendering: "pixelated",
-                      }}
-                    />
+                    <CapeCardPreview capeUrl={cape.imageUrl} width={64} height={96} />
                   </div>
                   <h3
                     style={{
@@ -1046,23 +1037,13 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                       cursor: "pointer",
                       width: "64px",
                       height: "96px",
-                      borderRadius: "8px",
-                      overflow: "hidden",
-                      backgroundColor: isDark ? "#0f172a" : "#f1f5f9",
-                      border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                     title="Ver en 3D"
                   >
-                    <img
-                      src={pcape.imageUrl}
-                      alt={pcape.name}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        imageRendering: "pixelated",
-                      }}
-                    />
+                    <CapeCardPreview capeUrl={pcape.imageUrl} width={64} height={96} />
                   </div>
                   <h3
                     style={{

@@ -22,6 +22,7 @@
     "minecraft-launcher-core": "^3.18.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "skinview-utils": "^0.7.1",
     "skinview3d": "^3.4.2",
     "three": "^0.156.1"
   },

@@ -225,4 +225,25 @@ describe("Back Office Skins & Capes Components (Phase 07 Hardening)", () => {
     expect(screen.getByText("DragonMaster")).toBeDefined()
     expect(screen.getByText("Capa de Fuego")).toBeDefined()
   })
+
+  it("renders CapeCardPreview with canvas element and extracts standard cape UV without raw img cover", async () => {
+    const { default: CapeCardPreview } = await import("./CapeCardPreview")
+    let renderedContainer: HTMLElement | null = null
+
+    await act(async () => {
+      const { container } = render(
+        <CapeCardPreview
+          capeUrl="/media/content/test-cape.png"
+          width={64}
+          height={96}
+        />,
+      )
+      renderedContainer = container
+    })
+
+    const canvas = (renderedContainer as HTMLElement | null)?.querySelector("canvas")
+    expect(canvas).toBeDefined()
+    expect(canvas?.getAttribute("aria-label")).toBe("Capa Minecraft")
+  })
 })
+

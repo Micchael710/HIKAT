@@ -323,4 +323,16 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
     expect(res.success).toBe(true)
     expect(res.data?.type).toBe("NONE")
   })
+
+  it("uploadPlayerCape rejects incompatible cape texture dimensions before creating ticket", async () => {
+    // 100x100 PNG is not a valid cape layout
+    const badData = new Uint8Array(100 * 100 * 4).fill(255)
+    const badPng = encodePng({ width: 100, height: 100, data: badData, channels: 4, depth: 8 })
+    const badFile = new File([badPng.buffer as ArrayBuffer], "badcape.png", { type: "image/png" })
+
+    await expect(uploadPlayerCape(badFile, "Bad Cape")).rejects.toThrow(
+      "Esta imagen no tiene un formato de capa compatible.",
+    )
+  })
 })
+

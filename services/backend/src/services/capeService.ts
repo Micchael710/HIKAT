@@ -343,11 +343,20 @@ export async function updateCape(
     updates.status = nextStatus
   }
 
+  const oldMediaId = existing.mediaId
+
   if (shouldReconcileStatus) {
     await reconcileSelectionsForGlobalCape(db, id)
   }
 
   await db.update(schema.capes).set(updates).where(eq(schema.capes.id, id))
+
+  // Clean up old media if texture was replaced
+  if (updates.mediaId && updates.mediaId !== oldMediaId && env.ASSETS) {
+    try {
+      await deleteMedia(db, env, oldMediaId)
+    } catch (_) {}
+  }
 
   const updated = await getCapeById(db, id)
   if (!updated) {

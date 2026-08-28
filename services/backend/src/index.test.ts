@@ -8938,8 +8938,146 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(activeAfterDelJson.data.myActiveCape.capeId).toBeNull()
       expect(activeAfterDelJson.data.myActiveCape.playerCapeId).toBeNull()
     })
+
+    it("cleans up orphaned media on updateSkin and updateCape when texture is replaced, but preserves media if referenced elsewhere", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const adminId = "admin-cleanup-" + crypto.randomUUID()
+      const adminSessionId = "sess-admin-cleanup-" + crypto.randomUUID()
+      const now = new Date().toISOString()
+
+      await db.insert(users).values({
+        id: adminId,
+        displayName: "CleanupAdmin",
+        role: "ADMIN",
+        createdAt: now,
+        updatedAt: now,
+      })
+      await db.insert(sessions).values({
+        id: adminSessionId,
+        userId: adminId,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: now,
+      })
+      const adminToken = await createTestAccessToken({
+        userId: adminId,
+        sessionId: adminSessionId,
+        role: "ADMIN",
+        displayName: "CleanupAdmin",
+      })
+
+      async function createTestMedia(data: Uint8Array, id: string): Promise<string> {
+        await db.insert(contentMedia).values({
+          id,
+          objectKey: `content/${id}.png`,
+          mediaType: "IMAGE",
+          mimeType: "image/png",
+          sizeBytes: data.byteLength,
+          createdBy: adminId,
+          createdAt: new Date().toISOString(),
+        })
+        await mockR2.put(`content/${id}.png`, data.buffer as ArrayBuffer, {
+          httpMetadata: { contentType: "image/png" },
+        })
+        return id
+      }
+
+      // 1. Create two textures for skin
+      const skin1Png = encode({ width: 64, height: 64, data: new Uint8Array(64 * 64 * 4).fill(100), channels: 4, depth: 8 })
+      const skin2Png = encode({ width: 64, height: 64, data: new Uint8Array(64 * 64 * 4).fill(150), channels: 4, depth: 8 })
+
+      const media1Id = await createTestMedia(skin1Png, "media-skin-cleanup-1")
+      const media2Id = await createTestMedia(skin2Png, "media-skin-cleanup-2")
+
+      // Create global skin with media1Id
+      const createSkinRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation CreateSkin($input: CreateSkinInput!) {
+              createSkin(input: $input) { id imageUrl }
+            }`,
+            variables: { input: { name: "Clean Media Skin", mediaId: media1Id, status: "AVAILABLE" } },
+          }),
+        }),
+        testEnv,
+      )
+      const skinId = ((await createSkinRes.json()) as any).data.createSkin.id
+
+      // Update skin with media2Id -> media1Id should be cleaned up as it is orphaned
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation UpdateSkin($id: ID!, $input: UpdateSkinInput!) {
+              updateSkin(id: $id, input: $input) { id imageUrl }
+            }`,
+            variables: { id: skinId, input: { mediaId: media2Id } },
+          }),
+        }),
+        testEnv,
+      )
+
+      // media1Id record should be deleted from contentMedia
+      const oldMediaInDb = await db.select().from(contentMedia).where(eq(contentMedia.id, media1Id)).get()
+      expect(oldMediaInDb).toBeUndefined()
+
+      // 2. Test shared media: create cape with media2Id (which is now shared with the skin)
+      const cape3Png = encode({ width: 64, height: 32, data: new Uint8Array(64 * 32 * 4).fill(200), channels: 4, depth: 8 })
+      const media3Id = await createTestMedia(cape3Png, "media-cape-cleanup-3")
+
+      const createCapeRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation CreateCape($input: CreateCapeInput!) {
+              createCape(input: $input) { id }
+            }`,
+            variables: { input: { name: "Shared Cape", mediaId: media2Id, status: "AVAILABLE" } },
+          }),
+        }),
+        testEnv,
+      )
+      const capeId = ((await createCapeRes.json()) as any).data.createCape.id
+
+      // Update cape to media3Id -> media2Id should NOT be deleted because it is still referenced by the skin!
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation UpdateCape($id: ID!, $input: UpdateCapeInput!) {
+              updateCape(id: $id, input: $input) { id }
+            }`,
+            variables: { id: capeId, input: { mediaId: media3Id } },
+          }),
+        }),
+        testEnv,
+      )
+
+      const sharedMediaInDb = await db.select().from(contentMedia).where(eq(contentMedia.id, media2Id)).get()
+      expect(sharedMediaInDb).toBeDefined()
+    })
   })
 })
+
+
 
 
 
