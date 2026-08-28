@@ -337,6 +337,7 @@ export async function updateSkin(
     updatedAt: new Date().toISOString(),
   }
 
+  // 1. Validate name
   if (input.name !== undefined) {
     const trimmed = String(input.name || "").trim()
     if (!trimmed) {
@@ -348,19 +349,27 @@ export async function updateSkin(
     updates.name = trimmed
   }
 
-  if (input.status !== undefined && input.status !== null) {
-    const nextStatus =
-      input.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE"
-    if (nextStatus === "UNAVAILABLE" && existing.status !== "UNAVAILABLE") {
-      await reconcileSelectionsForGlobalSkin(db, id)
-    }
-    updates.status = nextStatus
-  }
-
+  // 2. Validate media if provided (validates D1, R2, PNG dimensions and model)
   if (input.mediaId !== undefined && input.mediaId !== null) {
     const { model, media } = await inspectSkinMedia(db, env, input.mediaId)
     updates.mediaId = media.id
     updates.model = model
+  }
+
+  // 3. Validate status
+  let shouldReconcileStatus = false
+  if (input.status !== undefined && input.status !== null) {
+    const nextStatus =
+      input.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE"
+    if (nextStatus === "UNAVAILABLE" && existing.status !== "UNAVAILABLE") {
+      shouldReconcileStatus = true
+    }
+    updates.status = nextStatus
+  }
+
+  // 4. All validations passed: reconcile player selections if transitioning to UNAVAILABLE
+  if (shouldReconcileStatus) {
+    await reconcileSelectionsForGlobalSkin(db, id)
   }
 
   await db.update(schema.skins).set(updates).where(eq(schema.skins.id, id))

@@ -760,6 +760,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0008_player_skins.sql",
       "0009_server_operation_locks.sql",
       "0010_skins_active_and_server_tasks.sql",
+      "0011_server_tasks_action.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard

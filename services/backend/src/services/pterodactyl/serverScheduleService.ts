@@ -302,6 +302,81 @@ export function checkTasksMatchTemplate(
 }
 
 /**
+ * Verifies that a Pterodactyl schedule completely matches the D1 metadata and template plan.
+ * Valid only if:
+ * 1. Task sequence matches (action, payload, time_offset)
+ * 2. only_when_online matches plan.onlyWhenOnline
+ * 3. is_active matches d1Record.enabled
+ * 4. cron expressions match (minute, hour, day_of_week, day_of_month, month)
+ */
+export function checkScheduleAndTasksMatch(
+  attr: {
+    is_active?: boolean
+    only_when_online?: boolean
+    cron?: {
+      minute?: string
+      hour?: string
+      day_of_month?: string
+      month?: string
+      day_of_week?: string
+    }
+    tasks?: Array<{
+      attributes?: {
+        action: "command" | "power" | "backup"
+        payload?: string
+        time_offset: number
+      }
+    }>
+  },
+  d1Record: schema.ServerTaskRecord,
+  plan: TemplatePlan,
+): boolean {
+  // 1. Task steps matching
+  if (!checkTasksMatchTemplate(attr.tasks as any, plan)) {
+    return false
+  }
+
+  // 2. only_when_online matching
+  const pteroOnlyOnline = Boolean(attr.only_when_online)
+  if (pteroOnlyOnline !== Boolean(plan.onlyWhenOnline)) {
+    return false
+  }
+
+  // 3. is_active vs enabled matching
+  const d1Enabled = Boolean(d1Record.enabled)
+  const pteroActive = Boolean(attr.is_active)
+  if (d1Enabled !== pteroActive) {
+    return false
+  }
+
+  // 4. cron expression matching
+  const cron = attr.cron || {}
+  const norm = (v?: string | null) => (v ?? "*").trim()
+
+  if (norm(cron.minute) !== norm(d1Record.cronMinute)) {
+    return false
+  }
+
+  if (norm(cron.hour) !== norm(d1Record.cronHour)) {
+    return false
+  }
+
+  if (norm(cron.day_of_week) !== norm(d1Record.cronDayOfWeek)) {
+    return false
+  }
+
+  if (norm(cron.day_of_month) !== "*") {
+    return false
+  }
+
+  if (norm(cron.month) !== "*") {
+    return false
+  }
+
+  return true
+}
+
+/**
  * Lists all automated server tasks, reconciling Pterodactyl with D1 metadata.
  */
 export async function listServerAutomations(
@@ -397,7 +472,7 @@ export async function listServerAutomations(
         delaySeconds: d1Record.delaySeconds,
       })
 
-      const isMatching = checkTasksMatchTemplate(attr.tasks, plan)
+      const isMatching = checkScheduleAndTasksMatch(attr, d1Record, plan)
       if (isMatching) {
         const parsedWeekdays = d1Record.weekdays
           ? JSON.parse(d1Record.weekdays)
@@ -638,7 +713,7 @@ export async function updateServerAutomation(
     )
   }
 
-  // Also verify that current remote tasks match D1 template definition
+  // Also verify that current remote schedule and tasks match D1 template definition
   const currentPlan = buildTemplatePlan({
     template: d1Record.template as ServerTaskTemplate,
     action:
@@ -647,7 +722,7 @@ export async function updateServerAutomation(
     command: d1Record.command,
     delaySeconds: d1Record.delaySeconds,
   })
-  if (!checkTasksMatchTemplate(existingTasks, currentPlan)) {
+  if (!checkScheduleAndTasksMatch(fullSchedule.attributes, d1Record, currentPlan)) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
       "Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.",
@@ -909,7 +984,7 @@ export async function runServerAutomation(
     command: d1Record.command,
     delaySeconds: d1Record.delaySeconds,
   })
-  if (!checkTasksMatchTemplate(existingTasks, currentPlan)) {
+  if (!checkScheduleAndTasksMatch(fullSchedule.attributes, d1Record, currentPlan)) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
       "Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.",
@@ -961,7 +1036,7 @@ export async function deleteServerAutomation(
     command: d1Record.command,
     delaySeconds: d1Record.delaySeconds,
   })
-  if (!checkTasksMatchTemplate(existingTasks, currentPlan)) {
+  if (!checkScheduleAndTasksMatch(fullSchedule.attributes, d1Record, currentPlan)) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
       "Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.",

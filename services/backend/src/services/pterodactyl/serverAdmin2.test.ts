@@ -519,6 +519,7 @@ rcon.password=secret123
         cron: { minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*" },
         is_active: true,
         is_processing: false,
+        only_when_online: true,
         tasks: [
           {
             object: "task",
@@ -1687,6 +1688,236 @@ rcon.password=secret123
         db as any,
       ),
     ).rejects.toThrow("ATENCIÓN: El rollback falló")
+  })
+
+  // Test 45: External hour modification causes isManaged = false and blocks mutations
+  it("Phase 07 Hardening: External hour modification in Pterodactyl marks task unmanaged and read-only", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.serverTasks).values({
+      id: "task-hour-mod",
+      scheduleId: "601",
+      template: "AUTO_BACKUP",
+      action: "BACKUP",
+      name: "Daily Backup",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      enabled: true,
+      templateVersion: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Pterodactyl has hour = 12 instead of 4
+    const modifiedSchedule = {
+      object: "server_schedule",
+      attributes: {
+        id: 601,
+        name: "Daily Backup",
+        cron: { minute: "0", hour: "12", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        only_when_online: true,
+        tasks: [{ attributes: { id: 1, action: "backup", payload: "", time_offset: 0 } }],
+      },
+    }
+
+    const mockClient = {
+      listSchedules: vi.fn().mockResolvedValue({ data: [modifiedSchedule] }),
+      getSchedule: vi.fn().mockResolvedValue(modifiedSchedule),
+      updateSchedule: vi.fn(),
+      executeSchedule: vi.fn(),
+      deleteSchedule: vi.fn(),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    // 1. listServerAutomations marks isManaged: false
+    const list = await listServerAutomations(env, db as any, mockClient as any)
+    expect(list).toHaveLength(1)
+    expect(list[0]?.isManaged).toBe(false)
+    expect(list[0]?.template).toBe("AUTO_BACKUP")
+
+    // 2. update throws
+    await expect(
+      updateServerAutomation(env, "601", { name: "Test", template: "AUTO_BACKUP", frequency: "DAILY", enabled: true }, mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+
+    // 3. run throws
+    await expect(
+      runServerAutomation(env, "601", mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+
+    // 4. delete throws
+    await expect(
+      deleteServerAutomation(env, "601", mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+  })
+
+  // Test 46: External days modification causes isManaged = false and blocks mutations
+  it("Phase 07 Hardening: External days modification in Pterodactyl marks task unmanaged and read-only", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.serverTasks).values({
+      id: "task-days-mod",
+      scheduleId: "602",
+      template: "AUTO_BACKUP",
+      action: "BACKUP",
+      name: "Daily Backup",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      enabled: true,
+      templateVersion: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Pterodactyl has day_of_week = "1,3,5" instead of "*"
+    const modifiedSchedule = {
+      object: "server_schedule",
+      attributes: {
+        id: 602,
+        name: "Daily Backup",
+        cron: { minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "1,3,5" },
+        is_active: true,
+        is_processing: false,
+        only_when_online: true,
+        tasks: [{ attributes: { id: 1, action: "backup", payload: "", time_offset: 0 } }],
+      },
+    }
+
+    const mockClient = {
+      listSchedules: vi.fn().mockResolvedValue({ data: [modifiedSchedule] }),
+      getSchedule: vi.fn().mockResolvedValue(modifiedSchedule),
+      updateSchedule: vi.fn(),
+      executeSchedule: vi.fn(),
+      deleteSchedule: vi.fn(),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const list = await listServerAutomations(env, db as any, mockClient as any)
+    expect(list[0]?.isManaged).toBe(false)
+
+    await expect(
+      updateServerAutomation(env, "602", { name: "Test", template: "AUTO_BACKUP", frequency: "DAILY", enabled: true }, mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+  })
+
+  // Test 47: External only_when_online modification causes isManaged = false and blocks mutations
+  it("Phase 07 Hardening: External only_when_online modification in Pterodactyl marks task unmanaged and read-only", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.serverTasks).values({
+      id: "task-online-mod",
+      scheduleId: "603",
+      template: "AUTO_BACKUP",
+      action: "BACKUP",
+      name: "Daily Backup",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      enabled: true,
+      templateVersion: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Pterodactyl has only_when_online = false instead of true
+    const modifiedSchedule = {
+      object: "server_schedule",
+      attributes: {
+        id: 603,
+        name: "Daily Backup",
+        cron: { minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        only_when_online: false,
+        tasks: [{ attributes: { id: 1, action: "backup", payload: "", time_offset: 0 } }],
+      },
+    }
+
+    const mockClient = {
+      listSchedules: vi.fn().mockResolvedValue({ data: [modifiedSchedule] }),
+      getSchedule: vi.fn().mockResolvedValue(modifiedSchedule),
+      updateSchedule: vi.fn(),
+      executeSchedule: vi.fn(),
+      deleteSchedule: vi.fn(),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const list = await listServerAutomations(env, db as any, mockClient as any)
+    expect(list[0]?.isManaged).toBe(false)
+
+    await expect(
+      updateServerAutomation(env, "603", { name: "Test", template: "AUTO_BACKUP", frequency: "DAILY", enabled: true }, mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+  })
+
+  // Test 48: External task steps modification causes isManaged = false and blocks mutations
+  it("Phase 07 Hardening: External task steps modification marks task unmanaged and read-only", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.serverTasks).values({
+      id: "task-step-mod",
+      scheduleId: "604",
+      template: "AUTO_RESTART",
+      action: "RESTART",
+      name: "Daily Restart",
+      frequency: "DAILY",
+      cronMinute: "0",
+      cronHour: "4",
+      cronDayOfWeek: "*",
+      time: "04:00",
+      enabled: true,
+      templateVersion: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Pterodactyl has task action = "command" instead of power restart
+    const modifiedSchedule = {
+      object: "server_schedule",
+      attributes: {
+        id: 604,
+        name: "Daily Restart",
+        cron: { minute: "0", hour: "4", day_of_month: "*", month: "*", day_of_week: "*" },
+        is_active: true,
+        is_processing: false,
+        only_when_online: true,
+        tasks: [{ attributes: { id: 1, action: "command", payload: "stop", time_offset: 0 } }],
+      },
+    }
+
+    const mockClient = {
+      listSchedules: vi.fn().mockResolvedValue({ data: [modifiedSchedule] }),
+      getSchedule: vi.fn().mockResolvedValue(modifiedSchedule),
+      updateSchedule: vi.fn(),
+      executeSchedule: vi.fn(),
+      deleteSchedule: vi.fn(),
+    }
+
+    const env = { PTERODACTYL_BASE_URL: "https://panel.hikat.net", PTERODACTYL_API_KEY: "key", PTERODACTYL_SERVER_ID: "srv" } as any
+
+    const list = await listServerAutomations(env, db as any, mockClient as any)
+    expect(list[0]?.isManaged).toBe(false)
+
+    await expect(
+      updateServerAutomation(env, "604", { name: "Test", template: "AUTO_RESTART", frequency: "DAILY", enabled: true }, mockClient as any, db as any),
+    ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
   })
 })
 

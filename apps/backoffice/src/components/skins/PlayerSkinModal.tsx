@@ -75,18 +75,17 @@ export default function PlayerSkinModal({
       return
     }
 
+    if (!selectedFile) {
+      setError("Debes seleccionar una nueva textura PNG para guardar cambios.")
+      return
+    }
+
     setError(null)
     setIsSubmitting(true)
     try {
-      let mediaId: string | undefined
-
-      if (selectedFile) {
-        const uploadedMedia = await uploadMediaFile(selectedFile, "IMAGE")
-        mediaId = uploadedMedia.id
-      }
-
+      const uploadedMedia = await uploadMediaFile(selectedFile, "IMAGE")
       await skinsApi.updateAdminPlayerSkin(skin.id, {
-        mediaId,
+        mediaId: uploadedMedia.id,
       })
 
       onSaved()
@@ -166,7 +165,7 @@ export default function PlayerSkinModal({
             >
               {isViewOnly
                 ? "Inspección 3D y detalles de la skin personalizada."
-                : "Modifica el modelo o reemplaza la textura del jugador."}
+                : "Reemplaza la textura PNG de la skin del jugador."}
             </p>
           </div>
 
@@ -478,7 +477,8 @@ export default function PlayerSkinModal({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !selectedFile}
+                title={!selectedFile ? "Selecciona una nueva textura PNG para guardar cambios" : undefined}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -490,8 +490,8 @@ export default function PlayerSkinModal({
                   color: "#ffffff",
                   fontSize: "13px",
                   fontWeight: "600",
-                  cursor: isSubmitting ? "not-allowed" : "pointer",
-                  opacity: isSubmitting ? 0.7 : 1,
+                  cursor: isSubmitting || !selectedFile ? "not-allowed" : "pointer",
+                  opacity: isSubmitting || !selectedFile ? 0.5 : 1,
                 }}
               >
                 {isSubmitting && <IconSpinner size={16} />}

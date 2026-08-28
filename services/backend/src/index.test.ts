@@ -8586,6 +8586,84 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(d1Selection?.type).toBe("CUSTOM")
       expect(d1Selection?.skinId).toBeNull()
     })
+
+    it("Phase 07 Hardening: updateSkin with UNAVAILABLE and invalid media does not produce partial effects", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const player4Id = "player-4-" + crypto.randomUUID()
+      const adminId = "admin-4-" + crypto.randomUUID()
+
+      await db.insert(users).values([
+        { id: player4Id, displayName: "PlayerFour", role: "PLAYER" },
+        { id: adminId, displayName: "AdminFour", role: "ADMIN" },
+      ])
+
+      // Create a global skin
+      const global4Id = "skin-global-4-" + crypto.randomUUID()
+      const media4Id = "media-global-4-" + crypto.randomUUID()
+      await db.insert(contentMedia).values({
+        id: media4Id,
+        objectKey: `content/${media4Id}.png`,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 100,
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+      })
+      await db.insert(skins).values({
+        id: global4Id,
+        name: "Global Skin 4",
+        model: "CLASSIC",
+        mediaId: media4Id,
+        status: "AVAILABLE",
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Player 4 selects this global skin (and has custom skin)
+      await db.insert(playerSkinSelections).values({
+        userId: player4Id,
+        type: "GLOBAL",
+        skinId: global4Id,
+        updatedAt: new Date().toISOString(),
+      })
+      await db.insert(playerSkins).values({
+        id: crypto.randomUUID(),
+        userId: player4Id,
+        mediaId: media4Id,
+        model: "SLIM",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Attempt to update with status UNAVAILABLE and a NON-EXISTENT mediaId
+      const { updateSkin } = await import("./services/skinService")
+      await expect(
+        updateSkin(db, testEnv, global4Id, {
+          status: "UNAVAILABLE",
+          mediaId: "non-existent-media-id",
+        }),
+      ).rejects.toThrow("La textura de skin seleccionada no existe.")
+
+      // 1. Skin status must STILL be AVAILABLE
+      const skinAfter = await db
+        .select()
+        .from(skins)
+        .where(eq(skins.id, global4Id))
+        .get()
+      expect(skinAfter?.status).toBe("AVAILABLE")
+
+      // 2. Player selection must STILL be GLOBAL + global4Id (NOT reconciled to CUSTOM)
+      const selectionAfter = await db
+        .select()
+        .from(playerSkinSelections)
+        .where(eq(playerSkinSelections.userId, player4Id))
+        .get()
+      expect(selectionAfter?.type).toBe("GLOBAL")
+      expect(selectionAfter?.skinId).toBe(global4Id)
+    })
   })
 })
 
