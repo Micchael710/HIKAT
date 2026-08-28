@@ -84,18 +84,42 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
       })
   }
 
-  // Trigger search on tab changes
+  // Clear debounce and trigger search on tab changes
   useEffect(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current)
+      debounceTimer.current = null
+    }
     setOffset(0)
     executeSearch(query, selectedContentType, selectedProviderTab, 0, false)
+
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current)
+        debounceTimer.current = null
+      }
+    }
   }, [selectedContentType, selectedProviderTab])
+
+  // Clean up on component unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current)
+        debounceTimer.current = null
+      }
+      requestIdRef.current++
+    }
+  }, [])
 
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     setQuery(val)
     setOffset(0)
 
-    if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current)
+    }
     debounceTimer.current = setTimeout(() => {
       executeSearch(val, selectedContentType, selectedProviderTab, 0, false)
     }, 350)

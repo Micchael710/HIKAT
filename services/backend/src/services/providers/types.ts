@@ -52,7 +52,7 @@ export interface NormalizedModVersion {
   sha256?: string | null
   hashes?: {
     sha1?: string
-    sha256?: string
+    sha512?: string
     md5?: string
   }
   downloadUrl: string

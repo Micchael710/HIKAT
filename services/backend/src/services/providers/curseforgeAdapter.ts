@@ -27,6 +27,7 @@ const NEOFORGE_LOADER_TYPE = 6
 
 export class CurseForgeAdapter implements ModProviderAdapter {
   readonly provider = "CURSEFORGE" as const
+  private classIdCache: Map<ContentTypeGql, number> | null = null
 
   isConfigured(env: Env): boolean {
     return Boolean(env.CURSEFORGE_API_KEY && env.CURSEFORGE_API_KEY.trim())
@@ -43,6 +44,55 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     }
   }
 
+  async resolveClassId(env: Env, contentType: ContentTypeGql): Promise<number> {
+    if (this.classIdCache && this.classIdCache.has(contentType)) {
+      return this.classIdCache.get(contentType)!
+    }
+
+    const fallbackMap: Record<ContentTypeGql, number> = {
+      MOD: 6,
+      RESOURCE_PACK: 12,
+      DATA_PACK: 6945,
+      SHADER: 6552,
+    }
+
+    if (!this.isConfigured(env)) {
+      return fallbackMap[contentType]
+    }
+
+    try {
+      const baseUrl = this.getBaseUrl(env)
+      const res = await fetch(`${baseUrl}/categories?gameId=${MINECRAFT_GAME_ID}&classesOnly=true`, {
+        headers: this.getHeaders(env),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { data?: Array<{ id: number; name?: string; slug?: string }> }
+        if (data.data && Array.isArray(data.data)) {
+          const map = new Map<ContentTypeGql, number>()
+          for (const cls of data.data) {
+            const name = (cls.name || "").toLowerCase()
+            const slug = (cls.slug || "").toLowerCase()
+            if (slug === "mc-mods" || name === "mods") map.set("MOD", cls.id)
+            else if (slug === "texture-packs" || name === "resource packs") map.set("RESOURCE_PACK", cls.id)
+            else if (slug === "data-packs" || name === "data packs") map.set("DATA_PACK", cls.id)
+            else if (slug === "shaders" || name.includes("shader") || slug.includes("customization")) map.set("SHADER", cls.id)
+          }
+          for (const [ct, id] of Object.entries(fallbackMap)) {
+            if (!map.has(ct as ContentTypeGql)) {
+              map.set(ct as ContentTypeGql, id)
+            }
+          }
+          this.classIdCache = map
+          return map.get(contentType) || fallbackMap[contentType]
+        }
+      }
+    } catch {
+      // Fallback on error
+    }
+
+    return fallbackMap[contentType]
+  }
+
   async searchMods(
     env: Env,
     query: string,
@@ -57,7 +107,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     }
 
     const baseUrl = this.getBaseUrl(env)
-    const classId = CURSEFORGE_CLASS_MAP[contentType] || 6
+    const classId = await this.resolveClassId(env, contentType)
 
     const paramsRecord: Record<string, string> = {
       gameId: String(MINECRAFT_GAME_ID),
@@ -103,6 +153,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
           categories?: Array<{ name: string }>
           dateCreated?: string
           dateModified?: string
+          classId?: number
         }>
         pagination?: { totalCount?: number }
       }
@@ -171,11 +222,20 @@ export class CurseForgeAdapter implements ModProviderAdapter {
           categories?: Array<{ name: string }>
           dateCreated?: string
           dateModified?: string
+          classId?: number
+          mainCategoryId?: number
         }
       }
 
       const mod = data.data
       if (!mod) return null
+
+      const classId = mod.classId || mod.mainCategoryId
+      let discoveredType: ContentTypeGql = contentType
+      if (classId === 6) discoveredType = "MOD"
+      else if (classId === 12) discoveredType = "RESOURCE_PACK"
+      else if (classId === 6945) discoveredType = "DATA_PACK"
+      else if (classId === 6552) discoveredType = "SHADER"
 
       return {
         provider: "CURSEFORGE",
@@ -189,7 +249,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         downloads: Number(mod.downloadCount || 0),
         follows: null,
         categories: mod.categories?.map((c) => c.name) || [],
-        contentType,
+        contentType: discoveredType,
         environment: null,
         publishedAt: mod.dateCreated || null,
         updatedAt: mod.dateModified || null,
@@ -339,9 +399,23 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       }
     })
 
+    const rawGameVersions: string[] = file.gameVersions || []
+    const extractedLoaders: string[] = []
+    const extractedMcVersions: string[] = []
+
+    for (const gv of rawGameVersions) {
+      const lower = String(gv).toLowerCase()
+      if (lower === "neoforge") extractedLoaders.push("NeoForge")
+      else if (lower === "forge") extractedLoaders.push("Forge")
+      else if (lower === "fabric") extractedLoaders.push("Fabric")
+      else if (lower === "quilt") extractedLoaders.push("Quilt")
+      else if (lower === "rift") extractedLoaders.push("Rift")
+      else if (/^\d+\.\d+(\.\d+)?$/.test(gv)) extractedMcVersions.push(gv)
+    }
+
+    // Official CurseForge file hashes: algo 1 = SHA-1, algo 2 = MD5
     const sha1 = file.hashes?.find((h: any) => h.algo === 1)?.value || null
     const md5 = file.hashes?.find((h: any) => h.algo === 2)?.value || null
-    const sha256 = file.hashes?.find((h: any) => h.algo === 3)?.value || null
 
     return {
       id: String(file.id),
@@ -350,17 +424,23 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       versionNumber: file.displayName || file.fileName,
       name: file.displayName || file.fileName,
       releaseType,
-      gameVersions: file.gameVersions || (defaultMc ? [defaultMc] : []),
-      loaders: contentType === "MOD" ? ["NeoForge"] : [],
+      gameVersions:
+        extractedMcVersions.length > 0
+          ? extractedMcVersions
+          : rawGameVersions.length > 0
+          ? rawGameVersions
+          : defaultMc
+          ? [defaultMc]
+          : [],
+      loaders: contentType === "MOD" ? extractedLoaders : [],
       publishedAt: file.fileDate || new Date().toISOString(),
       downloads: Number(file.downloadCount || 0),
       filename: file.fileName || `${file.displayName || "file"}.jar`,
       sizeBytes: Number(file.fileLength || 0),
-      sha256,
+      sha256: null,
       hashes: {
         sha1: sha1 || undefined,
         md5: md5 || undefined,
-        sha256: sha256 || undefined,
       },
       downloadUrl,
       contentType,

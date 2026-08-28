@@ -1075,6 +1075,25 @@ export function validateGameFileBuffer(
         error: "El archivo no es un archivo .jar o .zip válido.",
       }
     }
+  } else if (category === "DATA_PACK") {
+    if (!cleanName.endsWith(".zip")) {
+      return {
+        valid: false,
+        error: "Un data pack debe tener extensión .zip.",
+      }
+    }
+    if (
+      bytes.length < 4 ||
+      bytes[0] !== 0x50 ||
+      bytes[1] !== 0x4b ||
+      bytes[2] !== 0x03 ||
+      bytes[3] !== 0x04
+    ) {
+      return {
+        valid: false,
+        error: "El archivo no es un data pack .zip válido.",
+      }
+    }
   } else if (category === "RESOURCE_PACK" || category === "SHADER_PACK") {
     if (!cleanName.endsWith(".zip")) {
       return {

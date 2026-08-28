@@ -180,11 +180,12 @@ export class ModProviderManager {
       }
     }
 
-    // "Todos" (ALL providers in parallel with graceful partial degradation)
+    // "Todos" (ALL providers in parallel with deterministic gap-free pagination)
+    const fetchLimit = offset + limit
     const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-      this.modrinth.searchMods(env, query, minecraftVersion, loader, limit, offset, contentType),
+      this.modrinth.searchMods(env, query, minecraftVersion, loader, fetchLimit, 0, contentType),
       this.curseforge.isConfigured(env)
-        ? this.curseforge.searchMods(env, query, minecraftVersion, loader, limit, offset, contentType)
+        ? this.curseforge.searchMods(env, query, minecraftVersion, loader, fetchLimit, 0, contentType)
         : Promise.resolve({ items: [], totalCount: 0 }),
     ])
 
@@ -221,7 +222,7 @@ export class ModProviderManager {
     const modrinthItems = modrinthResult.status === "fulfilled" ? modrinthResult.value.items : []
     const curseforgeItems = curseforgeResult.status === "fulfilled" ? curseforgeResult.value.items : []
 
-    // Interleave results preserving relevance ranking
+    // Interleave results preserving relevance ranking deterministically
     const maxLength = Math.max(modrinthItems.length, curseforgeItems.length)
     for (let i = 0; i < maxLength; i++) {
       if (i < modrinthItems.length) allItems.push(modrinthItems[i])
@@ -229,7 +230,7 @@ export class ModProviderManager {
     }
 
     return {
-      items: allItems.slice(0, limit),
+      items: allItems.slice(offset, offset + limit),
       totalCount: totalCount || allItems.length,
       providersStatus,
       minecraftVersion,
@@ -265,6 +266,13 @@ export class ModProviderManager {
       throw createGraphQLError("Proyecto no encontrado en el proveedor.", "NOT_FOUND")
     }
 
+    if (project.contentType && project.contentType !== contentType) {
+      throw createGraphQLError(
+        `El proyecto "${project.name}" es de tipo ${project.contentType}, no corresponde al tipo solicitado ${contentType}.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
     // Check if installed in active draft
     let installedVersion: string | null = null
     let isInstalled = false
@@ -275,6 +283,8 @@ export class ModProviderManager {
       .where(eq(schema.gameReleases.status, "DRAFT"))
       .get()
 
+    const targetCategory = contentType === "SHADER" ? "SHADER_PACK" : contentType
+
     if (draft) {
       const installedFile = await db
         .select()
@@ -284,6 +294,7 @@ export class ModProviderManager {
             eq(schema.gameReleaseFiles.releaseId, draft.id),
             eq(schema.gameReleaseFiles.sourceProvider, provider),
             eq(schema.gameReleaseFiles.sourceProjectId, projectId),
+            eq(schema.gameReleaseFiles.category, targetCategory),
           ),
         )
         .get()
@@ -362,7 +373,20 @@ export class ModProviderManager {
     const conflicts: string[] = []
     const visitedBranches = new Set<string>()
 
-    // 2. Fetch root project and version with strict compatibility validation
+    // 2. Fetch root project and validate content type
+    const rootProject = await adapter.getProject(env, input.projectId, contentType)
+    if (!rootProject) {
+      throw createGraphQLError("Proyecto no encontrado en el proveedor.", "NOT_FOUND")
+    }
+
+    if (rootProject.contentType && rootProject.contentType !== contentType) {
+      throw createGraphQLError(
+        `El proyecto "${rootProject.name}" es de tipo ${rootProject.contentType}, no corresponde al tipo solicitado ${contentType}.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    // Fetch compatible versions with strict compatibility validation
     const rootCompatibleVersions = await adapter.getCompatibleVersions(
       env,
       input.projectId,
@@ -400,7 +424,6 @@ export class ModProviderManager {
       )
     }
 
-    const rootProject = await adapter.getProject(env, input.projectId, contentType)
     const rootProjectName = rootProject?.name || rootVersion.name || "Elemento Principal"
     const rootLogicalPath = getLogicalPathForContent(contentType, rootVersion.filename)
 
@@ -408,8 +431,12 @@ export class ModProviderManager {
     const rootKey = `${input.provider}:${input.projectId}`
     visitedBranches.add(rootKey)
 
+    const targetCategory = contentType === "SHADER" ? "SHADER_PACK" : contentType
     const existingRoot = draftFiles.find(
-      (f) => f.sourceProvider === input.provider && f.sourceProjectId === input.projectId,
+      (f) =>
+        f.sourceProvider === input.provider &&
+        f.sourceProjectId === input.projectId &&
+        f.category === targetCategory,
     )
 
     let rootAction: "INSTALL" | "UPDATE" | "ALREADY_INSTALLED" | "CONFLICT" = "INSTALL"
@@ -620,9 +647,13 @@ export class ModProviderManager {
         const depContentType: ContentTypeGql = depProject?.contentType || selectedDepVersion.contentType || "MOD"
         const depProjectName = depProject?.name || dep.projectName || selectedDepVersion.name || "Dependencia"
         const depLogicalPath = getLogicalPathForContent(depContentType, selectedDepVersion.filename)
+        const depTargetCategory = depContentType === "SHADER" ? "SHADER_PACK" : depContentType
 
         const existingDep = draftFiles.find(
-          (f) => f.sourceProvider === current.provider && f.sourceProjectId === depProjectId,
+          (f) =>
+            f.sourceProvider === current.provider &&
+            f.sourceProjectId === depProjectId &&
+            f.category === depTargetCategory,
         )
 
         let depAction: "INSTALL" | "UPDATE" | "ALREADY_INSTALLED" | "CONFLICT" = "INSTALL"

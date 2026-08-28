@@ -21,6 +21,13 @@ import {
 } from "../game/releaseService"
 import { deleteR2ObjectIfUnreferenced } from "../game/gameFileService"
 
+type BatchStatements = Parameters<Database["batch"]>[0]
+type BatchStatement = BatchStatements[number]
+
+function asBatchTuple(statements: BatchStatement[]): BatchStatements {
+  return [statements[0]!, ...statements.slice(1)] as unknown as BatchStatements
+}
+
 export async function installModPlan(
   db: Database,
   env: Env,
@@ -203,15 +210,20 @@ export async function installModPlan(
           .join("")
           .toLowerCase()
 
-        // Verify provider checksum if provided
-        if (versionObj?.hashes?.sha256 && versionObj.hashes.sha256.toLowerCase() !== sha256) {
-          throw createGraphQLError(
-            `Error de integridad: el hash SHA-256 descargado para "${item.projectName}" no coincide con el proveedor.`,
-            "VALIDATION_ERROR",
-          )
-        }
-
-        if (versionObj?.hashes?.sha1) {
+        // Verify provider checksum if provided (SHA-512 for Modrinth, SHA-1 for CurseForge/Modrinth)
+        if (versionObj?.hashes?.sha512) {
+          const sha512Buffer = await crypto.subtle.digest("SHA-512", buffer.buffer as ArrayBuffer)
+          const computedSha512 = Array.from(new Uint8Array(sha512Buffer))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+            .toLowerCase()
+          if (computedSha512 !== versionObj.hashes.sha512.toLowerCase()) {
+            throw createGraphQLError(
+              `Error de integridad: el hash SHA-512 descargado para "${item.projectName}" no coincide con el proveedor.`,
+              "VALIDATION_ERROR",
+            )
+          }
+        } else if (versionObj?.hashes?.sha1) {
           const sha1Buffer = await crypto.subtle.digest("SHA-1", buffer.buffer as ArrayBuffer)
           const computedSha1 = Array.from(new Uint8Array(sha1Buffer))
             .map((b) => b.toString(16).padStart(2, "0"))
@@ -262,7 +274,7 @@ export async function installModPlan(
 
     // 5. Construct ALL D1 statements into a single atomic batch
     const now = new Date().toISOString()
-    const statements: any[] = []
+    const statements: BatchStatement[] = []
 
     for (const downloaded of downloadedItems) {
       const { item, filename, sizeBytes, sha256, objectKey, category } = downloaded
@@ -271,7 +283,10 @@ export async function installModPlan(
       )
 
       const existingByProvider = draftFiles.find(
-        (f) => f.sourceProvider === item.provider && f.sourceProjectId === item.projectId,
+        (f) =>
+          f.sourceProvider === item.provider &&
+          f.sourceProjectId === item.projectId &&
+          f.category === category,
       )
 
       const defaultPolicy: SyncPolicyGql | null =
@@ -330,7 +345,7 @@ export async function installModPlan(
 
     // 6. Execute atomic D1 batch!
     if (statements.length > 0) {
-      await db.batch(statements as any)
+      await db.batch(asBatchTuple(statements))
     }
 
     // 7. Clean up old unreferenced R2 objects ONLY after D1 batch succeeds

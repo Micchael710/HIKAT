@@ -15,16 +15,35 @@ import type {
 const DEFAULT_MODRINTH_BASE_URL = "https://api.modrinth.com/v2"
 const USER_AGENT = "HiKAT/0.1.0 (contact@hikat.local)"
 
+function isModrinthDataPack(
+  allProjectTypes?: string[],
+  categories?: string[],
+  additionalCategories?: string[],
+): boolean {
+  const allTypes = (allProjectTypes || []).map((t) => t.toLowerCase())
+  const cats = (categories || []).map((c) => c.toLowerCase())
+  const addCats = (additionalCategories || []).map((c) => c.toLowerCase())
+  return (
+    allTypes.includes("datapack") ||
+    cats.includes("datapack") ||
+    addCats.includes("datapack")
+  )
+}
+
 function mapModrinthProjectTypeToContentType(
   projectType?: string,
+  allProjectTypes?: string[],
   categories?: string[],
+  additionalCategories?: string[],
   fallback: ContentTypeGql = "MOD",
 ): ContentTypeGql {
+  if (isModrinthDataPack(allProjectTypes, categories, additionalCategories)) {
+    return "DATA_PACK"
+  }
   const pt = projectType?.toLowerCase()
   if (pt === "mod") return "MOD"
   if (pt === "resourcepack") return "RESOURCE_PACK"
   if (pt === "shader") return "SHADER"
-  if (pt === "datapack" || categories?.includes("datapack")) return "DATA_PACK"
   return fallback
 }
 
@@ -59,7 +78,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
   ): Promise<{ items: NormalizedModProject[]; totalCount: number }> {
     const baseUrl = this.getBaseUrl(env)
 
-    // Build facets per content type
+    // Build facets per content type according to official Modrinth v2 documentation
     const facets: string[][] = []
 
     if (contentType === "MOD") {
@@ -73,7 +92,8 @@ export class ModrinthAdapter implements ModProviderAdapter {
       facets.push(["project_type:shader"])
       facets.push([`versions:${minecraftVersion}`])
     } else if (contentType === "DATA_PACK") {
-      facets.push(["project_type:datapack"])
+      // In Modrinth, Data Packs are identified by categories:datapack
+      facets.push(["categories:datapack"])
       facets.push([`versions:${minecraftVersion}`])
     }
 
@@ -111,6 +131,8 @@ export class ModrinthAdapter implements ModProviderAdapter {
           description: string
           author: string
           categories: string[]
+          additional_categories?: string[]
+          all_project_types?: string[]
           downloads: number
           follows: number
           icon_url?: string | null
@@ -127,7 +149,9 @@ export class ModrinthAdapter implements ModProviderAdapter {
       const items: NormalizedModProject[] = (data.hits || []).map((hit) => {
         const itemType = mapModrinthProjectTypeToContentType(
           hit.project_type,
+          hit.all_project_types,
           hit.categories,
+          hit.additional_categories,
           contentType,
         )
         const environment = mapModrinthEnvironment(hit.client_side, hit.server_side)
@@ -191,6 +215,8 @@ export class ModrinthAdapter implements ModProviderAdapter {
         body?: string
         organization?: string
         categories: string[]
+        additional_categories?: string[]
+        all_project_types?: string[]
         downloads: number
         followers: number
         icon_url?: string | null
@@ -203,7 +229,9 @@ export class ModrinthAdapter implements ModProviderAdapter {
 
       const itemType = mapModrinthProjectTypeToContentType(
         data.project_type,
+        data.all_project_types,
         data.categories,
+        data.additional_categories,
         contentType,
       )
       const environment = mapModrinthEnvironment(data.client_side, data.server_side)
@@ -362,10 +390,10 @@ export class ModrinthAdapter implements ModProviderAdapter {
       downloads: Number(raw.downloads || 0),
       filename: primaryFile.filename,
       sizeBytes: Number(primaryFile.size || 0),
-      sha256: hashes.sha256 || null,
+      sha256: null,
       hashes: {
         sha1: hashes.sha1,
-        sha256: hashes.sha256,
+        sha512: hashes.sha512,
       },
       downloadUrl: primaryFile.url,
       contentType: fallbackContentType,
