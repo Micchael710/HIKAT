@@ -479,8 +479,43 @@ describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
     // 3. Fallback convention when no explicit ancestor policy is configured
     expect(resolveEffectiveGamePolicy("mods/jei.jar", null)).toBe("NO_MODIFICABLE")
     expect(resolveEffectiveGamePolicy("config/jei.toml", null)).toBe("MODIFICABLE")
+    expect(resolveEffectiveGamePolicy("defaultconfigs/server.toml", null)).toBe("MODIFICABLE")
+    expect(resolveEffectiveGamePolicy("resourcepacks/custom/pack.mcmeta", null)).toBe("MODIFICABLE")
+    expect(resolveEffectiveGamePolicy("shaderpacks/bsl/settings.txt", null)).toBe("MODIFICABLE")
     expect(resolveEffectiveGamePolicy("options.txt", null)).toBe("MODIFICABLE")
     expect(resolveEffectiveGamePolicy("custom/other.dat", null)).toBe("NO_MODIFICABLE")
+  })
+
+  it("validates filesystem tree invariants (file vs directory collision and file ancestors)", async () => {
+    const { validateGameTreeInvariants } = await import("./index")
+
+    // Valid tree
+    const validCheck = validateGameTreeInvariants(
+      [
+        { logicalPath: "config", isDirectory: true },
+        { logicalPath: "config/jei.toml", isDirectory: false },
+        { logicalPath: "mods", isDirectory: true },
+        { logicalPath: "mods/create.jar", isDirectory: false },
+      ],
+      [{ logicalPath: "config/sub/other.json", isDirectory: false }],
+    )
+    expect(validCheck.valid).toBe(true)
+
+    // Coexistence conflict (file and folder with same path)
+    const conflictCheck = validateGameTreeInvariants(
+      [{ logicalPath: "foo", isDirectory: false }],
+      [{ logicalPath: "foo", isDirectory: true }],
+    )
+    expect(conflictCheck.valid).toBe(false)
+    expect(conflictCheck.error).toContain("simultáneamente")
+
+    // File as ancestor of another file
+    const fileAncestorCheck = validateGameTreeInvariants(
+      [{ logicalPath: "mods/create.jar", isDirectory: false }],
+      [{ logicalPath: "mods/create.jar/invalid.txt", isDirectory: false }],
+    )
+    expect(fileAncestorCheck.valid).toBe(false)
+    expect(fileAncestorCheck.error).toContain("no puede contener")
   })
 })
 

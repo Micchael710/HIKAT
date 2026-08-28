@@ -953,6 +953,81 @@ export function resolveEffectiveGamePolicy(
   return "NO_MODIFICABLE"
 }
 
+export interface GameTreeItemCheck {
+  logicalPath: string
+  isDirectory: boolean
+}
+
+/**
+ * Validates filesystem tree invariants across a set of active release files.
+ * Invariants:
+ * 1. A file cannot have descendants (e.g. if 'foo' is a file, cannot have 'foo/bar').
+ * 2. A file and directory cannot coexist at the exact same logicalPath.
+ */
+export function validateGameTreeInvariants(
+  existingItems: GameTreeItemCheck[],
+  pendingItems: GameTreeItemCheck[] = [],
+  options?: {
+    ignoredExistingPaths?: Set<string>
+  },
+): { valid: boolean; error?: string } {
+  const filePaths = new Set<string>()
+  const dirPaths = new Set<string>()
+  const ignored = options?.ignoredExistingPaths ?? new Set<string>()
+
+  // Combine items
+  for (const item of existingItems) {
+    if (ignored.has(item.logicalPath)) continue
+    if (item.isDirectory) {
+      dirPaths.add(item.logicalPath)
+    } else {
+      filePaths.add(item.logicalPath)
+    }
+  }
+
+  for (const item of pendingItems) {
+    if (item.isDirectory) {
+      dirPaths.add(item.logicalPath)
+    } else {
+      filePaths.add(item.logicalPath)
+    }
+  }
+
+  // 1. Check exact collision between file and directory
+  for (const f of filePaths) {
+    if (dirPaths.has(f)) {
+      return {
+        valid: false,
+        error: `Conflicto de tipo en el árbol: "${f}" no puede ser simultáneamente un archivo y una carpeta.`,
+      }
+    }
+  }
+
+  // 2. Check that no file is an ancestor of any file or directory
+  for (const f of filePaths) {
+    const prefix = `${f}/`
+    for (const otherFile of filePaths) {
+      if (otherFile.startsWith(prefix)) {
+        return {
+          valid: false,
+          error: `Estructura de árbol inválida: el archivo "${f}" no puede contener elementos descendientes como "${otherFile}".`,
+        }
+      }
+    }
+    for (const otherDir of dirPaths) {
+      if (otherDir.startsWith(prefix)) {
+        return {
+          valid: false,
+          error: `Estructura de árbol inválida: el archivo "${f}" no puede contener la carpeta descendiente "${otherDir}".`,
+        }
+      }
+    }
+  }
+
+  return { valid: true }
+}
+
+
 /**
  * Validates a game binary file buffer against category requirements.
  * For JAR, RESOURCE_PACK, and SHADER_PACK, enforces standard ZIP/JAR header magic bytes (50 4B 03 04).

@@ -1368,7 +1368,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return discardGameDraft(context.db)
+      return discardGameDraft(context.db, context.env)
     },
 
     createGameFileUpload: async (
@@ -1404,7 +1404,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return updateGameFile(context.db, args.id, args.input)
+      return updateGameFile(context.db, args.id, args.input, context.env)
     },
 
     saveGameFileContent: async (
@@ -1476,7 +1476,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return deleteGamePaths(context.db, args.paths, identity.userId)
+      return deleteGamePaths(context.db, args.paths, identity.userId, context.env)
     },
 
     setGamePathPolicy: async (

@@ -441,7 +441,7 @@ export async function prepareGameDraft(
   return formatGameRelease(draftRelease, clonedFiles)
 }
 
-export async function discardGameDraft(db: Database): Promise<boolean> {
+export async function discardGameDraft(db: Database, env?: Env): Promise<boolean> {
   const draft = await db
     .select()
     .from(schema.gameReleases)
@@ -450,8 +450,35 @@ export async function discardGameDraft(db: Database): Promise<boolean> {
 
   if (!draft) return true
 
+  const draftFiles = await db
+    .select()
+    .from(schema.gameReleaseFiles)
+    .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
+    .all()
+
   // Cascade delete removes gameReleaseFiles belonging to the draft
   await db.delete(schema.gameReleases).where(eq(schema.gameReleases.id, draft.id))
+
+  // Clean up R2 objects exclusive to the draft
+  if (env?.ASSETS) {
+    for (const f of draftFiles) {
+      if (f.objectKey) {
+        try {
+          const refs = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(schema.gameReleaseFiles)
+            .where(eq(schema.gameReleaseFiles.objectKey, f.objectKey))
+            .get()
+          if (!refs || Number(refs.count) === 0) {
+            await env.ASSETS.delete(f.objectKey)
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  }
+
   return true
 }
 

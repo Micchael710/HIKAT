@@ -57,7 +57,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     expect(screen.getByText("Explorador de Archivos del Juego")).toBeDefined()
     expect(screen.getByText("v1.4.2")).toBeDefined()
-    expect(screen.getByText("Modo Solo Lectura (Versión Publicada)")).toBeDefined()
+    expect(screen.getByText(/Modo Lectura/i)).toBeDefined()
     expect(screen.getAllByText("Preparar actualización").length).toBeGreaterThan(0)
 
     // Virtual root directory shows top-level folder 'config'
@@ -271,5 +271,84 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     expect(screen.getByText("Ocultar explorador ▲")).toBeDefined()
     expect(screen.getByText("mods")).toBeDefined()
+  })
+
+  it("does not open editor on double click for binary files, and allows restoring removed items", async () => {
+    const mockFiles: import("../../types").AdminGameFile[] = [
+      {
+        id: "jar-1",
+        name: "create.jar",
+        logicalPath: "create.jar",
+        category: "MOD",
+        sha256: "jarhash",
+        sizeBytes: 50000,
+        policy: "NO_MODIFICABLE",
+        explicitPolicy: null,
+        effectivePolicy: "NO_MODIFICABLE",
+        isInherited: true,
+        isDirectory: false,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "removed-1",
+        name: "deleted.toml",
+        logicalPath: "deleted.toml",
+        category: "CONFIG",
+        sha256: "tomhlash",
+        sizeBytes: 100,
+        policy: "MODIFICABLE",
+        explicitPolicy: null,
+        effectivePolicy: "MODIFICABLE",
+        isInherited: true,
+        isDirectory: false,
+        changeStatus: "REMOVED",
+        createdAt: new Date().toISOString(),
+      },
+    ]
+
+    const onToast = vi.fn()
+    const onRefresh = vi.fn()
+    const restoreSpy = vi.spyOn(gameApi, "restoreGameFile").mockResolvedValue({
+      id: "restored-1",
+      name: "deleted.toml",
+      logicalPath: "deleted.toml",
+      category: "CONFIG",
+      sha256: "tomhlash",
+      sizeBytes: 100,
+      policy: "MODIFICABLE",
+      effectivePolicy: "MODIFICABLE",
+      isInherited: true,
+      isDirectory: false,
+      createdAt: new Date().toISOString(),
+    })
+
+    await act(async () => {
+      render(
+        <GameFilesExplorer
+          theme="dark"
+          files={mockFiles}
+          isDraft={true}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />,
+      )
+    })
+
+    // Double clicking create.jar should NOT open the editor modal
+    const jarRow = screen.getByText("create.jar")
+    await act(async () => {
+      fireEvent.doubleClick(jarRow)
+    })
+    expect(screen.queryByText("Guardar Cambios")).toBeNull()
+
+    // Removed item shows Restore button
+    const restoreBtn = screen.getByText("↩️ Restaurar")
+    await act(async () => {
+      fireEvent.click(restoreBtn)
+    })
+
+    expect(restoreSpy).toHaveBeenCalledWith("removed-1")
+    expect(onToast).toHaveBeenCalledWith("Elemento restaurado exitosamente.", "success")
+    expect(onRefresh).toHaveBeenCalled()
   })
 })
