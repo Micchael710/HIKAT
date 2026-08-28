@@ -546,11 +546,15 @@ export interface SetActiveCapeInputGql {
 export type GameFileCategoryGql =
   | "MOD"
   | "RESOURCE_PACK"
+  | "DATA_PACK"
   | "SHADER_PACK"
   | "KUBEJS"
   | "SCRIPT"
   | "CONFIG"
   | "GENERAL"
+
+export type ContentTypeGql = "MOD" | "RESOURCE_PACK" | "DATA_PACK" | "SHADER"
+export type ModEnvironmentGql = "CLIENT" | "SERVER" | "BOTH" | "UNKNOWN"
 
 export type GameReleaseStatusGql = "DRAFT" | "PUBLISHED" | "ARCHIVED"
 
@@ -607,6 +611,7 @@ export interface AdminGameFileGql {
   sourceProjectId?: string | null
   sourceVersionId?: string | null
   sourceFileId?: string | null
+  sourceEnvironment?: ModEnvironmentGql | null
   createdAt: string
 }
 
@@ -702,6 +707,8 @@ export interface ModSearchResultItemGql {
   downloads: number
   follows?: number | null
   categories: string[]
+  contentType: ContentTypeGql
+  environment?: ModEnvironmentGql | null
   latestVersion?: string | null
   publishedAt?: string | null
   updatedAt?: string | null
@@ -750,6 +757,8 @@ export interface ModProjectDetailGql {
   author: string
   iconUrl?: string | null
   downloads: number
+  contentType: ContentTypeGql
+  environment?: ModEnvironmentGql | null
   compatibleVersions: ModProjectVersionGql[]
   installedVersion?: string | null
   isInstalled: boolean
@@ -767,6 +776,9 @@ export interface ModInstallationPlanItemGql {
   filename: string
   sizeBytes: number
   sha256?: string | null
+  contentType: ContentTypeGql
+  environment?: ModEnvironmentGql | null
+  logicalPath: string
   isRoot: boolean
   isDependency: boolean
   isRequired: boolean
@@ -795,6 +807,7 @@ export interface ResolveModPlanInputGql {
   provider: ModProviderGql
   projectId: string
   versionId: string
+  contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
 }
 
@@ -802,6 +815,7 @@ export interface InstallModPlanInputGql {
   provider: ModProviderGql
   projectId: string
   versionId: string
+  contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
 }
 

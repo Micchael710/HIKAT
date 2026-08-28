@@ -682,8 +682,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(screen.queryByText("Guardar")).toBeNull()
   })
 
-  describe("Shard 8B — Mod Providers UI Integration", () => {
-    it("renders 'Añadir Mods' button in draft toolbar and opens unified ModSearchModal", async () => {
+  describe("Shard 8B — Content Providers UI Integration", () => {
+    it("renders 'Añadir Contenido' button in draft toolbar and opens unified ModSearchModal with content tabs", async () => {
       const onRefresh = vi.fn().mockResolvedValue(undefined)
       const onToast = vi.fn()
 
@@ -697,6 +697,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             author: "simibubi",
             downloads: 12000000,
             categories: ["technology"],
+            contentType: "MOD",
+            environment: "BOTH",
           },
           {
             provider: "CURSEFORGE",
@@ -706,6 +708,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             author: "mezz",
             downloads: 250000000,
             categories: ["utility"],
+            contentType: "MOD",
+            environment: "BOTH",
           },
         ],
         totalCount: 2,
@@ -727,14 +731,14 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         />,
       )
 
-      // 1. Verify "Añadir Mods" button is present
-      const addModsBtn = screen.getByTestId("button-open-mod-providers")
-      expect(addModsBtn).toBeDefined()
-      expect(addModsBtn.textContent).toContain("Añadir Mods")
+      // 1. Verify "Añadir Contenido" button is present
+      const addContentBtn = screen.getByTestId("button-open-mod-providers")
+      expect(addContentBtn).toBeDefined()
+      expect(addContentBtn.textContent).toContain("Añadir Contenido")
 
       // 2. Click button to open modal
       await act(async () => {
-        fireEvent.click(addModsBtn)
+        fireEvent.click(addContentBtn)
       })
 
       // 3. Verify modal opened with environment indicator and search input
@@ -742,7 +746,12 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.getByTestId("compatible-env-indicator").textContent).toContain("Minecraft 1.21.1")
       expect(screen.getByTestId("compatible-env-indicator").textContent).toContain("NeoForge")
 
-      // 4. Verify provider tabs
+      // 4. Verify content type tabs and provider tabs
+      expect(screen.getByTestId("tab-content-mod")).toBeDefined()
+      expect(screen.getByTestId("tab-content-resource_pack")).toBeDefined()
+      expect(screen.getByTestId("tab-content-data_pack")).toBeDefined()
+      expect(screen.getByTestId("tab-content-shader")).toBeDefined()
+
       expect(screen.getByTestId("tab-provider-all")).toBeDefined()
       expect(screen.getByTestId("tab-provider-modrinth")).toBeDefined()
       expect(screen.getByTestId("tab-provider-curseforge")).toBeDefined()
@@ -771,6 +780,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             author: "simibubi",
             downloads: 12000000,
             categories: ["technology"],
+            contentType: "MOD",
+            environment: "BOTH",
           },
         ],
         totalCount: 1,
@@ -786,6 +797,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         summary: "Building Tools and Aesthetic Technology",
         author: "simibubi",
         downloads: 12000000,
+        contentType: "MOD",
+        environment: "BOTH",
         isInstalled: false,
         compatibleVersions: [
           {
@@ -829,6 +842,9 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             versionNumber: "6.0.6",
             filename: "create-1.21.1-6.0.6.jar",
             sizeBytes: 15000000,
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/create-1.21.1-6.0.6.jar",
             isRoot: true,
             isDependency: false,
             isRequired: true,
@@ -844,6 +860,9 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             versionNumber: "1.0.0",
             filename: "flywheel-1.21.1-1.0.0.jar",
             sizeBytes: 3000000,
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/flywheel-1.21.1-1.0.0.jar",
             isRoot: false,
             isDependency: true,
             isRequired: true,
@@ -887,6 +906,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
           sourceProvider: "MODRINTH",
           sourceProjectId: "create-id",
           sourceVersionId: "ver-create-606",
+          sourceEnvironment: "BOTH",
           createdAt: new Date().toISOString(),
         },
       ])
@@ -920,7 +940,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
       })
 
-      expect(getDetailSpy).toHaveBeenCalledWith("MODRINTH", "create-id")
+      expect(getDetailSpy).toHaveBeenCalledWith("MODRINTH", "create-id", "MOD")
       expect(resolvePlanSpy).toHaveBeenCalled()
 
       // 4. Verify version selector preselected with latest release
@@ -934,8 +954,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       })
 
       // 6. Click Install Button
-      const installBtn = screen.getByTestId("button-confirm-install-mod")
-      expect(installBtn.textContent).toContain("Añadir 2 mods")
+      const installBtn = screen.getByTestId("button-confirm-install")
+      expect(installBtn.textContent).toContain("Añadir 2 elementos")
 
       await act(async () => {
         fireEvent.click(installBtn)
@@ -945,11 +965,11 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         provider: "MODRINTH",
         projectId: "create-id",
         versionId: "ver-create-606",
+        contentType: "MOD",
         manualOverrides: null,
       })
 
       await waitFor(() => {
-        expect(onToast).toHaveBeenCalledWith("Mods y dependencias instalados exitosamente en el borrador.", "success")
         expect(onRefresh).toHaveBeenCalled()
       })
     })

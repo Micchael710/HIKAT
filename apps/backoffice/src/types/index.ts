@@ -234,7 +234,18 @@ export interface UpdateAdminPlayerCapeInput {
 
 // --- Game & Modpack Types (Shard 06.5) ---
 
-export type GameFileCategory = "MOD" | "RESOURCE_PACK" | "SHADER_PACK" | "KUBEJS" | "SCRIPT" | "CONFIG" | "GENERAL"
+export type GameFileCategory =
+  | "MOD"
+  | "RESOURCE_PACK"
+  | "DATA_PACK"
+  | "SHADER_PACK"
+  | "KUBEJS"
+  | "SCRIPT"
+  | "CONFIG"
+  | "GENERAL"
+
+export type ContentType = "MOD" | "RESOURCE_PACK" | "DATA_PACK" | "SHADER"
+export type ModEnvironment = "CLIENT" | "SERVER" | "BOTH" | "UNKNOWN"
 
 export type GameReleaseStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED"
 
@@ -275,6 +286,7 @@ export interface AdminGameFile {
   sourceProjectId?: string | null
   sourceVersionId?: string | null
   sourceFileId?: string | null
+  sourceEnvironment?: ModEnvironment | null
   createdAt: string
 }
 
@@ -303,6 +315,8 @@ export interface ModSearchResultItem {
   downloads: number
   follows?: number | null
   categories: string[]
+  contentType: ContentType
+  environment?: ModEnvironment | null
   latestVersion?: string | null
   publishedAt?: string | null
   updatedAt?: string | null
@@ -351,6 +365,8 @@ export interface ModProjectDetail {
   author: string
   iconUrl?: string | null
   downloads: number
+  contentType: ContentType
+  environment?: ModEnvironment | null
   compatibleVersions: ModProjectVersion[]
   installedVersion?: string | null
   isInstalled: boolean
@@ -368,6 +384,9 @@ export interface ModInstallationPlanItem {
   filename: string
   sizeBytes: number
   sha256?: string | null
+  contentType: ContentType
+  environment?: ModEnvironment | null
+  logicalPath: string
   isRoot: boolean
   isDependency: boolean
   isRequired: boolean
@@ -396,6 +415,7 @@ export interface ResolveModPlanInput {
   provider: ModProvider
   projectId: string
   versionId: string
+  contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
 }
 
@@ -403,6 +423,7 @@ export interface InstallModPlanInput {
   provider: ModProvider
   projectId: string
   versionId: string
+  contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
 }
 

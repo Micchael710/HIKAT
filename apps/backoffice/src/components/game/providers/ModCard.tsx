@@ -102,6 +102,44 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
               >
                 {isModrinth ? "Modrinth" : "CurseForge"}
               </span>
+
+              {mod.contentType && mod.contentType !== "MOD" && (
+                <span
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: "600",
+                    padding: "2px 5px",
+                    borderRadius: "4px",
+                    background: "rgba(59, 130, 246, 0.15)",
+                    color: "#60a5fa",
+                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                  }}
+                >
+                  {mod.contentType === "RESOURCE_PACK"
+                    ? "Resource Pack"
+                    : mod.contentType === "DATA_PACK"
+                    ? "Data Pack"
+                    : mod.contentType === "SHADER"
+                    ? "Shader"
+                    : mod.contentType}
+                </span>
+              )}
+
+              {mod.environment && (
+                <span
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: "600",
+                    padding: "2px 5px",
+                    borderRadius: "4px",
+                    background: "rgba(168, 85, 247, 0.15)",
+                    color: "#c084fc",
+                    border: "1px solid rgba(168, 85, 247, 0.3)",
+                  }}
+                >
+                  {mod.environment}
+                </span>
+              )}
             </div>
 
             <div style={{ fontSize: "12px", color: "#9ca3af" }}>

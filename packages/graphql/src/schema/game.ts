@@ -5,11 +5,32 @@ export const gameTypeDefs = /* GraphQL */ `
   enum GameFileCategory {
     MOD
     RESOURCE_PACK
+    DATA_PACK
     SHADER_PACK
     KUBEJS
     SCRIPT
     CONFIG
     GENERAL
+  }
+
+  """
+  Type of content in external provider or local game instance
+  """
+  enum ContentType {
+    MOD
+    RESOURCE_PACK
+    DATA_PACK
+    SHADER
+  }
+
+  """
+  Target distribution environment for mods
+  """
+  enum ModEnvironment {
+    CLIENT
+    SERVER
+    BOTH
+    UNKNOWN
   }
 
   """
@@ -140,6 +161,7 @@ export const gameTypeDefs = /* GraphQL */ `
     sourceProjectId: String
     sourceVersionId: String
     sourceFileId: String
+    sourceEnvironment: ModEnvironment
     createdAt: DateTime!
   }
 
@@ -191,7 +213,7 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
-  Single mod search result item normalized across providers
+  Single mod/content search result item normalized across providers
   """
   type ModSearchResultItem {
     provider: ModProvider!
@@ -205,6 +227,8 @@ export const gameTypeDefs = /* GraphQL */ `
     downloads: Int!
     follows: Int
     categories: [String!]!
+    contentType: ContentType!
+    environment: ModEnvironment
     latestVersion: String
     publishedAt: String
     updatedAt: String
@@ -253,7 +277,7 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
-  Detailed mod project information with compatible versions
+  Detailed mod/content project information with compatible versions
   """
   type ModProjectDetail {
     provider: ModProvider!
@@ -265,6 +289,8 @@ export const gameTypeDefs = /* GraphQL */ `
     author: String!
     iconUrl: String
     downloads: Int!
+    contentType: ContentType!
+    environment: ModEnvironment
     compatibleVersions: [ModProjectVersion!]!
     installedVersion: String
     isInstalled: Boolean!
@@ -285,6 +311,9 @@ export const gameTypeDefs = /* GraphQL */ `
     filename: String!
     sizeBytes: Int!
     sha256: String
+    contentType: ContentType!
+    environment: ModEnvironment
+    logicalPath: String!
     isRoot: Boolean!
     isDependency: Boolean!
     isRequired: Boolean!
@@ -354,6 +383,7 @@ export const gameTypeDefs = /* GraphQL */ `
     provider: ModProvider!
     projectId: String!
     versionId: String!
+    contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
   }
 
@@ -361,6 +391,7 @@ export const gameTypeDefs = /* GraphQL */ `
     provider: ModProvider!
     projectId: String!
     versionId: String!
+    contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
   }
 
@@ -398,6 +429,7 @@ export const gameTypeDefs = /* GraphQL */ `
     """
     searchMods(
       query: String!
+      contentType: ContentType
       provider: ModProvider
       limit: Int
       offset: Int
@@ -409,6 +441,7 @@ export const gameTypeDefs = /* GraphQL */ `
     getModProjectDetail(
       provider: ModProvider!
       projectId: String!
+      contentType: ContentType
     ): ModProjectDetail!
 
     """

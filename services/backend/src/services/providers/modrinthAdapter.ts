@@ -5,10 +5,37 @@ import type {
   NormalizedModVersion,
   NormalizedModDependency,
 } from "./types"
-import type { ModReleaseTypeGql, ModDependencyTypeGql } from "@hikat/graphql"
+import type {
+  ModReleaseTypeGql,
+  ModDependencyTypeGql,
+  ContentTypeGql,
+  ModEnvironmentGql,
+} from "@hikat/graphql"
 
 const DEFAULT_MODRINTH_BASE_URL = "https://api.modrinth.com/v2"
 const USER_AGENT = "HiKAT/0.1.0 (contact@hikat.local)"
+
+function mapModrinthProjectTypeToContentType(
+  projectType?: string,
+  categories?: string[],
+  fallback: ContentTypeGql = "MOD",
+): ContentTypeGql {
+  const pt = projectType?.toLowerCase()
+  if (pt === "mod") return "MOD"
+  if (pt === "resourcepack") return "RESOURCE_PACK"
+  if (pt === "shader") return "SHADER"
+  if (pt === "datapack" || categories?.includes("datapack")) return "DATA_PACK"
+  return fallback
+}
+
+function mapModrinthEnvironment(clientSide?: string, serverSide?: string): ModEnvironmentGql {
+  const client = clientSide?.toLowerCase()
+  const server = serverSide?.toLowerCase()
+  if (client === "unsupported" && server && server !== "unsupported") return "SERVER"
+  if (server === "unsupported" && client && client !== "unsupported") return "CLIENT"
+  if (client && client !== "unsupported" && server && server !== "unsupported") return "BOTH"
+  return "UNKNOWN"
+}
 
 export class ModrinthAdapter implements ModProviderAdapter {
   readonly provider = "MODRINTH" as const
@@ -28,15 +55,27 @@ export class ModrinthAdapter implements ModProviderAdapter {
     loader: string,
     limit: number,
     offset: number,
+    contentType: ContentTypeGql = "MOD",
   ): Promise<{ items: NormalizedModProject[]; totalCount: number }> {
     const baseUrl = this.getBaseUrl(env)
 
-    // Build facets for mod, current minecraft version, and loader (neoforge)
-    const facets = [
-      ["project_type:mod"],
-      [`versions:${minecraftVersion}`],
-      [`categories:${loader.toLowerCase()}`],
-    ]
+    // Build facets per content type
+    const facets: string[][] = []
+
+    if (contentType === "MOD") {
+      facets.push(["project_type:mod"])
+      facets.push([`versions:${minecraftVersion}`])
+      facets.push([`categories:${loader.toLowerCase()}`])
+    } else if (contentType === "RESOURCE_PACK") {
+      facets.push(["project_type:resourcepack"])
+      facets.push([`versions:${minecraftVersion}`])
+    } else if (contentType === "SHADER") {
+      facets.push(["project_type:shader"])
+      facets.push([`versions:${minecraftVersion}`])
+    } else if (contentType === "DATA_PACK") {
+      facets.push(["project_type:datapack"])
+      facets.push([`versions:${minecraftVersion}`])
+    }
 
     const params = new URLSearchParams()
     if (query.trim()) {
@@ -78,26 +117,40 @@ export class ModrinthAdapter implements ModProviderAdapter {
           latest_version?: string | null
           date_created?: string
           date_modified?: string
+          project_type?: string
+          client_side?: string
+          server_side?: string
         }>
         total_hits: number
       }
 
-      const items: NormalizedModProject[] = (data.hits || []).map((hit) => ({
-        provider: "MODRINTH",
-        projectId: hit.project_id,
-        slug: hit.slug,
-        name: hit.title,
-        summary: hit.description,
-        description: hit.description,
-        author: hit.author,
-        iconUrl: hit.icon_url || null,
-        downloads: Number(hit.downloads || 0),
-        follows: Number(hit.follows || 0),
-        categories: hit.categories || [],
-        latestVersion: hit.latest_version || null,
-        publishedAt: hit.date_created || null,
-        updatedAt: hit.date_modified || null,
-      }))
+      const items: NormalizedModProject[] = (data.hits || []).map((hit) => {
+        const itemType = mapModrinthProjectTypeToContentType(
+          hit.project_type,
+          hit.categories,
+          contentType,
+        )
+        const environment = mapModrinthEnvironment(hit.client_side, hit.server_side)
+
+        return {
+          provider: "MODRINTH",
+          projectId: hit.project_id,
+          slug: hit.slug,
+          name: hit.title,
+          summary: hit.description,
+          description: hit.description,
+          author: hit.author,
+          iconUrl: hit.icon_url || null,
+          downloads: Number(hit.downloads || 0),
+          follows: Number(hit.follows || 0),
+          categories: hit.categories || [],
+          contentType: itemType,
+          environment,
+          latestVersion: hit.latest_version || null,
+          publishedAt: hit.date_created || null,
+          updatedAt: hit.date_modified || null,
+        }
+      })
 
       return { items, totalCount: data.total_hits || items.length }
     } finally {
@@ -105,7 +158,11 @@ export class ModrinthAdapter implements ModProviderAdapter {
     }
   }
 
-  async getProject(env: Env, projectId: string): Promise<NormalizedModProject | null> {
+  async getProject(
+    env: Env,
+    projectId: string,
+    contentType: ContentTypeGql = "MOD",
+  ): Promise<NormalizedModProject | null> {
     const baseUrl = this.getBaseUrl(env)
     const url = `${baseUrl}/project/${encodeURIComponent(projectId)}`
 
@@ -139,7 +196,17 @@ export class ModrinthAdapter implements ModProviderAdapter {
         icon_url?: string | null
         published?: string
         updated?: string
+        project_type?: string
+        client_side?: string
+        server_side?: string
       }
+
+      const itemType = mapModrinthProjectTypeToContentType(
+        data.project_type,
+        data.categories,
+        contentType,
+      )
+      const environment = mapModrinthEnvironment(data.client_side, data.server_side)
 
       return {
         provider: "MODRINTH",
@@ -153,6 +220,8 @@ export class ModrinthAdapter implements ModProviderAdapter {
         downloads: Number(data.downloads || 0),
         follows: Number(data.followers || 0),
         categories: data.categories || [],
+        contentType: itemType,
+        environment,
         publishedAt: data.published || null,
         updatedAt: data.updated || null,
       }
@@ -171,13 +240,18 @@ export class ModrinthAdapter implements ModProviderAdapter {
     projectId: string,
     minecraftVersion: string,
     loader: string,
+    contentType: ContentTypeGql = "MOD",
   ): Promise<NormalizedModVersion[]> {
     const baseUrl = this.getBaseUrl(env)
-    const params = new URLSearchParams({
-      loaders: JSON.stringify([loader.toLowerCase()]),
+    const paramsRecord: Record<string, string> = {
       game_versions: JSON.stringify([minecraftVersion]),
-    })
+    }
 
+    if (contentType === "MOD") {
+      paramsRecord.loaders = JSON.stringify([loader.toLowerCase()])
+    }
+
+    const params = new URLSearchParams(paramsRecord)
     const url = `${baseUrl}/project/${encodeURIComponent(projectId)}/version?${params.toString()}`
 
     const controller = new AbortController()
@@ -196,32 +270,9 @@ export class ModrinthAdapter implements ModProviderAdapter {
         throw new Error(`Modrinth getCompatibleVersions failed with status ${res.status}`)
       }
 
-      const data = (await res.json()) as Array<{
-        id: string
-        project_id: string
-        name: string
-        version_number: string
-        game_versions: string[]
-        loaders: string[]
-        version_type: string
-        date_published: string
-        downloads: number
-        files: Array<{
-          hashes: { sha512?: string; sha1?: string; sha256?: string }
-          url: string
-          filename: string
-          primary?: boolean
-          size: number
-        }>
-        dependencies: Array<{
-          version_id?: string | null
-          project_id?: string | null
-          file_name?: string | null
-          dependency_type: string
-        }>
-      }>
-
-      return (data || []).map((v) => this.mapModrinthVersion(v))
+      const data = await res.json()
+      const list = Array.isArray(data) ? data : data ? [data] : []
+      return list.map((v) => this.mapModrinthVersion(v, contentType))
     } finally {
       clearTimeout(timeoutId)
     }
@@ -230,7 +281,8 @@ export class ModrinthAdapter implements ModProviderAdapter {
   async getVersion(
     env: Env,
     versionId: string,
-    _projectId?: string,
+    _projectId?: string | null,
+    contentType: ContentTypeGql = "MOD",
   ): Promise<NormalizedModVersion | null> {
     const baseUrl = this.getBaseUrl(env)
     const url = `${baseUrl}/version/${encodeURIComponent(versionId)}`
@@ -253,18 +305,18 @@ export class ModrinthAdapter implements ModProviderAdapter {
       }
 
       const data = (await res.json()) as any
-      return this.mapModrinthVersion(data)
+      return this.mapModrinthVersion(data, contentType)
     } finally {
       clearTimeout(timeoutId)
     }
   }
 
-  private mapModrinthVersion(raw: any): NormalizedModVersion {
+  private mapModrinthVersion(raw: any, fallbackContentType: ContentTypeGql = "MOD"): NormalizedModVersion {
     const primaryFile =
       raw.files?.find((f: any) => f.primary) ||
-      raw.files?.find((f: any) => f.filename?.endsWith(".jar")) ||
+      raw.files?.find((f: any) => f.filename?.endsWith(".jar") || f.filename?.endsWith(".zip")) ||
       raw.files?.[0] || {
-        filename: `${raw.name || "mod"}.jar`,
+        filename: `${raw.name || "file"}.jar`,
         size: 0,
         url: "",
         hashes: {},
@@ -295,8 +347,11 @@ export class ModrinthAdapter implements ModProviderAdapter {
       },
     )
 
+    const hashes = primaryFile.hashes || {}
+
     return {
       id: raw.id,
+      projectId: raw.project_id || undefined,
       fileId: null,
       versionNumber: raw.version_number || raw.name,
       name: raw.name || raw.version_number,
@@ -307,8 +362,14 @@ export class ModrinthAdapter implements ModProviderAdapter {
       downloads: Number(raw.downloads || 0),
       filename: primaryFile.filename,
       sizeBytes: Number(primaryFile.size || 0),
-      sha256: primaryFile.hashes?.sha256 || null,
+      sha256: hashes.sha256 || null,
+      hashes: {
+        sha1: hashes.sha1,
+        sha256: hashes.sha256,
+      },
       downloadUrl: primaryFile.url,
+      contentType: fallbackContentType,
+      environment: null,
       dependencies,
     }
   }

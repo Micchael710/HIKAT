@@ -77,6 +77,8 @@ import type {
   ModInstallationPlanGql,
   ResolveModPlanInputGql,
   InstallModPlanInputGql,
+  ContentTypeGql,
+  ModEnvironmentGql,
 } from "@hikat/graphql"
 
 import {
@@ -693,6 +695,7 @@ export const resolvers = {
       _parent: unknown,
       args: {
         query: string
+        contentType?: ContentTypeGql | null
         provider?: ModProviderGql | null
         limit?: number | null
         offset?: number | null
@@ -700,18 +703,23 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<ModSearchPayloadGql> => {
       requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
       return modProviderManager.searchMods(
         context.env,
+        context.db,
         args.query,
         args.provider,
         args.limit || 20,
         args.offset || 0,
+        args.contentType || "MOD",
       )
     },
 
     getModProjectDetail: async (
       _parent: unknown,
-      args: { provider: ModProviderGql; projectId: string },
+      args: { provider: ModProviderGql; projectId: string; contentType?: ContentTypeGql | null },
       context: BackendGraphQLContext,
     ): Promise<ModProjectDetailGql> => {
       requireAdmin(context)
@@ -723,6 +731,7 @@ export const resolvers = {
         context.db,
         args.provider,
         args.projectId,
+        args.contentType || "MOD",
       )
     },
 

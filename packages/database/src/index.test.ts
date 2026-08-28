@@ -776,6 +776,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0012_remove_skin_model_and_add_capes.sql",
       "0013_game_files_enhancements.sql",
       "0014_mod_providers_metadata.sql",
+      "0015_content_providers_expansion.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -2133,6 +2134,26 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(file2.source_provider).toBe("CURSEFORGE")
     expect(file2.source_project_id).toBe("238222")
     expect(file2.source_file_id).toBe("554433")
+
+    // 6. Apply migration 0015 (adds source_environment)
+    const file0015 = sqlFiles.find((f) => f.startsWith("0015_"))
+    expect(file0015).toBeDefined()
+    const sql0015 = readFileSync(join(migrationsDir, file0015!), "utf-8")
+    for (const statement of sql0015.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim()
+      if (trimmed) sqlite.exec(trimmed)
+    }
+
+    const fileAfter0015 = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(fileId) as any
+    expect(fileAfter0015.source_environment).toBeNull()
+
+    sqlite.exec(`
+      UPDATE game_release_files
+      SET source_environment = 'BOTH'
+      WHERE id = '${fileId}';
+    `)
+    const fileUpdatedEnv = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(fileId) as any
+    expect(fileUpdatedEnv.source_environment).toBe("BOTH")
   })
 })
 

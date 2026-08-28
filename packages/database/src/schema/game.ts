@@ -50,6 +50,7 @@ export const gameReleaseFiles = sqliteTable(
     sourceProjectId: text("source_project_id"),
     sourceVersionId: text("source_version_id"),
     sourceFileId: text("source_file_id"),
+    sourceEnvironment: text("source_environment"),
     createdAt: text("created_at")
       .notNull()
       .$defaultFn(() => new Date().toISOString()),

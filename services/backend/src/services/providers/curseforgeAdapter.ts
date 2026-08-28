@@ -5,11 +5,24 @@ import type {
   NormalizedModVersion,
   NormalizedModDependency,
 } from "./types"
-import type { ModReleaseTypeGql, ModDependencyTypeGql } from "@hikat/graphql"
+import type {
+  ModReleaseTypeGql,
+  ModDependencyTypeGql,
+  ContentTypeGql,
+  ModEnvironmentGql,
+} from "@hikat/graphql"
 
 const DEFAULT_CURSEFORGE_BASE_URL = "https://api.curseforge.com/v1"
 const MINECRAFT_GAME_ID = 432
-const MINECRAFT_MODS_CLASS_ID = 6
+
+// Official CurseForge class IDs for Minecraft
+const CURSEFORGE_CLASS_MAP: Record<ContentTypeGql, number> = {
+  MOD: 6,
+  RESOURCE_PACK: 12,
+  DATA_PACK: 6945,
+  SHADER: 6552,
+}
+
 const NEOFORGE_LOADER_TYPE = 6
 
 export class CurseForgeAdapter implements ModProviderAdapter {
@@ -37,25 +50,32 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     _loader: string,
     limit: number,
     offset: number,
+    contentType: ContentTypeGql = "MOD",
   ): Promise<{ items: NormalizedModProject[]; totalCount: number }> {
     if (!this.isConfigured(env)) {
       return { items: [], totalCount: 0 }
     }
 
     const baseUrl = this.getBaseUrl(env)
-    const params = new URLSearchParams({
+    const classId = CURSEFORGE_CLASS_MAP[contentType] || 6
+
+    const paramsRecord: Record<string, string> = {
       gameId: String(MINECRAFT_GAME_ID),
-      classId: String(MINECRAFT_MODS_CLASS_ID),
+      classId: String(classId),
       gameVersion: minecraftVersion,
-      modLoaderType: String(NEOFORGE_LOADER_TYPE),
       pageSize: String(Math.min(limit || 20, 50)),
       index: String(offset || 0),
-    })
-
-    if (query.trim()) {
-      params.set("searchFilter", query.trim())
     }
 
+    if (contentType === "MOD") {
+      paramsRecord.modLoaderType = String(NEOFORGE_LOADER_TYPE)
+    }
+
+    if (query.trim()) {
+      paramsRecord.searchFilter = query.trim()
+    }
+
+    const params = new URLSearchParams(paramsRecord)
     const url = `${baseUrl}/mods/search?${params.toString()}`
 
     const controller = new AbortController()
@@ -99,6 +119,8 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         downloads: Number(mod.downloadCount || 0),
         follows: null,
         categories: mod.categories?.map((c) => c.name) || [],
+        contentType,
+        environment: null,
         latestVersion: null,
         publishedAt: mod.dateCreated || null,
         updatedAt: mod.dateModified || null,
@@ -113,7 +135,11 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     }
   }
 
-  async getProject(env: Env, projectId: string): Promise<NormalizedModProject | null> {
+  async getProject(
+    env: Env,
+    projectId: string,
+    contentType: ContentTypeGql = "MOD",
+  ): Promise<NormalizedModProject | null> {
     if (!this.isConfigured(env)) return null
 
     const baseUrl = this.getBaseUrl(env)
@@ -163,6 +189,8 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         downloads: Number(mod.downloadCount || 0),
         follows: null,
         categories: mod.categories?.map((c) => c.name) || [],
+        contentType,
+        environment: null,
         publishedAt: mod.dateCreated || null,
         updatedAt: mod.dateModified || null,
       }
@@ -176,16 +204,21 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     projectId: string,
     minecraftVersion: string,
     _loader: string,
+    contentType: ContentTypeGql = "MOD",
   ): Promise<NormalizedModVersion[]> {
     if (!this.isConfigured(env)) return []
 
     const baseUrl = this.getBaseUrl(env)
-    const params = new URLSearchParams({
+    const paramsRecord: Record<string, string> = {
       gameVersion: minecraftVersion,
-      modLoaderType: String(NEOFORGE_LOADER_TYPE),
       pageSize: "50",
-    })
+    }
 
+    if (contentType === "MOD") {
+      paramsRecord.modLoaderType = String(NEOFORGE_LOADER_TYPE)
+    }
+
+    const params = new URLSearchParams(paramsRecord)
     const url = `${baseUrl}/mods/${encodeURIComponent(projectId)}/files?${params.toString()}`
 
     const controller = new AbortController()
@@ -205,7 +238,13 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         data: Array<any>
       }
 
-      return (data.data || []).map((file) => this.mapCurseForgeFile(file, minecraftVersion))
+      const versions: NormalizedModVersion[] = []
+      for (const file of data.data || []) {
+        const v = await this.mapCurseForgeFile(env, projectId, file, minecraftVersion, contentType)
+        versions.push(v)
+      }
+
+      return versions
     } finally {
       clearTimeout(timeoutId)
     }
@@ -214,7 +253,8 @@ export class CurseForgeAdapter implements ModProviderAdapter {
   async getVersion(
     env: Env,
     versionId: string,
-    projectId?: string,
+    projectId?: string | null,
+    contentType: ContentTypeGql = "MOD",
   ): Promise<NormalizedModVersion | null> {
     if (!this.isConfigured(env)) return null
     if (!projectId) {
@@ -241,20 +281,40 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       const data = (await res.json()) as { data: any }
       if (!data.data) return null
 
-      return this.mapCurseForgeFile(data.data, "")
+      return await this.mapCurseForgeFile(env, projectId, data.data, "", contentType)
     } finally {
       clearTimeout(timeoutId)
     }
   }
 
-  private mapCurseForgeFile(file: any, defaultMc: string): NormalizedModVersion {
-    const fileId = Number(file.id)
-    let downloadUrl = file.downloadUrl
-    if (!downloadUrl) {
-      // Fallback direct ForgeCDN pattern
-      const p1 = Math.floor(fileId / 1000)
-      const p2 = fileId % 1000
-      downloadUrl = `https://edge.forgecdn.net/files/${p1}/${p2}/${encodeURIComponent(file.fileName || "mod.jar")}`
+  private async mapCurseForgeFile(
+    env: Env,
+    projectId: string,
+    file: any,
+    defaultMc: string,
+    contentType: ContentTypeGql = "MOD",
+  ): Promise<NormalizedModVersion> {
+    let downloadUrl = file.downloadUrl || ""
+
+    // If downloadUrl is missing in the file object, query official CurseForge endpoint for download URL
+    if (!downloadUrl && projectId && file.id) {
+      try {
+        const baseUrl = this.getBaseUrl(env)
+        const dlRes = await fetch(
+          `${baseUrl}/mods/${encodeURIComponent(projectId)}/files/${encodeURIComponent(file.id)}/download-url`,
+          {
+            headers: this.getHeaders(env),
+          },
+        )
+        if (dlRes.ok) {
+          const dlData = (await dlRes.json()) as { data?: string }
+          if (dlData.data) {
+            downloadUrl = dlData.data
+          }
+        }
+      } catch {
+        // Leave downloadUrl empty if endpoint fails
+      }
     }
 
     let releaseType: ModReleaseTypeGql = "RELEASE"
@@ -279,22 +339,32 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       }
     })
 
+    const sha1 = file.hashes?.find((h: any) => h.algo === 1)?.value || null
+    const md5 = file.hashes?.find((h: any) => h.algo === 2)?.value || null
     const sha256 = file.hashes?.find((h: any) => h.algo === 3)?.value || null
 
     return {
       id: String(file.id),
+      projectId,
       fileId: String(file.id),
       versionNumber: file.displayName || file.fileName,
       name: file.displayName || file.fileName,
       releaseType,
       gameVersions: file.gameVersions || (defaultMc ? [defaultMc] : []),
-      loaders: ["NeoForge"],
+      loaders: contentType === "MOD" ? ["NeoForge"] : [],
       publishedAt: file.fileDate || new Date().toISOString(),
       downloads: Number(file.downloadCount || 0),
-      filename: file.fileName || `${file.displayName || "mod"}.jar`,
+      filename: file.fileName || `${file.displayName || "file"}.jar`,
       sizeBytes: Number(file.fileLength || 0),
       sha256,
+      hashes: {
+        sha1: sha1 || undefined,
+        md5: md5 || undefined,
+        sha256: sha256 || undefined,
+      },
       downloadUrl,
+      contentType,
+      environment: null,
       dependencies,
     }
   }

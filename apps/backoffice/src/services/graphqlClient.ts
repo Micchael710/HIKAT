@@ -1713,18 +1713,20 @@ export const gameApi = {
 
   async searchMods(
     query: string,
+    contentType?: import("../types").ContentType | null,
     provider?: import("../types").ModProvider | null,
     limit?: number,
     offset?: number,
   ): Promise<import("../types").ModSearchPayload> {
-    return graphqlClient.searchMods(query, provider, limit, offset)
+    return graphqlClient.searchMods(query, contentType, provider, limit, offset)
   },
 
   async getModProjectDetail(
     provider: import("../types").ModProvider,
     projectId: string,
+    contentType?: import("../types").ContentType | null,
   ): Promise<import("../types").ModProjectDetail> {
-    return graphqlClient.getModProjectDetail(provider, projectId)
+    return graphqlClient.getModProjectDetail(provider, projectId, contentType)
   },
 
   async resolveModInstallationPlan(
@@ -1802,13 +1804,26 @@ export const settingsApi = {
 export const modProvidersApi = {
   async searchMods(
     query: string,
+    contentType?: import("../types").ContentType | null,
     provider?: import("../types").ModProvider | null,
     limit?: number,
     offset?: number,
   ): Promise<import("../types").ModSearchPayload> {
     const gqlQuery = /* GraphQL */ `
-      query SearchMods($query: String!, $provider: ModProvider, $limit: Int, $offset: Int) {
-        searchMods(query: $query, provider: $provider, limit: $limit, offset: $offset) {
+      query SearchMods(
+        $query: String!
+        $contentType: ContentType
+        $provider: ModProvider
+        $limit: Int
+        $offset: Int
+      ) {
+        searchMods(
+          query: $query
+          contentType: $contentType
+          provider: $provider
+          limit: $limit
+          offset: $offset
+        ) {
           items {
             provider
             projectId
@@ -1821,6 +1836,8 @@ export const modProvidersApi = {
             downloads
             follows
             categories
+            contentType
+            environment
             latestVersion
             publishedAt
             updatedAt
@@ -1838,6 +1855,7 @@ export const modProvidersApi = {
     `
     const data = await executeGraphQL<{ searchMods: import("../types").ModSearchPayload }>(gqlQuery, {
       query,
+      contentType: contentType || "MOD",
       provider,
       limit,
       offset,
@@ -1848,10 +1866,19 @@ export const modProvidersApi = {
   async getModProjectDetail(
     provider: import("../types").ModProvider,
     projectId: string,
+    contentType?: import("../types").ContentType | null,
   ): Promise<import("../types").ModProjectDetail> {
     const gqlQuery = /* GraphQL */ `
-      query GetModProjectDetail($provider: ModProvider!, $projectId: String!) {
-        getModProjectDetail(provider: $provider, projectId: $projectId) {
+      query GetModProjectDetail(
+        $provider: ModProvider!
+        $projectId: String!
+        $contentType: ContentType
+      ) {
+        getModProjectDetail(
+          provider: $provider
+          projectId: $projectId
+          contentType: $contentType
+        ) {
           provider
           projectId
           slug
@@ -1861,6 +1888,8 @@ export const modProvidersApi = {
           author
           iconUrl
           downloads
+          contentType
+          environment
           compatibleVersions {
             id
             fileId
@@ -1893,6 +1922,7 @@ export const modProvidersApi = {
     const data = await executeGraphQL<{ getModProjectDetail: import("../types").ModProjectDetail }>(gqlQuery, {
       provider,
       projectId,
+      contentType: contentType || "MOD",
     })
     return data.getModProjectDetail
   },
@@ -1913,6 +1943,9 @@ export const modProvidersApi = {
             filename
             sizeBytes
             sha256
+            contentType
+            environment
+            logicalPath
             isRoot
             isDependency
             isRequired
@@ -1979,6 +2012,7 @@ export const modProvidersApi = {
           sourceProjectId
           sourceVersionId
           sourceFileId
+          sourceEnvironment
           createdAt
         }
       }

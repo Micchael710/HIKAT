@@ -683,10 +683,10 @@ export default function GameFilesExplorer({
                   border: "none",
                   fontWeight: "600",
                 }}
-                title="Buscar e instalar mods desde Modrinth y CurseForge"
+                title="Buscar e instalar contenido desde Modrinth y CurseForge"
               >
                 <span style={{ fontSize: "14px" }}>🧩</span>
-                <span>Añadir Mods</span>
+                <span>Añadir Contenido</span>
               </button>
 
               <button

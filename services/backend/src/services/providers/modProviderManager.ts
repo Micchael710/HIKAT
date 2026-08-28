@@ -16,8 +16,25 @@ import type {
   ModInstallationPlanGql,
   ModInstallationPlanItemGql,
   ResolveModPlanInputGql,
+  ContentTypeGql,
 } from "@hikat/graphql"
 import { createGraphQLError } from "@hikat/graphql"
+
+export function getLogicalPathForContent(contentType: ContentTypeGql, filename: string): string {
+  const cleanFilename = filename.trim().replace(/^[/\\]+/, "")
+  switch (contentType) {
+    case "MOD":
+      return `mods/${cleanFilename}`
+    case "RESOURCE_PACK":
+      return `resourcepacks/${cleanFilename}`
+    case "DATA_PACK":
+      return `datapacks/${cleanFilename}`
+    case "SHADER":
+      return `shaderpacks/${cleanFilename}`
+    default:
+      return `mods/${cleanFilename}`
+  }
+}
 
 export class ModProviderManager {
   private modrinth = new ModrinthAdapter()
@@ -26,30 +43,84 @@ export class ModProviderManager {
   getAdapter(provider: ModProviderGql): ModProviderAdapter {
     if (provider === "MODRINTH") return this.modrinth
     if (provider === "CURSEFORGE") return this.curseforge
-    throw new Error(`Proveedor de mods no soportado: ${provider}`)
+    throw new Error(`Proveedor de contenido no soportado: ${provider}`)
+  }
+
+  async getActiveEnvironment(
+    db: Database,
+  ): Promise<{ minecraftVersion: string; neoForgeVersion: string }> {
+    // 1. Try active draft
+    const draft = await db
+      .select({
+        minecraftVersion: schema.gameReleases.minecraftVersion,
+        neoForgeVersion: schema.gameReleases.neoForgeVersion,
+      })
+      .from(schema.gameReleases)
+      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .get()
+
+    if (draft) {
+      return {
+        minecraftVersion: draft.minecraftVersion || "1.21.1",
+        neoForgeVersion: draft.neoForgeVersion || "21.1.65",
+      }
+    }
+
+    // 2. Try published release
+    const published = await db
+      .select({
+        minecraftVersion: schema.gameReleases.minecraftVersion,
+        neoForgeVersion: schema.gameReleases.neoForgeVersion,
+      })
+      .from(schema.gameReleases)
+      .where(eq(schema.gameReleases.status, "PUBLISHED"))
+      .get()
+
+    if (published) {
+      return {
+        minecraftVersion: published.minecraftVersion || "1.21.1",
+        neoForgeVersion: published.neoForgeVersion || "21.1.65",
+      }
+    }
+
+    return {
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    }
   }
 
   async searchMods(
     env: Env,
+    db: Database,
     query: string,
     provider: ModProviderGql | null | undefined,
     limit: number = 20,
     offset: number = 0,
-    minecraftVersion: string = "1.21.1",
-    loader: string = "NeoForge",
+    contentType: ContentTypeGql = "MOD",
   ): Promise<ModSearchPayloadGql> {
+    const envData = await this.getActiveEnvironment(db)
+    const { minecraftVersion, neoForgeVersion } = envData
+    const loader = contentType === "MOD" ? "NeoForge" : ""
     const providersStatus: ModProviderStatusGql[] = []
 
     if (provider === "MODRINTH") {
       try {
-        const res = await this.modrinth.searchMods(env, query, minecraftVersion, loader, limit, offset)
+        const res = await this.modrinth.searchMods(
+          env,
+          query,
+          minecraftVersion,
+          loader,
+          limit,
+          offset,
+          contentType,
+        )
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
         return {
           items: res.items,
           totalCount: res.totalCount,
           providersStatus,
           minecraftVersion,
-          neoForgeVersion: "21.1.65",
+          neoForgeVersion,
         }
       } catch (err: any) {
         providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
@@ -58,7 +129,7 @@ export class ModProviderManager {
           totalCount: 0,
           providersStatus,
           minecraftVersion,
-          neoForgeVersion: "21.1.65",
+          neoForgeVersion,
         }
       }
     }
@@ -75,19 +146,27 @@ export class ModProviderManager {
           totalCount: 0,
           providersStatus,
           minecraftVersion,
-          neoForgeVersion: "21.1.65",
+          neoForgeVersion,
         }
       }
 
       try {
-        const res = await this.curseforge.searchMods(env, query, minecraftVersion, loader, limit, offset)
+        const res = await this.curseforge.searchMods(
+          env,
+          query,
+          minecraftVersion,
+          loader,
+          limit,
+          offset,
+          contentType,
+        )
         providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
         return {
           items: res.items,
           totalCount: res.totalCount,
           providersStatus,
           minecraftVersion,
-          neoForgeVersion: "21.1.65",
+          neoForgeVersion,
         }
       } catch (err: any) {
         providersStatus.push({ provider: "CURSEFORGE", available: false, error: err.message })
@@ -96,16 +175,16 @@ export class ModProviderManager {
           totalCount: 0,
           providersStatus,
           minecraftVersion,
-          neoForgeVersion: "21.1.65",
+          neoForgeVersion,
         }
       }
     }
 
     // "Todos" (ALL providers in parallel with graceful partial degradation)
     const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-      this.modrinth.searchMods(env, query, minecraftVersion, loader, limit, offset),
+      this.modrinth.searchMods(env, query, minecraftVersion, loader, limit, offset, contentType),
       this.curseforge.isConfigured(env)
-        ? this.curseforge.searchMods(env, query, minecraftVersion, loader, limit, offset)
+        ? this.curseforge.searchMods(env, query, minecraftVersion, loader, limit, offset, contentType)
         : Promise.resolve({ items: [], totalCount: 0 }),
     ])
 
@@ -154,7 +233,7 @@ export class ModProviderManager {
       totalCount: totalCount || allItems.length,
       providersStatus,
       minecraftVersion,
-      neoForgeVersion: "21.1.65",
+      neoForgeVersion,
     }
   }
 
@@ -163,9 +242,12 @@ export class ModProviderManager {
     db: Database,
     provider: ModProviderGql,
     projectId: string,
-    minecraftVersion: string = "1.21.1",
-    loader: string = "NeoForge",
+    contentType: ContentTypeGql = "MOD",
   ): Promise<ModProjectDetailGql> {
+    const envData = await this.getActiveEnvironment(db)
+    const { minecraftVersion, neoForgeVersion } = envData
+    const loader = contentType === "MOD" ? "NeoForge" : ""
+
     const adapter = this.getAdapter(provider)
     if (!adapter.isConfigured(env)) {
       throw createGraphQLError(
@@ -175,12 +257,12 @@ export class ModProviderManager {
     }
 
     const [project, compatibleVersions] = await Promise.all([
-      adapter.getProject(env, projectId),
-      adapter.getCompatibleVersions(env, projectId, minecraftVersion, loader),
+      adapter.getProject(env, projectId, contentType),
+      adapter.getCompatibleVersions(env, projectId, minecraftVersion, loader, contentType),
     ])
 
     if (!project) {
-      throw createGraphQLError("Proyecto de mod no encontrado en el proveedor.", "NOT_FOUND")
+      throw createGraphQLError("Proyecto no encontrado en el proveedor.", "NOT_FOUND")
     }
 
     // Check if installed in active draft
@@ -226,11 +308,13 @@ export class ModProviderManager {
       author: project.author,
       iconUrl: project.iconUrl,
       downloads: project.downloads,
+      contentType: project.contentType || contentType,
+      environment: project.environment || null,
       compatibleVersions: compatibleVersions as any,
       installedVersion,
       isInstalled,
       minecraftVersion,
-      neoForgeVersion: "21.1.65",
+      neoForgeVersion,
     }
   }
 
@@ -238,9 +322,12 @@ export class ModProviderManager {
     env: Env,
     db: Database,
     input: ResolveModPlanInputGql,
-    minecraftVersion: string = "1.21.1",
-    loader: string = "NeoForge",
   ): Promise<ModInstallationPlanGql> {
+    const envData = await this.getActiveEnvironment(db)
+    const { minecraftVersion, neoForgeVersion } = envData
+    const contentType = input.contentType || "MOD"
+    const loader = contentType === "MOD" ? "NeoForge" : ""
+
     const adapter = this.getAdapter(input.provider)
     if (!adapter.isConfigured(env)) {
       throw createGraphQLError(
@@ -275,26 +362,47 @@ export class ModProviderManager {
     const conflicts: string[] = []
     const visitedBranches = new Set<string>()
 
-    // 2. Fetch root project and version
+    // 2. Fetch root project and version with strict compatibility validation
     const rootCompatibleVersions = await adapter.getCompatibleVersions(
       env,
       input.projectId,
       minecraftVersion,
       loader,
+      contentType,
     )
 
     let rootVersion = rootCompatibleVersions.find((v) => v.id === input.versionId || v.fileId === input.versionId)
     if (!rootVersion) {
-      // Fallback direct getVersion
-      rootVersion = (await adapter.getVersion(env, input.versionId, input.projectId)) || undefined
+      // Check if version exists at all to provide authoritative error
+      const directVersion = await adapter.getVersion(env, input.versionId, input.projectId, contentType)
+      if (directVersion) {
+        // Validate compatibility
+        const isMcCompatible = directVersion.gameVersions.length === 0 || directVersion.gameVersions.includes(minecraftVersion)
+        const isLoaderCompatible =
+          contentType !== "MOD" ||
+          directVersion.loaders.length === 0 ||
+          directVersion.loaders.map((l) => l.toLowerCase()).includes("neoforge")
+
+        if (!isMcCompatible || !isLoaderCompatible) {
+          throw createGraphQLError(
+            `La versión seleccionada no es compatible con el entorno actual (Minecraft ${minecraftVersion}${contentType === "MOD" ? " · NeoForge" : ""}).`,
+            "VALIDATION_ERROR",
+          )
+        }
+        rootVersion = directVersion
+      }
     }
 
     if (!rootVersion) {
-      throw createGraphQLError("La versión seleccionada no fue encontrada o no es compatible.", "NOT_FOUND")
+      throw createGraphQLError(
+        `La versión seleccionada no fue encontrada o no es compatible con Minecraft ${minecraftVersion}.`,
+        "NOT_FOUND",
+      )
     }
 
-    const rootProject = await adapter.getProject(env, input.projectId)
-    const rootProjectName = rootProject?.name || rootVersion.name || "Mod Principal"
+    const rootProject = await adapter.getProject(env, input.projectId, contentType)
+    const rootProjectName = rootProject?.name || rootVersion.name || "Elemento Principal"
+    const rootLogicalPath = getLogicalPathForContent(contentType, rootVersion.filename)
 
     // Add root item
     const rootKey = `${input.provider}:${input.projectId}`
@@ -332,6 +440,9 @@ export class ModProviderManager {
       filename: rootVersion.filename,
       sizeBytes: rootVersion.sizeBytes,
       sha256: rootVersion.sha256 || null,
+      contentType,
+      environment: rootProject?.environment || rootVersion.environment || null,
+      logicalPath: rootLogicalPath,
       isRoot: true,
       isDependency: false,
       isRequired: true,
@@ -359,7 +470,7 @@ export class ModProviderManager {
         // A. Handle INCOMPATIBLE
         if (dep.dependencyType === "INCOMPATIBLE") {
           conflicts.push(
-            `Conflicto detectado: "${current.parentName}" declara incompatibilidad con el mod "${dep.projectName || dep.projectId}".`,
+            `Conflicto detectado: "${current.parentName}" declara incompatibilidad con "${dep.projectName || dep.projectId}".`,
           )
           continue
         }
@@ -367,11 +478,13 @@ export class ModProviderManager {
         const depAdapter = this.getAdapter(current.provider)
         let depProjectId = dep.projectId
 
-        // If only versionId is given (e.g. Modrinth specific file dependency), resolve its project ID
+        // If only versionId is given (e.g. Modrinth specific file dependency), resolve its real project ID
         if (!depProjectId && dep.versionId) {
           const fetchedVer = await depAdapter.getVersion(env, dep.versionId)
-          if (fetchedVer) {
-            depProjectId = fetchedVer.id // or fetchedVer
+          if (fetchedVer?.projectId) {
+            depProjectId = fetchedVer.projectId
+          } else if (fetchedVer?.id) {
+            depProjectId = fetchedVer.id
           }
         }
 
@@ -382,7 +495,9 @@ export class ModProviderManager {
         if (dep.dependencyType === "OPTIONAL" || dep.dependencyType === "EMBEDDED") {
           if (!optionalDepsMap.has(depKey) && !itemsMap.has(depKey)) {
             try {
-              const depProj = await depAdapter.getProject(env, depProjectId)
+              const depProj = await depAdapter.getProject(env, depProjectId, "MOD")
+              const depFilename = dep.fileName || "optional.jar"
+              const depContentType: ContentTypeGql = depProj?.contentType || "MOD"
               optionalDepsMap.set(depKey, {
                 provider: current.provider,
                 projectId: depProjectId,
@@ -390,9 +505,12 @@ export class ModProviderManager {
                 versionId: dep.versionId || "",
                 fileId: dep.fileId || null,
                 versionNumber: "",
-                filename: dep.fileName || "optional.jar",
+                filename: depFilename,
                 sizeBytes: 0,
                 sha256: null,
+                contentType: depContentType,
+                environment: depProj?.environment || null,
+                logicalPath: getLogicalPathForContent(depContentType, depFilename),
                 isRoot: false,
                 isDependency: true,
                 isRequired: false,
@@ -414,7 +532,7 @@ export class ModProviderManager {
         // C. Handle REQUIRED dependencies
         // Check cycle / duplicate
         if (itemsMap.has(depKey)) {
-          // Already resolved in plan!
+          // Already resolved in plan
           continue
         }
 
@@ -424,30 +542,28 @@ export class ModProviderManager {
         }
         visitedBranches.add(depKey)
 
-        // Fetch compatible versions for the required dependency
+        // Fetch compatible versions for the required dependency (assume MOD unless project specifies otherwise)
         let depCompatibleVersions: NormalizedModVersion[] = []
+        let depProject: NormalizedModProject | null = null
         try {
+          depProject = await depAdapter.getProject(env, depProjectId, "MOD").catch(() => null)
+          const depContentType: ContentTypeGql = depProject?.contentType || "MOD"
+          const depLoader = depContentType === "MOD" ? "NeoForge" : ""
           depCompatibleVersions = await depAdapter.getCompatibleVersions(
             env,
             depProjectId,
             minecraftVersion,
-            loader,
+            depLoader,
+            depContentType,
           )
         } catch {
           conflicts.push(`Error al consultar versiones para la dependencia "${dep.projectName || depProjectId}".`)
           continue
         }
 
-        if (depCompatibleVersions.length === 0) {
-          conflicts.push(
-            `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion} y ${loader} para la dependencia "${dep.projectName || depProjectId}".`,
-          )
-          continue
-        }
-
         let selectedDepVersion: NormalizedModVersion | undefined
 
-        // Check if manual override exists
+        // Priority 1: Manual override
         const overrideVersionId = manualOverridesMap.get(depKey)
         if (overrideVersionId) {
           selectedDepVersion = depCompatibleVersions.find(
@@ -459,13 +575,34 @@ export class ModProviderManager {
             )
             continue
           }
-        } else if (dep.versionId) {
-          // Priority 1: Explicitly pinned versionId by provider
-          selectedDepVersion = depCompatibleVersions.find((v) => v.id === dep.versionId || v.fileId === dep.versionId)
-        }
+        } else if (dep.versionId || dep.fileId) {
+          // Priority 2: Explicitly pinned versionId by provider -> MUST MATCH pinned version, NO silent fallback!
+          const pinnedId = dep.versionId || dep.fileId!
+          selectedDepVersion = depCompatibleVersions.find((v) => v.id === pinnedId || v.fileId === pinnedId)
 
-        // Priority 2: Automatic selection (latest RELEASE stable, fallback to BETA/ALPHA)
-        if (!selectedDepVersion) {
+          if (!selectedDepVersion) {
+            // Check direct getVersion to confirm incompatibility
+            const directDepVer = await depAdapter.getVersion(env, pinnedId, depProjectId).catch(() => null)
+            if (directDepVer) {
+              conflicts.push(
+                `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con Minecraft ${minecraftVersion}.`,
+              )
+            } else {
+              conflicts.push(
+                `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no fue encontrada.`,
+              )
+            }
+            continue
+          }
+        } else {
+          // Priority 3: Automatic selection (latest stable RELEASE, fallback to BETA/ALPHA)
+          if (depCompatibleVersions.length === 0) {
+            conflicts.push(
+              `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion} para la dependencia "${dep.projectName || depProjectId}".`,
+            )
+            continue
+          }
+
           const sorted = [...depCompatibleVersions].sort((a, b) => {
             const rankA = a.releaseType === "RELEASE" ? 3 : a.releaseType === "BETA" ? 2 : 1
             const rankB = b.releaseType === "RELEASE" ? 3 : b.releaseType === "BETA" ? 2 : 1
@@ -476,12 +613,13 @@ export class ModProviderManager {
         }
 
         if (!selectedDepVersion) {
-          conflicts.push(`No se pudo seleccionar una versión válida para la dependencia "${dep.projectName || depProjectId}".`)
+          conflicts.push(`No se pudo resolver una versión válida para la dependencia "${dep.projectName || depProjectId}".`)
           continue
         }
 
-        const depProject = await depAdapter.getProject(env, depProjectId).catch(() => null)
+        const depContentType: ContentTypeGql = depProject?.contentType || selectedDepVersion.contentType || "MOD"
         const depProjectName = depProject?.name || dep.projectName || selectedDepVersion.name || "Dependencia"
+        const depLogicalPath = getLogicalPathForContent(depContentType, selectedDepVersion.filename)
 
         const existingDep = draftFiles.find(
           (f) => f.sourceProvider === current.provider && f.sourceProjectId === depProjectId,
@@ -515,6 +653,9 @@ export class ModProviderManager {
           filename: selectedDepVersion.filename,
           sizeBytes: selectedDepVersion.sizeBytes,
           sha256: selectedDepVersion.sha256 || null,
+          contentType: depContentType,
+          environment: depProject?.environment || selectedDepVersion.environment || null,
+          logicalPath: depLogicalPath,
           isRoot: false,
           isDependency: true,
           isRequired: true,

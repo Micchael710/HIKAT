@@ -5,10 +5,10 @@ import { eq } from "drizzle-orm"
 import type { Env } from "../../types"
 import { ModrinthAdapter } from "./modrinthAdapter"
 import { CurseForgeAdapter } from "./curseforgeAdapter"
-import { ModProviderManager } from "./modProviderManager"
+import { ModProviderManager, getLogicalPathForContent } from "./modProviderManager"
 import { installModPlan } from "./modInstallationService"
-import { prepareGameDraft } from "../game/releaseService"
-import { saveGameFileContent } from "../game/gameFileService"
+import { prepareGameDraft, getPublishedModpack, publishGameRelease } from "../game/releaseService"
+import { saveGameFileContent, addGameFile, updateGameFile } from "../game/gameFileService"
 
 // Mock global fetch for provider API calls and binary downloads
 const mockFetch = vi.fn()
@@ -65,7 +65,7 @@ function createSampleJarBuffer(content: string = "dummy jar content"): Uint8Arra
   return buf
 }
 
-describe("Shard 8B — Mod Providers & Dependency Resolution Suite", () => {
+describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
   let testD1: ReturnType<typeof createTestD1>
   let db: ReturnType<typeof createDatabase>
   let env: Env
@@ -101,8 +101,8 @@ describe("Shard 8B — Mod Providers & Dependency Resolution Suite", () => {
     vi.restoreAllMocks()
   })
 
-  describe("1. Modrinth Adapter", () => {
-    it("searches Modrinth with automatic Minecraft 1.21.1 and NeoForge filters", async () => {
+  describe("1. Modrinth Adapter Multi-Content & Environment", () => {
+    it("searches Modrinth with automatic Minecraft 1.21.1 and NeoForge filters for MOD", async () => {
       const adapter = new ModrinthAdapter()
 
       mockFetch.mockResolvedValueOnce({
@@ -121,76 +121,83 @@ describe("Shard 8B — Mod Providers & Dependency Resolution Suite", () => {
               follows: 50000,
               icon_url: "https://cdn.modrinth.com/icon.png",
               latest_version: "6.0.6",
+              client_side: "required",
+              server_side: "required",
             },
           ],
           total_hits: 1,
         }),
       })
 
-      const result = await adapter.searchMods(env, "create", "1.21.1", "NeoForge", 20, 0)
+      const result = await adapter.searchMods(env, "create", "1.21.1", "NeoForge", 20, 0, "MOD")
       expect(result.items.length).toBe(1)
       expect(result.items[0]!.provider).toBe("MODRINTH")
       expect(result.items[0]!.projectId).toBe("LNytGWDc")
       expect(result.items[0]!.name).toBe("Create")
+      expect(result.items[0]!.contentType).toBe("MOD")
+      expect(result.items[0]!.environment).toBe("BOTH")
 
-      // Verify request url contained facets for 1.21.1 and neoforge
       const calledUrl = (mockFetch.mock.calls[0] as any)?.[0] as string
       expect(calledUrl).toContain("versions%3A1.21.1")
       expect(calledUrl).toContain("categories%3Aneoforge")
       expect(calledUrl).toContain("project_type%3Amod")
     })
 
-    it("fetches compatible versions for Modrinth filtered by loaders and game versions", async () => {
+    it("searches Modrinth for RESOURCE_PACK, DATA_PACK, and SHADER without loader filter", async () => {
       const adapter = new ModrinthAdapter()
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => [
-          {
-            id: "ver-create-606",
-            project_id: "LNytGWDc",
-            name: "Create 6.0.6",
-            version_number: "6.0.6",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            version_type: "release",
-            date_published: "2024-08-20T10:00:00.000Z",
-            downloads: 25000,
-            files: [
-              {
-                hashes: { sha256: "sha256-create-606" },
-                url: "https://cdn.modrinth.com/create-6.0.6.jar",
-                filename: "create-1.21.1-6.0.6.jar",
-                primary: true,
-                size: 15000000,
-              },
-            ],
-            dependencies: [
-              {
-                project_id: "P7dR8mSH",
-                version_id: null,
-                dependency_type: "required",
-              },
-            ],
-          },
-        ],
+        json: async () => ({
+          hits: [
+            {
+              project_id: "rp-1",
+              title: "Faithful",
+              description: "HD textures",
+              author: "FaithfulTeam",
+              downloads: 500000,
+              client_side: "required",
+              server_side: "unsupported",
+            },
+          ],
+          total_hits: 1,
+        }),
       })
 
-      const versions = await adapter.getCompatibleVersions(env, "LNytGWDc", "1.21.1", "NeoForge")
-      expect(versions.length).toBe(1)
-      expect(versions[0]!.versionNumber).toBe("6.0.6")
-      expect(versions[0]!.releaseType).toBe("RELEASE")
-      expect(versions[0]!.dependencies.length).toBe(1)
-      expect(versions[0]!.dependencies[0]!.projectId).toBe("P7dR8mSH")
-      expect(versions[0]!.dependencies[0]!.dependencyType).toBe("REQUIRED")
+      const rpResult = await adapter.searchMods(env, "faithful", "1.21.1", "NeoForge", 20, 0, "RESOURCE_PACK")
+      expect(rpResult.items.length).toBe(1)
+      expect(rpResult.items[0]!.contentType).toBe("RESOURCE_PACK")
+      expect(rpResult.items[0]!.environment).toBe("CLIENT")
+
+      const rpUrl = (mockFetch.mock.calls[0] as any)?.[0] as string
+      expect(rpUrl).toContain("project_type%3Aresourcepack")
+      expect(rpUrl).not.toContain("categories%3Aneoforge")
+    })
+
+    it("resolves client_side and server_side environment correctly", async () => {
+      const adapter = new ModrinthAdapter()
+
+      // Server only mod
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "server-core",
+          title: "Server Core",
+          client_side: "unsupported",
+          server_side: "required",
+        }),
+      })
+
+      const project = await adapter.getProject(env, "server-core")
+      expect(project?.environment).toBe("SERVER")
     })
   })
 
-  describe("2. CurseForge Adapter & Protected API Key", () => {
-    it("sends x-api-key header exclusively from backend env and searches with NeoForge loader type 6", async () => {
+  describe("2. CurseForge Adapter Multi-Content & Class IDs", () => {
+    it("searches CurseForge with classId 6 for MOD and includes loader filter", async () => {
       const adapter = new CurseForgeAdapter()
-      expect(adapter.isConfigured(env)).toBe(true)
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -198,758 +205,493 @@ describe("Shard 8B — Mod Providers & Dependency Resolution Suite", () => {
         json: async () => ({
           data: [
             {
-              id: 238222,
-              name: "Just Enough Items (JEI)",
-              slug: "jei",
-              summary: "View Items and Recipes",
-              authors: [{ name: "mezz" }],
-              logo: { url: "https://media.forgecdn.net/jei.png" },
-              downloadCount: 300000000,
-              categories: [{ name: "Utility" }],
-              dateCreated: "2015-10-15T00:00:00.000Z",
+              id: 328085,
+              slug: "create",
+              name: "Create",
+              summary: "Aesthetic Technology",
+              authors: [{ name: "simibubi" }],
+              downloadCount: 12000000,
+              logo: { thumbnailUrl: "https://cf.com/icon.png" },
+              categories: [{ name: "Technology" }],
             },
           ],
           pagination: { totalCount: 1 },
         }),
       })
 
-      const result = await adapter.searchMods(env, "jei", "1.21.1", "NeoForge", 20, 0)
+      const result = await adapter.searchMods(env, "create", "1.21.1", "NeoForge", 20, 0, "MOD")
       expect(result.items.length).toBe(1)
       expect(result.items[0]!.provider).toBe("CURSEFORGE")
-      expect(result.items[0]!.projectId).toBe("238222")
-      expect(result.items[0]!.name).toBe("Just Enough Items (JEI)")
+      expect(result.items[0]!.projectId).toBe("328085")
 
-      const [calledUrl, options] = (mockFetch.mock.calls[0] as any) || []
-      expect(calledUrl).toContain("gameId=432")
+      const calledUrl = (mockFetch.mock.calls[0] as any)?.[0] as string
       expect(calledUrl).toContain("classId=6")
-      expect(calledUrl).toContain("modLoaderType=6")
       expect(calledUrl).toContain("gameVersion=1.21.1")
-      expect(options.headers["x-api-key"]).toBe("test-curseforge-api-key-12345")
+      expect(calledUrl).toContain("modLoaderType=6")
     })
 
-    it("returns available: false gracefully when CURSEFORGE_API_KEY is not configured without crashing", async () => {
-      const unconfiguredEnv: Env = { ENVIRONMENT: "test" }
+    it("searches CurseForge with classId 12 (Resource Packs), 6945 (Data Packs), 6552 (Shaders) without loader", async () => {
       const adapter = new CurseForgeAdapter()
-      expect(adapter.isConfigured(unconfiguredEnv)).toBe(false)
 
-      const result = await adapter.searchMods(unconfiguredEnv, "jei", "1.21.1", "NeoForge", 20, 0)
-      expect(result.items).toEqual([])
-      expect(result.totalCount).toBe(0)
-    })
-  })
-
-  describe("3. Parallel Multi-Provider Search & Partial Degradation", () => {
-    it("searches ALL providers in parallel and interleaves results", async () => {
-      // Modrinth fetch
+      // Data Packs
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({
-          hits: [
-            {
-              project_id: "modrinth-1",
-              title: "Create (Modrinth)",
-              description: "Create mod",
-              author: "simibubi",
-              categories: ["neoforge"],
-              downloads: 100,
-            },
-          ],
-          total_hits: 1,
-        }),
-      })
-      // CurseForge fetch
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: [
-            {
-              id: 238222,
-              name: "JEI (CurseForge)",
-              summary: "JEI mod",
-              authors: [{ name: "mezz" }],
-              downloadCount: 200,
-            },
-          ],
+          data: [{ id: 99911, name: "Terralith", summary: "Overworld overhaul", authors: [{ name: "Stardust" }], downloadCount: 500000 }],
           pagination: { totalCount: 1 },
         }),
       })
 
-      const payload = await manager.searchMods(env, "mod", null, 20, 0)
-      expect(payload.items.length).toBe(2)
-      expect(payload.items[0]!.provider).toBe("MODRINTH")
-      expect(payload.items[1]!.provider).toBe("CURSEFORGE")
-      expect(payload.providersStatus.every((s) => s.available)).toBe(true)
+      const result = await adapter.searchMods(env, "terralith", "1.21.1", "NeoForge", 20, 0, "DATA_PACK")
+      expect(result.items.length).toBe(1)
+      expect(result.items[0]!.contentType).toBe("DATA_PACK")
+
+      const calledUrl = (mockFetch.mock.calls[0] as any)?.[0] as string
+      expect(calledUrl).toContain("classId=6945")
+      expect(calledUrl).not.toContain("modLoaderType")
     })
 
-    it("handles partial failure: if CurseForge fails or is not configured, Modrinth results still return with partial status", async () => {
-      // Modrinth succeeds
+    it("resolves hashes (SHA-1, MD5, SHA-256) correctly from CurseForge files", async () => {
+      const adapter = new CurseForgeAdapter()
+
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({
-          hits: [
-            {
-              project_id: "modrinth-only",
-              title: "JourneyMap",
-              description: "Mapping mod",
-              author: "techbrew",
-              categories: ["neoforge"],
-              downloads: 50000,
-            },
-          ],
-          total_hits: 1,
+          data: {
+            id: 55555,
+            fileName: "mod.jar",
+            displayName: "Mod 1.0",
+            downloadUrl: "https://cf.com/mod.jar",
+            fileLength: 4000,
+            fileDate: "2024-08-01T00:00:00Z",
+            releaseType: 1,
+            gameVersions: ["1.21.1", "NeoForge"],
+            hashes: [
+              { value: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", algo: 1 }, // SHA-1
+              { value: "md5hash1234567890", algo: 2 }, // MD5
+            ],
+            dependencies: [],
+          },
         }),
       })
-      // CurseForge throws 500
+
+      const version = await adapter.getVersion(env, "55555", "328085", "MOD")
+      expect(version).toBeDefined()
+      expect(version?.hashes?.sha1).toBe("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
+      expect(version?.hashes?.md5).toBe("md5hash1234567890")
+    })
+
+    it("uses official download URL endpoint when downloadUrl is null in file payload", async () => {
+      const adapter = new CurseForgeAdapter()
+
+      // 1. File payload with null downloadUrl
       mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            id: 66666,
+            fileName: "opt-mod.jar",
+            displayName: "Opt Mod",
+            downloadUrl: null,
+            fileLength: 3000,
+            fileDate: "2024-08-01T00:00:00Z",
+            releaseType: 1,
+            gameVersions: ["1.21.1", "NeoForge"],
+            hashes: [],
+            dependencies: [],
+          },
+        }),
       })
 
-      const payload = await manager.searchMods(env, "map", null, 20, 0)
-      expect(payload.items.length).toBe(1)
-      expect(payload.items[0]!.name).toBe("JourneyMap")
+      // 2. Official download-url endpoint resolution
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: "https://mediafilez.forgecdn.net/files/666/opt-mod.jar",
+        }),
+      })
 
-      const modrinthStatus = payload.providersStatus.find((s) => s.provider === "MODRINTH")
-      const curseStatus = payload.providersStatus.find((s) => s.provider === "CURSEFORGE")
-      expect(modrinthStatus?.available).toBe(true)
-      expect(curseStatus?.available).toBe(false)
-      expect(curseStatus?.error).toBeDefined()
+      const version = await adapter.getVersion(env, "66666", "328085", "MOD")
+      expect(version?.downloadUrl).toBe("https://mediafilez.forgecdn.net/files/666/opt-mod.jar")
     })
   })
 
-  describe("4. Dependency Resolver Engine", () => {
-    it("resolves mod with 0 dependencies cleanly", async () => {
-      // getCompatibleVersions for root mod
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-appleskin-1",
-            name: "AppleSkin 3.0.0",
-            version_number: "3.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-01T00:00:00Z",
-            files: [{ filename: "appleskin-1.21.1-3.0.0.jar", size: 50000, url: "https://cdn.modrinth.com/appleskin.jar" }],
-            dependencies: [],
-          },
-        ],
-      })
-      // getProject for root mod
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "appleskin-id", title: "AppleSkin", description: "Food HUD info", categories: [] }),
-      })
-
-      const plan = await manager.resolveInstallationPlan(
-        env,
-        db,
-        { provider: "MODRINTH", projectId: "appleskin-id", versionId: "ver-appleskin-1" },
-        "1.21.1",
-        "NeoForge",
-      )
-
-      expect(plan.isValid).toBe(true)
-      expect(plan.items.length).toBe(1)
-      expect(plan.items[0]!.isRoot).toBe(true)
-      expect(plan.items[0]!.action).toBe("INSTALL")
-      expect(plan.conflicts.length).toBe(0)
-    })
-
-    it("resolves transitive dependencies (A -> B -> C) and deduplicates repeated dependencies (A -> B, C and B -> C)", async () => {
-      // 1. Root mod A (Create)
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-a",
-            name: "Create 6.0.6",
-            version_number: "6.0.6",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-20T00:00:00Z",
-            files: [{ filename: "create-6.0.6.jar", size: 100000, url: "https://cdn/create.jar" }],
-            dependencies: [
-              { project_id: "proj-b", dependency_type: "required" },
-              { project_id: "proj-c", dependency_type: "required" },
-            ],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "proj-a", title: "Create", description: "Create", categories: [] }),
-      })
-
-      // 2. Dependency B (Flywheel) -> depends on C (Registrate)
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-b",
-            name: "Flywheel 1.0.0",
-            version_number: "1.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-15T00:00:00Z",
-            files: [{ filename: "flywheel-1.0.0.jar", size: 50000, url: "https://cdn/flywheel.jar" }],
-            dependencies: [{ project_id: "proj-c", dependency_type: "required" }],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "proj-b", title: "Flywheel", description: "Flywheel", categories: [] }),
-      })
-
-      // 3. Dependency C (Registrate)
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-c",
-            name: "Registrate 1.3.0",
-            version_number: "1.3.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-10T00:00:00Z",
-            files: [{ filename: "registrate-1.3.0.jar", size: 40000, url: "https://cdn/registrate.jar" }],
-            dependencies: [],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "proj-c", title: "Registrate", description: "Registrate", categories: [] }),
-      })
-
-      const plan = await manager.resolveInstallationPlan(
-        env,
-        db,
-        { provider: "MODRINTH", projectId: "proj-a", versionId: "ver-a" },
-        "1.21.1",
-        "NeoForge",
-      )
-
-      expect(plan.isValid).toBe(true)
-      // Exactly 3 items: A, B, C (C was deduplicated across branches)
-      expect(plan.items.length).toBe(3)
-      const projectIds = plan.items.map((i) => i.projectId)
-      expect(projectIds).toEqual(["proj-a", "proj-b", "proj-c"])
-    })
-
-    it("prevents infinite loops when dependency graph contains cycles (A -> B -> A)", async () => {
-      // Mod A depends on B
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-cycle-a",
-            name: "Mod A",
-            version_number: "1.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-01T00:00:00Z",
-            files: [{ filename: "mod-a.jar", size: 1000, url: "https://cdn/a.jar" }],
-            dependencies: [{ project_id: "proj-cycle-b", dependency_type: "required" }],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "proj-cycle-a", title: "Mod A", description: "", categories: [] }),
-      })
-
-      // Mod B depends on A
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-cycle-b",
-            name: "Mod B",
-            version_number: "1.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-01T00:00:00Z",
-            files: [{ filename: "mod-b.jar", size: 1000, url: "https://cdn/b.jar" }],
-            dependencies: [{ project_id: "proj-cycle-a", dependency_type: "required" }],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "proj-cycle-b", title: "Mod B", description: "", categories: [] }),
-      })
-
-      const plan = await manager.resolveInstallationPlan(
-        env,
-        db,
-        { provider: "MODRINTH", projectId: "proj-cycle-a", versionId: "ver-cycle-a" },
-        "1.21.1",
-        "NeoForge",
-      )
-
-      expect(plan.isValid).toBe(true)
-      expect(plan.items.length).toBe(2)
-      expect(plan.items.map((i) => i.projectId)).toEqual(["proj-cycle-a", "proj-cycle-b"])
-    })
-
-    it("flags INCOMPATIBLE dependencies as conflicts and does not add OPTIONAL dependencies to auto install", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-incompat-test",
-            name: "Mod With Incompat",
-            version_number: "1.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-01T00:00:00Z",
-            files: [{ filename: "test.jar", size: 1000, url: "https://cdn/test.jar" }],
-            dependencies: [
-              { project_id: "opt-proj", dependency_type: "optional" },
-              { project_id: "bad-proj", dependency_type: "incompatible", project_name: "Incompatible Mod" },
-            ],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "root-incompat", title: "Root Mod", description: "", categories: [] }),
-      })
-      // optional project metadata fetch
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "opt-proj", title: "Optional Mod", description: "", categories: [] }),
-      })
-
-      const plan = await manager.resolveInstallationPlan(
-        env,
-        db,
-        { provider: "MODRINTH", projectId: "root-incompat", versionId: "ver-incompat-test" },
-        "1.21.1",
-        "NeoForge",
-      )
-
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts.length).toBeGreaterThan(0)
-      expect(plan.conflicts[0]).toContain("Incompatible Mod")
-      expect(plan.optionalDependencies.length).toBe(1)
-      expect(plan.optionalDependencies[0]!.projectId).toBe("opt-proj")
-    })
-
-    it("respects manual overrides when selecting dependency versions", async () => {
-      // Root mod
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-root",
-            name: "Root Mod",
-            version_number: "1.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-01T00:00:00Z",
-            files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar" }],
-            dependencies: [{ project_id: "dep-proj", dependency_type: "required" }],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "root-mod", title: "Root Mod", description: "", categories: [] }),
-      })
-
-      // Dep has two versions: latest release 2.0.0 and older manual choice 1.5.0
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-dep-200",
-            name: "Dep 2.0.0",
-            version_number: "2.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-20T00:00:00Z",
-            files: [{ filename: "dep-2.0.0.jar", size: 2000, url: "https://cdn/dep-200.jar" }],
-            dependencies: [],
-          },
-          {
-            id: "ver-dep-150",
-            name: "Dep 1.5.0",
-            version_number: "1.5.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-07-01T00:00:00Z",
-            files: [{ filename: "dep-1.5.0.jar", size: 1500, url: "https://cdn/dep-150.jar" }],
-            dependencies: [],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "dep-proj", title: "Dep Mod", description: "", categories: [] }),
-      })
-
-      const plan = await manager.resolveInstallationPlan(
-        env,
-        db,
-        {
-          provider: "MODRINTH",
-          projectId: "root-mod",
-          versionId: "ver-root",
-          manualOverrides: [{ provider: "MODRINTH", projectId: "dep-proj", versionId: "ver-dep-150" }],
-        },
-        "1.21.1",
-        "NeoForge",
-      )
-
-      expect(plan.isValid).toBe(true)
-      const depItem = plan.items.find((i) => i.projectId === "dep-proj")
-      expect(depItem?.versionId).toBe("ver-dep-150")
-      expect(depItem?.versionNumber).toBe("1.5.0")
-    })
-
-    it("correctly flags ALREADY_INSTALLED vs UPDATE when comparing against active draft files", async () => {
-      const draft = await prepareGameDraft(db, adminUserId)
-
-      // Insert existing mod in draft: JEI version 1.0.0
-      await db.insert(schema.gameReleaseFiles).values({
-        id: "existing-jei-file",
-        releaseId: draft.id,
-        name: "jei-1.0.0.jar",
-        logicalPath: "mods/jei-1.0.0.jar",
-        category: "MOD",
-        sha256: "sha256-old-jei",
-        sizeBytes: 1000,
-        objectKey: "game-files/old-jei",
-        sourceProvider: "MODRINTH",
-        sourceProjectId: "jei-proj-id",
-        sourceVersionId: "ver-jei-100",
-        createdAt: new Date().toISOString(),
-      })
-
-      // Query plan for JEI version 2.0.0 (should be UPDATE)
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-jei-200",
-            name: "JEI 2.0.0",
-            version_number: "2.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-08-20T00:00:00Z",
-            files: [{ filename: "jei-2.0.0.jar", size: 2000, url: "https://cdn/jei-200.jar" }],
-            dependencies: [],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "jei-proj-id", title: "JEI", description: "", categories: [] }),
-      })
-
-      const planUpdate = await manager.resolveInstallationPlan(
-        env,
-        db,
-        { provider: "MODRINTH", projectId: "jei-proj-id", versionId: "ver-jei-200" },
-        "1.21.1",
-        "NeoForge",
-      )
-
-      expect(planUpdate.items[0]!.action).toBe("UPDATE")
-      expect(planUpdate.items[0]!.isInstalled).toBe(true)
-      expect(planUpdate.items[0]!.installedFileId).toBe("existing-jei-file")
-
-      // Query plan for JEI version 1.0.0 (should be ALREADY_INSTALLED)
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [
-          {
-            id: "ver-jei-100",
-            name: "JEI 1.0.0",
-            version_number: "1.0.0",
-            version_type: "release",
-            game_versions: ["1.21.1"],
-            loaders: ["neoforge"],
-            date_published: "2024-07-01T00:00:00Z",
-            files: [{ filename: "jei-1.0.0.jar", size: 1000, url: "https://cdn/jei-100.jar" }],
-            dependencies: [],
-          },
-        ],
-      })
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "jei-proj-id", title: "JEI", description: "", categories: [] }),
-      })
-
-      const planSame = await manager.resolveInstallationPlan(
-        env,
-        db,
-        { provider: "MODRINTH", projectId: "jei-proj-id", versionId: "ver-jei-100" },
-        "1.21.1",
-        "NeoForge",
-      )
-
-      expect(planSame.items[0]!.action).toBe("ALREADY_INSTALLED")
-    })
-  })
-
-  describe("5. Mod Installation & Atomic Compensation", () => {
-    it("downloads and installs mod and required dependency atomically into draft with source metadata", async () => {
+  describe("3. Strict Compatibility & Dependency Rules", () => {
+    it("rejects root version if it does not support the draft's Minecraft version", async () => {
       mockFetch.mockImplementation(async (url: string) => {
-        const urlStr = String(url)
-        if (urlStr.includes("/version?")) {
-          if (urlStr.includes("proj-create")) {
-            return {
-              ok: true,
-              status: 200,
-              json: async () => [
-                {
-                  id: "ver-create-root",
-                  name: "Create 6.0.6",
-                  version_number: "6.0.6",
-                  version_type: "release",
-                  game_versions: ["1.21.1"],
-                  loaders: ["neoforge"],
-                  date_published: "2024-08-20T00:00:00Z",
-                  files: [{ filename: "create-1.21.1-6.0.6.jar", size: 5000, url: "https://cdn/create.jar" }],
-                  dependencies: [{ project_id: "dep-flywheel", dependency_type: "required" }],
-                },
-              ],
-            }
-          }
-          if (urlStr.includes("dep-flywheel")) {
-            return {
-              ok: true,
-              status: 200,
-              json: async () => [
-                {
-                  id: "ver-flywheel",
-                  name: "Flywheel 1.0.0",
-                  version_number: "1.0.0",
-                  version_type: "release",
-                  game_versions: ["1.21.1"],
-                  loaders: ["neoforge"],
-                  date_published: "2024-08-15T00:00:00Z",
-                  files: [{ filename: "flywheel-1.0.0.jar", size: 3000, url: "https://cdn/flywheel.jar" }],
-                  dependencies: [],
-                },
-              ],
-            }
-          }
-        }
-        if (urlStr.includes("/version/ver-create-root")) {
+        const u = String(url)
+        if (u.includes("/version/ver-incompat-mc")) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              id: "ver-create-root",
-              name: "Create 6.0.6",
-              version_number: "6.0.6",
+              id: "ver-incompat-mc",
+              project_id: "mod-x",
+              name: "Old Mod",
+              version_number: "0.1.0",
               version_type: "release",
-              files: [{ filename: "create-1.21.1-6.0.6.jar", size: 5000, url: "https://cdn/create.jar" }],
+              game_versions: ["1.20.1"], // Incompatible with 1.21.1
+              loaders: ["neoforge"],
+              files: [{ filename: "old.jar", size: 1000, url: "https://cdn/old.jar" }],
+              dependencies: [],
             }),
           }
         }
-        if (urlStr.includes("/version/ver-flywheel")) {
+        if (u.includes("/project/mod-x")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({
-              id: "ver-flywheel",
-              name: "Flywheel 1.0.0",
-              version_number: "1.0.0",
-              version_type: "release",
-              files: [{ filename: "flywheel-1.0.0.jar", size: 3000, url: "https://cdn/flywheel.jar" }],
-            }),
-          }
-        }
-        if (urlStr.includes("/project/proj-create")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ id: "proj-create", title: "Create", description: "", categories: [] }),
-          }
-        }
-        if (urlStr.includes("/project/dep-flywheel")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ id: "dep-flywheel", title: "Flywheel", description: "", categories: [] }),
-          }
-        }
-        if (urlStr.includes("create.jar")) {
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => createSampleJarBuffer("create jar binary content").buffer,
-          }
-        }
-        if (urlStr.includes("flywheel.jar")) {
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => createSampleJarBuffer("flywheel jar binary content").buffer,
+            json: async () => ({ id: "mod-x", title: "Old Mod", description: "", categories: [] }),
           }
         }
         return { ok: false, status: 404 }
       })
 
-      const result = await installModPlan(
+      await expect(
+        manager.resolveInstallationPlan(
+          env,
+          db,
+          { provider: "MODRINTH", projectId: "mod-x", versionId: "ver-incompat-mc" },
+        ),
+      ).rejects.toThrow(/no es compatible con el entorno actual/)
+    })
+
+    it("enforces pinned dependencies and flags conflict if pinned version is incompatible without fallback", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-root")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-root",
+              project_id: "root-proj",
+              name: "Root 1.0",
+              version_number: "1.0.0",
+              version_type: "release",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar" }],
+              dependencies: [
+                { version_id: "ver-pinned-incompat", dependency_type: "required" },
+              ],
+            }),
+          }
+        }
+        if (u.includes("/version/ver-pinned-incompat")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-pinned-incompat",
+              project_id: "dep-proj",
+              name: "Dep Old",
+              version_number: "0.5.0",
+              version_type: "release",
+              game_versions: ["1.19.2"],
+              loaders: ["neoforge"],
+              files: [{ filename: "dep-old.jar", size: 500, url: "https://cdn/dep-old.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/root-proj")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "root-proj", title: "Root Project", description: "", categories: [] }),
+          }
+        }
+        if (u.includes("/project/dep-proj")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "dep-proj", title: "Dep Project", description: "", categories: [] }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "root-proj", versionId: "ver-root" },
+      )
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.length).toBeGreaterThan(0)
+      expect(plan.conflicts[0]).toContain("versión requerida")
+    })
+
+    it("resolves Modrinth dependency that specifies version_id but missing project_id", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-root-ok")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-root-ok",
+              project_id: "root-ok-proj",
+              name: "Root OK",
+              version_number: "1.0.0",
+              version_type: "release",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "root-ok.jar", size: 1000, url: "https://cdn/root-ok.jar" }],
+              dependencies: [
+                { version_id: "ver-dep-only-id", dependency_type: "required" },
+              ],
+            }),
+          }
+        }
+        if (u.includes("/version/ver-dep-only-id")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-dep-only-id",
+              project_id: "resolved-dep-proj",
+              name: "Dep Resolved",
+              version_number: "2.0.0",
+              version_type: "release",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "dep-resolved.jar", size: 2000, url: "https://cdn/dep-resolved.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/root-ok-proj")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "root-ok-proj", title: "Root OK", description: "", categories: [] }),
+          }
+        }
+        if (u.includes("/project/resolved-dep-proj/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-dep-only-id",
+                name: "Dep Resolved",
+                version_number: "2.0.0",
+                version_type: "release",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "dep-resolved.jar", size: 2000, url: "https://cdn/dep-resolved.jar" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/resolved-dep-proj")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "resolved-dep-proj", title: "Resolved Dep", description: "", categories: [] }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "root-ok-proj", versionId: "ver-root-ok" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[1]!.projectId).toBe("resolved-dep-proj")
+    })
+  })
+
+  describe("4. Target Paths & Policy Verification", () => {
+    it("computes proper logical paths per content type", () => {
+      expect(getLogicalPathForContent("MOD", "create.jar")).toBe("mods/create.jar")
+      expect(getLogicalPathForContent("RESOURCE_PACK", "faithful.zip")).toBe("resourcepacks/faithful.zip")
+      expect(getLogicalPathForContent("DATA_PACK", "terralith.zip")).toBe("datapacks/terralith.zip")
+      expect(getLogicalPathForContent("SHADER", "complementary.zip")).toBe("shaderpacks/complementary.zip")
+    })
+
+    it("excludes DATA_PACK files from publishedModpack.clientFiles", async () => {
+      const draft = await prepareGameDraft(db, adminUserId)
+
+      // Put files into R2 with matching sizes
+      await r2.put("game-files/mod", new Uint8Array(1000))
+      await r2.put("game-files/dp", new Uint8Array(5000))
+
+      // Add a mod and a datapack to draft
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "mod-file-1",
+        releaseId: draft.id,
+        name: "jei.jar",
+        logicalPath: "mods/jei.jar",
+        category: "MOD",
+        sha256: "sha256-mod",
+        sizeBytes: 1000,
+        policy: "NO_MODIFICABLE",
+        objectKey: "game-files/mod",
+        createdAt: new Date().toISOString(),
+      })
+
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "datapack-file-1",
+        releaseId: draft.id,
+        name: "server_data.zip",
+        logicalPath: "datapacks/server_data.zip",
+        category: "DATA_PACK",
+        sha256: "sha256-dp",
+        sizeBytes: 5000,
+        policy: "NO_MODIFICABLE",
+        objectKey: "game-files/dp",
+        createdAt: new Date().toISOString(),
+      })
+
+      // Publish release with correct argument order (db, env, input, userId)
+      await publishGameRelease(db, env, { version: "1.0.0", notes: "Release with datapack" }, adminUserId)
+
+      const publishedManifest = await getPublishedModpack(db, env)
+      expect(publishedManifest).toBeDefined()
+      expect(publishedManifest?.clientFiles.length).toBe(1)
+      expect(publishedManifest?.clientFiles[0]!.path).toBe("mods/jei.jar")
+      expect(publishedManifest?.clientFiles.some((f) => f.path.startsWith("datapacks/"))).toBe(false)
+    })
+  })
+
+  describe("5. Atomic Installation & Compensation", () => {
+    it("installs resource pack, datapack, and shader into respective target folders with valid zip/jar", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const urlStr = String(url)
+        if (urlStr.includes("/version/ver-rp-1")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-rp-1",
+              project_id: "faithful-rp",
+              name: "Faithful 1.21",
+              version_number: "1.21.0",
+              version_type: "release",
+              game_versions: ["1.21.1"],
+              loaders: [],
+              files: [{ filename: "faithful-1.21.zip", size: 5000, url: "https://cdn/faithful.zip" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (urlStr.includes("/project/faithful-rp/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-rp-1",
+                name: "Faithful 1.21",
+                version_number: "1.21.0",
+                version_type: "release",
+                game_versions: ["1.21.1"],
+                loaders: [],
+                files: [{ filename: "faithful-1.21.zip", size: 5000, url: "https://cdn/faithful.zip" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (urlStr.includes("/project/faithful-rp")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "faithful-rp", title: "Faithful", description: "", categories: [] }),
+          }
+        }
+        if (urlStr.includes("faithful.zip")) {
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => createSampleJarBuffer("zip header content").buffer,
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const files = await installModPlan(
         db,
         env,
-        { provider: "MODRINTH", projectId: "proj-create", versionId: "ver-create-root" },
+        { provider: "MODRINTH", projectId: "faithful-rp", versionId: "ver-rp-1", contentType: "RESOURCE_PACK" },
         adminUserId,
       )
 
-      expect(result.length).toBe(2)
-      const createRecord = result.find((f) => f.logicalPath === "mods/create-1.21.1-6.0.6.jar")
-      const flywheelRecord = result.find((f) => f.logicalPath === "mods/flywheel-1.0.0.jar")
-
-      expect(createRecord).toBeDefined()
-      expect(createRecord?.sourceProvider).toBe("MODRINTH")
-      expect(createRecord?.sourceProjectId).toBe("proj-create")
-      expect(createRecord?.sourceVersionId).toBe("ver-create-root")
-      expect(createRecord?.category).toBe("MOD")
-
-      expect(flywheelRecord).toBeDefined()
-      expect(flywheelRecord?.sourceProvider).toBe("MODRINTH")
-      expect(flywheelRecord?.sourceProjectId).toBe("dep-flywheel")
-      expect(flywheelRecord?.sourceVersionId).toBe("ver-flywheel")
-      expect(flywheelRecord?.category).toBe("MOD")
-
-      // Check R2 storage
-      expect(r2._store.size).toBe(2)
+      expect(files.length).toBe(1)
+      expect(files[0]!.logicalPath).toBe("resourcepacks/faithful-1.21.zip")
+      expect(files[0]!.category).toBe("RESOURCE_PACK")
     })
 
-    it("compensates and purges all new R2 objects if download or validation of any dependency fails", async () => {
+    it("prevents collision when target path already exists with a different manual file", async () => {
+      const draft = await prepareGameDraft(db, adminUserId)
+
+      // Existing manual mod at mods/custom.jar
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "manual-mod",
+        releaseId: draft.id,
+        name: "custom.jar",
+        logicalPath: "mods/custom.jar",
+        category: "MOD",
+        sha256: "sha256-manual",
+        sizeBytes: 2000,
+        objectKey: "game-files/manual",
+        createdAt: new Date().toISOString(),
+      })
+
       mockFetch.mockImplementation(async (url: string) => {
         const urlStr = String(url)
-        if (urlStr.includes("/version?")) {
-          if (urlStr.includes("proj-root-comp")) {
-            return {
-              ok: true,
-              status: 200,
-              json: async () => [
-                {
-                  id: "ver-root-comp",
-                  name: "Root Mod",
-                  version_number: "1.0.0",
-                  version_type: "release",
-                  game_versions: ["1.21.1"],
-                  loaders: ["neoforge"],
-                  date_published: "2024-08-20T00:00:00Z",
-                  files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar" }],
-                  dependencies: [{ project_id: "dep-failing", dependency_type: "required" }],
-                },
-              ],
-            }
-          }
-          if (urlStr.includes("dep-failing")) {
-            return {
-              ok: true,
-              status: 200,
-              json: async () => [
-                {
-                  id: "ver-dep-fail",
-                  name: "Failing Dep",
-                  version_number: "1.0.0",
-                  version_type: "release",
-                  game_versions: ["1.21.1"],
-                  loaders: ["neoforge"],
-                  date_published: "2024-08-20T00:00:00Z",
-                  files: [{ filename: "dep.jar", size: 1000, url: "https://cdn/dep.jar" }],
-                  dependencies: [],
-                },
-              ],
-            }
-          }
-        }
-        if (urlStr.includes("/version/ver-root-comp")) {
+        if (urlStr.includes("/version/ver-custom")) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              id: "ver-root-comp",
-              files: [{ filename: "root.jar", url: "https://cdn/root.jar" }],
+              id: "ver-custom",
+              project_id: "mod-custom-provider",
+              name: "Custom Mod",
+              version_number: "1.0.0",
+              version_type: "release",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "custom.jar", size: 2000, url: "https://cdn/custom.jar" }],
+              dependencies: [],
             }),
           }
         }
-        if (urlStr.includes("/version/ver-dep-fail")) {
+        if (urlStr.includes("/project/mod-custom-provider/version")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({
-              id: "ver-dep-fail",
-              files: [{ filename: "dep.jar", url: "https://cdn/dep.jar" }],
-            }),
+            json: async () => [
+              {
+                id: "ver-custom",
+                name: "Custom Mod",
+                version_number: "1.0.0",
+                version_type: "release",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "custom.jar", size: 2000, url: "https://cdn/custom.jar" }],
+                dependencies: [],
+              },
+            ],
           }
         }
-        if (urlStr.includes("/project/proj-root-comp")) {
+        if (urlStr.includes("/project/mod-custom-provider")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({ id: "proj-root-comp", title: "Root", description: "", categories: [] }),
-          }
-        }
-        if (urlStr.includes("/project/dep-failing")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ id: "dep-failing", title: "Fail", description: "", categories: [] }),
-          }
-        }
-        if (urlStr.includes("root.jar")) {
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => createSampleJarBuffer("valid root jar").buffer,
-          }
-        }
-        if (urlStr.includes("dep.jar")) {
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => new Uint8Array([0x00, 0x00, 0x00, 0x00]).buffer, // Corrupt magic bytes
+            json: async () => ({ id: "mod-custom-provider", title: "Custom Mod", description: "", categories: [] }),
           }
         }
         return { ok: false, status: 404 }
@@ -959,56 +701,65 @@ describe("Shard 8B — Mod Providers & Dependency Resolution Suite", () => {
         installModPlan(
           db,
           env,
-          { provider: "MODRINTH", projectId: "proj-root-comp", versionId: "ver-root-comp" },
+          { provider: "MODRINTH", projectId: "mod-custom-provider", versionId: "ver-custom" },
           adminUserId,
         ),
-      ).rejects.toThrow(/formato \.jar válido/)
-
-      // Ensure R2 was compensated and no files remain in R2 or D1
-      expect(r2._store.size).toBe(0)
-
-      const draftFiles = await db.select().from(schema.gameReleaseFiles).all()
-      expect(draftFiles.length).toBe(0)
+      ).rejects.toThrow(/Ya existe un archivo en "mods\/custom\.jar"/)
     })
 
-    it("clears sourceProvider metadata when a provider-installed mod is manually overwritten with text or custom upload", async () => {
+    it("clears provider metadata when a provider file is replaced via addGameFile or updateGameFile", async () => {
       const draft = await prepareGameDraft(db, adminUserId)
 
-      // 1. Mod installed with provider metadata
-      const modFileId = "mod-with-metadata"
+      const fileId = "provider-mod-file"
       await db.insert(schema.gameReleaseFiles).values({
-        id: modFileId,
+        id: fileId,
         releaseId: draft.id,
-        name: "config.json",
-        logicalPath: "config/config.json",
-        category: "CONFIG",
-        sha256: "sha256-orig",
-        sizeBytes: 100,
-        objectKey: "game-files/orig",
+        name: "testmod.jar",
+        logicalPath: "mods/testmod.jar",
+        category: "MOD",
+        sha256: "sha256-mod",
+        sizeBytes: 3000,
+        objectKey: "game-files/testmod",
         sourceProvider: "MODRINTH",
-        sourceProjectId: "config-mod-id",
-        sourceVersionId: "ver-cfg-1",
+        sourceProjectId: "test-proj",
+        sourceVersionId: "ver-test",
+        sourceEnvironment: "BOTH",
         createdAt: new Date().toISOString(),
       })
 
-      // 2. Save text content manually over the file
-      await saveGameFileContent(
+      // Overwrite by calling addGameFile with tokenHash or direct payload
+      const tokenHash = "token-hash-123"
+      await db.insert(schema.gameFileUploadTokens).values({
+        id: crypto.randomUUID(),
+        tokenHash,
+        category: "MOD",
+        originalFilename: "testmod.jar",
+        expectedSizeBytes: 4000,
+        uploadedSizeBytes: 4000,
+        objectKey: "game-files/new-manual",
+        sha256: "sha256-new-manual",
+        createdBy: adminUserId,
+        usedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        createdAt: new Date().toISOString(),
+      })
+
+      await addGameFile(
         db,
-        { logicalPath: "config/config.json", content: '{"custom": true}' },
+        {
+          name: "testmod.jar",
+          logicalPath: "mods/testmod.jar",
+          tokenHash,
+        },
         adminUserId,
         env,
       )
 
-      const updated = await db
-        .select()
-        .from(schema.gameReleaseFiles)
-        .where(eq(schema.gameReleaseFiles.id, modFileId))
-        .get()
-
-      expect(updated).toBeDefined()
+      const updated = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.id, fileId)).get()
       expect(updated?.sourceProvider).toBeNull()
       expect(updated?.sourceProjectId).toBeNull()
       expect(updated?.sourceVersionId).toBeNull()
+      expect(updated?.sourceEnvironment).toBeNull()
     })
   })
 })

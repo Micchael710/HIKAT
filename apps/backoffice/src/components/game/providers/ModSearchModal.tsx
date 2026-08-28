@@ -3,6 +3,7 @@ import type {
   ModProvider,
   ModSearchResultItem,
   ModProviderStatus,
+  ContentType,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
 import { ModCard } from "./ModCard"
@@ -13,53 +14,102 @@ interface ModSearchModalProps {
   onSuccess: () => void
 }
 
+const PAGE_SIZE = 20
+
 export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSuccess }) => {
   const [query, setQuery] = useState("")
+  const [selectedContentType, setSelectedContentType] = useState<ContentType>("MOD")
   const [selectedProviderTab, setSelectedProviderTab] = useState<ModProvider | "ALL">("ALL")
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [results, setResults] = useState<ModSearchResultItem[]>([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [offset, setOffset] = useState(0)
   const [providerStatuses, setProviderStatuses] = useState<ModProviderStatus[]>([])
   const [selectedMod, setSelectedMod] = useState<ModSearchResultItem | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [envInfo, setEnvInfo] = useState<{ minecraftVersion: string; neoForgeVersion: string }>({
+    minecraftVersion: "1.21.1",
+    neoForgeVersion: "21.1.65",
+  })
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null)
+  const requestIdRef = useRef(0)
 
-  const executeSearch = (searchQuery: string, providerTab: ModProvider | "ALL") => {
-    setLoading(true)
-    setError(null)
+  const executeSearch = (
+    searchQuery: string,
+    contentType: ContentType,
+    providerTab: ModProvider | "ALL",
+    currentOffset: number = 0,
+    isLoadMore: boolean = false,
+  ) => {
+    const currentReqId = ++requestIdRef.current
+
+    if (isLoadMore) {
+      setLoadingMore(true)
+    } else {
+      setLoading(true)
+      setError(null)
+    }
 
     const providerArg = providerTab === "ALL" ? null : providerTab
 
     graphqlClient
-      .searchMods(searchQuery, providerArg, 40, 0)
+      .searchMods(searchQuery, contentType, providerArg, PAGE_SIZE, currentOffset)
       .then((payload) => {
-        setResults(payload.items || [])
+        if (currentReqId !== requestIdRef.current) return
+
+        if (isLoadMore) {
+          setResults((prev) => [...prev, ...(payload.items || [])])
+        } else {
+          setResults(payload.items || [])
+        }
+
+        setTotalCount(payload.totalCount || 0)
         setProviderStatuses(payload.providersStatus || [])
+        if (payload.minecraftVersion) {
+          setEnvInfo({
+            minecraftVersion: payload.minecraftVersion,
+            neoForgeVersion: payload.neoForgeVersion,
+          })
+        }
         setLoading(false)
+        setLoadingMore(false)
       })
       .catch((err) => {
-        setError(err.message || "Error al realizar la búsqueda de mods.")
+        if (currentReqId !== requestIdRef.current) return
+        setError(err.message || "Error al realizar la búsqueda.")
         setLoading(false)
+        setLoadingMore(false)
       })
   }
 
-  // Initial load
+  // Trigger search on tab changes
   useEffect(() => {
-    executeSearch("", selectedProviderTab)
-  }, [selectedProviderTab])
+    setOffset(0)
+    executeSearch(query, selectedContentType, selectedProviderTab, 0, false)
+  }, [selectedContentType, selectedProviderTab])
 
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     setQuery(val)
+    setOffset(0)
 
     if (debounceTimer.current) clearTimeout(debounceTimer.current)
     debounceTimer.current = setTimeout(() => {
-      executeSearch(val, selectedProviderTab)
+      executeSearch(val, selectedContentType, selectedProviderTab, 0, false)
     }, 350)
+  }
+
+  const handleLoadMore = () => {
+    const nextOffset = offset + PAGE_SIZE
+    setOffset(nextOffset)
+    executeSearch(query, selectedContentType, selectedProviderTab, nextOffset, true)
   }
 
   // Partial provider failure warning check
   const failedProviders = providerStatuses.filter((s) => !s.available && s.error)
+  const hasMore = results.length < totalCount
 
   return (
     <div
@@ -100,21 +150,31 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
             borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
             display: "flex",
             flexDirection: "column",
-            gap: "16px",
+            gap: "14px",
             background: "rgba(255, 255, 255, 0.02)",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
               <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "700", color: "#f9fafb" }}>
-                Explorador de Mods
+                Añadir Contenido
               </h2>
               <div
                 data-testid="compatible-env-indicator"
                 style={{ fontSize: "13px", color: "#9ca3af", marginTop: "2px" }}
               >
-                Compatible con <span style={{ color: "#34d399", fontWeight: "600" }}>Minecraft 1.21.1</span> ·{" "}
-                <span style={{ color: "#60a5fa", fontWeight: "600" }}>NeoForge</span>
+                Compatible con{" "}
+                <span style={{ color: "#34d399", fontWeight: "600" }}>
+                  Minecraft {envInfo.minecraftVersion}
+                </span>
+                {selectedContentType === "MOD" && (
+                  <>
+                    {" "}·{" "}
+                    <span style={{ color: "#60a5fa", fontWeight: "600" }}>
+                      NeoForge
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -136,7 +196,48 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
             </button>
           </div>
 
-          {/* Search Controls */}
+          {/* Content Type Selector Tabs */}
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+              paddingBottom: "8px",
+              flexWrap: "wrap",
+            }}
+          >
+            {[
+              { type: "MOD" as ContentType, label: "Mods", testId: "tab-content-mod" },
+              { type: "RESOURCE_PACK" as ContentType, label: "Resource Packs", testId: "tab-content-resource_pack" },
+              { type: "DATA_PACK" as ContentType, label: "Data Packs", testId: "tab-content-data_pack" },
+              { type: "SHADER" as ContentType, label: "Shaders", testId: "tab-content-shader" },
+            ].map((tab) => {
+              const isSelected = selectedContentType === tab.type
+              return (
+                <button
+                  key={tab.type}
+                  type="button"
+                  data-testid={tab.testId}
+                  onClick={() => setSelectedContentType(tab.type)}
+                  style={{
+                    padding: "6px 14px",
+                    background: isSelected ? "rgba(59, 130, 246, 0.2)" : "rgba(255, 255, 255, 0.04)",
+                    color: isSelected ? "#60a5fa" : "#9ca3af",
+                    border: `1px solid ${isSelected ? "rgba(59, 130, 246, 0.4)" : "rgba(255, 255, 255, 0.08)"}`,
+                    borderRadius: "8px",
+                    fontSize: "13px",
+                    fontWeight: isSelected ? "600" : "500",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Search Input and Provider Tabs */}
           <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
             {/* Search Input */}
             <div style={{ flex: 1, minWidth: "240px", position: "relative" }}>
@@ -145,7 +246,15 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
                 type="text"
                 value={query}
                 onChange={handleQueryChange}
-                placeholder="Buscar mods en Modrinth y CurseForge (ej. Create, JEI, JourneyMap)..."
+                placeholder={`Buscar ${
+                  selectedContentType === "MOD"
+                    ? "mods"
+                    : selectedContentType === "RESOURCE_PACK"
+                    ? "resource packs"
+                    : selectedContentType === "DATA_PACK"
+                    ? "data packs"
+                    : "shaders"
+                } en Modrinth y CurseForge...`}
                 style={{
                   width: "100%",
                   padding: "10px 16px 10px 38px",
@@ -275,7 +384,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
           {loading ? (
             <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af" }}>
               <div style={{ fontSize: "28px", marginBottom: "12px" }}>⏳</div>
-              Buscando mods compatibles en los repositorios...
+              Buscando contenido compatible en los repositorios...
             </div>
           ) : error ? (
             <div
@@ -295,27 +404,54 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
             <div style={{ textAlign: "center", padding: "60px 0", color: "#6b7280" }}>
               <div style={{ fontSize: "36px", marginBottom: "12px" }}>🔍</div>
               <div style={{ fontSize: "16px", color: "#9ca3af", marginBottom: "4px" }}>
-                No se encontraron mods
+                No se encontraron resultados
               </div>
               <div style={{ fontSize: "13px" }}>
-                Intenta buscar por otro nombre o revisa los filtros de proveedor.
+                Intenta buscar por otro nombre o revisa los filtros de proveedor y tipo.
               </div>
             </div>
           ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-                gap: "16px",
-              }}
-            >
-              {results.map((mod) => (
-                <ModCard
-                  key={`${mod.provider}:${mod.projectId}`}
-                  mod={mod}
-                  onSelect={(selected) => setSelectedMod(selected)}
-                />
-              ))}
+            <div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                  gap: "16px",
+                  marginBottom: "20px",
+                }}
+              >
+                {results.map((mod) => (
+                  <ModCard
+                    key={`${mod.provider}:${mod.projectId}`}
+                    mod={mod}
+                    onSelect={(selected) => setSelectedMod(selected)}
+                  />
+                ))}
+              </div>
+
+              {hasMore && (
+                <div style={{ textAlign: "center", padding: "16px 0" }}>
+                  <button
+                    type="button"
+                    data-testid="button-load-more"
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    style={{
+                      padding: "10px 24px",
+                      background: "rgba(255, 255, 255, 0.08)",
+                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                      color: "#f3f4f6",
+                      borderRadius: "8px",
+                      fontSize: "14px",
+                      fontWeight: "500",
+                      cursor: loadingMore ? "not-allowed" : "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {loadingMore ? "Cargando más..." : `Cargar más (${results.length} de ${totalCount})`}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -326,6 +462,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
         <ModDetailModal
           provider={selectedMod.provider}
           projectId={selectedMod.projectId}
+          contentType={selectedMod.contentType || selectedContentType}
           onClose={() => setSelectedMod(null)}
           onSuccess={() => {
             setSelectedMod(null)

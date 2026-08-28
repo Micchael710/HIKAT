@@ -4,12 +4,14 @@ import type {
   ModProjectDetail,
   ModInstallationPlan,
   ModVersionOverrideInput,
+  ContentType,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
 
 interface ModDetailModalProps {
   provider: ModProvider
   projectId: string
+  contentType?: ContentType
   onClose: () => void
   onSuccess: () => void
 }
@@ -17,6 +19,7 @@ interface ModDetailModalProps {
 export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   provider,
   projectId,
+  contentType = "MOD",
   onClose,
   onSuccess,
 }) => {
@@ -37,7 +40,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     setError(null)
 
     graphqlClient
-      .getModProjectDetail(provider, projectId)
+      .getModProjectDetail(provider, projectId, contentType)
       .then((data) => {
         if (!active) return
         setDetail(data)
@@ -51,14 +54,14 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
       })
       .catch((err) => {
         if (!active) return
-        setError(err.message || "Error al cargar los detalles del mod")
+        setError(err.message || "Error al cargar los detalles del contenido")
         setLoading(false)
       })
 
     return () => {
       active = false
     }
-  }, [provider, projectId])
+  }, [provider, projectId, contentType])
 
   // 2. Resolve installation plan whenever selected version or manual overrides change
   useEffect(() => {
@@ -79,6 +82,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         provider,
         projectId,
         versionId: selectedVersionId,
+        contentType,
         manualOverrides: overridesList.length > 0 ? overridesList : null,
       })
       .then((resPlan) => {
@@ -95,7 +99,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     return () => {
       active = false
     }
-  }, [provider, projectId, selectedVersionId, manualOverrides])
+  }, [provider, projectId, selectedVersionId, manualOverrides, contentType])
 
   const handleInstall = async () => {
     if (!selectedVersionId || !plan || !plan.isValid) return
@@ -115,12 +119,13 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         provider,
         projectId,
         versionId: selectedVersionId,
+        contentType,
         manualOverrides: overridesList.length > 0 ? overridesList : null,
       })
 
       onSuccess()
     } catch (err: any) {
-      setError(err.message || "Error durante la instalación del mod")
+      setError(err.message || "Error durante la instalación del contenido")
       setInstalling(false)
     }
   }
@@ -130,6 +135,9 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   // Count items to install/update
   const itemsToInstallCount =
     plan?.items.filter((i) => i.action === "INSTALL" || i.action === "UPDATE").length || 1
+
+  const currentMcVersion = detail?.minecraftVersion || "1.21.1"
+  const currentLoader = detail?.neoForgeVersion ? "NeoForge" : ""
 
   return (
     <div
@@ -207,7 +215,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "600", color: "#f3f4f6" }}>
-                  {detail?.name || "Cargando mod..."}
+                  {detail?.name || "Cargando..."}
                 </h3>
                 <span
                   style={{
@@ -301,7 +309,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     marginBottom: "8px",
                   }}
                 >
-                  Versión del Mod (Compatible con Minecraft 1.21.1 · NeoForge)
+                  Versión (Compatible con Minecraft {currentMcVersion}{contentType === "MOD" && currentLoader ? ` · ${currentLoader}` : ""})
                 </label>
                 <select
                   data-testid="select-mod-version"
@@ -410,6 +418,11 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                               <span style={{ fontSize: "12px", color: "#9ca3af", marginLeft: "8px" }}>
                                 {dep.versionNumber}
                               </span>
+                              {dep.logicalPath && (
+                                <span style={{ fontSize: "11px", color: "#6b7280", marginLeft: "6px" }}>
+                                  ({dep.logicalPath})
+                                </span>
+                              )}
                             </div>
 
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -487,7 +500,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   </div>
                 ) : (
                   <div style={{ fontSize: "13px", color: "#9ca3af" }}>
-                    Este mod no declara dependencias requeridas adicionales.
+                    Este contenido no declara dependencias requeridas adicionales.
                   </div>
                 )}
 
@@ -500,13 +513,13 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                       padding: "10px 14px",
                       background: "rgba(239, 68, 68, 0.15)",
                       border: "1px solid rgba(239, 68, 68, 0.3)",
-                      borderRadius: "6px",
+                      borderRadius: "8px",
                       color: "#fca5a5",
                       fontSize: "13px",
                     }}
                   >
-                    <strong>Conflicto detectado:</strong>
-                    <ul style={{ margin: "4px 0 0 0", paddingLeft: "20px" }}>
+                    <strong>Incompatibilidad o conflicto detectado:</strong>
+                    <ul style={{ margin: "6px 0 0 0", paddingLeft: "18px" }}>
                       {plan.conflicts.map((c, i) => (
                         <li key={i}>{c}</li>
                       ))}
@@ -515,87 +528,93 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                 )}
               </div>
 
-              {/* Summary box before confirmation */}
-              {plan && plan.isValid && (
+              {error && (
                 <div
                   style={{
-                    fontSize: "13px",
-                    color: "#9ca3af",
-                    background: "rgba(255, 255, 255, 0.02)",
-                    padding: "12px 14px",
+                    marginBottom: "16px",
+                    padding: "10px 14px",
+                    background: "rgba(239, 68, 68, 0.15)",
+                    border: "1px solid rgba(239, 68, 68, 0.3)",
                     borderRadius: "8px",
-                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                    color: "#fca5a5",
+                    fontSize: "13px",
                   }}
                 >
-                  <span style={{ color: "#e5e7eb", fontWeight: "500" }}>Se añadirá:</span>{" "}
-                  {plan.items.map((i) => `${i.projectName} ${i.versionNumber}`).join(", ")}
-                  {plan.items.length > 1 && ` · ${plan.items.length - 1} dependencias requeridas`}
+                  {error}
                 </div>
               )}
             </div>
           )}
         </div>
 
-        {/* Modal Footer */}
+        {/* Footer Actions */}
         <div
           style={{
             padding: "16px 24px",
             borderTop: "1px solid rgba(255, 255, 255, 0.08)",
             display: "flex",
             alignItems: "center",
-            justifyContent: "flex-end",
-            gap: "12px",
+            justifyContent: "space-between",
             background: "rgba(255, 255, 255, 0.02)",
           }}
         >
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={installing}
-            style={{
-              padding: "8px 16px",
-              background: "rgba(255, 255, 255, 0.06)",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              color: "#d1d5db",
-              borderRadius: "6px",
-              fontSize: "13px",
-              fontWeight: "500",
-              cursor: "pointer",
-            }}
-          >
-            Cancelar
-          </button>
-
-          <button
-            type="button"
-            data-testid="button-confirm-install-mod"
-            onClick={handleInstall}
-            disabled={installing || loading || resolvingPlan || !plan?.isValid}
-            style={{
-              padding: "8px 20px",
-              background: isModrinth ? "#10b981" : "#f97316",
-              border: "none",
-              color: "#ffffff",
-              borderRadius: "6px",
-              fontSize: "13px",
-              fontWeight: "600",
-              cursor:
-                installing || loading || resolvingPlan || !plan?.isValid ? "not-allowed" : "pointer",
-              opacity: installing || loading || resolvingPlan || !plan?.isValid ? 0.6 : 1,
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
-            }}
-          >
-            {installing ? (
-              <>
-                <span>⏳</span> Instalando...
-              </>
-            ) : (
-              `Añadir ${itemsToInstallCount > 1 ? `${itemsToInstallCount} mods` : detail?.name || "Mod"}`
+          <div style={{ fontSize: "13px", color: "#9ca3af" }}>
+            {plan && plan.totalDownloadSizeBytes > 0 && (
+              <span>
+                Descarga estimada: {(plan.totalDownloadSizeBytes / (1024 * 1024)).toFixed(1)} MB
+              </span>
             )}
-          </button>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={installing}
+              style={{
+                padding: "8px 16px",
+                background: "rgba(255, 255, 255, 0.06)",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                color: "#e5e7eb",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: "500",
+                cursor: "pointer",
+              }}
+            >
+              Cancelar
+            </button>
+
+            <button
+              type="button"
+              data-testid="button-confirm-install"
+              onClick={handleInstall}
+              disabled={installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)}
+              style={{
+                padding: "8px 20px",
+                background:
+                  installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)
+                    ? "rgba(16, 185, 129, 0.3)"
+                    : "#10b981",
+                border: "none",
+                color: "#ffffff",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: "600",
+                cursor:
+                  installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)
+                    ? "not-allowed"
+                    : "pointer",
+                transition: "background 0.15s ease",
+              }}
+            >
+              {installing
+                ? "Instalando..."
+                : itemsToInstallCount > 1
+                ? `Añadir ${itemsToInstallCount} elementos`
+                : "Añadir a la actualización"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

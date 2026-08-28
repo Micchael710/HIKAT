@@ -341,6 +341,11 @@ export async function addGameFile(
           policy: explicitPolicy,
           isDirectory: 0,
           objectKey,
+          sourceProvider: null,
+          sourceProjectId: null,
+          sourceVersionId: null,
+          sourceFileId: null,
+          sourceEnvironment: null,
         })
         .where(eq(schema.gameReleaseFiles.id, existing.id))
 
@@ -370,6 +375,7 @@ export async function addGameFile(
         sourceProjectId: null,
         sourceVersionId: null,
         sourceFileId: null,
+        sourceEnvironment: null,
         createdAt: now,
       }
 
@@ -424,6 +430,11 @@ export async function updateGameFile(
         sha256: claimedToken.sha256,
         sizeBytes: claimedToken.uploadedSizeBytes || claimedToken.expectedSizeBytes,
         objectKey: claimedToken.objectKey,
+        sourceProvider: null,
+        sourceProjectId: null,
+        sourceVersionId: null,
+        sourceFileId: null,
+        sourceEnvironment: null,
       }
     }
 
@@ -651,7 +662,7 @@ export async function saveGameFileContent(
 
   try {
     if (existing) {
-      const updatePayload: Partial<schema.GameReleaseFile> = {
+      const updatePayload: Partial<typeof schema.gameReleaseFiles.$inferInsert> = {
         name: filename,
         category,
         sha256,
@@ -662,6 +673,7 @@ export async function saveGameFileContent(
         sourceProjectId: null,
         sourceVersionId: null,
         sourceFileId: null,
+        sourceEnvironment: null,
       }
       if (input.explicitPolicy !== undefined) {
         updatePayload.policy = input.explicitPolicy
@@ -693,6 +705,7 @@ export async function saveGameFileContent(
         sourceProjectId: null,
         sourceVersionId: null,
         sourceFileId: null,
+        sourceEnvironment: null,
         createdAt: now,
       }
 
@@ -831,6 +844,7 @@ export async function createGameFolder(
     sourceProjectId: null,
     sourceVersionId: null,
     sourceFileId: null,
+    sourceEnvironment: null,
     createdAt: new Date().toISOString(),
   }
 
@@ -1195,6 +1209,7 @@ export async function copyGamePaths(
         sourceProjectId: f.sourceProjectId || null,
         sourceVersionId: f.sourceVersionId || null,
         sourceFileId: f.sourceFileId || null,
+        sourceEnvironment: f.sourceEnvironment || null,
         createdAt: now,
       })
     }
@@ -1502,6 +1517,7 @@ export async function restoreGameFile(
     sourceProjectId: originalFile.sourceProjectId || null,
     sourceVersionId: originalFile.sourceVersionId || null,
     sourceFileId: originalFile.sourceFileId || null,
+    sourceEnvironment: originalFile.sourceEnvironment || null,
     createdAt: now,
   }
 
@@ -1536,6 +1552,7 @@ export async function restoreGameFile(
           sourceProjectId: pf.sourceProjectId || null,
           sourceVersionId: pf.sourceVersionId || null,
           sourceFileId: pf.sourceFileId || null,
+          sourceEnvironment: pf.sourceEnvironment || null,
           createdAt: now,
         })
         draftPathSet.add(pf.logicalPath)

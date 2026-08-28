@@ -4,6 +4,8 @@ import type {
   ModDependencyTypeGql,
   ModReleaseTypeGql,
   ModPlanActionGql,
+  ContentTypeGql,
+  ModEnvironmentGql,
 } from "@hikat/graphql"
 
 export interface NormalizedModProject {
@@ -18,6 +20,8 @@ export interface NormalizedModProject {
   downloads: number
   follows?: number | null
   categories: string[]
+  contentType: ContentTypeGql
+  environment?: ModEnvironmentGql | null
   latestVersion?: string | null
   publishedAt?: string | null
   updatedAt?: string | null
@@ -34,6 +38,7 @@ export interface NormalizedModDependency {
 
 export interface NormalizedModVersion {
   id: string
+  projectId?: string
   fileId?: string | null
   versionNumber: string
   name: string
@@ -45,7 +50,14 @@ export interface NormalizedModVersion {
   filename: string
   sizeBytes: number
   sha256?: string | null
+  hashes?: {
+    sha1?: string
+    sha256?: string
+    md5?: string
+  }
   downloadUrl: string
+  contentType: ContentTypeGql
+  environment?: ModEnvironmentGql | null
   dependencies: NormalizedModDependency[]
 }
 
@@ -59,17 +71,24 @@ export interface ModProviderAdapter {
     loader: string,
     limit: number,
     offset: number,
+    contentType?: ContentTypeGql,
   ): Promise<{ items: NormalizedModProject[]; totalCount: number }>
-  getProject(env: Env, projectId: string): Promise<NormalizedModProject | null>
+  getProject(
+    env: Env,
+    projectId: string,
+    contentType?: ContentTypeGql,
+  ): Promise<NormalizedModProject | null>
   getCompatibleVersions(
     env: Env,
     projectId: string,
     minecraftVersion: string,
     loader: string,
+    contentType?: ContentTypeGql,
   ): Promise<NormalizedModVersion[]>
   getVersion(
     env: Env,
     versionId: string,
-    projectId?: string,
+    projectId?: string | null,
+    contentType?: ContentTypeGql,
   ): Promise<NormalizedModVersion | null>
 }

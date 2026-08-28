@@ -458,6 +458,7 @@ export const MAX_CAPE_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
 export const ALLOWED_GAME_CATEGORIES = [
   "MOD",
   "RESOURCE_PACK",
+  "DATA_PACK",
   "SHADER_PACK",
   "KUBEJS",
   "SCRIPT",
@@ -485,6 +486,7 @@ export const MAX_GAME_TEXT_FILE_SIZE_BYTES = 1024 * 1024 // 1 MB
 export const GAME_CATEGORY_DIRECTORIES: Record<GameFileCategory, string> = {
   MOD: "mods",
   RESOURCE_PACK: "resourcepacks",
+  DATA_PACK: "datapacks",
   SHADER_PACK: "shaderpacks",
   KUBEJS: "kubejs",
   SCRIPT: "scripts",
@@ -498,6 +500,7 @@ export const GAME_CATEGORY_DEFAULT_POLICIES: Record<
 > = {
   MOD: "NO_MODIFICABLE",
   RESOURCE_PACK: "MODIFICABLE",
+  DATA_PACK: "NO_MODIFICABLE",
   SHADER_PACK: "MODIFICABLE",
   KUBEJS: "NO_MODIFICABLE",
   SCRIPT: "NO_MODIFICABLE",
@@ -901,6 +904,7 @@ export function inferGameCategory(logicalPath: string): GameFileCategory {
   const normalized = logicalPath.trim().replace(/\\/g, "/").toLowerCase()
   if (normalized.startsWith("mods/") || normalized.endsWith(".jar")) return "MOD"
   if (normalized.startsWith("resourcepacks/")) return "RESOURCE_PACK"
+  if (normalized.startsWith("datapacks/")) return "DATA_PACK"
   if (normalized.startsWith("shaderpacks/")) return "SHADER_PACK"
   if (normalized.startsWith("kubejs/")) return "KUBEJS"
   if (normalized.startsWith("scripts/")) return "SCRIPT"
@@ -939,7 +943,7 @@ export function resolveEffectiveGamePolicy(
 
   // Fallback to directory conventions
   const root = segments[0]?.toLowerCase() || ""
-  if (root === "mods") return "NO_MODIFICABLE"
+  if (root === "mods" || root === "datapacks") return "NO_MODIFICABLE"
   if (
     root === "config" ||
     root === "defaultconfigs" ||

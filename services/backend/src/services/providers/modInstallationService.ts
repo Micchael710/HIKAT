@@ -4,6 +4,8 @@ import { createGraphQLError } from "@hikat/graphql"
 import type {
   AdminGameFileGql,
   InstallModPlanInputGql,
+  GameFileCategoryGql,
+  SyncPolicyGql,
 } from "@hikat/graphql"
 import {
   MAX_GAME_FILE_SIZE_BYTES,
@@ -11,7 +13,7 @@ import {
   sanitizeGamePath,
 } from "@hikat/shared"
 import type { Env } from "../../types"
-import { modProviderManager } from "./modProviderManager"
+import { modProviderManager, getLogicalPathForContent } from "./modProviderManager"
 import {
   prepareGameDraft,
   formatAdminGameFile,
@@ -50,13 +52,11 @@ export async function installModPlan(
     env,
     db,
     input,
-    draft.minecraftVersion || "1.21.1",
-    draft.neoForgeVersion || "21.1.65",
   )
 
   if (!plan.isValid || plan.conflicts.length > 0) {
     throw createGraphQLError(
-      `No se puede instalar el mod debido a conflictos: ${plan.conflicts.join(". ")}`,
+      `No se puede instalar el contenido debido a conflictos: ${plan.conflicts.join(". ")}`,
       "VALIDATION_ERROR",
     )
   }
@@ -75,21 +75,65 @@ export async function installModPlan(
     return allFiles.map((f) => formatAdminGameFile(f, effMap.get(f.id)))
   }
 
+  // 3. Preflight check: path collisions & duplicates within plan
+  const planPaths = new Set<string>()
+  for (const item of itemsToProcess) {
+    const targetPath = item.logicalPath || getLogicalPathForContent(item.contentType, item.filename)
+    if (planPaths.has(targetPath)) {
+      throw createGraphQLError(
+        `Conflicto en el plan: múltiples elementos intentan instalarse en "${targetPath}".`,
+        "VALIDATION_ERROR",
+      )
+    }
+    planPaths.add(targetPath)
+  }
+
+  const draftFiles = await db
+    .select()
+    .from(schema.gameReleaseFiles)
+    .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
+    .all()
+
+  for (const item of itemsToProcess) {
+    const targetPath = sanitizeGamePath(
+      item.logicalPath || getLogicalPathForContent(item.contentType, item.filename),
+    )
+    const existingByPath = draftFiles.find((f) => f.logicalPath === targetPath)
+
+    if (existingByPath) {
+      const isSameProject =
+        existingByPath.sourceProvider === item.provider &&
+        existingByPath.sourceProjectId === item.projectId
+
+      if (!isSameProject) {
+        throw createGraphQLError(
+          `Ya existe un archivo en "${targetPath}" que no corresponde al proyecto ${item.projectName}.`,
+          "CONFLICT",
+        )
+      }
+    }
+  }
+
   const createdR2Keys: string[] = []
   const oldKeysToClean: string[] = []
 
   try {
-    // 3. Download and upload each binary in parallel
+    // 4. Download and validate each binary in parallel
     const downloadedItems = await Promise.all(
       itemsToProcess.map(async (item) => {
         const adapter = modProviderManager.getAdapter(item.provider)
-        const versionObj = await adapter.getVersion(env, item.versionId, item.projectId)
-        const downloadUrl = versionObj?.downloadUrl
+        const versionObj = await adapter.getVersion(
+          env,
+          item.versionId,
+          item.projectId,
+          item.contentType,
+        )
+        const downloadUrl = versionObj?.downloadUrl || ""
         const filename = versionObj?.filename || item.filename
 
         if (!downloadUrl) {
           throw createGraphQLError(
-            `No se encontró URL de descarga directa para "${item.projectName}".`,
+            `El autor de este archivo en ${item.provider} ha deshabilitado la descarga directa de terceros.`,
             "VALIDATION_ERROR",
           )
         }
@@ -130,11 +174,24 @@ export async function installModPlan(
           )
         }
 
-        // Validate jar format / magic bytes
-        const validation = validateGameFileBuffer(buffer.buffer as ArrayBuffer, filename, "MOD")
+        // Validate jar/zip format / magic bytes
+        const validationCategory =
+          item.contentType === "SHADER"
+            ? "SHADER_PACK"
+            : item.contentType === "RESOURCE_PACK"
+            ? "RESOURCE_PACK"
+            : item.contentType === "DATA_PACK"
+            ? "DATA_PACK"
+            : "MOD"
+
+        const validation = validateGameFileBuffer(
+          buffer.buffer as ArrayBuffer,
+          filename,
+          validationCategory as any,
+        )
         if (!validation.valid) {
           throw createGraphQLError(
-            `El archivo descargado para "${item.projectName}" no tiene formato .jar válido.`,
+            `El archivo descargado para "${item.projectName}" no tiene un formato binario válido.`,
             "VALIDATION_ERROR",
           )
         }
@@ -146,18 +203,43 @@ export async function installModPlan(
           .join("")
           .toLowerCase()
 
-        // Generate R2 key and store
+        // Verify provider checksum if provided
+        if (versionObj?.hashes?.sha256 && versionObj.hashes.sha256.toLowerCase() !== sha256) {
+          throw createGraphQLError(
+            `Error de integridad: el hash SHA-256 descargado para "${item.projectName}" no coincide con el proveedor.`,
+            "VALIDATION_ERROR",
+          )
+        }
+
+        if (versionObj?.hashes?.sha1) {
+          const sha1Buffer = await crypto.subtle.digest("SHA-1", buffer.buffer as ArrayBuffer)
+          const computedSha1 = Array.from(new Uint8Array(sha1Buffer))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+            .toLowerCase()
+          if (computedSha1 !== versionObj.hashes.sha1.toLowerCase()) {
+            throw createGraphQLError(
+              `Error de integridad: el hash SHA-1 descargado para "${item.projectName}" no coincide con el proveedor.`,
+              "VALIDATION_ERROR",
+            )
+          }
+        }
+
+        // Generate R2 key and upload
         const fileId = crypto.randomUUID()
         const objectKey = `game-files/${fileId}-${sha256.slice(0, 16)}`
 
         if (env.ASSETS) {
           await env.ASSETS.put(objectKey, buffer, {
             httpMetadata: {
-              contentType: "application/java-archive",
+              contentType:
+                item.contentType === "MOD"
+                  ? "application/java-archive"
+                  : "application/zip",
             },
             customMetadata: {
               sha256,
-              category: "MOD",
+              category: validationCategory,
               filename,
               provider: item.provider,
               projectId: item.projectId,
@@ -173,100 +255,90 @@ export async function installModPlan(
           sizeBytes: buffer.byteLength,
           sha256,
           objectKey,
+          category: validationCategory as GameFileCategoryGql,
         }
       }),
     )
 
-    // 4. Apply all mutations to D1
-    const draftFiles = await db
-      .select()
-      .from(schema.gameReleaseFiles)
-      .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
-      .all()
-
+    // 5. Construct ALL D1 statements into a single atomic batch
     const now = new Date().toISOString()
+    const statements: any[] = []
 
     for (const downloaded of downloadedItems) {
-      const { item, filename, sizeBytes, sha256, objectKey } = downloaded
-      const logicalPath = sanitizeGamePath(`mods/${filename}`)
+      const { item, filename, sizeBytes, sha256, objectKey, category } = downloaded
+      const logicalPath = sanitizeGamePath(
+        item.logicalPath || getLogicalPathForContent(item.contentType, filename),
+      )
 
       const existingByProvider = draftFiles.find(
         (f) => f.sourceProvider === item.provider && f.sourceProjectId === item.projectId,
       )
 
+      const defaultPolicy: SyncPolicyGql | null =
+        category === "DATA_PACK" ? "NO_MODIFICABLE" : null
+
       if (existingByProvider) {
-        // UPDATE existing mod
+        // UPDATE existing provider record
         if (existingByProvider.objectKey && existingByProvider.objectKey !== objectKey) {
           oldKeysToClean.push(existingByProvider.objectKey)
         }
 
-        await db
-          .update(schema.gameReleaseFiles)
-          .set({
-            name: filename,
-            logicalPath,
-            category: "MOD",
-            sha256,
-            sizeBytes,
-            isDirectory: 0,
-            objectKey,
-            sourceProvider: item.provider,
-            sourceProjectId: item.projectId,
-            sourceVersionId: item.versionId,
-            sourceFileId: item.fileId,
-          })
-          .where(eq(schema.gameReleaseFiles.id, existingByProvider.id))
-      } else {
-        // Check collision on logicalPath with any manual file
-        const existingByPath = draftFiles.find((f) => f.logicalPath === logicalPath)
-        if (existingByPath) {
-          if (existingByPath.objectKey && existingByPath.objectKey !== objectKey) {
-            oldKeysToClean.push(existingByPath.objectKey)
-          }
-          await db
+        statements.push(
+          db
             .update(schema.gameReleaseFiles)
             .set({
               name: filename,
-              category: "MOD",
+              logicalPath,
+              category,
               sha256,
               sizeBytes,
+              policy: existingByProvider.policy || defaultPolicy,
               isDirectory: 0,
               objectKey,
               sourceProvider: item.provider,
               sourceProjectId: item.projectId,
               sourceVersionId: item.versionId,
-              sourceFileId: item.fileId,
+              sourceFileId: item.fileId || null,
+              sourceEnvironment: item.environment || null,
             })
-            .where(eq(schema.gameReleaseFiles.id, existingByPath.id))
-        } else {
-          // INSERT new file
-          await db.insert(schema.gameReleaseFiles).values({
+            .where(eq(schema.gameReleaseFiles.id, existingByProvider.id)),
+        )
+      } else {
+        // INSERT new file
+        statements.push(
+          db.insert(schema.gameReleaseFiles).values({
             id: crypto.randomUUID(),
             releaseId: draft.id,
             name: filename,
             logicalPath,
-            category: "MOD",
+            category,
             sha256,
             sizeBytes,
-            policy: null,
+            policy: defaultPolicy,
             isDirectory: 0,
             objectKey,
             sourceProvider: item.provider,
             sourceProjectId: item.projectId,
             sourceVersionId: item.versionId,
-            sourceFileId: item.fileId,
+            sourceFileId: item.fileId || null,
+            sourceEnvironment: item.environment || null,
             createdAt: now,
-          })
-        }
+          }),
+        )
       }
     }
 
-    // Clean up old unreferenced R2 objects
+    // 6. Execute atomic D1 batch!
+    if (statements.length > 0) {
+      await db.batch(statements as any)
+    }
+
+    // 7. Clean up old unreferenced R2 objects ONLY after D1 batch succeeds
     for (const oldKey of oldKeysToClean) {
       await deleteR2ObjectIfUnreferenced(env, db, oldKey)
     }
 
-    // 5. Return updated draft files with effective policies
+    // 8. Return updated draft files with effective policies
     const updatedFiles = await db
       .select()
       .from(schema.gameReleaseFiles)

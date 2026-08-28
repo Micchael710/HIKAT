@@ -74,6 +74,7 @@ export function formatAdminGameFile(
     sourceProjectId: file.sourceProjectId || null,
     sourceVersionId: file.sourceVersionId || null,
     sourceFileId: file.sourceFileId || null,
+    sourceEnvironment: file.sourceEnvironment ? (file.sourceEnvironment as any) : null,
     createdAt: normalizeIsoDateTime(file.createdAt),
   }
 }
@@ -253,8 +254,10 @@ export async function getPublishedModpack(
   // 1. Resolve effective policies across the entire release tree
   const effectiveMap = resolveReleaseEffectivePolicies(allRecords)
 
-  // 2. Filter out directory records: clientFiles strictly contains real downloadable files
-  const realFiles = allRecords.filter((file) => !file.isDirectory)
+  // 2. Filter out directory records and server-only DATA_PACK files
+  const realFiles = allRecords.filter(
+    (file) => !file.isDirectory && file.category !== "DATA_PACK",
+  )
 
   const clientFiles: ClientFileGql[] = realFiles.map((file) => ({
     path: file.logicalPath,
@@ -430,6 +433,7 @@ export async function prepareGameDraft(
         sourceProjectId: bf.sourceProjectId || null,
         sourceVersionId: bf.sourceVersionId || null,
         sourceFileId: bf.sourceFileId || null,
+        sourceEnvironment: bf.sourceEnvironment || null,
         createdAt: now,
       }
       await db.insert(schema.gameReleaseFiles).values(newFile)
