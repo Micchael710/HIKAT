@@ -432,6 +432,87 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(version?.hashes?.md5).toBe("md5hash1234567890")
     })
 
+    it("fails closed on unknown CurseForge classId (does not return MOD or accept spoofing)", async () => {
+      const adapter = new CurseForgeAdapter()
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/mods/88888")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: {
+                id: 88888,
+                name: "Unknown Item",
+                slug: "unknown-item",
+                classId: 99999, // Unknown classId!
+              },
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const supported = await adapter.getSupportedContentTypes(env, "88888")
+      expect(supported).toEqual([])
+
+      const project = await adapter.getProject(env, "88888", "MOD")
+      expect(project).toBeNull()
+
+      // Manager integration: Attempting to get project detail or resolve plan fails
+      await expect(
+        manager.getProjectDetail(env, db, "CURSEFORGE", "88888", "MOD"),
+      ).rejects.toThrow()
+    })
+
+    it("flags conflict when a required dependency has an unknown CurseForge classId", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/mods/328085/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 1111,
+                  fileName: "root.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  dependencies: [{ modId: 999999, relationType: 3 }], // Required dep with unknown modId
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("/mods/328085")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 328085, name: "Root Mod", classId: 6 } }),
+          }
+        }
+        if (u.includes("/mods/999999")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 999999, name: "Unknown Class Dep", classId: 88888 } }), // Unknown classId
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "CURSEFORGE", projectId: "328085", versionId: "1111", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.length).toBe(1)
+      expect(plan.conflicts[0]).toContain("tipo de contenido desconocido")
+    })
+
     it("ensures CurseForge API key is NEVER sent to external binary CDN download URLs", async () => {
       mockFetch.mockImplementation(async (url: string, opts?: any) => {
         const u = String(url)
@@ -2022,6 +2103,215 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(plan.isValid).toBe(false)
       expect(plan.conflicts.length).toBe(1)
       expect(plan.conflicts[0]).toContain("es multi-tipo y ambigua")
+    })
+
+    it("resolves pinned RESOURCE_PACK with loader minecraft into resourcepacks/", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-with-rp/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-rp",
+                name: "Root With RP Dep",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root-rp.jar", size: 1000, url: "https://cdn/root-rp.jar" }],
+                dependencies: [{ project_id: "rp-dep", version_id: "ver-pinned-rp", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/ver-pinned-rp")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-pinned-rp",
+              project_id: "rp-dep",
+              name: "Faithful RP",
+              game_versions: ["1.21.1"],
+              loaders: ["minecraft"],
+              files: [{ filename: "faithful.zip", size: 3000, url: "https://cdn/faithful.zip" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/rp-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-pinned-rp",
+                name: "Faithful RP",
+                game_versions: ["1.21.1"],
+                loaders: ["minecraft"],
+                files: [{ filename: "faithful.zip", size: 3000, url: "https://cdn/faithful.zip" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-with-rp")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-with-rp", title: "Root RP", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("/project/rp-dep")) {
+          return { ok: true, status: 200, json: async () => ({ id: "rp-dep", title: "Faithful RP", project_type: "resourcepack", categories: [] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "root-with-rp", versionId: "ver-root-rp", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[0]!.logicalPath).toBe("mods/root-rp.jar")
+      expect(plan.items[0]!.contentType).toBe("MOD")
+      expect(plan.items[1]!.logicalPath).toBe("resourcepacks/faithful.zip")
+      expect(plan.items[1]!.contentType).toBe("RESOURCE_PACK")
+    })
+
+    it("resolves pinned SHADER into shaderpacks/", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-with-sh/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-sh",
+                name: "Root With Shader Dep",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root-sh.jar", size: 1000, url: "https://cdn/root-sh.jar" }],
+                dependencies: [{ project_id: "sh-dep", version_id: "ver-pinned-sh", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/ver-pinned-sh")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-pinned-sh",
+              project_id: "sh-dep",
+              name: "Complementary Shader",
+              game_versions: ["1.21.1"],
+              loaders: [],
+              files: [{ filename: "complementary.zip", size: 5000, url: "https://cdn/comp.zip" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/sh-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-pinned-sh",
+                name: "Complementary Shader",
+                game_versions: ["1.21.1"],
+                loaders: [],
+                files: [{ filename: "complementary.zip", size: 5000, url: "https://cdn/comp.zip" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-with-sh")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-with-sh", title: "Root Shader", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("/project/sh-dep")) {
+          return { ok: true, status: 200, json: async () => ({ id: "sh-dep", title: "Complementary", project_type: "shader", categories: [] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "root-with-sh", versionId: "ver-root-sh", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[0]!.logicalPath).toBe("mods/root-sh.jar")
+      expect(plan.items[0]!.contentType).toBe("MOD")
+      expect(plan.items[1]!.logicalPath).toBe("shaderpacks/complementary.zip")
+      expect(plan.items[1]!.contentType).toBe("SHADER")
+    })
+
+    it("flags conflict for pinned dependency of indeterminable type without guessing MOD", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-with-indet/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-indet",
+                name: "Root Indet",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root-indet.jar", size: 1000, url: "https://cdn/root.jar" }],
+                dependencies: [{ project_id: "unknown-dep", version_id: "ver-pinned-unknown", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/ver-pinned-unknown")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-pinned-unknown",
+              project_id: "unknown-dep",
+              name: "Unknown Ver",
+              game_versions: ["1.21.1"],
+              loaders: [],
+              files: [{ filename: "unknown.bin", size: 100, url: "https://cdn/unknown.bin" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/root-with-indet")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-with-indet", title: "Root Indet", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("/project/unknown-dep")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "unknown-dep",
+              title: "Unknown Dep",
+              project_type: "unknown_weird_type",
+              categories: [],
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "root-with-indet", versionId: "ver-root-indet", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.length).toBe(1)
+      expect(plan.conflicts[0]).toContain("no se pudo determinar el tipo de contenido")
     })
   })
 })

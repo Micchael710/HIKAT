@@ -538,35 +538,69 @@ export class ModProviderManager {
         // 2. Determine target contentType for the dependency without assuming MOD:
         let depContentType: ContentTypeGql | null = null
 
-        if (pinnedVersionObj?.contentType) {
-          // If we resolved the pinned version, its metadata/loaders is authoritative
-          depContentType = pinnedVersionObj.contentType
-        } else if (typeof depAdapter.getSupportedContentTypes === "function") {
-          const supportedTypes: ContentTypeGql[] = await depAdapter.getSupportedContentTypes(env, depProjectId)
+        // Query supported types for project
+        let supportedTypes: ContentTypeGql[] = []
+        if (typeof depAdapter.getSupportedContentTypes === "function") {
+          supportedTypes = await depAdapter.getSupportedContentTypes(env, depProjectId).catch(() => [])
+        } else {
+          const candidate = await depAdapter.getProject(env, depProjectId).catch(() => null)
+          if (candidate?.contentType) {
+            supportedTypes = [candidate.contentType]
+          }
+        }
+
+        if (pinnedVersionObj) {
+          const vLoaders = (pinnedVersionObj.loaders || []).map((l) => l.toLowerCase())
+          if (vLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
+            depContentType = "MOD"
+          } else if (vLoaders.includes("datapack")) {
+            depContentType = "DATA_PACK"
+          } else if (vLoaders.includes("minecraft") && supportedTypes.includes("RESOURCE_PACK")) {
+            depContentType = "RESOURCE_PACK"
+          } else if (
+            supportedTypes.includes("SHADER") &&
+            !supportedTypes.includes("MOD") &&
+            !supportedTypes.includes("RESOURCE_PACK") &&
+            !supportedTypes.includes("DATA_PACK")
+          ) {
+            depContentType = "SHADER"
+          } else if (supportedTypes.length === 1) {
+            depContentType = supportedTypes[0]!
+          } else if (supportedTypes.length > 1) {
+            // Cross supported types with version metadata
+            const candidateTypes = supportedTypes.filter((t) => {
+              if (t === "MOD") return vLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))
+              if (t === "DATA_PACK") return vLoaders.includes("datapack")
+              if (t === "RESOURCE_PACK") return vLoaders.includes("minecraft")
+              if (t === "SHADER") return true
+              return false
+            })
+            if (candidateTypes.length === 1) {
+              depContentType = candidateTypes[0]!
+            } else {
+              conflicts.push(
+                `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" es de tipo indeterminable o ambigua (tipos compatibles posibles: ${candidateTypes.join(", ")}).`,
+              )
+              continue
+            }
+          } else {
+            conflicts.push(
+              `Conflicto: no se pudo determinar el tipo de contenido para la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}".`,
+            )
+            continue
+          }
+        } else {
+          // No pinned version (only projectId)
           if (supportedTypes.length === 1) {
             depContentType = supportedTypes[0]!
           } else if (supportedTypes.length > 1) {
-            // Multi-type ambiguity without pinned versionId -> safe conflict instead of silent guess
             conflicts.push(
               `Conflicto: la dependencia "${dep.projectName || depProjectId}" es multi-tipo y ambigua (soporta ${supportedTypes.join(", ")}); se requiere especificar versión o resolver manualmente.`,
             )
             continue
           } else {
-            const candidate = await depAdapter.getProject(env, depProjectId).catch(() => null)
-            depContentType = candidate?.contentType || null
-            if (!depContentType) {
-              conflicts.push(
-                `No se pudo determinar el tipo de contenido para la dependencia "${dep.projectName || depProjectId}".`,
-              )
-              continue
-            }
-          }
-        } else {
-          const candidate = await depAdapter.getProject(env, depProjectId).catch(() => null)
-          depContentType = candidate?.contentType || null
-          if (!depContentType) {
             conflicts.push(
-              `No se pudo determinar el tipo de contenido para la dependencia "${dep.projectName || depProjectId}".`,
+              `Conflicto: la dependencia "${dep.projectName || depProjectId}" tiene un tipo de contenido desconocido o no soportado.`,
             )
             continue
           }

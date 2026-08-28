@@ -231,11 +231,15 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       if (!mod) return null
 
       const classId = mod.classId || mod.mainCategoryId
-      let discoveredType: ContentTypeGql = contentType
+      let discoveredType: ContentTypeGql | null = null
       if (classId === 6) discoveredType = "MOD"
       else if (classId === 12) discoveredType = "RESOURCE_PACK"
       else if (classId === 6945) discoveredType = "DATA_PACK"
       else if (classId === 6552) discoveredType = "SHADER"
+
+      if (!discoveredType) {
+        return null
+      }
 
       return {
         provider: "CURSEFORGE",
@@ -288,7 +292,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       if (classId === 12) return ["RESOURCE_PACK"]
       if (classId === 6945) return ["DATA_PACK"]
       if (classId === 6552) return ["SHADER"]
-      return ["MOD"]
+      return []
     } catch {
       return []
     } finally {

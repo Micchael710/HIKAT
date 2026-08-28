@@ -368,7 +368,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
     env: Env,
     versionId: string,
     _projectId?: string | null,
-    contentType: ContentTypeGql = "MOD",
+    contentType?: ContentTypeGql,
   ): Promise<NormalizedModVersion | null> {
     const baseUrl = this.getBaseUrl(env)
     const url = `${baseUrl}/version/${encodeURIComponent(versionId)}`
@@ -397,7 +397,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
     }
   }
 
-  private mapModrinthVersion(raw: any, fallbackContentType: ContentTypeGql = "MOD"): NormalizedModVersion {
+  private mapModrinthVersion(raw: any, fallbackContentType?: ContentTypeGql): NormalizedModVersion {
     const primaryFile =
       raw.files?.find((f: any) => f.primary) ||
       raw.files?.find((f: any) => f.filename?.endsWith(".jar") || f.filename?.endsWith(".zip")) ||
@@ -444,12 +444,16 @@ export class ModrinthAdapter implements ModProviderAdapter {
       return l
     })
 
-    let versionContentType = fallbackContentType
+    let versionContentType: ContentTypeGql = fallbackContentType || "MOD"
     const lowerLoaders = rawLoaders.map((l: string) => l.toLowerCase())
     if (lowerLoaders.includes("datapack")) {
       versionContentType = "DATA_PACK"
     } else if (lowerLoaders.some((l: string) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
       versionContentType = "MOD"
+    } else if (lowerLoaders.includes("minecraft")) {
+      versionContentType = fallbackContentType || "RESOURCE_PACK"
+    } else if (fallbackContentType) {
+      versionContentType = fallbackContentType
     }
 
     const hashes = primaryFile.hashes || {}
