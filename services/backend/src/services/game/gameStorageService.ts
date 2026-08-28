@@ -123,15 +123,21 @@ export async function handleGameFileUpload(
   })
 
   // 8. Atomically mark upload token as used and record immutable storage metadata
-  await db
-    .update(schema.gameFileUploadTokens)
-    .set({
-      usedAt: new Date().toISOString(),
-      sha256,
-      objectKey,
-      uploadedSizeBytes: arrayBuffer.byteLength,
-    })
-    .where(eq(schema.gameFileUploadTokens.id, tokenRecord.id))
+  try {
+    await db
+      .update(schema.gameFileUploadTokens)
+      .set({
+        usedAt: new Date().toISOString(),
+        sha256,
+        objectKey,
+        uploadedSizeBytes: arrayBuffer.byteLength,
+      })
+      .where(eq(schema.gameFileUploadTokens.id, tokenRecord.id))
+  } catch (dbErr) {
+    // Compensate: delete new R2 object if D1 token update fails
+    await env.ASSETS.delete(objectKey).catch(() => {})
+    throw dbErr
+  }
 
 
   const cors = getCorsHeaders(request, env)

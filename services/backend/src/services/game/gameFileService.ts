@@ -183,40 +183,16 @@ export async function addGameFile(
   },
 ): Promise<AdminGameFileGql> {
   let objectKeyToCompensate: string | undefined
+  let tokenHashToInvalidate: string | undefined
 
   try {
-    const name = String(input.name || "").trim()
-    if (!name) {
-      throw createGraphQLError("El nombre del archivo o mod es obligatorio.", "VALIDATION_ERROR")
-    }
-
-    // 1. Ensure active DRAFT release
-    let draft = await db
-      .select()
-      .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
-      .get()
-
-    if (!draft) {
-      await prepareGameDraft(db, userId)
-      draft = await db
-        .select()
-        .from(schema.gameReleases)
-        .where(eq(schema.gameReleases.status, "DRAFT"))
-        .get()
-    }
-
-    if (!draft) {
-      throw createGraphQLError("No se pudo inicializar el borrador de actualización.", "INTERNAL_ERROR")
-    }
-
-    // 2. Validate token or metadata
     let sha256: string
     let sizeBytes: number
     let objectKey: string
     let originalFilename: string
     let category: GameFileCategory = (input.category as GameFileCategory) || "GENERAL"
 
+    // 1. Early token / metadata lookup
     if (uploadedMetadata) {
       sha256 = uploadedMetadata.sha256
       sizeBytes = uploadedMetadata.sizeBytes
@@ -246,9 +222,36 @@ export async function addGameFile(
       objectKey = tokenRecord.objectKey
       originalFilename = tokenRecord.originalFilename
       objectKeyToCompensate = objectKey
+      tokenHashToInvalidate = input.tokenHash
+
       if (!input.category && tokenRecord.category) {
         category = tokenRecord.category as GameFileCategory
       }
+    }
+
+    const name = String(input.name || "").trim()
+    if (!name) {
+      throw createGraphQLError("El nombre del archivo o mod es obligatorio.", "VALIDATION_ERROR")
+    }
+
+    // 2. Ensure active DRAFT release
+    let draft = await db
+      .select()
+      .from(schema.gameReleases)
+      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .get()
+
+    if (!draft) {
+      await prepareGameDraft(db, userId)
+      draft = await db
+        .select()
+        .from(schema.gameReleases)
+        .where(eq(schema.gameReleases.status, "DRAFT"))
+        .get()
+    }
+
+    if (!draft) {
+      throw createGraphQLError("No se pudo inicializar el borrador de actualización.", "INTERNAL_ERROR")
     }
 
     // Determine default folder prefix if only a filename was provided without subdirectories
@@ -354,10 +357,24 @@ export async function addGameFile(
       record = newFile
     }
 
+    // Permanently consume token on successful attach
+    if (input.tokenHash) {
+      await db
+        .delete(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+        .catch(() => {})
+    }
+
     return formatAdminFileWithTree(db, draft.id, record)
   } catch (err) {
     if (env && objectKeyToCompensate) {
       await deleteR2ObjectIfUnreferenced(env, db, objectKeyToCompensate)
+    }
+    if (tokenHashToInvalidate) {
+      await db
+        .delete(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHashToInvalidate))
+        .catch(() => {})
     }
     throw err
   }
@@ -370,8 +387,32 @@ export async function updateGameFile(
   env?: Env,
 ): Promise<AdminGameFileGql> {
   let objectKeyToCompensate: string | undefined
+  let tokenHashToInvalidate: string | undefined
 
   try {
+    let tokenUpdates: Partial<schema.GameReleaseFile> = {}
+
+    // Early token lookup
+    if (input.tokenHash) {
+      const tokenRecord = await db
+        .select()
+        .from(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+        .get()
+
+      if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
+        throw createGraphQLError("Token de subida inválido o no completado.", "VALIDATION_ERROR")
+      }
+
+      objectKeyToCompensate = tokenRecord.objectKey
+      tokenHashToInvalidate = input.tokenHash
+      tokenUpdates = {
+        sha256: tokenRecord.sha256,
+        sizeBytes: tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes,
+        objectKey: tokenRecord.objectKey,
+      }
+    }
+
     const existing = await db
       .select()
       .from(schema.gameReleaseFiles)
@@ -381,6 +422,8 @@ export async function updateGameFile(
     if (!existing) {
       throw createGraphQLError("Archivo de juego no encontrado.", "NOT_FOUND")
     }
+
+    const oldObjectKey = existing.objectKey
 
     const release = await db
       .select()
@@ -395,7 +438,7 @@ export async function updateGameFile(
       )
     }
 
-    const updates: Partial<schema.GameReleaseFile> = {}
+    const updates: Partial<schema.GameReleaseFile> = { ...tokenUpdates }
     if (input.name !== undefined && input.name !== null) {
       const trimmed = String(input.name || "").trim()
       if (!trimmed) {
@@ -433,25 +476,6 @@ export async function updateGameFile(
       updates.policy = input.explicitPolicy
     }
 
-    let oldObjectKey: string | undefined
-    if (input.tokenHash) {
-      const tokenRecord = await db
-        .select()
-        .from(schema.gameFileUploadTokens)
-        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
-        .get()
-
-      if (!tokenRecord || !tokenRecord.usedAt || !tokenRecord.objectKey || !tokenRecord.sha256) {
-        throw createGraphQLError("Token de subida inválido o no completado.", "VALIDATION_ERROR")
-      }
-
-      oldObjectKey = existing.objectKey
-      objectKeyToCompensate = tokenRecord.objectKey
-      updates.sha256 = tokenRecord.sha256
-      updates.sizeBytes = tokenRecord.uploadedSizeBytes || tokenRecord.expectedSizeBytes
-      updates.objectKey = tokenRecord.objectKey
-    }
-
     if (Object.keys(updates).length > 0) {
       await db
         .update(schema.gameReleaseFiles)
@@ -461,6 +485,14 @@ export async function updateGameFile(
 
     if (env && oldObjectKey && updates.objectKey && oldObjectKey !== updates.objectKey) {
       await deleteR2ObjectIfUnreferenced(env, db, oldObjectKey)
+    }
+
+    // Permanently consume token on successful attach
+    if (input.tokenHash) {
+      await db
+        .delete(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, input.tokenHash))
+        .catch(() => {})
     }
 
     const updated = (await db
@@ -473,6 +505,12 @@ export async function updateGameFile(
   } catch (err) {
     if (env && objectKeyToCompensate) {
       await deleteR2ObjectIfUnreferenced(env, db, objectKeyToCompensate)
+    }
+    if (tokenHashToInvalidate) {
+      await db
+        .delete(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHashToInvalidate))
+        .catch(() => {})
     }
     throw err
   }
@@ -892,12 +930,8 @@ export async function renameGamePath(
       .where(eq(schema.gameReleaseFiles.id, item.id)),
   )
 
-  if (typeof (db as any).batch === "function" && statements.length > 0) {
+  if (statements.length > 0) {
     await (db as any).batch(statements)
-  } else {
-    for (const stmt of statements) {
-      await stmt
-    }
   }
 
   return true
@@ -1034,12 +1068,8 @@ export async function moveGamePaths(
       .where(eq(schema.gameReleaseFiles.id, move.id)),
   )
 
-  if (typeof (db as any).batch === "function" && statements.length > 0) {
+  if (statements.length > 0) {
     await (db as any).batch(statements)
-  } else {
-    for (const stmt of statements) {
-      await stmt
-    }
   }
 
   return true
@@ -1185,12 +1215,8 @@ export async function copyGamePaths(
     db.insert(schema.gameReleaseFiles).values(insertItem),
   )
 
-  if (typeof (db as any).batch === "function" && statements.length > 0) {
+  if (statements.length > 0) {
     await (db as any).batch(statements)
-  } else {
-    for (const stmt of statements) {
-      await stmt
-    }
   }
 
   return true
