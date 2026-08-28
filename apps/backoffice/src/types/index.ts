@@ -146,29 +146,19 @@ export interface AdminDashboardSummary {
 
 // --- Skin Types (Shard 06.5) ---
 
-export type SkinModel = "CLASSIC" | "SLIM"
-
 export type SkinStatus = "AVAILABLE" | "UNAVAILABLE"
 
 export interface SkinItem {
   id: string
-
   name: string
-
-  model: SkinModel
-
   imageUrl: string
-
   status: SkinStatus
-
   createdAt: string
-
   updatedAt: string
 }
 
 export interface SkinConnection {
   items: SkinItem[]
-
   totalCount: number
 }
 
@@ -176,30 +166,70 @@ export interface SkinConnection {
 
 export interface AdminPlayerSkin {
   id: string
-
   userId: string
-
   userDisplayName: string
-
-  model: SkinModel
-
   imageUrl: string
-
   createdAt: string
-
   updatedAt: string
 }
 
 export interface AdminPlayerSkinConnection {
   items: AdminPlayerSkin[]
-
   totalCount: number
 }
 
 export interface UpdateAdminPlayerSkinInput {
-  model?: SkinModel | null
-
   mediaId?: string | null
+}
+
+// --- Capes Types (Phase 07 Hardening) ---
+
+export type CapeStatus = "AVAILABLE" | "UNAVAILABLE"
+
+export interface CapeItem {
+  id: string
+  name: string
+  imageUrl: string
+  status: CapeStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CapeConnection {
+  items: CapeItem[]
+  totalCount: number
+}
+
+export interface AdminPlayerCape {
+  id: string
+  userId: string
+  userDisplayName: string
+  name: string
+  imageUrl: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminPlayerCapeConnection {
+  items: AdminPlayerCape[]
+  totalCount: number
+}
+
+export interface CreateCapeInput {
+  name: string
+  mediaId: string
+  status?: CapeStatus
+}
+
+export interface UpdateCapeInput {
+  name?: string
+  mediaId?: string
+  status?: CapeStatus
+}
+
+export interface UpdateAdminPlayerCapeInput {
+  name?: string
+  mediaId?: string
 }
 
 // --- Game & Modpack Types (Shard 06.5) ---
@@ -360,32 +390,52 @@ export interface UpdateMinecraftServerSettingsInput {
 }
 
 export type ServerAutomationAction = "BACKUP" | "RESTART" | "START" | "STOP" | "COMMAND"
-export type ServerAutomationFrequency = "DAILY" | "WEEKLY" | "SELECTED_DAYS"
+export type ServerAutomationFrequency = "DAILY" | "WEEKLY" | "SELECTED_DAYS" | "INTERVAL"
+export type ServerTaskTemplate =
+  | "AUTO_STOP"
+  | "AUTO_START"
+  | "AUTO_RESTART"
+  | "AUTO_BACKUP"
+  | "RUN_COMMAND"
+  | "BACKUP_AND_RESTART"
+  | "BACKUP_AND_STOP"
+  | "WARN_AND_RESTART"
+  | "WARN_AND_STOP"
+  | "SAVE_AND_BACKUP"
+  | "CUSTOM"
 
 export interface ServerAutomationItem {
   id: string
   name: string
+  template?: ServerTaskTemplate | null
   action: ServerAutomationAction
   frequency: ServerAutomationFrequency
   time: string
+  intervalHours?: number | null
   weekday?: number | null
   weekdays?: number[] | null
   command?: string | null
+  delaySeconds?: number | null
+  humanSchedule?: string | null
   enabled: boolean
   isProcessing: boolean
   isAdvanced: boolean
+  isManaged?: boolean
   lastRunAt?: string | null
   nextRunAt?: string | null
 }
 
 export interface ServerAutomationInput {
   name: string
-  action: ServerAutomationAction
+  template?: ServerTaskTemplate | null
+  action?: ServerAutomationAction | null
   frequency: ServerAutomationFrequency
-  time: string
+  time?: string | null
+  intervalHours?: number | null
   weekday?: number | null
   weekdays?: number[] | null
   command?: string | null
+  delaySeconds?: number | null
   enabled?: boolean
 }
 

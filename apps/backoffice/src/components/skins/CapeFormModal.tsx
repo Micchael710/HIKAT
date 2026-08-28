@@ -1,35 +1,36 @@
 import React, { useState, useRef } from "react"
-import type { ThemeMode, SkinItem, SkinStatus } from "../../types"
-import { validateMinecraftSkinTexture } from "@hikat/shared"
-import { skinsApi } from "../../services/graphqlClient"
+import type { ThemeMode, CapeItem, CapeStatus } from "../../types"
+import { validateCapeTextureBuffer, MAX_CAPE_SIZE_BYTES } from "@hikat/shared"
+import { loadCapeToCanvas } from "skinview-utils"
+import { capesApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
-import { IconCross, IconUpload } from "../../theme/icons"
+import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
 import SkinViewer3D from "./SkinViewer3D"
 
-interface SkinFormModalProps {
+interface CapeFormModalProps {
   theme: ThemeMode
-  skin: SkinItem | null
+  cape: CapeItem | null
   mode?: "edit" | "view"
   onClose: () => void
   onSaved: () => void
 }
 
-export default function SkinFormModal({
+export default function CapeFormModal({
   theme,
-  skin,
+  cape,
   mode = "edit",
   onClose,
   onSaved,
-}: SkinFormModalProps) {
+}: CapeFormModalProps) {
   const isDark = theme === "dark"
-  const isEdit = !!skin
+  const isEdit = !!cape
   const isViewOnly = mode === "view"
 
-  const [name, setName] = useState(skin?.name || "")
-  const [status, setStatus] = useState<SkinStatus>(skin?.status || "AVAILABLE")
+  const [name, setName] = useState(cape?.name || "")
+  const [status, setStatus] = useState<CapeStatus>(cape?.status || "AVAILABLE")
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string>(skin?.imageUrl || "")
+  const [previewUrl, setPreviewUrl] = useState<string | null>(cape?.imageUrl || null)
   const [fileError, setFileError] = useState<string | null>(null)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -48,11 +49,33 @@ export default function SkinFormModal({
       return
     }
 
+    if (file.size > MAX_CAPE_SIZE_BYTES) {
+      setFileError("El archivo supera el tamaño máximo permitido de 5 MB.")
+      return
+    }
+
     try {
       const buffer = await file.arrayBuffer()
-      const validation = validateMinecraftSkinTexture(buffer)
+      const validation = validateCapeTextureBuffer(buffer)
       if (!validation.valid) {
-        setFileError(validation.error || "Dimensiones de skin no válidas.")
+        setFileError(validation.error || "Textura de capa PNG no válida.")
+        return
+      }
+
+      try {
+        const url = URL.createObjectURL(file)
+        const img = new Image()
+        img.src = url
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve()
+          img.onerror = () => reject(new Error("No se pudo cargar la imagen"))
+        })
+        URL.revokeObjectURL(url)
+
+        const tempCanvas = document.createElement("canvas")
+        loadCapeToCanvas(tempCanvas, img)
+      } catch {
+        setFileError("Esta imagen no tiene un formato de capa compatible.")
         return
       }
 
@@ -65,7 +88,7 @@ export default function SkinFormModal({
         setName(cleanName)
       }
     } catch {
-      setFileError("No se pudo leer la textura de la skin.")
+      setFileError("No se pudo leer la textura de la capa.")
     }
   }
 
@@ -79,12 +102,12 @@ export default function SkinFormModal({
     setError(null)
 
     if (!name.trim()) {
-      setError("El nombre de la skin es obligatorio.")
+      setError("El nombre de la capa es obligatorio.")
       return
     }
 
     if (!isEdit && !selectedFile) {
-      setError("Debes seleccionar un archivo de skin (.png).")
+      setError("Debes seleccionar un archivo de capa (.png).")
       return
     }
 
@@ -98,16 +121,16 @@ export default function SkinFormModal({
       }
 
       if (isEdit) {
-        await skinsApi.updateSkin(skin.id, {
+        await capesApi.updateCape(cape.id, {
           name: name.trim(),
           status,
           mediaId,
         })
       } else {
         if (!mediaId) {
-          throw new Error("No se pudo subir la textura.")
+          throw new Error("No se pudo subir la textura de la capa.")
         }
-        await skinsApi.createSkin({
+        await capesApi.createCape({
           name: name.trim(),
           status,
           mediaId,
@@ -117,7 +140,7 @@ export default function SkinFormModal({
       onSaved()
       onClose()
     } catch (err: any) {
-      setError(err.message || "Error al guardar la skin.")
+      setError(err.message || "Error al guardar la capa.")
     } finally {
       setIsSubmitting(false)
     }
@@ -169,7 +192,7 @@ export default function SkinFormModal({
               color: isDark ? "#f1f5f9" : "#0f172a",
             }}
           >
-            {isViewOnly ? "Detalles de la Skin" : isEdit ? "Editar Skin" : "Nueva Skin"}
+            {isViewOnly ? "Detalles de la Capa" : isEdit ? "Editar Capa" : "Nueva Capa Global"}
           </h2>
           <button
             onClick={onClose}
@@ -186,7 +209,7 @@ export default function SkinFormModal({
           </button>
         </div>
 
-        {/* Modal Body: Two Column Layout (3D Viewer on Left, Form on Right) */}
+        {/* Modal Body */}
         <form onSubmit={handleSubmit} style={{ overflowY: "auto", padding: "24px", flex: 1 }}>
           {error && (
             <div
@@ -216,7 +239,7 @@ export default function SkinFormModal({
               <div style={{ marginBottom: "16px" }}>
                 {previewUrl ? (
                   <SkinViewer3D
-                    skinUrl={previewUrl}
+                    capeUrl={previewUrl}
                     width={280}
                     height={340}
                     theme={theme}
@@ -241,7 +264,7 @@ export default function SkinFormModal({
                   >
                     <IconUpload size={32} />
                     <span style={{ marginTop: "12px", fontSize: "13px", fontWeight: "500" }}>
-                      Selecciona una textura PNG para ver el visor 3D
+                      Selecciona una textura PNG de capa (estándar o HD)
                     </span>
                   </div>
                 )}
@@ -274,7 +297,7 @@ export default function SkinFormModal({
                     }}
                   >
                     <IconUpload size={16} />
-                    {selectedFile ? "Cambiar archivo..." : isEdit ? "Reemplazar textura..." : "Seleccionar PNG (64x64)..."}
+                    {selectedFile ? "Cambiar archivo..." : isEdit ? "Reemplazar textura..." : "Seleccionar PNG..."}
                   </button>
                   {fileError && (
                     <div style={{ marginTop: "6px", fontSize: "12px", color: "#ef4444", textAlign: "center" }}>
@@ -298,7 +321,7 @@ export default function SkinFormModal({
                     marginBottom: "6px",
                   }}
                 >
-                  Nombre de la Skin
+                  Nombre de la Capa
                 </label>
                 {isViewOnly ? (
                   <div style={{ fontSize: "15px", fontWeight: "600", color: isDark ? "#f1f5f9" : "#0f172a" }}>
@@ -309,7 +332,7 @@ export default function SkinFormModal({
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Ej. Alex Aventurera, Traje Espacial..."
+                    placeholder="Ej. Capa de Fundador, Capa Épica..."
                     style={{
                       width: "100%",
                       padding: "10px 14px",
@@ -425,6 +448,9 @@ export default function SkinFormModal({
                 type="submit"
                 disabled={isSubmitting}
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
                   padding: "8px 20px",
                   borderRadius: "8px",
                   border: "none",
@@ -436,7 +462,8 @@ export default function SkinFormModal({
                   opacity: isSubmitting ? 0.7 : 1,
                 }}
               >
-                {isSubmitting ? "Guardando..." : isEdit ? "Actualizar Skin" : "Crear Skin"}
+                {isSubmitting && <IconSpinner size={16} />}
+                {isSubmitting ? "Guardando..." : isEdit ? "Actualizar Capa" : "Crear Capa"}
               </button>
             )}
           </div>

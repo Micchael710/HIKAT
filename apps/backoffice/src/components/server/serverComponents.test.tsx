@@ -15,6 +15,7 @@ import {
 import ServerOverviewView from "./ServerOverviewView"
 import ServerConsoleView from "./ServerConsoleView"
 import ServerFilesView from "./ServerFilesView"
+import ServerTasksView from "./ServerTasksView"
 import { consoleService } from "../../services/consoleService"
 import { authService } from "../../services/authService"
 import { serverApi } from "../../services/graphqlClient"
@@ -386,47 +387,35 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       render(<ServerOverviewView theme="dark" />)
     })
 
-    // 1. Initial overview tab is rendered with Rx / Tx
-    expect(screen.getByText("Tráfico recibido (RX)")).toBeDefined()
-    expect(screen.getByText("Tráfico enviado (TX)")).toBeDefined()
-    expect(screen.getByText("Actividad reciente")).toBeDefined()
+    // 1. Initial General tab is rendered with live console and clean metrics (CPU, RAM, Disco)
+    expect(screen.getByText("CPU")).toBeDefined()
+    expect(screen.getByText("Memoria RAM")).toBeDefined()
+    expect(screen.getByText("Disco")).toBeDefined()
+    expect(screen.getByText("Consola en vivo")).toBeDefined()
 
-    // 2. Click "Mundo"
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Mundo/i }))
-    })
-    expect(screen.getByText("Mundo activo detectado")).toBeDefined()
-
-    // 3. Click "Copias"
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Copias/i }))
-    })
-    expect(screen.getByText(/Copias de seguridad/i)).toBeDefined()
-    expect(screen.getByText("Crear copia ahora")).toBeDefined()
-
-    // 4. Click "Automatizaciones"
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Automatizaciones/i }))
-    })
-    expect(screen.getByText(/Automatizaciones programadas/i)).toBeDefined()
-    expect(screen.getByText("Nueva automatización")).toBeDefined()
-
-    // 5. Click "Configuración"
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Configuración/i }))
-    })
-    expect(screen.getByText("Configuración de Minecraft")).toBeDefined()
-    expect(screen.getByText("Dificultad del juego:")).toBeDefined()
-
-    // 6. Click "Archivos"
+    // 2. Click "Archivos"
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Archivos/i }))
     })
     expect(screen.getByText("Nueva carpeta")).toBeDefined()
     expect(screen.getByText("Subir archivo")).toBeDefined()
+
+    // 3. Click "Backups"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Backups/i }))
+    })
+    expect(screen.getByText(/Copias de seguridad/i)).toBeDefined()
+    expect(screen.getByText("Crear copia ahora")).toBeDefined()
+
+    // 4. Click "Tasks"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Tasks/i }))
+    })
+    expect(screen.getByText(/Tasks Programadas/i)).toBeDefined()
+    expect(screen.getByText("Nueva Task")).toBeDefined()
   })
 
-  it("Shard 07A: Disconnected UI renders top-right badge, full overview, and all 7 subtabs without full-page error card", async () => {
+  it("Phase 07: Disconnected UI renders top-right badge and exactly 5 subtabs without crash", async () => {
     vi.spyOn(serverApi, "getServerStatus").mockRejectedValue(new Error("Connection refused to Pterodactyl"))
 
     await act(async () => {
@@ -434,20 +423,17 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Disconnected infrastructure badge top-right is displayed
-    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
+    expect(screen.getByText("Servidor no disponible")).toBeDefined()
 
-    // Servidor overview heading & status card are displayed with '—' values (NO full page error card!)
+    // Servidor overview heading is displayed
     expect(screen.getByText("Servidor Principal")).toBeDefined()
-    expect(screen.getByText("Disponible cuando la infraestructura esté conectada.")).toBeDefined()
 
-    // All 7 sub-tabs switcher buttons remain active and reachable!
-    expect(screen.getByRole("button", { name: /Resumen/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Consola/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Mundo/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Copias/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Automatizaciones/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Configuración/i })).toBeDefined()
-    expect(screen.getByRole("button", { name: /Archivos/i })).toBeDefined()
+    // Exactly 5 sub-tabs switcher buttons remain active and reachable!
+    expect(screen.getByRole("button", { name: "General" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Consola" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Archivos" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Backups" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Tasks" })).toBeDefined()
   })
 
   it("Shard 07D Test 1: Infra transitions to DISCONNECTED if polling fails after prior success and disables power actions", async () => {
@@ -473,7 +459,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Initially CONNECTED
-    expect(screen.getByText("Infraestructura conectada")).toBeDefined()
+    expect(screen.getByText("Servidor disponible")).toBeDefined()
 
     // Trigger 2nd poll via timer interval -> fails
     await act(async () => {
@@ -481,7 +467,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Badge updates to DISCONNECTED
-    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
+    expect(screen.getByText("Servidor no disponible")).toBeDefined()
 
     // Power buttons are disabled
     const startBtns = screen.getAllByRole("button", { name: /Iniciar/i })
@@ -511,7 +497,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Initially DISCONNECTED
-    expect(screen.getByText("Infraestructura no conectada")).toBeDefined()
+    expect(screen.getByText("Servidor no disponible")).toBeDefined()
 
     // Click Reintentar -> succeeds
     await act(async () => {
@@ -519,7 +505,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     // Transitions back to CONNECTED
-    expect(screen.getByText("Infraestructura conectada")).toBeDefined()
+    expect(screen.getByText("Servidor disponible")).toBeDefined()
     expect(screen.getByText("En línea")).toBeDefined()
   })
 })
@@ -631,6 +617,131 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
     // Normal file has Edit button
     const editBtns = screen.getAllByTitle("Editar texto")
     expect(editBtns).toHaveLength(1)
+  })
+})
+
+describe("Phase 07: ServerTasksView Custom Action Toggle Preservation", () => {
+  const onToastMock = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it("CUSTOM + STOP task toggle sends action: STOP and inverted enabled value", async () => {
+    const customStopTask = {
+      id: "task-custom-stop",
+      name: "Parada nocturna",
+      template: "CUSTOM" as const,
+      action: "STOP" as const,
+      frequency: "DAILY" as const,
+      time: "04:00",
+      intervalHours: null,
+      weekday: null,
+      weekdays: null,
+      command: null,
+      delaySeconds: null,
+      humanSchedule: "Todos los días a las 04:00",
+      enabled: true,
+      isProcessing: false,
+      isAdvanced: false,
+      isManaged: true,
+      lastRunAt: null,
+      nextRunAt: null,
+    }
+
+    vi.spyOn(serverApi, "getServerAutomations").mockResolvedValue([customStopTask])
+    const updateSpy = vi.spyOn(serverApi, "updateServerAutomation").mockResolvedValue({
+      ...customStopTask,
+      enabled: false,
+    })
+
+    await act(async () => {
+      render(<ServerTasksView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+    })
+
+    expect(screen.getByText("Parada nocturna")).toBeDefined()
+
+    // Find the toggle button (currently enabled -> says "Activa" and title "Desactivar tarea")
+    const toggleBtn = screen.getByTitle("Desactivar tarea")
+    await act(async () => {
+      fireEvent.click(toggleBtn)
+    })
+
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(updateSpy).toHaveBeenCalledWith("task-custom-stop", {
+      name: "Parada nocturna",
+      template: "CUSTOM",
+      action: "STOP",
+      frequency: "DAILY",
+      time: "04:00",
+      intervalHours: null,
+      weekday: null,
+      weekdays: null,
+      command: null,
+      delaySeconds: null,
+      enabled: false,
+    })
+  })
+
+  it("CUSTOM + COMMAND task toggle sends action: COMMAND and preserved command string", async () => {
+    const customCmdTask = {
+      id: "task-custom-cmd",
+      name: "Anuncio automático",
+      template: "CUSTOM" as const,
+      action: "COMMAND" as const,
+      frequency: "DAILY" as const,
+      time: "12:00",
+      intervalHours: null,
+      weekday: null,
+      weekdays: null,
+      command: "say Bienvenidos al servidor",
+      delaySeconds: null,
+      humanSchedule: "Todos los días a las 12:00",
+      enabled: false,
+      isProcessing: false,
+      isAdvanced: false,
+      isManaged: true,
+      lastRunAt: null,
+      nextRunAt: null,
+    }
+
+    vi.spyOn(serverApi, "getServerAutomations").mockResolvedValue([customCmdTask])
+    const updateSpy = vi.spyOn(serverApi, "updateServerAutomation").mockResolvedValue({
+      ...customCmdTask,
+      enabled: true,
+    })
+
+    await act(async () => {
+      render(<ServerTasksView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+    })
+
+    expect(screen.getByText("Anuncio automático")).toBeDefined()
+
+    // Find the toggle button (currently disabled -> says "Inactiva" and title "Activar tarea")
+    const toggleBtn = screen.getByTitle("Activar tarea")
+    await act(async () => {
+      fireEvent.click(toggleBtn)
+    })
+
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(updateSpy).toHaveBeenCalledWith("task-custom-cmd", {
+      name: "Anuncio automático",
+      template: "CUSTOM",
+      action: "COMMAND",
+      frequency: "DAILY",
+      time: "12:00",
+      intervalHours: null,
+      weekday: null,
+      weekdays: null,
+      command: "say Bienvenidos al servidor",
+      delaySeconds: null,
+      enabled: true,
+    })
   })
 })
 

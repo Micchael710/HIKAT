@@ -1,32 +1,34 @@
 import React, { useState, useRef } from "react"
-import type { ThemeMode, AdminPlayerSkin } from "../../types"
-import { validateMinecraftSkinTexture } from "@hikat/shared"
-import { skinsApi } from "../../services/graphqlClient"
+import type { ThemeMode, AdminPlayerCape } from "../../types"
+import { validateCapeTextureBuffer, MAX_CAPE_SIZE_BYTES } from "@hikat/shared"
+import { loadCapeToCanvas } from "skinview-utils"
+import { capesApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
 import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
 import SkinViewer3D from "./SkinViewer3D"
 
-interface PlayerSkinModalProps {
+interface PlayerCapeModalProps {
   theme: ThemeMode
-  skin: AdminPlayerSkin
+  cape: AdminPlayerCape
   mode?: "edit" | "view"
   onClose: () => void
   onSaved: () => void
 }
 
-export default function PlayerSkinModal({
+export default function PlayerCapeModal({
   theme,
-  skin,
+  cape,
   mode = "edit",
   onClose,
   onSaved,
-}: PlayerSkinModalProps) {
+}: PlayerCapeModalProps) {
   const isDark = theme === "dark"
   const [currentMode, setCurrentMode] = useState<"edit" | "view">(mode)
   const isViewOnly = currentMode === "view"
 
+  const [name, setName] = useState<string>(cape.name || "")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string>(skin.imageUrl)
+  const [previewUrl, setPreviewUrl] = useState<string>(cape.imageUrl)
   const [fileError, setFileError] = useState<string | null>(null)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -48,11 +50,34 @@ export default function PlayerSkinModal({
       return
     }
 
+    if (file.size > MAX_CAPE_SIZE_BYTES) {
+      setFileError("El archivo supera el tamaño máximo permitido de 5 MB.")
+      return
+    }
+
     try {
       const buffer = await file.arrayBuffer()
-      const validation = validateMinecraftSkinTexture(buffer)
+      const validation = validateCapeTextureBuffer(buffer)
       if (!validation.valid) {
-        setFileError(validation.error || "Dimensiones de skin no válidas.")
+        setFileError(validation.error || "Textura de capa PNG no válida.")
+        return
+      }
+
+      // Visual compatibility check with skinview-utils
+      try {
+        const url = URL.createObjectURL(file)
+        const img = new Image()
+        img.src = url
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve()
+          img.onerror = () => reject(new Error("No se pudo cargar la imagen"))
+        })
+        URL.revokeObjectURL(url)
+
+        const tempCanvas = document.createElement("canvas")
+        loadCapeToCanvas(tempCanvas, img)
+      } catch {
+        setFileError("Esta imagen no tiene un formato de capa compatible.")
         return
       }
 
@@ -60,7 +85,7 @@ export default function PlayerSkinModal({
       const url = URL.createObjectURL(file)
       setPreviewUrl(url)
     } catch {
-      setFileError("No se pudo leer la textura de la skin.")
+      setFileError("No se pudo leer la textura de la capa.")
     }
   }
 
@@ -71,22 +96,23 @@ export default function PlayerSkinModal({
       return
     }
 
-    if (!selectedFile) {
-      setError("Debes seleccionar una nueva textura PNG para guardar cambios.")
-      return
-    }
-
     setError(null)
     setIsSubmitting(true)
     try {
-      const uploadedMedia = await uploadMediaFile(selectedFile, "IMAGE")
-      await skinsApi.updateAdminPlayerSkin(skin.id, {
-        mediaId: uploadedMedia.id,
+      let mediaId: string | undefined
+      if (selectedFile) {
+        const uploadedMedia = await uploadMediaFile(selectedFile, "IMAGE")
+        mediaId = uploadedMedia.id
+      }
+
+      await capesApi.updateAdminPlayerCape(cape.id, {
+        name: name.trim() || undefined,
+        mediaId,
       })
 
       onSaved()
     } catch (err: any) {
-      setError(err.message || "Error al actualizar la skin del jugador.")
+      setError(err.message || "Error al actualizar la capa del jugador.")
     } finally {
       setIsSubmitting(false)
     }
@@ -148,7 +174,7 @@ export default function PlayerSkinModal({
                 color: isDark ? "#f1f5f9" : "#0f172a",
               }}
             >
-              Skin de {skin.userDisplayName}
+              Capa de {cape.userDisplayName}
             </h2>
             <p
               style={{
@@ -157,7 +183,7 @@ export default function PlayerSkinModal({
                 color: isDark ? "#94a3b8" : "#64748b",
               }}
             >
-              ID Usuario: <code style={{ fontSize: "12px" }}>{skin.userId}</code>
+              ID Usuario: <code style={{ fontSize: "12px" }}>{cape.userId}</code>
             </p>
           </div>
           <button
@@ -212,7 +238,7 @@ export default function PlayerSkinModal({
               gap: "24px",
             }}
           >
-            {/* 3D Skin Viewer */}
+            {/* 3D Cape Viewer */}
             <div
               style={{
                 display: "flex",
@@ -222,7 +248,7 @@ export default function PlayerSkinModal({
               }}
             >
               <SkinViewer3D
-                skinUrl={previewUrl}
+                capeUrl={previewUrl}
                 width={280}
                 height={340}
                 theme={theme}
@@ -288,6 +314,49 @@ export default function PlayerSkinModal({
                     letterSpacing: "0.05em",
                   }}
                 >
+                  Nombre de la capa
+                </label>
+                {isViewOnly ? (
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: "600",
+                      color: isDark ? "#f1f5f9" : "#0f172a",
+                    }}
+                  >
+                    {name}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
+                      backgroundColor: isDark ? "#0f172a" : "#ffffff",
+                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      fontSize: "14px",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                )}
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    color: isDark ? "#94a3b8" : "#64748b",
+                    marginBottom: "4px",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                  }}
+                >
                   Jugador
                 </label>
                 <div
@@ -297,7 +366,7 @@ export default function PlayerSkinModal({
                     color: isDark ? "#f1f5f9" : "#0f172a",
                   }}
                 >
-                  {skin.userDisplayName}
+                  {cape.userDisplayName}
                 </div>
               </div>
 
@@ -321,7 +390,7 @@ export default function PlayerSkinModal({
                     color: isDark ? "#cbd5e1" : "#334155",
                   }}
                 >
-                  {new Date(skin.createdAt).toLocaleString()}
+                  {new Date(cape.createdAt).toLocaleString()}
                 </div>
               </div>
 
@@ -345,7 +414,7 @@ export default function PlayerSkinModal({
                     color: isDark ? "#cbd5e1" : "#334155",
                   }}
                 >
-                  {new Date(skin.updatedAt).toLocaleString()}
+                  {new Date(cape.updatedAt).toLocaleString()}
                 </div>
               </div>
 
@@ -368,7 +437,7 @@ export default function PlayerSkinModal({
                       cursor: "pointer",
                     }}
                   >
-                    Reemplazar textura como Administrador
+                    Editar como Administrador
                   </button>
                 </div>
               )}
@@ -404,7 +473,7 @@ export default function PlayerSkinModal({
             {!isViewOnly && (
               <button
                 type="submit"
-                disabled={isSubmitting || !selectedFile}
+                disabled={isSubmitting}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -416,12 +485,12 @@ export default function PlayerSkinModal({
                   color: "#ffffff",
                   fontSize: "13px",
                   fontWeight: "600",
-                  cursor: isSubmitting || !selectedFile ? "not-allowed" : "pointer",
-                  opacity: isSubmitting || !selectedFile ? 0.6 : 1,
+                  cursor: isSubmitting ? "not-allowed" : "pointer",
+                  opacity: isSubmitting ? 0.6 : 1,
                 }}
               >
                 {isSubmitting && <IconSpinner size={16} />}
-                {isSubmitting ? "Guardando..." : "Guardar Nueva Textura"}
+                {isSubmitting ? "Guardando..." : "Guardar Cambios"}
               </button>
             )}
           </div>

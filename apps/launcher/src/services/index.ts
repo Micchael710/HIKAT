@@ -9,3 +9,5 @@ export * from "./serverService"
 export * from "./gameService"
 
 export * from "./skinService"
+
+export * from "./capeService"

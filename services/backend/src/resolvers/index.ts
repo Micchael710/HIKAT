@@ -17,7 +17,7 @@ import type {
   ServerResourcesGql,
   ServerPowerActionResultGql,
   ServerCommandResultGql,
-  ServerConsoleTicketPayloadGql,
+  ServerConsoleTicketGql,
   ServerActivityItemGql,
   ServerBackupItemGql,
   ServerWorldInfoGql,
@@ -54,6 +54,21 @@ import type {
   AdminPlayerSkinConnectionGql,
   SetPlayerSkinInputGql,
   UpdateAdminPlayerSkinInputGql,
+  ActiveSkinSelectionGql,
+  SetActiveSkinInputGql,
+  CapeGql,
+  CapeConnectionGql,
+  CapeStatusGql,
+  CreateCapeInputGql,
+  UpdateCapeInputGql,
+  PlayerCapeGql,
+  PlayerCapeConnectionGql,
+  AdminPlayerCapeGql,
+  AdminPlayerCapeConnectionGql,
+  AddPlayerCapeInputGql,
+  UpdateAdminPlayerCapeInputGql,
+  ActiveCapeSelectionGql,
+  SetActiveCapeInputGql,
 } from "@hikat/graphql"
 
 import {
@@ -132,11 +147,32 @@ import {
   createPlayerSkinUpload,
   setMyPlayerSkin,
   deleteMyPlayerSkin,
+  getMyActiveSkin,
+  setMyActiveSkin,
   getAdminPlayerSkins,
   getAdminPlayerSkinById,
   updateAdminPlayerSkin,
   deleteAdminPlayerSkin,
 } from "../services/skinService"
+
+import {
+  getAdminCapes,
+  getPublicCapes,
+  getCapeById,
+  createCape,
+  updateCape,
+  deleteCape,
+  getMyPlayerCapes,
+  createPlayerCapeUpload,
+  addMyPlayerCape,
+  deleteMyPlayerCape,
+  getMyActiveCape,
+  setMyActiveCape,
+  getAdminPlayerCapes,
+  getAdminPlayerCapeById,
+  updateAdminPlayerCape,
+  deleteAdminPlayerCape,
+} from "../services/capeService"
 
 import {
   getPublishedModpack,
@@ -350,7 +386,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql[]> => {
       requireAdmin(context)
-      return listServerAutomations(context.env)
+      return listServerAutomations(context.env, context.db)
     },
 
     serverFiles: async (
@@ -439,6 +475,18 @@ export const resolvers = {
       return getMyPlayerSkin(context.db, identity.userId)
     },
 
+    myActiveSkin: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ActiveSkinSelectionGql | null> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getMyActiveSkin(context.db, context.env, identity.userId)
+    },
+
     adminPlayerSkins: async (
       _parent: unknown,
       args: {
@@ -465,6 +513,99 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return getAdminPlayerSkinById(context.db, args.id)
+    },
+
+    // --- Capes Queries (Shard 07 Hardening) ---
+
+    capes: async (
+      _parent: unknown,
+      args: { first?: number | null; after?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<CapeConnectionGql> => {
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getPublicCapes(context.db, context.env, args)
+    },
+
+    adminCapes: async (
+      _parent: unknown,
+      args: {
+        first?: number | null
+        after?: string | null
+        status?: CapeStatusGql | null
+      },
+      context: BackendGraphQLContext,
+    ): Promise<CapeConnectionGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminCapes(context.db, context.env, args)
+    },
+
+    adminCape: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<CapeGql | null> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getCapeById(context.db, args.id)
+    },
+
+    myPlayerCapes: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<PlayerCapeGql[]> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getMyPlayerCapes(context.db, identity.userId)
+    },
+
+    myActiveCape: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ActiveCapeSelectionGql> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getMyActiveCape(context.db, context.env, identity.userId)
+    },
+
+    adminPlayerCapes: async (
+      _parent: unknown,
+      args: {
+        first?: number | null
+        after?: string | null
+        search?: string | null
+      },
+      context: BackendGraphQLContext,
+    ): Promise<AdminPlayerCapeConnectionGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminPlayerCapes(context.db, context.env, args)
+    },
+
+    adminPlayerCape: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<AdminPlayerCapeGql | null> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getAdminPlayerCapeById(context.db, args.id)
     },
 
 
@@ -552,7 +693,7 @@ export const resolvers = {
       _parent: unknown,
       _args: unknown,
       context: BackendGraphQLContext,
-    ): Promise<ServerConsoleTicketPayloadGql> => {
+    ): Promise<ServerConsoleTicketGql> => {
       const identity = requireAdmin(context)
       if (!identity.sessionId) {
         throw createGraphQLError(
@@ -727,7 +868,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql> => {
       requireAdmin(context)
-      return createServerAutomation(context.env, args.input as any)
+      return createServerAutomation(context.env, args.input as any, undefined, context.db)
     },
 
     updateServerAutomation: async (
@@ -736,7 +877,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql> => {
       requireAdmin(context)
-      return updateServerAutomation(context.env, args.id, args.input as any)
+      return updateServerAutomation(context.env, args.id, args.input as any, undefined, context.db)
     },
 
     runServerAutomation: async (
@@ -745,7 +886,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return runServerAutomation(context.env, args.id)
+      return runServerAutomation(context.env, args.id, undefined, context.db)
     },
 
     deleteServerAutomation: async (
@@ -754,7 +895,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return deleteServerAutomation(context.env, args.id)
+      return deleteServerAutomation(context.env, args.id, undefined, context.db)
     },
 
     createServerFolder: async (
@@ -958,7 +1099,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return createSkin(context.db, args.input, identity.userId)
+      return createSkin(context.db, context.env, args.input, identity.userId)
     },
 
     updateSkin: async (
@@ -970,7 +1111,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return updateSkin(context.db, args.id, args.input)
+      return updateSkin(context.db, context.env, args.id, args.input)
     },
 
     deleteSkin: async (
@@ -1028,6 +1169,18 @@ export const resolvers = {
       return deleteMyPlayerSkin(context.db, context.env, identity.userId)
     },
 
+    setMyActiveSkin: async (
+      _parent: unknown,
+      args: { input: SetActiveSkinInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ActiveSkinSelectionGql> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return setMyActiveSkin(context.db, context.env, identity.userId, args.input)
+    },
+
     updateAdminPlayerSkin: async (
       _parent: unknown,
       args: { id: string; input: UpdateAdminPlayerSkinInputGql },
@@ -1051,6 +1204,121 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return deleteAdminPlayerSkin(context.db, context.env, args.id)
+    },
+
+    // --- Capes Administrative & Player Mutations (Shard 07 Hardening) ---
+
+    createCape: async (
+      _parent: unknown,
+      args: { input: CreateCapeInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<CapeGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createCape(context.db, context.env, args.input, identity.userId)
+    },
+
+    updateCape: async (
+      _parent: unknown,
+      args: { id: string; input: UpdateCapeInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<CapeGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateCape(context.db, context.env, args.id, args.input)
+    },
+
+    deleteCape: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteCape(context.db, args.id, context.env)
+    },
+
+    createPlayerCapeUpload: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ContentMediaUploadPayloadGql> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createPlayerCapeUpload(
+        context.db,
+        context.env,
+        identity.userId,
+        context.request,
+      )
+    },
+
+    addMyPlayerCape: async (
+      _parent: unknown,
+      args: { input: AddPlayerCapeInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<PlayerCapeGql> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return addMyPlayerCape(context.db, context.env, args.input, identity.userId)
+    },
+
+    deleteMyPlayerCape: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteMyPlayerCape(context.db, context.env, args.id, identity.userId)
+    },
+
+    setMyActiveCape: async (
+      _parent: unknown,
+      args: { input: SetActiveCapeInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ActiveCapeSelectionGql> => {
+      const identity = requireAuth(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return setMyActiveCape(context.db, context.env, identity.userId, args.input)
+    },
+
+    updateAdminPlayerCape: async (
+      _parent: unknown,
+      args: { id: string; input: UpdateAdminPlayerCapeInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminPlayerCapeGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateAdminPlayerCape(context.db, context.env, args.id, args.input)
+    },
+
+    deleteAdminPlayerCape: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteAdminPlayerCape(context.db, context.env, args.id)
     },
 
 

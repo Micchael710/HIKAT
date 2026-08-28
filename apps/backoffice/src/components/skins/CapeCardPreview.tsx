@@ -10,16 +10,16 @@ interface CapeCardPreviewProps {
 }
 
 /**
- * Renders a crisp 2D cape preview in catalog cards.
+ * Renders a crisp 2D cape preview in Back Office catalog cards.
  * Uses skinview-utils loadCapeToCanvas to process standard Minecraft 64x32 templates,
  * HD multiples (128x64, 256x128, 512x256, etc.), and official supported cape formats.
  */
 export default function CapeCardPreview({
   capeUrl,
-  width = 90,
-  height = 144,
+  width = 64,
+  height = 96,
   className = "",
-  alt = "Minecraft Cape",
+  alt = "Capa Minecraft",
 }: CapeCardPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [isLoaded, setIsLoaded] = useState(false)
@@ -96,7 +96,7 @@ export default function CapeCardPreview({
         borderRadius: 8,
         imageRendering: "auto",
         display: isLoaded ? "block" : "none",
-        filter: "drop-shadow(0 8px 20px rgba(0,0,0,0.5))",
+        filter: "drop-shadow(0 4px 12px rgba(0,0,0,0.4))",
       }}
     />
   )

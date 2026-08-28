@@ -9,7 +9,6 @@ export type AnimationType = "pose" | "walk" | "idle" | "run"
 export interface SkinViewer3DProps {
   skinUrl?: string
   capeUrl?: string
-  model?: "classic" | "slim" | "auto-detect"
   accentHex?: string
   width?: number
   height?: number
@@ -22,7 +21,6 @@ export interface SkinViewer3DProps {
 export default function SkinViewer3D({
   skinUrl,
   capeUrl,
-  model = "auto-detect",
   accentHex = "#38bdf8",
   width = 400,
   height = 540,
@@ -305,7 +303,7 @@ export default function SkinViewer3D({
       try {
         if (skinUrl) {
           await viewer.loadSkin(skinUrl, {
-            model: model === "auto-detect" ? "auto-detect" : model === "slim" ? "slim" : "default",
+            model: "auto-detect",
           })
           if (viewer.playerObject) {
             viewer.playerObject.visible = true
@@ -353,7 +351,7 @@ export default function SkinViewer3D({
     return () => {
       isMounted = false
     }
-  }, [skinUrl, capeUrl, model, isCapeMode, applyPoseOrAnimation, onPoseChange])
+  }, [skinUrl, capeUrl, isCapeMode, applyPoseOrAnimation, onPoseChange])
 
   return (
     <div

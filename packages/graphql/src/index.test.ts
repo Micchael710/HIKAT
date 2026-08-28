@@ -5,6 +5,8 @@ import {
   GraphQLEnumType,
   GraphQLObjectType,
   Kind,
+  parse,
+  validate,
 } from "graphql"
 
 import {
@@ -399,114 +401,97 @@ describe("@hikat/graphql foundation & contracts", () => {
 
     expect(queryType?.getFields()["adminDashboard"]).toBeDefined()
 
-    // 2. Skins & Player Skins (Shard 06.5 / 06.6)
+    // 2. Skins & Player Skins (Shard 06.5 / 06.6 / 07 Hardening)
 
     expect(queryType?.getFields()["skins"]).toBeDefined()
-
     expect(queryType?.getFields()["adminSkins"]).toBeDefined()
-
     expect(queryType?.getFields()["adminSkin"]).toBeDefined()
-
     expect(queryType?.getFields()["myPlayerSkin"]).toBeDefined()
-
     expect(queryType?.getFields()["adminPlayerSkins"]).toBeDefined()
-
     expect(queryType?.getFields()["adminPlayerSkin"]).toBeDefined()
 
+    // Capes queries (Shard 07 Hardening)
+    expect(queryType?.getFields()["capes"]).toBeDefined()
+    expect(queryType?.getFields()["adminCapes"]).toBeDefined()
+    expect(queryType?.getFields()["adminCape"]).toBeDefined()
+    expect(queryType?.getFields()["myPlayerCapes"]).toBeDefined()
+    expect(queryType?.getFields()["myActiveCape"]).toBeDefined()
+    expect(queryType?.getFields()["adminPlayerCapes"]).toBeDefined()
+    expect(queryType?.getFields()["adminPlayerCape"]).toBeDefined()
+
     expect(mutationType?.getFields()["createSkin"]).toBeDefined()
-
     expect(mutationType?.getFields()["updateSkin"]).toBeDefined()
-
     expect(mutationType?.getFields()["deleteSkin"]).toBeDefined()
-
     expect(mutationType?.getFields()["createPlayerSkinUpload"]).toBeDefined()
-
     expect(mutationType?.getFields()["setMyPlayerSkin"]).toBeDefined()
-
     expect(mutationType?.getFields()["deleteMyPlayerSkin"]).toBeDefined()
-
     expect(mutationType?.getFields()["updateAdminPlayerSkin"]).toBeDefined()
-
     expect(mutationType?.getFields()["deleteAdminPlayerSkin"]).toBeDefined()
 
-    // Check PlayerSkin and AdminPlayerSkin contracts
+    // Capes mutations (Shard 07 Hardening)
+    expect(mutationType?.getFields()["createCape"]).toBeDefined()
+    expect(mutationType?.getFields()["updateCape"]).toBeDefined()
+    expect(mutationType?.getFields()["deleteCape"]).toBeDefined()
+    expect(mutationType?.getFields()["createPlayerCapeUpload"]).toBeDefined()
+    expect(mutationType?.getFields()["addMyPlayerCape"]).toBeDefined()
+    expect(mutationType?.getFields()["deleteMyPlayerCape"]).toBeDefined()
+    expect(mutationType?.getFields()["setMyActiveCape"]).toBeDefined()
+    expect(mutationType?.getFields()["updateAdminPlayerCape"]).toBeDefined()
+    expect(mutationType?.getFields()["deleteAdminPlayerCape"]).toBeDefined()
 
+    // Check PlayerSkin and AdminPlayerSkin contracts (No model)
     const playerSkinType = schema.getType("PlayerSkin") as GraphQLObjectType
-
     expect(playerSkinType).toBeDefined()
-
     const playerSkinFields = Object.keys(playerSkinType.getFields())
-
     expect(playerSkinFields).toEqual([
       "id",
       "userId",
-      "model",
       "imageUrl",
       "createdAt",
       "updatedAt",
     ])
-
 
     const adminPlayerSkinType = schema.getType(
       "AdminPlayerSkin",
     ) as GraphQLObjectType
-
     expect(adminPlayerSkinType).toBeDefined()
-
     const adminPlayerSkinFields = Object.keys(adminPlayerSkinType.getFields())
-
     expect(adminPlayerSkinFields).toEqual([
       "id",
       "userId",
       "userDisplayName",
-      "model",
       "imageUrl",
       "createdAt",
       "updatedAt",
     ])
 
+    // Verify SkinModel is not in schema
+    expect(schema.getType("SkinModel")).toBeUndefined()
+
     // 3. Game & Launcher Manifest
-
     expect(queryType?.getFields()["publishedModpack"]).toBeDefined()
-
     expect(queryType?.getFields()["adminGameOverview"]).toBeDefined()
-
     expect(queryType?.getFields()["gameReleaseHistory"]).toBeDefined()
-
     expect(queryType?.getFields()["adminGameFiles"]).toBeDefined()
 
     expect(mutationType?.getFields()["prepareGameDraft"]).toBeDefined()
-
     expect(mutationType?.getFields()["discardGameDraft"]).toBeDefined()
-
     expect(mutationType?.getFields()["createGameFileUpload"]).toBeDefined()
-
     expect(mutationType?.getFields()["addGameFile"]).toBeDefined()
-
     expect(mutationType?.getFields()["updateGameFile"]).toBeDefined()
-
     expect(mutationType?.getFields()["removeGameFile"]).toBeDefined()
-
     expect(mutationType?.getFields()["restoreGameFile"]).toBeDefined()
-
     expect(mutationType?.getFields()["publishGameRelease"]).toBeDefined()
 
     // 4. Settings
-
     expect(queryType?.getFields()["clientConfiguration"]).toBeDefined()
-
     expect(queryType?.getFields()["adminSettings"]).toBeDefined()
-
     expect(mutationType?.getFields()["updateAdminSettings"]).toBeDefined()
 
     // Check ClientFile contract
-
     const clientFileType = schema.getType("ClientFile") as GraphQLObjectType
-
     expect(clientFileType).toBeDefined()
-
     const clientFields = Object.keys(clientFileType.getFields())
-
     expect(clientFields).toEqual([
       "path",
       "sha256",
@@ -516,15 +501,11 @@ describe("@hikat/graphql foundation & contracts", () => {
     ])
 
     // Check PublishedModpack contract
-
     const publishedModpackType = schema.getType(
       "PublishedModpack",
     ) as GraphQLObjectType
-
     expect(publishedModpackType).toBeDefined()
-
     const modpackFields = Object.keys(publishedModpackType.getFields())
-
     expect(modpackFields).toEqual([
       "version",
       "minecraftVersion",
@@ -532,5 +513,168 @@ describe("@hikat/graphql foundation & contracts", () => {
       "mandatory",
       "clientFiles",
     ])
+  })
+
+  it("validates real Launcher active skin queries and mutations against schema", () => {
+    const schema = getBaseSchema()
+
+    // 1. Valid Launcher MyActiveSkin Query (no model field)
+    const validMyActiveSkinQuery = /* GraphQL */ `
+      query MyActiveSkin {
+        myActiveSkin {
+          type
+          skinId
+          skin {
+            id
+            name
+            imageUrl
+          }
+        }
+      }
+    `
+    const errors1 = validate(schema, parse(validMyActiveSkinQuery))
+    expect(errors1).toHaveLength(0)
+
+    // 2. Valid Launcher SetMyActiveSkin Mutation
+    const validSetMyActiveSkinMutation = /* GraphQL */ `
+      mutation SetMyActiveSkin($input: SetActiveSkinInput!) {
+        setMyActiveSkin(input: $input) {
+          type
+          skinId
+          skin {
+            id
+            name
+            imageUrl
+          }
+        }
+      }
+    `
+    const errors2 = validate(schema, parse(validSetMyActiveSkinMutation))
+    expect(errors2).toHaveLength(0)
+
+    // 3. Reject invalid query asking for non-existent globalSkinId
+    const invalidQuery = /* GraphQL */ `
+      query BadActiveSkin {
+        myActiveSkin {
+          type
+          globalSkinId
+        }
+      }
+    `
+    const invalidErrors = validate(schema, parse(invalidQuery))
+    expect(invalidErrors.length).toBeGreaterThan(0)
+    expect(invalidErrors[0]?.message).toContain('Cannot query field "globalSkinId"')
+  })
+
+  it("validates Capes GraphQL operations against schema", () => {
+    const schema = getBaseSchema()
+
+    // 1. Query capes and active cape
+    const capesQueryDoc = /* GraphQL */ `
+      query LauncherCapes {
+        capes(first: 20) {
+          items {
+            id
+            name
+            imageUrl
+            status
+          }
+        }
+        myPlayerCapes {
+          id
+          name
+          imageUrl
+        }
+        myActiveCape {
+          type
+          capeId
+          playerCapeId
+          imageUrl
+          name
+        }
+      }
+    `
+    expect(validate(schema, parse(capesQueryDoc))).toHaveLength(0)
+
+    // 2. Set active cape mutation
+    const setActiveCapeDoc = /* GraphQL */ `
+      mutation SetActiveCape($input: SetActiveCapeInput!) {
+        setMyActiveCape(input: $input) {
+          type
+          capeId
+          playerCapeId
+          imageUrl
+          name
+        }
+      }
+    `
+    expect(validate(schema, parse(setActiveCapeDoc))).toHaveLength(0)
+  })
+
+  it("Shard 07 Hardening: Back Office skin mutations are valid and model is not defined on inputs or types", () => {
+    const schema = getBaseSchema()
+
+    // 1. Back Office createSkin mutation (no model)
+    const createSkinDoc = /* GraphQL */ `
+      mutation CreateSkin($input: CreateSkinInput!) {
+        createSkin(input: $input) {
+          id
+          name
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    expect(validate(schema, parse(createSkinDoc))).toHaveLength(0)
+
+    // 2. Back Office updateSkin mutation (no model)
+    const updateSkinDoc = /* GraphQL */ `
+      mutation UpdateSkin($id: ID!, $input: UpdateSkinInput!) {
+        updateSkin(id: $id, input: $input) {
+          id
+          name
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    expect(validate(schema, parse(updateSkinDoc))).toHaveLength(0)
+
+    // 3. Back Office updateAdminPlayerSkin mutation (no model)
+    const updateAdminPlayerSkinDoc = /* GraphQL */ `
+      mutation UpdateAdminPlayerSkin($id: ID!, $input: UpdateAdminPlayerSkinInput!) {
+        updateAdminPlayerSkin(id: $id, input: $input) {
+          id
+          userId
+          userDisplayName
+          imageUrl
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    expect(validate(schema, parse(updateAdminPlayerSkinDoc))).toHaveLength(0)
+
+    // 4. Verify model field does not exist on CreateSkinInput, UpdateSkinInput, UpdateAdminPlayerSkinInput, SetPlayerSkinInput
+    const createSkinType = schema.getType("CreateSkinInput") as any
+    expect(createSkinType.getFields().model).toBeUndefined()
+    expect(createSkinType.getFields().name).toBeDefined()
+    expect(createSkinType.getFields().mediaId).toBeDefined()
+
+    const updateSkinType = schema.getType("UpdateSkinInput") as any
+    expect(updateSkinType.getFields().model).toBeUndefined()
+    expect(updateSkinType.getFields().name).toBeDefined()
+
+    const updateAdminPlayerSkinType = schema.getType("UpdateAdminPlayerSkinInput") as any
+    expect(updateAdminPlayerSkinType.getFields().model).toBeUndefined()
+    expect(updateAdminPlayerSkinType.getFields().mediaId).toBeDefined()
+
+    const setPlayerSkinType = schema.getType("SetPlayerSkinInput") as any
+    expect(setPlayerSkinType.getFields().model).toBeUndefined()
+    expect(setPlayerSkinType.getFields().mediaId).toBeDefined()
   })
 })

@@ -12,6 +12,8 @@ import {
   news,
   skins,
   playerSkins,
+  capes,
+  playerCapes,
   ContentMedia,
 } from "@hikat/database"
 
@@ -399,6 +401,33 @@ export async function deleteMedia(
     )
   }
 
+  // Check if referenced by any global cape
+  const referencingCape = await db
+    .select({ id: capes.id, name: capes.name })
+    .from(capes)
+    .where(eq(capes.mediaId, mediaId))
+    .get()
+
+  if (referencingCape) {
+    throw createGraphQLError(
+      `Cannot delete media asset because it is currently in use by cape '${referencingCape.name}' (${referencingCape.id})`,
+      "CONFLICT",
+    )
+  }
+
+  // Check if referenced by any player custom cape
+  const referencingPlayerCape = await db
+    .select({ id: playerCapes.id, name: playerCapes.name })
+    .from(playerCapes)
+    .where(eq(playerCapes.mediaId, mediaId))
+    .get()
+
+  if (referencingPlayerCape) {
+    throw createGraphQLError(
+      `Cannot delete media asset because it is currently in use by player cape '${referencingPlayerCape.name}' (${referencingPlayerCape.id})`,
+      "CONFLICT",
+    )
+  }
 
   // Delete from D1
   await db.delete(contentMedia).where(eq(contentMedia.id, mediaId))

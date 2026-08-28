@@ -342,7 +342,7 @@ export default function ServerAutomationsView({
           </h3>
           <p style={{ margin: 0, fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)" }}>
             {isDisconnected
-              ? "Las automatizaciones aparecerán aquí cuando la infraestructura esté disponible."
+              ? "Las tareas aparecerán aquí cuando el servidor esté disponible."
               : "Programa reinicios automáticos, copias de seguridad periódicas o comandos diarios."}
           </p>
         </div>
@@ -604,7 +604,7 @@ export default function ServerAutomationsView({
                   Acción a ejecutar:
                 </label>
                 <select
-                  value={formData.action}
+                  value={formData.action || "RESTART"}
                   onChange={(e) => setFormData({ ...formData, action: e.target.value as ServerAutomationAction })}
                   style={{
                     width: "100%",
@@ -742,7 +742,7 @@ export default function ServerAutomationsView({
                 <input
                   type="time"
                   required
-                  value={formData.time}
+                  value={formData.time || "04:00"}
                   onChange={(e) => setFormData({ ...formData, time: e.target.value })}
                   style={{
                     width: "100%",

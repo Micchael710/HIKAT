@@ -20,7 +20,9 @@ export default function ServerConsoleView({
   theme,
 }: ServerConsoleViewProps) {
   const isDark = theme === "dark"
-  const [logs, setLogs] = useState<ConsoleLogEntry[]>([])
+  const [logs, setLogs] = useState<ConsoleLogEntry[]>(() =>
+    consoleService.getRecentLogs(200),
+  )
   const [command, setCommand] = useState("")
   const [isSending, setIsSending] = useState(false)
   const [isScrolledUp, setIsScrolledUp] = useState(false)
@@ -35,11 +37,11 @@ export default function ServerConsoleView({
   const isDisconnected = serverStatus === "DISCONNECTED"
   const isServerOffline = serverStatus === "OFFLINE" || isDisconnected
 
-  // Connect to console WebSocket service ONLY when infrastructure is connected
+  // Reference-counted connection to console WebSocket service
   useEffect(() => {
     if (isDisconnected) return
 
-    consoleService.connect()
+    const release = consoleService.retain()
 
     const unsubscribeLogs = consoleService.onLog((entry) => {
       setLogs((prev) => [...prev.slice(-499), entry]) // Retain max 500 lines
@@ -47,7 +49,7 @@ export default function ServerConsoleView({
 
     return () => {
       unsubscribeLogs()
-      consoleService.disconnect()
+      release()
     }
   }, [isDisconnected])
 
@@ -235,7 +237,7 @@ export default function ServerConsoleView({
             <IconTerminal size={32} />
             <div>
               {isDisconnected
-                ? "Consola no disponible mientras la infraestructura esté desconectada."
+                ? "Consola no disponible mientras el servidor esté desconectado."
                 : isServerOffline
                 ? "El servidor se encuentra apagado."
                 : "Esperando output del servidor..."}
@@ -335,7 +337,7 @@ export default function ServerConsoleView({
             disabled={isSending || isServerOffline}
             placeholder={
               isDisconnected
-                ? "Consola no disponible mientras la infraestructura esté desconectada."
+                ? "Consola no disponible mientras el servidor esté desconectado."
                 : isServerOffline
                 ? "El servidor está apagado. Inicia el servidor para enviar comandos."
                 : "Escribe un comando... (ej. say Hola HiKAT)"

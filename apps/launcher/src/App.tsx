@@ -26,8 +26,10 @@ export default function App() {
     playerSkin,
     handleUploadSkin,
     handleDeleteSkin,
-    customCapes,
-    setCustomCapes,
+    allCapes,
+    playerCapes,
+    handleUploadCape,
+    handleDeleteCape,
     activeSkinData,
     activeSkinAccent,
     scale,
@@ -60,36 +62,20 @@ export default function App() {
       }
     }
 
-    // 2. Prevent accidental file drops navigating away (allow only in skin dropzones)
+    // 2. Drag & Drop: Prevent browser from navigating or opening dropped files globally
     const handleDragOver = (e: DragEvent) => {
       e.preventDefault()
     }
     const handleDrop = (e: DragEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest(".skin-dropzone")) {
-        e.preventDefault()
-      }
+      e.preventDefault()
     }
 
-    // 3. Block accidental browser shortcuts while preserving DevTools (F12, Ctrl+Shift+I) for development
+    // 3. Prevent accidental browser navigation shortcuts (F5, Ctrl+R, etc.)
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Reload shortcuts
-      if ((e.ctrlKey && (e.key === "r" || e.key === "R")) || e.key === "F5") {
-        e.preventDefault()
-        return
-      }
-      // Search, Print, Source, Zoom
       if (
-        (e.ctrlKey &&
-          (e.key === "f" ||
-            e.key === "F" ||
-            e.key === "p" ||
-            e.key === "P" ||
-            e.key === "u" ||
-            e.key === "U")) ||
-        (e.ctrlKey &&
-          (e.key === "+" || e.key === "-" || e.key === "=" || e.key === "0")) ||
-        e.key === "F3"
+        (e.key === "r" && (e.ctrlKey || e.metaKey)) ||
+        e.key === "F5" ||
+        (e.key === "F12" && import.meta.env.PROD)
       ) {
         e.preventDefault()
       }
@@ -187,8 +173,10 @@ export default function App() {
                 playerSkin={playerSkin}
                 onUploadSkin={handleUploadSkin}
                 onDeleteSkin={handleDeleteSkin}
-                customCapes={customCapes}
-                setCustomCapes={setCustomCapes}
+                allCapes={allCapes}
+                playerCapes={playerCapes}
+                onUploadCape={handleUploadCape}
+                onDeleteCape={handleDeleteCape}
                 theme={theme}
               />
             )}

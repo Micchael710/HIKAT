@@ -1,5 +1,5 @@
-import { graphqlClient, API_BASE_URL } from "./apiClient"
-import type { GlobalSkin, PlayerSkin, SkinUploadTicket } from "../types"
+import { graphqlClient } from "./apiClient"
+import type { GlobalSkin, PlayerSkin, SkinUploadTicket, ActiveSkinSelection } from "../types"
 import {
   validateMinecraftSkinTexture,
   MAX_SKIN_SIZE_BYTES,
@@ -42,7 +42,6 @@ export async function fetchGlobalSkins(
         items {
           id
           name
-          model
           imageUrl
           status
           createdAt
@@ -83,7 +82,6 @@ export async function fetchMyPlayerSkin(): Promise<PlayerSkin | null> {
       myPlayerSkin {
         id
         userId
-        model
         imageUrl
         createdAt
         updatedAt
@@ -98,6 +96,87 @@ export async function fetchMyPlayerSkin(): Promise<PlayerSkin | null> {
     }
   }
   return null
+}
+
+/**
+ * Fetches the authenticated player's currently active skin selection.
+ */
+export async function fetchMyActiveSkin(): Promise<ActiveSkinSelection | null> {
+  const token =
+    typeof window !== "undefined"
+      ? localStorage.getItem("hikat_auth_token")
+      : null
+  if (!token) return null
+
+  const query = /* GraphQL */ `
+    query MyActiveSkin {
+      myActiveSkin {
+        type
+        skinId
+        skin {
+          id
+          name
+          imageUrl
+        }
+      }
+    }
+  `
+  const res = await graphqlClient<{ myActiveSkin: ActiveSkinSelection | null }>(query)
+  if (res.success && res.data?.myActiveSkin) {
+    return {
+      ...res.data.myActiveSkin,
+      skin: res.data.myActiveSkin.skin
+        ? {
+            ...res.data.myActiveSkin.skin,
+            imageUrl: resolveApiAssetUrl(res.data.myActiveSkin.skin.imageUrl),
+          }
+        : null,
+    }
+  }
+  return null
+}
+
+/**
+ * Sets the active skin selection (GLOBAL or CUSTOM) for the authenticated player.
+ */
+export async function setMyActiveSkin(
+  type: "GLOBAL" | "CUSTOM",
+  skinId?: string | null,
+): Promise<{ success: boolean; data?: ActiveSkinSelection; error?: string }> {
+  const mutation = /* GraphQL */ `
+    mutation SetMyActiveSkin($input: SetActiveSkinInput!) {
+      setMyActiveSkin(input: $input) {
+        type
+        skinId
+        skin {
+          id
+          name
+          imageUrl
+        }
+      }
+    }
+  `
+  const res = await graphqlClient<{ setMyActiveSkin: ActiveSkinSelection }>(mutation, {
+    input: { type, skinId },
+  })
+  if (res.success && res.data?.setMyActiveSkin) {
+    return {
+      success: true,
+      data: {
+        ...res.data.setMyActiveSkin,
+        skin: res.data.setMyActiveSkin.skin
+          ? {
+              ...res.data.setMyActiveSkin.skin,
+              imageUrl: resolveApiAssetUrl(res.data.setMyActiveSkin.skin.imageUrl),
+            }
+          : null,
+      },
+    }
+  }
+  return {
+    success: false,
+    error: res.error || "No se pudo cambiar la skin activa",
+  }
 }
 
 /**
@@ -138,14 +217,12 @@ export async function createPlayerSkinUploadTicket(): Promise<{
  */
 export async function setMyPlayerSkin(
   mediaId: string,
-  model: "CLASSIC" | "SLIM",
 ): Promise<{ success: boolean; data?: PlayerSkin; error?: string }> {
   const mutation = /* GraphQL */ `
     mutation SetMyPlayerSkin($input: SetPlayerSkinInput!) {
       setMyPlayerSkin(input: $input) {
         id
         userId
-        model
         imageUrl
         createdAt
         updatedAt
@@ -153,7 +230,7 @@ export async function setMyPlayerSkin(
     }
   `
   const res = await graphqlClient<{ setMyPlayerSkin: PlayerSkin }>(mutation, {
-    input: { mediaId, model },
+    input: { mediaId },
   })
   if (res.success && res.data?.setMyPlayerSkin) {
     return {
@@ -197,13 +274,12 @@ export async function deleteMyPlayerSkin(): Promise<{
  * 1. Validates local file format (PNG), size (<= 1MB), and Minecraft skin dimensions (64x64 or 64x32)
  * 2. Creates single-use upload ticket via Backend GraphQL
  * 3. PUT upload binary texture to R2 endpoint
- * 4. Extracts mediaId from response ({ id, ... } or { media: { id } })
- * 5. Executes setMyPlayerSkin(mediaId, model)
+ * 4. Extracts mediaId from response
+ * 5. Executes setMyPlayerSkin(mediaId)
  * 6. Returns fully resolved PlayerSkin
  */
 export async function uploadPlayerSkin(
   file: File,
-  model: "CLASSIC" | "SLIM" = "CLASSIC",
 ): Promise<PlayerSkin> {
   // 1. Client-side validation: format and max size
   if (!file.type.includes("png") && !file.name.toLowerCase().endsWith(".png")) {
@@ -219,7 +295,6 @@ export async function uploadPlayerSkin(
   if (!validation.valid) {
     throw new Error(
       validation.error ||
-        validation.reason ||
         "Dimensiones de skin inválidas. Se requiere PNG de 64x64 o 64x32.",
     )
   }
@@ -270,7 +345,7 @@ export async function uploadPlayerSkin(
   }
 
   // 5. Link texture to player skin in D1
-  const setRes = await setMyPlayerSkin(mediaId, model)
+  const setRes = await setMyPlayerSkin(mediaId)
   if (!setRes.success || !setRes.data) {
     throw new Error(setRes.error || "No se pudo asociar la skin a tu cuenta")
   }

@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from "react"
 import { SkinViewer, IdleAnimation, WalkingAnimation, RunningAnimation } from "skinview3d"
-import type { ThemeMode, SkinModel } from "../../types"
+import type { ThemeMode } from "../../types"
 import { resolveMediaUrl } from "../../services/graphqlClient"
 import { IconSpinner, IconRefresh } from "../../theme/icons"
 
 interface SkinViewer3DProps {
-  skinUrl: string
-  model?: SkinModel
+  skinUrl?: string
+  capeUrl?: string
   width?: number
   height?: number
   theme?: ThemeMode
@@ -16,7 +16,7 @@ interface SkinViewer3DProps {
 
 export default function SkinViewer3D({
   skinUrl,
-  model = "CLASSIC",
+  capeUrl,
   width = 280,
   height = 360,
   theme = "dark",
@@ -32,7 +32,8 @@ export default function SkinViewer3D({
   const [animationType, setAnimationType] = useState<"idle" | "walk" | "run" | "none">("idle")
 
   const isDark = theme === "dark"
-  const resolvedUrl = resolveMediaUrl(skinUrl)
+  const resolvedSkinUrl = skinUrl ? resolveMediaUrl(skinUrl) : undefined
+  const resolvedCapeUrl = capeUrl ? resolveMediaUrl(capeUrl) : undefined
 
   // 1. Initialize SkinViewer instance
   useEffect(() => {
@@ -61,7 +62,6 @@ export default function SkinViewer3D({
       viewer.zoom = 0.9
       viewer.adjustCameraDistance?.()
 
-
       if (viewer.controls) {
         viewer.controls.enablePan = false
         viewer.controls.enableRotate = true
@@ -80,12 +80,24 @@ export default function SkinViewer3D({
 
       viewerRef.current = viewer
 
-      // Load skin texture
-      if (resolvedUrl) {
-        viewer
-          .loadSkin(resolvedUrl, {
-            model: model === "SLIM" ? "slim" : "default",
-          })
+      const promises: Promise<any>[] = []
+      if (resolvedSkinUrl) {
+        promises.push(
+          viewer.loadSkin(resolvedSkinUrl, {
+            model: "auto-detect",
+          }),
+        )
+      }
+      if (resolvedCapeUrl) {
+        promises.push(
+          viewer.loadCape(resolvedCapeUrl).then(() => {
+            viewer.playerObject.backEquipment = "cape"
+          }),
+        )
+      }
+
+      if (promises.length > 0) {
+        Promise.all(promises)
           .then(() => {
             if (isMounted) {
               setIsLoading(false)
@@ -93,7 +105,7 @@ export default function SkinViewer3D({
             }
           })
           .catch((err) => {
-            console.error("Failed to load skin in 3D viewer:", err)
+            console.error("Failed to load texture in 3D viewer:", err)
             if (isMounted) {
               setHasError(true)
               setIsLoading(false)
@@ -119,37 +131,60 @@ export default function SkinViewer3D({
     }
   }, [width, height])
 
-  // 2. Update skin texture and model dynamically
+  // 2. Update skin/cape textures dynamically
   useEffect(() => {
     const viewer = viewerRef.current
-    if (!viewer || !resolvedUrl) return
+    if (!viewer) return
 
     let isMounted = true
     setIsLoading(true)
     setHasError(false)
 
-    viewer
-      .loadSkin(resolvedUrl, {
-        model: model === "SLIM" ? "slim" : "default",
-      })
-      .then(() => {
-        if (isMounted) {
-          setIsLoading(false)
-          viewer.render()
-        }
-      })
-      .catch((err) => {
-        console.error("Error updating 3D skin texture:", err)
-        if (isMounted) {
-          setHasError(true)
-          setIsLoading(false)
-        }
-      })
+    const promises: Promise<any>[] = []
+    if (resolvedSkinUrl) {
+      promises.push(
+        viewer.loadSkin(resolvedSkinUrl, {
+          model: "auto-detect",
+        }),
+      )
+    } else {
+      viewer.resetSkin?.()
+    }
+
+    if (resolvedCapeUrl) {
+      promises.push(
+        viewer.loadCape(resolvedCapeUrl).then(() => {
+          viewer.playerObject.backEquipment = "cape"
+        }),
+      )
+    } else {
+      viewer.resetCape?.()
+      viewer.playerObject.backEquipment = null
+    }
+
+    if (promises.length > 0) {
+      Promise.all(promises)
+        .then(() => {
+          if (isMounted) {
+            setIsLoading(false)
+            viewer.render()
+          }
+        })
+        .catch((err) => {
+          console.error("Error updating 3D textures:", err)
+          if (isMounted) {
+            setHasError(true)
+            setIsLoading(false)
+          }
+        })
+    } else {
+      setIsLoading(false)
+    }
 
     return () => {
       isMounted = false
     }
-  }, [resolvedUrl, model])
+  }, [resolvedSkinUrl, resolvedCapeUrl])
 
   // 3. Auto-rotation control
   useEffect(() => {
@@ -199,7 +234,6 @@ export default function SkinViewer3D({
     }
     viewer.zoom = 0.9
     viewer.adjustCameraDistance?.()
-
 
     if (viewer.controls) {
       viewer.controls.target.set(0, 0, 0)
@@ -267,7 +301,7 @@ export default function SkinViewer3D({
             fontSize: "13px",
           }}
         >
-          No se pudo mostrar la skin en 3D.
+          No se pudo mostrar el modelo en 3D.
         </div>
       )}
 

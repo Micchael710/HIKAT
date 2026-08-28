@@ -347,7 +347,7 @@ export default function ServerWorldView({
               color: isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
             }}
           >
-            Conecta la infraestructura para administrar el mundo.
+            Disponible cuando el servidor esté conectado.
           </p>
         )}
       </div>

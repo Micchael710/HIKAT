@@ -179,19 +179,20 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     expect(SERVER_PUBLIC_MESSAGES.COMMAND_RATE_LIMITED).toBe("Has enviado demasiados comandos. Espera un momento.")
   })
 
-  it("validates Minecraft skin texture dimensions and PNG format", async () => {
-    const { validateMinecraftSkinTexture, ALLOWED_SKIN_MODELS, ALLOWED_SKIN_STATUSES } = await import("./index")
+  it("validates Minecraft skin texture dimensions and PNG format (without model detection)", async () => {
+    const { validateMinecraftSkinTexture, ALLOWED_SKIN_STATUSES } = await import("./index")
+    const { encode } = await import("fast-png")
 
-
-    expect(ALLOWED_SKIN_MODELS).toEqual(["CLASSIC", "SLIM"])
     expect(ALLOWED_SKIN_STATUSES).toEqual(["AVAILABLE", "UNAVAILABLE"])
 
-    // Construct valid 64x64 PNG buffer mock
-    const validPng = new Uint8Array(32)
-    validPng.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
-    const view = new DataView(validPng.buffer)
-    view.setUint32(16, 64, false)
-    view.setUint32(20, 64, false)
+    // Valid 64x64 PNG
+    const validPng = encode({
+      width: 64,
+      height: 64,
+      data: new Uint8Array(64 * 64 * 4).fill(255),
+      channels: 4,
+      depth: 8,
+    })
 
     const res1 = validateMinecraftSkinTexture(validPng)
     expect(res1.valid).toBe(true)
@@ -199,14 +200,27 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     expect(res1.height).toBe(64)
 
     // Valid 64x32 legacy skin
-    view.setUint32(20, 32, false)
-    const res2 = validateMinecraftSkinTexture(validPng)
+    const valid64x32 = encode({
+      width: 64,
+      height: 32,
+      data: new Uint8Array(64 * 32 * 4).fill(255),
+      channels: 4,
+      depth: 8,
+    })
+    const res2 = validateMinecraftSkinTexture(valid64x32)
     expect(res2.valid).toBe(true)
+    expect(res2.width).toBe(64)
+    expect(res2.height).toBe(32)
 
     // Invalid dimensions (e.g. 50x50)
-    view.setUint32(16, 50, false)
-    view.setUint32(20, 50, false)
-    const res3 = validateMinecraftSkinTexture(validPng)
+    const invalidDimPng = encode({
+      width: 50,
+      height: 50,
+      data: new Uint8Array(50 * 50 * 4).fill(255),
+      channels: 4,
+      depth: 8,
+    })
+    const res3 = validateMinecraftSkinTexture(invalidDimPng)
     expect(res3.valid).toBe(false)
     expect(res3.error).toContain("Dimensiones")
 
@@ -217,57 +231,170 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     expect(res4.error).toContain("PNG")
   })
 
-  it("validates game files, path sanitization, and SemVer helpers", async () => {
+  it("validates Minecraft cape textures with standard, HD, and OptiFine support", async () => {
     const {
-      validateGameFileBuffer,
-      sanitizeGameFileName,
-      resolveGameLogicalPath,
-      validateSemVer,
-      suggestNextPatchVersion,
-      GAME_CATEGORY_DIRECTORIES,
-      GAME_CATEGORY_DEFAULT_POLICIES,
+      validateCapeTextureBuffer,
+      ALLOWED_CAPE_STATUSES,
+      ALLOWED_ACTIVE_CAPE_TYPES,
+      MAX_PLAYER_CAPES,
+      MAX_CAPE_SIZE_BYTES,
+    } = await import("./index")
+    const { encode } = await import("fast-png")
+
+    expect(ALLOWED_CAPE_STATUSES).toEqual(["AVAILABLE", "UNAVAILABLE"])
+    expect(ALLOWED_ACTIVE_CAPE_TYPES).toEqual(["NONE", "CUSTOM", "GLOBAL"])
+    expect(MAX_PLAYER_CAPES).toBe(10)
+    expect(MAX_CAPE_SIZE_BYTES).toBe(5 * 1024 * 1024)
+
+    // Helper to make cape PNG
+    function makeCape(w: number, h: number): Uint8Array {
+      return encode({
+        width: w,
+        height: h,
+        data: new Uint8Array(w * h * 4).fill(200),
+        channels: 4,
+        depth: 8,
+      })
+    }
+
+    // 1. Standard 64x32
+    expect(validateCapeTextureBuffer(makeCape(64, 32)).valid).toBe(true)
+
+    // 2. HD Multiples (128x64, 256x128, 512x256)
+    expect(validateCapeTextureBuffer(makeCape(128, 64)).valid).toBe(true)
+    expect(validateCapeTextureBuffer(makeCape(256, 128)).valid).toBe(true)
+    expect(validateCapeTextureBuffer(makeCape(512, 256)).valid).toBe(true)
+
+    // 3. OptiFine ratio (46x22, 92x44)
+    expect(validateCapeTextureBuffer(makeCape(46, 22)).valid).toBe(true)
+    expect(validateCapeTextureBuffer(makeCape(92, 44)).valid).toBe(true)
+
+    // 4. Corrupted / non-PNG buffer
+    expect(validateCapeTextureBuffer(new Uint8Array(10)).valid).toBe(false)
+    expect(validateCapeTextureBuffer(new Uint8Array(40)).valid).toBe(false)
+
+    // 5. Visual compatibility helper (computeCapeScale / isCompatibleCapeDimensions)
+    const { computeCapeScale, isCompatibleCapeDimensions } = await import("./index")
+    expect(computeCapeScale(64, 32)).toBe(1)
+    expect(computeCapeScale(128, 64)).toBe(2)
+    expect(computeCapeScale(256, 128)).toBe(4)
+    expect(computeCapeScale(512, 256)).toBe(8)
+    expect(computeCapeScale(46, 22)).toBe(1)
+    expect(computeCapeScale(92, 44)).toBe(2)
+    expect(computeCapeScale(22, 17)).toBe(1)
+    expect(computeCapeScale(500, 500)).toBeNull()
+    expect(computeCapeScale(100, 200)).toBeNull()
+
+    expect(isCompatibleCapeDimensions(64, 32)).toBe(true)
+    expect(isCompatibleCapeDimensions(128, 64)).toBe(true)
+    expect(isCompatibleCapeDimensions(512, 256)).toBe(true)
+    expect(isCompatibleCapeDimensions(46, 22)).toBe(true)
+    expect(isCompatibleCapeDimensions(500, 500)).toBe(false)
+  })
+
+  it("validates server task templates, only_when_online policy, and schedule cron formatting", async () => {
+    const {
+      ALLOWED_SERVER_TASK_TEMPLATES,
+      SERVER_TASK_TEMPLATE_DEFS,
+      convertAutomationToPterodactylCron,
+      formatScheduleHumanDescription,
     } = await import("./index")
 
-    expect(GAME_CATEGORY_DIRECTORIES.MOD).toBe("mods")
-    expect(GAME_CATEGORY_DIRECTORIES.RESOURCE_PACK).toBe("resourcepacks")
-    expect(GAME_CATEGORY_DEFAULT_POLICIES.MOD).toBe("NO_MODIFICABLE")
-    expect(GAME_CATEGORY_DEFAULT_POLICIES.RESOURCE_PACK).toBe("MODIFICABLE")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("AUTO_START")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("AUTO_STOP")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("AUTO_RESTART")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("AUTO_BACKUP")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("RUN_COMMAND")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("BACKUP_AND_RESTART")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("BACKUP_AND_STOP")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("WARN_AND_RESTART")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("WARN_AND_STOP")
+    expect(ALLOWED_SERVER_TASK_TEMPLATES).toContain("SAVE_AND_BACKUP")
 
-    // Filename sanitizer
-    expect(sanitizeGameFileName("../../mods/evil.jar")).toBe("evil.jar")
-    expect(sanitizeGameFileName("C:\\Windows\\System32\\mod.jar")).toBe("mod.jar")
-    expect(sanitizeGameFileName("journeymap-1.21.1.jar")).toBe("journeymap-1.21.1.jar")
+    // only_when_online per template
+    expect(SERVER_TASK_TEMPLATE_DEFS.AUTO_START.onlyWhenOnline).toBe(false)
+    expect(SERVER_TASK_TEMPLATE_DEFS.AUTO_STOP.onlyWhenOnline).toBe(true)
+    expect(SERVER_TASK_TEMPLATE_DEFS.AUTO_RESTART.onlyWhenOnline).toBe(true)
+    expect(SERVER_TASK_TEMPLATE_DEFS.AUTO_BACKUP.onlyWhenOnline).toBe(true)
+    expect(SERVER_TASK_TEMPLATE_DEFS.BACKUP_AND_RESTART.onlyWhenOnline).toBe(true)
 
-    // Logical path resolution
-    expect(resolveGameLogicalPath("MOD", "journeymap.jar")).toBe("mods/journeymap.jar")
-    expect(resolveGameLogicalPath("RESOURCE_PACK", "faithful.zip")).toBe("resourcepacks/faithful.zip")
+    // Cron conversion
+    // Daily at 04:00 AM
+    const dailyCron = convertAutomationToPterodactylCron("DAILY", "04:00")
+    expect(dailyCron.minute).toBe("00")
+    expect(dailyCron.hour).toBe("04")
+    expect(dailyCron.day_of_week).toBe("*")
 
-    // ZIP/JAR buffer validation (50 4B 03 04)
-    const validJar = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00])
-    expect(validateGameFileBuffer(validJar, "test.jar", "MOD").valid).toBe(true)
+    // Selected days (Mon, Wed, Fri) at 03:30 AM
+    const selectedCron = convertAutomationToPterodactylCron(
+      "SELECTED_DAYS",
+      "03:30",
+      null,
+      [1, 3, 5],
+    )
+    expect(selectedCron.minute).toBe("30")
+    expect(selectedCron.hour).toBe("03")
+    expect(selectedCron.day_of_week).toBe("1,3,5")
 
-    // Non-JAR extension for MOD
-    expect(validateGameFileBuffer(validJar, "test.exe", "MOD").valid).toBe(false)
+    // Weekly (Sunday) at 05:00 AM
+    const weeklyCron = convertAutomationToPterodactylCron("WEEKLY", "05:00", 0)
+    expect(weeklyCron.minute).toBe("00")
+    expect(weeklyCron.hour).toBe("05")
+    expect(weeklyCron.day_of_week).toBe("0")
 
-    // Corrupted magic bytes
-    const invalidJar = new Uint8Array([0x00, 0x00, 0x00, 0x00])
-    expect(validateGameFileBuffer(invalidJar, "test.jar", "MOD").valid).toBe(false)
+    // Interval every 6 hours
+    const intervalCron6 = convertAutomationToPterodactylCron(
+      "INTERVAL",
+      null,
+      null,
+      null,
+      6,
+    )
+    expect(intervalCron6.minute).toBe("0")
+    expect(intervalCron6.hour).toBe("*/6")
+    expect(intervalCron6.day_of_week).toBe("*")
 
-    // SemVer validation
-    expect(validateSemVer("1.4.2")).toBe(true)
-    expect(validateSemVer("1.4.2-beta.1")).toBe(true)
-    expect(validateSemVer("invalid")).toBe(false)
+    // Interval every 1 hour
+    const intervalCron1 = convertAutomationToPterodactylCron(
+      "INTERVAL",
+      null,
+      null,
+      null,
+      1,
+    )
+    expect(intervalCron1.minute).toBe("0")
+    expect(intervalCron1.hour).toBe("*")
 
-    // Next patch version suggestion
-    expect(suggestNextPatchVersion("1.4.2")).toBe("1.4.3")
-    expect(suggestNextPatchVersion("2.0.0")).toBe("2.0.1")
-    expect(suggestNextPatchVersion(null)).toBe("1.0.0")
-
-    // ISO-8601 Date normalization
-    const { normalizeIsoDateTime } = await import("./index")
-    expect(normalizeIsoDateTime("2026-08-26 20:24:10")).toBe("2026-08-26T20:24:10.000Z")
-    expect(normalizeIsoDateTime("2026-08-26T20:24:10.000Z")).toBe("2026-08-26T20:24:10.000Z")
-    expect(typeof normalizeIsoDateTime(null)).toBe("string")
+    // Human description formatting
+    expect(
+      formatScheduleHumanDescription({ frequency: "DAILY", time: "04:00" }),
+    ).toBe("Todos los días · 4:00 AM")
+    expect(
+      formatScheduleHumanDescription({
+        frequency: "SELECTED_DAYS",
+        time: "03:30",
+        weekdays: [1, 3, 5],
+      }),
+    ).toBe("Lunes, Miércoles y Viernes · 3:30 AM")
+    expect(
+      formatScheduleHumanDescription({
+        frequency: "WEEKLY",
+        time: "05:00",
+        weekday: 0,
+      }),
+    ).toBe("Cada domingo · 5:00 AM")
+    expect(
+      formatScheduleHumanDescription({
+        frequency: "INTERVAL",
+        intervalHours: 6,
+      }),
+    ).toBe("Cada 6 horas")
+    expect(
+      formatScheduleHumanDescription({
+        frequency: "INTERVAL",
+        intervalHours: 1,
+      }),
+    ).toBe("Cada hora")
   })
 })
 

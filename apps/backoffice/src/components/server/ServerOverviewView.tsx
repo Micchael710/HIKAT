@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react"
-import type { ThemeMode, ServerResources, ServerPowerAction, ServerActivityItem } from "../../types"
+import type { ThemeMode, ServerResources, ServerPowerAction, ConsoleLogEntry } from "../../types"
 import { serverApi } from "../../services/graphqlClient"
+import { consoleService } from "../../services/consoleService"
 import { formatBytesToHuman, formatUptime } from "@hikat/shared"
 import ServerStatusBadge from "./ServerStatusBadge"
 import ServerResourceCard from "./ServerResourceCard"
 import ServerPowerActions from "./ServerPowerActions"
 import ServerConsoleView from "./ServerConsoleView"
-import ServerWorldView from "./ServerWorldView"
 import ServerBackupsView from "./ServerBackupsView"
-import ServerAutomationsView from "./ServerAutomationsView"
-import ServerConfigurationView from "./ServerConfigurationView"
+import ServerTasksView from "./ServerTasksView"
 import ServerFilesView from "./ServerFilesView"
 import LiveToast from "../common/LiveToast"
 import {
@@ -22,51 +21,40 @@ import {
   IconRefresh,
   IconSpinner,
   IconAlertCircle,
-  IconGlobe,
   IconArchive,
   IconCalendar,
-  IconSliders,
   IconFolder,
-  IconDownload,
-  IconUpload,
-  IconHistory,
 } from "../../theme/icons"
 
 interface ServerOverviewViewProps {
   theme: ThemeMode
 }
 
-export type ServerSubTab =
-  | "overview"
-  | "console"
-  | "world"
-  | "backups"
-  | "automations"
-  | "configuration"
-  | "files"
+export type ServerSubTab = "general" | "console" | "files" | "backups" | "tasks"
 
 const SUB_TABS: Array<{ id: ServerSubTab; label: string; icon: React.ReactNode }> = [
-  { id: "overview", label: "Resumen", icon: <IconServer size={18} /> },
+  { id: "general", label: "General", icon: <IconServer size={18} /> },
   { id: "console", label: "Consola", icon: <IconTerminal size={18} /> },
-  { id: "world", label: "Mundo", icon: <IconGlobe size={18} /> },
-  { id: "backups", label: "Copias", icon: <IconArchive size={18} /> },
-  { id: "automations", label: "Automatizaciones", icon: <IconCalendar size={18} /> },
-  { id: "configuration", label: "Configuración", icon: <IconSliders size={18} /> },
   { id: "files", label: "Archivos", icon: <IconFolder size={18} /> },
+  { id: "backups", label: "Backups", icon: <IconArchive size={18} /> },
+  { id: "tasks", label: "Tasks", icon: <IconCalendar size={18} /> },
 ]
 
 export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
   const isDark = theme === "dark"
-  const [activeTab, setActiveTab] = useState<ServerSubTab>("overview")
+  const [activeTab, setActiveTab] = useState<ServerSubTab>("general")
   const [infraState, setInfraState] = useState<"CHECKING" | "CONNECTED" | "DISCONNECTED">("CHECKING")
   const [resources, setResources] = useState<ServerResources | null>(null)
-  const [activity, setActivity] = useState<ServerActivityItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [isActivityLoading, setIsActivityLoading] = useState(false)
   const [isActionLoading, setIsActionLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [toastType, setToastType] = useState<"success" | "error">("success")
+
+  // Live Console Preview State for General tab
+  const [liveLogs, setLiveLogs] = useState<ConsoleLogEntry[]>([])
+  const [isConsoleConnected, setIsConsoleConnected] = useState(false)
+  const liveConsoleEndRef = useRef<HTMLDivElement>(null)
 
   const isMountedRef = useRef(true)
   const isFetchingRef = useRef(false)
@@ -114,28 +102,10 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
     }
   }, [])
 
-  // Activity fetcher
-  const fetchActivity = useCallback(async () => {
-    setIsActivityLoading(true)
-    try {
-      const list = await serverApi.getServerActivity()
-      if (isMountedRef.current) {
-        setActivity(list)
-      }
-    } catch {
-      // Non-critical, ignore
-    } finally {
-      if (isMountedRef.current) {
-        setIsActivityLoading(false)
-      }
-    }
-  }, [])
-
-  // Controlled polling: exactly 1 initial fetch, then maximum once per ~5s when visible
+  // Controlled polling: initial fetch, then once every 5s
   useEffect(() => {
     isMountedRef.current = true
     fetchStatus()
-    fetchActivity()
 
     const interval = setInterval(() => {
       if (document.visibilityState === "visible" && !isActionLoadingRef.current) {
@@ -156,29 +126,78 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       clearInterval(interval)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [fetchStatus, fetchActivity])
+  }, [fetchStatus])
 
+  // Live console preview subscription on General tab
+  useEffect(() => {
+    if (activeTab !== "general") return
+
+    // Pre-populate with existing rolling logs
+    setLiveLogs(consoleService.getRecentLogs(15))
+
+    const unretain = consoleService.retain()
+
+    const unsubLog = consoleService.onLog((entry) => {
+      setLiveLogs((prev) => [...prev.slice(-20), entry])
+    })
+
+    const unsubConn = consoleService.onConnectionChange((connected) => {
+      setIsConsoleConnected(connected)
+    })
+
+    return () => {
+      unsubLog()
+      unsubConn()
+      unretain()
+    }
+  }, [activeTab])
+
+  // Auto-scroll live console preview
+  useEffect(() => {
+    if (activeTab === "general" && liveConsoleEndRef.current) {
+      liveConsoleEndRef.current.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [liveLogs, activeTab])
+
+  // Power action dispatcher
   const handlePowerAction = async (action: ServerPowerAction) => {
     setIsActionLoading(true)
     isActionLoadingRef.current = true
+
     try {
-      let res: { success: boolean; message?: string }
+      let result: { success: boolean; status: any; message?: string }
       if (action === "START") {
-        res = await serverApi.startServer()
+        result = await serverApi.startServer()
       } else if (action === "RESTART") {
-        res = await serverApi.restartServer()
+        result = await serverApi.restartServer()
       } else {
-        res = await serverApi.stopServer()
+        result = await serverApi.stopServer()
       }
 
-      showToast(res.message || "Acción enviada correctamente.", "success")
-      await fetchStatus()
-      await fetchActivity()
+      if (result.success) {
+        const actionLabels: Record<ServerPowerAction, string> = {
+          START: "Orden de encendido enviada.",
+          RESTART: "Orden de reinicio enviada.",
+          STOP: "Orden de apagado enviada.",
+        }
+        showToast(actionLabels[action], "success")
+
+        if (resources) {
+          setResources({ ...resources, status: result.status })
+        }
+
+        setTimeout(() => {
+          fetchStatus()
+        }, 1500)
+      } else {
+        showToast(
+          result.message || `No se pudo ejecutar la acción ${action}.`,
+          "error",
+        )
+      }
     } catch (err: unknown) {
       const msg =
-        err instanceof Error
-          ? err.message
-          : "No se pudo ejecutar la acción del servidor."
+        err instanceof Error ? err.message : "Error al ejecutar acción de energía."
       showToast(msg, "error")
     } finally {
       setIsActionLoading(false)
@@ -186,66 +205,57 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
     }
   }
 
-  const currentStatus = infraState === "CONNECTED" && resources ? resources.status : "DISCONNECTED"
-
-  // RAM calculations
-  const memUsed = resources?.memoryUsedBytes ?? 0
-  const memLimit = resources?.memoryLimitBytes ?? null
-  const memPercent =
-    memLimit && memLimit > 0 ? (memUsed / memLimit) * 100 : null
-
-  // Disk calculations
-  const diskUsed = resources?.diskUsedBytes ?? 0
-  const diskLimit = resources?.diskLimitBytes ?? null
-  const diskPercent =
-    diskLimit && diskLimit > 0 ? (diskUsed / diskLimit) * 100 : null
-
-  // CPU calculations
+  // Calculated metrics
+  const currentStatus = resources?.status || (infraState === "DISCONNECTED" ? "DISCONNECTED" : "OFFLINE")
   const cpuVal = resources?.cpuPercent ?? 0
-  const cpuLimit = resources?.cpuLimitPercent ?? null
-
-  // Network calculations
-  const rxBytes = resources?.networkRxBytes ?? 0
-  const txBytes = resources?.networkTxBytes ?? 0
+  const cpuLimit = resources?.cpuLimitPercent ?? 0
+  const memUsed = resources?.memoryUsedBytes ?? 0
+  const memLimit = resources?.memoryLimitBytes ?? 0
+  const memPercent = memLimit > 0 ? (memUsed / memLimit) * 100 : null
+  const diskUsed = resources?.diskUsedBytes ?? 0
+  const diskLimit = resources?.diskLimitBytes ?? 0
+  const diskPercent = diskLimit > 0 ? (diskUsed / diskLimit) * 100 : null
 
   return (
     <div
       style={{
-        width: "100%",
-        height: "100%",
         display: "flex",
         flexDirection: "column",
-        padding: "24px 32px",
-        overflowY: "auto",
-        position: "relative",
-        boxSizing: "border-box",
+        gap: 24,
+        paddingBottom: 40,
+        maxWidth: 1200,
+        margin: "0 auto",
       }}
     >
-      {/* Toast Alert */}
-      <LiveToast
-        message={toastMessage}
-        type={toastType}
-        theme={theme}
-        onClose={() => setToastMessage(null)}
-      />
+      {/* Toast Notification */}
+      {toastMessage && (
+        <LiveToast
+          message={toastMessage}
+          type={toastType}
+          onClose={() => setToastMessage(null)}
+        />
+      )}
 
-      {/* Top Header & Sub-Navigation */}
+      {/* Top Header & 5 Sub-Tabs Navigation */}
       <div
         style={{
           display: "flex",
-          alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: 24,
+          alignItems: "center",
           flexWrap: "wrap",
           gap: 16,
+          borderBottom: `1px solid ${
+            isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)"
+          }`,
+          paddingBottom: 16,
         }}
       >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-          <div>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h1
               style={{
                 margin: 0,
-                fontSize: "1.75rem",
+                fontSize: "1.65rem",
                 fontWeight: 800,
                 color: isDark ? "#ffffff" : "#0f172a",
                 letterSpacing: "-0.02em",
@@ -253,37 +263,6 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
             >
               Servidor
             </h1>
-            <p
-              style={{
-                margin: "4px 0 0 0",
-                fontSize: "0.9rem",
-                color: isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.5)",
-              }}
-            >
-              Administración completa del servidor principal de Minecraft HiKAT
-            </p>
-          </div>
-
-          {/* Small Infrastructure Status Badge Top Right */}
-          <div>
-            {infraState === "CHECKING" && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "4px 12px",
-                  borderRadius: 999,
-                  background: isDark ? "rgba(255, 255, 255, 0.08)" : "#e2e8f0",
-                  color: isDark ? "rgba(255, 255, 255, 0.65)" : "#64748b",
-                  fontSize: "0.775rem",
-                  fontWeight: 600,
-                }}
-              >
-                <IconSpinner size={12} />
-                <span>Comprobando infraestructura...</span>
-              </span>
-            )}
 
             {infraState === "CONNECTED" && (
               <span
@@ -291,11 +270,11 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
-                  padding: "4px 12px",
+                  padding: "4px 10px",
                   borderRadius: 999,
-                  background: isDark ? "rgba(34, 197, 94, 0.15)" : "#dcfce7",
-                  color: isDark ? "#4ade80" : "#15803d",
-                  fontSize: "0.775rem",
+                  background: isDark ? "rgba(74, 222, 128, 0.15)" : "#dcfce7",
+                  color: isDark ? "#4ade80" : "#16a34a",
+                  fontSize: "0.75rem",
                   fontWeight: 600,
                 }}
               >
@@ -307,7 +286,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                     background: isDark ? "#4ade80" : "#16a34a",
                   }}
                 />
-                <span>Infraestructura conectada</span>
+                <span>Servidor disponible</span>
               </span>
             )}
 
@@ -325,7 +304,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                   fontWeight: 600,
                 }}
               >
-                <span>Infraestructura no conectada</span>
+                <span>Servidor no disponible</span>
                 <button
                   type="button"
                   onClick={() => fetchStatus(true)}
@@ -347,7 +326,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
           </div>
         </div>
 
-        {/* Extended 7 Sub-tabs switcher with responsive wrap */}
+        {/* 5 Sub-tabs switcher */}
         <div
           style={{
             display: "flex",
@@ -407,7 +386,7 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       </div>
 
       {/* Main Subtab View Content */}
-      {activeTab === "overview" && (
+      {activeTab === "general" && (
         <div
           style={{
             display: "flex",
@@ -522,11 +501,11 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                 />
               </div>
 
-              {/* Resource Metrics Grid including Rx/Tx */}
+              {/* Resource Metrics Grid (CPU, RAM, Disco) */}
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
                   gap: 16,
                 }}
               >
@@ -559,169 +538,166 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
                   theme={theme}
                   accentColor="#f59e0b"
                 />
-
-                <ServerResourceCard
-                  label="Tráfico recibido (RX)"
-                  icon={<IconDownload size={20} />}
-                  value={resources ? formatBytesToHuman(rxBytes) : "—"}
-                  theme={theme}
-                  accentColor="#38bdf8"
-                />
-
-                <ServerResourceCard
-                  label="Tráfico enviado (TX)"
-                  icon={<IconUpload size={20} />}
-                  value={resources ? formatBytesToHuman(txBytes) : "—"}
-                  theme={theme}
-                  accentColor="#a78bfa"
-                />
               </div>
 
-              {/* Recent Activity Card */}
+              {/* Live Console Card */}
               <div
                 style={{
                   padding: "20px 24px",
                   borderRadius: 18,
                   background: isDark ? "rgba(19, 28, 35, 0.85)" : "#ffffff",
-                  border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)"}`,
+                  border: `1px solid ${
+                    isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)"
+                  }`,
                   display: "flex",
                   flexDirection: "column",
-                  gap: 16,
-                  boxShadow: isDark ? "0 4px 16px rgba(0,0,0,0.15)" : "0 2px 8px rgba(0,0,0,0.03)",
+                  gap: 14,
+                  boxShadow: isDark
+                    ? "0 4px 16px rgba(0,0,0,0.15)"
+                    : "0 2px 8px rgba(0,0,0,0.03)",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ color: isDark ? "#3ec4c0" : "#0c6e6b" }}>
-                      <IconHistory size={20} />
+                      <IconTerminal size={20} />
                     </div>
-                    <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: isDark ? "#ffffff" : "#0f172a" }}>
-                      Actividad reciente
+                    <h3
+                      style={{
+                        margin: 0,
+                        fontSize: "1.1rem",
+                        fontWeight: 700,
+                        color: isDark ? "#ffffff" : "#0f172a",
+                      }}
+                    >
+                      Consola en vivo
                     </h3>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        fontSize: "0.75rem",
+                        color: isConsoleConnected
+                          ? isDark ? "#4ade80" : "#16a34a"
+                          : isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)",
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: isConsoleConnected ? "#4ade80" : "#94a3b8",
+                        }}
+                      />
+                      {isConsoleConnected ? "Conectada" : "En espera"}
+                    </span>
                   </div>
 
                   <button
                     type="button"
-                    onClick={fetchActivity}
-                    disabled={isActivityLoading}
+                    onClick={() => setActiveTab("console")}
                     style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "6px 12px",
+                      borderRadius: 8,
                       border: "none",
-                      background: "transparent",
-                      color: isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.6)",
-                      cursor: isActivityLoading ? "not-allowed" : "pointer",
-                      padding: 4,
+                      background: isDark ? "rgba(62, 196, 192, 0.15)" : "#e6fffa",
+                      color: isDark ? "#3ec4c0" : "#0c6e6b",
+                      fontSize: "0.825rem",
+                      fontWeight: 700,
+                      cursor: "pointer",
                     }}
                   >
-                    {isActivityLoading ? <IconSpinner size={16} /> : <IconRefresh size={16} />}
+                    <span>Abrir consola →</span>
                   </button>
                 </div>
 
-                {activity.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)" }}>
-                    No hay eventos recientes registrados.
-                  </p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {activity.map((item) => (
+                {/* Console Log Preview Window */}
+                <div
+                  style={{
+                    padding: "14px 16px",
+                    borderRadius: 12,
+                    background: isDark ? "#0b1116" : "#0f172a",
+                    border: `1px solid ${
+                      isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.2)"
+                    }`,
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                    fontSize: "0.8rem",
+                    lineHeight: 1.5,
+                    color: "#e2e8f0",
+                    height: 180,
+                    overflowY: "auto",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  {liveLogs.length === 0 ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        height: "100%",
+                        color: "rgba(255, 255, 255, 0.35)",
+                        fontSize: "0.85rem",
+                      }}
+                    >
+                      {currentStatus === "OFFLINE"
+                        ? "El servidor está apagado."
+                        : "Esperando registros de consola..."}
+                    </div>
+                  ) : (
+                    liveLogs.map((log) => (
                       <div
-                        key={item.id}
+                        key={log.id}
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "8px 12px",
-                          borderRadius: 10,
-                          background: isDark ? "rgba(255,255,255,0.03)" : "#f8fafc",
-                          fontSize: "0.85rem",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-all",
+                          color: log.type === "stderr" ? "#f87171" : "#cbd5e1",
                         }}
                       >
-                        <span style={{ fontWeight: 600, color: isDark ? "#ffffff" : "#0f172a" }}>
-                          {item.description}
-                        </span>
-                        <span style={{ color: isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)", fontSize: "0.8rem" }}>
-                          {new Date(item.timestamp).toLocaleString()}
-                        </span>
+                        {log.line}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    ))
+                  )}
+                  <div ref={liveConsoleEndRef} />
+                </div>
               </div>
             </>
           )}
         </div>
       )}
 
-      {/* TAB 2: CONSOLE */}
+      {/* Subtab Views */}
       {activeTab === "console" && (
-        <div
-          style={{
-            flex: 1,
-            minHeight: 480,
-            display: "flex",
-            flexDirection: "column",
-            animation: "fadeIn 0.2s ease",
-          }}
-        >
-          <ServerConsoleView
-            serverStatus={currentStatus}
-            theme={theme}
-          />
-        </div>
+        <ServerConsoleView theme={theme} serverStatus={resources?.status || "UNKNOWN"} />
       )}
 
-      {/* TAB 3: WORLD */}
-      {activeTab === "world" && (
-        <div style={{ animation: "fadeIn 0.2s ease" }}>
-          <ServerWorldView
-            theme={theme}
-            serverStatus={currentStatus}
-            onToast={showToast}
-          />
-        </div>
-      )}
-
-      {/* TAB 4: BACKUPS */}
-      {activeTab === "backups" && (
-        <div style={{ animation: "fadeIn 0.2s ease" }}>
-          <ServerBackupsView
-            theme={theme}
-            serverStatus={currentStatus}
-            onToast={showToast}
-          />
-        </div>
-      )}
-
-      {/* TAB 5: AUTOMATIONS */}
-      {activeTab === "automations" && (
-        <div style={{ animation: "fadeIn 0.2s ease" }}>
-          <ServerAutomationsView
-            theme={theme}
-            serverStatus={currentStatus}
-            onToast={showToast}
-          />
-        </div>
-      )}
-
-      {/* TAB 6: CONFIGURATION */}
-      {activeTab === "configuration" && (
-        <div style={{ animation: "fadeIn 0.2s ease" }}>
-          <ServerConfigurationView
-            theme={theme}
-            serverStatus={currentStatus}
-            onToast={showToast}
-          />
-        </div>
-      )}
-
-      {/* TAB 7: FILES */}
       {activeTab === "files" && (
-        <div style={{ animation: "fadeIn 0.2s ease" }}>
-          <ServerFilesView
-            theme={theme}
-            serverStatus={currentStatus}
-            onToast={showToast}
-          />
-        </div>
+        <ServerFilesView theme={theme} onToast={showToast} />
+      )}
+
+      {activeTab === "backups" && (
+        <ServerBackupsView theme={theme} onToast={showToast} />
+      )}
+
+      {activeTab === "tasks" && (
+        <ServerTasksView
+          theme={theme}
+          serverStatus={resources?.status}
+          onToast={showToast}
+        />
       )}
     </div>
   )
