@@ -397,15 +397,16 @@ export class ModProviderManager {
 
     let rootVersion = rootCompatibleVersions.find((v) => v.id === input.versionId || v.fileId === input.versionId)
     if (!rootVersion) {
-      // Check if version exists at all to provide authoritative error
+      // Check if version exists at all to provide authoritative error / direct resolution
       const directVersion = await adapter.getVersion(env, input.versionId, input.projectId, contentType)
       if (directVersion) {
-        // Validate compatibility
-        const isMcCompatible = directVersion.gameVersions.length === 0 || directVersion.gameVersions.includes(minecraftVersion)
+        // Validate compatibility (fail-closed: empty loaders is NOT compatible for MOD)
+        const isMcCompatible = directVersion.gameVersions.includes(minecraftVersion)
         const isLoaderCompatible =
-          contentType !== "MOD" ||
-          directVersion.loaders.length === 0 ||
-          directVersion.loaders.map((l) => l.toLowerCase()).includes("neoforge")
+          contentType !== "MOD"
+            ? true
+            : directVersion.loaders.length > 0 &&
+              directVersion.loaders.map((l) => l.toLowerCase()).includes("neoforge")
 
         if (!isMcCompatible || !isLoaderCompatible) {
           throw createGraphQLError(

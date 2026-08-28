@@ -15,36 +15,49 @@ import type {
 const DEFAULT_MODRINTH_BASE_URL = "https://api.modrinth.com/v2"
 const USER_AGENT = "HiKAT/0.1.0 (contact@hikat.local)"
 
-function isModrinthDataPack(
-  allProjectTypes?: string[],
-  categories?: string[],
-  additionalCategories?: string[],
-): boolean {
-  const allTypes = (allProjectTypes || []).map((t) => t.toLowerCase())
-  const cats = (categories || []).map((c) => c.toLowerCase())
-  const addCats = (additionalCategories || []).map((c) => c.toLowerCase())
-  return (
-    allTypes.includes("datapack") ||
-    cats.includes("datapack") ||
-    addCats.includes("datapack")
-  )
-}
-
 function mapModrinthProjectTypeToContentType(
   projectType?: string,
   allProjectTypes?: string[],
   categories?: string[],
   additionalCategories?: string[],
-  fallback: ContentTypeGql = "MOD",
+  requestedContentType: ContentTypeGql = "MOD",
 ): ContentTypeGql {
-  if (isModrinthDataPack(allProjectTypes, categories, additionalCategories)) {
+  const allTypes = new Set([
+    ...(allProjectTypes || []).map((t) => t.toLowerCase()),
+    (projectType || "").toLowerCase(),
+  ])
+  const cats = new Set([
+    ...(categories || []).map((c) => c.toLowerCase()),
+    ...(additionalCategories || []).map((c) => c.toLowerCase()),
+  ])
+
+  // If the project explicitly supports the requested content type, return it
+  if (requestedContentType === "DATA_PACK" && (allTypes.has("datapack") || cats.has("datapack"))) {
     return "DATA_PACK"
   }
+  if (requestedContentType === "MOD" && (allTypes.has("mod") || projectType?.toLowerCase() === "mod")) {
+    return "MOD"
+  }
+  if (
+    requestedContentType === "RESOURCE_PACK" &&
+    (allTypes.has("resourcepack") || projectType?.toLowerCase() === "resourcepack")
+  ) {
+    return "RESOURCE_PACK"
+  }
+  if (
+    requestedContentType === "SHADER" &&
+    (allTypes.has("shader") || projectType?.toLowerCase() === "shader")
+  ) {
+    return "SHADER"
+  }
+
+  // Fallback inferred from primary project type
   const pt = projectType?.toLowerCase()
   if (pt === "mod") return "MOD"
   if (pt === "resourcepack") return "RESOURCE_PACK"
   if (pt === "shader") return "SHADER"
-  return fallback
+  if (allTypes.has("datapack") || cats.has("datapack")) return "DATA_PACK"
+  return requestedContentType
 }
 
 function mapModrinthEnvironment(clientSide?: string, serverSide?: string): ModEnvironmentGql {
@@ -92,8 +105,8 @@ export class ModrinthAdapter implements ModProviderAdapter {
       facets.push(["project_type:shader"])
       facets.push([`versions:${minecraftVersion}`])
     } else if (contentType === "DATA_PACK") {
-      // In Modrinth, Data Packs are identified by categories:datapack
-      facets.push(["categories:datapack"])
+      // In Modrinth, Data Packs use official facet all_project_types:datapack
+      facets.push(["all_project_types:datapack"])
       facets.push([`versions:${minecraftVersion}`])
     }
 
@@ -277,6 +290,8 @@ export class ModrinthAdapter implements ModProviderAdapter {
 
     if (contentType === "MOD") {
       paramsRecord.loaders = JSON.stringify([loader.toLowerCase()])
+    } else if (contentType === "DATA_PACK") {
+      paramsRecord.loaders = JSON.stringify(["datapack"])
     }
 
     const params = new URLSearchParams(paramsRecord)
@@ -375,6 +390,22 @@ export class ModrinthAdapter implements ModProviderAdapter {
       },
     )
 
+    const rawLoaders = raw.loaders || []
+    const loaders = rawLoaders.map((l: string) => {
+      const lower = l.toLowerCase()
+      if (lower === "neoforge") return "NeoForge"
+      if (lower === "forge") return "Forge"
+      if (lower === "fabric") return "Fabric"
+      if (lower === "quilt") return "Quilt"
+      if (lower === "datapack") return "datapack"
+      return l
+    })
+
+    let versionContentType = fallbackContentType
+    if (loaders.includes("datapack") || rawLoaders.map((l: string) => l.toLowerCase()).includes("datapack")) {
+      versionContentType = "DATA_PACK"
+    }
+
     const hashes = primaryFile.hashes || {}
 
     return {
@@ -385,7 +416,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
       name: raw.name || raw.version_number,
       releaseType,
       gameVersions: raw.game_versions || [],
-      loaders: raw.loaders || [],
+      loaders,
       publishedAt: raw.date_published || new Date().toISOString(),
       downloads: Number(raw.downloads || 0),
       filename: primaryFile.filename,
@@ -396,7 +427,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
         sha512: hashes.sha512,
       },
       downloadUrl: primaryFile.url,
-      contentType: fallbackContentType,
+      contentType: versionContentType,
       environment: null,
       dependencies,
     }

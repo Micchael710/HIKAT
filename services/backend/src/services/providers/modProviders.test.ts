@@ -102,7 +102,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     vi.restoreAllMocks()
   })
 
-  describe("1. Modrinth Adapter Multi-Content & Environment", () => {
+  describe("1. Modrinth Adapter Multi-Content, Multi-Type Projects & Hashes", () => {
     it("searches Modrinth with automatic Minecraft 1.21.1 and NeoForge filters for MOD", async () => {
       const adapter = new ModrinthAdapter()
 
@@ -145,7 +145,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(calledUrl).toContain("project_type%3Amod")
     })
 
-    it("searches Modrinth for DATA_PACK using official categories:datapack semantics and all_project_types", async () => {
+    it("searches Modrinth for DATA_PACK using official facet all_project_types:datapack", async () => {
       const adapter = new ModrinthAdapter()
 
       mockFetch.mockResolvedValueOnce({
@@ -177,8 +177,81 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(dpResult.items[0]!.environment).toBe("SERVER")
 
       const dpUrl = (mockFetch.mock.calls[0] as any)?.[0] as string
-      expect(dpUrl).toContain("categories%3Adatapack")
-      expect(dpUrl).not.toContain("categories%3Aneoforge")
+      expect(dpUrl).toContain("all_project_types%3Adatapack")
+      expect(dpUrl).not.toContain("categories%3Adatapack")
+      expect(dpUrl).not.toContain("project_type%3Adatapack")
+    })
+
+    it("handles multi-type project with all_project_types = ['mod', 'datapack'] cleanly per requested contentType", async () => {
+      const adapter = new ModrinthAdapter()
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/hybrid-proj/version")) {
+          if (u.includes("loaders=%5B%22neoforge%22%5D") || u.includes("loaders=%5B%22neoforge%22%5D")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-mod-jar",
+                  name: "Hybrid Mod 1.0",
+                  loaders: ["neoforge"],
+                  game_versions: ["1.21.1"],
+                  files: [{ filename: "hybrid-mod.jar", size: 5000, url: "https://cdn/mod.jar" }],
+                  dependencies: [],
+                },
+              ],
+            }
+          }
+          if (u.includes("loaders=%5B%22datapack%22%5D")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-dp-zip",
+                  name: "Hybrid DataPack 1.0",
+                  loaders: ["datapack"],
+                  game_versions: ["1.21.1"],
+                  files: [{ filename: "hybrid-dp.zip", size: 3000, url: "https://cdn/dp.zip" }],
+                  dependencies: [],
+                },
+              ],
+            }
+          }
+        }
+        if (u.includes("/project/hybrid-proj")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "hybrid-proj",
+              title: "Hybrid Project",
+              project_type: "mod",
+              all_project_types: ["mod", "datapack"],
+              categories: ["technology"],
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      // Query as MOD
+      const modProj = await adapter.getProject(env, "hybrid-proj", "MOD")
+      expect(modProj?.contentType).toBe("MOD")
+      const modVersions = await adapter.getCompatibleVersions(env, "hybrid-proj", "1.21.1", "NeoForge", "MOD")
+      expect(modVersions.length).toBe(1)
+      expect(modVersions[0]!.contentType).toBe("MOD")
+      expect(modVersions[0]!.filename).toBe("hybrid-mod.jar")
+
+      // Query as DATA_PACK
+      const dpProj = await adapter.getProject(env, "hybrid-proj", "DATA_PACK")
+      expect(dpProj?.contentType).toBe("DATA_PACK")
+      const dpVersions = await adapter.getCompatibleVersions(env, "hybrid-proj", "1.21.1", "", "DATA_PACK")
+      expect(dpVersions.length).toBe(1)
+      expect(dpVersions[0]!.contentType).toBe("DATA_PACK")
+      expect(dpVersions[0]!.filename).toBe("hybrid-dp.zip")
     })
 
     it("parses SHA-512 and SHA-1 hashes from Modrinth without inventing SHA-256", async () => {
@@ -217,7 +290,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     })
   })
 
-  describe("2. CurseForge Adapter Multi-Content, Discovery & Hashes", () => {
+  describe("2. CurseForge Adapter Multi-Content, Security & Hashes", () => {
     it("discovers CurseForge class IDs dynamically via /categories?classesOnly=true", async () => {
       const adapter = new CurseForgeAdapter()
 
@@ -275,9 +348,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
             releaseType: 1,
             gameVersions: ["1.21.1", "NeoForge"],
             hashes: [
-              { value: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", algo: 1 }, // SHA-1
-              { value: "md5hash1234567890", algo: 2 }, // MD5
-              { value: "invalid_supposed_sha256", algo: 3 }, // Unsupported algo 3
+              { value: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", algo: 1 },
+              { value: "md5hash1234567890", algo: 2 },
+              { value: "invalid_supposed_sha256", algo: 3 },
             ],
             dependencies: [],
           },
@@ -291,52 +364,20 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(version?.hashes?.md5).toBe("md5hash1234567890")
     })
 
-    it("rejects CurseForge file if loader is not NeoForge when requested as MOD", async () => {
-      const adapter = new CurseForgeAdapter()
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            id: 77777,
-            fileName: "fabric-only.jar",
-            displayName: "Fabric Mod",
-            downloadUrl: "https://cf.com/fabric.jar",
-            gameVersions: ["1.21.1", "Fabric"], // Fabric only, no NeoForge
-            hashes: [],
-            dependencies: [],
-          },
-        }),
-      })
-
-      const version = await adapter.getVersion(env, "77777", "328085", "MOD")
-      expect(version?.loaders).toEqual(["Fabric"])
-      expect(version?.loaders.includes("NeoForge")).toBe(false)
-    })
-
-    it("uses official download URL endpoint when downloadUrl is null in CurseForge file payload", async () => {
-      const adapter = new CurseForgeAdapter()
-
-      mockFetch.mockImplementation(async (url: string) => {
+    it("ensures CurseForge API key is NEVER sent to external binary CDN download URLs", async () => {
+      mockFetch.mockImplementation(async (url: string, opts?: any) => {
         const u = String(url)
-        if (u.includes("/files/66666/download-url")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ data: "https://mediafilez.forgecdn.net/files/666/opt-mod.jar" }),
-          }
-        }
-        if (u.includes("/files/66666")) {
+        if (u.includes("api.curseforge.com/v1/mods/328085/files/99999")) {
+          // Metadata request: MUST have x-api-key
+          expect(opts?.headers?.["x-api-key"]).toBe("test-curseforge-api-key-12345")
           return {
             ok: true,
             status: 200,
             json: async () => ({
               data: {
-                id: 66666,
-                fileName: "opt-mod.jar",
-                displayName: "Opt Mod",
-                downloadUrl: null,
+                id: 99999,
+                fileName: "secure.jar",
+                downloadUrl: "https://cdn.external-forge-cdn.net/files/secure.jar",
                 gameVersions: ["1.21.1", "NeoForge"],
                 hashes: [],
                 dependencies: [],
@@ -344,15 +385,58 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
             }),
           }
         }
+        if (u.includes("api.curseforge.com/v1/mods/328085/files")) {
+          expect(opts?.headers?.["x-api-key"]).toBe("test-curseforge-api-key-12345")
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 99999,
+                  fileName: "secure.jar",
+                  downloadUrl: "https://cdn.external-forge-cdn.net/files/secure.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/328085")) {
+          expect(opts?.headers?.["x-api-key"]).toBe("test-curseforge-api-key-12345")
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 328085, name: "Secure Mod", classId: 6 } }),
+          }
+        }
+        if (u.includes("https://cdn.external-forge-cdn.net/files/secure.jar")) {
+          // Binary download request: MUST NOT contain x-api-key!
+          expect(opts?.headers?.["x-api-key"]).toBeUndefined()
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => createSampleJarBuffer("secure binary").buffer,
+          }
+        }
         return { ok: false, status: 404 }
       })
 
-      const version = await adapter.getVersion(env, "66666", "328085", "MOD")
-      expect(version?.downloadUrl).toBe("https://mediafilez.forgecdn.net/files/666/opt-mod.jar")
+      const result = await installModPlan(
+        db,
+        env,
+        { provider: "CURSEFORGE", projectId: "328085", versionId: "99999" },
+        adminUserId,
+      )
+
+      expect(result.length).toBe(1)
+      expect(result[0]!.name).toBe("secure.jar")
     })
   })
 
-  describe("3. Strict Compatibility & Dependency Rules", () => {
+  describe("3. Strict Fail-Closed Compatibility & Dependency Rules", () => {
     it("rejects contentType spoofing when project does not match requested content type", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
@@ -364,7 +448,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
               id: "mod-create",
               slug: "create",
               title: "Create",
-              project_type: "mod", // Real type is MOD
+              project_type: "mod",
               categories: ["technology"],
             }),
           }
@@ -372,7 +456,6 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         return { ok: false, status: 404 }
       })
 
-      // Client attempts to query a MOD as DATA_PACK
       await expect(
         manager.getProjectDetail(env, db, "MODRINTH", "mod-create", "DATA_PACK"),
       ).rejects.toThrow(/no corresponde al tipo solicitado/)
@@ -415,6 +498,196 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           { provider: "MODRINTH", projectId: "mod-x", versionId: "ver-incompat-mc" },
         ),
       ).rejects.toThrow(/no es compatible con el entorno actual/)
+    })
+
+    it("fails closed when loaders is empty (loaders=[]) or unknown for contentType=MOD", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-no-loaders")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-no-loaders",
+              project_id: "mod-no-loader",
+              name: "No Loader Mod",
+              game_versions: ["1.21.1"],
+              loaders: [], // Empty loaders!
+              files: [{ filename: "mod.jar", size: 1000, url: "https://cdn/mod.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/mod-no-loader")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "mod-no-loader", title: "No Loader Mod", project_type: "mod", categories: [] }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      await expect(
+        manager.resolveInstallationPlan(
+          env,
+          db,
+          { provider: "MODRINTH", projectId: "mod-no-loader", versionId: "ver-no-loaders" },
+        ),
+      ).rejects.toThrow(/no es compatible con el entorno actual/)
+    })
+
+    it("fails closed when loader is Fabric for contentType=MOD", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-fabric-only")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-fabric-only",
+              project_id: "mod-fabric",
+              name: "Fabric Mod",
+              game_versions: ["1.21.1"],
+              loaders: ["fabric"],
+              files: [{ filename: "mod.jar", size: 1000, url: "https://cdn/mod.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/mod-fabric")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "mod-fabric", title: "Fabric Mod", project_type: "mod", categories: [] }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      await expect(
+        manager.resolveInstallationPlan(
+          env,
+          db,
+          { provider: "MODRINTH", projectId: "mod-fabric", versionId: "ver-fabric-only" },
+        ),
+      ).rejects.toThrow(/no es compatible con el entorno actual/)
+    })
+
+    it("resolves project with 0 dependencies cleanly into a single valid item", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-zero-dep")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-zero-dep",
+              project_id: "zero-dep-proj",
+              name: "Solo Mod",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "solo.jar", size: 1000, url: "https://cdn/solo.jar" }],
+              dependencies: [], // 0 dependencies
+            }),
+          }
+        }
+        if (u.includes("/project/zero-dep-proj")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "zero-dep-proj", title: "Solo Mod", project_type: "mod", categories: [] }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "zero-dep-proj", versionId: "ver-zero-dep" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(1)
+      expect(plan.optionalDependencies.length).toBe(0)
+    })
+
+    it("treats OPTIONAL dependencies as non-auto-installed", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-opt-root")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-opt-root",
+              project_id: "opt-root-proj",
+              name: "Opt Root",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "opt-root.jar", size: 1000, url: "https://cdn/opt-root.jar" }],
+              dependencies: [{ project_id: "opt-dep", dependency_type: "optional" }],
+            }),
+          }
+        }
+        if (u.includes("/project/opt-root-proj")) {
+          return { ok: true, status: 200, json: async () => ({ id: "opt-root-proj", title: "Opt Root", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("/project/opt-dep")) {
+          return { ok: true, status: 200, json: async () => ({ id: "opt-dep", title: "Opt Dep", project_type: "mod", categories: [] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "opt-root-proj", versionId: "ver-opt-root" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items.length).toBe(1) // Only root item in install items
+      expect(plan.optionalDependencies.length).toBe(1) // Optional dependency present in optional list
+      expect(plan.optionalDependencies[0]!.projectId).toBe("opt-dep")
+    })
+
+    it("flags INCOMPATIBLE dependency as a conflict", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-incomp-root")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-incomp-root",
+              project_id: "incomp-root-proj",
+              name: "Incomp Root",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "incomp-root.jar", size: 1000, url: "https://cdn/incomp-root.jar" }],
+              dependencies: [{ project_id: "bad-mod", dependency_type: "incompatible" }],
+            }),
+          }
+        }
+        if (u.includes("/project/incomp-root-proj")) {
+          return { ok: true, status: 200, json: async () => ({ id: "incomp-root-proj", title: "Incomp Root", project_type: "mod", categories: [] }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "incomp-root-proj", versionId: "ver-incomp-root" },
+      )
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.length).toBe(1)
+      expect(plan.conflicts[0]).toContain("declara incompatibilidad")
     })
 
     it("enforces pinned dependencies and flags conflict if pinned version is incompatible without fallback", async () => {
@@ -516,7 +789,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
               game_versions: ["1.21.1"],
               loaders: ["neoforge"],
               files: [{ filename: "b.jar", size: 100, url: "https://cdn/b.jar" }],
-              dependencies: [{ project_id: "proj-a", dependency_type: "required" }], // Cycle back to A!
+              dependencies: [{ project_id: "proj-a", dependency_type: "required" }],
             }),
           }
         }
@@ -532,7 +805,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
               game_versions: ["1.21.1"],
               loaders: ["neoforge"],
               files: [{ filename: "c.jar", size: 100, url: "https://cdn/c.jar" }],
-              dependencies: [{ project_id: "proj-b", dependency_type: "required" }], // Duplicate reference to B!
+              dependencies: [{ project_id: "proj-b", dependency_type: "required" }],
             }),
           }
         }
@@ -559,14 +832,32 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           return {
             ok: true,
             status: 200,
-            json: async () => [{ id: "ver-b", name: "B", game_versions: ["1.21.1"], loaders: ["neoforge"], files: [{ filename: "b.jar", size: 100, url: "https://cdn/b.jar" }], dependencies: [] }],
+            json: async () => [
+              {
+                id: "ver-b",
+                name: "B",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "b.jar", size: 100, url: "https://cdn/b.jar" }],
+                dependencies: [{ project_id: "proj-a", dependency_type: "required" }],
+              },
+            ],
           }
         }
         if (u.includes("/project/proj-c/version")) {
           return {
             ok: true,
             status: 200,
-            json: async () => [{ id: "ver-c", name: "C", game_versions: ["1.21.1"], loaders: ["neoforge"], files: [{ filename: "c.jar", size: 100, url: "https://cdn/c.jar" }], dependencies: [] }],
+            json: async () => [
+              {
+                id: "ver-c",
+                name: "C",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "c.jar", size: 100, url: "https://cdn/c.jar" }],
+                dependencies: [],
+              },
+            ],
           }
         }
         if (u.includes("/project/proj-")) {
@@ -587,64 +878,85 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       )
 
       expect(plan.isValid).toBe(true)
-      expect(plan.items.length).toBe(3) // A, B, C (no duplicates, no infinite loop)
+      expect(plan.items.length).toBe(3)
     })
 
-    it("respects manual overrides to select user-specified versions for dependencies", async () => {
+    it("distinguishes ALREADY_INSTALLED and UPDATE accurately", async () => {
+      const draft = await prepareGameDraft(db, adminUserId)
+
+      // Insert pre-installed version 1.0 of test mod
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "installed-file-id",
+        releaseId: draft.id,
+        name: "mod-1.0.jar",
+        logicalPath: "mods/mod.jar",
+        category: "MOD",
+        sha256: "sha256-mod1",
+        sizeBytes: 1000,
+        sourceProvider: "MODRINTH",
+        sourceProjectId: "test-mod-id",
+        sourceVersionId: "ver-1.0",
+        createdAt: new Date().toISOString(),
+      })
+
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.includes("/version/ver-root-ov")) {
+        if (u.includes("/version/ver-1.0")) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              id: "ver-root-ov",
-              project_id: "proj-root-ov",
-              name: "Root",
-              version_number: "1.0",
+              id: "ver-1.0",
+              project_id: "test-mod-id",
+              name: "Mod 1.0",
               game_versions: ["1.21.1"],
               loaders: ["neoforge"],
-              files: [{ filename: "root.jar", size: 100, url: "https://cdn/root.jar" }],
-              dependencies: [{ project_id: "dep-custom", dependency_type: "required" }],
+              files: [{ filename: "mod.jar", size: 1000, url: "https://cdn/mod.jar" }],
+              dependencies: [],
             }),
           }
         }
-        if (u.includes("/project/proj-root-ov")) {
-          return { ok: true, status: 200, json: async () => ({ id: "proj-root-ov", title: "Root", project_type: "mod", categories: [] }) }
-        }
-        if (u.includes("/project/dep-custom/version")) {
+        if (u.includes("/version/ver-2.0")) {
           return {
             ok: true,
             status: 200,
-            json: async () => [
-              { id: "ver-dep-latest", version_number: "2.0", game_versions: ["1.21.1"], loaders: ["neoforge"], files: [{ filename: "dep2.jar", size: 100, url: "https://cdn/dep2.jar" }], dependencies: [] },
-              { id: "ver-dep-manual", version_number: "1.5", game_versions: ["1.21.1"], loaders: ["neoforge"], files: [{ filename: "dep15.jar", size: 100, url: "https://cdn/dep15.jar" }], dependencies: [] },
-            ],
+            json: async () => ({
+              id: "ver-2.0",
+              project_id: "test-mod-id",
+              name: "Mod 2.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "mod.jar", size: 1200, url: "https://cdn/mod.jar" }],
+              dependencies: [],
+            }),
           }
         }
-        if (u.includes("/project/dep-custom")) {
-          return { ok: true, status: 200, json: async () => ({ id: "dep-custom", title: "Dep", project_type: "mod", categories: [] }) }
+        if (u.includes("/project/test-mod-id")) {
+          return { ok: true, status: 200, json: async () => ({ id: "test-mod-id", title: "Test Mod", project_type: "mod", categories: [] }) }
         }
         return { ok: false, status: 404 }
       })
 
-      const plan = await manager.resolveInstallationPlan(
+      // Plan for ver-1.0 -> ALREADY_INSTALLED
+      const planSame = await manager.resolveInstallationPlan(
         env,
         db,
-        {
-          provider: "MODRINTH",
-          projectId: "proj-root-ov",
-          versionId: "ver-root-ov",
-          manualOverrides: [{ provider: "MODRINTH", projectId: "dep-custom", versionId: "ver-dep-manual" }],
-        },
+        { provider: "MODRINTH", projectId: "test-mod-id", versionId: "ver-1.0" },
       )
+      expect(planSame.items[0]!.action).toBe("ALREADY_INSTALLED")
 
-      expect(plan.isValid).toBe(true)
-      expect(plan.items[1]!.versionId).toBe("ver-dep-manual")
+      // Plan for ver-2.0 -> UPDATE
+      const planNew = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "MODRINTH", projectId: "test-mod-id", versionId: "ver-2.0" },
+      )
+      expect(planNew.items[0]!.action).toBe("UPDATE")
+      expect(planNew.items[0]!.installedFileId).toBe("installed-file-id")
     })
   })
 
-  describe("4. Target Paths, Policies & Manifest Filtering", () => {
+  describe("4. Target Paths, Policies & Multi-Category Installations", () => {
     it("computes proper logical paths per content type", () => {
       expect(getLogicalPathForContent("MOD", "create.jar")).toBe("mods/create.jar")
       expect(getLogicalPathForContent("RESOURCE_PACK", "faithful.zip")).toBe("resourcepacks/faithful.zip")
@@ -659,6 +971,182 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(validateGameFileBuffer(validZip, "datapack.zip", "DATA_PACK").valid).toBe(true)
       expect(validateGameFileBuffer(invalidZip, "datapack.zip", "DATA_PACK").valid).toBe(false)
       expect(validateGameFileBuffer(validZip, "datapack.jar", "DATA_PACK").valid).toBe(false)
+    })
+
+    it("installs real root MOD + required dependency into mods/", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-root-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-root-mod",
+              project_id: "proj-root-mod",
+              name: "Root Mod",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar" }],
+              dependencies: [{ project_id: "proj-dep-mod", dependency_type: "required" }],
+            }),
+          }
+        }
+        if (u.includes("/version/ver-dep-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-dep-mod",
+              project_id: "proj-dep-mod",
+              name: "Dep Mod",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "dep.jar", size: 500, url: "https://cdn/dep.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/proj-root-mod")) {
+          return { ok: true, status: 200, json: async () => ({ id: "proj-root-mod", title: "Root Mod", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("/project/proj-dep-mod/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-dep-mod",
+                name: "Dep Mod",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "dep.jar", size: 500, url: "https://cdn/dep.jar" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/proj-dep-mod")) {
+          return { ok: true, status: 200, json: async () => ({ id: "proj-dep-mod", title: "Dep Mod", project_type: "mod", categories: [] }) }
+        }
+        if (u.includes("root.jar") || u.includes("dep.jar")) {
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => createSampleJarBuffer("jar content").buffer,
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const files = await installModPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "proj-root-mod", versionId: "ver-root-mod", contentType: "MOD" },
+        adminUserId,
+      )
+
+      expect(files.length).toBe(2)
+      expect(files.some((f) => f.logicalPath === "mods/root.jar")).toBe(true)
+      expect(files.some((f) => f.logicalPath === "mods/dep.jar")).toBe(true)
+    })
+
+    it("installs Resource Pack, Data Pack, and Shader individually into their respective directories and policies", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/ver-rp")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-rp",
+              project_id: "rp-proj",
+              name: "Faithful",
+              game_versions: ["1.21.1"],
+              loaders: [],
+              files: [{ filename: "faithful.zip", size: 5000, url: "https://cdn/faithful.zip" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/version/ver-dp")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-dp",
+              project_id: "dp-proj",
+              name: "Terralith",
+              game_versions: ["1.21.1"],
+              loaders: ["datapack"],
+              files: [{ filename: "terralith.zip", size: 4000, url: "https://cdn/terralith.zip" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/version/ver-shader")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-shader",
+              project_id: "shader-proj",
+              name: "Complementary",
+              game_versions: ["1.21.1"],
+              loaders: [],
+              files: [{ filename: "complementary.zip", size: 6000, url: "https://cdn/shader.zip" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/rp-proj")) return { ok: true, status: 200, json: async () => ({ id: "rp-proj", title: "Faithful", project_type: "resourcepack", categories: [] }) }
+        if (u.includes("/project/dp-proj")) return { ok: true, status: 200, json: async () => ({ id: "dp-proj", title: "Terralith", all_project_types: ["datapack"], categories: [] }) }
+        if (u.includes("/project/shader-proj")) return { ok: true, status: 200, json: async () => ({ id: "shader-proj", title: "Complementary", project_type: "shader", categories: [] }) }
+
+        if (u.includes(".zip")) {
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => createSampleJarBuffer("zip content").buffer,
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      // 1. Install Resource Pack
+      const rpFiles = await installModPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "rp-proj", versionId: "ver-rp", contentType: "RESOURCE_PACK" },
+        adminUserId,
+      )
+      const rp = rpFiles.find((f) => f.logicalPath === "resourcepacks/faithful.zip")
+      expect(rp).toBeDefined()
+      expect(rp?.category).toBe("RESOURCE_PACK")
+      expect(rp?.policy).toBe("MODIFICABLE")
+
+      // 2. Install Data Pack
+      const dpFiles = await installModPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "dp-proj", versionId: "ver-dp", contentType: "DATA_PACK" },
+        adminUserId,
+      )
+      const dp = dpFiles.find((f) => f.logicalPath === "datapacks/terralith.zip")
+      expect(dp).toBeDefined()
+      expect(dp?.category).toBe("DATA_PACK")
+      expect(dp?.policy).toBe("NO_MODIFICABLE")
+
+      // 3. Install Shader
+      const shaderFiles = await installModPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "shader-proj", versionId: "ver-shader", contentType: "SHADER" },
+        adminUserId,
+      )
+      const sh = shaderFiles.find((f) => f.logicalPath === "shaderpacks/complementary.zip")
+      expect(sh).toBeDefined()
+      expect(sh?.category).toBe("SHADER_PACK")
+      expect(sh?.policy).toBe("MODIFICABLE")
     })
 
     it("excludes DATA_PACK files from publishedModpack.clientFiles", async () => {
@@ -703,68 +1191,76 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     })
   })
 
-  describe("5. Installation, Atomic D1 Rollback & Compensation", () => {
-    it("installs resource pack, datapack, and shader into respective target folders with valid zip", async () => {
+  describe("5. Hash Fallback Verification (MD5) & D1 Rollback", () => {
+    it("verifies MD5 checksum correctly when only MD5 is provided, and rejects on mismatch", async () => {
+      const validBuffer = createSampleJarBuffer("test content for md5")
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
-        if (u.includes("/version/ver-rp-1")) {
+        if (u.includes("api.curseforge.com/v1/mods/328085/files/5555")) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              id: "ver-rp-1",
-              project_id: "faithful-rp",
-              name: "Faithful 1.21",
-              version_number: "1.21.0",
-              version_type: "release",
-              game_versions: ["1.21.1"],
-              loaders: [],
-              files: [{ filename: "faithful-1.21.zip", size: 5000, url: "https://cdn/faithful.zip" }],
-              dependencies: [],
+              data: {
+                id: 5555,
+                fileName: "cfmd5.jar",
+                downloadUrl: "https://cdn/cfmd5.jar",
+                gameVersions: ["1.21.1", "NeoForge"],
+                hashes: [{ algo: 2, value: "00000000000000000000000000000000" }], // Wrong MD5
+                dependencies: [],
+              },
             }),
           }
         }
-        if (u.includes("/project/faithful-rp/version")) {
+        if (u.includes("api.curseforge.com/v1/mods/328085/files")) {
           return {
             ok: true,
             status: 200,
-            json: async () => [{ id: "ver-rp-1", name: "Faithful 1.21", version_number: "1.21.0", game_versions: ["1.21.1"], loaders: [], files: [{ filename: "faithful-1.21.zip", size: 5000, url: "https://cdn/faithful.zip" }], dependencies: [] }],
+            json: async () => ({
+              data: [
+                {
+                  id: 5555,
+                  fileName: "cfmd5.jar",
+                  downloadUrl: "https://cdn/cfmd5.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 2, value: "00000000000000000000000000000000" }],
+                  dependencies: [],
+                },
+              ],
+            }),
           }
         }
-        if (u.includes("/project/faithful-rp")) {
+        if (u.includes("api.curseforge.com/v1/mods/328085")) {
           return {
             ok: true,
             status: 200,
-            json: async () => ({ id: "faithful-rp", title: "Faithful", project_type: "resourcepack", categories: [] }),
+            json: async () => ({ data: { id: 328085, name: "MD5 CF", classId: 6 } }),
           }
         }
-        if (u.includes("faithful.zip")) {
+        if (u.includes("https://cdn/cfmd5.jar")) {
           return {
             ok: true,
             status: 200,
-            arrayBuffer: async () => createSampleJarBuffer("zip header content").buffer,
+            arrayBuffer: async () => validBuffer.buffer,
           }
         }
         return { ok: false, status: 404 }
       })
 
-      const files = await installModPlan(
-        db,
-        env,
-        { provider: "MODRINTH", projectId: "faithful-rp", versionId: "ver-rp-1", contentType: "RESOURCE_PACK" },
-        adminUserId,
-      )
-
-      expect(files.length).toBe(1)
-      expect(files[0]!.logicalPath).toBe("resourcepacks/faithful-1.21.zip")
-      expect(files[0]!.category).toBe("RESOURCE_PACK")
-      expect(files[0]!.policy).toBe("MODIFICABLE")
+      // Should fail with MD5 integrity error
+      await expect(
+        installModPlan(
+          db,
+          env,
+          { provider: "CURSEFORGE", projectId: "328085", versionId: "5555" },
+          adminUserId,
+        ),
+      ).rejects.toThrow(/hash MD5 descargado/)
     })
 
     it("executes a REAL SQLite batch rollback when a statement inside the D1 batch fails", async () => {
       const draft = await prepareGameDraft(db, adminUserId)
 
-      // Insert pre-existing file
       const preExistingId = "pre-existing-file"
       await db.insert(schema.gameReleaseFiles).values({
         id: preExistingId,
@@ -829,13 +1325,8 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         if (u.includes("/project/batch-dep")) {
           return { ok: true, status: 200, json: async () => ({ id: "batch-dep", title: "Batch Dep", project_type: "mod", categories: [] }) }
         }
-        if (u.includes("root.jar")) {
-          // Unique buffer
-          return { ok: true, status: 200, arrayBuffer: async () => createSampleJarBuffer("unique root binary").buffer }
-        }
-        if (u.includes("dep.jar")) {
-          // This buffer will collide on sha256 with the pre-existing file or let's return buffer that produces duplicate sha256!
-          return { ok: true, status: 200, arrayBuffer: async () => createSampleJarBuffer("unique root binary").buffer }
+        if (u.includes("root.jar") || u.includes("dep.jar")) {
+          return { ok: true, status: 200, arrayBuffer: async () => createSampleJarBuffer("identical binary").buffer }
         }
         return { ok: false, status: 404 }
       })
@@ -915,9 +1406,8 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     })
   })
 
-  describe("6. Pagination, Combinations & Tab Racing", () => {
+  describe("6. Pagination & Combinations", () => {
     it("handles ALL search pagination deterministically without gaps or duplicate items", async () => {
-      // Setup Modrinth (items M0, M1, M2) and CurseForge (items C0, C1, C2)
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
         if (u.includes("modrinth.com")) {
@@ -951,19 +1441,19 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         return { ok: false, status: 404 }
       })
 
-      // Page 1: limit 2, offset 0 -> Should return M0, C0
+      // Page 1: limit 2, offset 0 -> M0, C0
       const page1 = await manager.searchMods(env, db, "", null, 2, 0, "MOD")
       expect(page1.items.length).toBe(2)
       expect(page1.items[0]!.projectId).toBe("M0")
       expect(page1.items[1]!.projectId).toBe("100")
 
-      // Page 2: limit 2, offset 2 -> Should return M1, C1 (no gaps, no duplicates)
+      // Page 2: limit 2, offset 2 -> M1, C1
       const page2 = await manager.searchMods(env, db, "", null, 2, 2, "MOD")
       expect(page2.items.length).toBe(2)
       expect(page2.items[0]!.projectId).toBe("M1")
       expect(page2.items[1]!.projectId).toBe("101")
 
-      // Page 3: limit 2, offset 4 -> Should return M2, C2
+      // Page 3: limit 2, offset 4 -> M2, C2
       const page3 = await manager.searchMods(env, db, "", null, 2, 4, "MOD")
       expect(page3.items.length).toBe(2)
       expect(page3.items[0]!.projectId).toBe("M2")

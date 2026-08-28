@@ -6,6 +6,7 @@ import GameView from "./GameView"
 import GameFilesExplorer from "./GameFilesExplorer"
 import TextFileEditorModal from "./TextFileEditorModal"
 import { gameApi, graphqlClient } from "../../services/graphqlClient"
+import { ModSearchModal } from "./providers/ModSearchModal"
 
 describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
   beforeEach(() => {
@@ -973,6 +974,47 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         expect(onRefresh).toHaveBeenCalled()
       })
     })
+
+    it("cancels pending debounce and invalidates in-flight requests when switching content type tab", async () => {
+      vi.useFakeTimers()
+      const searchSpy = vi.spyOn(graphqlClient, "searchMods").mockImplementation(async (query, contentType, provider, limit, offset) => {
+        return {
+          items: [],
+          totalCount: 0,
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          providersStatus: [],
+        }
+      })
+
+      render(
+        <ModSearchModal
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />,
+      )
+
+      // 1. Type in search input to trigger debounce
+      const searchInput = screen.getByTestId("input-mod-search")
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: "test query" } })
+      })
+
+      // 2. Immediately switch to Data Packs tab before debounce timer fires
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("tab-content-data_pack"))
+      })
+
+      // 3. Advance fake timers
+      await act(async () => {
+        vi.advanceTimersByTime(500)
+      })
+
+      // 4. Verify the search request executed for DATA_PACK and not for old MOD
+      expect(searchSpy).toHaveBeenCalledWith("test query", "DATA_PACK", null, 20, 0)
+      vi.useRealTimers()
+    })
   })
 })
+
 
