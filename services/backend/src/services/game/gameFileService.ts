@@ -30,7 +30,15 @@ import {
   resolveReleaseEffectivePolicies,
 } from "./releaseService"
 
-type BatchArray = [any, ...any[]]
+type BatchStatements = Parameters<Database["batch"]>[0]
+type BatchStatement = BatchStatements[number]
+
+function asBatchTuple(statements: BatchStatement[]): BatchStatements {
+  if (statements.length === 0) {
+    throw new Error("Batch statements cannot be empty.")
+  }
+  return [statements[0], ...statements.slice(1)] as unknown as BatchStatements
+}
 
 /**
  * Safely deletes an R2 object if and only if NO record in game_release_files references it.
@@ -919,7 +927,7 @@ export async function renameGamePath(
   )
 
   if (statements.length > 0) {
-    await db.batch(statements as unknown as BatchArray)
+    await db.batch(asBatchTuple(statements))
   }
 
   return true
@@ -1057,7 +1065,7 @@ export async function moveGamePaths(
   )
 
   if (statements.length > 0) {
-    await db.batch(statements as unknown as BatchArray)
+    await db.batch(asBatchTuple(statements))
   }
 
   return true
@@ -1204,7 +1212,7 @@ export async function copyGamePaths(
   )
 
   if (statements.length > 0) {
-    await db.batch(statements as unknown as BatchArray)
+    await db.batch(asBatchTuple(statements))
   }
 
   return true
