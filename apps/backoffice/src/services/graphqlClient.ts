@@ -20,7 +20,7 @@ import type { NewsType, NewsStatus } from "@hikat/shared"
 
 import { authService } from "./authService"
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_API_URL || "http://localhost:8787"
+const BACKEND_URL = import.meta.env.VITE_BACKEND_API_URL || "http://127.0.0.1:8787"
 const GRAPHQL_ENDPOINT = `${BACKEND_URL}/graphql`
 
 export function resolveMediaUrl(url?: string | null): string {
