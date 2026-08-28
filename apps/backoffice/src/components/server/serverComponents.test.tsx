@@ -15,6 +15,7 @@ import {
 import ServerOverviewView from "./ServerOverviewView"
 import ServerConsoleView from "./ServerConsoleView"
 import ServerFilesView from "./ServerFilesView"
+import ServerTasksView from "./ServerTasksView"
 import { consoleService } from "../../services/consoleService"
 import { authService } from "../../services/authService"
 import { serverApi } from "../../services/graphqlClient"
@@ -616,6 +617,131 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
     // Normal file has Edit button
     const editBtns = screen.getAllByTitle("Editar texto")
     expect(editBtns).toHaveLength(1)
+  })
+})
+
+describe("Phase 07: ServerTasksView Custom Action Toggle Preservation", () => {
+  const onToastMock = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it("CUSTOM + STOP task toggle sends action: STOP and inverted enabled value", async () => {
+    const customStopTask = {
+      id: "task-custom-stop",
+      name: "Parada nocturna",
+      template: "CUSTOM" as const,
+      action: "STOP" as const,
+      frequency: "DAILY" as const,
+      time: "04:00",
+      intervalHours: null,
+      weekday: null,
+      weekdays: null,
+      command: null,
+      delaySeconds: null,
+      humanSchedule: "Todos los días a las 04:00",
+      enabled: true,
+      isProcessing: false,
+      isAdvanced: false,
+      isManaged: true,
+      lastRunAt: null,
+      nextRunAt: null,
+    }
+
+    vi.spyOn(serverApi, "getServerAutomations").mockResolvedValue([customStopTask])
+    const updateSpy = vi.spyOn(serverApi, "updateServerAutomation").mockResolvedValue({
+      ...customStopTask,
+      enabled: false,
+    })
+
+    await act(async () => {
+      render(<ServerTasksView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+    })
+
+    expect(screen.getByText("Parada nocturna")).toBeDefined()
+
+    // Find the toggle button (currently enabled -> says "Activa" and title "Desactivar tarea")
+    const toggleBtn = screen.getByTitle("Desactivar tarea")
+    await act(async () => {
+      fireEvent.click(toggleBtn)
+    })
+
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(updateSpy).toHaveBeenCalledWith("task-custom-stop", {
+      name: "Parada nocturna",
+      template: "CUSTOM",
+      action: "STOP",
+      frequency: "DAILY",
+      time: "04:00",
+      intervalHours: null,
+      weekday: null,
+      weekdays: null,
+      command: null,
+      delaySeconds: null,
+      enabled: false,
+    })
+  })
+
+  it("CUSTOM + COMMAND task toggle sends action: COMMAND and preserved command string", async () => {
+    const customCmdTask = {
+      id: "task-custom-cmd",
+      name: "Anuncio automático",
+      template: "CUSTOM" as const,
+      action: "COMMAND" as const,
+      frequency: "DAILY" as const,
+      time: "12:00",
+      intervalHours: null,
+      weekday: null,
+      weekdays: null,
+      command: "say Bienvenidos al servidor",
+      delaySeconds: null,
+      humanSchedule: "Todos los días a las 12:00",
+      enabled: false,
+      isProcessing: false,
+      isAdvanced: false,
+      isManaged: true,
+      lastRunAt: null,
+      nextRunAt: null,
+    }
+
+    vi.spyOn(serverApi, "getServerAutomations").mockResolvedValue([customCmdTask])
+    const updateSpy = vi.spyOn(serverApi, "updateServerAutomation").mockResolvedValue({
+      ...customCmdTask,
+      enabled: true,
+    })
+
+    await act(async () => {
+      render(<ServerTasksView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+    })
+
+    expect(screen.getByText("Anuncio automático")).toBeDefined()
+
+    // Find the toggle button (currently disabled -> says "Inactiva" and title "Activar tarea")
+    const toggleBtn = screen.getByTitle("Activar tarea")
+    await act(async () => {
+      fireEvent.click(toggleBtn)
+    })
+
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(updateSpy).toHaveBeenCalledWith("task-custom-cmd", {
+      name: "Anuncio automático",
+      template: "CUSTOM",
+      action: "COMMAND",
+      frequency: "DAILY",
+      time: "12:00",
+      intervalHours: null,
+      weekday: null,
+      weekdays: null,
+      command: "say Bienvenidos al servidor",
+      delaySeconds: null,
+      enabled: true,
+    })
   })
 })
 

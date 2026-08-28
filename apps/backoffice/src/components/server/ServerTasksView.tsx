@@ -387,7 +387,7 @@ export default function ServerTasksView({
   }
 
   const handleToggleEnabled = async (task: ServerAutomationItem) => {
-    if (task.isAdvanced && task.isManaged === false) {
+    if (task.isManaged === false) {
       onToast(
         "Esta tarea es externa y no puede modificarse desde HiKAT.",
         "error",
@@ -400,6 +400,7 @@ export default function ServerTasksView({
       await serverApi.updateServerAutomation(task.id, {
         name: task.name,
         template: task.template,
+        action: task.template === "CUSTOM" ? task.action : undefined,
         frequency: task.frequency,
         time: task.time,
         intervalHours: task.intervalHours,
