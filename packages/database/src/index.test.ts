@@ -41,6 +41,18 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(schema.contentMedia).toBeDefined()
 
     expect(schema.contentMediaUploadTokens).toBeDefined()
+
+    expect(schema.skins).toBeDefined()
+
+    expect(schema.playerSkins).toBeDefined()
+
+    expect(schema.playerSkinSelections).toBeDefined()
+
+    expect(schema.capes).toBeDefined()
+
+    expect(schema.playerCapes).toBeDefined()
+
+    expect(schema.playerCapeSelections).toBeDefined()
   })
 
   it("creates user with default role PLAYER", async () => {
@@ -761,6 +773,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0009_server_operation_locks.sql",
       "0010_skins_active_and_server_tasks.sql",
       "0011_server_tasks_action.sql",
+      "0012_remove_skin_model_and_add_capes.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -1192,23 +1205,14 @@ describe("@hikat/database schema and D1 operations", () => {
       createdAt: now,
     })
 
-    // 2. Insert Skin
-
+    // 2. Insert Skin (No model column)
     await db.insert(schema.skins).values({
       id: "skin-1",
-
       name: "Alex Aventurero",
-
-      model: "SLIM",
-
       mediaId: "media-skin-1",
-
       status: "AVAILABLE",
-
       createdBy: "admin-core",
-
       createdAt: now,
-
       updatedAt: now,
     })
 
@@ -1219,53 +1223,32 @@ describe("@hikat/database schema and D1 operations", () => {
       .get()
 
     expect(skin).toBeDefined()
-
     expect(skin?.name).toBe("Alex Aventurero")
 
-    expect(skin?.model).toBe("SLIM")
-
     // 3. Insert Game Releases
-
     await db.insert(schema.gameReleases).values({
       id: "rel-1",
-
       version: "1.4.2",
-
       minecraftVersion: "1.21.1",
-
       neoForgeVersion: "21.1.65",
-
       status: "PUBLISHED",
-
       publishedAt: now,
-
       createdBy: "admin-core",
-
       createdAt: now,
-
       updatedAt: now,
     })
 
     await db.insert(schema.gameReleaseFiles).values({
       id: "file-1",
-
       releaseId: "rel-1",
-
       name: "JourneyMap",
-
       logicalPath: "mods/journeymap-1.21.1.jar",
-
       category: "MOD",
-
       sha256:
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-
       sizeBytes: 1048576,
-
       policy: "NO_MODIFICABLE",
-
       objectKey: "game-files/mod-1",
-
       createdAt: now,
     })
 
@@ -1278,14 +1261,11 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(rel?.status).toBe("PUBLISHED")
 
     // 4. Enforce exactly ONE PUBLISHED release at SQL level
-
     expect(() => {
       d1._sqlite
-
         .prepare(
           "INSERT INTO game_releases (id, version, minecraft_version, neoforge_version, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
-
         .run(
           "rel-2",
           "1.4.3",
@@ -1299,7 +1279,6 @@ describe("@hikat/database schema and D1 operations", () => {
     }).toThrow()
 
     // 5. Test Project Settings singleton
-
     const settings = await db
       .select()
       .from(schema.projectSettings)
@@ -1307,62 +1286,39 @@ describe("@hikat/database schema and D1 operations", () => {
       .get()
 
     expect(settings).toBeDefined()
-
     expect(settings?.projectName).toBe("HiKAT")
-
     expect(settings?.serverIp).toBe("mc.hikat.org")
 
-    // 6. Test Player Skins 1:1 and unique user_id constraint (Shard 06.6)
-
+    // 6. Test Player Skins 1:1 and unique user_id constraint (No model column)
     const mediaSkin1 = "media-pskin-1"
-
     const mediaSkin2 = "media-pskin-2"
 
     await db.insert(schema.contentMedia).values({
       id: mediaSkin1,
-
       objectKey: "content/media/pskin-1.png",
-
       mediaType: "IMAGE",
-
       mimeType: "image/png",
-
       sizeBytes: 4096,
-
       createdBy: "admin-core",
-
       createdAt: now,
     })
 
     await db.insert(schema.contentMedia).values({
       id: mediaSkin2,
-
       objectKey: "content/media/pskin-2.png",
-
       mediaType: "IMAGE",
-
       mimeType: "image/png",
-
       sizeBytes: 4096,
-
       createdBy: "admin-core",
-
       createdAt: now,
     })
 
     // Insert first skin for user
-
     await db.insert(schema.playerSkins).values({
       id: "pskin-1",
-
       userId: "admin-core",
-
-      model: "CLASSIC",
-
       mediaId: mediaSkin1,
-
       createdAt: now,
-
       updatedAt: now,
     })
 
@@ -1373,37 +1329,24 @@ describe("@hikat/database schema and D1 operations", () => {
       .get()
 
     expect(pskin).toBeDefined()
-
     expect(pskin?.mediaId).toBe(mediaSkin1)
 
-    expect(pskin?.model).toBe("CLASSIC")
-
     // Attempt to insert a second skin for the same user -> MUST THROW UNIQUE CONSTRAINT ERROR
-
     expect(() => {
       d1._sqlite
-
         .prepare(
-          "INSERT INTO player_skins (id, user_id, model, media_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+          "INSERT INTO player_skins (id, user_id, media_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
-
-        .run("pskin-2", "admin-core", "SLIM", mediaSkin2, now, now)
+        .run("pskin-2", "admin-core", mediaSkin2, now, now)
     }).toThrow()
 
     // Test upsert / update replacement
-
     await db
-
       .update(schema.playerSkins)
-
       .set({
         mediaId: mediaSkin2,
-
-        model: "SLIM",
-
         updatedAt: new Date().toISOString(),
       })
-
       .where(eq(schema.playerSkins.userId, "admin-core"))
 
     const updatedPskin = await db
@@ -1414,35 +1357,21 @@ describe("@hikat/database schema and D1 operations", () => {
 
     expect(updatedPskin?.mediaId).toBe(mediaSkin2)
 
-    expect(updatedPskin?.model).toBe("SLIM")
-
     // Test FK CASCADE: deleting user removes their player skin
-
     const testUserCascadeId = "user-cascade-" + crypto.randomUUID()
-
     await db.insert(schema.users).values({
       id: testUserCascadeId,
-
       displayName: "Cascade User",
-
       role: "PLAYER",
-
       createdAt: now,
-
       updatedAt: now,
     })
 
     await db.insert(schema.playerSkins).values({
       id: "pskin-cascade",
-
       userId: testUserCascadeId,
-
-      model: "CLASSIC",
-
       mediaId: mediaSkin1,
-
       createdAt: now,
-
       updatedAt: now,
     })
 
@@ -1494,7 +1423,6 @@ describe("@hikat/database schema and D1 operations", () => {
     await db.insert(schema.skins).values({
       id: globalSkinId,
       name: "Global Astronaut",
-      model: "SLIM",
       mediaId,
       status: "AVAILABLE",
       createdBy: userId,
@@ -1574,5 +1502,93 @@ describe("@hikat/database schema and D1 operations", () => {
         updatedAt: now,
       }),
     ).rejects.toThrow()
+  })
+
+  it("supports Capes domain: global capes, multiple player capes, active cape selections with canonical NONE", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const now = new Date().toISOString()
+
+    const adminId = "admin-capes-user"
+    const playerId = "player-capes-user"
+    await db.insert(schema.users).values([
+      { id: adminId, displayName: "Cape Admin", role: "ADMIN", createdAt: now, updatedAt: now },
+      { id: playerId, displayName: "Cape Player", role: "PLAYER", createdAt: now, updatedAt: now },
+    ])
+
+    const capeMedia1 = "media-cape-global-1"
+    const capeMedia2 = "media-cape-player-1"
+    const capeMedia3 = "media-cape-player-2"
+
+    await db.insert(schema.contentMedia).values([
+      { id: capeMedia1, mediaType: "IMAGE", objectKey: "capes/global1.png", mimeType: "image/png", sizeBytes: 2048, createdBy: adminId, createdAt: now },
+      { id: capeMedia2, mediaType: "IMAGE", objectKey: "capes/player1.png", mimeType: "image/png", sizeBytes: 4096, createdBy: playerId, createdAt: now },
+      { id: capeMedia3, mediaType: "IMAGE", objectKey: "capes/player2.png", mimeType: "image/png", sizeBytes: 8192, createdBy: playerId, createdAt: now },
+    ])
+
+    // 1. Global Cape
+    const globalCapeId = "cape-global-1"
+    await db.insert(schema.capes).values({
+      id: globalCapeId,
+      name: "Founder Cape",
+      mediaId: capeMedia1,
+      status: "AVAILABLE",
+      createdBy: adminId,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const globalCape = await db.select().from(schema.capes).where(eq(schema.capes.id, globalCapeId)).get()
+    expect(globalCape).toBeDefined()
+    expect(globalCape?.name).toBe("Founder Cape")
+
+    // 2. Multiple Player Custom Capes for same player
+    const playerCape1Id = "pcape-1"
+    const playerCape2Id = "pcape-2"
+    await db.insert(schema.playerCapes).values([
+      { id: playerCape1Id, userId: playerId, name: "Fire Cape", mediaId: capeMedia2, createdAt: now, updatedAt: now },
+      { id: playerCape2Id, userId: playerId, name: "Ice Cape", mediaId: capeMedia3, createdAt: now, updatedAt: now },
+    ])
+
+    const pCapes = await db.select().from(schema.playerCapes).where(eq(schema.playerCapes.userId, playerId)).all()
+    expect(pCapes.length).toBe(2)
+
+    // 3. Active Cape Selection: NONE (canonical "Sin capa")
+    await db.insert(schema.playerCapeSelections).values({
+      userId: playerId,
+      type: "NONE",
+      capeId: null,
+      playerCapeId: null,
+      updatedAt: now,
+    })
+
+    let activeCapeSel = await db.select().from(schema.playerCapeSelections).where(eq(schema.playerCapeSelections.userId, playerId)).get()
+    expect(activeCapeSel?.type).toBe("NONE")
+    expect(activeCapeSel?.capeId).toBeNull()
+    expect(activeCapeSel?.playerCapeId).toBeNull()
+
+    // 4. Update Active Cape Selection to CUSTOM
+    await db.update(schema.playerCapeSelections).set({
+      type: "CUSTOM",
+      capeId: null,
+      playerCapeId: playerCape1Id,
+      updatedAt: now,
+    }).where(eq(schema.playerCapeSelections.userId, playerId))
+
+    activeCapeSel = await db.select().from(schema.playerCapeSelections).where(eq(schema.playerCapeSelections.userId, playerId)).get()
+    expect(activeCapeSel?.type).toBe("CUSTOM")
+    expect(activeCapeSel?.playerCapeId).toBe(playerCape1Id)
+
+    // 5. Update Active Cape Selection to GLOBAL
+    await db.update(schema.playerCapeSelections).set({
+      type: "GLOBAL",
+      capeId: globalCapeId,
+      playerCapeId: null,
+      updatedAt: now,
+    }).where(eq(schema.playerCapeSelections.userId, playerId))
+
+    activeCapeSel = await db.select().from(schema.playerCapeSelections).where(eq(schema.playerCapeSelections.userId, playerId)).get()
+    expect(activeCapeSel?.type).toBe("GLOBAL")
+    expect(activeCapeSel?.capeId).toBe(globalCapeId)
   })
 })

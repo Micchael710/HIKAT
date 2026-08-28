@@ -179,12 +179,10 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     expect(SERVER_PUBLIC_MESSAGES.COMMAND_RATE_LIMITED).toBe("Has enviado demasiados comandos. Espera un momento.")
   })
 
-  it("validates Minecraft skin texture dimensions and PNG format", async () => {
-    const { validateMinecraftSkinTexture, ALLOWED_SKIN_MODELS, ALLOWED_SKIN_STATUSES } = await import("./index")
-
-
+  it("validates Minecraft skin texture dimensions and PNG format (without model detection)", async () => {
+    const { validateMinecraftSkinTexture, ALLOWED_SKIN_STATUSES } = await import("./index")
     const { encode } = await import("fast-png")
-    expect(ALLOWED_SKIN_MODELS).toEqual(["CLASSIC", "SLIM"])
+
     expect(ALLOWED_SKIN_STATUSES).toEqual(["AVAILABLE", "UNAVAILABLE"])
 
     // Valid 64x64 PNG
@@ -233,140 +231,47 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
     expect(res4.error).toContain("PNG")
   })
 
-  it("inspects Minecraft skin textures with authoritative Classic vs Slim detection (skinview-utils equivalent)", async () => {
+  it("validates Minecraft cape textures with standard, HD, and OptiFine support", async () => {
+    const {
+      validateCapeTextureBuffer,
+      ALLOWED_CAPE_STATUSES,
+      ALLOWED_ACTIVE_CAPE_TYPES,
+      MAX_PLAYER_CAPES,
+      MAX_CAPE_SIZE_BYTES,
+    } = await import("./index")
     const { encode } = await import("fast-png")
-    const { inspectMinecraftSkinTexture } = await import("./index")
 
-    // Helper to generate a 64x64 RGBA test image buffer
-    function makeSkinPng(
-      width: number,
-      height: number,
-      fillBoxFn?: (data: Uint8Array) => void,
-    ): Uint8Array {
-      const data = new Uint8Array(width * height * 4)
-      // Default fill: fully opaque colored pixels (classic Steve skin style)
-      for (let i = 0; i < data.length; i += 4) {
-        data[i] = 120 // R
-        data[i + 1] = 80 // G
-        data[i + 2] = 60 // B
-        data[i + 3] = 255 // A (100% opaque)
-      }
-      if (fillBoxFn) {
-        fillBoxFn(data)
-      }
-      return encode({ width, height, data, channels: 4, depth: 8 })
+    expect(ALLOWED_CAPE_STATUSES).toEqual(["AVAILABLE", "UNAVAILABLE"])
+    expect(ALLOWED_ACTIVE_CAPE_TYPES).toEqual(["NONE", "CUSTOM", "GLOBAL"])
+    expect(MAX_PLAYER_CAPES).toBe(10)
+    expect(MAX_CAPE_SIZE_BYTES).toBe(5 * 1024 * 1024)
+
+    // Helper to make cape PNG
+    function makeCape(w: number, h: number): Uint8Array {
+      return encode({
+        width: w,
+        height: h,
+        data: new Uint8Array(w * h * 4).fill(200),
+        channels: 4,
+        depth: 8,
+      })
     }
 
-    // 1. Classic Steve 64x64: all boxes opaque
-    const classicPng = makeSkinPng(64, 64)
-    const classicRes = inspectMinecraftSkinTexture(classicPng)
-    expect(classicRes.valid).toBe(true)
-    expect(classicRes.width).toBe(64)
-    expect(classicRes.height).toBe(64)
-    expect(classicRes.model).toBe("CLASSIC")
+    // 1. Standard 64x32
+    expect(validateCapeTextureBuffer(makeCape(64, 32)).valid).toBe(true)
 
-    // 2. Slim Alex 64x64: transparent pixels in indicator box (50, 16, 2, 4)
-    const slimTransparentPng = makeSkinPng(64, 64, (data) => {
-      // Clear (50, 16, 2, 4) to alpha=0
-      for (let y = 16; y < 20; y++) {
-        for (let x = 50; x < 52; x++) {
-          const idx = (y * 64 + x) * 4
-          data[idx + 3] = 0 // Transparent
-        }
-      }
-    })
-    const slimRes = inspectMinecraftSkinTexture(slimTransparentPng)
-    expect(slimRes.valid).toBe(true)
-    expect(slimRes.model).toBe("SLIM")
+    // 2. HD Multiples (128x64, 256x128, 512x256)
+    expect(validateCapeTextureBuffer(makeCape(128, 64)).valid).toBe(true)
+    expect(validateCapeTextureBuffer(makeCape(256, 128)).valid).toBe(true)
+    expect(validateCapeTextureBuffer(makeCape(512, 256)).valid).toBe(true)
 
-    // 3. Slim Alex 64x64 with non-255 alpha (e.g. alpha = 128)
-    const slimSemiTransparentPng = makeSkinPng(64, 64, (data) => {
-      const idx = (16 * 64 + 50) * 4
-      data[idx + 3] = 200 // Non-255 alpha
-    })
-    const slimSemiRes = inspectMinecraftSkinTexture(slimSemiTransparentPng)
-    expect(slimSemiRes.valid).toBe(true)
-    expect(slimSemiRes.model).toBe("SLIM")
+    // 3. OptiFine ratio (46x22, 92x44)
+    expect(validateCapeTextureBuffer(makeCape(46, 22)).valid).toBe(true)
+    expect(validateCapeTextureBuffer(makeCape(92, 44)).valid).toBe(true)
 
-    // 4. Slim 64x64: all 4 boxes solid black (0, 0, 0, 255)
-    const slimAllBlackPng = makeSkinPng(64, 64, (data) => {
-      const boxes: Array<[number, number, number, number]> = [
-        [50, 16, 2, 4],
-        [54, 20, 2, 12],
-        [42, 48, 2, 4],
-        [46, 52, 2, 12],
-      ]
-      for (const [x0, y0, w, h] of boxes) {
-        for (let y = y0; y < y0 + h; y++) {
-          for (let x = x0; x < x0 + w; x++) {
-            const idx = (y * 64 + x) * 4
-            data[idx] = 0
-            data[idx + 1] = 0
-            data[idx + 2] = 0
-            data[idx + 3] = 255
-          }
-        }
-      }
-    })
-    const slimBlackRes = inspectMinecraftSkinTexture(slimAllBlackPng)
-    expect(slimBlackRes.valid).toBe(true)
-    expect(slimBlackRes.model).toBe("SLIM")
-
-    // 5. Slim 64x64: all 4 boxes solid white (255, 255, 255, 255)
-    const slimAllWhitePng = makeSkinPng(64, 64, (data) => {
-      const boxes: Array<[number, number, number, number]> = [
-        [50, 16, 2, 4],
-        [54, 20, 2, 12],
-        [42, 48, 2, 4],
-        [46, 52, 2, 12],
-      ]
-      for (const [x0, y0, w, h] of boxes) {
-        for (let y = y0; y < y0 + h; y++) {
-          for (let x = x0; x < x0 + w; x++) {
-            const idx = (y * 64 + x) * 4
-            data[idx] = 255
-            data[idx + 1] = 255
-            data[idx + 2] = 255
-            data[idx + 3] = 255
-          }
-        }
-      }
-    })
-    const slimWhiteRes = inspectMinecraftSkinTexture(slimAllWhitePng)
-    expect(slimWhiteRes.valid).toBe(true)
-    expect(slimWhiteRes.model).toBe("SLIM")
-
-    // 6. Mixed black and white (not all 4 black, not all 4 white, no transparency) -> CLASSIC
-    const mixedBwPng = makeSkinPng(64, 64, (data) => {
-      // Box 1 black, others white
-      for (let y = 16; y < 20; y++) {
-        for (let x = 50; x < 52; x++) {
-          const idx = (y * 64 + x) * 4
-          data[idx] = 0; data[idx + 1] = 0; data[idx + 2] = 0; data[idx + 3] = 255
-        }
-      }
-      for (let y = 20; y < 32; y++) {
-        for (let x = 54; x < 56; x++) {
-          const idx = (y * 64 + x) * 4
-          data[idx] = 255; data[idx + 1] = 255; data[idx + 2] = 255; data[idx + 3] = 255
-        }
-      }
-    })
-    const mixedRes = inspectMinecraftSkinTexture(mixedBwPng)
-    expect(mixedRes.valid).toBe(true)
-    expect(mixedRes.model).toBe("CLASSIC")
-
-    // 7. Legacy 64x32 skin -> always CLASSIC
-    const legacyPng = makeSkinPng(64, 32)
-    const legacyRes = inspectMinecraftSkinTexture(legacyPng)
-    expect(legacyRes.valid).toBe(true)
-    expect(legacyRes.width).toBe(64)
-    expect(legacyRes.height).toBe(32)
-    expect(legacyRes.model).toBe("CLASSIC")
-
-    // 8. Corrupted and invalid buffers
-    expect(inspectMinecraftSkinTexture(new Uint8Array(10)).valid).toBe(false)
-    expect(inspectMinecraftSkinTexture(new Uint8Array(50)).valid).toBe(false)
+    // 4. Corrupted / non-PNG buffer
+    expect(validateCapeTextureBuffer(new Uint8Array(10)).valid).toBe(false)
+    expect(validateCapeTextureBuffer(new Uint8Array(40)).valid).toBe(false)
   })
 
   it("validates server task templates, only_when_online policy, and schedule cron formatting", async () => {

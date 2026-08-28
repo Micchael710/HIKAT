@@ -7,10 +7,12 @@ import {
   CapeItem,
   GlobalSkin,
   PlayerSkin,
+  GlobalCape,
+  PlayerCape,
   DEFAULT_SKINS,
   DEFAULT_CAPES,
 } from "../types"
-import { CANVAS_W, MIN_WINDOW_W, MIN_WINDOW_H, hexToRGB } from "../theme/tokens"
+import { CANVAS_W, MIN_WINDOW_W, hexToRGB } from "../theme/tokens"
 import {
   fetchGlobalSkins,
   fetchMyPlayerSkin,
@@ -19,7 +21,15 @@ import {
   uploadPlayerSkin,
   deleteMyPlayerSkin,
 } from "../services/skinService"
-import { authService, UserProfile } from "../services/authService"
+import {
+  fetchGlobalCapes,
+  fetchMyPlayerCapes,
+  fetchMyActiveCape,
+  setMyActiveCape,
+  uploadPlayerCape,
+  deleteMyPlayerCape,
+} from "../services/capeService"
+import { authService } from "../services/authService"
 
 export function useLauncherState() {
   const [screen, setScreen] = useState<LauncherScreen>(() => {
@@ -56,27 +66,32 @@ export function useLauncherState() {
     } catch (_) {}
   }, [theme])
 
-  /* Skins and Capes Domain State */
+  /* Skins Domain State */
   const [appliedSkin, setAppliedSkin] = useState<string>("player-custom")
-  const [appliedCape, setAppliedCape] = useState<string>("none")
   const [globalSkins, setGlobalSkins] = useState<GlobalSkin[]>([])
   const [playerSkin, setPlayerSkin] = useState<PlayerSkin | null>(null)
   const [skinsLoading, setSkinsLoading] = useState<boolean>(false)
   const [skinsError, setSkinsError] = useState<string | null>(null)
 
-  // Capes collection (preserved for capes subsystem)
-  const [customCapes, setCustomCapes] = useState<CapeItem[]>([])
+  /* Capes Domain State */
+  const [appliedCape, setAppliedCape] = useState<string>("none")
+  const [globalCapes, setGlobalCapes] = useState<GlobalCape[]>([])
+  const [playerCapes, setPlayerCapes] = useState<PlayerCape[]>([])
+  const [capesLoading, setCapesLoading] = useState<boolean>(false)
+  const [capesError, setCapesError] = useState<string | null>(null)
 
   /**
-   * Loads public global skins catalog (can be called unauthenticated or offline)
+   * Loads public catalogs (skins & capes)
    */
   const loadGlobalCatalog = useCallback(async () => {
     try {
-      const globals = await fetchGlobalSkins()
+      const [globals, gCapes] = await Promise.all([
+        fetchGlobalSkins().catch(() => []),
+        fetchGlobalCapes().catch(() => []),
+      ])
       setGlobalSkins(globals)
-    } catch (err: any) {
-      // Offline fallback
-    }
+      setGlobalCapes(gCapes)
+    } catch (_) {}
   }, [])
 
   /**
@@ -113,7 +128,41 @@ export function useLauncherState() {
   }, [])
 
   /**
-   * Applies and persists the active skin selection with optimistic update and rollback on failure
+   * Refreshes the authenticated player's capes collection and active cape selection
+   */
+  const refreshPlayerCapes = useCallback(async () => {
+    const token = authService.getStoredToken()
+    if (!token) {
+      setPlayerCapes([])
+      setAppliedCape("none")
+      return
+    }
+    try {
+      setCapesLoading(true)
+      const [mine, active] = await Promise.all([
+        fetchMyPlayerCapes(),
+        fetchMyActiveCape(),
+      ])
+      setPlayerCapes(mine)
+      if (active) {
+        if (active.type === "NONE") {
+          setAppliedCape("none")
+        } else if (active.type === "CUSTOM" && active.playerCapeId) {
+          setAppliedCape(active.playerCapeId)
+        } else if (active.type === "GLOBAL" && active.capeId) {
+          setAppliedCape(active.capeId)
+        }
+      }
+      setCapesError(null)
+    } catch (err: any) {
+      setCapesError(err?.message || "No se pudo sincronizar las capas.")
+    } finally {
+      setCapesLoading(false)
+    }
+  }, [])
+
+  /**
+   * Applies and persists active skin selection
    */
   const handleApplySkin = useCallback(
     async (skinId: string) => {
@@ -146,19 +195,51 @@ export function useLauncherState() {
     [appliedSkin],
   )
 
-  // Initial load: fetch global catalog on mount, and player skin if authenticated
+  /**
+   * Applies and persists active cape selection (NONE, GLOBAL, or CUSTOM)
+   */
+  const handleApplyCape = useCallback(
+    async (capeId: string) => {
+      const previousCape = appliedCape
+      setAppliedCape(capeId)
+      const token = authService.getStoredToken()
+      if (!token) return
+
+      try {
+        let res: { success: boolean; data?: any; error?: string }
+        if (!capeId || capeId === "none") {
+          res = await setMyActiveCape("NONE")
+        } else if (playerCapes.some((pc) => pc.id === capeId)) {
+          res = await setMyActiveCape("CUSTOM", null, capeId)
+        } else {
+          res = await setMyActiveCape("GLOBAL", capeId, null)
+        }
+
+        if (!res.success) {
+          setAppliedCape(previousCape)
+          setCapesError(res.error || "No se pudo actualizar la capa activa")
+        } else {
+          setCapesError(null)
+        }
+      } catch (err: any) {
+        setAppliedCape(previousCape)
+        setCapesError(err?.message || "Error al actualizar la capa activa")
+      }
+    },
+    [appliedCape, playerCapes],
+  )
+
+  // Initial load: fetch global catalog on mount, and player data if authenticated
   useEffect(() => {
     loadGlobalCatalog()
     if (authService.getStoredToken()) {
       refreshPlayerSkin()
+      refreshPlayerCapes()
     }
-  }, [loadGlobalCatalog, refreshPlayerSkin])
+  }, [loadGlobalCatalog, refreshPlayerSkin, refreshPlayerCapes])
 
   /**
-   * Unified derived skins list:
-   * 1. Player Custom Skin (if uploaded: badge 'CUSTOM')
-   * 2. Backend Global Skins Catalog (badge 'OFFICIAL')
-   * 3. Fallback DEFAULT_SKINS (only used when global catalog is empty, e.g. offline mode)
+   * Unified derived skins list (No model interpretation)
    */
   const allSkins = useMemo<SkinItem[]>(() => {
     const items: SkinItem[] = []
@@ -171,7 +252,6 @@ export function useLauncherState() {
         accent: "#38bdf8",
         customImgUrl: playerSkin.imageUrl,
         skinUrl: playerSkin.imageUrl,
-        model: (playerSkin.model?.toLowerCase() as any) || "classic",
       })
     }
 
@@ -183,11 +263,9 @@ export function useLauncherState() {
         accent: "#6366f1",
         customImgUrl: gs.imageUrl,
         skinUrl: gs.imageUrl,
-        model: (gs.model?.toLowerCase() as any) || "classic",
       })
     }
 
-    // Offline fallback policy: show DEFAULT_SKINS only if no remote skins available
     if (globalSkins.length === 0 && !playerSkin) {
       return DEFAULT_SKINS
     }
@@ -206,6 +284,49 @@ export function useLauncherState() {
       activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8",
     )
   }, [activeSkinData])
+
+  /**
+   * Unified derived capes list
+   */
+  const allCapes = useMemo<CapeItem[]>(() => {
+    const items: CapeItem[] = [
+      {
+        id: "none",
+        name: "Sin Capa",
+        badge: "N/A",
+        accent: "#64748b",
+      },
+    ]
+
+    for (const pc of playerCapes) {
+      items.push({
+        id: pc.id,
+        name: pc.name,
+        badge: "CUSTOM",
+        accent: "#10b981",
+        customImgUrl: pc.imageUrl,
+        capeUrl: pc.imageUrl,
+      })
+    }
+
+    for (const gc of globalCapes) {
+      items.push({
+        id: gc.id,
+        name: gc.name,
+        badge: "OFFICIAL",
+        accent: "#6366f1",
+        customImgUrl: gc.imageUrl,
+        capeUrl: gc.imageUrl,
+      })
+    }
+
+    return items
+  }, [playerCapes, globalCapes])
+
+  const activeCapeData = useMemo(() => {
+    const found = allCapes.find((c) => c.id === appliedCape)
+    return found || allCapes[0] || DEFAULT_CAPES[0]
+  }, [allCapes, appliedCape])
 
   /* Dynamic Responsive Window Scaling */
   const [scale, setScale] = useState(() => {
@@ -226,7 +347,7 @@ export function useLauncherState() {
   }, [])
 
   /**
-   * Upload and link a player custom skin with safe replacement
+   * Upload and link a player custom skin
    */
   const handleUploadSkin = useCallback(
     async (file: File): Promise<PlayerSkin> => {
@@ -254,6 +375,37 @@ export function useLauncherState() {
   }, [appliedSkin])
 
   /**
+   * Upload and add a player custom cape
+   */
+  const handleUploadCape = useCallback(
+    async (file: File, name?: string): Promise<PlayerCape> => {
+      const uploaded = await uploadPlayerCape(file, name)
+      setPlayerCapes((prev) => [uploaded, ...prev])
+      setAppliedCape(uploaded.id)
+      return uploaded
+    },
+    [],
+  )
+
+  /**
+   * Delete a player custom cape
+   */
+  const handleDeleteCape = useCallback(
+    async (id: string): Promise<boolean> => {
+      const res = await deleteMyPlayerCape(id)
+      if (res.success) {
+        setPlayerCapes((prev) => prev.filter((c) => c.id !== id))
+        if (appliedCape === id) {
+          setAppliedCape("none")
+        }
+        return true
+      }
+      return false
+    },
+    [appliedCape],
+  )
+
+  /**
    * Handle user login success
    */
   const handleLogin = useCallback((name: string) => {
@@ -261,8 +413,9 @@ export function useLauncherState() {
     setScreen("home")
     setView("home")
     refreshPlayerSkin()
+    refreshPlayerCapes()
     loadGlobalCatalog()
-  }, [refreshPlayerSkin, loadGlobalCatalog])
+  }, [refreshPlayerSkin, refreshPlayerCapes, loadGlobalCatalog])
 
   /**
    * Handle user logout cleanly
@@ -270,12 +423,14 @@ export function useLauncherState() {
   const handleLogout = useCallback(() => {
     authService.logout()
     setPlayerSkin(null)
+    setPlayerCapes([])
     setUsername("Jugador")
     setScreen("login")
     setView("home")
     if (appliedSkin === "player-custom") {
       setAppliedSkin("none")
     }
+    setAppliedCape("none")
   }, [appliedSkin])
 
   return {
@@ -290,20 +445,27 @@ export function useLauncherState() {
     appliedSkin,
     setAppliedSkin: handleApplySkin,
     appliedCape,
-    setAppliedCape,
+    setAppliedCape: handleApplyCape,
     globalSkins,
     playerSkin,
     skinsLoading,
     skinsError,
-    customCapes,
-    setCustomCapes,
+    globalCapes,
+    playerCapes,
+    capesLoading,
+    capesError,
     allSkins,
     activeSkinData,
     activeSkinAccent,
+    allCapes,
+    activeCapeData,
     scale,
     handleUploadSkin,
     handleDeleteSkin,
+    handleUploadCape,
+    handleDeleteCape,
     refreshPlayerSkin,
+    refreshPlayerCapes,
     handleLogin,
     handleLogout,
   }

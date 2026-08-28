@@ -12,14 +12,23 @@ import {
   uploadPlayerSkin,
   resolveApiAssetUrl,
 } from "./skinService"
+import {
+  fetchGlobalCapes,
+  fetchMyPlayerCapes,
+  fetchMyActiveCape,
+  setMyActiveCape,
+  createPlayerCapeUploadTicket,
+  addMyPlayerCape,
+  deleteMyPlayerCape,
+  uploadPlayerCape,
+} from "./capeService"
 import * as apiClientModule from "./apiClient"
 
-describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
+describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
   })
-
 
   it("resolves asset URLs correctly (relative vs absolute)", () => {
     expect(resolveApiAssetUrl("https://example.com/skin.png")).toBe(
@@ -41,7 +50,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
             {
               id: "skin-1",
               name: "Steve",
-              model: "CLASSIC",
               imageUrl: "/media/content/steve.png",
               status: "AVAILABLE",
               createdAt: "2026-08-26T12:00:00Z",
@@ -67,7 +75,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
         myPlayerSkin: {
           id: "pskin-123",
           userId: "user-456",
-          model: "SLIM",
           imageUrl: "/media/content/custom.png",
           createdAt: "2026-08-26T12:00:00Z",
           updatedAt: "2026-08-26T12:00:00Z",
@@ -78,7 +85,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
     const mySkin = await fetchMyPlayerSkin()
     expect(mySkin).not.toBeNull()
     expect(mySkin?.id).toBe("pskin-123")
-    expect(mySkin?.model).toBe("SLIM")
     expect(mySkin?.imageUrl).toContain("/media/content/custom.png")
   })
 
@@ -93,7 +99,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
           skin: {
             id: "pskin-123",
             name: "Mi Skin",
-            model: "SLIM",
             imageUrl: "/media/content/custom.png",
           },
         },
@@ -103,7 +108,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
     const active = await fetchMyActiveSkin()
     expect(active).not.toBeNull()
     expect(active?.type).toBe("CUSTOM")
-    expect(active?.skin?.model).toBe("SLIM")
   })
 
   it("sets player active skin selection", async () => {
@@ -117,7 +121,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
           skin: {
             id: "skin-1",
             name: "Steve",
-            model: "CLASSIC",
             imageUrl: "/media/content/steve.png",
           },
         },
@@ -153,14 +156,13 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
     expect(res.data?.uploadToken).toBe("tok-abc-123")
   })
 
-  it("sets player skin after upload with authoritative backend model", async () => {
+  it("sets player skin after upload", async () => {
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
         setMyPlayerSkin: {
           id: "pskin-123",
           userId: "user-456",
-          model: "SLIM",
           imageUrl: "/media/content/custom.png",
           createdAt: "2026-08-26T12:00:00Z",
           updatedAt: "2026-08-26T12:00:00Z",
@@ -170,13 +172,11 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
 
     const res = await setMyPlayerSkin("media-789")
     expect(res.success).toBe(true)
-    expect(res.data?.model).toBe("SLIM")
   })
 
   it("uploads player skin end-to-end consuming flat backend response ({ id, ... })", async () => {
     window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
 
-    // 1. Mock ticket and setMyPlayerSkin
     vi.spyOn(apiClientModule, "graphqlClient").mockImplementation(async (query) => {
       if (typeof query === "string" && query.includes("createPlayerSkinUpload")) {
         return {
@@ -198,7 +198,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
             setMyPlayerSkin: {
               id: "pskin-789",
               userId: "user-456",
-              model: "CLASSIC" as const,
               imageUrl: "/media/content/media-999.png",
               createdAt: "2026-08-26T12:00:00Z",
               updatedAt: "2026-08-26T12:00:00Z",
@@ -209,7 +208,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
       return { success: false }
     })
 
-    // 2. Construct valid 64x64 PNG buffer using fast-png
     const rawData = new Uint8ClampedArray(64 * 64 * 4)
     rawData.fill(255)
     const validPngBytes = encodePng({
@@ -224,7 +222,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
       type: "image/png",
     })
 
-    // 3. Mock fetch binary PUT endpoint returning flat { id: 'media-999', ... }
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -241,7 +238,6 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
 
     const result = await uploadPlayerSkin(mockFile)
     expect(result.id).toBe("pskin-789")
-    expect(result.model).toBe("CLASSIC")
     expect(result.imageUrl).toContain("/media/content/media-999.png")
     expect(fetchMock).toHaveBeenCalled()
   })
@@ -256,5 +252,75 @@ describe("Launcher Skin Service & URL Resolution (Shard 06.6A)", () => {
 
     const res = await deleteMyPlayerSkin()
     expect(res.success).toBe(true)
+  })
+
+  // --- Capes Service Tests ---
+
+  it("fetches global capes catalog", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        capes: {
+          items: [
+            {
+              id: "cape-1",
+              name: "Capa Fundador",
+              imageUrl: "/media/content/cape1.png",
+              status: "AVAILABLE",
+              createdAt: "2026-08-26T12:00:00Z",
+              updatedAt: "2026-08-26T12:00:00Z",
+            },
+          ],
+          totalCount: 1,
+        },
+      },
+    })
+
+    const capes = await fetchGlobalCapes()
+    expect(capes.length).toBe(1)
+    expect(capes[0].name).toBe("Capa Fundador")
+  })
+
+  it("fetches player capes and active cape selection", async () => {
+    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        myPlayerCapes: [
+          {
+            id: "pcape-1",
+            userId: "user-1",
+            name: "Capa Dragón",
+            imageUrl: "/media/content/pcape1.png",
+            createdAt: "2026-08-26T12:00:00Z",
+            updatedAt: "2026-08-26T12:00:00Z",
+          },
+        ],
+      },
+    })
+
+    const pCapes = await fetchMyPlayerCapes()
+    expect(pCapes.length).toBe(1)
+    expect(pCapes[0].name).toBe("Capa Dragón")
+  })
+
+  it("sets active cape to NONE canonical", async () => {
+    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        setMyActiveCape: {
+          type: "NONE",
+          capeId: null,
+          playerCapeId: null,
+          imageUrl: null,
+          name: "Sin capa",
+        },
+      },
+    })
+
+    const res = await setMyActiveCape("NONE")
+    expect(res.success).toBe(true)
+    expect(res.data?.type).toBe("NONE")
   })
 })

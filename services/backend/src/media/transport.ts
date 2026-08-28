@@ -9,7 +9,9 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   MAX_VIDEO_SIZE_BYTES,
   MAX_SKIN_SIZE_BYTES,
+  MAX_CAPE_SIZE_BYTES,
   validateMinecraftSkinTexture,
+  validateCapeTextureBuffer,
   MediaMimeType,
 } from "@hikat/shared"
 import type { Env, BackendGraphQLContext } from "../types"
@@ -505,4 +507,122 @@ export async function handlePlayerSkinUpload(
     return jsonResponse({ error: "Internal server error" }, 500, request, env)
   }
 }
+
+/**
+ * Dedicated upload handler for player custom capes: PUT /media/player-cape/upload
+ * Validates single-use token, authenticated PLAYER, PNG content-type, size <= 5MB,
+ * decodability (supports standard 64x32 and HD/OptiFine ratios), and consumes the token.
+ */
+export async function handlePlayerCapeUpload(
+  request: Request,
+  env: Env,
+  db: Database | undefined,
+  context: BackendGraphQLContext,
+): Promise<Response> {
+  const isDev = env.ENVIRONMENT === "development"
+
+  try {
+    // 1. Authenticate user
+    if (context.auth.status !== "authenticated") {
+      return jsonResponse({ error: "Authentication required" }, 401, request, env)
+    }
+
+    const userId = context.auth.identity.userId
+
+    if (!db) {
+      return jsonResponse({ error: "Database unavailable" }, 500, request, env)
+    }
+
+    // 2. Validate token header
+    const rawToken = request.headers.get("X-Upload-Token") || request.headers.get("x-upload-token")
+    if (!rawToken) {
+      return jsonResponse({ error: "Missing X-Upload-Token header" }, 400, request, env)
+    }
+
+    let tokenRecord
+    try {
+      tokenRecord = await getAndValidateUploadToken(db, rawToken, userId)
+    } catch (tokenErr: any) {
+      const code = tokenErr.extensions?.code
+      if (code === "FORBIDDEN") {
+        return jsonResponse({ error: tokenErr.message }, 403, request, env)
+      }
+      if (code === "CONFLICT") {
+        return jsonResponse({ error: tokenErr.message }, 409, request, env)
+      }
+      return jsonResponse({ error: tokenErr.message || "Invalid or expired upload token" }, 401, request, env)
+    }
+
+    // 3. Validate Content-Type
+    const contentType = request.headers.get("Content-Type")?.toLowerCase().split(";")[0]?.trim()
+    if (contentType !== "image/png") {
+      return jsonResponse({ error: "Solo se admiten archivos PNG para texturas de Capa" }, 415, request, env)
+    }
+
+    // 4. Read body stream with limit (5MB max)
+    const readResult = await readBodyWithLimit(request, MAX_CAPE_SIZE_BYTES)
+    if (!readResult.success) {
+      if (readResult.reason === "TOO_LARGE") {
+        return jsonResponse({ error: `El archivo supera el tamaño máximo permitido de 5 MB` }, 413, request, env)
+      }
+
+      return jsonResponse({ error: "El cuerpo de la petición está vacío" }, 400, request, env)
+    }
+
+    const buffer = readResult.buffer
+
+    // 5. Validate Minecraft cape decodability & PNG format
+    const capeValidation = validateCapeTextureBuffer(buffer)
+    if (!capeValidation.valid) {
+      return jsonResponse(
+        {
+          error: capeValidation.error || "El archivo no es una imagen PNG de capa válida.",
+        },
+        400,
+        request,
+        env,
+      )
+    }
+
+    // 6. Consume upload token atomically
+    const consumed = await consumeUploadTokenAtomically(
+      db,
+      tokenRecord.tokenHash,
+      userId,
+    )
+    if (!consumed) {
+      return jsonResponse({ error: "Upload token was already consumed concurrently" }, 409, request, env)
+    }
+
+    // 7. Store in R2 + metadata in D1 with compensation
+    const mediaRecord = await saveMediaObjectWithCompensation(db, env, {
+      mimeType: "image/png",
+      mediaType: "IMAGE",
+      body: buffer,
+      createdBy: userId,
+    })
+
+    const formatted = formatMediaGql(mediaRecord, env, request)
+    return jsonResponse(
+      {
+        id: formatted.id,
+        mediaType: formatted.mediaType,
+        mimeType: formatted.mimeType,
+        sizeBytes: formatted.sizeBytes,
+        url: formatted.url,
+        createdAt: formatted.createdAt,
+      },
+      201,
+      request,
+      env,
+    )
+
+  } catch (err: any) {
+    if (isDev) {
+      return jsonResponse({ error: err.message, stack: err.stack }, 500, request, env)
+    }
+    return jsonResponse({ error: "Internal server error" }, 500, request, env)
+  }
+}
+
 

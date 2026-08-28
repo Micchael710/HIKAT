@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { useLauncherState } from "./useLauncherState"
 import * as skinServiceModule from "../services/skinService"
+import * as capeServiceModule from "../services/capeService"
 import { authService } from "../services/authService"
 
 function renderCustomHook<T>(hook: () => T) {
@@ -36,14 +37,23 @@ describe("useLauncherState Hook (Phase 07 Hardening)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+
+    vi.spyOn(skinServiceModule, "fetchGlobalSkins").mockResolvedValue([])
+    vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue(null)
+    vi.spyOn(skinServiceModule, "fetchMyActiveSkin").mockResolvedValue(null)
+    vi.spyOn(capeServiceModule, "fetchGlobalCapes").mockResolvedValue([])
+    vi.spyOn(capeServiceModule, "fetchMyPlayerCapes").mockResolvedValue([])
+    vi.spyOn(capeServiceModule, "fetchMyActiveCape").mockResolvedValue({
+      type: "NONE",
+      capeId: null,
+      playerCapeId: null,
+    })
   })
 
   it("handleApplySkin updates optimistically and reverts appliedSkin if Backend returns success: false", async () => {
-    // 1. Authenticated user
     window.localStorage.setItem("hikat_auth_token", "fake-token")
     vi.spyOn(authService, "getStoredToken").mockReturnValue("fake-token")
 
-    // 2. Mock setMyActiveSkin to return failure
     const setMyActiveSkinSpy = vi
       .spyOn(skinServiceModule, "setMyActiveSkin")
       .mockResolvedValue({
@@ -53,18 +63,17 @@ describe("useLauncherState Hook (Phase 07 Hardening)", () => {
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
 
-    // Initial appliedSkin
+    await act(async () => {
+      await Promise.resolve()
+    })
+
     expect(result.current.appliedSkin).toBe("player-custom")
 
-    // Act: apply a different skin
     await act(async () => {
       await result.current.setAppliedSkin("skin-999")
     })
 
-    // Expect setMyActiveSkin to be called
     expect(setMyActiveSkinSpy).toHaveBeenCalledWith("GLOBAL", "skin-999")
-
-    // Expect appliedSkin to have been reverted to player-custom
     expect(result.current.appliedSkin).toBe("player-custom")
     expect(result.current.skinsError).toBe("Skin no disponible o no encontrada")
 
@@ -80,6 +89,10 @@ describe("useLauncherState Hook (Phase 07 Hardening)", () => {
     )
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
 
     await act(async () => {
       await result.current.setAppliedSkin("skin-888")
@@ -104,6 +117,10 @@ describe("useLauncherState Hook (Phase 07 Hardening)", () => {
     })
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
 
     await act(async () => {
       await result.current.setAppliedSkin("skin-123")

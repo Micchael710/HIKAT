@@ -146,29 +146,19 @@ export interface AdminDashboardSummary {
 
 // --- Skin Types (Shard 06.5) ---
 
-export type SkinModel = "CLASSIC" | "SLIM"
-
 export type SkinStatus = "AVAILABLE" | "UNAVAILABLE"
 
 export interface SkinItem {
   id: string
-
   name: string
-
-  model: SkinModel
-
   imageUrl: string
-
   status: SkinStatus
-
   createdAt: string
-
   updatedAt: string
 }
 
 export interface SkinConnection {
   items: SkinItem[]
-
   totalCount: number
 }
 
@@ -176,28 +166,70 @@ export interface SkinConnection {
 
 export interface AdminPlayerSkin {
   id: string
-
   userId: string
-
   userDisplayName: string
-
-  model: SkinModel
-
   imageUrl: string
-
   createdAt: string
-
   updatedAt: string
 }
 
 export interface AdminPlayerSkinConnection {
   items: AdminPlayerSkin[]
-
   totalCount: number
 }
 
 export interface UpdateAdminPlayerSkinInput {
   mediaId?: string | null
+}
+
+// --- Capes Types (Phase 07 Hardening) ---
+
+export type CapeStatus = "AVAILABLE" | "UNAVAILABLE"
+
+export interface CapeItem {
+  id: string
+  name: string
+  imageUrl: string
+  status: CapeStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CapeConnection {
+  items: CapeItem[]
+  totalCount: number
+}
+
+export interface AdminPlayerCape {
+  id: string
+  userId: string
+  userDisplayName: string
+  name: string
+  imageUrl: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminPlayerCapeConnection {
+  items: AdminPlayerCape[]
+  totalCount: number
+}
+
+export interface CreateCapeInput {
+  name: string
+  mediaId: string
+  status?: CapeStatus
+}
+
+export interface UpdateCapeInput {
+  name?: string
+  mediaId?: string
+  status?: CapeStatus
+}
+
+export interface UpdateAdminPlayerCapeInput {
+  name?: string
+  mediaId?: string
 }
 
 // --- Game & Modpack Types (Shard 06.5) ---

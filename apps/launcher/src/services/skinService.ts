@@ -1,7 +1,7 @@
-import { graphqlClient, API_BASE_URL } from "./apiClient"
+import { graphqlClient } from "./apiClient"
 import type { GlobalSkin, PlayerSkin, SkinUploadTicket, ActiveSkinSelection } from "../types"
 import {
-  inspectMinecraftSkinTexture,
+  validateMinecraftSkinTexture,
   MAX_SKIN_SIZE_BYTES,
 } from "@hikat/shared"
 
@@ -42,7 +42,6 @@ export async function fetchGlobalSkins(
         items {
           id
           name
-          model
           imageUrl
           status
           createdAt
@@ -83,7 +82,6 @@ export async function fetchMyPlayerSkin(): Promise<PlayerSkin | null> {
       myPlayerSkin {
         id
         userId
-        model
         imageUrl
         createdAt
         updatedAt
@@ -118,7 +116,6 @@ export async function fetchMyActiveSkin(): Promise<ActiveSkinSelection | null> {
         skin {
           id
           name
-          model
           imageUrl
         }
       }
@@ -154,7 +151,6 @@ export async function setMyActiveSkin(
         skin {
           id
           name
-          model
           imageUrl
         }
       }
@@ -227,7 +223,6 @@ export async function setMyPlayerSkin(
       setMyPlayerSkin(input: $input) {
         id
         userId
-        model
         imageUrl
         createdAt
         updatedAt
@@ -294,12 +289,12 @@ export async function uploadPlayerSkin(
     throw new Error("El archivo supera el tamaño máximo permitido de 1 MB.")
   }
 
-  // Read buffer and validate dimensions & model
+  // Read buffer and validate dimensions
   const arrayBuffer = await file.arrayBuffer()
-  const inspection = inspectMinecraftSkinTexture(arrayBuffer)
-  if (!inspection.valid) {
+  const validation = validateMinecraftSkinTexture(arrayBuffer)
+  if (!validation.valid) {
     throw new Error(
-      inspection.error ||
+      validation.error ||
         "Dimensiones de skin inválidas. Se requiere PNG de 64x64 o 64x32.",
     )
   }
@@ -349,7 +344,7 @@ export async function uploadPlayerSkin(
     )
   }
 
-  // 5. Link texture to player skin in D1 (backend authoritatively computes model)
+  // 5. Link texture to player skin in D1
   const setRes = await setMyPlayerSkin(mediaId)
   if (!setRes.success || !setRes.data) {
     throw new Error(setRes.error || "No se pudo asociar la skin a tu cuenta")

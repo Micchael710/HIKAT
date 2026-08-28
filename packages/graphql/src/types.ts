@@ -339,41 +339,28 @@ export interface AdminDashboardSummaryGql {
   game: AdminDashboardGameSummaryGql
 }
 
-// --- Skin Types (Shard 06.5) ---
-
-export type SkinModelGql = "CLASSIC" | "SLIM"
+// --- Skin Types (Shard 06.5 / 07 Hardening) ---
 
 export type SkinStatusGql = "AVAILABLE" | "UNAVAILABLE"
 
 export interface SkinGql {
   id: string
-
   name: string
-
-  model: SkinModelGql
-
   imageUrl: string
-
   status: SkinStatusGql
-
   createdAt: string
-
   updatedAt: string
 }
 
 export interface SkinEdgeGql {
   node: SkinGql
-
   cursor: string
 }
 
 export interface SkinConnectionGql {
   edges: SkinEdgeGql[]
-
   items: SkinGql[]
-
   pageInfo: PageInfoGql
-
   totalCount: number
 }
 
@@ -389,12 +376,11 @@ export interface UpdateSkinInputGql {
   status?: SkinStatusGql | null
 }
 
-// --- Player Skins Types (Shard 06.6) ---
+// --- Player Skins Types (Shard 06.6 / 07 Hardening) ---
 
 export interface PlayerSkinGql {
   id: string
   userId: string
-  model: SkinModelGql
   imageUrl: string
   createdAt: string
   updatedAt: string
@@ -404,7 +390,6 @@ export interface AdminPlayerSkinGql {
   id: string
   userId: string
   userDisplayName: string
-  model: SkinModelGql
   imageUrl: string
   createdAt: string
   updatedAt: string
@@ -433,7 +418,6 @@ export interface ActiveSkinSelectionGql {
   skinId?: string | null
   skin?: SkinGql | null
   playerSkin?: PlayerSkinGql | null
-  model: SkinModelGql
   imageUrl: string
   name?: string | null
   updatedAt: string
@@ -446,6 +430,115 @@ export interface SetActiveSkinInputGql {
 
 export interface UpdateAdminPlayerSkinInputGql {
   mediaId: string
+}
+
+// --- Capes Types (Shard 07 Hardening) ---
+
+export type CapeStatusGql = "AVAILABLE" | "UNAVAILABLE"
+
+export interface CapeGql {
+  id: string
+  name: string
+  imageUrl: string
+  status: CapeStatusGql
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CapeEdgeGql {
+  node: CapeGql
+  cursor: string
+}
+
+export interface CapeConnectionGql {
+  edges: CapeEdgeGql[]
+  items: CapeGql[]
+  pageInfo: PageInfoGql
+  totalCount: number
+}
+
+export interface CreateCapeInputGql {
+  name: string
+  mediaId: string
+  status?: CapeStatusGql | null
+}
+
+export interface UpdateCapeInputGql {
+  name?: string | null
+  mediaId?: string | null
+  status?: CapeStatusGql | null
+}
+
+export interface PlayerCapeGql {
+  id: string
+  userId: string
+  name: string
+  imageUrl: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PlayerCapeEdgeGql {
+  node: PlayerCapeGql
+  cursor: string
+}
+
+export interface PlayerCapeConnectionGql {
+  edges: PlayerCapeEdgeGql[]
+  items: PlayerCapeGql[]
+  pageInfo: PageInfoGql
+  totalCount: number
+}
+
+export interface AddPlayerCapeInputGql {
+  name: string
+  mediaId: string
+}
+
+export interface AdminPlayerCapeGql {
+  id: string
+  userId: string
+  userDisplayName: string
+  name: string
+  imageUrl: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminPlayerCapeEdgeGql {
+  node: AdminPlayerCapeGql
+  cursor: string
+}
+
+export interface AdminPlayerCapeConnectionGql {
+  edges: AdminPlayerCapeEdgeGql[]
+  items: AdminPlayerCapeGql[]
+  pageInfo: PageInfoGql
+  totalCount: number
+}
+
+export interface UpdateAdminPlayerCapeInputGql {
+  name?: string | null
+  mediaId?: string | null
+}
+
+export type ActiveCapeTypeGql = "NONE" | "CUSTOM" | "GLOBAL"
+
+export interface ActiveCapeSelectionGql {
+  type: ActiveCapeTypeGql
+  capeId?: string | null
+  playerCapeId?: string | null
+  cape?: CapeGql | null
+  playerCape?: PlayerCapeGql | null
+  imageUrl?: string | null
+  name?: string | null
+  updatedAt: string
+}
+
+export interface SetActiveCapeInputGql {
+  type: ActiveCapeTypeGql
+  capeId?: string | null
+  playerCapeId?: string | null
 }
 
 // --- Game & Launcher Types (Shard 06.5) ---

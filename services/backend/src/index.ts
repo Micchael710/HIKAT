@@ -23,6 +23,7 @@ import { getCorsHeaders, handleOptionsRequest } from "./cors"
 import {
   handleMediaUpload,
   handlePlayerSkinUpload,
+  handlePlayerCapeUpload,
   handleMediaServe,
 } from "./media/transport"
 
@@ -52,6 +53,8 @@ export * from "./services/mediaService"
 export * from "./services/dashboardService"
 
 export * from "./services/skinService"
+
+export * from "./services/capeService"
 
 export * from "./services/game"
 
@@ -170,6 +173,22 @@ export default {
     if (url.pathname === "/media/player-skin/upload") {
       if (request.method === "PUT") {
         return handlePlayerSkinUpload(request, env, db, context)
+      }
+
+      const corsHeaders = getCorsHeaders(request, env)
+
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    // Dedicated Binary Player Cape Upload Route: PUT /media/player-cape/upload (Shard 07 Hardening)
+
+    if (url.pathname === "/media/player-cape/upload") {
+      if (request.method === "PUT") {
+        return handlePlayerCapeUpload(request, env, db, context)
       }
 
       const corsHeaders = getCorsHeaders(request, env)

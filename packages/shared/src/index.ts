@@ -439,16 +439,21 @@ export function validateServerCommand(command: unknown): {
   return { valid: true, command: trimmed }
 }
 
-// --- HiKAT Back Office Core Constants & Validation Helpers (Shard 06.5) ---
-
-
-export const ALLOWED_SKIN_MODELS = ["CLASSIC", "SLIM"] as const
-export type SkinModel = typeof ALLOWED_SKIN_MODELS[number]
+// --- HiKAT Back Office & Cosmetics Constants & Validation Helpers (Shard 06.5 / 07 Hardening) ---
 
 export const ALLOWED_SKIN_STATUSES = ["AVAILABLE", "UNAVAILABLE"] as const
 export type SkinStatus = typeof ALLOWED_SKIN_STATUSES[number]
 
 export const MAX_SKIN_SIZE_BYTES = 1 * 1024 * 1024 // 1 MB
+
+export const ALLOWED_CAPE_STATUSES = ["AVAILABLE", "UNAVAILABLE"] as const
+export type CapeStatus = typeof ALLOWED_CAPE_STATUSES[number]
+
+export const ALLOWED_ACTIVE_CAPE_TYPES = ["NONE", "CUSTOM", "GLOBAL"] as const
+export type ActiveCapeType = typeof ALLOWED_ACTIVE_CAPE_TYPES[number]
+
+export const MAX_PLAYER_CAPES = 10
+export const MAX_CAPE_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
 
 export const ALLOWED_GAME_CATEGORIES = [
   "MOD",
@@ -496,78 +501,22 @@ export const GAME_CATEGORY_DEFAULT_POLICIES: Record<
 import { decode as decodePng } from "fast-png"
 
 /**
- * Result of inspecting a Minecraft skin texture PNG.
+ * Result of inspecting / validating a Minecraft skin texture PNG.
+ * HiKAT does not infer or store CLASSIC vs SLIM model type.
  */
 export interface MinecraftSkinInspectionResult {
   valid: boolean
   width?: number
   height?: number
-  model?: "CLASSIC" | "SLIM"
   error?: string
   reason?: string
 }
 
-function hasAnyTransparencyInBox(
-  data: ArrayLike<number>,
-  width: number,
-  channels: number,
-  x0: number,
-  y0: number,
-  w: number,
-  h: number,
-): boolean {
-  if (channels < 4) return false
-  for (let y = y0; y < y0 + h; y++) {
-    for (let x = x0; x < x0 + w; x++) {
-      const idx = (y * width + x) * channels
-      const alpha = data[idx + 3]
-      if (alpha !== 255) {
-        return true
-      }
-    }
-  }
-  return false
-}
-
-function isBoxSolidColor(
-  data: ArrayLike<number>,
-  width: number,
-  channels: number,
-  x0: number,
-  y0: number,
-  w: number,
-  h: number,
-  targetR: number,
-  targetG: number,
-  targetB: number,
-): boolean {
-  for (let y = y0; y < y0 + h; y++) {
-    for (let x = x0; x < x0 + w; x++) {
-      const idx = (y * width + x) * channels
-      const r = data[idx]
-      const g = data[idx + 1]
-      const b = data[idx + 2]
-      const a = channels >= 4 ? data[idx + 3] : 255
-      if (r !== targetR || g !== targetG || b !== targetB || a !== 255) {
-        return false
-      }
-    }
-  }
-  return true
-}
-
 /**
- * Inspects a Minecraft skin texture PNG buffer.
- * Replicates skinview-utils / skinview3d inferModelType() logic:
- * - Checks PNG signature and IHDR dimensions (64x64 or 64x32).
- * - 64x32 skins are legacy CLASSIC (Steve).
- * - 64x64 skins: checks the 4 indicator boxes (50,16,2,4), (54,20,2,12), (42,48,2,4), (46,52,2,12):
- *   - Any non-255 alpha (transparency) in any box -> SLIM
- *   - ALL 4 boxes solid black (0,0,0,255) -> SLIM
- *   - ALL 4 boxes solid white (255,255,255,255) -> SLIM
- *   - Otherwise -> CLASSIC
+ * Validates PNG buffer header magic bytes, dimensions and decodability for Minecraft skins.
+ * Supported standard Minecraft skins: strict 64x64 or 64x32 dimensions.
  */
-export function inspectMinecraftSkinTexture(
+export function validateMinecraftSkinTexture(
   buffer: ArrayBuffer | Uint8Array,
 ): MinecraftSkinInspectionResult {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
@@ -602,44 +551,17 @@ export function inspectMinecraftSkinTexture(
     return { valid: false, width, height, error: msg, reason: msg }
   }
 
-  // 64x32 legacy skins are always CLASSIC
-  if (height === 32) {
-    return { valid: true, width, height, model: "CLASSIC" }
-  }
-
-  // Decode PNG image pixels for 64x64 textures
+  // Verify PNG decodability
   try {
     const decoded = decodePng(bytes)
-    const { data, channels, width: imgW, height: imgH } = decoded
-    if (imgW !== 64 || imgH !== 64 || !data || data.length === 0) {
+    if (!decoded || !decoded.data || decoded.data.length === 0) {
       const msg = "Error al decodificar la textura de la skin."
       return { valid: false, error: msg, reason: msg }
     }
-
-    const hasAnyTransparency =
-      hasAnyTransparencyInBox(data, 64, channels, 50, 16, 2, 4) ||
-      hasAnyTransparencyInBox(data, 64, channels, 54, 20, 2, 12) ||
-      hasAnyTransparencyInBox(data, 64, channels, 42, 48, 2, 4) ||
-      hasAnyTransparencyInBox(data, 64, channels, 46, 52, 2, 12)
-
-    const allSolidBlack =
-      isBoxSolidColor(data, 64, channels, 50, 16, 2, 4, 0, 0, 0) &&
-      isBoxSolidColor(data, 64, channels, 54, 20, 2, 12, 0, 0, 0) &&
-      isBoxSolidColor(data, 64, channels, 42, 48, 2, 4, 0, 0, 0) &&
-      isBoxSolidColor(data, 64, channels, 46, 52, 2, 12, 0, 0, 0)
-
-    const allSolidWhite =
-      isBoxSolidColor(data, 64, channels, 50, 16, 2, 4, 255, 255, 255) &&
-      isBoxSolidColor(data, 64, channels, 54, 20, 2, 12, 255, 255, 255) &&
-      isBoxSolidColor(data, 64, channels, 42, 48, 2, 4, 255, 255, 255) &&
-      isBoxSolidColor(data, 64, channels, 46, 52, 2, 12, 255, 255, 255)
-
-    const isSlim = hasAnyTransparency || allSolidBlack || allSolidWhite
     return {
       valid: true,
-      width: 64,
-      height: 64,
-      model: isSlim ? "SLIM" : "CLASSIC",
+      width,
+      height,
     }
   } catch (err: any) {
     const msg = err?.message || "No se pudo leer la textura de la skin."
@@ -648,19 +570,70 @@ export function inspectMinecraftSkinTexture(
 }
 
 /**
- * Validates PNG buffer header magic bytes and IHDR dimensions for Minecraft skins.
- * Supported standard Minecraft skins: strict 64x64 or 64x32 dimensions.
+ * Result of validating a Minecraft cape texture PNG buffer.
+ * HiKAT accepts standard, HD, and OptiFine ratio capes without enforcing 64x32.
  */
-export function validateMinecraftSkinTexture(
+export interface MinecraftCapeInspectionResult {
+  valid: boolean
+  width?: number
+  height?: number
+  error?: string
+  reason?: string
+}
+
+/**
+ * Validates PNG buffer header magic bytes and decodability for Minecraft capes.
+ * Allows standard and HD textures (e.g. 64x32, 128x64, 256x128, 512x256, 46x22, 92x44, etc.).
+ */
+export function validateCapeTextureBuffer(
   buffer: ArrayBuffer | Uint8Array,
-): { valid: boolean; width?: number; height?: number; error?: string; reason?: string } {
-  const res = inspectMinecraftSkinTexture(buffer)
-  return {
-    valid: res.valid,
-    width: res.width,
-    height: res.height,
-    error: res.error,
-    reason: res.reason,
+): MinecraftCapeInspectionResult {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  if (bytes.length < 24) {
+    const msg = "El archivo de capa es demasiado pequeño o está incompleto."
+    return { valid: false, error: msg, reason: msg }
+  }
+
+  // PNG Magic Bytes: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes[0] !== 0x89 ||
+    bytes[1] !== 0x50 ||
+    bytes[2] !== 0x4e ||
+    bytes[3] !== 0x47 ||
+    bytes[4] !== 0x0d ||
+    bytes[5] !== 0x0a ||
+    bytes[6] !== 0x1a ||
+    bytes[7] !== 0x0a
+  ) {
+    const msg = "El archivo no es una imagen PNG válida."
+    return { valid: false, error: msg, reason: msg }
+  }
+
+  // Read IHDR dimensions in big-endian
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const width = view.getUint32(16, false)
+  const height = view.getUint32(20, false)
+
+  if (width === 0 || height === 0) {
+    const msg = "Dimensiones de capa inválidas."
+    return { valid: false, width, height, error: msg, reason: msg }
+  }
+
+  // Verify PNG decodability
+  try {
+    const decoded = decodePng(bytes)
+    if (!decoded || !decoded.data || decoded.data.length === 0) {
+      const msg = "Error al decodificar la textura de la capa."
+      return { valid: false, error: msg, reason: msg }
+    }
+    return {
+      valid: true,
+      width,
+      height,
+    }
+  } catch (err: any) {
+    const msg = err?.message || "No se pudo leer la textura de la capa."
+    return { valid: false, error: msg, reason: msg }
   }
 }
 

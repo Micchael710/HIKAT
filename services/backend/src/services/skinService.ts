@@ -21,7 +21,7 @@ import {
   decodeCursor,
   normalizeIsoDateTime,
   MAX_SKIN_SIZE_BYTES,
-  inspectMinecraftSkinTexture,
+  validateMinecraftSkinTexture,
 } from "@hikat/shared"
 import type { Env } from "../types"
 import {
@@ -36,7 +36,6 @@ export function formatSkinGql(
   return {
     id: skin.id,
     name: skin.name,
-    model: skin.model as any,
     imageUrl: mediaUrl,
     status: skin.status as any,
     createdAt: normalizeIsoDateTime(skin.createdAt),
@@ -51,7 +50,6 @@ export function formatPlayerSkinGql(
   return {
     id: playerSkin.id,
     userId: playerSkin.userId,
-    model: playerSkin.model as any,
     imageUrl: mediaUrl,
     createdAt: normalizeIsoDateTime(playerSkin.createdAt),
     updatedAt: normalizeIsoDateTime(playerSkin.updatedAt),
@@ -67,7 +65,6 @@ export function formatAdminPlayerSkinGql(
     id: playerSkin.id,
     userId: playerSkin.userId,
     userDisplayName: userDisplayName || "Jugador",
-    model: playerSkin.model as any,
     imageUrl: mediaUrl,
     createdAt: normalizeIsoDateTime(playerSkin.createdAt),
     updatedAt: normalizeIsoDateTime(playerSkin.updatedAt),
@@ -75,14 +72,14 @@ export function formatAdminPlayerSkinGql(
 }
 
 /**
- * Loads a media record, fetches its PNG buffer from R2, and executes authoritative texture inspection.
- * Rejects non-PNG, corrupted, or non-Minecraft textures, and determines model: "CLASSIC" | "SLIM".
+ * Loads a media record, fetches its PNG buffer from R2, and validates standard skin dimensions (64x64 or 64x32) & decodability.
+ * HiKAT does NOT infer or store CLASSIC vs SLIM model type.
  */
 export async function inspectSkinMedia(
   db: Database,
   env: Env,
   mediaId: string,
-): Promise<{ model: "CLASSIC" | "SLIM"; media: schema.ContentMedia }> {
+): Promise<{ media: schema.ContentMedia }> {
   const media = await db
     .select()
     .from(schema.contentMedia)
@@ -119,17 +116,16 @@ export async function inspectSkinMedia(
   }
 
   const buffer = await object.arrayBuffer()
-  const inspection = inspectMinecraftSkinTexture(buffer)
-  if (!inspection.valid || !inspection.model) {
+  const validation = validateMinecraftSkinTexture(buffer)
+  if (!validation.valid) {
     throw createGraphQLError(
-      inspection.error ||
+      validation.error ||
         "Dimensiones de skin inválidas. Se requiere PNG de 64x64 o 64x32.",
       "VALIDATION_ERROR",
     )
   }
 
   return {
-    model: inspection.model,
     media,
   }
 }
@@ -252,7 +248,7 @@ export async function createSkin(
     )
   }
 
-  const { model, media } = await inspectSkinMedia(db, env, input.mediaId)
+  const { media } = await inspectSkinMedia(db, env, input.mediaId)
   const skinId = crypto.randomUUID()
   const now = new Date().toISOString()
   const status = input.status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE"
@@ -260,7 +256,6 @@ export async function createSkin(
   await db.insert(schema.skins).values({
     id: skinId,
     name,
-    model,
     mediaId: media.id,
     status,
     createdBy: userId,
@@ -271,7 +266,6 @@ export async function createSkin(
   return {
     id: skinId,
     name,
-    model,
     imageUrl: `/media/content/${media.id}`,
     status,
     createdAt: now,
@@ -349,11 +343,10 @@ export async function updateSkin(
     updates.name = trimmed
   }
 
-  // 2. Validate media if provided (validates D1, R2, PNG dimensions and model)
+  // 2. Validate media if provided (validates D1, R2, PNG dimensions)
   if (input.mediaId !== undefined && input.mediaId !== null) {
-    const { model, media } = await inspectSkinMedia(db, env, input.mediaId)
+    const { media } = await inspectSkinMedia(db, env, input.mediaId)
     updates.mediaId = media.id
-    updates.model = model
   }
 
   // 3. Validate status
@@ -405,30 +398,13 @@ export async function deleteSkin(
   // 2. Delete skin record
   await db.delete(schema.skins).where(eq(schema.skins.id, id))
 
-
   // 3. Check if media is orphaned
-  const otherSkin = await db
-    .select({ id: schema.skins.id })
-    .from(schema.skins)
-    .where(eq(schema.skins.mediaId, mediaId))
-    .get()
-
-  const playerSkinRef = await db
-    .select({ id: schema.playerSkins.id })
-    .from(schema.playerSkins)
-    .where(eq(schema.playerSkins.mediaId, mediaId))
-    .get()
-
-  const newsImg = await db
-    .select({ id: schema.news.id })
-    .from(schema.news)
-    .where(eq(schema.news.imageMediaId, mediaId))
-    .get()
-
-  if (!otherSkin && !playerSkinRef && !newsImg && env.ASSETS) {
+  if (env.ASSETS) {
     try {
       await deleteMedia(db, env, mediaId)
-    } catch {}
+    } catch {
+      // Ignored if media is still in use by other domains
+    }
   }
 
   return true
@@ -506,7 +482,7 @@ export async function setMyPlayerSkin(
   input: SetPlayerSkinInputGql,
   userId: string,
 ): Promise<PlayerSkinGql> {
-  const { model, media } = await inspectSkinMedia(db, env, input.mediaId)
+  const { media } = await inspectSkinMedia(db, env, input.mediaId)
 
   // Security: only allow using texture uploaded by the same user
   if (media.createdBy !== userId) {
@@ -534,7 +510,6 @@ export async function setMyPlayerSkin(
     .values({
       id: recordId,
       userId,
-      model,
       mediaId: media.id,
       createdAt: now,
       updatedAt: now,
@@ -542,7 +517,6 @@ export async function setMyPlayerSkin(
     .onConflictDoUpdate({
       target: schema.playerSkins.userId,
       set: {
-        model,
         mediaId: media.id,
         updatedAt: now,
       },
@@ -568,34 +542,9 @@ export async function setMyPlayerSkin(
 
   // 4. Safe post-success media cleanup: only clean oldMediaId if differs
   if (oldMediaId && oldMediaId !== media.id && env.ASSETS) {
-    const skinRef = await db
-      .select({ id: schema.skins.id })
-      .from(schema.skins)
-      .where(eq(schema.skins.mediaId, oldMediaId))
-      .get()
-
-    const otherPlayerRef = await db
-      .select({ id: schema.playerSkins.id })
-      .from(schema.playerSkins)
-      .where(
-        and(
-          eq(schema.playerSkins.mediaId, oldMediaId),
-          sql`${schema.playerSkins.userId} != ${userId}`,
-        ),
-      )
-      .get()
-
-    const newsRef = await db
-      .select({ id: schema.news.id })
-      .from(schema.news)
-      .where(eq(schema.news.imageMediaId, oldMediaId))
-      .get()
-
-    if (!skinRef && !otherPlayerRef && !newsRef) {
-      try {
-        await deleteMedia(db, env, oldMediaId)
-      } catch {}
-    }
+    try {
+      await deleteMedia(db, env, oldMediaId)
+    } catch {}
   }
 
   const updated = await db
@@ -644,29 +593,9 @@ export async function deleteMyPlayerSkin(
 
   // 3. Clean up media if orphaned
   if (env.ASSETS) {
-    const skinRef = await db
-      .select({ id: schema.skins.id })
-      .from(schema.skins)
-      .where(eq(schema.skins.mediaId, mediaId))
-      .get()
-
-    const otherPlayerRef = await db
-      .select({ id: schema.playerSkins.id })
-      .from(schema.playerSkins)
-      .where(eq(schema.playerSkins.mediaId, mediaId))
-      .get()
-
-    const newsRef = await db
-      .select({ id: schema.news.id })
-      .from(schema.news)
-      .where(eq(schema.news.imageMediaId, mediaId))
-      .get()
-
-    if (!skinRef && !otherPlayerRef && !newsRef) {
-      try {
-        await deleteMedia(db, env, mediaId)
-      } catch {}
-    }
+    try {
+      await deleteMedia(db, env, mediaId)
+    } catch {}
   }
 
   return true
@@ -706,7 +635,6 @@ export async function getMyActiveSkin(
           skinId: null,
           skin: null,
           playerSkin: formatted,
-          model: pskin.model as any,
           imageUrl: formatted.imageUrl,
           name: "Personalizada",
           updatedAt: normalizeIsoDateTime(selection.updatedAt),
@@ -736,7 +664,6 @@ export async function getMyActiveSkin(
             skinId: globalSkin.id,
             skin: formatted,
             playerSkin: null,
-            model: globalSkin.model as any,
             imageUrl: formatted.imageUrl,
             name: globalSkin.name,
             updatedAt: normalizeIsoDateTime(selection.updatedAt),
@@ -765,7 +692,6 @@ export async function getMyActiveSkin(
           skinId: null,
           skin: null,
           playerSkin: formatted,
-          model: pskin.model as any,
           imageUrl: formatted.imageUrl,
           name: "Personalizada",
           updatedAt: normalizeIsoDateTime(now),
@@ -790,7 +716,6 @@ export async function getMyActiveSkin(
       skinId: null,
       skin: null,
       playerSkin: formatted,
-      model: pskin.model as any,
       imageUrl: formatted.imageUrl,
       name: "Personalizada",
       updatedAt: normalizeIsoDateTime(pskin.updatedAt),
@@ -851,7 +776,6 @@ export async function setMyActiveSkin(
       skinId: null,
       skin: null,
       playerSkin: formatted,
-      model: pskin.model as any,
       imageUrl: formatted.imageUrl,
       name: "Personalizada",
       updatedAt: normalizeIsoDateTime(now),
@@ -912,7 +836,6 @@ export async function setMyActiveSkin(
       skinId: globalSkin.id,
       skin: formatted,
       playerSkin: null,
-      model: globalSkin.model as any,
       imageUrl: formatted.imageUrl,
       name: globalSkin.name,
       updatedAt: normalizeIsoDateTime(now),
@@ -958,7 +881,6 @@ export async function getAdminPlayerSkins(
     .select({
       id: schema.playerSkins.id,
       userId: schema.playerSkins.userId,
-      model: schema.playerSkins.model,
       mediaId: schema.playerSkins.mediaId,
       createdAt: schema.playerSkins.createdAt,
       updatedAt: schema.playerSkins.updatedAt,
@@ -980,7 +902,6 @@ export async function getAdminPlayerSkins(
       id: row.id,
       userId: row.userId,
       userDisplayName: row.userDisplayName || "Jugador",
-      model: row.model as any,
       imageUrl: mediaUrl,
       createdAt: normalizeIsoDateTime(row.createdAt),
       updatedAt: normalizeIsoDateTime(row.updatedAt),
@@ -994,9 +915,6 @@ export async function getAdminPlayerSkins(
       }),
     }
   })
-
-
-
 
   const totalCountResult = await db
     .select({ count: sql<number>`count(*)` })
@@ -1033,7 +951,6 @@ export async function getAdminPlayerSkinById(
     .select({
       id: schema.playerSkins.id,
       userId: schema.playerSkins.userId,
-      model: schema.playerSkins.model,
       mediaId: schema.playerSkins.mediaId,
       createdAt: schema.playerSkins.createdAt,
       updatedAt: schema.playerSkins.updatedAt,
@@ -1050,7 +967,6 @@ export async function getAdminPlayerSkinById(
     id: row.id,
     userId: row.userId,
     userDisplayName: row.userDisplayName || "Jugador",
-    model: row.model as any,
     imageUrl: `/media/content/${row.mediaId}`,
     createdAt: normalizeIsoDateTime(row.createdAt),
     updatedAt: normalizeIsoDateTime(row.updatedAt),
@@ -1078,10 +994,9 @@ export async function updateAdminPlayerSkin(
   }
 
   if (input.mediaId !== undefined && input.mediaId !== null) {
-    const { model, media } = await inspectSkinMedia(db, env, input.mediaId)
+    const { media } = await inspectSkinMedia(db, env, input.mediaId)
     const oldMediaId = existing.mediaId
     updates.mediaId = media.id
-    updates.model = model
 
     await db
       .update(schema.playerSkins)
@@ -1089,34 +1004,9 @@ export async function updateAdminPlayerSkin(
       .where(eq(schema.playerSkins.id, id))
 
     if (oldMediaId !== media.id && env.ASSETS) {
-      const skinRef = await db
-        .select({ id: schema.skins.id })
-        .from(schema.skins)
-        .where(eq(schema.skins.mediaId, oldMediaId))
-        .get()
-
-      const otherPlayerRef = await db
-        .select({ id: schema.playerSkins.id })
-        .from(schema.playerSkins)
-        .where(
-          and(
-            eq(schema.playerSkins.mediaId, oldMediaId),
-            sql`${schema.playerSkins.id} != ${id}`,
-          ),
-        )
-        .get()
-
-      const newsRef = await db
-        .select({ id: schema.news.id })
-        .from(schema.news)
-        .where(eq(schema.news.imageMediaId, oldMediaId))
-        .get()
-
-      if (!skinRef && !otherPlayerRef && !newsRef) {
-        try {
-          await deleteMedia(db, env, oldMediaId)
-        } catch {}
-      }
+      try {
+        await deleteMedia(db, env, oldMediaId)
+      } catch {}
     }
   } else {
     await db
@@ -1171,34 +1061,9 @@ export async function deleteAdminPlayerSkin(
 
   // 3. Clean up orphaned media
   if (env.ASSETS) {
-    const skinRef = await db
-      .select({ id: schema.skins.id })
-      .from(schema.skins)
-      .where(eq(schema.skins.mediaId, mediaId))
-      .get()
-
-    const otherPlayerRef = await db
-      .select({ id: schema.playerSkins.id })
-      .from(schema.playerSkins)
-      .where(
-        and(
-          eq(schema.playerSkins.mediaId, mediaId),
-          sql`${schema.playerSkins.id} != ${id}`,
-        ),
-      )
-      .get()
-
-    const newsRef = await db
-      .select({ id: schema.news.id })
-      .from(schema.news)
-      .where(eq(schema.news.imageMediaId, mediaId))
-      .get()
-
-    if (!skinRef && !otherPlayerRef && !newsRef) {
-      try {
-        await deleteMedia(db, env, mediaId)
-      } catch {}
-    }
+    try {
+      await deleteMedia(db, env, mediaId)
+    } catch {}
   }
 
   return true

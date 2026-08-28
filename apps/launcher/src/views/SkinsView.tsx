@@ -4,6 +4,7 @@ import {
   SkinItem,
   CapeItem,
   PlayerSkin,
+  PlayerCape,
   DEFAULT_SKINS,
   DEFAULT_CAPES,
 } from "../types"
@@ -15,7 +16,10 @@ import LiveToast from "../components/common/LiveToast"
 import { useTranslation } from "../context/LanguageContext"
 import {
   validateMinecraftSkinTexture,
+  validateCapeTextureBuffer,
   MAX_SKIN_SIZE_BYTES,
+  MAX_CAPE_SIZE_BYTES,
+  MAX_PLAYER_CAPES,
 } from "@hikat/shared"
 
 interface SkinsViewProps {
@@ -28,8 +32,10 @@ interface SkinsViewProps {
   playerSkin?: PlayerSkin | null
   onUploadSkin?: (file: File) => Promise<PlayerSkin>
   onDeleteSkin?: () => Promise<boolean>
-  customCapes: CapeItem[]
-  setCustomCapes: React.Dispatch<React.SetStateAction<CapeItem[]>>
+  allCapes?: CapeItem[]
+  playerCapes?: PlayerCape[]
+  onUploadCape?: (file: File, name?: string) => Promise<PlayerCape>
+  onDeleteCape?: (id: string) => Promise<boolean>
   theme?: ThemeMode
 }
 
@@ -43,8 +49,10 @@ export default function SkinsView({
   playerSkin = null,
   onUploadSkin,
   onDeleteSkin,
-  customCapes,
-  setCustomCapes,
+  allCapes = DEFAULT_CAPES,
+  playerCapes = [],
+  onUploadCape,
+  onDeleteCape,
   theme = "dark",
 }: SkinsViewProps) {
   const { t } = useTranslation()
@@ -63,7 +71,6 @@ export default function SkinsView({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const isDark = theme === "dark"
 
-  const allCapes = [...customCapes, ...DEFAULT_CAPES]
   const items = skinType === "skin" ? allSkins : allCapes
   const activeId = skinType === "skin" ? appliedSkin : appliedCape
 
@@ -127,7 +134,7 @@ export default function SkinsView({
     showToast(t("settings.toastSaved"), "success", itemAccent)
   }
 
-  /* File upload with strict Minecraft dimensions & format validation */
+  /* File upload with strict verification & format validation */
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -159,7 +166,6 @@ export default function SkinsView({
         if (!validation.valid) {
           showToast(
             validation.error ||
-              validation.reason ||
               "Dimensiones no válidas. Debe ser una skin de Minecraft 64x64 o 64x32.",
             "error",
           )
@@ -180,7 +186,7 @@ export default function SkinsView({
         e.target.value = ""
       }
     } else {
-      // Cape Upload (Capes subsystem)
+      // Cape Upload (End-to-End Capes subsystem)
       if (
         !file.type.includes("png") &&
         !file.name.toLowerCase().endsWith(".png")
@@ -190,28 +196,44 @@ export default function SkinsView({
         return
       }
 
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        const url = ev.target?.result as string
-        if (!url) return
-        const newId = `custom-cape-${Date.now()}`
-        const newName =
-          file.name.replace(/\.[^/.]+$/, "").slice(0, 15) || "Personalizada"
-        const newCape: CapeItem = {
-          id: newId,
-          name: newName,
-          color: "#38bdf8",
-          badge: "CUSTOM",
-          accent: "#38bdf8",
-          customImgUrl: url,
-          capeUrl: url,
-        }
-        setCustomCapes((prev) => [newCape, ...prev])
-        setAppliedCape(newId)
-        showToast("Capa personalizada añadida.", "success")
+      if (file.size > MAX_CAPE_SIZE_BYTES) {
+        showToast("El archivo supera el tamaño máximo permitido de 5 MB.", "error")
+        e.target.value = ""
+        return
       }
-      reader.readAsDataURL(file)
-      e.target.value = ""
+
+      if (playerCapes.length >= MAX_PLAYER_CAPES) {
+        showToast(`Has alcanzado el límite de ${MAX_PLAYER_CAPES} capas personalizadas.`, "error")
+        e.target.value = ""
+        return
+      }
+
+      try {
+        setIsUploading(true)
+        const arrayBuffer = await file.arrayBuffer()
+        const validation = validateCapeTextureBuffer(arrayBuffer)
+        if (!validation.valid) {
+          showToast(
+            validation.error || "El archivo no contiene una textura de capa PNG válida.",
+            "error",
+          )
+          return
+        }
+
+        if (onUploadCape) {
+          const capeName = file.name.replace(/\.[^/.]+$/, "").slice(0, 20) || "Mi Capa"
+          await onUploadCape(file, capeName)
+          showToast("¡Capa personalizada subida y guardada con éxito!", "success", "#10b981")
+        }
+      } catch (err: any) {
+        showToast(
+          err?.message || "Error al subir la capa al servidor. Inténtalo de nuevo.",
+          "error",
+        )
+      } finally {
+        setIsUploading(false)
+        e.target.value = ""
+      }
     }
   }
 
@@ -230,6 +252,26 @@ export default function SkinsView({
       }
     } catch (err: any) {
       showToast(err?.message || "Error al eliminar la skin.", "error")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  /* Handle deletion of custom player cape */
+  const handleDeletePersonalCape = async (capeId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    if (!onDeleteCape || isDeleting) return
+
+    try {
+      setIsDeleting(true)
+      const success = await onDeleteCape(capeId)
+      if (success) {
+        showToast("Capa eliminada correctamente.", "success")
+      } else {
+        showToast("No se pudo eliminar la capa.", "error")
+      }
+    } catch (err: any) {
+      showToast(err?.message || "Error al eliminar la capa.", "error")
     } finally {
       setIsDeleting(false)
     }
@@ -448,8 +490,6 @@ export default function SkinsView({
 
           {/* Right Action Tools: Upload Button */}
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-
-            {/* Upload Button */}
             <button
               type="button"
               disabled={isUploading}
@@ -483,7 +523,11 @@ export default function SkinsView({
                 <polyline points="17 8 12 3 7 8" />
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
-              {isUploading ? "Subiendo..." : t("skins.uploadSkin")}
+              {isUploading
+                ? "Subiendo..."
+                : skinType === "skin"
+                  ? t("skins.uploadSkin")
+                  : "Subir Capa"}
             </button>
           </div>
         </div>
@@ -531,7 +575,7 @@ export default function SkinsView({
                 }}
               />
 
-              {/* 3D Skin & Cape Viewer */}
+              {/* 3D Skin & Cape Viewer (Uses auto-detect for skin and loadCape) */}
               <div
                 style={{
                   position: "relative",
@@ -557,11 +601,9 @@ export default function SkinsView({
                     }
                     width={380}
                     height={520}
-                    model={
-                      previewSkin?.model === "slim" ? "slim" : "classic"
-                    }
+                    model="auto-detect"
+                    isCapeMode={skinType === "capa"}
                   />
-
                 ) : (
                   <div
                     style={{
@@ -646,7 +688,7 @@ export default function SkinsView({
               ))}
 
               {/* Action row for personal custom skin */}
-              {appliedSkin === "player-custom" && playerSkin && (
+              {skinType === "skin" && appliedSkin === "player-custom" && playerSkin && (
                 <div
                   style={{
                     marginTop: 6,
@@ -685,6 +727,50 @@ export default function SkinsView({
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
                     {isDeleting ? "Eliminando..." : "Eliminar Skin"}
+                  </button>
+                </div>
+              )}
+
+              {/* Action row for personal custom cape */}
+              {skinType === "capa" && playerCapes.some((pc) => pc.id === appliedCape) && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    paddingTop: 10,
+                    borderTop: isDark
+                      ? "1px solid rgba(255,255,255,0.08)"
+                      : "1px solid rgba(0,0,0,0.08)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span style={{ fontSize: 13, color: "#10b981", fontWeight: 600 }}>
+                    Tu capa personalizada activa
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeletePersonalCape(appliedCape, e)}
+                    disabled={isDeleting}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      background: "rgba(239, 68, 68, 0.12)",
+                      border: "1px solid rgba(239, 68, 68, 0.25)",
+                      borderRadius: 8,
+                      padding: "5px 12px",
+                      color: "#f87171",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: isDeleting ? "default" : "pointer",
+                    }}
+                  >
+                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                    {isDeleting ? "Eliminando..." : "Eliminar Capa"}
                   </button>
                 </div>
               )}
@@ -775,13 +861,13 @@ export default function SkinsView({
                             position: "absolute",
                             top: 8,
                             right: 8,
-                            background: "rgba(56, 189, 248, 0.2)",
-                            border: "1px solid rgba(56, 189, 248, 0.4)",
+                            background: skinType === "capa" ? "rgba(16, 185, 129, 0.2)" : "rgba(56, 189, 248, 0.2)",
+                            border: skinType === "capa" ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid rgba(56, 189, 248, 0.4)",
                             borderRadius: 6,
                             padding: "2px 8px",
                             fontSize: 10,
                             fontWeight: 800,
-                            color: "#38bdf8",
+                            color: skinType === "capa" ? "#10b981" : "#38bdf8",
                             letterSpacing: "0.05em",
                             zIndex: 3,
                           }}
@@ -837,7 +923,6 @@ export default function SkinsView({
                           />
                         )}
                       </div>
-
                     </div>
 
                     {/* Name + Selected Status Row */}
@@ -897,4 +982,3 @@ export default function SkinsView({
     </div>
   )
 }
-

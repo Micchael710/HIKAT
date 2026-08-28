@@ -931,7 +931,6 @@ export const skinsApi = {
           items {
             id
             name
-            model
             imageUrl
             status
             createdAt
@@ -957,7 +956,6 @@ export const skinsApi = {
         createSkin(input: $input) {
           id
           name
-          model
           imageUrl
           status
           createdAt
@@ -978,7 +976,6 @@ export const skinsApi = {
         updateSkin(id: $id, input: $input) {
           id
           name
-          model
           imageUrl
           status
           createdAt
@@ -1031,7 +1028,6 @@ export const skinsApi = {
             id
             userId
             userDisplayName
-            model
             imageUrl
             createdAt
             updatedAt
@@ -1047,7 +1043,6 @@ export const skinsApi = {
     return data.adminPlayerSkins
   },
 
-
   async getAdminPlayerSkin(id: string): Promise<import("../types").AdminPlayerSkin | null> {
     const query = /* GraphQL */ `
       query AdminPlayerSkin($id: ID!) {
@@ -1055,7 +1050,6 @@ export const skinsApi = {
           id
           userId
           userDisplayName
-          model
           imageUrl
           createdAt
           updatedAt
@@ -1076,7 +1070,6 @@ export const skinsApi = {
           id
           userId
           userDisplayName
-          model
           imageUrl
           createdAt
           updatedAt
@@ -1098,6 +1091,178 @@ export const skinsApi = {
     `
     const data = await executeGraphQL<{ deleteAdminPlayerSkin: boolean }>(mutation, { id })
     return data.deleteAdminPlayerSkin
+  },
+}
+
+// --- Capes API Facade (Phase 07 Hardening) ---
+
+export const capesApi = {
+  async getAdminCapes(params?: { status?: string | null }): Promise<import("../types").CapeConnection> {
+    const query = /* GraphQL */ `
+      query AdminCapes($status: CapeStatus) {
+        adminCapes(status: $status) {
+          items {
+            id
+            name
+            imageUrl
+            status
+            createdAt
+            updatedAt
+          }
+          totalCount
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminCapes: import("../types").CapeConnection }>(query, {
+      status: params?.status === "ALL" ? null : params?.status,
+    })
+    return data.adminCapes
+  },
+
+  async createCape(input: import("../types").CreateCapeInput): Promise<import("../types").CapeItem> {
+    const mutation = /* GraphQL */ `
+      mutation CreateCape($input: CreateCapeInput!) {
+        createCape(input: $input) {
+          id
+          name
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ createCape: import("../types").CapeItem }>(mutation, { input })
+    return data.createCape
+  },
+
+  async updateCape(
+    id: string,
+    input: import("../types").UpdateCapeInput,
+  ): Promise<import("../types").CapeItem> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateCape($id: ID!, $input: UpdateCapeInput!) {
+        updateCape(id: $id, input: $input) {
+          id
+          name
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ updateCape: import("../types").CapeItem }>(mutation, { id, input })
+    return data.updateCape
+  },
+
+  async deleteCape(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteCape($id: ID!) {
+        deleteCape(id: $id)
+      }
+    `
+    const data = await executeGraphQL<{ deleteCape: boolean }>(mutation, { id })
+    return data.deleteCape
+  },
+
+  async getAdminPlayerCapes(
+    paramsOrFirst?: { first?: number; after?: string | null; search?: string | null } | number,
+    afterArg?: string | null,
+    searchArg?: string | null,
+  ): Promise<import("../types").AdminPlayerCapeConnection> {
+    let first = 50
+    let after: string | null | undefined = undefined
+    let search: string | null | undefined = undefined
+
+    if (typeof paramsOrFirst === "object" && paramsOrFirst !== null) {
+      first = paramsOrFirst.first ?? 50
+      after = paramsOrFirst.after
+      search = paramsOrFirst.search
+    } else {
+      if (typeof paramsOrFirst === "number") first = paramsOrFirst
+      after = afterArg
+      search = searchArg
+    }
+
+    const query = /* GraphQL */ `
+      query AdminPlayerCapes($first: Int, $after: String, $search: String) {
+        adminPlayerCapes(first: $first, after: $after, search: $search) {
+          totalCount
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          items {
+            id
+            userId
+            userDisplayName
+            name
+            imageUrl
+            createdAt
+            updatedAt
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminPlayerCapes: import("../types").AdminPlayerCapeConnection }>(query, {
+      first,
+      after,
+      search,
+    })
+    return data.adminPlayerCapes
+  },
+
+  async getAdminPlayerCape(id: string): Promise<import("../types").AdminPlayerCape | null> {
+    const query = /* GraphQL */ `
+      query AdminPlayerCape($id: ID!) {
+        adminPlayerCape(id: $id) {
+          id
+          userId
+          userDisplayName
+          name
+          imageUrl
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ adminPlayerCape: import("../types").AdminPlayerCape | null }>(query, { id })
+    return data.adminPlayerCape
+  },
+
+  async updateAdminPlayerCape(
+    id: string,
+    input: import("../types").UpdateAdminPlayerCapeInput,
+  ): Promise<import("../types").AdminPlayerCape> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateAdminPlayerCape($id: ID!, $input: UpdateAdminPlayerCapeInput!) {
+        updateAdminPlayerCape(id: $id, input: $input) {
+          id
+          userId
+          userDisplayName
+          name
+          imageUrl
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ updateAdminPlayerCape: import("../types").AdminPlayerCape }>(mutation, {
+      id,
+      input,
+    })
+    return data.updateAdminPlayerCape
+  },
+
+  async deleteAdminPlayerCape(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteAdminPlayerCape($id: ID!) {
+        deleteAdminPlayerCape(id: $id)
+      }
+    `
+    const data = await executeGraphQL<{ deleteAdminPlayerCape: boolean }>(mutation, { id })
+    return data.deleteAdminPlayerCape
   },
 }
 

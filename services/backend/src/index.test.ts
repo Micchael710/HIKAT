@@ -5779,7 +5779,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           createSkin(input: $input) {
             id
             name
-            model
             imageUrl
             status
           }
@@ -5822,14 +5821,12 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       expect(createData.data.createSkin.name).toBe("Alex Aventurera")
 
-      expect(createData.data.createSkin.model).toBe("SLIM")
-
       // 3. Public catalog query
 
       const publicQuery = `
         query {
           skins {
-            items { id name model imageUrl }
+            items { id name imageUrl }
             totalCount
           }
         }
@@ -7366,7 +7363,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
 
           body: JSON.stringify({
-            query: `query { myPlayerSkin { id userId model imageUrl } }`,
+            query: `query { myPlayerSkin { id userId imageUrl } }`,
           }),
         }),
 
@@ -7567,7 +7564,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
               setMyPlayerSkin(input: $input) {
                 id
                 userId
-                model
                 imageUrl
               }
             }`,
@@ -7586,8 +7582,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const setSkinJson = (await setSkinRes.json()) as any
 
       expect(setSkinJson.errors).toBeUndefined()
-
-      expect(setSkinJson.data.setMyPlayerSkin.model).toBe("CLASSIC")
 
       expect(setSkinJson.data.setMyPlayerSkin.imageUrl).toBe(
         `/media/content/${mediaId1}`,
@@ -7608,7 +7602,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
 
           body: JSON.stringify({
-            query: `query { myPlayerSkin { id userId model imageUrl } }`,
+            query: `query { myPlayerSkin { id userId imageUrl } }`,
           }),
         }),
 
@@ -7620,8 +7614,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(mySkinJson.errors).toBeUndefined()
 
       expect(mySkinJson.data.myPlayerSkin.id).toBe(playerSkinId)
-
-      expect(mySkinJson.data.myPlayerSkin.model).toBe("CLASSIC")
 
       // 10. Public skins query does NOT return player custom skins (Strict domain isolation)
 
@@ -7658,7 +7650,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
 
           body: JSON.stringify({
-            query: `query { adminPlayerSkins { items { id userId userDisplayName model imageUrl } totalCount } }`,
+            query: `query { adminPlayerSkins { items { id userId userDisplayName imageUrl } totalCount } }`,
           }),
         }),
 
@@ -7675,10 +7667,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         adminListJson.data.adminPlayerSkins.items[0]?.userDisplayName,
       ).toBe("SteveMiner")
 
-      expect(adminListJson.data.adminPlayerSkins.items[0]?.model).toBe(
-        "CLASSIC",
-      )
-
       // 12. Admin single player skin query
 
       const adminSingleRes = await worker.fetch(
@@ -7692,7 +7680,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
 
           body: JSON.stringify({
-            query: `query GetSingle($id: ID!) { adminPlayerSkin(id: $id) { id userDisplayName model } }`,
+            query: `query GetSingle($id: ID!) { adminPlayerSkin(id: $id) { id userDisplayName imageUrl } }`,
 
             variables: { id: playerSkinId },
           }),
@@ -7709,7 +7697,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         "SteveMiner",
       )
 
-      // 13. Admin updates player skin texture to SLIM texture
+      // 13. Admin updates player skin texture to new texture
       const slimData = new Uint8Array(64 * 64 * 4).fill(255)
       for (let y = 16; y < 20; y++) {
         for (let x = 50; x < 52; x++) {
@@ -7743,7 +7731,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
           body: JSON.stringify({
             query: `mutation Update($id: ID!, $input: UpdateAdminPlayerSkinInput!) {
-              updateAdminPlayerSkin(id: $id, input: $input) { id model }
+              updateAdminPlayerSkin(id: $id, input: $input) { id imageUrl }
             }`,
 
             variables: { id: playerSkinId, input: { mediaId: slimMediaId } },
@@ -7756,8 +7744,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const adminUpdateJson = (await adminUpdateRes.json()) as any
 
       expect(adminUpdateJson.errors).toBeUndefined()
-
-      expect(adminUpdateJson.data.updateAdminPlayerSkin.model).toBe("SLIM")
+      expect(adminUpdateJson.data.updateAdminPlayerSkin.id).toBe(playerSkinId)
 
       // 14. Safe Replacement: Upload a second skin and replace
 
@@ -7822,7 +7809,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             query: `mutation SetSkin($input: SetPlayerSkinInput!) {
               setMyPlayerSkin(input: $input) {
                 id
-                model
                 imageUrl
               }
             }`,
@@ -8012,7 +7998,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             },
             body: JSON.stringify({
               query: `mutation SetSkin($input: SetPlayerSkinInput!) {
-                setMyPlayerSkin(input: $input) { id model }
+                setMyPlayerSkin(input: $input) { id imageUrl }
               }`,
               variables: { input: { mediaId: media.id } },
             }),
@@ -8028,7 +8014,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             },
             body: JSON.stringify({
               query: `mutation SetSkin($input: SetPlayerSkinInput!) {
-                setMyPlayerSkin(input: $input) { id model }
+                setMyPlayerSkin(input: $input) { id imageUrl }
               }`,
               variables: { input: { mediaId: media.id } },
             }),
@@ -8243,7 +8229,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             Authorization: `Bearer ${playerToken}`,
           },
           body: JSON.stringify({
-            query: `query { myActiveSkin { type skinId model imageUrl name } }`,
+            query: `query { myActiveSkin { type skinId imageUrl name } }`,
           }),
         }),
         testEnv,
@@ -8261,7 +8247,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             Authorization: `Bearer ${playerToken}`,
           },
           body: JSON.stringify({
-            query: `mutation { setMyActiveSkin(input: { type: CUSTOM }) { type model } }`,
+            query: `mutation { setMyActiveSkin(input: { type: CUSTOM }) { type name } }`,
           }),
         }),
         testEnv,
@@ -8270,7 +8256,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(failCustomJson.errors).toBeDefined()
       expect(failCustomJson.errors[0].extensions?.code).toBe("VALIDATION_ERROR")
 
-      // 3. Upload custom skin (Alex Slim)
+      // 3. Upload custom skin (Alex Slim texture)
       const ticketRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
@@ -8318,7 +8304,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
           body: JSON.stringify({
             query: `mutation SetSkin($input: SetPlayerSkinInput!) {
-              setMyPlayerSkin(input: $input) { id model }
+              setMyPlayerSkin(input: $input) { id imageUrl }
             }`,
             variables: { input: { mediaId: mediaJson.id } },
           }),
@@ -8327,9 +8313,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       )
       const setSkinData = (await setSkinRes.json()) as any
       expect(setSkinData.errors).toBeUndefined()
-      expect(setSkinData.data.setMyPlayerSkin.model).toBe("SLIM")
+      expect(setSkinData.data.setMyPlayerSkin.id).toBeDefined()
 
-      // 4. Setting active skin to CUSTOM now succeeds and auto-detects SLIM
+      // 4. Setting active skin to CUSTOM now succeeds
       const setCustomActiveRes = await worker.fetch(
         new Request("http://localhost/graphql", {
           method: "POST",
@@ -8338,7 +8324,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             Authorization: `Bearer ${playerToken}`,
           },
           body: JSON.stringify({
-            query: `mutation { setMyActiveSkin(input: { type: CUSTOM }) { type model imageUrl name } }`,
+            query: `mutation { setMyActiveSkin(input: { type: CUSTOM }) { type imageUrl name } }`,
           }),
         }),
         testEnv,
@@ -8346,7 +8332,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const setCustomActiveJson = (await setCustomActiveRes.json()) as any
       expect(setCustomActiveJson.errors).toBeUndefined()
       expect(setCustomActiveJson.data.setMyActiveSkin.type).toBe("CUSTOM")
-      expect(setCustomActiveJson.data.setMyActiveSkin.model).toBe("SLIM")
 
       // 5. Query myActiveSkin returns CUSTOM
       const queryActiveRes = await worker.fetch(
@@ -8357,16 +8342,15 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             Authorization: `Bearer ${playerToken}`,
           },
           body: JSON.stringify({
-            query: `query { myActiveSkin { type model imageUrl name } }`,
+            query: `query { myActiveSkin { type imageUrl name } }`,
           }),
         }),
         testEnv,
       )
       const queryActiveJson = (await queryActiveRes.json()) as any
       expect(queryActiveJson.data.myActiveSkin.type).toBe("CUSTOM")
-      expect(queryActiveJson.data.myActiveSkin.model).toBe("SLIM")
 
-      // 6. Create a Global Skin (Classic Steve)
+      // 6. Create a Global Skin
       const classicData = new Uint8Array(64 * 64 * 4).fill(150)
       const classicPng = encode({ width: 64, height: 64, data: classicData, channels: 4, depth: 8 })
       const globalMediaId = "media-global-" + crypto.randomUUID()
@@ -8387,7 +8371,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       await db.insert(skins).values({
         id: globalSkinId,
         name: "Caballero Real",
-        model: "CLASSIC",
         mediaId: globalMediaId,
         status: "AVAILABLE",
         createdBy: adminId,
@@ -8405,7 +8388,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
           body: JSON.stringify({
             query: `mutation SetActive($input: SetActiveSkinInput!) {
-              setMyActiveSkin(input: $input) { type skinId model name }
+              setMyActiveSkin(input: $input) { type skinId name }
             }`,
             variables: { input: { type: "GLOBAL", skinId: globalSkinId } },
           }),
@@ -8416,7 +8399,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(setGlobalActiveJson.errors).toBeUndefined()
       expect(setGlobalActiveJson.data.setMyActiveSkin.type).toBe("GLOBAL")
       expect(setGlobalActiveJson.data.setMyActiveSkin.skinId).toBe(globalSkinId)
-      expect(setGlobalActiveJson.data.setMyActiveSkin.model).toBe("CLASSIC")
       expect(setGlobalActiveJson.data.setMyActiveSkin.name).toBe("Caballero Real")
 
       // 8. Test Fallback: Admin deletes global skin via deleteSkin -> D1 selection immediately reconciles to CUSTOM
@@ -8442,7 +8424,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
             Authorization: `Bearer ${playerToken}`,
           },
           body: JSON.stringify({
-            query: `query { myActiveSkin { type model imageUrl name } }`,
+            query: `query { myActiveSkin { type imageUrl name } }`,
           }),
         }),
         testEnv,
@@ -8450,7 +8432,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const fallbackJson = (await fallbackRes.json()) as any
       expect(fallbackJson.errors).toBeUndefined()
       expect(fallbackJson.data.myActiveSkin.type).toBe("CUSTOM")
-      expect(fallbackJson.data.myActiveSkin.model).toBe("SLIM")
     })
 
     it("Phase 07 Hardening: deleteSkin without custom skin removes D1 selection row immediately", async () => {
@@ -8480,7 +8461,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       await db.insert(skins).values({
         id: global2Id,
         name: "Global Skin 2",
-        model: "CLASSIC",
         mediaId: media2Id,
         status: "AVAILABLE",
         createdBy: adminId,
@@ -8547,7 +8527,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       await db.insert(skins).values({
         id: global3Id,
         name: "Global Skin 3",
-        model: "CLASSIC",
         mediaId: media3Id,
         status: "AVAILABLE",
         createdBy: adminId,
@@ -8566,7 +8545,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         id: crypto.randomUUID(),
         userId: player3Id,
         mediaId: media3Id,
-        model: "SLIM",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
@@ -8614,7 +8592,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       await db.insert(skins).values({
         id: global4Id,
         name: "Global Skin 4",
-        model: "CLASSIC",
         mediaId: media4Id,
         status: "AVAILABLE",
         createdBy: adminId,
@@ -8633,7 +8610,6 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         id: crypto.randomUUID(),
         userId: player4Id,
         mediaId: media4Id,
-        model: "SLIM",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
@@ -8663,6 +8639,304 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         .get()
       expect(selectionAfter?.type).toBe("GLOBAL")
       expect(selectionAfter?.skinId).toBe(global4Id)
+    })
+  })
+
+  describe("HiKAT Capes Management & Selection (Phase 07 Hardening)", () => {
+    let mockR2: ReturnType<typeof createTestR2Bucket>
+
+    const createEnv = (): Env => ({
+      DB: testD1 as unknown as D1Database,
+      ASSETS: mockR2 as unknown as R2Bucket,
+      AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+      AUTH_ISSUER: DEFAULT_AUTH_ISSUER,
+      ENVIRONMENT: "test",
+    })
+
+    beforeEach(() => {
+      mockR2 = createTestR2Bucket()
+    })
+
+    it("manages global capes, multiple player custom capes, active cape selection with canonical NONE, and limits", async () => {
+      const testEnv = createEnv()
+      const db = createDatabase(testEnv.DB!)
+
+      const adminId = "admin-cape-" + crypto.randomUUID()
+      const adminSessionId = "sess-admin-cape-" + crypto.randomUUID()
+      const playerId = "player-cape-" + crypto.randomUUID()
+      const playerSessionId = "sess-player-cape-" + crypto.randomUUID()
+
+      await db.insert(users).values([
+        { id: adminId, displayName: "CapeAdmin", role: "ADMIN" },
+        { id: playerId, displayName: "CapePlayer", role: "PLAYER" },
+      ])
+
+      await db.insert(sessions).values([
+        {
+          id: adminSessionId,
+          userId: adminId,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: playerSessionId,
+          userId: playerId,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      ])
+
+      const adminToken = await createTestAccessToken({
+        userId: adminId,
+        sessionId: adminSessionId,
+        role: "ADMIN",
+        displayName: "CapeAdmin",
+      })
+      const playerToken = await createTestAccessToken({
+        userId: playerId,
+        sessionId: playerSessionId,
+        role: "PLAYER",
+        displayName: "CapePlayer",
+      })
+
+      // 1. Initial State: Player has no active cape (canonical NONE)
+      const initActiveRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `query { myActiveCape { type capeId playerCapeId imageUrl name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const initActiveJson = (await initActiveRes.json()) as any
+      expect(initActiveJson.errors).toBeUndefined()
+      expect(initActiveJson.data.myActiveCape.type).toBe("NONE")
+      expect(initActiveJson.data.myActiveCape.capeId).toBeNull()
+      expect(initActiveJson.data.myActiveCape.playerCapeId).toBeNull()
+      expect(initActiveJson.data.myActiveCape.name).toBe("Sin capa")
+
+      // 2. Admin creates a Global Cape (Standard 64x32 or HD 128x64)
+      const capeData = new Uint8Array(64 * 32 * 4).fill(180)
+      const capePng = encode({ width: 64, height: 32, data: capeData, channels: 4, depth: 8 })
+      const globalMediaId = "media-cape-global-" + crypto.randomUUID()
+
+      await db.insert(contentMedia).values({
+        id: globalMediaId,
+        objectKey: `content/${globalMediaId}.png`,
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: capePng.byteLength,
+        createdBy: adminId,
+        createdAt: new Date().toISOString(),
+      })
+      await mockR2.put(`content/${globalMediaId}.png`, capePng.buffer as ArrayBuffer, {
+        httpMetadata: { contentType: "image/png" },
+      })
+
+      const createCapeRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation CreateCape($input: CreateCapeInput!) {
+              createCape(input: $input) { id name imageUrl status }
+            }`,
+            variables: {
+              input: {
+                name: "Capa Fundador",
+                mediaId: globalMediaId,
+                status: "AVAILABLE",
+              },
+            },
+          }),
+        }),
+        testEnv,
+      )
+      const createCapeJson = (await createCapeRes.json()) as any
+      expect(createCapeJson.errors).toBeUndefined()
+      const globalCapeId = createCapeJson.data.createCape.id
+      expect(globalCapeId).toBeDefined()
+      expect(createCapeJson.data.createCape.name).toBe("Capa Fundador")
+
+      // 3. Player selects Global Cape
+      const setGlobalRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation SetActiveCape($input: SetActiveCapeInput!) {
+              setMyActiveCape(input: $input) { type capeId playerCapeId name }
+            }`,
+            variables: { input: { type: "GLOBAL", capeId: globalCapeId } },
+          }),
+        }),
+        testEnv,
+      )
+      const setGlobalJson = (await setGlobalRes.json()) as any
+      expect(setGlobalJson.errors).toBeUndefined()
+      expect(setGlobalJson.data.setMyActiveCape.type).toBe("GLOBAL")
+      expect(setGlobalJson.data.setMyActiveCape.capeId).toBe(globalCapeId)
+      expect(setGlobalJson.data.setMyActiveCape.playerCapeId).toBeNull()
+
+      // 4. Player uploads and adds a custom cape (e.g. HD 128x64 OptiFine style)
+      const playerCapeTicketRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation { createPlayerCapeUpload { uploadUrl uploadToken } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const playerCapeTicket = ((await playerCapeTicketRes.json()) as any).data.createPlayerCapeUpload.uploadToken
+
+      const hdCapeData = new Uint8Array(128 * 64 * 4).fill(220)
+      const hdCapePng = encode({ width: 128, height: 64, data: hdCapeData, channels: 4, depth: 8 })
+
+      const uploadCapeRes = await worker.fetch(
+        new Request("http://localhost/media/player-cape/upload", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "image/png",
+            Authorization: `Bearer ${playerToken}`,
+            "X-Upload-Token": playerCapeTicket,
+          },
+          body: hdCapePng as unknown as BodyInit,
+        }),
+        testEnv,
+      )
+      const uploadCapeJson = (await uploadCapeRes.json()) as any
+      expect(uploadCapeRes.status).toBe(201)
+
+      const addCapeRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation AddPlayerCape($input: AddPlayerCapeInput!) {
+              addMyPlayerCape(input: $input) { id name imageUrl }
+            }`,
+            variables: { input: { name: "Mi Capa Dragón", mediaId: uploadCapeJson.id } },
+          }),
+        }),
+        testEnv,
+      )
+      const addCapeJson = (await addCapeRes.json()) as any
+      expect(addCapeJson.errors).toBeUndefined()
+      const playerCapeId = addCapeJson.data.addMyPlayerCape.id
+      expect(playerCapeId).toBeDefined()
+
+      // Adding custom cape automatically sets active selection to CUSTOM
+      const queryActiveAfterAdd = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `query { myActiveCape { type capeId playerCapeId name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const activeAfterAddJson = (await queryActiveAfterAdd.json()) as any
+      expect(activeAfterAddJson.data.myActiveCape.type).toBe("CUSTOM")
+      expect(activeAfterAddJson.data.myActiveCape.playerCapeId).toBe(playerCapeId)
+      expect(activeAfterAddJson.data.myActiveCape.capeId).toBeNull()
+
+      // 5. Player sets active cape to NONE explicitly
+      const setNoneRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation { setMyActiveCape(input: { type: NONE }) { type capeId playerCapeId name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const setNoneJson = (await setNoneRes.json()) as any
+      expect(setNoneJson.errors).toBeUndefined()
+      expect(setNoneJson.data.setMyActiveCape.type).toBe("NONE")
+      expect(setNoneJson.data.setMyActiveCape.capeId).toBeNull()
+      expect(setNoneJson.data.setMyActiveCape.playerCapeId).toBeNull()
+
+      // 6. Delete custom cape reconciles active selection to NONE if it was active
+      await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation SetActiveCape($input: SetActiveCapeInput!) {
+              setMyActiveCape(input: $input) { type playerCapeId }
+            }`,
+            variables: { input: { type: "CUSTOM", playerCapeId } },
+          }),
+        }),
+        testEnv,
+      )
+
+      const deleteMyCapeRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation DeleteMyCape($id: ID!) {
+              deleteMyPlayerCape(id: $id)
+            }`,
+            variables: { id: playerCapeId },
+          }),
+        }),
+        testEnv,
+      )
+      const deleteMyCapeJson = (await deleteMyCapeRes.json()) as any
+      expect(deleteMyCapeJson.data.deleteMyPlayerCape).toBe(true)
+
+      const queryActiveAfterDel = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${playerToken}`,
+          },
+          body: JSON.stringify({
+            query: `query { myActiveCape { type capeId playerCapeId name } }`,
+          }),
+        }),
+        testEnv,
+      )
+      const activeAfterDelJson = (await queryActiveAfterDel.json()) as any
+      expect(activeAfterDelJson.data.myActiveCape.type).toBe("NONE")
+      expect(activeAfterDelJson.data.myActiveCape.capeId).toBeNull()
+      expect(activeAfterDelJson.data.myActiveCape.playerCapeId).toBeNull()
     })
   })
 })
