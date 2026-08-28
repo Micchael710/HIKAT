@@ -2314,4 +2314,163 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(plan.conflicts[0]).toContain("no se pudo determinar el tipo de contenido")
     })
   })
+
+  describe("8. Modrinth Authoritative Version-Level Type Metadata (Without all_project_types)", () => {
+    const adapter = new ModrinthAdapter()
+
+    it("1. determines DATA_PACK when project_type is mod but versions only have datapack loaders (no all_project_types)", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.endsWith("/project/dp-only-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "dp-only-mod", title: "DP Only Mod", project_type: "mod" }),
+          }
+        }
+        if (u.endsWith("/project/dp-only-mod/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: "v1", loaders: ["datapack"], game_versions: ["1.21.1"] },
+            ],
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const types = await adapter.getSupportedContentTypes(env, "dp-only-mod")
+      expect(types).toEqual(["DATA_PACK"])
+    })
+
+    it("2. detects [MOD, DATA_PACK] on project_type: mod with NeoForge + Data Pack versions, generating ambiguity conflict for unpinned dep", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-parent/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-root",
+                loaders: ["neoforge"],
+                game_versions: ["1.21.1"],
+                files: [{ filename: "root.jar", size: 100, url: "https://cdn/r.jar" }],
+                dependencies: [{ project_id: "hybrid-proj", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-parent")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-parent", project_type: "mod" }) }
+        }
+        if (u.includes("/project/hybrid-proj/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: "v-mod", loaders: ["neoforge"], game_versions: ["1.21.1"] },
+              { id: "v-dp", loaders: ["datapack"], game_versions: ["1.21.1"] },
+            ],
+          }
+        }
+        if (u.includes("/project/hybrid-proj")) {
+          return { ok: true, status: 200, json: async () => ({ id: "hybrid-proj", title: "Hybrid Project", project_type: "mod" }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const supported = await adapter.getSupportedContentTypes(env, "hybrid-proj")
+      expect(supported).toContain("MOD")
+      expect(supported).toContain("DATA_PACK")
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-parent",
+        versionId: "v-root",
+        contentType: "MOD",
+      })
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts[0]).toContain("es multi-tipo y ambigua")
+    })
+
+    it("3. determines RESOURCE_PACK for resourcepack project without all_project_types and loader minecraft", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.endsWith("/project/faithful-rp")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "faithful-rp", title: "Faithful RP", project_type: "resourcepack" }),
+          }
+        }
+        if (u.endsWith("/project/faithful-rp/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: "v1", loaders: ["minecraft"], game_versions: ["1.21.1"] },
+            ],
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const types = await adapter.getSupportedContentTypes(env, "faithful-rp")
+      expect(types).toEqual(["RESOURCE_PACK"])
+    })
+
+    it("4. determines SHADER for shader project without all_project_types", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.endsWith("/project/bsl-shader")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "bsl-shader", title: "BSL Shader", project_type: "shader" }),
+          }
+        }
+        if (u.endsWith("/project/bsl-shader/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: "v1", loaders: [], game_versions: ["1.21.1"] },
+            ],
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const types = await adapter.getSupportedContentTypes(env, "bsl-shader")
+      expect(types).toEqual(["SHADER"])
+    })
+
+    it("5. determines MOD for normal NeoForge mod project", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.endsWith("/project/jei-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "jei-mod", title: "JEI Mod", project_type: "mod" }),
+          }
+        }
+        if (u.endsWith("/project/jei-mod/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: "v1", loaders: ["neoforge"], game_versions: ["1.21.1"] },
+            ],
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const types = await adapter.getSupportedContentTypes(env, "jei-mod")
+      expect(types).toEqual(["MOD"])
+    })
+  })
 })

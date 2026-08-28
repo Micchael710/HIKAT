@@ -278,13 +278,14 @@ export class ModrinthAdapter implements ModProviderAdapter {
 
   async getSupportedContentTypes(env: Env, projectId: string): Promise<ContentTypeGql[]> {
     const baseUrl = this.getBaseUrl(env)
-    const url = `${baseUrl}/project/${encodeURIComponent(projectId)}`
+    const projectUrl = `${baseUrl}/project/${encodeURIComponent(projectId)}`
+    const versionsUrl = `${baseUrl}/project/${encodeURIComponent(projectId)}/version`
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 15000)
 
     try {
-      const res = await fetch(url, {
+      const res = await fetch(projectUrl, {
         headers: {
           "User-Agent": USER_AGENT,
           Accept: "application/json",
@@ -301,15 +302,65 @@ export class ModrinthAdapter implements ModProviderAdapter {
         additional_categories?: string[]
       }
 
-      const types = new Set<ContentTypeGql>()
       const allTypes = (data.all_project_types || []).map((t) => t.toLowerCase())
       const cats = [...(data.categories || []), ...(data.additional_categories || [])].map((c) => c.toLowerCase())
       const pt = (data.project_type || "").toLowerCase()
 
-      if (allTypes.includes("mod") || pt === "mod") types.add("MOD")
-      if (allTypes.includes("datapack") || cats.includes("datapack")) types.add("DATA_PACK")
-      if (allTypes.includes("resourcepack") || pt === "resourcepack") types.add("RESOURCE_PACK")
-      if (allTypes.includes("shader") || pt === "shader") types.add("SHADER")
+      // Fetch versions to inspect authorative version loaders
+      let versions: Array<{ loaders?: string[] }> = []
+      try {
+        const vRes = await fetch(versionsUrl, {
+          headers: {
+            "User-Agent": USER_AGENT,
+            Accept: "application/json",
+          },
+          signal: controller.signal,
+        })
+        if (vRes.ok) {
+          const vData = await vRes.json()
+          if (Array.isArray(vData)) {
+            versions = vData
+          }
+        }
+      } catch {
+        // Ignore error and use project metadata fallback
+      }
+
+      const types = new Set<ContentTypeGql>()
+
+      if (versions.length > 0) {
+        let hasModVersion = false
+        let hasDpVersion = false
+        let hasRpVersion = false
+
+        for (const v of versions) {
+          const rawLoaders = (v.loaders || []).map((l: string) => l.toLowerCase())
+          if (rawLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
+            hasModVersion = true
+          }
+          if (rawLoaders.includes("datapack")) {
+            hasDpVersion = true
+          }
+          if (
+            rawLoaders.includes("minecraft") &&
+            (pt === "resourcepack" || allTypes.includes("resourcepack") || cats.includes("resourcepack"))
+          ) {
+            hasRpVersion = true
+          }
+        }
+
+        if (hasModVersion) types.add("MOD")
+        if (hasDpVersion) types.add("DATA_PACK")
+        if (hasRpVersion || pt === "resourcepack" || allTypes.includes("resourcepack")) types.add("RESOURCE_PACK")
+        if (pt === "shader" || allTypes.includes("shader")) types.add("SHADER")
+      }
+
+      if (types.size === 0) {
+        if (allTypes.includes("mod") || pt === "mod") types.add("MOD")
+        if (allTypes.includes("datapack") || cats.includes("datapack")) types.add("DATA_PACK")
+        if (allTypes.includes("resourcepack") || pt === "resourcepack") types.add("RESOURCE_PACK")
+        if (allTypes.includes("shader") || pt === "shader") types.add("SHADER")
+      }
 
       return Array.from(types)
     } catch {
