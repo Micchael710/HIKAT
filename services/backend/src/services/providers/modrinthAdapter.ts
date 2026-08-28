@@ -425,7 +425,27 @@ export class ModrinthAdapter implements ModProviderAdapter {
 
       const data = await res.json()
       const list = Array.isArray(data) ? data : data ? [data] : []
-      return list.map((v) => this.mapModrinthVersion(v, contentType))
+      const mapped = list.map((v) => this.mapModrinthVersion(v, contentType))
+
+      // Authoritatively filter by requested contentType
+      return mapped.filter((v) => {
+        if (contentType === "MOD") {
+          return (
+            v.contentType === "MOD" &&
+            v.loaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l.toLowerCase()))
+          )
+        }
+        if (contentType === "DATA_PACK") {
+          return v.contentType === "DATA_PACK"
+        }
+        if (contentType === "RESOURCE_PACK") {
+          return v.contentType === "RESOURCE_PACK"
+        }
+        if (contentType === "SHADER") {
+          return v.contentType === "SHADER"
+        }
+        return true
+      })
     } finally {
       clearTimeout(timeoutId)
     }
@@ -518,7 +538,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
     } else if (lowerLoaders.some((l: string) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
       versionContentType = "MOD"
     } else if (lowerLoaders.includes("minecraft")) {
-      versionContentType = fallbackContentType || "RESOURCE_PACK"
+      versionContentType = fallbackContentType === "SHADER" ? "SHADER" : "RESOURCE_PACK"
     } else if (fallbackContentType) {
       versionContentType = fallbackContentType
     }

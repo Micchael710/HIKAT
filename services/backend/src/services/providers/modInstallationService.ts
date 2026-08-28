@@ -6,6 +6,7 @@ import type {
   InstallModPlanInputGql,
   GameFileCategoryGql,
   SyncPolicyGql,
+  ModInstallationPlanItemGql,
 } from "@hikat/graphql"
 import {
   MAX_GAME_FILE_SIZE_BYTES,
@@ -191,7 +192,7 @@ export async function installModPlan(
 
   try {
     // 4. Download and validate each binary in parallel
-    const downloadedItems = await Promise.all(
+    const stageResults = await Promise.allSettled(
       itemsToProcess.map(async (item) => {
         const adapter = modProviderManager.getAdapter(item.provider)
         const versionObj = await adapter.getVersion(
@@ -341,6 +342,22 @@ export async function installModPlan(
           category: validationCategory as GameFileCategoryGql,
         }
       }),
+    )
+
+    const rejected = stageResults.find((r) => r.status === "rejected")
+    if (rejected && rejected.status === "rejected") {
+      throw rejected.reason
+    }
+
+    const downloadedItems = stageResults.map(
+      (r) => (r as PromiseFulfilledResult<{
+        item: ModInstallationPlanItemGql
+        filename: string
+        sizeBytes: number
+        sha256: string
+        objectKey: string
+        category: GameFileCategoryGql
+      }>).value,
     )
 
     // 5. Construct ALL D1 statements into a single atomic batch

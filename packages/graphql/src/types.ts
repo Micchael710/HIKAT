@@ -801,6 +801,7 @@ export interface ModVersionOverrideInputGql {
   provider: ModProviderGql
   projectId: string
   versionId: string
+  contentType?: ContentTypeGql | null
 }
 
 export interface ResolveModPlanInputGql {

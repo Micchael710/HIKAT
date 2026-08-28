@@ -72,8 +72,13 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
 
     const overridesList: ModVersionOverrideInput[] = Object.entries(manualOverrides).map(
       ([key, verId]) => {
-        const [p, pid] = key.split(":")
-        return { provider: p as ModProvider, projectId: pid, versionId: verId }
+        const [p, pid, cType] = key.split(":")
+        return {
+          provider: p as ModProvider,
+          projectId: pid,
+          versionId: verId,
+          contentType: (cType as any) || undefined,
+        }
       },
     )
 
@@ -110,8 +115,13 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
 
       const overridesList: ModVersionOverrideInput[] = Object.entries(manualOverrides).map(
         ([key, verId]) => {
-          const [p, pid] = key.split(":")
-          return { provider: p as ModProvider, projectId: pid, versionId: verId }
+          const [p, pid, cType] = key.split(":")
+          return {
+            provider: p as ModProvider,
+            projectId: pid,
+            versionId: verId,
+            contentType: (cType as any) || undefined,
+          }
         },
       )
 
@@ -221,32 +231,30 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   style={{
                     fontSize: "11px",
                     fontWeight: "600",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                    background: isModrinth ? "rgba(16, 185, 129, 0.15)" : "rgba(249, 115, 22, 0.15)",
-                    color: isModrinth ? "#10b981" : "#f97316",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    background: isModrinth ? "rgba(16, 185, 129, 0.2)" : "rgba(249, 115, 22, 0.2)",
+                    color: isModrinth ? "#34d399" : "#fb923c",
                     border: `1px solid ${isModrinth ? "rgba(16, 185, 129, 0.3)" : "rgba(249, 115, 22, 0.3)"}`,
                   }}
                 >
-                  {isModrinth ? "Modrinth" : "CurseForge"}
+                  {provider}
                 </span>
-                {detail?.isInstalled && (
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: "600",
-                      padding: "2px 6px",
-                      borderRadius: "4px",
-                      background: "rgba(59, 130, 246, 0.15)",
-                      color: "#60a5fa",
-                      border: "1px solid rgba(59, 130, 246, 0.3)",
-                    }}
-                  >
-                    Ya instalado ({detail.installedVersion})
-                  </span>
-                )}
+                <span
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: "600",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    background: "rgba(139, 92, 246, 0.2)",
+                    color: "#c084fc",
+                    border: "1px solid rgba(139, 92, 246, 0.3)",
+                  }}
+                >
+                  {contentType}
+                </span>
               </div>
-              <div style={{ fontSize: "13px", color: "#9ca3af", marginTop: "2px" }}>
+              <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "4px" }}>
                 por <span style={{ color: "#e5e7eb" }}>{detail?.author || "..."}</span>
               </div>
             </div>
@@ -396,7 +404,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     {plan.items
                       .filter((item) => item.isDependency)
                       .map((dep) => {
-                        const depKey = `${dep.provider}:${dep.projectId}`
+                        const depKey = `${dep.provider}:${dep.projectId}:${dep.contentType}`
                         return (
                           <div
                             key={depKey}
@@ -527,6 +535,100 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Optional Dependencies Section */}
+              {plan && plan.optionalDependencies && plan.optionalDependencies.length > 0 && (
+                <div
+                  data-testid="optional-dependencies-section"
+                  style={{
+                    background: "rgba(0, 0, 0, 0.2)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    borderRadius: "10px",
+                    padding: "16px",
+                    marginBottom: "20px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "600", color: "#e5e7eb" }}>
+                      Dependencias opcionales
+                    </h4>
+                    <span style={{ fontSize: "12px", color: "#9ca3af" }}>
+                      No se instalará automáticamente
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {plan.optionalDependencies.map((opt) => {
+                      const optKey = `${opt.provider}:${opt.projectId}:${opt.contentType}`
+                      return (
+                        <div
+                          key={optKey}
+                          data-testid={`optional-dependency-item-${opt.projectId}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "8px 12px",
+                            background: "rgba(255, 255, 255, 0.03)",
+                            borderRadius: "6px",
+                            border: "1px solid rgba(255, 255, 255, 0.05)",
+                          }}
+                        >
+                          <div>
+                            <span style={{ fontWeight: "600", fontSize: "13px", color: "#f3f4f6" }}>
+                              {opt.projectName}
+                            </span>
+                            <span style={{ fontSize: "12px", color: "#9ca3af", marginLeft: "8px" }}>
+                              [{opt.provider} · {opt.contentType}]
+                            </span>
+                            {opt.versionNumber && (
+                              <span style={{ fontSize: "12px", color: "#9ca3af", marginLeft: "6px" }}>
+                                {opt.versionNumber}
+                              </span>
+                            )}
+                          </div>
+
+                          <div>
+                            {opt.isInstalled ? (
+                              <span
+                                data-testid={`optional-installed-${opt.projectId}`}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  background: "rgba(107, 114, 128, 0.2)",
+                                  color: "#9ca3af",
+                                }}
+                              >
+                                Ya instalada
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  background: "rgba(234, 179, 8, 0.15)",
+                                  color: "#fde047",
+                                }}
+                              >
+                                No instalada (Opcional)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div

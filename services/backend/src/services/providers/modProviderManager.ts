@@ -180,12 +180,12 @@ export class ModProviderManager {
       }
     }
 
-    // "Todos" (ALL providers in parallel with deterministic gap-free pagination)
+    // "Todos" (ALL providers in parallel with deterministic gap-free chunked pagination)
     const fetchLimit = offset + limit
     const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-      this.modrinth.searchMods(env, query, minecraftVersion, loader, fetchLimit, 0, contentType),
+      this.fetchChunkedFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, 100),
       this.curseforge.isConfigured(env)
-        ? this.curseforge.searchMods(env, query, minecraftVersion, loader, fetchLimit, 0, contentType)
+        ? this.fetchChunkedFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, 50)
         : Promise.resolve({ items: [], totalCount: 0 }),
     ])
 
@@ -236,6 +236,42 @@ export class ModProviderManager {
       minecraftVersion,
       neoForgeVersion,
     }
+  }
+
+  private async fetchChunkedFromProvider(
+    adapter: ModProviderAdapter,
+    env: Env,
+    query: string,
+    minecraftVersion: string,
+    loader: string,
+    neededCount: number,
+    contentType: ContentTypeGql,
+    pageSize: number,
+  ): Promise<{ items: NormalizedModProject[]; totalCount: number }> {
+    const allItems: NormalizedModProject[] = []
+    let currentOffset = 0
+    let totalCount = 0
+
+    while (allItems.length < neededCount) {
+      const take = Math.min(pageSize, neededCount - allItems.length)
+      if (take <= 0) break
+      const res = await adapter.searchMods(
+        env,
+        query,
+        minecraftVersion,
+        loader,
+        take,
+        currentOffset,
+        contentType,
+      )
+      totalCount = res.totalCount
+      if (!res.items || res.items.length === 0) break
+      allItems.push(...res.items)
+      currentOffset += res.items.length
+      if (currentOffset >= totalCount || res.items.length < take) break
+    }
+
+    return { items: allItems, totalCount }
   }
 
   async getProjectDetail(
@@ -365,13 +401,23 @@ export class ModProviderManager {
 
     const manualOverridesMap = new Map<string, string>()
     for (const ov of input.manualOverrides || []) {
-      manualOverridesMap.set(`${ov.provider}:${ov.projectId}`, ov.versionId)
+      if (ov.contentType) {
+        manualOverridesMap.set(`${ov.provider}:${ov.projectId}:${ov.contentType}`, ov.versionId)
+      } else {
+        manualOverridesMap.set(`${ov.provider}:${ov.projectId}`, ov.versionId)
+      }
     }
 
     const itemsMap = new Map<string, ModInstallationPlanItemGql>()
     const optionalDepsMap = new Map<string, ModInstallationPlanItemGql>()
     const conflicts: string[] = []
     const visitedBranches = new Set<string>()
+    const incompatibleRules: Array<{
+      sourceName: string
+      targetProjectId: string
+      targetVersionId?: string | null
+      targetFileId?: number | string | null
+    }> = []
 
     // 2. Fetch root project and validate content type
     const rootProject = await adapter.getProject(env, input.projectId, contentType)
@@ -444,8 +490,8 @@ export class ModProviderManager {
     const rootProjectName = rootProject?.name || rootVersion.name || "Elemento Principal"
     const rootLogicalPath = getLogicalPathForContent(contentType, rootVersion.filename)
 
-    // Add root item
-    const rootKey = `${input.provider}:${input.projectId}`
+    // Add root item with 3-part identity key
+    const rootKey = `${input.provider}:${input.projectId}:${contentType}`
     visitedBranches.add(rootKey)
 
     const targetCategory = contentType === "SHADER" ? "SHADER_PACK" : contentType
@@ -511,11 +557,14 @@ export class ModProviderManager {
       for (const dep of currentDeps) {
         if (!dep.projectId && !dep.versionId) continue
 
-        // A. Handle INCOMPATIBLE
+        // A. Accumulate INCOMPATIBLE restrictions (evaluated at end of traversal)
         if (dep.dependencyType === "INCOMPATIBLE") {
-          conflicts.push(
-            `Conflicto detectado: "${current.parentName}" declara incompatibilidad con "${dep.projectName || dep.projectId}".`,
-          )
+          incompatibleRules.push({
+            sourceName: current.parentName,
+            targetProjectId: dep.projectId || "",
+            targetVersionId: dep.versionId || null,
+            targetFileId: dep.fileId || null,
+          })
           continue
         }
 
@@ -533,7 +582,6 @@ export class ModProviderManager {
         }
 
         if (!depProjectId) continue
-        const depKey = `${current.provider}:${depProjectId}`
 
         // 2. Determine target contentType for the dependency without assuming MOD:
         let depContentType: ContentTypeGql | null = null
@@ -606,12 +654,15 @@ export class ModProviderManager {
           }
         }
 
+        const depKey = `${current.provider}:${depProjectId}:${depContentType}`
+
         // B. Handle OPTIONAL dependencies (do NOT automatically install)
         if (dep.dependencyType === "OPTIONAL" || dep.dependencyType === "EMBEDDED") {
           if (!optionalDepsMap.has(depKey) && !itemsMap.has(depKey)) {
             try {
               const depProj = await depAdapter.getProject(env, depProjectId, depContentType)
               const depFilename = dep.fileName || (depContentType === "MOD" ? "optional.jar" : "optional.zip")
+              const targetCat = depContentType === "SHADER" ? "SHADER_PACK" : depContentType
               optionalDepsMap.set(depKey, {
                 provider: current.provider,
                 projectId: depProjectId,
@@ -629,7 +680,10 @@ export class ModProviderManager {
                 isDependency: true,
                 isRequired: false,
                 isInstalled: draftFiles.some(
-                  (f) => f.sourceProvider === current.provider && f.sourceProjectId === depProjectId,
+                  (f) =>
+                    f.sourceProvider === current.provider &&
+                    f.sourceProjectId === depProjectId &&
+                    f.category === targetCat,
                 ),
                 action: "ALREADY_INSTALLED",
                 installedFileId: null,
@@ -644,7 +698,7 @@ export class ModProviderManager {
         }
 
         // C. Handle REQUIRED dependencies
-        // Check cycle / duplicate
+        // Check duplicate within same provider + projectId + contentType
         if (itemsMap.has(depKey)) {
           // Already resolved in plan
           continue
@@ -676,8 +730,11 @@ export class ModProviderManager {
 
         let selectedDepVersion: NormalizedModVersion | undefined
 
-        // Priority 1: Manual override
-        const overrideVersionId = manualOverridesMap.get(depKey)
+        // Priority 1: Manual override (exact 3-part key first, then 2-part key fallback)
+        const overrideVersionId =
+          manualOverridesMap.get(depKey) ||
+          manualOverridesMap.get(`${current.provider}:${depProjectId}`)
+
         if (overrideVersionId) {
           selectedDepVersion = depCompatibleVersions.find(
             (v) => v.id === overrideVersionId || v.fileId === overrideVersionId,
@@ -803,6 +860,51 @@ export class ModProviderManager {
           version: selectedDepVersion,
           parentName: depProjectName,
         })
+      }
+    }
+
+    // 4. Evaluate accumulated INCOMPATIBLE rules against draftFiles and resolved plan items
+    for (const rule of incompatibleRules) {
+      if (!rule.targetProjectId) continue
+
+      // Check DRAFT files
+      const draftMatch = draftFiles.find(
+        (f) => f.sourceProjectId === rule.targetProjectId || f.id === rule.targetProjectId,
+      )
+      if (draftMatch) {
+        if (rule.targetVersionId || rule.targetFileId) {
+          const isSameVersion =
+            Boolean(rule.targetVersionId && draftMatch.sourceVersionId === rule.targetVersionId) ||
+            Boolean(rule.targetFileId && draftMatch.sourceFileId && String(draftMatch.sourceFileId) === String(rule.targetFileId))
+          if (isSameVersion) {
+            conflicts.push(
+              `Conflicto detectado: "${rule.sourceName}" declara incompatibilidad con la versión instalada de "${draftMatch.name}".`,
+            )
+          }
+        } else {
+          conflicts.push(
+            `Conflicto detectado: "${rule.sourceName}" declara incompatibilidad con "${draftMatch.name}".`,
+          )
+        }
+      }
+
+      // Check resolved plan items
+      const planMatches = Array.from(itemsMap.values()).filter((i) => i.projectId === rule.targetProjectId)
+      for (const planMatch of planMatches) {
+        if (rule.targetVersionId || rule.targetFileId) {
+          const isSameVersion =
+            Boolean(rule.targetVersionId && planMatch.versionId === rule.targetVersionId) ||
+            Boolean(rule.targetFileId && planMatch.fileId && String(planMatch.fileId) === String(rule.targetFileId))
+          if (isSameVersion) {
+            conflicts.push(
+              `Conflicto detectado: "${rule.sourceName}" declara incompatibilidad con la versión seleccionada de "${planMatch.projectName}".`,
+            )
+          }
+        } else {
+          conflicts.push(
+            `Conflicto detectado: "${rule.sourceName}" declara incompatibilidad con "${planMatch.projectName}".`,
+          )
+        }
       }
     }
 

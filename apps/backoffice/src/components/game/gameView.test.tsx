@@ -1014,6 +1014,141 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(searchSpy).toHaveBeenCalledWith("test query", "DATA_PACK", null, 20, 0)
       vi.useRealTimers()
     })
+
+    it("renders optional dependencies section with explicit notice and does not count them in install button", async () => {
+      const onRefresh = vi.fn().mockResolvedValue(undefined)
+      const onToast = vi.fn()
+
+      vi.spyOn(graphqlClient, "searchMods").mockResolvedValue({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "opt-mod-id",
+            name: "OptMod",
+            summary: "Mod with optional dep",
+            author: "author",
+            downloads: 100,
+            categories: [],
+            contentType: "MOD",
+            environment: "BOTH",
+          },
+        ],
+        totalCount: 1,
+        providersStatus: [{ provider: "MODRINTH", available: true }],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+
+      vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "MODRINTH",
+        projectId: "opt-mod-id",
+        name: "OptMod",
+        summary: "Mod with optional dep",
+        author: "author",
+        downloads: 100,
+        contentType: "MOD",
+        environment: "BOTH",
+        isInstalled: false,
+        compatibleVersions: [
+          {
+            id: "ver-opt-1",
+            versionNumber: "1.0.0",
+            name: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: "2024-08-20T00:00:00Z",
+            downloads: 100,
+            filename: "opt-1.0.0.jar",
+            sizeBytes: 50000,
+            dependencies: [],
+          },
+        ],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+
+      vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "opt-mod-id",
+            projectName: "OptMod",
+            versionId: "ver-opt-1",
+            versionNumber: "1.0.0",
+            filename: "opt-1.0.0.jar",
+            sizeBytes: 50000,
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/opt-1.0.0.jar",
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            availableCompatibleVersions: [],
+          },
+        ],
+        totalDownloadSizeBytes: 50000,
+        conflicts: [],
+        optionalDependencies: [
+          {
+            provider: "MODRINTH",
+            projectId: "opt-dep-id",
+            projectName: "Optional JEI Integration",
+            versionId: "ver-jei-opt",
+            versionNumber: "15.0.0",
+            filename: "optional.jar",
+            sizeBytes: 0,
+            contentType: "MOD",
+            logicalPath: "mods/optional.jar",
+            isRoot: false,
+            isDependency: true,
+            isRequired: false,
+            isInstalled: false,
+            action: "ALREADY_INSTALLED",
+            availableCompatibleVersions: [],
+          },
+        ],
+        isValid: true,
+      })
+
+      render(
+        <GameFilesExplorer
+          theme="dark"
+          files={[]}
+          isDraft={true}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />,
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("button-open-mod-providers"))
+      })
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-card-modrinth-opt-mod-id")).toBeDefined()
+      })
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("mod-card-modrinth-opt-mod-id"))
+      })
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
+        expect(screen.getByTestId("optional-dependencies-section")).toBeDefined()
+      })
+
+      expect(screen.getByText("Dependencias opcionales")).toBeDefined()
+      expect(screen.getByText("No se instalará automáticamente")).toBeDefined()
+      expect(screen.getByText("Optional JEI Integration")).toBeDefined()
+      expect(screen.getByText("No instalada (Opcional)")).toBeDefined()
+
+      // The install button must only count 1 item (the root mod), NOT the optional dependency
+      const installBtn = screen.getByTestId("button-confirm-install")
+      expect(installBtn.textContent).toBe("Añadir a la actualización")
+    })
   })
 })
 

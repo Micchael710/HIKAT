@@ -814,7 +814,23 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(plan.optionalDependencies[0]!.projectId).toBe("opt-dep")
     })
 
-    it("flags INCOMPATIBLE dependency as a conflict", async () => {
+    it("flags INCOMPATIBLE dependency as a conflict when the incompatible mod is installed in DRAFT", async () => {
+      const draft = await prepareGameDraft(db, adminUserId)
+      await db.insert(schema.gameReleaseFiles).values({
+        id: crypto.randomUUID(),
+        releaseId: draft.id,
+        name: "bad-mod.jar",
+        logicalPath: "mods/bad-mod.jar",
+        category: "MOD",
+        sha256: "sha256badmod",
+        sizeBytes: 1000,
+        isDirectory: 0,
+        sourceProvider: "MODRINTH",
+        sourceProjectId: "bad-mod",
+        sourceVersionId: "ver-bad-1",
+        createdAt: new Date().toISOString(),
+      })
+
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
         if (u.includes("/project/incomp-root-proj/version")) {
@@ -2553,6 +2569,546 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
 
       const types = await adapter.getSupportedContentTypes(env, "incompatible-proj", "1.21.1")
       expect(types).toEqual([])
+    })
+  })
+
+  describe("9. Final Integral Closure Hardening Tests", () => {
+    describe("9.1 INCOMPATIBLE Restriction Evaluation", () => {
+      it("does not conflict when declared INCOMPATIBLE target is neither in DRAFT nor in Plan", async () => {
+        mockFetch.mockImplementation(async (url: string) => {
+          const u = String(url)
+          if (u.includes("/project/sodium/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-sodium-1",
+                  project_id: "sodium",
+                  name: "Sodium 1.0",
+                  version_number: "1.0.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  dependencies: [
+                    {
+                      project_id: "optifine",
+                      dependency_type: "incompatible",
+                    },
+                  ],
+                  files: [{ primary: true, filename: "sodium-1.0.jar", size: 1000, url: "https://cdn/sodium.jar" }],
+                },
+              ],
+            }
+          }
+          if (u.includes("/project/sodium")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ id: "sodium", title: "Sodium", project_type: "mod" }),
+            }
+          }
+          return { ok: false, status: 404 }
+        })
+
+        const plan = await manager.resolveInstallationPlan(env, db, {
+          provider: "MODRINTH",
+          projectId: "sodium",
+          versionId: "ver-sodium-1",
+          contentType: "MOD",
+        })
+
+        expect(plan.isValid).toBe(true)
+        expect(plan.conflicts.length).toBe(0)
+        expect(plan.items.length).toBe(1)
+        expect(plan.items[0]!.projectName).toBe("Sodium")
+      })
+
+      it("conflicts when declared INCOMPATIBLE target is already present in DRAFT", async () => {
+        // Seed an existing draft with optifine installed
+        const draft = await prepareGameDraft(db, adminUserId)
+        await db.insert(schema.gameReleaseFiles).values({
+          id: crypto.randomUUID(),
+          releaseId: draft.id,
+          name: "optifine.jar",
+          logicalPath: "mods/optifine.jar",
+          category: "MOD",
+          sha256: "sha256optifine",
+          sizeBytes: 2000,
+          isDirectory: 0,
+          sourceProvider: "MODRINTH",
+          sourceProjectId: "optifine",
+          sourceVersionId: "ver-optifine-1",
+          createdAt: new Date().toISOString(),
+        })
+
+        mockFetch.mockImplementation(async (url: string) => {
+          const u = String(url)
+          if (u.includes("/project/sodium/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-sodium-1",
+                  project_id: "sodium",
+                  name: "Sodium 1.0",
+                  version_number: "1.0.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  dependencies: [
+                    {
+                      project_id: "optifine",
+                      dependency_type: "incompatible",
+                    },
+                  ],
+                  files: [{ primary: true, filename: "sodium-1.0.jar", size: 1000, url: "https://cdn/sodium.jar" }],
+                },
+              ],
+            }
+          }
+          if (u.includes("/project/sodium")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ id: "sodium", title: "Sodium", project_type: "mod" }),
+            }
+          }
+          return { ok: false, status: 404 }
+        })
+
+        const plan = await manager.resolveInstallationPlan(env, db, {
+          provider: "MODRINTH",
+          projectId: "sodium",
+          versionId: "ver-sodium-1",
+          contentType: "MOD",
+        })
+
+        expect(plan.isValid).toBe(false)
+        expect(plan.conflicts.length).toBe(1)
+        expect(plan.conflicts[0]).toContain('declara incompatibilidad con "optifine.jar"')
+      })
+
+      it("conflicts when declared INCOMPATIBLE target is to be installed in the same Plan", async () => {
+        mockFetch.mockImplementation(async (url: string) => {
+          const u = String(url)
+          if (u.includes("/project/mod-a/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-a-1",
+                  project_id: "mod-a",
+                  name: "Mod A",
+                  version_number: "1.0.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  dependencies: [
+                    { project_id: "mod-b", dependency_type: "required" },
+                    { project_id: "mod-b", dependency_type: "incompatible" },
+                  ],
+                  files: [{ primary: true, filename: "mod-a.jar", size: 1000, url: "https://cdn/mod-a.jar" }],
+                },
+              ],
+            }
+          }
+          if (u.includes("/project/mod-b/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-b-1",
+                  project_id: "mod-b",
+                  name: "Mod B",
+                  version_number: "1.0.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  dependencies: [],
+                  files: [{ primary: true, filename: "mod-b.jar", size: 1000, url: "https://cdn/mod-b.jar" }],
+                },
+              ],
+            }
+          }
+          if (u.includes("/project/mod-a")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ id: "mod-a", title: "Mod A", project_type: "mod" }),
+            }
+          }
+          if (u.includes("/project/mod-b")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ id: "mod-b", title: "Mod B", project_type: "mod" }),
+            }
+          }
+          return { ok: false, status: 404 }
+        })
+
+        const plan = await manager.resolveInstallationPlan(env, db, {
+          provider: "MODRINTH",
+          projectId: "mod-a",
+          versionId: "ver-a-1",
+          contentType: "MOD",
+        })
+
+        expect(plan.isValid).toBe(false)
+        expect(plan.conflicts.length).toBe(1)
+        expect(plan.conflicts[0]).toContain('declara incompatibilidad con "Mod B"')
+      })
+
+      it("does not conflict when INCOMPATIBLE is pinned to a version different from what is installed", async () => {
+        // Seed draft with version 2.0.0 of helper-lib
+        const draft = await prepareGameDraft(db, adminUserId)
+        await db.insert(schema.gameReleaseFiles).values({
+          id: crypto.randomUUID(),
+          releaseId: draft.id,
+          name: "helper-2.0.jar",
+          logicalPath: "mods/helper-2.0.jar",
+          category: "MOD",
+          sha256: "sha256helper2",
+          sizeBytes: 2000,
+          isDirectory: 0,
+          sourceProvider: "MODRINTH",
+          sourceProjectId: "helper-lib",
+          sourceVersionId: "ver-helper-200",
+          createdAt: new Date().toISOString(),
+        })
+
+        mockFetch.mockImplementation(async (url: string) => {
+          const u = String(url)
+          if (u.includes("/project/mod-c/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-c-1",
+                  project_id: "mod-c",
+                  name: "Mod C",
+                  version_number: "1.0.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  dependencies: [
+                    // Only incompatible with buggy old version 1.0.0 (ver-helper-100)
+                    {
+                      project_id: "helper-lib",
+                      version_id: "ver-helper-100",
+                      dependency_type: "incompatible",
+                    },
+                  ],
+                  files: [{ primary: true, filename: "mod-c.jar", size: 1000, url: "https://cdn/mod-c.jar" }],
+                },
+              ],
+            }
+          }
+          if (u.includes("/project/mod-c")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ id: "mod-c", title: "Mod C", project_type: "mod" }),
+            }
+          }
+          return { ok: false, status: 404 }
+        })
+
+        const plan = await manager.resolveInstallationPlan(env, db, {
+          provider: "MODRINTH",
+          projectId: "mod-c",
+          versionId: "ver-c-1",
+          contentType: "MOD",
+        })
+
+        // Because installed version is ver-helper-200, not the pinned incompatible ver-helper-100, there is NO conflict
+        expect(plan.isValid).toBe(true)
+        expect(plan.conflicts.length).toBe(0)
+      })
+    })
+
+    describe("9.2 Modrinth Strict getCompatibleVersions ContentType Filtering", () => {
+      it("filters out MOD versions when requesting RESOURCE_PACK", async () => {
+        const adapter = new ModrinthAdapter()
+        mockFetch.mockImplementation(async (url: string) => {
+          const u = String(url)
+          if (u.includes("/project/hybrid-proj/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-mod",
+                  name: "Mod Version",
+                  version_number: "1.0.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  files: [{ primary: true, filename: "hybrid.jar", size: 1000 }],
+                },
+                {
+                  id: "ver-rp",
+                  name: "RP Version",
+                  version_number: "1.0.0-rp",
+                  game_versions: ["1.21.1"],
+                  loaders: ["minecraft"],
+                  files: [{ primary: true, filename: "hybrid.zip", size: 500 }],
+                },
+              ],
+            }
+          }
+          return { ok: false, status: 404 }
+        })
+
+        const versions = await adapter.getCompatibleVersions(
+          env,
+          "hybrid-proj",
+          "1.21.1",
+          "",
+          "RESOURCE_PACK",
+        )
+
+        expect(versions.length).toBe(1)
+        expect(versions[0]!.id).toBe("ver-rp")
+        expect(versions[0]!.contentType).toBe("RESOURCE_PACK")
+      })
+
+      it("filters out RESOURCE_PACK versions when requesting MOD", async () => {
+        const adapter = new ModrinthAdapter()
+        mockFetch.mockImplementation(async (url: string) => {
+          const u = String(url)
+          if (u.includes("/project/hybrid-proj/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-mod",
+                  name: "Mod Version",
+                  version_number: "1.0.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  files: [{ primary: true, filename: "hybrid.jar", size: 1000 }],
+                },
+                {
+                  id: "ver-rp",
+                  name: "RP Version",
+                  version_number: "1.0.0-rp",
+                  game_versions: ["1.21.1"],
+                  loaders: ["minecraft"],
+                  files: [{ primary: true, filename: "hybrid.zip", size: 500 }],
+                },
+              ],
+            }
+          }
+          return { ok: false, status: 404 }
+        })
+
+        const versions = await adapter.getCompatibleVersions(
+          env,
+          "hybrid-proj",
+          "1.21.1",
+          "NeoForge",
+          "MOD",
+        )
+
+        expect(versions.length).toBe(1)
+        expect(versions[0]!.id).toBe("ver-mod")
+        expect(versions[0]!.contentType).toBe("MOD")
+      })
+    })
+
+    describe("9.3 R2 Compensation Safety with Promise.allSettled", () => {
+      it("ensures all in-flight R2 objects are completely cleaned up when one parallel download fails", async () => {
+        const validJar = createSampleJarBuffer("Mod Success")
+        let r2ObjectsStored: string[] = []
+
+        const customEnv = {
+          ...env,
+          ASSETS: {
+            put: vi.fn().mockImplementation(async (key: string) => {
+              r2ObjectsStored.push(key)
+              return {}
+            }),
+            delete: vi.fn().mockImplementation(async (key: string) => {
+              r2ObjectsStored = r2ObjectsStored.filter((k) => k !== key)
+              return {}
+            }),
+          } as any,
+        }
+
+        mockFetch.mockImplementation(async (url: string) => {
+          const u = String(url)
+          if (u.includes("/project/mod-succ/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-succ",
+                  project_id: "mod-succ",
+                  name: "Mod Success",
+                  version_number: "1.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  dependencies: [{ project_id: "mod-fail", dependency_type: "required" }],
+                  files: [{ primary: true, filename: "mod-success.jar", size: validJar.byteLength, url: "https://cdn/mod-success.jar" }],
+                },
+              ],
+            }
+          }
+          if (u.includes("/project/mod-fail/version")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-fail",
+                  project_id: "mod-fail",
+                  name: "Mod Fail",
+                  version_number: "1.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  dependencies: [],
+                  files: [{ primary: true, filename: "mod-fail.jar", size: 1000, url: "https://cdn/mod-fail.jar" }],
+                },
+              ],
+            }
+          }
+          if (u.includes("/project/mod-succ")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ id: "mod-succ", title: "Mod Success", project_type: "mod" }),
+            }
+          }
+          if (u.includes("/project/mod-fail")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ id: "mod-fail", title: "Mod Fail", project_type: "mod" }),
+            }
+          }
+          if (u.includes("cdn/mod-success.jar")) {
+            return {
+              ok: true,
+              status: 200,
+              arrayBuffer: async () => validJar.buffer,
+            }
+          }
+          if (u.includes("cdn/mod-fail.jar")) {
+            // Delay slightly to simulate in-flight parallel upload
+            await new Promise((r) => setTimeout(r, 50))
+            return {
+              ok: false,
+              status: 500,
+            }
+          }
+          return { ok: false, status: 404 }
+        })
+
+        await expect(
+          installModPlan(
+            db,
+            customEnv,
+            {
+              provider: "MODRINTH",
+              projectId: "mod-succ",
+              versionId: "ver-succ",
+              contentType: "MOD",
+            },
+            adminUserId,
+          ),
+        ).rejects.toThrow()
+
+        // All created R2 objects must have been purged by compensation after Promise.allSettled
+        expect(r2ObjectsStored.length).toBe(0)
+
+        // No D1 records written
+        const filesInDb = await db.select().from(schema.gameReleaseFiles).all()
+        expect(filesInDb.filter((f: any) => f.sourceProjectId === "mod-succ").length).toBe(0)
+      })
+    })
+
+    describe("9.4 Deep Pagination for ALL Provider Search", () => {
+      it("queries multiple chunks when limit + offset exceeds single page capacity", async () => {
+        let modrinthCalls = 0
+        mockFetch.mockImplementation(async (url: string) => {
+          const u = String(url)
+          if (u.includes("api.modrinth.com/v2/search")) {
+            modrinthCalls++
+            const parsedUrl = new URL(u)
+            const offset = Number(parsedUrl.searchParams.get("offset") || "0")
+            const limit = Number(parsedUrl.searchParams.get("limit") || "10")
+
+            const hits = Array.from({ length: limit }, (_, i) => ({
+              project_id: `modrinth-item-${offset + i}`,
+              title: `Modrinth Item ${offset + i}`,
+              description: "Desc",
+              author: "Author",
+              downloads: 100,
+              categories: ["technology"],
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }))
+
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                hits,
+                total_hits: 250,
+                offset,
+                limit,
+              }),
+            }
+          }
+          return { ok: false, status: 404 }
+        })
+
+        // Request offset 120, limit 30 -> needs up to 150 items from Modrinth
+        const res = await manager.searchMods(
+          env,
+          db,
+          "tech",
+          null,
+          30,
+          120,
+          "MOD",
+        )
+
+        expect(res.items.length).toBe(30)
+        expect(res.totalCount).toBeGreaterThanOrEqual(250)
+        // Verified chunked queries were dispatched to fulfill the 150 items needed
+        expect(modrinthCalls).toBeGreaterThanOrEqual(2)
+      })
+    })
+
+    describe("9.5 DATA_PACK Manual Upload in GameFileService", () => {
+      it("assigns datapacks/ logical path and NO_MODIFICABLE policy when category is DATA_PACK and logicalPath is null", async () => {
+        const validZip = createSampleJarBuffer("PK\x03\x04Datapack Contents")
+        const res = await addGameFile(
+          db,
+          {
+            name: "custom_datapack.zip",
+            category: "DATA_PACK",
+            logicalPath: null,
+            tokenHash: "token-hash-123",
+          },
+          adminUserId,
+          env,
+          {
+            sha256: "sha256dp",
+            sizeBytes: 1024,
+            objectKey: "game-files/dp1",
+            originalFilename: "custom_datapack.zip",
+          },
+        )
+
+        expect(res.logicalPath).toBe("datapacks/custom_datapack.zip")
+        expect(res.category).toBe("DATA_PACK")
+        expect(res.effectivePolicy).toBe("NO_MODIFICABLE")
+      })
     })
   })
 })

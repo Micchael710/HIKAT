@@ -377,6 +377,7 @@ export const gameTypeDefs = /* GraphQL */ `
     provider: ModProvider!
     projectId: String!
     versionId: String!
+    contentType: ContentType
   }
 
   input ResolveModPlanInput {

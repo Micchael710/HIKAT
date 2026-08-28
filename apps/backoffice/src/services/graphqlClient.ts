@@ -1978,6 +1978,7 @@ export const modProvidersApi = {
             versionNumber
             filename
             sizeBytes
+            contentType
             isInstalled
           }
           isValid

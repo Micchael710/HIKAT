@@ -278,6 +278,8 @@ export async function addGameFile(
         ? "resourcepacks"
         : category === "SHADER_PACK"
         ? "shaderpacks"
+        : category === "DATA_PACK"
+        ? "datapacks"
         : category === "KUBEJS"
         ? "kubejs"
         : category === "SCRIPT"

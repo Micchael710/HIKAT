@@ -409,6 +409,7 @@ export interface ModVersionOverrideInput {
   provider: ModProvider
   projectId: string
   versionId: string
+  contentType?: ContentType | null
 }
 
 export interface ResolveModPlanInput {
