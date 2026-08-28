@@ -129,10 +129,10 @@ export const playerCapeSelections = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     type: text("type").notNull().default("NONE"), // "NONE" | "CUSTOM" | "GLOBAL"
     capeId: text("cape_id").references(() => capes.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     playerCapeId: text("player_cape_id").references(() => playerCapes.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     updatedAt: text("updated_at")
       .notNull()

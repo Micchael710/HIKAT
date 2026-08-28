@@ -1710,8 +1710,147 @@ describe("@hikat/database schema and D1 operations", () => {
     ).rejects.toThrow()
   })
 
-  it("performs real upgrade from migration 0011 to 0012 preserving existing global skin selection in player_skin_selections", async () => {
+  it("cascades player_cape_selections when a selected global cape is deleted directly in DB without leaving invalid rows or violating CHECK constraints", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const now = new Date().toISOString()
+
+    const adminId = "admin-del-cape-user"
+    const playerId = "player-del-cape-user"
+    await db.insert(schema.users).values([
+      { id: adminId, displayName: "Admin", role: "ADMIN", createdAt: now, updatedAt: now },
+      { id: playerId, displayName: "Player", role: "PLAYER", createdAt: now, updatedAt: now },
+    ])
+
+    const capeMedia1 = "media-del-cape-1"
+    await db.insert(schema.contentMedia).values({
+      id: capeMedia1,
+      mediaType: "IMAGE",
+      objectKey: "capes/del1.png",
+      mimeType: "image/png",
+      sizeBytes: 2048,
+      createdBy: adminId,
+      createdAt: now,
+    })
+
+    const globalCapeId = "cape-to-delete"
+    await db.insert(schema.capes).values({
+      id: globalCapeId,
+      name: "Cape To Delete",
+      mediaId: capeMedia1,
+      status: "AVAILABLE",
+      createdBy: adminId,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // Player selects the global cape
+    await db.insert(schema.playerCapeSelections).values({
+      userId: playerId,
+      type: "GLOBAL",
+      capeId: globalCapeId,
+      playerCapeId: null,
+      updatedAt: now,
+    })
+
+    const selBefore = await db.select().from(schema.playerCapeSelections).where(eq(schema.playerCapeSelections.userId, playerId)).get()
+    expect(selBefore?.type).toBe("GLOBAL")
+    expect(selBefore?.capeId).toBe(globalCapeId)
+
+    // Delete global cape directly from DB
+    await db.delete(schema.capes).where(eq(schema.capes.id, globalCapeId))
+
+    // Row in player_cape_selections was cleanly cascaded rather than set to an invalid GLOBAL with null cape_id state
+    const selAfter = await db.select().from(schema.playerCapeSelections).where(eq(schema.playerCapeSelections.userId, playerId)).get()
+    expect(selAfter).toBeUndefined()
+  })
+
+  it("cascades player_cape_selections when a selected player custom cape is deleted directly in DB without leaving invalid rows or violating CHECK constraints", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const now = new Date().toISOString()
+
+    const adminId = "admin-del-pcape-user"
+    const playerId = "player-del-pcape-user"
+    await db.insert(schema.users).values([
+      { id: adminId, displayName: "Admin", role: "ADMIN", createdAt: now, updatedAt: now },
+      { id: playerId, displayName: "Player", role: "PLAYER", createdAt: now, updatedAt: now },
+    ])
+
+    const capeMedia1 = "media-del-pcape-1"
+    await db.insert(schema.contentMedia).values({
+      id: capeMedia1,
+      mediaType: "IMAGE",
+      objectKey: "capes/del2.png",
+      mimeType: "image/png",
+      sizeBytes: 2048,
+      createdBy: playerId,
+      createdAt: now,
+    })
+
+    const playerCapeId = "pcape-to-delete"
+    await db.insert(schema.playerCapes).values({
+      id: playerCapeId,
+      userId: playerId,
+      name: "Custom Cape To Delete",
+      mediaId: capeMedia1,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // Player selects the custom cape
+    await db.insert(schema.playerCapeSelections).values({
+      userId: playerId,
+      type: "CUSTOM",
+      capeId: null,
+      playerCapeId: playerCapeId,
+      updatedAt: now,
+    })
+
+    const selBefore = await db.select().from(schema.playerCapeSelections).where(eq(schema.playerCapeSelections.userId, playerId)).get()
+    expect(selBefore?.type).toBe("CUSTOM")
+    expect(selBefore?.playerCapeId).toBe(playerCapeId)
+
+    // Delete custom cape directly from DB
+    await db.delete(schema.playerCapes).where(eq(schema.playerCapes.id, playerCapeId))
+
+    // Row in player_cape_selections was cleanly cascaded rather than set to an invalid CUSTOM with null player_cape_id state
+    const selAfter = await db.select().from(schema.playerCapeSelections).where(eq(schema.playerCapeSelections.userId, playerId)).get()
+    expect(selAfter).toBeUndefined()
+  })
+
+  it("cascades player_cape_selections when a user is deleted", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const now = new Date().toISOString()
+
+    const playerId = "player-to-delete-user"
+    await db.insert(schema.users).values({
+      id: playerId,
+      displayName: "Player To Delete",
+      role: "PLAYER",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.insert(schema.playerCapeSelections).values({
+      userId: playerId,
+      type: "NONE",
+      capeId: null,
+      playerCapeId: null,
+      updatedAt: now,
+    })
+
+    // Delete user
+    await db.delete(schema.users).where(eq(schema.users.id, playerId))
+
+    const selAfter = await db.select().from(schema.playerCapeSelections).where(eq(schema.playerCapeSelections.userId, playerId)).get()
+    expect(selAfter).toBeUndefined()
+  })
+
+  it("performs real D1-safe upgrade from migration 0011 to 0012 without PRAGMA foreign_keys = OFF, preserving existing global skin selection in player_skin_selections", async () => {
     const sqlite = new DatabaseSync(":memory:")
+    // Enforce foreign keys strictly throughout the entire simulation, matching Cloudflare D1 environment
     sqlite.exec("PRAGMA foreign_keys = ON;")
 
     const migrationsDir = join(__dirname, "../migrations")
@@ -1768,10 +1907,15 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(beforeSel.type).toBe("GLOBAL")
     expect(beforeSel.skin_id).toBe(skinId)
 
-    // 6. Apply migration 0012
+    // 6. Apply migration 0012 with PRAGMA foreign_keys = ON strictly enforced
     const file0012 = sqlFiles.find((f) => f.startsWith("0012_"))
     expect(file0012).toBeDefined()
     const sql0012 = readFileSync(join(migrationsDir, file0012!), "utf-8")
+    
+    // Verify migration 0012 does NOT contain PRAGMA foreign_keys = OFF
+    expect(sql0012.includes("PRAGMA foreign_keys = OFF")).toBe(false)
+    expect(sql0012.includes("PRAGMA foreign_keys = ON")).toBe(false)
+
     const statements0012 = sql0012.split("--> statement-breakpoint")
     for (const statement of statements0012) {
       const trimmed = statement.trim()
@@ -1794,9 +1938,14 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(afterSel.type).toBe("GLOBAL")
     expect(afterSel.skin_id).toBe(skinId)
 
-    // c) foreign keys are active
+    // c) Staging backup table was cleaned up
+    const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='player_skin_selections_backup'").all()
+    expect(tables.length).toBe(0)
+
+    // d) foreign keys are active
     const fkStatus = sqlite.prepare("PRAGMA foreign_keys;").get() as any
     expect(fkStatus.foreign_keys).toBe(1)
   })
 })
+
 

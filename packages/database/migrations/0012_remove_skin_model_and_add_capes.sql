@@ -1,9 +1,20 @@
 -- Migration 0012: Remove model column from skins and player_skins, and add capes domain tables
+-- Note: D1-safe migration. Foreign keys remain active throughout migration without disabling foreign key checks.
+-- Existing player_skin_selections are safely backed up and restored to preserve GLOBAL selections referencing skins.
 
-PRAGMA foreign_keys = OFF;
+-- 1. Backup player_skin_selections to temporary staging table
+CREATE TABLE `player_skin_selections_backup` (
+	`user_id` text PRIMARY KEY NOT NULL,
+	`type` text NOT NULL,
+	`skin_id` text,
+	`updated_at` text NOT NULL
+);
+--> statement-breakpoint
+INSERT INTO `player_skin_selections_backup` (`user_id`, `type`, `skin_id`, `updated_at`)
+SELECT `user_id`, `type`, `skin_id`, `updated_at` FROM `player_skin_selections`;
 --> statement-breakpoint
 
--- 1. Recreate skins without model column and without skins_model_check
+-- 2. Recreate skins without model column
 CREATE TABLE `skins_new` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -31,7 +42,7 @@ CREATE INDEX `skins_created_by_idx` ON `skins` (`created_by`);
 CREATE INDEX `skins_media_id_idx` ON `skins` (`media_id`);
 --> statement-breakpoint
 
--- 2. Recreate player_skins without model column
+-- 3. Recreate player_skins without model column
 CREATE TABLE `player_skins_new` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -54,7 +65,16 @@ CREATE UNIQUE INDEX `player_skins_user_id_idx` ON `player_skins` (`user_id`);
 CREATE INDEX `player_skins_media_id_idx` ON `player_skins` (`media_id`);
 --> statement-breakpoint
 
--- 3. Create capes table (Global admin catalog)
+-- 4. Restore player_skin_selections from backup staging table
+DELETE FROM `player_skin_selections`;
+--> statement-breakpoint
+INSERT INTO `player_skin_selections` (`user_id`, `type`, `skin_id`, `updated_at`)
+SELECT `user_id`, `type`, `skin_id`, `updated_at` FROM `player_skin_selections_backup`;
+--> statement-breakpoint
+DROP TABLE `player_skin_selections_backup`;
+--> statement-breakpoint
+
+-- 5. Create capes table (Global admin catalog)
 CREATE TABLE `capes` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -75,7 +95,7 @@ CREATE INDEX `capes_created_by_idx` ON `capes` (`created_by`);
 CREATE INDEX `capes_media_id_idx` ON `capes` (`media_id`);
 --> statement-breakpoint
 
--- 4. Create player_capes table (Player personal custom capes)
+-- 6. Create player_capes table (Player personal custom capes)
 CREATE TABLE `player_capes` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -92,7 +112,7 @@ CREATE INDEX `player_capes_user_id_idx` ON `player_capes` (`user_id`);
 CREATE INDEX `player_capes_media_id_idx` ON `player_capes` (`media_id`);
 --> statement-breakpoint
 
--- 5. Create player_cape_selections table (Player active cape selection)
+-- 7. Create player_cape_selections table (Player active cape selection)
 CREATE TABLE `player_cape_selections` (
 	`user_id` text PRIMARY KEY NOT NULL,
 	`type` text DEFAULT 'NONE' NOT NULL,
@@ -107,13 +127,10 @@ CREATE TABLE `player_cape_selections` (
 		(`type` = 'CUSTOM' AND `cape_id` IS NULL AND `player_cape_id` IS NOT NULL)
 	),
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`cape_id`) REFERENCES `capes`(`id`) ON UPDATE no action ON DELETE set null,
-	FOREIGN KEY (`player_cape_id`) REFERENCES `player_capes`(`id`) ON UPDATE no action ON DELETE set null
+	FOREIGN KEY (`cape_id`) REFERENCES `capes`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`player_cape_id`) REFERENCES `player_capes`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `player_cape_selections_cape_id_idx` ON `player_cape_selections` (`cape_id`);
 --> statement-breakpoint
 CREATE INDEX `player_cape_selections_player_cape_id_idx` ON `player_cape_selections` (`player_cape_id`);
---> statement-breakpoint
-
-PRAGMA foreign_keys = ON;
