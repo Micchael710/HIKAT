@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import React from "react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, act, cleanup, fireEvent } from "@testing-library/react"
+import { render, screen, act, cleanup, fireEvent, waitFor } from "@testing-library/react"
 import GameView from "./GameView"
+import GameFilesExplorer from "./GameFilesExplorer"
+import TextFileEditorModal from "./TextFileEditorModal"
 import { gameApi } from "../../services/graphqlClient"
 
-describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
+describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -14,7 +16,7 @@ describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
     cleanup()
   })
 
-  it("renders published release overview with read-only mods list without technical paths", async () => {
+  it("renders published release overview with Game Files Explorer in read-only mode", async () => {
     const mockOverview: import("../../types").AdminGameOverview = {
       publishedRelease: {
         id: "rel-1",
@@ -27,12 +29,16 @@ describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
         files: [
           {
             id: "file-1",
-            name: "JourneyMap",
-            logicalPath: "mods/journeymap-1.21.1.jar",
-            category: "MOD",
+            name: "create.toml",
+            logicalPath: "config/create.toml",
+            category: "CONFIG",
             sha256: "abc123456789",
-            sizeBytes: 2500000,
-            policy: "NO_MODIFICABLE",
+            sizeBytes: 1500,
+            policy: "MODIFICABLE",
+            explicitPolicy: null,
+            effectivePolicy: "MODIFICABLE",
+            isInherited: true,
+            isDirectory: false,
             createdAt: new Date().toISOString(),
           },
         ],
@@ -49,18 +55,16 @@ describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
       render(<GameView theme="dark" />)
     })
 
-    expect(screen.getByText("Juego y Actualizaciones")).toBeDefined()
+    expect(screen.getByText("Explorador de Archivos del Juego")).toBeDefined()
     expect(screen.getByText("v1.4.2")).toBeDefined()
-    expect(screen.getByText("JourneyMap")).toBeDefined()
-    expect(screen.getByText("Mod")).toBeDefined()
-    expect(screen.getByText("2.38 MB")).toBeDefined()
-    expect(screen.getByText("Preparar actualización")).toBeDefined()
+    expect(screen.getByText("Modo Solo Lectura (Versión Publicada)")).toBeDefined()
+    expect(screen.getAllByText("Preparar actualización").length).toBeGreaterThan(0)
 
-    // Ensure technical logical paths are NOT displayed
-    expect(screen.queryByText("mods/journeymap-1.21.1.jar")).toBeNull()
+    // Virtual root directory shows top-level folder 'config'
+    expect(screen.getByText("config")).toBeDefined()
   })
 
-  it("renders active draft banner, change badges, and opens publish modal with readiness", async () => {
+  it("renders active draft with explorer actions and allows navigating into folders", async () => {
     const mockOverview: import("../../types").AdminGameOverview = {
       publishedRelease: {
         id: "rel-1",
@@ -84,13 +88,31 @@ describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
         publishedAt: null,
         files: [
           {
+            id: "folder-1",
+            name: "config",
+            logicalPath: "config",
+            category: "CONFIG",
+            sha256: "",
+            sizeBytes: 0,
+            policy: "MODIFICABLE",
+            explicitPolicy: null,
+            effectivePolicy: "MODIFICABLE",
+            isInherited: true,
+            isDirectory: true,
+            createdAt: new Date().toISOString(),
+          },
+          {
             id: "file-2",
-            name: "Sodium",
-            logicalPath: "mods/sodium-1.21.1.jar",
-            category: "MOD",
+            name: "create.toml",
+            logicalPath: "config/create.toml",
+            category: "CONFIG",
             sha256: "def456",
-            sizeBytes: 1500000,
-            policy: "NO_MODIFICABLE",
+            sizeBytes: 1200,
+            policy: "MODIFICABLE",
+            explicitPolicy: null,
+            effectivePolicy: "MODIFICABLE",
+            isInherited: true,
+            isDirectory: false,
             changeStatus: "ADDED",
             createdAt: new Date().toISOString(),
           },
@@ -122,20 +144,77 @@ describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
     })
 
     expect(screen.getByText("Actualización en preparación (Borrador)")).toBeDefined()
-    expect(screen.getByText("+ Añadido")).toBeDefined()
-    expect(screen.getByText("✓ Lista para publicar")).toBeDefined()
+    expect(screen.getByText("Nueva Carpeta")).toBeDefined()
+    expect(screen.getByText("Nuevo Archivo")).toBeDefined()
+    expect(screen.getByText("Subir Archivos")).toBeDefined()
+    expect(screen.getByText("Subir Carpeta")).toBeDefined()
     expect(screen.getByText("Publicar actualización")).toBeDefined()
     expect(screen.getByText("Descartar borrador")).toBeDefined()
 
-    const publishBtn = screen.getByText("Publicar actualización")
-    fireEvent.click(publishBtn)
+    // Double click on folder row 'config' to navigate into it
+    const folderRow = screen.getByText("config")
+    await act(async () => {
+      fireEvent.doubleClick(folderRow)
+    })
 
-    expect(screen.getByText("Publicar actualización oficial")).toBeDefined()
-    expect(screen.getByText("+1 añadidos")).toBeDefined()
-    expect(screen.getByText("✓ Lista para publicar inmediatamente")).toBeDefined()
+    // Now inside config/ -> create.toml is visible
+    expect(screen.getByText("create.toml")).toBeDefined()
+    expect(screen.getByText("1.2 KB")).toBeDefined()
+    expect(screen.getByText("Nuevo")).toBeDefined()
+    expect(screen.getByText("✏️ Personalizable")).toBeDefined()
   })
 
-  it("switches to version history tab and renders historical releases", async () => {
+  it("opens text editor modal and validates JSON in real-time", async () => {
+    const onToast = vi.fn()
+    const onSaveSuccess = vi.fn()
+    const onClose = vi.fn()
+
+    const saveSpy = vi.spyOn(gameApi, "saveGameFileContent").mockResolvedValue({
+      id: "f-saved",
+      name: "settings.json",
+      logicalPath: "config/settings.json",
+      category: "CONFIG",
+      sha256: "hash123",
+      sizeBytes: 25,
+      policy: "MODIFICABLE",
+      effectivePolicy: "MODIFICABLE",
+      isInherited: true,
+      isDirectory: false,
+      createdAt: new Date().toISOString(),
+    })
+
+    await act(async () => {
+      render(
+        <TextFileEditorModal
+          theme="dark"
+          logicalPath="config/settings.json"
+          initialContent={'{\n  "valid": true\n}'}
+          isNew={false}
+          onClose={onClose}
+          onSaveSuccess={onSaveSuccess}
+          onToast={onToast}
+        />,
+      )
+    })
+
+    expect(screen.getByText("config/settings.json")).toBeDefined()
+    expect(screen.getByText("✓ JSON Válido")).toBeDefined()
+
+    // Save valid content
+    const saveBtn = screen.getByText("Guardar")
+    await act(async () => {
+      fireEvent.click(saveBtn)
+    })
+
+    expect(saveSpy).toHaveBeenCalledWith({
+      logicalPath: "config/settings.json",
+      content: "{\n  \"valid\": true\n}",
+      explicitPolicy: undefined,
+    })
+    expect(onSaveSuccess).toHaveBeenCalled()
+  })
+
+  it("switches to version history tab and renders historical releases with explorer", async () => {
     vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
       publishedRelease: null,
       draftRelease: null,
@@ -151,7 +230,22 @@ describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
         status: "ARCHIVED",
         notes: "Versión histórica",
         publishedAt: "2026-08-20T12:00:00.000Z",
-        files: [],
+        files: [
+          {
+            id: "f-old-1",
+            name: "old-mod.jar",
+            logicalPath: "mods/old-mod.jar",
+            category: "MOD",
+            sha256: "123",
+            sizeBytes: 5000,
+            policy: "NO_MODIFICABLE",
+            explicitPolicy: null,
+            effectivePolicy: "NO_MODIFICABLE",
+            isInherited: true,
+            isDirectory: false,
+            createdAt: new Date().toISOString(),
+          },
+        ],
         createdAt: "2026-08-20T12:00:00.000Z",
         updatedAt: "2026-08-20T12:00:00.000Z",
       },
@@ -167,82 +261,15 @@ describe("Back Office Game & Updates Components (Shard 06.5A)", () => {
     })
 
     expect(screen.getByText("v1.0.0")).toBeDefined()
-    expect(screen.getByText("Anterior")).toBeDefined()
-  })
+    expect(screen.getByText("Histórica")).toBeDefined()
 
-  it("renders tombstones for removed files with Se eliminará badge and allows restore", async () => {
-    const mockOverview: import("../../types").AdminGameOverview = {
-      publishedRelease: {
-        id: "rel-1",
-        version: "1.0.0",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-        status: "PUBLISHED",
-        notes: null,
-        publishedAt: new Date().toISOString(),
-        files: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      draftRelease: {
-        id: "rel-draft",
-        version: "1.0.1",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-        status: "DRAFT",
-        notes: null,
-        publishedAt: null,
-        files: [
-          {
-            id: "tombstone-file-1",
-            name: "Old Mod",
-            logicalPath: "mods/old-mod.jar",
-            category: "MOD",
-            sha256: "12345",
-            sizeBytes: 1000,
-            policy: "NO_MODIFICABLE",
-            changeStatus: "REMOVED",
-            createdAt: new Date().toISOString(),
-          },
-        ],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      pendingChangesCount: 1,
-      changes: {
-        added: 0,
-        updated: 0,
-        removed: 1,
-        unchanged: 0,
-        total: 0,
-      },
-    }
-
-    vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue(mockOverview)
-    const restoreSpy = vi.spyOn(gameApi, "restoreGameFile").mockResolvedValue({
-      id: "file-1",
-      name: "Old Mod",
-      logicalPath: "mods/old-mod.jar",
-      category: "MOD",
-      sha256: "12345",
-      sizeBytes: 1000,
-      policy: "NO_MODIFICABLE",
-      createdAt: new Date().toISOString(),
-    })
-
+    // Expand historical release
+    const expandBtn = screen.getByText("Abrir explorador ▼")
     await act(async () => {
-      render(<GameView theme="dark" />)
+      fireEvent.click(expandBtn)
     })
 
-    expect(screen.getByText("Old Mod")).toBeDefined()
-    expect(screen.getByText("− Se eliminará")).toBeDefined()
-
-    const undoBtn = screen.getByText("Deshacer")
-    await act(async () => {
-      fireEvent.click(undoBtn)
-    })
-
-    expect(restoreSpy).toHaveBeenCalledWith("tombstone-file-1")
+    expect(screen.getByText("Ocultar explorador ▲")).toBeDefined()
+    expect(screen.getByText("mods")).toBeDefined()
   })
 })
-

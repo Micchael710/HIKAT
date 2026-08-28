@@ -461,6 +461,8 @@ export const ALLOWED_GAME_CATEGORIES = [
   "SHADER_PACK",
   "KUBEJS",
   "SCRIPT",
+  "CONFIG",
+  "GENERAL",
 ] as const
 export type GameFileCategory = typeof ALLOWED_GAME_CATEGORIES[number]
 
@@ -478,6 +480,7 @@ export const ALLOWED_SYNC_POLICIES = [
 export type SyncPolicy = typeof ALLOWED_SYNC_POLICIES[number]
 
 export const MAX_GAME_FILE_SIZE_BYTES = 100 * 1024 * 1024 // 100 MB
+export const MAX_GAME_TEXT_FILE_SIZE_BYTES = 1024 * 1024 // 1 MB
 
 export const GAME_CATEGORY_DIRECTORIES: Record<GameFileCategory, string> = {
   MOD: "mods",
@@ -485,6 +488,8 @@ export const GAME_CATEGORY_DIRECTORIES: Record<GameFileCategory, string> = {
   SHADER_PACK: "shaderpacks",
   KUBEJS: "kubejs",
   SCRIPT: "scripts",
+  CONFIG: "config",
+  GENERAL: "",
 }
 
 export const GAME_CATEGORY_DEFAULT_POLICIES: Record<
@@ -496,7 +501,55 @@ export const GAME_CATEGORY_DEFAULT_POLICIES: Record<
   SHADER_PACK: "MODIFICABLE",
   KUBEJS: "NO_MODIFICABLE",
   SCRIPT: "NO_MODIFICABLE",
+  CONFIG: "MODIFICABLE",
+  GENERAL: "NO_MODIFICABLE",
 }
+
+export const GAME_TEXT_FILE_EXTENSIONS = [
+  ".txt",
+  ".json",
+  ".json5",
+  ".toml",
+  ".yaml",
+  ".yml",
+  ".properties",
+  ".cfg",
+  ".conf",
+  ".ini",
+  ".js",
+  ".ts",
+  ".mcmeta",
+  ".md",
+  ".xml",
+  ".csv",
+  ".snbt",
+  ".mcdoc",
+  ".lang",
+  ".log",
+] as const
+
+export const KNOWN_BINARY_EXTENSIONS = [
+  ".jar",
+  ".zip",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".gif",
+  ".ogg",
+  ".mp3",
+  ".wav",
+  ".class",
+  ".exe",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".dat",
+  ".bin",
+  ".gz",
+  ".tar",
+  ".7z",
+] as const
 
 import { decode as decodePng } from "fast-png"
 
@@ -675,15 +728,235 @@ export function sanitizeGameFileName(filename: string): string {
     .replace(/[/\\]/g, "")
     .trim()
 
-
   // Remove any leading periods to prevent hidden file traversal
   const cleaned = base.replace(/^\.+/, "")
   return cleaned || "file.jar"
 }
 
+const WINDOWS_RESERVED_NAMES = new Set([
+  "con",
+  "prn",
+  "aux",
+  "nul",
+  "com1",
+  "com2",
+  "com3",
+  "com4",
+  "com5",
+  "com6",
+  "com7",
+  "com8",
+  "com9",
+  "lpt1",
+  "lpt2",
+  "lpt3",
+  "lpt4",
+  "lpt5",
+  "lpt6",
+  "lpt7",
+  "lpt8",
+  "lpt9",
+])
+
+/**
+ * Validates and sanitizes an arbitrary game logical path inside the instance sandbox.
+ * Strictly prevents path traversal (../), null bytes, Windows reserved device names, and invalid characters.
+ */
+export function sanitizeGamePath(rawPath: string): string {
+  if (typeof rawPath !== "string" || !rawPath.trim()) {
+    throw new Error("La ruta del archivo no puede estar vacía.")
+  }
+
+  // Normalize slashes
+  const normalized = rawPath
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .replace(/\/+/g, "/")
+
+  if (!normalized) {
+    throw new Error("Ruta de archivo inválida.")
+  }
+
+  // Reject forbidden characters: colons, asterisks, question marks, quotes, angle brackets, pipes, null bytes, control chars
+  if (/[:*?"<>|\x00-\x1F\x7F]/.test(normalized)) {
+    throw new Error("Caracteres no permitidos en la ruta.")
+  }
+
+  const segments = normalized.split("/")
+  for (const segment of segments) {
+    const trimmed = segment.trim()
+    if (!trimmed || trimmed === "." || trimmed === "..") {
+      throw new Error("Ruta no permitida (path traversal detectado).")
+    }
+    const baseName = trimmed.split(".")[0]?.toLowerCase() || ""
+    if (WINDOWS_RESERVED_NAMES.has(baseName)) {
+      throw new Error(`Nombre de archivo o carpeta reservado no permitido: ${trimmed}`)
+    }
+  }
+
+  return segments.join("/")
+}
+
+/**
+ * Tests whether a byte buffer represents valid UTF-8 text without binary null bytes or control codes.
+ */
+export function isUtf8TextBuffer(buffer: ArrayBuffer | Uint8Array): boolean {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  if (bytes.length === 0) return true
+
+  for (const byte of bytes) {
+    if (byte === 0x00) return false // Null byte is binary indicator
+    // Reject control characters except tab (9), newline (10), carriage return (13), form feed (12)
+    if (byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d && byte !== 0x0c) {
+      return false
+    }
+  }
+
+  try {
+    const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false })
+    decoder.decode(bytes)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Checks whether a filename represents an editable text file.
+ * Fast-path check by extension, or buffer analysis for unknown extensions.
+ * Strictly rejects known binary formats (.jar, .zip, .png, etc.).
+ */
+export function isEditableTextFile(
+  filename: string,
+  buffer?: ArrayBuffer | Uint8Array,
+): boolean {
+  if (!filename || typeof filename !== "string") return false
+  const lower = filename.toLowerCase().trim()
+
+  // Strict binary guard
+  if (KNOWN_BINARY_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    return false
+  }
+
+  // Fast path by known text extension
+  if (GAME_TEXT_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    if (buffer) {
+      return isUtf8TextBuffer(buffer)
+    }
+    return true
+  }
+
+  // Fallback for unknown extension / extensionless files
+  if (buffer) {
+    return isUtf8TextBuffer(buffer)
+  }
+
+  return false
+}
+
+/**
+ * Validates JSON text content and extracts syntax error line if invalid.
+ */
+export function validateJsonContent(content: string): {
+  valid: boolean
+  error?: string
+  line?: number
+} {
+  if (typeof content !== "string") {
+    return { valid: false, error: "Contenido JSON inválido.", line: 1 }
+  }
+  if (!content.trim()) {
+    return { valid: true }
+  }
+  try {
+    JSON.parse(content)
+    return { valid: true }
+  } catch (err: any) {
+    let line = 1
+    const msg = err?.message || "Error de sintaxis JSON."
+    const match = msg.match(/position\s+(\d+)/i) || msg.match(/line\s+(\d+)/i)
+    if (match && match[1]) {
+      const pos = parseInt(match[1], 10)
+      if (msg.includes("position") && !isNaN(pos)) {
+        line = content.slice(0, pos).split("\n").length
+      } else if (!isNaN(pos)) {
+        line = pos
+      }
+    }
+    return {
+      valid: false,
+      error: `Error de sintaxis JSON en línea ${line}: ${msg}`,
+      line,
+    }
+  }
+}
+
+/**
+ * Infers a secondary game file category based on logical path and extension.
+ */
+export function inferGameCategory(logicalPath: string): GameFileCategory {
+  if (!logicalPath || typeof logicalPath !== "string") return "GENERAL"
+  const normalized = logicalPath.trim().replace(/\\/g, "/").toLowerCase()
+  if (normalized.startsWith("mods/") || normalized.endsWith(".jar")) return "MOD"
+  if (normalized.startsWith("resourcepacks/")) return "RESOURCE_PACK"
+  if (normalized.startsWith("shaderpacks/")) return "SHADER_PACK"
+  if (normalized.startsWith("kubejs/")) return "KUBEJS"
+  if (normalized.startsWith("scripts/")) return "SCRIPT"
+  if (normalized.startsWith("config/") || normalized.startsWith("defaultconfigs/")) return "CONFIG"
+  return "GENERAL"
+}
+
+/**
+ * Resolves the 3-tier effective policy (own override, inherited from closest ancestor directory, or root fallback).
+ */
+export function resolveEffectiveGamePolicy(
+  logicalPath: string,
+  explicitPolicy?: string | null,
+  ancestorPolicies?: Map<string, string | null | undefined> | Record<string, string | null | undefined>,
+): SyncPolicy {
+  if (explicitPolicy === "NO_MODIFICABLE" || explicitPolicy === "MODIFICABLE") {
+    return explicitPolicy
+  }
+
+  const normalized = (logicalPath || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+  const segments = normalized.split("/").filter(Boolean)
+
+  if (ancestorPolicies && segments.length > 1) {
+    // Traverse parent directories from closest to root
+    for (let i = segments.length - 1; i >= 1; i--) {
+      const ancestorPath = segments.slice(0, i).join("/")
+      const policyVal =
+        ancestorPolicies instanceof Map
+          ? ancestorPolicies.get(ancestorPath)
+          : ancestorPolicies[ancestorPath]
+      if (policyVal === "NO_MODIFICABLE" || policyVal === "MODIFICABLE") {
+        return policyVal
+      }
+    }
+  }
+
+  // Fallback to directory conventions
+  const root = segments[0]?.toLowerCase() || ""
+  if (root === "mods") return "NO_MODIFICABLE"
+  if (
+    root === "config" ||
+    root === "defaultconfigs" ||
+    root === "resourcepacks" ||
+    root === "shaderpacks" ||
+    normalized.toLowerCase() === "options.txt"
+  ) {
+    return "MODIFICABLE"
+  }
+
+  return "NO_MODIFICABLE"
+}
+
 /**
  * Validates a game binary file buffer against category requirements.
  * For JAR, RESOURCE_PACK, and SHADER_PACK, enforces standard ZIP/JAR header magic bytes (50 4B 03 04).
+ * For CONFIG, GENERAL, SCRIPT, KUBEJS, allows any safe buffer up to MAX_GAME_FILE_SIZE_BYTES.
  */
 export function validateGameFileBuffer(
   buffer: ArrayBuffer | Uint8Array,
@@ -755,8 +1028,8 @@ export function resolveGameLogicalPath(
   filename: string,
 ): string {
   const safeFilename = sanitizeGameFileName(filename)
-  const dir = GAME_CATEGORY_DIRECTORIES[category] || "mods"
-  return `${dir}/${safeFilename}`
+  const dir = GAME_CATEGORY_DIRECTORIES[category]
+  return dir ? `${dir}/${safeFilename}` : safeFilename
 }
 
 /**

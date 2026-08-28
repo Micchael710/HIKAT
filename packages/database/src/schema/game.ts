@@ -40,11 +40,12 @@ export const gameReleaseFiles = sqliteTable(
       .references(() => gameReleases.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     logicalPath: text("logical_path").notNull(),
-    category: text("category").notNull().default("MOD"),
+    category: text("category").notNull().default("GENERAL"),
     sha256: text("sha256").notNull(),
-    sizeBytes: integer("size_bytes").notNull(),
-    policy: text("policy").notNull().default("NO_MODIFICABLE"),
-    objectKey: text("object_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    policy: text("policy"),
+    isDirectory: integer("is_directory").notNull().default(0),
+    objectKey: text("object_key").notNull().default(""),
     createdAt: text("created_at")
       .notNull()
       .$defaultFn(() => new Date().toISOString()),

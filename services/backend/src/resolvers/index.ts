@@ -43,6 +43,8 @@ import type {
   CreateGameFileUploadInputGql,
   AddGameFileInputGql,
   UpdateGameFileInputGql,
+  SaveGameFileContentInputGql,
+  SyncPolicyGql,
   PrepareGameDraftInputGql,
   PublishGameReleaseInputGql,
   AdminSettingsGql,
@@ -189,6 +191,14 @@ import {
   updateGameFile,
   removeGameFile,
   restoreGameFile,
+  saveGameFileContent,
+  readGameFileContent,
+  createGameFolder,
+  renameGamePath,
+  moveGamePaths,
+  copyGamePaths,
+  deleteGamePaths,
+  setGamePathPolicy,
 } from "../services/game"
 
 import {
@@ -656,6 +666,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return getAdminGameFiles(context.db, args.releaseId, args.category)
+    },
+
+    readGameFileContent: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<string> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return readGameFileContent(context.db, args.id, context.env)
     },
 
 
@@ -1383,6 +1405,90 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return updateGameFile(context.db, args.id, args.input)
+    },
+
+    saveGameFileContent: async (
+      _parent: unknown,
+      args: { input: SaveGameFileContentInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return saveGameFileContent(context.db, args.input, identity.userId, context.env)
+    },
+
+    createGameFolder: async (
+      _parent: unknown,
+      args: { logicalPath: string },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createGameFolder(context.db, args.logicalPath, identity.userId)
+    },
+
+    renameGamePath: async (
+      _parent: unknown,
+      args: { oldPath: string; newPath: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return renameGamePath(context.db, args.oldPath, args.newPath, identity.userId)
+    },
+
+    moveGamePaths: async (
+      _parent: unknown,
+      args: { sources: string[]; destinationFolder: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return moveGamePaths(context.db, args.sources, args.destinationFolder, identity.userId)
+    },
+
+    copyGamePaths: async (
+      _parent: unknown,
+      args: { sources: string[]; destinationFolder: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return copyGamePaths(context.db, args.sources, args.destinationFolder, identity.userId)
+    },
+
+    deleteGamePaths: async (
+      _parent: unknown,
+      args: { paths: string[] },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteGamePaths(context.db, args.paths, identity.userId)
+    },
+
+    setGamePathPolicy: async (
+      _parent: unknown,
+      args: { path: string; explicitPolicy?: SyncPolicyGql | null },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return setGamePathPolicy(context.db, args.path, args.explicitPolicy, identity.userId)
     },
 
     removeGameFile: async (

@@ -541,9 +541,16 @@ export interface SetActiveCapeInputGql {
   playerCapeId?: string | null
 }
 
-// --- Game & Launcher Types (Shard 06.5) ---
+// --- Game & Launcher Types (Shard 06.5 / Shard 08A) ---
 
-export type GameFileCategoryGql = "MOD" | "RESOURCE_PACK" | "SHADER_PACK" | "KUBEJS" | "SCRIPT"
+export type GameFileCategoryGql =
+  | "MOD"
+  | "RESOURCE_PACK"
+  | "SHADER_PACK"
+  | "KUBEJS"
+  | "SCRIPT"
+  | "CONFIG"
+  | "GENERAL"
 
 export type GameReleaseStatusGql = "DRAFT" | "PUBLISHED" | "ARCHIVED"
 
@@ -553,140 +560,108 @@ export type GameDraftChangeStatusGql = "UNCHANGED" | "ADDED" | "UPDATED" | "REMO
 
 export interface GameDraftChangesGql {
   added: number
-
   updated: number
-
   removed: number
-
   unchanged: number
-
   total: number
 }
 
 export interface GameDraftReadinessGql {
   isReady: boolean
-
   validVersion: boolean
-
   noConflicts: boolean
-
   storageVerified: boolean
-
   issues: string[]
 }
 
 export interface ClientFileGql {
   path: string
-
   sha256: string
-
   sizeBytes: number
-
   downloadUrl: string
-
   policy: SyncPolicyGql
 }
 
 export interface PublishedModpackGql {
   version: string
-
   minecraftVersion: string
-
   neoForgeVersion: string
-
   mandatory: boolean
-
   clientFiles: ClientFileGql[]
 }
 
 export interface AdminGameFileGql {
   id: string
-
   name: string
-
   logicalPath: string
-
   category: GameFileCategoryGql
-
   sha256: string
-
   sizeBytes: number
-
   policy: SyncPolicyGql
-
+  explicitPolicy?: SyncPolicyGql | null
+  effectivePolicy: SyncPolicyGql
+  isInherited: boolean
+  isDirectory: boolean
   changeStatus?: GameDraftChangeStatusGql | null
-
   createdAt: string
 }
 
 export interface GameReleaseGql {
   id: string
-
   version: string
-
   minecraftVersion: string
-
   neoForgeVersion: string
-
   status: GameReleaseStatusGql
-
   notes?: string | null
-
   publishedAt?: string | null
-
   files: AdminGameFileGql[]
-
   createdAt: string
-
   updatedAt: string
 }
 
 export interface AdminGameOverviewGql {
   publishedRelease?: GameReleaseGql | null
-
   draftRelease?: GameReleaseGql | null
-
   pendingChangesCount: number
-
   changes?: GameDraftChangesGql | null
-
   readiness?: GameDraftReadinessGql | null
 }
 
 export interface GameFileUploadPayloadGql {
   uploadUrl: string
-
   uploadToken: string
-
   expiresAt: string
-
   maxSizeBytes: number
-
   expectedCategory: GameFileCategoryGql
 }
 
 export interface CreateGameFileUploadInputGql {
-  category: GameFileCategoryGql
-
+  category?: GameFileCategoryGql | null
   originalFilename: string
-
   sizeBytes: number
+  logicalPath?: string | null
 }
 
 export interface AddGameFileInputGql {
   name: string
-
   category?: GameFileCategoryGql | null
-
+  logicalPath?: string | null
+  explicitPolicy?: SyncPolicyGql | null
   tokenHash: string
 }
 
 export interface UpdateGameFileInputGql {
   name?: string | null
-
   category?: GameFileCategoryGql | null
-
+  logicalPath?: string | null
+  explicitPolicy?: SyncPolicyGql | null
   tokenHash?: string | null
+}
+
+export interface SaveGameFileContentInputGql {
+  logicalPath: string
+  content: string
+  explicitPolicy?: SyncPolicyGql | null
 }
 
 export interface PrepareGameDraftInputGql {
@@ -695,7 +670,6 @@ export interface PrepareGameDraftInputGql {
 
 export interface PublishGameReleaseInputGql {
   version: string
-
   notes?: string | null
 }
 

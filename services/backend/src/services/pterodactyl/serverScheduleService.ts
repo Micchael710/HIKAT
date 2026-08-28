@@ -393,7 +393,7 @@ export async function listServerAutomations(
   const pteroSchedules = res.data
   const pteroScheduleIds = new Set(pteroSchedules.map((s) => String(s.attributes.id)))
 
-  let d1TasksMap = new Map<string, schema.ServerTaskRecord>()
+  const d1TasksMap = new Map<string, schema.ServerTaskRecord>()
   if (db) {
     try {
       const d1Records = await db.select().from(schema.serverTasks).all()

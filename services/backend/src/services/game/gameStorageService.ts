@@ -187,6 +187,7 @@ export async function handleGameFileDownload(
       and(
         eq(schema.gameReleaseFiles.id, fileId),
         eq(schema.gameReleases.status, "PUBLISHED"),
+        eq(schema.gameReleaseFiles.isDirectory, 0),
       ),
     )
     .get()

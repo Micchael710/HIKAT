@@ -774,6 +774,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0010_skins_active_and_server_tasks.sql",
       "0011_server_tasks_action.sql",
       "0012_remove_skin_model_and_add_capes.sql",
+      "0013_game_files_enhancements.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -1945,6 +1946,124 @@ describe("@hikat/database schema and D1 operations", () => {
     // d) foreign keys are active
     const fkStatus = sqlite.prepare("PRAGMA foreign_keys;").get() as any
     expect(fkStatus.foreign_keys).toBe(1)
+  })
+
+  it("performs real D1-safe upgrade from migration 0012 to 0013, verifying game_release_files preservation, nullable policy, is_directory flag, cascade delete and unique constraints", async () => {
+    const sqlite = new DatabaseSync(":memory:")
+    sqlite.exec("PRAGMA foreign_keys = ON;")
+
+    const migrationsDir = join(__dirname, "../migrations")
+    const sqlFiles = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort()
+
+    // 1. Apply migrations up to 0012
+    const upTo0012 = sqlFiles.filter((f) => !f.startsWith("0013_"))
+    for (const file of upTo0012) {
+      const sqlContent = readFileSync(join(migrationsDir, file), "utf-8")
+      const statements = sqlContent.split("--> statement-breakpoint")
+      for (const statement of statements) {
+        const trimmed = statement.trim()
+        if (trimmed) {
+          sqlite.exec(trimmed)
+        }
+      }
+    }
+
+    const now = new Date().toISOString()
+    const adminId = "admin-game-upgrade"
+    const releaseId = "release-100"
+    const fileId1 = "file-mod-1"
+    const fileId2 = "file-config-1"
+
+    // 2. Create user and game release
+    sqlite.exec(`
+      INSERT INTO users (id, display_name, role, created_at, updated_at)
+      VALUES ('${adminId}', 'Game Admin', 'ADMIN', '${now}', '${now}');
+      INSERT INTO game_releases (id, version, minecraft_version, neoforge_version, status, created_by, created_at, updated_at)
+      VALUES ('${releaseId}', '1.0.0', '1.21.1', '21.1.65', 'PUBLISHED', '${adminId}', '${now}', '${now}');
+    `)
+
+    // 3. Create game release files with 0012 schema (NOT NULL policies)
+    sqlite.exec(`
+      INSERT INTO game_release_files (id, release_id, name, logical_path, category, sha256, size_bytes, policy, object_key, created_at)
+      VALUES ('${fileId1}', '${releaseId}', 'create.jar', 'mods/create.jar', 'MOD', 'sha256-create', 1048576, 'NO_MODIFICABLE', 'game-files/create', '${now}'),
+             ('${fileId2}', '${releaseId}', 'config.toml', 'config/config.toml', 'MOD', 'sha256-config', 2048, 'MODIFICABLE', 'game-files/config', '${now}');
+    `)
+
+    // Verify state BEFORE 0013 migration
+    const beforeFiles = sqlite.prepare("SELECT * FROM game_release_files WHERE release_id = ?").all(releaseId) as any[]
+    expect(beforeFiles.length).toBe(2)
+
+    // 4. Apply migration 0013
+    const file0013 = sqlFiles.find((f) => f.startsWith("0013_"))
+    expect(file0013).toBeDefined()
+    const sql0013 = readFileSync(join(migrationsDir, file0013!), "utf-8")
+    
+    // Verify migration 0013 does NOT contain PRAGMA foreign_keys = OFF
+    expect(sql0013.includes("PRAGMA foreign_keys = OFF")).toBe(false)
+    expect(sql0013.includes("PRAGMA foreign_keys = ON")).toBe(false)
+
+    const statements0013 = sql0013.split("--> statement-breakpoint")
+    for (const statement of statements0013) {
+      const trimmed = statement.trim()
+      if (trimmed) {
+        sqlite.exec(trimmed)
+      }
+    }
+
+    // 5. Verify state AFTER 0013 migration:
+    // a) Existing files and releases preserved
+    const afterFiles = sqlite.prepare("SELECT * FROM game_release_files WHERE release_id = ? ORDER BY id ASC").all(releaseId) as any[]
+    expect(afterFiles.length).toBe(2)
+    
+    const file1 = afterFiles.find((f) => f.id === fileId1)
+    expect(file1).toBeDefined()
+    expect(file1.name).toBe("create.jar")
+    expect(file1.logical_path).toBe("mods/create.jar")
+    expect(file1.policy).toBe("NO_MODIFICABLE")
+    expect(file1.is_directory).toBe(0)
+
+    const file2 = afterFiles.find((f) => f.id === fileId2)
+    expect(file2).toBeDefined()
+    expect(file2.name).toBe("config.toml")
+    expect(file2.logical_path).toBe("config/config.toml")
+    expect(file2.policy).toBe("MODIFICABLE")
+    expect(file2.is_directory).toBe(0)
+
+    // b) Null policy is accepted (NULL = inherit)
+    const fileId3 = "file-inherit-3"
+    sqlite.exec(`
+      INSERT INTO game_release_files (id, release_id, name, logical_path, category, sha256, size_bytes, policy, is_directory, object_key, created_at)
+      VALUES ('${fileId3}', '${releaseId}', 'child.toml', 'config/sub/child.toml', 'GENERAL', 'sha256-child', 512, NULL, 0, 'game-files/child', '${now}');
+    `)
+    const file3 = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(fileId3) as any
+    expect(file3.policy).toBeNull()
+    expect(file3.is_directory).toBe(0)
+
+    // c) Directory record with is_directory = 1, size_bytes = 0, object_key = ''
+    const dirId = "dir-config-sub"
+    sqlite.exec(`
+      INSERT INTO game_release_files (id, release_id, name, logical_path, category, sha256, size_bytes, policy, is_directory, object_key, created_at)
+      VALUES ('${dirId}', '${releaseId}', 'sub', 'config/sub', 'GENERAL', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 0, 'MODIFICABLE', 1, '', '${now}');
+    `)
+    const dirRecord = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(dirId) as any
+    expect(dirRecord.is_directory).toBe(1)
+    expect(dirRecord.size_bytes).toBe(0)
+    expect(dirRecord.object_key).toBe("")
+
+    // d) Unique constraint on (release_id, logical_path) is enforced
+    expect(() => {
+      sqlite.exec(`
+        INSERT INTO game_release_files (id, release_id, name, logical_path, category, sha256, size_bytes, policy, is_directory, object_key, created_at)
+        VALUES ('file-dup', '${releaseId}', 'dup.jar', 'mods/create.jar', 'MOD', 'sha256-dup', 100, NULL, 0, 'game-files/dup', '${now}');
+      `)
+    }).toThrow()
+
+    // e) Foreign key cascade delete is enforced
+    sqlite.exec(`DELETE FROM game_releases WHERE id = '${releaseId}';`)
+    const orphanedFiles = sqlite.prepare("SELECT * FROM game_release_files WHERE release_id = ?").all(releaseId)
+    expect(orphanedFiles.length).toBe(0)
   })
 })
 

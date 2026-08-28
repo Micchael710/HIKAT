@@ -398,6 +398,92 @@ describe("Shared News & Media Content Utilities (Shard 04B)", () => {
   })
 })
 
+describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
+  it("sanitizes safe game logical paths and normalizes slashes", async () => {
+    const { sanitizeGamePath } = await import("./index")
+    expect(sanitizeGamePath("mods/create.jar")).toBe("mods/create.jar")
+    expect(sanitizeGamePath("config\\jei\\jei-client.ini")).toBe("config/jei/jei-client.ini")
+    expect(sanitizeGamePath("/kubejs/server_scripts/recipes.js/")).toBe("kubejs/server_scripts/recipes.js")
+    expect(sanitizeGamePath("options.txt")).toBe("options.txt")
+  })
+
+  it("strictly rejects path traversal, forbidden characters, and reserved Windows device names", async () => {
+    const { sanitizeGamePath } = await import("./index")
+    expect(() => sanitizeGamePath("../mods/evil.jar")).toThrow(/traversal/i)
+    expect(() => sanitizeGamePath("config/../../etc/passwd")).toThrow(/traversal/i)
+    expect(() => sanitizeGamePath("mods/create:jar")).toThrow(/no permitidos/i)
+    expect(() => sanitizeGamePath("mods/create*jar")).toThrow(/no permitidos/i)
+    expect(() => sanitizeGamePath("con.txt")).toThrow(/reservado/i)
+    expect(() => sanitizeGamePath("config/nul.json")).toThrow(/reservado/i)
+    expect(() => sanitizeGamePath("")).toThrow(/vacía/i)
+  })
+
+  it("accurately detects valid UTF-8 text buffers and rejects binary buffers", async () => {
+    const { isUtf8TextBuffer } = await import("./index")
+    const textEncoder = new TextEncoder()
+    expect(isUtf8TextBuffer(textEncoder.encode("Hello world\nThis is UTF-8 text\twith tabs"))).toBe(true)
+    expect(isUtf8TextBuffer(new Uint8Array([]))).toBe(true)
+
+    // Binary with null byte
+    expect(isUtf8TextBuffer(new Uint8Array([0x48, 0x65, 0x00, 0x6c]))).toBe(false)
+    // Binary with non-printable control code
+    expect(isUtf8TextBuffer(new Uint8Array([0x48, 0x07, 0x65]))).toBe(false)
+  })
+
+  it("checks editable text files with extension fast-path and strict binary guards", async () => {
+    const { isEditableTextFile } = await import("./index")
+    expect(isEditableTextFile("config.toml")).toBe(true)
+    expect(isEditableTextFile("recipes.json")).toBe(true)
+    expect(isEditableTextFile("script.js")).toBe(true)
+    expect(isEditableTextFile("patch.snbt")).toBe(true)
+
+    // Strict binary rejections
+    expect(isEditableTextFile("create.jar")).toBe(false)
+    expect(isEditableTextFile("pack.zip")).toBe(false)
+    expect(isEditableTextFile("icon.png")).toBe(false)
+
+    // Unknown extension with text buffer
+    const textEncoder = new TextEncoder()
+    expect(isEditableTextFile("custom_conf", textEncoder.encode("some=value\n"))).toBe(true)
+    expect(isEditableTextFile("custom_bin", new Uint8Array([0x50, 0x4b, 0x00]))).toBe(false)
+  })
+
+  it("validates JSON content and extracts syntax error lines", async () => {
+    const { validateJsonContent } = await import("./index")
+    expect(validateJsonContent('{"name": "hikat", "count": 42}').valid).toBe(true)
+    expect(validateJsonContent("").valid).toBe(true)
+
+    const invalid = validateJsonContent('{\n  "name": "hikat",\n  "count": \n}')
+    expect(invalid.valid).toBe(false)
+    expect(invalid.error).toContain("sintaxis")
+    expect(invalid.line).toBeDefined()
+  })
+
+  it("resolves 3-tier effective policy correctly with explicit, ancestor inherited, and convention fallback", async () => {
+    const { resolveEffectiveGamePolicy } = await import("./index")
+
+    // 1. Explicit override on file
+    expect(resolveEffectiveGamePolicy("config/critical.toml", "NO_MODIFICABLE")).toBe("NO_MODIFICABLE")
+    expect(resolveEffectiveGamePolicy("mods/client-only.jar", "MODIFICABLE")).toBe("MODIFICABLE")
+
+    // 2. Inherited from ancestor folder policy
+    const folderPolicies = new Map<string, string | null>([
+      ["config", "MODIFICABLE"],
+      ["config/protected", "NO_MODIFICABLE"],
+      ["mods", "NO_MODIFICABLE"],
+    ])
+
+    expect(resolveEffectiveGamePolicy("config/foo.toml", null, folderPolicies)).toBe("MODIFICABLE")
+    expect(resolveEffectiveGamePolicy("config/protected/deep/secret.toml", null, folderPolicies)).toBe("NO_MODIFICABLE")
+
+    // 3. Fallback convention when no explicit ancestor policy is configured
+    expect(resolveEffectiveGamePolicy("mods/jei.jar", null)).toBe("NO_MODIFICABLE")
+    expect(resolveEffectiveGamePolicy("config/jei.toml", null)).toBe("MODIFICABLE")
+    expect(resolveEffectiveGamePolicy("options.txt", null)).toBe("MODIFICABLE")
+    expect(resolveEffectiveGamePolicy("custom/other.dat", null)).toBe("NO_MODIFICABLE")
+  })
+})
+
 
 
 

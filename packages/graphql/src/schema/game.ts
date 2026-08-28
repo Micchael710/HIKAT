@@ -8,6 +8,8 @@ export const gameTypeDefs = /* GraphQL */ `
     SHADER_PACK
     KUBEJS
     SCRIPT
+    CONFIG
+    GENERAL
   }
 
   """
@@ -92,6 +94,10 @@ export const gameTypeDefs = /* GraphQL */ `
     sha256: String!
     sizeBytes: Int!
     policy: SyncPolicy!
+    explicitPolicy: SyncPolicy
+    effectivePolicy: SyncPolicy!
+    isInherited: Boolean!
+    isDirectory: Boolean!
     changeStatus: GameDraftChangeStatus
     createdAt: DateTime!
   }
@@ -135,21 +141,32 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   input CreateGameFileUploadInput {
-    category: GameFileCategory!
+    category: GameFileCategory
     originalFilename: String!
     sizeBytes: Int!
+    logicalPath: String
   }
 
   input AddGameFileInput {
     name: String!
     category: GameFileCategory
+    logicalPath: String
+    explicitPolicy: SyncPolicy
     tokenHash: String!
   }
 
   input UpdateGameFileInput {
     name: String
     category: GameFileCategory
+    logicalPath: String
+    explicitPolicy: SyncPolicy
     tokenHash: String
+  }
+
+  input SaveGameFileContentInput {
+    logicalPath: String!
+    content: String!
+    explicitPolicy: SyncPolicy
   }
 
   input PrepareGameDraftInput {
@@ -184,8 +201,12 @@ export const gameTypeDefs = /* GraphQL */ `
       releaseId: ID
       category: GameFileCategory
     ): [AdminGameFile!]!
-  }
 
+    """
+    Read text content of a game file from active draft/release - requires ADMIN role
+    """
+    readGameFileContent(id: ID!): String!
+  }
 
   extend type Mutation {
     """
@@ -199,7 +220,7 @@ export const gameTypeDefs = /* GraphQL */ `
     discardGameDraft: Boolean!
 
     """
-    Request a single-use token to upload a game file binary (.jar / .zip) - requires ADMIN role
+    Request a single-use token to upload a game file binary - requires ADMIN role
     """
     createGameFileUpload(input: CreateGameFileUploadInput!): GameFileUploadPayload!
 
@@ -212,6 +233,41 @@ export const gameTypeDefs = /* GraphQL */ `
     Update metadata of an existing game file in the active draft - requires ADMIN role
     """
     updateGameFile(id: ID!, input: UpdateGameFileInput!): AdminGameFile!
+
+    """
+    Save direct UTF-8 text file content into active draft - requires ADMIN role
+    """
+    saveGameFileContent(input: SaveGameFileContentInput!): AdminGameFile!
+
+    """
+    Create an explicit directory record in the active draft - requires ADMIN role
+    """
+    createGameFolder(logicalPath: String!): AdminGameFile!
+
+    """
+    Rename a file or folder path in the active draft - requires ADMIN role
+    """
+    renameGamePath(oldPath: String!, newPath: String!): Boolean!
+
+    """
+    Move one or multiple files/folders into a destination folder in active draft - requires ADMIN role
+    """
+    moveGamePaths(sources: [String!]!, destinationFolder: String!): Boolean!
+
+    """
+    Copy one or multiple files/folders into a destination folder in active draft - requires ADMIN role
+    """
+    copyGamePaths(sources: [String!]!, destinationFolder: String!): Boolean!
+
+    """
+    Delete one or multiple files or folders from active draft - requires ADMIN role
+    """
+    deleteGamePaths(paths: [String!]!): Boolean!
+
+    """
+    Set explicit policy on a file or folder (pass null to inherit) - requires ADMIN role
+    """
+    setGamePathPolicy(path: String!, explicitPolicy: SyncPolicy): Boolean!
 
     """
     Remove a game file from the active draft - requires ADMIN role

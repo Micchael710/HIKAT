@@ -10,13 +10,53 @@ import type {
   GameDraftChangesGql,
   GameDraftReadinessGql,
   GameDraftChangeStatusGql,
+  SyncPolicyGql,
   PublishGameReleaseInputGql,
   PrepareGameDraftInputGql,
 } from "@hikat/graphql"
-import { validateSemVer, normalizeIsoDateTime } from "@hikat/shared"
+import {
+  validateSemVer,
+  normalizeIsoDateTime,
+  resolveEffectiveGamePolicy,
+  type SyncPolicy,
+} from "@hikat/shared"
 import type { Env } from "../../types"
 
-export function formatAdminGameFile(file: schema.GameReleaseFile): AdminGameFileGql {
+/**
+ * Builds a directory explicit policy map from release records and computes effective policy for each record.
+ */
+export function resolveReleaseEffectivePolicies(
+  records: schema.GameReleaseFile[],
+): Map<string, SyncPolicyGql> {
+  const directoryPolicies = new Map<string, string | null>()
+
+  for (const r of records) {
+    if (r.isDirectory) {
+      directoryPolicies.set(r.logicalPath, r.policy)
+    }
+  }
+
+  const effectiveMap = new Map<string, SyncPolicyGql>()
+  for (const r of records) {
+    const effective = resolveEffectiveGamePolicy(
+      r.logicalPath,
+      r.policy,
+      directoryPolicies,
+    ) as SyncPolicyGql
+    effectiveMap.set(r.id, effective)
+  }
+
+  return effectiveMap
+}
+
+export function formatAdminGameFile(
+  file: schema.GameReleaseFile,
+  effectivePolicy?: SyncPolicyGql,
+): AdminGameFileGql {
+  const effective =
+    effectivePolicy ||
+    (file.policy as SyncPolicyGql) ||
+    (resolveEffectiveGamePolicy(file.logicalPath, file.policy as SyncPolicy) as SyncPolicyGql)
   return {
     id: file.id,
     name: file.name,
@@ -24,7 +64,11 @@ export function formatAdminGameFile(file: schema.GameReleaseFile): AdminGameFile
     category: file.category as any,
     sha256: file.sha256,
     sizeBytes: file.sizeBytes,
-    policy: file.policy as any,
+    policy: effective,
+    explicitPolicy: file.policy ? (file.policy as SyncPolicyGql) : null,
+    effectivePolicy: effective,
+    isInherited: !file.policy,
+    isDirectory: Boolean(file.isDirectory),
     createdAt: normalizeIsoDateTime(file.createdAt),
   }
 }
@@ -34,6 +78,7 @@ export function formatGameRelease(
   files: schema.GameReleaseFile[],
   taggedFiles?: AdminGameFileGql[],
 ): GameReleaseGql {
+  const effectiveMap = resolveReleaseEffectivePolicies(files)
   return {
     id: release.id,
     version: release.version,
@@ -42,7 +87,7 @@ export function formatGameRelease(
     status: release.status as any,
     notes: release.notes,
     publishedAt: release.publishedAt ? normalizeIsoDateTime(release.publishedAt) : null,
-    files: taggedFiles || files.map(formatAdminGameFile),
+    files: taggedFiles || files.map((f) => formatAdminGameFile(f, effectiveMap.get(f.id))),
     createdAt: normalizeIsoDateTime(release.createdAt),
     updatedAt: normalizeIsoDateTime(release.updatedAt),
   }
@@ -55,6 +100,9 @@ export function computeDraftChanges(
   changes: GameDraftChangesGql
   taggedFiles: AdminGameFileGql[]
 } {
+  const publishedEffectiveMap = resolveReleaseEffectivePolicies(publishedFiles)
+  const draftEffectiveMap = resolveReleaseEffectivePolicies(draftFiles)
+
   const publishedMap = new Map<string, schema.GameReleaseFile>()
   for (const pf of publishedFiles) {
     publishedMap.set(pf.logicalPath, pf)
@@ -70,21 +118,28 @@ export function computeDraftChanges(
   for (const df of draftFiles) {
     draftPaths.add(df.logicalPath)
     const base = publishedMap.get(df.logicalPath)
+    const draftEffective = draftEffectiveMap.get(df.id) || "NO_MODIFICABLE"
     let changeStatus: GameDraftChangeStatusGql = "UNCHANGED"
 
     if (!base) {
       changeStatus = "ADDED"
-      added++
-    } else if (base.sha256 !== df.sha256 || base.sizeBytes !== df.sizeBytes) {
-      changeStatus = "UPDATED"
-      updated++
+      if (!df.isDirectory) added++
     } else {
-      changeStatus = "UNCHANGED"
-      unchanged++
+      const baseEffective = publishedEffectiveMap.get(base.id) || "NO_MODIFICABLE"
+      const contentChanged = base.sha256 !== df.sha256 || base.sizeBytes !== df.sizeBytes
+      const policyChanged = baseEffective !== draftEffective || base.policy !== df.policy
+
+      if (contentChanged || policyChanged) {
+        changeStatus = "UPDATED"
+        if (!df.isDirectory) updated++
+      } else {
+        changeStatus = "UNCHANGED"
+        if (!df.isDirectory) unchanged++
+      }
     }
 
     taggedFiles.push({
-      ...formatAdminGameFile(df),
+      ...formatAdminGameFile(df, draftEffective),
       changeStatus,
     })
   }
@@ -92,14 +147,17 @@ export function computeDraftChanges(
   let removed = 0
   for (const pf of publishedFiles) {
     if (!draftPaths.has(pf.logicalPath)) {
-      removed++
+      if (!pf.isDirectory) removed++
+      const baseEffective = publishedEffectiveMap.get(pf.id) || "NO_MODIFICABLE"
       taggedFiles.push({
-        ...formatAdminGameFile(pf),
+        ...formatAdminGameFile(pf, baseEffective),
         id: `tombstone-${pf.id}`,
         changeStatus: "REMOVED",
       })
     }
   }
+
+  const realDraftFilesCount = draftFiles.filter((f) => !f.isDirectory).length
 
   return {
     changes: {
@@ -107,16 +165,15 @@ export function computeDraftChanges(
       updated,
       removed,
       unchanged,
-      total: draftFiles.length,
+      total: realDraftFilesCount,
     },
     taggedFiles,
   }
 }
 
-
 export async function validateDraftReadiness(
   env: Env,
-  draft: schema.GameRelease,
+  draft: { version: string; minecraftVersion?: string; neoForgeVersion?: string },
   draftFiles: schema.GameReleaseFile[],
 ): Promise<GameDraftReadinessGql> {
   const issues: string[] = []
@@ -124,8 +181,10 @@ export async function validateDraftReadiness(
   let storageVerified = true
   const validVersion = true
 
-  if (draftFiles.length === 0) {
-    issues.push("El borrador no contiene ningún archivo o mod.")
+  const realFiles = draftFiles.filter((f) => !f.isDirectory)
+
+  if (realFiles.length === 0) {
+    issues.push("El borrador no contiene ningún archivo o mod descargable.")
   }
 
   // Check unique logical paths
@@ -138,9 +197,9 @@ export async function validateDraftReadiness(
     pathSet.add(f.logicalPath)
   }
 
-  // Verify object existence in R2
+  // Verify object existence in R2 strictly for real files (skipping directory records)
   if (env.ASSETS) {
-    for (const f of draftFiles) {
+    for (const f of realFiles) {
       try {
         const head = await env.ASSETS.head(f.objectKey)
         if (!head) {
@@ -157,7 +216,7 @@ export async function validateDraftReadiness(
     }
   }
 
-  const isReady = validVersion && noConflicts && storageVerified && draftFiles.length > 0
+  const isReady = validVersion && noConflicts && storageVerified && realFiles.length > 0
 
   return {
     isReady,
@@ -180,18 +239,24 @@ export async function getPublishedModpack(
 
   if (!published) return null
 
-  const files = await db
+  const allRecords = await db
     .select()
     .from(schema.gameReleaseFiles)
     .where(eq(schema.gameReleaseFiles.releaseId, published.id))
     .all()
 
-  const clientFiles: ClientFileGql[] = files.map((file) => ({
+  // 1. Resolve effective policies across the entire release tree
+  const effectiveMap = resolveReleaseEffectivePolicies(allRecords)
+
+  // 2. Filter out directory records: clientFiles strictly contains real downloadable files
+  const realFiles = allRecords.filter((file) => !file.isDirectory)
+
+  const clientFiles: ClientFileGql[] = realFiles.map((file) => ({
     path: file.logicalPath,
     sha256: file.sha256,
     sizeBytes: file.sizeBytes,
     downloadUrl: `/game/download/${file.id}`,
-    policy: file.policy as any,
+    policy: effectiveMap.get(file.id) || "NO_MODIFICABLE",
   }))
 
   return {
@@ -354,6 +419,7 @@ export async function prepareGameDraft(
         sha256: bf.sha256,
         sizeBytes: bf.sizeBytes,
         policy: bf.policy,
+        isDirectory: bf.isDirectory ?? 0,
         objectKey: bf.objectKey, // Immutable reference to identical R2 object
         createdAt: now,
       }

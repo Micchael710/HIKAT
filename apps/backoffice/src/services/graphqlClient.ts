@@ -1290,6 +1290,10 @@ export const gameApi = {
               sha256
               sizeBytes
               policy
+              explicitPolicy
+              effectivePolicy
+              isInherited
+              isDirectory
               createdAt
             }
             createdAt
@@ -1311,6 +1315,10 @@ export const gameApi = {
               sha256
               sizeBytes
               policy
+              explicitPolicy
+              effectivePolicy
+              isInherited
+              isDirectory
               changeStatus
               createdAt
             }
@@ -1358,6 +1366,10 @@ export const gameApi = {
             sha256
             sizeBytes
             policy
+            explicitPolicy
+            effectivePolicy
+            isInherited
+            isDirectory
             createdAt
           }
           createdAt
@@ -1369,10 +1381,10 @@ export const gameApi = {
     return data.gameReleaseHistory
   },
 
-  async prepareGameDraft(): Promise<import("../types").GameRelease> {
+  async prepareGameDraft(input?: { baseReleaseId?: string }): Promise<import("../types").GameRelease> {
     const mutation = /* GraphQL */ `
-      mutation PrepareGameDraft {
-        prepareGameDraft {
+      mutation PrepareGameDraft($input: PrepareGameDraftInput) {
+        prepareGameDraft(input: $input) {
           id
           version
           status
@@ -1384,11 +1396,15 @@ export const gameApi = {
             sha256
             sizeBytes
             policy
+            explicitPolicy
+            effectivePolicy
+            isInherited
+            isDirectory
           }
         }
       }
     `
-    const data = await executeGraphQL<{ prepareGameDraft: import("../types").GameRelease }>(mutation)
+    const data = await executeGraphQL<{ prepareGameDraft: import("../types").GameRelease }>(mutation, { input })
     return data.prepareGameDraft
   },
 
@@ -1403,9 +1419,10 @@ export const gameApi = {
   },
 
   async createGameFileUpload(input: {
-    category: string
+    category?: string
     originalFilename: string
     sizeBytes: number
+    logicalPath?: string
   }): Promise<{
     uploadUrl: string
     uploadToken: string
@@ -1431,7 +1448,6 @@ export const gameApi = {
     uploadUrl: string,
     uploadToken: string,
   ): Promise<{ tokenHash: string; originalFilename?: string; sizeBytes?: number }> {
-
     const token = authService.getAccessToken()
     const targetUrl = uploadUrl.startsWith("http") ? uploadUrl : `${BACKEND_URL}${uploadUrl}`
 
@@ -1459,6 +1475,8 @@ export const gameApi = {
   async addGameFile(input: {
     name: string
     category?: string
+    logicalPath?: string
+    explicitPolicy?: import("../types").SyncPolicy
     tokenHash: string
   }): Promise<import("../types").AdminGameFile> {
     const mutation = /* GraphQL */ `
@@ -1471,6 +1489,10 @@ export const gameApi = {
           sha256
           sizeBytes
           policy
+          explicitPolicy
+          effectivePolicy
+          isInherited
+          isDirectory
           createdAt
         }
       }
@@ -1481,7 +1503,13 @@ export const gameApi = {
 
   async updateGameFile(
     id: string,
-    input: { name?: string; category?: string; tokenHash?: string },
+    input: {
+      name?: string
+      category?: string
+      logicalPath?: string
+      explicitPolicy?: import("../types").SyncPolicy
+      tokenHash?: string
+    },
   ): Promise<import("../types").AdminGameFile> {
     const mutation = /* GraphQL */ `
       mutation UpdateGameFile($id: ID!, $input: UpdateGameFileInput!) {
@@ -1493,12 +1521,126 @@ export const gameApi = {
           sha256
           sizeBytes
           policy
+          explicitPolicy
+          effectivePolicy
+          isInherited
+          isDirectory
           createdAt
         }
       }
     `
     const data = await executeGraphQL<{ updateGameFile: import("../types").AdminGameFile }>(mutation, { id, input })
     return data.updateGameFile
+  },
+
+  async saveGameFileContent(input: {
+    logicalPath: string
+    content: string
+    explicitPolicy?: import("../types").SyncPolicy | null
+  }): Promise<import("../types").AdminGameFile> {
+    const mutation = /* GraphQL */ `
+      mutation SaveGameFileContent($input: SaveGameFileContentInput!) {
+        saveGameFileContent(input: $input) {
+          id
+          name
+          logicalPath
+          category
+          sha256
+          sizeBytes
+          policy
+          explicitPolicy
+          effectivePolicy
+          isInherited
+          isDirectory
+          createdAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ saveGameFileContent: import("../types").AdminGameFile }>(mutation, { input })
+    return data.saveGameFileContent
+  },
+
+  async readGameFileContent(id: string): Promise<string> {
+    const query = /* GraphQL */ `
+      query ReadGameFileContent($id: ID!) {
+        readGameFileContent(id: $id)
+      }
+    `
+    const data = await executeGraphQL<{ readGameFileContent: string }>(query, { id })
+    return data.readGameFileContent
+  },
+
+  async createGameFolder(logicalPath: string): Promise<import("../types").AdminGameFile> {
+    const mutation = /* GraphQL */ `
+      mutation CreateGameFolder($logicalPath: String!) {
+        createGameFolder(logicalPath: $logicalPath) {
+          id
+          name
+          logicalPath
+          category
+          sha256
+          sizeBytes
+          policy
+          explicitPolicy
+          effectivePolicy
+          isInherited
+          isDirectory
+          createdAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ createGameFolder: import("../types").AdminGameFile }>(mutation, { logicalPath })
+    return data.createGameFolder
+  },
+
+  async renameGamePath(oldPath: string, newPath: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation RenameGamePath($oldPath: String!, $newPath: String!) {
+        renameGamePath(oldPath: $oldPath, newPath: $newPath)
+      }
+    `
+    const data = await executeGraphQL<{ renameGamePath: boolean }>(mutation, { oldPath, newPath })
+    return data.renameGamePath
+  },
+
+  async moveGamePaths(sources: string[], destinationFolder: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation MoveGamePaths($sources: [String!]!, $destinationFolder: String!) {
+        moveGamePaths(sources: $sources, destinationFolder: $destinationFolder)
+      }
+    `
+    const data = await executeGraphQL<{ moveGamePaths: boolean }>(mutation, { sources, destinationFolder })
+    return data.moveGamePaths
+  },
+
+  async copyGamePaths(sources: string[], destinationFolder: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation CopyGamePaths($sources: [String!]!, $destinationFolder: String!) {
+        copyGamePaths(sources: $sources, destinationFolder: $destinationFolder)
+      }
+    `
+    const data = await executeGraphQL<{ copyGamePaths: boolean }>(mutation, { sources, destinationFolder })
+    return data.copyGamePaths
+  },
+
+  async deleteGamePaths(paths: string[]): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteGamePaths($paths: [String!]!) {
+        deleteGamePaths(paths: $paths)
+      }
+    `
+    const data = await executeGraphQL<{ deleteGamePaths: boolean }>(mutation, { paths })
+    return data.deleteGamePaths
+  },
+
+  async setGamePathPolicy(path: string, explicitPolicy?: import("../types").SyncPolicy | null): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation SetGamePathPolicy($path: String!, $explicitPolicy: SyncPolicy) {
+        setGamePathPolicy(path: $path, explicitPolicy: $explicitPolicy)
+      }
+    `
+    const data = await executeGraphQL<{ setGamePathPolicy: boolean }>(mutation, { path, explicitPolicy })
+    return data.setGamePathPolicy
   },
 
   async removeGameFile(id: string): Promise<boolean> {
@@ -1522,6 +1664,10 @@ export const gameApi = {
           sha256
           sizeBytes
           policy
+          explicitPolicy
+          effectivePolicy
+          isInherited
+          isDirectory
           createdAt
         }
       }
@@ -1535,7 +1681,6 @@ export const gameApi = {
     notes?: string
   }): Promise<import("../types").GameRelease> {
     const mutation = /* GraphQL */ `
-
       mutation PublishGameRelease($input: PublishGameReleaseInput!) {
         publishGameRelease(input: $input) {
           id
@@ -1553,6 +1698,10 @@ export const gameApi = {
             sha256
             sizeBytes
             policy
+            explicitPolicy
+            effectivePolicy
+            isInherited
+            isDirectory
             createdAt
           }
         }

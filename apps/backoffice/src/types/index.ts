@@ -234,7 +234,7 @@ export interface UpdateAdminPlayerCapeInput {
 
 // --- Game & Modpack Types (Shard 06.5) ---
 
-export type GameFileCategory = "MOD" | "RESOURCE_PACK" | "SHADER_PACK" | "KUBEJS" | "SCRIPT"
+export type GameFileCategory = "MOD" | "RESOURCE_PACK" | "SHADER_PACK" | "KUBEJS" | "SCRIPT" | "CONFIG" | "GENERAL"
 
 export type GameReleaseStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED"
 
@@ -244,45 +244,33 @@ export type GameDraftChangeStatus = "UNCHANGED" | "ADDED" | "UPDATED" | "REMOVED
 
 export interface GameDraftChanges {
   added: number
-
   updated: number
-
   removed: number
-
   unchanged: number
-
   total: number
 }
 
 export interface GameDraftReadiness {
   isReady: boolean
-
   validVersion: boolean
-
   noConflicts: boolean
-
   storageVerified: boolean
-
   issues: string[]
 }
 
 export interface AdminGameFile {
   id: string
-
   name: string
-
   logicalPath: string
-
   category: GameFileCategory
-
   sha256: string
-
   sizeBytes: number
-
   policy: SyncPolicy
-
+  explicitPolicy?: SyncPolicy | null
+  effectivePolicy: SyncPolicy
+  isInherited: boolean
+  isDirectory: boolean
   changeStatus?: GameDraftChangeStatus | null
-
   createdAt: string
 }
 
