@@ -320,7 +320,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div data-testid="server-files-view" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Pending Release Sync Banner */}
       {syncPlan?.isPending && (
         <div

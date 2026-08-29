@@ -1225,4 +1225,197 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
   })
 })
 
+describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () => {
+  const mockServerResources: import("../../types").ServerResources = {
+    status: "OFFLINE",
+    memoryUsedBytes: 0,
+    memoryLimitBytes: 4 * 1024 * 1024 * 1024,
+    cpuPercent: 0,
+    cpuLimitPercent: 200,
+    diskUsedBytes: 1024 * 1024 * 1024,
+    diskLimitBytes: 10 * 1024 * 1024 * 1024,
+    uptimeMs: 0,
+    networkRxBytes: 0,
+    networkTxBytes: 0,
+    isSuspended: false,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it("1 & 2. isPending=true renders pending changes banner in General with version and quantities", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue(mockServerResources)
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [
+        {
+          action: "INSTALL",
+          filename: "both-mod.jar",
+          targetPath: "mods/both-mod.jar",
+          sizeBytes: 2048,
+          sha256: "h1",
+        },
+      ],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 2 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+      blockReason: null,
+    })
+
+    render(<ServerOverviewView theme="dark" />)
+
+    // Banner is visible in General view
+    const banner = await screen.findByTestId("server-overview-pending-changes-banner")
+    expect(banner).toBeDefined()
+    expect(screen.getByText("Cambios pendientes en el servidor")).toBeDefined()
+    expect(screen.getByText(/La versión v1.2.0 tiene cambios que todavía no se han aplicado al servidor/i)).toBeDefined()
+    expect(screen.getByText(/1 para instalar/i)).toBeDefined()
+    expect(screen.getByText(/0 para actualizar/i)).toBeDefined()
+  })
+
+  it("3. Click 'Revisar cambios' in General switches active tab to Archivos", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue(mockServerResources)
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+      blockReason: null,
+    })
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([])
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([])
+
+    render(<ServerOverviewView theme="dark" />)
+
+    const reviewBtn = await screen.findByTestId("button-overview-review-pending-changes")
+    await act(async () => {
+      fireEvent.click(reviewBtn)
+    })
+
+    // Now Archivos tab is active
+    expect(screen.getByTestId("server-files-view")).toBeDefined()
+  })
+
+  it("4. isPending=false does not render pending changes banner in General", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue(mockServerResources)
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: false,
+      items: [],
+      summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 3 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+      blockReason: null,
+    })
+
+    render(<ServerOverviewView theme="dark" />)
+
+    await screen.findByText("Servidor Principal")
+    expect(screen.queryByTestId("server-overview-pending-changes-banner")).toBeNull()
+  })
+
+  it("5. Failure of getServerReleaseSyncPlan does not break General and does not show false banner", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue(mockServerResources)
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockRejectedValue(new Error("Server unconfigured"))
+
+    render(<ServerOverviewView theme="dark" />)
+
+    await screen.findByText("Servidor Principal")
+    expect(screen.queryByTestId("server-overview-pending-changes-banner")).toBeNull()
+  })
+
+  it("6. canApply=true shows green ready notice in General banner", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue(mockServerResources)
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+      blockReason: null,
+    })
+
+    render(<ServerOverviewView theme="dark" />)
+
+    const banner = await screen.findByTestId("server-overview-pending-changes-banner")
+    expect(banner).toBeDefined()
+    expect(screen.getByText(/Servidor apagado y listo para aplicar los cambios/i)).toBeDefined()
+  })
+
+  it("7. ONLINE status shows orange turn off notice in General banner", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue({
+      ...mockServerResources,
+      status: "ONLINE",
+    })
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "ONLINE",
+      canApply: false,
+      blockReason: "Apaga el servidor para aplicar los cambios.",
+    })
+
+    render(<ServerOverviewView theme="dark" />)
+
+    const banner = await screen.findByTestId("server-overview-pending-changes-banner")
+    expect(banner).toBeDefined()
+    expect(screen.getByText(/Apaga el servidor para aplicar los cambios/i)).toBeDefined()
+  })
+
+  it("8. DISCONNECTED status shows red unavailable notice in General banner", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue({
+      ...mockServerResources,
+      status: "DISCONNECTED",
+    })
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "DISCONNECTED",
+      canApply: false,
+      blockReason: "El servidor no está disponible en este momento.",
+    })
+
+    render(<ServerOverviewView theme="dark" />)
+
+    const banner = await screen.findByTestId("server-overview-pending-changes-banner")
+    expect(banner).toBeDefined()
+    expect(screen.getByText(/El servidor no está disponible en este momento/i)).toBeDefined()
+  })
+})
+
+
 

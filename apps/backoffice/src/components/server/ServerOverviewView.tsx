@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react"
-import type { ThemeMode, ServerResources, ServerPowerAction, ConsoleLogEntry } from "../../types"
-import { serverApi } from "../../services/graphqlClient"
+import type { ThemeMode, ServerResources, ServerPowerAction, ConsoleLogEntry, ServerReleaseSyncPlan } from "../../types"
+import { serverApi, serverContentApi } from "../../services/graphqlClient"
 import { consoleService } from "../../services/consoleService"
 import { formatBytesToHuman, formatUptime } from "@hikat/shared"
 import ServerStatusBadge from "./ServerStatusBadge"
@@ -46,6 +46,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
   const [activeTab, setActiveTab] = useState<ServerSubTab>("general")
   const [infraState, setInfraState] = useState<"CHECKING" | "CONNECTED" | "DISCONNECTED">("CHECKING")
   const [resources, setResources] = useState<ServerResources | null>(null)
+  const [syncPlan, setSyncPlan] = useState<ServerReleaseSyncPlan | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isActionLoading, setIsActionLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,6 +68,20 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
     setToastType(type)
   }, [])
 
+  // Sync plan fetcher
+  const fetchSyncPlan = useCallback(async () => {
+    try {
+      const plan = await serverContentApi.getServerReleaseSyncPlan()
+      if (isMountedRef.current) {
+        setSyncPlan(plan)
+      }
+    } catch {
+      if (isMountedRef.current) {
+        setSyncPlan(null)
+      }
+    }
+  }, [])
+
   // Stable status fetcher
   const fetchStatus = useCallback(async (isManual: boolean = false) => {
     if (isFetchingRef.current || !isMountedRef.current) return
@@ -75,6 +90,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
     if (isManual) {
       setError(null)
       setInfraState("CHECKING")
+      fetchSyncPlan()
     }
 
     try {
@@ -101,22 +117,25 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
       }
       isFetchingRef.current = false
     }
-  }, [])
+  }, [fetchSyncPlan])
 
   // Controlled polling: initial fetch, then once every 5s
   useEffect(() => {
     isMountedRef.current = true
     fetchStatus()
+    fetchSyncPlan()
 
     const interval = setInterval(() => {
       if (document.visibilityState === "visible" && !isActionLoadingRef.current) {
         fetchStatus()
+        fetchSyncPlan()
       }
     }, 5000)
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible" && !isActionLoadingRef.current) {
         fetchStatus()
+        fetchSyncPlan()
       }
     }
 
@@ -127,7 +146,14 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
       clearInterval(interval)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [fetchStatus])
+  }, [fetchStatus, fetchSyncPlan])
+
+  // Refresh plan on tab activation
+  useEffect(() => {
+    if (activeTab === "general") {
+      fetchSyncPlan()
+    }
+  }, [activeTab, fetchSyncPlan])
 
   // Live console preview subscription on General tab
   useEffect(() => {
@@ -501,6 +527,125 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                   theme={theme}
                 />
               </div>
+
+              {/* Pending Server Release Changes Banner */}
+              {syncPlan?.isPending && (
+                <div
+                  data-testid="server-overview-pending-changes-banner"
+                  style={{
+                    padding: "16px 20px",
+                    borderRadius: 16,
+                    background: isDark ? "rgba(59, 130, 246, 0.12)" : "#eff6ff",
+                    border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.3)" : "#bfdbfe"}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: 14,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <div
+                      style={{
+                        width: 42,
+                        height: 42,
+                        borderRadius: 12,
+                        backgroundColor: "rgba(59, 130, 246, 0.15)",
+                        color: "#3b82f6",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <IconFolder size={22} />
+                    </div>
+
+                    <div>
+                      <div
+                        style={{
+                          fontSize: "0.95rem",
+                          fontWeight: 700,
+                          color: isDark ? "#f3f4f6" : "#1e3a8a",
+                        }}
+                      >
+                        Cambios pendientes en el servidor
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.85rem",
+                          color: isDark ? "#94a3b8" : "#475569",
+                          marginTop: 2,
+                        }}
+                      >
+                        La versión v{syncPlan.releaseVersion || "—"} tiene cambios que todavía no se han aplicado al servidor.
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.82rem",
+                          color: isDark ? "#93c5fd" : "#3b82f6",
+                          marginTop: 4,
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span>{syncPlan.summary.toInstall} para instalar</span>
+                        <span>•</span>
+                        <span>{syncPlan.summary.toUpdate} para actualizar</span>
+                        {syncPlan.summary.toRemove > 0 && (
+                          <>
+                            <span>•</span>
+                            <span>{syncPlan.summary.toRemove} para eliminar</span>
+                          </>
+                        )}
+                        <span>•</span>
+                        <span
+                          style={{
+                            color: syncPlan.canApply
+                              ? "#22c55e"
+                              : syncPlan.serverStatus === "DISCONNECTED" || syncPlan.serverStatus === "UNKNOWN"
+                              ? "#ef4444"
+                              : "#f59e0b",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {syncPlan.canApply
+                            ? "🟢 Servidor apagado y listo para aplicar los cambios."
+                            : syncPlan.serverStatus === "ONLINE" || syncPlan.serverStatus === "STARTING" || syncPlan.serverStatus === "STOPPING"
+                            ? `🟠 ${syncPlan.blockReason || "Apaga el servidor para aplicar los cambios."}`
+                            : syncPlan.serverStatus === "OFFLINE"
+                            ? `🟠 ${syncPlan.blockReason || "No se pudieron verificar los archivos del servidor."}`
+                            : `🔴 ${syncPlan.blockReason || "El servidor no está disponible en este momento."}`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-testid="button-overview-review-pending-changes"
+                    onClick={() => setActiveTab("files")}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 18px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: "#3b82f6",
+                      color: "#ffffff",
+                      fontWeight: 700,
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 6px rgba(59, 130, 246, 0.3)",
+                    }}
+                  >
+                    <span>Revisar cambios</span>
+                  </button>
+                </div>
+              )}
 
               {/* Resource Metrics Grid (CPU, RAM, Disco) */}
               <div
