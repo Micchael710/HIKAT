@@ -96,9 +96,14 @@
   },
   "news": {
     "sectionTitle": "Latest News",
-    "offlineTitle": "Unable to load news",
-    "offlineDesc": "Could not retrieve news articles from the server at this time.",
-    "retry": "Retry"
+    "offlineTitle": "No connection to news feed",
+    "offlineDesc": "Could not synchronize published articles from the server at this time.",
+    "retry": "Retry",
+    "typeNews": "News",
+    "typeUpdate": "Update",
+    "typeAnnouncement": "Announcement",
+    "typeMaintenance": "Maintenance",
+    "playVideo": "Play video"
   },
   "serverStats": {
     "title": "Server Status",

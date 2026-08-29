@@ -1,18 +1,12 @@
 import { graphqlClient } from "./apiClient"
 import { resolveApiAssetUrl } from "../config/api"
+import { heroHomeBg } from "../assets"
 import type { NewsCardItem } from "../types"
 
 export interface NewsResult {
   items: NewsCardItem[]
   isCached?: boolean
   error?: boolean
-}
-
-const TYPE_ACCENT_COLORS: Record<string, string> = {
-  UPDATE: "#3ec4c0",
-  ANNOUNCEMENT: "#e8a840",
-  MAINTENANCE: "#ef4444",
-  NEWS: "#10b981",
 }
 
 interface NewsItemResponse {
@@ -22,15 +16,44 @@ interface NewsItemResponse {
   type: string
   image?: {
     url: string
+    mimeType?: string
+    mediaType?: string
+  } | null
+  youtubeVideoId?: string | null
+  youtubeUrl?: string | null
+  video?: {
+    url: string
+    mimeType?: string
+    mediaType?: string
   } | null
   publishedAt?: string | null
   createdAt: string
 }
 
+/**
+ * Resolves the preview image for a news card according to the strict canonical hierarchy:
+ * 1. Explicit cover image
+ * 2. YouTube official thumbnail (via youtubeVideoId)
+ * 3. Uploaded video asset URL
+ * 4. Neutral fallback launcher artwork
+ */
+export function resolveNewsPreview(item: NewsItemResponse): string {
+  if (item.image?.url) {
+    return resolveApiAssetUrl(item.image.url)
+  }
+  if (item.youtubeVideoId) {
+    return `https://img.youtube.com/vi/${encodeURIComponent(item.youtubeVideoId)}/hqdefault.jpg`
+  }
+  if (item.video?.url) {
+    return resolveApiAssetUrl(item.video.url)
+  }
+  return heroHomeBg
+}
+
 export const newsService = {
   /**
    * Fetch published news articles from Backend GraphQL newsFeed query
-   * with automatic offline caching of real seen articles.
+   * with multimedia metadata (YouTube, video, cover image) and automatic offline caching.
    * If offline and no previous articles exist in cache, returns empty list with error flag.
    */
   async getNewsArticles(_lang?: string): Promise<NewsResult> {
@@ -44,6 +67,15 @@ export const newsService = {
             type
             image {
               url
+              mimeType
+              mediaType
+            }
+            youtubeVideoId
+            youtubeUrl
+            video {
+              url
+              mimeType
+              mediaType
             }
             publishedAt
             createdAt
@@ -71,12 +103,17 @@ export const newsService = {
 
         return {
           id: item.id,
-          img: resolveApiAssetUrl(item.image?.url),
+          img: resolveNewsPreview(item),
           title: item.title,
           desc: snippet,
           content: item.content || "",
-          accentColor: TYPE_ACCENT_COLORS[item.type] || "#e8a840",
+          type: item.type,
+          accentColor: "#38bdf8",
           date: item.publishedAt || item.createdAt,
+          youtubeVideoId: item.youtubeVideoId || null,
+          youtubeUrl: item.youtubeUrl || null,
+          videoUrl: item.video?.url ? resolveApiAssetUrl(item.video.url) : null,
+          videoMimeType: item.video?.mimeType || null,
         }
       })
 

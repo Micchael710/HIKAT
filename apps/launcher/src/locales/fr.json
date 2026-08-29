@@ -96,9 +96,14 @@
   },
   "news": {
     "sectionTitle": "Dernières Nouvelles",
-    "offlineTitle": "Impossible de charger les actualités",
-    "offlineDesc": "Impossible de récupérer les articles du serveur pour le moment.",
-    "retry": "Réessayer"
+    "offlineTitle": "Pas de connexion aux actualités",
+    "offlineDesc": "Impossible d'obtenir les articles du serveur pour le moment.",
+    "retry": "Réessayer",
+    "typeNews": "Nouvelle",
+    "typeUpdate": "Mise à jour",
+    "typeAnnouncement": "Annonce",
+    "typeMaintenance": "Maintenance",
+    "playVideo": "Lire la vidéo"
   },
   "serverStats": {
     "title": "État du Serveur",

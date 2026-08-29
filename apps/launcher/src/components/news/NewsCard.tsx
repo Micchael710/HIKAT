@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react"
+import React from "react"
 import { ThemeMode, NewsCardItem } from "../../types"
-import { hexToRGB } from "../../theme/tokens"
+import { useDynamicAccent } from "../../utils/dynamicAccent"
 
 interface NewsCardProps {
   card: NewsCardItem
@@ -15,62 +15,11 @@ export default function NewsCard({
   CARD_W,
   CARD_H,
   onClick,
-  theme = "dark",
 }: NewsCardProps) {
-  const isDark = theme === "dark"
-  const [accent, setAccent] = useState(() =>
-    hexToRGB(card.accentColor || "#e8a840"),
-  )
+  // Extract dominant accent dynamically from thumbnail image
+  const accent = useDynamicAccent(card.img, card.accentColor || "#38bdf8")
 
-  /* Saturated dominant color extraction */
-  useEffect(() => {
-    const img = new Image()
-    img.onload = () => {
-      try {
-        const W = 48
-        const H = 48
-        const canvas = document.createElement("canvas")
-        canvas.width = W
-        canvas.height = H
-        const ctx = canvas.getContext("2d")
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, W, H)
-          const data = ctx.getImageData(0, 0, W, H).data
-          let bestSaturation = -1
-          let bestR = 232
-          let bestG = 168
-          let bestB = 64
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i]
-            const g = data[i + 1]
-            const b = data[i + 2]
-            const a = data[i + 3]
-            if (a > 120) {
-              const max = Math.max(r, g, b)
-              const min = Math.min(r, g, b)
-              const sat = max === 0 ? 0 : (max - min) / max
-              const lum = (max + min) / 2
-              if (sat > bestSaturation && lum > 35 && lum < 225) {
-                bestSaturation = sat
-                bestR = r
-                bestG = g
-                bestB = b
-              }
-            }
-          }
-          setAccent({
-            r: bestR,
-            g: bestG,
-            b: bestB,
-            css: `${bestR}, ${bestG}, ${bestB}`,
-          })
-        }
-      } catch (_) {
-        /* keep fallback */
-      }
-    }
-    img.src = card.img
-  }, [card.img])
+  const hasVideo = Boolean(card.youtubeVideoId || card.videoUrl)
 
   return (
     <div
@@ -130,6 +79,35 @@ export default function NewsCard({
           pointerEvents: "none",
         }}
       />
+
+      {/* Video Indicator Badge (Clean & Formal) */}
+      {hasVideo && (
+        <div
+          style={{
+            position: "absolute",
+            top: 14,
+            right: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 10px",
+            borderRadius: 8,
+            background: "rgba(0, 0, 0, 0.65)",
+            backdropFilter: "blur(8px)",
+            border: `1px solid rgba(${accent.css}, 0.4)`,
+            color: "#ffffff",
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: "0.02em",
+            pointerEvents: "none",
+          }}
+        >
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+          <span>VIDEO</span>
+        </div>
+      )}
 
       {/* Bottom Title Container */}
       <div

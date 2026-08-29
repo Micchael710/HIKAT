@@ -3,14 +3,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { newsService } from "./newsService"
 import * as apiClientModule from "./apiClient"
 
-describe("Launcher News Service (GraphQL newsFeed & Offline Caching)", () => {
+describe("Launcher News Service (GraphQL newsFeed & Multimedia Caching)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
     ;(import.meta.env as any).DEV = true
   })
 
-  it("1. Successfully queries GraphQL newsFeed, normalizes entity fields, and caches results", async () => {
+  it("1. Successfully queries GraphQL newsFeed with rich media fields and caches results", async () => {
     const mockNewsFeed = {
       items: [
         {
@@ -21,15 +21,21 @@ describe("Launcher News Service (GraphQL newsFeed & Offline Caching)", () => {
           image: {
             url: "/media/content/news-banner-1.png",
           },
+          youtubeVideoId: "dQw4w9WgXcQ",
+          youtubeUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+          video: null,
           publishedAt: "2026-08-29T12:00:00.000Z",
           createdAt: "2026-08-29T11:00:00.000Z",
         },
         {
           id: "news-2",
-          title: "Mantenimiento Programado",
-          content: "El servidor estará en mantenimiento durante 30 minutos.",
-          type: "MAINTENANCE",
+          title: "Trailer Oficial en YouTube",
+          content: "Mira el trailer oficial de la nueva temporada.",
+          type: "ANNOUNCEMENT",
           image: null,
+          youtubeVideoId: "abc123xyz89",
+          youtubeUrl: "https://www.youtube.com/watch?v=abc123xyz89",
+          video: null,
           publishedAt: "2026-08-28T10:00:00.000Z",
           createdAt: "2026-08-28T09:00:00.000Z",
         },
@@ -45,30 +51,36 @@ describe("Launcher News Service (GraphQL newsFeed & Offline Caching)", () => {
     const result = await newsService.getNewsArticles("es")
 
     expect(gqlSpy).toHaveBeenCalledTimes(1)
+    expect(gqlSpy.mock.calls[0][0]).toContain("youtubeVideoId")
+    expect(gqlSpy.mock.calls[0][0]).toContain("youtubeUrl")
+    expect(gqlSpy.mock.calls[0][0]).toContain("video")
+
     expect(result.isCached).toBe(false)
     expect(result.error).toBeUndefined()
     expect(result.items.length).toBe(2)
 
-    // Verify entity field mappings
+    // Verify entity field mappings: Item 1 has explicit image priority
     const item1 = result.items[0]
     expect(item1.id).toBe("news-1")
     expect(item1.title).toBe("Nueva Actualización 1.1.0")
     expect(item1.img).toBe("http://127.0.0.1:8787/media/content/news-banner-1.png")
-    expect(item1.accentColor).toBe("#3ec4c0") // UPDATE accent color
-    expect(item1.content).toContain("Detalles completos")
-    expect(item1.date).toBe("2026-08-29T12:00:00.000Z")
+    expect(item1.youtubeVideoId).toBe("dQw4w9WgXcQ")
+    expect(item1.type).toBe("UPDATE")
 
+    // Item 2 has no image but has youtubeVideoId -> resolves YouTube hqdefault thumbnail
     const item2 = result.items[1]
     expect(item2.id).toBe("news-2")
-    expect(item2.img).toBe("")
-    expect(item2.accentColor).toBe("#ef4444") // MAINTENANCE accent color
+    expect(item2.img).toBe("https://img.youtube.com/vi/abc123xyz89/hqdefault.jpg")
+    expect(item2.youtubeVideoId).toBe("abc123xyz89")
 
-    // Verify localStorage cache was populated
+    // Verify localStorage cache was populated with rich media properties
     const cached = window.localStorage.getItem("hikat_cached_news")
     expect(cached).not.toBeNull()
     const parsed = JSON.parse(cached!)
     expect(parsed.length).toBe(2)
     expect(parsed[0].id).toBe("news-1")
+    expect(parsed[0].youtubeVideoId).toBe("dQw4w9WgXcQ")
+    expect(parsed[1].img).toBe("https://img.youtube.com/vi/abc123xyz89/hqdefault.jpg")
   })
 
   it("2. Empty feed (0 published articles) returns empty list with isCached: false and no fake news", async () => {
@@ -85,7 +97,6 @@ describe("Launcher News Service (GraphQL newsFeed & Offline Caching)", () => {
   })
 
   it("3. Network/API failure with existing cache falls back to cached news with isCached: true", async () => {
-    // Seed previous cached news
     const existingCache = [
       {
         id: "news-cached-1",
@@ -93,8 +104,10 @@ describe("Launcher News Service (GraphQL newsFeed & Offline Caching)", () => {
         title: "Noticia en Cache",
         desc: "Descripción en cache",
         content: "Contenido",
-        accentColor: "#10b981",
+        accentColor: "#38bdf8",
         date: "2026-08-27T00:00:00.000Z",
+        type: "NEWS",
+        youtubeVideoId: "cachedVideo1",
       },
     ]
     window.localStorage.setItem("hikat_cached_news", JSON.stringify(existingCache))
@@ -108,6 +121,7 @@ describe("Launcher News Service (GraphQL newsFeed & Offline Caching)", () => {
 
     expect(result.items.length).toBe(1)
     expect(result.items[0].id).toBe("news-cached-1")
+    expect(result.items[0].youtubeVideoId).toBe("cachedVideo1")
     expect(result.isCached).toBe(true)
   })
 

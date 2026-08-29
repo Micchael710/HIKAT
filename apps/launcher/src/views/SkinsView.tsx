@@ -8,13 +8,14 @@ import {
   DEFAULT_SKINS,
   DEFAULT_CAPES,
 } from "../types"
-import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens"
+import { CANVAS_W, BASE_FONT } from "../theme/tokens"
 import SkinViewer3D from "../components/minecraft/SkinViewer3D"
 import SkinCardPreview from "../components/minecraft/SkinCardPreview"
 import CapeCardPreview from "../components/minecraft/CapeCardPreview"
 import { loadCapeToCanvas } from "skinview-utils"
 import LiveToast from "../components/common/LiveToast"
 import { useTranslation } from "../context/LanguageContext"
+import { useDynamicAccent } from "../utils/dynamicAccent"
 import {
   validateMinecraftSkinTexture,
   validateCapeTextureBuffer,
@@ -22,6 +23,207 @@ import {
   MAX_CAPE_SIZE_BYTES,
   MAX_PLAYER_CAPES,
 } from "@hikat/shared"
+
+interface SkinCapeItemCardProps {
+  item: SkinItem | CapeItem
+  skinType: "skin" | "capa"
+  isSel: boolean
+  isDark: boolean
+  onSelect: (id: string, itemAccent?: string) => void
+  t: (key: string, params?: Record<string, any>) => string
+}
+
+function SkinCapeItemCard({
+  item,
+  skinType,
+  isSel,
+  isDark,
+  onSelect,
+  t,
+}: SkinCapeItemCardProps) {
+  const isNone = item.id === "none"
+  const isCustom = item.badge === "CUSTOM" || item.id === "player-custom"
+  const textureUrl =
+    item.customImgUrl ||
+    (skinType === "skin"
+      ? (item as SkinItem).skinUrl
+      : (item as CapeItem).capeUrl)
+
+  const fallbackHex =
+    item.accent ||
+    (skinType === "skin"
+      ? (item as SkinItem).shirt
+      : (item as CapeItem).color) ||
+    (skinType === "capa" ? "#10b981" : "#38bdf8")
+
+  const accent = useDynamicAccent(textureUrl, fallbackHex)
+
+  const displayName = isNone
+    ? skinType === "skin"
+      ? t("skins.noSkin")
+      : t("skins.noCape")
+    : item.name
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(item.id, accent.hex)}
+      className={`skin-card-item ${isSel ? "is-selected" : ""}`}
+      style={{
+        ["--card-border-color" as any]: `rgba(${accent.css}, 0.88)`,
+        ["--card-glow-color" as any]: `rgba(${accent.css}, 0.28)`,
+        position: "relative",
+      }}
+    >
+      {/* Inner Container */}
+      <div
+        style={{
+          borderRadius: 14,
+          overflow: "hidden",
+          position: "relative",
+          height: 256,
+          background: isDark ? "#080e13" : "#e6ebf2",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: `radial-gradient(ellipse 85% 75% at 50% 62%, rgba(${accent.r},${accent.g},${accent.b}, ${
+              isDark ? 0.12 : 0.2
+            }) 0%, ${isDark ? "#080e13" : "#e6ebf2"} 75%)`,
+            pointerEvents: "none",
+          }}
+        />
+
+        {/* Badge if custom */}
+        {isCustom && (
+          <div
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              background:
+                skinType === "capa"
+                  ? "rgba(16, 185, 129, 0.2)"
+                  : "rgba(56, 189, 248, 0.2)",
+              border:
+                skinType === "capa"
+                  ? "1px solid rgba(16, 185, 129, 0.4)"
+                  : "1px solid rgba(56, 189, 248, 0.4)",
+              borderRadius: 6,
+              padding: "2px 8px",
+              fontSize: 10,
+              fontWeight: 800,
+              color: skinType === "capa" ? "#10b981" : "#38bdf8",
+              letterSpacing: "0.05em",
+              zIndex: 3,
+            }}
+          >
+            PERSONAL
+          </div>
+        )}
+
+        <div style={{ position: "relative", zIndex: 1 }}>
+          {skinType === "skin" ? (
+            isNone || (!item.customImgUrl && !(item as SkinItem).skinUrl) ? (
+              <div
+                style={{
+                  width: 90,
+                  height: 145,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <span style={{ fontSize: 13, color: "#64748b" }}>
+                  {t("skins.noSkin")}
+                </span>
+              </div>
+            ) : (
+              <SkinCardPreview
+                skinUrl={item.customImgUrl || (item as SkinItem).skinUrl}
+                alt={item.name}
+                width={110}
+                height={185}
+              />
+            )
+          ) : isNone || (!item.customImgUrl && !(item as CapeItem).capeUrl) ? (
+            <div
+              style={{
+                width: 86,
+                height: 124,
+                borderRadius: 12,
+                border: isDark
+                  ? "2.4px dashed rgba(255,255,255,0.18)"
+                  : "2.4px dashed rgba(0,0,0,0.18)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <span style={{ fontSize: 13, color: "#64748b" }}>
+                {t("skins.noCape")}
+              </span>
+            </div>
+          ) : (
+            <CapeCardPreview
+              capeUrl={item.customImgUrl || (item as CapeItem).capeUrl}
+              alt={item.name}
+              width={85}
+              height={136}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Name + Selected Status Row */}
+      <div
+        style={{
+          padding: "8px 8px 4px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 16.5,
+            fontWeight: 700,
+            color: isSel
+              ? isDark
+                ? "white"
+                : "#111822"
+              : isDark
+                ? "rgba(255,255,255,0.7)"
+                : "#556677",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {displayName}
+        </span>
+        {isSel && (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: `rgb(${accent.css})`,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+            }}
+          >
+            {t("skins.selected")}
+          </span>
+        )}
+      </div>
+    </button>
+  )
+}
 
 interface SkinsViewProps {
   username: string
@@ -92,13 +294,19 @@ export default function SkinsView({
   )
 
   const activePreview = skinType === "skin" ? previewSkin : previewCape
-  const accentHex =
+  const activeTextureUrl =
+    activePreview?.customImgUrl ||
+    (skinType === "skin"
+      ? (activePreview as SkinItem)?.skinUrl
+      : (activePreview as CapeItem)?.capeUrl)
+  const activeFallbackHex =
     activePreview?.accent ||
     (skinType === "skin"
       ? (activePreview as SkinItem)?.shirt
       : (activePreview as CapeItem)?.color) ||
-    "#38bdf8"
-  const currentAccent = hexToRGB(accentHex)
+    (skinType === "capa" ? "#10b981" : "#38bdf8")
+
+  const currentAccent = useDynamicAccent(activeTextureUrl, activeFallbackHex)
 
   const showToast = (
     msg?: string,
@@ -108,7 +316,7 @@ export default function SkinsView({
     setToastState({
       message: msg || t("settings.toastSaved"),
       type,
-      accentColor: type === "error" ? undefined : overrideAccent || accentHex,
+      accentColor: type === "error" ? undefined : overrideAccent || currentAccent.hex,
     })
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current)
     toastTimerRef.current = window.setTimeout(() => {
@@ -118,21 +326,13 @@ export default function SkinsView({
 
   const CONTENT_LEFT = 184
 
-  const handleSelectItem = (id: string) => {
-    const item = items.find((i) => i.id === id)
-    const itemAccent =
-      item?.accent ||
-      (skinType === "skin"
-        ? (item as SkinItem)?.shirt
-        : (item as CapeItem)?.color) ||
-      accentHex
-
+  const handleSelectItem = (id: string, itemAccentHex?: string) => {
     if (skinType === "skin") {
       setAppliedSkin(id)
     } else {
       setAppliedCape(id)
     }
-    showToast(t("settings.toastSaved"), "success", itemAccent)
+    showToast(t("settings.toastSaved"), "success", itemAccentHex || currentAccent.hex)
   }
 
   /* File upload with strict verification & format validation */
@@ -781,174 +981,17 @@ export default function SkinsView({
                 animation: "fadeScaleIn 0.26s cubic-bezier(0.16, 1, 0.3, 1)",
               }}
             >
-              {items.map((item) => {
-                const isSel = item.id === activeId
-                const isNone = item.id === "none"
-                const isCustom = item.badge === "CUSTOM" || item.id === "player-custom"
-                const itemAccentHex =
-                  item.accent ||
-                  (skinType === "skin"
-                    ? (item as SkinItem).shirt
-                    : (item as CapeItem).color) ||
-                  "#38bdf8"
-                const accent = hexToRGB(itemAccentHex)
-                const displayName = isNone
-                  ? skinType === "skin"
-                    ? t("skins.noSkin")
-                    : t("skins.noCape")
-                  : item.name
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleSelectItem(item.id)}
-                    className={`skin-card-item ${isSel ? "is-selected" : ""}`}
-                    style={{
-                      ["--card-border-color" as any]: `rgba(${accent.css}, 0.88)`,
-                      ["--card-glow-color" as any]: `rgba(${accent.css}, 0.28)`,
-                      position: "relative",
-                    }}
-                  >
-                    {/* Inner Container */}
-                    <div
-                      style={{
-                        borderRadius: 14,
-                        overflow: "hidden",
-                        position: "relative",
-                        height: 256,
-                        background: isDark ? "#080e13" : "#e6ebf2",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <div
-                        style={{
-                          position: "absolute",
-                          inset: 0,
-                          background: `radial-gradient(ellipse 85% 75% at 50% 62%, rgba(${accent.r},${accent.g},${accent.b}, ${
-                            isDark ? 0.12 : 0.2
-                          }) 0%, ${isDark ? "#080e13" : "#e6ebf2"} 75%)`,
-                          pointerEvents: "none",
-                        }}
-                      />
-
-                      {/* Badge if custom */}
-                      {isCustom && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            top: 8,
-                            right: 8,
-                            background: skinType === "capa" ? "rgba(16, 185, 129, 0.2)" : "rgba(56, 189, 248, 0.2)",
-                            border: skinType === "capa" ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid rgba(56, 189, 248, 0.4)",
-                            borderRadius: 6,
-                            padding: "2px 8px",
-                            fontSize: 10,
-                            fontWeight: 800,
-                            color: skinType === "capa" ? "#10b981" : "#38bdf8",
-                            letterSpacing: "0.05em",
-                            zIndex: 3,
-                          }}
-                        >
-                          PERSONAL
-                        </div>
-                      )}
-
-                      <div style={{ position: "relative", zIndex: 1 }}>
-                        {skinType === "skin" ? (
-                          isNone || (!item.customImgUrl && !(item as SkinItem).skinUrl) ? (
-                            <div
-                              style={{
-                                width: 90,
-                                height: 145,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                              }}
-                            >
-                              <span style={{ fontSize: 13, color: "#64748b" }}>{t("skins.noSkin")}</span>
-                            </div>
-                          ) : (
-                            <SkinCardPreview
-                              skinUrl={item.customImgUrl || (item as SkinItem).skinUrl}
-                              alt={item.name}
-                              width={110}
-                              height={185}
-                            />
-                          )
-                        ) : isNone || (!item.customImgUrl && !(item as CapeItem).capeUrl) ? (
-                          <div
-                            style={{
-                              width: 86,
-                              height: 124,
-                              borderRadius: 12,
-                              border: isDark
-                                ? "2.4px dashed rgba(255,255,255,0.18)"
-                                : "2.4px dashed rgba(0,0,0,0.18)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <span style={{ fontSize: 13, color: "#64748b" }}>{t("skins.noCape")}</span>
-                          </div>
-                        ) : (
-                          <CapeCardPreview
-                            capeUrl={item.customImgUrl || (item as CapeItem).capeUrl}
-                            alt={item.name}
-                            width={85}
-                            height={136}
-                          />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Name + Selected Status Row */}
-                    <div
-                      style={{
-                        padding: "8px 8px 4px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 16.5,
-                          fontWeight: 700,
-                          color: isSel
-                            ? isDark
-                              ? "white"
-                              : "#111822"
-                            : isDark
-                              ? "rgba(255,255,255,0.7)"
-                              : "#556677",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {displayName}
-                      </span>
-                      {isSel && (
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 800,
-                            color: `rgb(${accent.css})`,
-                            letterSpacing: "0.06em",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          {t("skins.selected")}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                )
-              })}
+              {items.map((item) => (
+                <SkinCapeItemCard
+                  key={item.id}
+                  item={item}
+                  skinType={skinType}
+                  isSel={item.id === activeId}
+                  isDark={isDark}
+                  onSelect={handleSelectItem}
+                  t={t}
+                />
+              ))}
             </div>
           </div>
         </div>

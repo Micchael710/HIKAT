@@ -97,8 +97,13 @@
   "news": {
     "sectionTitle": "Últimas Novidades",
     "offlineTitle": "Sem conexão com as novidades",
-    "offlineDesc": "Não foi possível obter as publicações do servidor neste momento.",
-    "retry": "Tentar novamente"
+    "offlineDesc": "Não foi possível sincronizar as últimas notícias com o servidor.",
+    "retry": "Tentar novamente",
+    "typeNews": "Notícia",
+    "typeUpdate": "Atualização",
+    "typeAnnouncement": "Anúncio",
+    "typeMaintenance": "Manutenção",
+    "playVideo": "Reproduzir vídeo"
   },
   "serverStats": {
     "title": "Status do Servidor",

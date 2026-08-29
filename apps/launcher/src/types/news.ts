@@ -7,4 +7,9 @@ export interface NewsCardItem {
   date?: string
   author?: string
   content?: string
+  type?: string
+  youtubeVideoId?: string | null
+  youtubeUrl?: string | null
+  videoUrl?: string | null
+  videoMimeType?: string | null
 }
