@@ -1,6 +1,7 @@
 import { eq, and, desc } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
+import { validateGameFileBuffer } from "@hikat/shared"
 import type {
   ServerReleaseSyncPlanGql,
   ServerReleaseSyncStatusGql,
@@ -19,6 +20,10 @@ import {
   releaseServerOperationLock,
 } from "./serverAdministrationService"
 import { createServerBackup } from "./serverBackupService"
+import { safeDeleteServerFilePhysical } from "./serverFileService"
+
+export const SERVER_RELEASE_SYNC_BACKUP_POLL_INTERVAL_MS = 2000
+export const SERVER_RELEASE_SYNC_BACKUP_TIMEOUT_MS = 180000 // 3 minutes
 
 /**
  * Computes the Server Release Sync Plan by comparing the published game release's
@@ -35,6 +40,15 @@ export async function getServerReleaseSyncPlan(
     .where(eq(schema.gameReleases.status, "PUBLISHED"))
     .get()
 
+  // 1. Check server status for preconditions (fail closed)
+  let serverStatus: ServerStatusGql = "UNKNOWN"
+  try {
+    const statusMetrics = await getServerStatus(env, clientOverride)
+    serverStatus = statusMetrics.status as ServerStatusGql
+  } catch {
+    serverStatus = "DISCONNECTED"
+  }
+
   if (!published) {
     return {
       releaseId: null,
@@ -47,13 +61,13 @@ export async function getServerReleaseSyncPlan(
         toRemove: 0,
         toKeep: 0,
       },
-      serverStatus: "OFFLINE",
-      canApply: true,
-      blockReason: null,
+      serverStatus,
+      canApply: serverStatus === "OFFLINE",
+      blockReason: serverStatus === "OFFLINE" ? null : (serverStatus === "DISCONNECTED" || serverStatus === "UNKNOWN" ? "No se pudo confirmar que el servidor esté apagado." : "Apaga el servidor antes de aplicar cambios de mods."),
     }
   }
 
-  // 1. Fetch desired state: Game release files with category === "MOD" and sourceEnvironment === "BOTH"
+  // 2. Fetch desired state: Game release files with category === "MOD" and sourceEnvironment === "BOTH"
   const desiredFiles = await db
     .select()
     .from(schema.gameReleaseFiles)
@@ -66,7 +80,7 @@ export async function getServerReleaseSyncPlan(
     )
     .all()
 
-  // 2. Fetch current state: server_managed_content with managementSource === "GAME_RELEASE"
+  // 3. Fetch current state: server_managed_content with managementSource === "GAME_RELEASE"
   const currentRecords = await db
     .select()
     .from(schema.serverManagedContent)
@@ -76,7 +90,7 @@ export async function getServerReleaseSyncPlan(
   const items: ServerReleaseSyncPlanItemGql[] = []
   const matchedCurrentIds = new Set<string>()
 
-  // 3. Compare desired against current
+  // 4. Compare desired against current
   for (const desired of desiredFiles) {
     const matchedCurrent = currentRecords.find(
       (c) =>
@@ -145,7 +159,7 @@ export async function getServerReleaseSyncPlan(
     }
   }
 
-  // 4. Identify unreferenced current records to REMOVE
+  // 5. Identify unreferenced current records to REMOVE
   for (const current of currentRecords) {
     if (!matchedCurrentIds.has(current.id)) {
       const currentFileName = current.targetPath.split("/").pop() || current.targetPath
@@ -167,7 +181,7 @@ export async function getServerReleaseSyncPlan(
     }
   }
 
-  // 5. Compute summary
+  // 6. Compute summary
   const summary: ServerReleaseSyncSummaryGql = {
     toInstall: items.filter((i) => i.action === "INSTALL").length,
     toUpdate: items.filter((i) => i.action === "UPDATE").length,
@@ -176,21 +190,12 @@ export async function getServerReleaseSyncPlan(
   }
 
   const isPending = summary.toInstall > 0 || summary.toUpdate > 0 || summary.toRemove > 0
-
-  // 6. Check server status for preconditions
-  let serverStatus: ServerStatusGql = "OFFLINE"
-  try {
-    const statusMetrics = await getServerStatus(env, clientOverride)
-    serverStatus = statusMetrics.status as ServerStatusGql
-  } catch {
-    // If server status is unavailable, leave as OFFLINE
-  }
-
   const canApply = serverStatus === "OFFLINE"
-  const blockReason =
-    isPending && !canApply
-      ? "Apaga el servidor antes de aplicar cambios de mods."
-      : null
+  const blockReason = !canApply
+    ? (serverStatus === "DISCONNECTED" || serverStatus === "UNKNOWN"
+        ? "No se pudo confirmar que el servidor esté apagado."
+        : "Apaga el servidor antes de aplicar cambios de mods.")
+    : null
 
   return {
     releaseId: published.id,
@@ -233,9 +238,12 @@ export async function getServerReleaseSyncStatus(
  * Applies the release sync to the server:
  * 1. Checks server is OFFLINE.
  * 2. Acquires distributed operation lock.
- * 3. Creates pre-sync backup if requested and waits for completion.
- * 4. Downloads binaries from R2 and writes them to Wings /mods/.
- * 5. Updates server_managed_content and records server_release_syncs in D1.
+ * 3. Records APPLYING status in D1.
+ * 4. Creates pre-sync backup if requested and waits for completion (aborts on timeout/fail).
+ * 5. Preflights and authoritatively validates all R2 release binaries.
+ * 6. Checks physical collisions on Wings.
+ * 7. Writes binaries to Wings /mods/ with clean old-file cleanup on filename updates.
+ * 8. Reconciles D1 and marks APPLIED.
  */
 export async function applyServerReleaseSync(
   db: Database,
@@ -246,8 +254,17 @@ export async function applyServerReleaseSync(
 ): Promise<ServerReleaseSyncResultGql> {
   const client = clientOverride || createPterodactylClient(env)
 
-  // 1. Guard: Check server status is OFFLINE
-  const statusMetrics = await getServerStatus(env, client)
+  // 1. Guard: Check server status is OFFLINE (fail-closed)
+  let statusMetrics
+  try {
+    statusMetrics = await getServerStatus(env, client)
+  } catch {
+    throw createGraphQLError(
+      "No se pudo confirmar el estado del servidor. Inténtalo de nuevo cuando el servidor esté accesible y apagado.",
+      "VALIDATION_ERROR",
+    )
+  }
+
   if (statusMetrics.status !== "OFFLINE") {
     throw createGraphQLError(
       "Apaga el servidor antes de aplicar cambios de mods.",
@@ -258,8 +275,11 @@ export async function applyServerReleaseSync(
   // 2. Guard: Acquire distributed operation lock
   const lockKey = await acquireServerOperationLock(db, "SERVER_RELEASE_SYNC", userId)
 
+  const syncId = crypto.randomUUID()
+  const nowStart = new Date().toISOString()
+
   try {
-    // 3. Fetch published release and recompute plan
+    // 3. Fetch published release
     const published = await db
       .select()
       .from(schema.gameReleases)
@@ -269,6 +289,16 @@ export async function applyServerReleaseSync(
     if (!published) {
       throw createGraphQLError("No hay ninguna release publicada para sincronizar.", "VALIDATION_ERROR")
     }
+
+    // Record APPLYING status in D1
+    await db.insert(schema.serverReleaseSyncs).values({
+      id: syncId,
+      releaseId: published.id,
+      status: "APPLYING",
+      details: JSON.stringify({ step: "INITIALIZING", createBackup }),
+      createdAt: nowStart,
+      updatedAt: nowStart,
+    })
 
     const desiredFiles = await db
       .select()
@@ -282,60 +312,183 @@ export async function applyServerReleaseSync(
       )
       .all()
 
-    const currentRecords = await db
+    const allManagedRecords = await db
       .select()
       .from(schema.serverManagedContent)
-      .where(eq(schema.serverManagedContent.managementSource, "GAME_RELEASE"))
       .all()
 
-    // 4. Optional pre-sync backup with polling
+    const currentRecords = allManagedRecords.filter((m) => m.managementSource === "GAME_RELEASE")
+
+    // 4. Pre-sync backup with strict timeout and failure abort semantics
     if (createBackup) {
+      let backupId: string | null = null
       try {
         const backupItem = await createServerBackup(env, "Pre-Release Sync Backup", client)
-        if (backupItem && backupItem.id) {
-          // Poll up to 60s for backup completion
-          let isDone = false
-          const startTime = Date.now()
-          while (!isDone && Date.now() - startTime < 60000) {
-            await new Promise((r) => setTimeout(r, 2000))
-            const check = await client.getBackup(backupItem.id).catch(() => null)
-            if (check && check.attributes && check.attributes.completed_at) {
+        if (!backupItem || !backupItem.id) {
+          throw new Error("No se pudo iniciar el backup de Pterodactyl.")
+        }
+        backupId = backupItem.id
+
+        let isDone = false
+        const startTime = Date.now()
+
+        while (!isDone && Date.now() - startTime < SERVER_RELEASE_SYNC_BACKUP_TIMEOUT_MS) {
+          await new Promise((r) => setTimeout(r, SERVER_RELEASE_SYNC_BACKUP_POLL_INTERVAL_MS))
+          const check = await client.getBackup(backupId)
+          if (check && check.attributes) {
+            if (check.attributes.completed_at) {
               if (!check.attributes.is_successful) {
                 throw new Error("El backup de Pterodactyl finalizó con error.")
               }
               isDone = true
+              break
             }
           }
         }
+
+        if (!isDone) {
+          throw new Error(`Timeout al esperar la finalización del backup (${SERVER_RELEASE_SYNC_BACKUP_TIMEOUT_MS / 1000}s).`)
+        }
       } catch (backupErr: any) {
         const now = new Date().toISOString()
-        await db.insert(schema.serverReleaseSyncs).values({
-          id: crypto.randomUUID(),
-          releaseId: published.id,
-          status: "FAILED",
-          details: JSON.stringify({ error: backupErr?.message || "Error al crear backup" }),
-          createdAt: now,
-          updatedAt: now,
-        })
+        await db
+          .update(schema.serverReleaseSyncs)
+          .set({
+            status: "FAILED",
+            details: JSON.stringify({
+              error: backupErr?.message || "Error al crear backup",
+              backupId,
+              failedAt: now,
+            }),
+            updatedAt: now,
+          })
+          .where(eq(schema.serverReleaseSyncs.id, syncId))
 
         throw createGraphQLError(
-          "El backup previo a la sincronización no se completó exitosamente. Operación cancelada.",
+          `El backup previo a la sincronización no se completó exitosamente (${backupErr?.message || "Error"}). Operación cancelada.`,
           "INTERNAL_ERROR",
         )
       }
     }
 
-    // 5. Ensure Wings /mods folder exists
+    // 5. Authoritative R2 Preflight Validation
+    if (!env.ASSETS) {
+      throw createGraphQLError("El almacenamiento R2 no está configurado.", "INTERNAL_ERROR")
+    }
+
+    const stagedBinaries = new Map<string, Uint8Array>()
+    for (const desired of desiredFiles) {
+      const isIdentical = currentRecords.some(
+        (c) =>
+          (c.gameReleaseFileId === desired.id ||
+            (c.provider === desired.sourceProvider && c.projectId === desired.sourceProjectId)) &&
+          c.sha256 === desired.sha256 &&
+          c.targetPath === `mods/${desired.name}`,
+      )
+
+      if (isIdentical) {
+        continue // KEEP, already matched
+      }
+
+      // Download and validate from R2
+      const r2Obj = await env.ASSETS.get(desired.objectKey)
+      if (!r2Obj) {
+        throw createGraphQLError(
+          `El archivo binario para "${desired.name}" (${desired.objectKey}) no existe en R2.`,
+          "INTERNAL_ERROR",
+        )
+      }
+
+      const arrayBuffer = await r2Obj.arrayBuffer()
+      const buffer = new Uint8Array(arrayBuffer)
+
+      if (buffer.byteLength === 0) {
+        throw createGraphQLError(
+          `El archivo binario en R2 para "${desired.name}" está vacío (0 bytes).`,
+          "INTERNAL_ERROR",
+        )
+      }
+
+      if (buffer.byteLength !== desired.sizeBytes) {
+        throw createGraphQLError(
+          `Discrepancia de tamaño en R2 para "${desired.name}": esperado ${desired.sizeBytes} B, recibido ${buffer.byteLength} B.`,
+          "INTERNAL_ERROR",
+        )
+      }
+
+      const shaBuffer = await crypto.subtle.digest("SHA-256", buffer.buffer as ArrayBuffer)
+      const computedSha256 = Array.from(new Uint8Array(shaBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+        .toLowerCase()
+
+      if (computedSha256 !== desired.sha256.toLowerCase()) {
+        throw createGraphQLError(
+          `Discrepancia de hash SHA-256 en R2 para "${desired.name}": esperado ${desired.sha256}, calculado ${computedSha256}.`,
+          "INTERNAL_ERROR",
+        )
+      }
+
+      const formatValidation = validateGameFileBuffer(buffer.buffer as ArrayBuffer, desired.name, "MOD")
+      if (!formatValidation.valid) {
+        throw createGraphQLError(
+          `El archivo binario en R2 para "${desired.name}" no tiene un formato JAR/ZIP válido.`,
+          "INTERNAL_ERROR",
+        )
+      }
+
+      stagedBinaries.set(desired.id, buffer)
+    }
+
+    // 6. Check physical directory and manual collisions on Wings
     try {
       await client.createFolder("/", "mods")
     } catch {
       // Ignore if folder exists
     }
 
-    let appliedCount = 0
+    const modsListRes = await client.listDirectory("/mods").catch(() => ({ data: [] }))
+    const physicalMods = new Set<string>()
+    if (modsListRes && modsListRes.data && Array.isArray(modsListRes.data)) {
+      for (const item of modsListRes.data) {
+        if (item?.attributes?.name && item.attributes.is_file) {
+          physicalMods.add(item.attributes.name)
+        }
+      }
+    }
+
+    for (const desired of desiredFiles) {
+      if (physicalMods.has(desired.name)) {
+        const recordAtTargetPath = allManagedRecords.find(
+          (m) => m.targetPath === `mods/${desired.name}`,
+        )
+
+        if (recordAtTargetPath) {
+          if (recordAtTargetPath.managementSource === "SERVER_DIRECT") {
+            throw createGraphQLError(
+              `La ruta mods/${desired.name} está en conflicto con un mod administrado directamente desde el Servidor.`,
+              "CONFLICT",
+            )
+          }
+          // If GAME_RELEASE: OK
+        } else {
+          // Physical file exists without any D1 tracking -> manual file collision!
+          throw createGraphQLError(
+            `Ya existe un archivo manual en esta ruta (mods/${desired.name}). HiKAT no lo reemplazará automáticamente.`,
+            "CONFLICT",
+          )
+        }
+      }
+    }
+
+    // 7. Apply Physical Writes and D1 Reconciliations
+    let installedCount = 0
+    let updatedCount = 0
+    let removedCount = 0
+    let keptCount = 0
+
     const matchedCurrentIds = new Set<string>()
 
-    // Apply INSTALL and UPDATE
     for (const desired of desiredFiles) {
       const matchedCurrent = currentRecords.find(
         (c) =>
@@ -351,40 +504,37 @@ export async function applyServerReleaseSync(
           matchedCurrent.targetPath === `mods/${desired.name}`
 
         if (isIdentical) {
-          // KEEP: already synchronized
+          keptCount++
           continue
         }
       }
 
-      // Read binary from R2
-      if (!env.ASSETS) {
-        throw createGraphQLError("El almacenamiento R2 no está configurado.", "INTERNAL_ERROR")
+      const buffer = stagedBinaries.get(desired.id)
+      if (!buffer) {
+        throw createGraphQLError(`Falta el binario preparado para "${desired.name}".`, "INTERNAL_ERROR")
       }
 
-      const r2Obj = await env.ASSETS.get(desired.objectKey)
-      if (!r2Obj) {
-        const now = new Date().toISOString()
-        await db.insert(schema.serverReleaseSyncs).values({
-          id: crypto.randomUUID(),
-          releaseId: published.id,
-          status: "FAILED",
-          details: JSON.stringify({ error: `Falta archivo R2 ${desired.objectKey}` }),
-          createdAt: now,
-          updatedAt: now,
-        })
-        throw createGraphQLError(
-          `El archivo binario para "${desired.name}" no se encuentra en el almacenamiento R2.`,
-          "INTERNAL_ERROR",
-        )
-      }
-
-      const arrayBuffer = await r2Obj.arrayBuffer()
-      const buffer = new Uint8Array(arrayBuffer)
-
-      // Write binary to Wings
+      // Step A: Write new binary to Wings
       await client.writeFile(`/mods/${desired.name}`, buffer)
 
-      // Update / insert D1 serverManagedContent record
+      // Step B: If UPDATE had a filename change (old target != new target), delete old file physically
+      if (matchedCurrent && matchedCurrent.targetPath !== `mods/${desired.name}`) {
+        const oldFileName = matchedCurrent.targetPath.split("/").pop() || ""
+        if (oldFileName && oldFileName !== desired.name) {
+          try {
+            await safeDeleteServerFilePhysical(client, "/mods", oldFileName)
+          } catch (deleteErr: any) {
+            // Attempt compensation of newly written file
+            await client.deleteFiles("/mods", [desired.name]).catch(() => {})
+            throw createGraphQLError(
+              `No se pudo eliminar el archivo anterior (${oldFileName}) al actualizar a ${desired.name}: ${deleteErr.message}`,
+              "INTERNAL_ERROR",
+            )
+          }
+        }
+      }
+
+      // Step C: Update D1 record
       const now = new Date().toISOString()
       if (matchedCurrent) {
         await db
@@ -405,6 +555,7 @@ export async function applyServerReleaseSync(
             updatedAt: now,
           })
           .where(eq(schema.serverManagedContent.id, matchedCurrent.id))
+        updatedCount++
       } else {
         await db.insert(schema.serverManagedContent).values({
           id: crypto.randomUUID(),
@@ -423,56 +574,69 @@ export async function applyServerReleaseSync(
           createdAt: now,
           updatedAt: now,
         })
+        installedCount++
       }
-
-      appliedCount++
     }
 
-    // Apply REMOVE
+    // Step D: Apply REMOVE for unreferenced GAME_RELEASE items
     for (const current of currentRecords) {
       if (!matchedCurrentIds.has(current.id)) {
         const fileName = current.targetPath.split("/").pop() || current.targetPath
-        try {
-          await client.deleteFiles("/mods", [fileName])
-        } catch {
-          // If physical file already deleted, ignore
-        }
+        // Safe physical delete
+        await safeDeleteServerFilePhysical(client, "/mods", fileName)
 
+        // Delete from D1
         await db
           .delete(schema.serverManagedContent)
           .where(eq(schema.serverManagedContent.id, current.id))
 
-        appliedCount++
+        removedCount++
       }
     }
 
-    // 6. Record APPLIED in server_release_syncs table
-    const now = new Date().toISOString()
+    // 8. Record APPLIED in server_release_syncs table with honest summary
+    const nowEnd = new Date().toISOString()
     const finalSummary: ServerReleaseSyncSummaryGql = {
-      toInstall: desiredFiles.filter((d) => !currentRecords.some((c) => c.targetPath === `mods/${d.name}`)).length,
-      toUpdate: 0,
-      toRemove: 0,
-      toKeep: desiredFiles.length,
+      toInstall: installedCount,
+      toUpdate: updatedCount,
+      toRemove: removedCount,
+      toKeep: keptCount,
     }
 
-    await db.insert(schema.serverReleaseSyncs).values({
-      id: crypto.randomUUID(),
-      releaseId: published.id,
-      status: "APPLIED",
-      appliedAt: now,
-      details: JSON.stringify(finalSummary),
-      createdAt: now,
-      updatedAt: now,
-    })
+    await db
+      .update(schema.serverReleaseSyncs)
+      .set({
+        status: "APPLIED",
+        appliedAt: nowEnd,
+        details: JSON.stringify(finalSummary),
+        updatedAt: nowEnd,
+      })
+      .where(eq(schema.serverReleaseSyncs.id, syncId))
 
     return {
       success: true,
       message: "Sincronización de release completada con éxito.",
-      syncedCount: appliedCount,
+      syncedCount: installedCount + updatedCount + removedCount,
       status: "APPLIED",
     }
+  } catch (err: any) {
+    // If sync failed at any point, record FAILED in D1
+    const now = new Date().toISOString()
+    try {
+      await db
+        .update(schema.serverReleaseSyncs)
+        .set({
+          status: "FAILED",
+          details: JSON.stringify({ error: err?.message || String(err), failedAt: now }),
+          updatedAt: now,
+        })
+        .where(eq(schema.serverReleaseSyncs.id, syncId))
+    } catch {
+      // Ignore fallback log error
+    }
+    throw err
   } finally {
-    // 7. Release distributed operation lock
+    // 9. Release distributed operation lock
     await releaseServerOperationLock(db, lockKey)
   }
 }

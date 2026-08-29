@@ -110,10 +110,17 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
 
     const writeFileSpy = vi.fn().mockResolvedValue(undefined)
     const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
       getFileContents: vi.fn().mockResolvedValue("level-name=survival_2026"),
       listDirectory: vi.fn().mockResolvedValue({ data: [] }),
       createFolder: vi.fn().mockResolvedValue(undefined),
       writeFile: writeFileSpy,
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
     }
 
     const { modProviderManager } = await import("../providers/modProviderManager")
@@ -196,6 +203,12 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
   // Test 3: Untracked Physical File Collision Rejection
   it("installServerContentPlan detects and blocks untracked physical file collisions with CONFLICT", async () => {
     const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
       getFileContents: vi.fn().mockResolvedValue("level-name=world"),
       listDirectory: vi.fn().mockImplementation((dir: string) => {
         if (dir.includes("mods")) {
@@ -286,7 +299,16 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
 
     const deleteFilesSpy = vi.fn().mockResolvedValue(undefined)
     const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
       deleteFiles: deleteFilesSpy,
+      listDirectory: vi.fn().mockResolvedValue({
+        data: [{ attributes: { name: "direct-mod.jar", is_file: true } }],
+      }),
     }
 
     // Attempting to remove GAME_RELEASE throws
@@ -304,5 +326,74 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
     const remaining = await db.select().from(schema.serverManagedContent)
     expect(remaining).toHaveLength(1)
     expect(remaining[0]?.id).toBe("smc-release-1")
+  })
+
+  // Test 5: MOD Operations Require Server OFFLINE Status
+  it("installServerContentPlan and removeServerManagedContent require server to be OFFLINE for MOD content", async () => {
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.serverManagedContent).values({
+      id: "smc-online-mod",
+      managementSource: "SERVER_DIRECT",
+      targetPath: "mods/online-mod.jar",
+      sha256: "hashmod",
+      sizeBytes: 1000,
+      name: "online-mod.jar",
+      contentType: "MOD",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const mockRunningClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "running", resources: { memory_bytes: 500, cpu_absolute: 10, disk_bytes: 500, uptime: 100 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+    }
+
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "spark-id",
+          projectName: "spark",
+          versionId: "ver-1",
+          versionNumber: "1.0.0",
+          filename: "spark.jar",
+          sizeBytes: 1000,
+          sha256: "hash123",
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: "mods/spark.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: 1000,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    await expect(
+      installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "spark-id", versionId: "ver-1", contentType: "MOD" },
+        "admin-1",
+        mockRunningClient as any,
+      ),
+    ).rejects.toThrow("Apaga el servidor antes de instalar o actualizar mods.")
+
+    await expect(
+      removeServerManagedContent(db, env, "smc-online-mod", "admin-1", mockRunningClient as any),
+    ).rejects.toThrow("Apaga el servidor antes de eliminar mods.")
   })
 })

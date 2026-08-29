@@ -472,4 +472,71 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     expect(projectIds).toContain("mod-c")
     expect(projectIds).toContain("mod-d")
   })
+
+  // Test 7: searchServerMods filters and returns SERVER mods only
+  it("searchServerMods excludes CLIENT and BOTH mods, returning only SERVER mods", async () => {
+    const mockProjects = [
+      { projectId: "srv-mod-1", name: "Chunky", environment: "SERVER", contentType: "MOD" },
+      { projectId: "client-mod-1", name: "Sodium", environment: "CLIENT", contentType: "MOD" },
+      { projectId: "both-mod-1", name: "FerriteCore", environment: "BOTH", contentType: "MOD" },
+      { projectId: "srv-mod-2", name: "Spark", environment: "SERVER", contentType: "MOD" },
+    ]
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockResolvedValue({
+        items: mockProjects,
+        totalCount: 4,
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+    ;(manager as any).modrinth = mockAdapter
+
+    const results = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "test",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+    )
+
+    expect(results.items).toHaveLength(2)
+    expect(results.items.map((i) => i.projectId)).toEqual(["srv-mod-1", "srv-mod-2"])
+  })
+
+  // Test 8: searchMods excludes SERVER mods in Game Updates flow
+  it("searchMods excludes SERVER mods in Game Updates flow", async () => {
+    const mockProjects = [
+      { projectId: "srv-mod-1", name: "Chunky", environment: "SERVER", contentType: "MOD" },
+      { projectId: "client-mod-1", name: "Sodium", environment: "CLIENT", contentType: "MOD" },
+      { projectId: "both-mod-1", name: "FerriteCore", environment: "BOTH", contentType: "MOD" },
+    ]
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockResolvedValue({
+        items: mockProjects,
+        totalCount: 3,
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+    ;(manager as any).modrinth = mockAdapter
+
+    const results = await manager.searchMods(
+      mockEnv,
+      db,
+      "test",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+    )
+
+    expect(results.items).toHaveLength(2)
+    expect(results.items.map((i) => i.projectId)).toEqual(["client-mod-1", "both-mod-1"])
+  })
 })

@@ -11,9 +11,15 @@ import {
 } from "@hikat/shared"
 import type { Env } from "../../types"
 import { IPterodactylClient } from "./types"
-import { createPterodactylClient } from "./serverAdministrationService"
+import {
+  createPterodactylClient,
+  getServerStatus,
+  acquireServerOperationLock,
+  releaseServerOperationLock,
+} from "./serverAdministrationService"
 import { detectActiveWorldName } from "./serverWorldService"
 import { modProviderManager, getLogicalPathForServerContent } from "../providers/modProviderManager"
+import { safeDeleteServerFilePhysical } from "./serverFileService"
 
 function computeMd5Hex(data: Uint8Array): string {
   function md5cycle(x: Int32Array, k: Int32Array) {
@@ -148,7 +154,7 @@ export async function getServerManagedContent(
     physicalPaths = res.physicalPaths
     worldName = res.worldName
   } catch {
-    // If server is unavailable, mark status as INSTALLED or MISSING based on cached info without throwing
+    // If server is unavailable, mark status based on cached info without throwing
   }
 
   return records.map((record) => {
@@ -212,213 +218,280 @@ export async function installServerContentPlan(
   }
 
   const client = clientOverride || createPterodactylClient(env)
-  const worldName = await detectActiveWorldName(env, client)
-  const { physicalPaths } = await getPhysicalServerFilesSet(env, client)
 
-  const managedRecords = await db
-    .select()
-    .from(schema.serverManagedContent)
-    .all()
+  // 1. Guard: Check server status is OFFLINE if any MOD is being installed/updated
+  const hasMod = itemsToProcess.some((i) => i.contentType === "MOD")
+  if (hasMod) {
+    let statusMetrics
+    try {
+      statusMetrics = await getServerStatus(env, client)
+    } catch {
+      throw createGraphQLError(
+        "No se pudo verificar el estado del servidor. Apaga el servidor antes de instalar mods.",
+        "VALIDATION_ERROR",
+      )
+    }
+    if (statusMetrics.status !== "OFFLINE") {
+      throw createGraphQLError(
+        "Apaga el servidor antes de instalar o actualizar mods.",
+        "VALIDATION_ERROR",
+      )
+    }
+  }
 
-  // Preflight check: path collisions
-  for (const item of itemsToProcess) {
-    const targetPath = item.targetPath || getLogicalPathForServerContent(item.contentType, item.filename, worldName)
-    const fileName = targetPath.split("/").pop() || item.filename
+  // 2. Guard: Acquire distributed operation lock
+  const lockKey = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
 
-    const isPhysical =
-      physicalPaths.has(targetPath) ||
-      physicalPaths.has(`mods/${fileName}`) ||
-      physicalPaths.has(`${worldName}/datapacks/${fileName}`) ||
-      physicalPaths.has(`datapacks/${fileName}`)
+  try {
+    const worldName = await detectActiveWorldName(env, client)
+    const { physicalPaths } = await getPhysicalServerFilesSet(env, client)
 
-    if (isPhysical) {
-      const tracked = managedRecords.find(
+    const managedRecords = await db
+      .select()
+      .from(schema.serverManagedContent)
+      .all()
+
+    // 3. Strict Preflight check: Exact Path Ownership & Manual Collisions
+    for (const item of itemsToProcess) {
+      const targetPath = item.targetPath || getLogicalPathForServerContent(item.contentType, item.filename, worldName)
+      const fileName = targetPath.split("/").pop() || item.filename
+
+      const isPhysical =
+        physicalPaths.has(targetPath) ||
+        physicalPaths.has(`mods/${fileName}`) ||
+        physicalPaths.has(`${worldName}/datapacks/${fileName}`) ||
+        physicalPaths.has(`datapacks/${fileName}`)
+
+      if (isPhysical) {
+        // Find if a managed record owns THIS EXACT targetPath
+        const trackedAtTarget = managedRecords.find(
+          (m) =>
+            m.targetPath === targetPath ||
+            m.targetPath === `mods/${fileName}` ||
+            m.targetPath === `${worldName}/datapacks/${fileName}`,
+        )
+
+        if (trackedAtTarget) {
+          const isSameItem =
+            trackedAtTarget.provider === item.provider &&
+            trackedAtTarget.projectId === item.projectId &&
+            trackedAtTarget.contentType === item.contentType
+
+          if (!isSameItem) {
+            const currentFileName = trackedAtTarget.targetPath.split("/").pop() || trackedAtTarget.targetPath
+            throw createGraphQLError(
+              `La ruta ${targetPath} está ocupada por otro contenido administrado (${currentFileName}).`,
+              "CONFLICT",
+            )
+          }
+        } else {
+          // Physical file exists without any tracking at this targetPath -> manual file collision!
+          throw createGraphQLError(
+            `Ya existe un archivo manual en esta ruta (${targetPath}). HiKAT no lo reemplazará automáticamente.`,
+            "CONFLICT",
+          )
+        }
+      }
+    }
+
+    // 4. Download, validate, write to Wings, and handle old file cleanup
+    for (const item of itemsToProcess) {
+      const adapter = modProviderManager.getAdapter(item.provider)
+      const versionObj = await adapter.getVersion(
+        env,
+        item.versionId,
+        item.projectId,
+        item.contentType,
+      )
+      const downloadUrl = versionObj?.downloadUrl || ""
+      const filename = versionObj?.filename || item.filename
+
+      if (!downloadUrl) {
+        throw createGraphQLError(
+          `El autor de este archivo en ${item.provider} ha deshabilitado la descarga directa de terceros.`,
+          "VALIDATION_ERROR",
+        )
+      }
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 45000)
+
+      let buffer: Uint8Array
+      try {
+        const res = await fetch(downloadUrl, {
+          headers: {
+            "User-Agent": "HiKAT/0.1.0 (contact@hikat.local)",
+          },
+          signal: controller.signal,
+        })
+
+        if (!res.ok) {
+          throw new Error(`Error ${res.status} al descargar "${item.projectName}" desde ${item.provider}`)
+        }
+
+        const arrayBuffer = await res.arrayBuffer()
+        buffer = new Uint8Array(arrayBuffer)
+      } finally {
+        clearTimeout(timeoutId)
+      }
+
+      if (buffer.byteLength === 0) {
+        throw createGraphQLError(`El archivo descargado para "${item.projectName}" está vacío.`, "VALIDATION_ERROR")
+      }
+
+      if (buffer.byteLength > MAX_GAME_FILE_SIZE_BYTES) {
+        throw createGraphQLError(
+          `El archivo descargado para "${item.projectName}" supera el tamaño máximo permitido (100 MB).`,
+          "VALIDATION_ERROR",
+        )
+      }
+
+      // Format & magic bytes validation
+      const validationCategory = item.contentType === "DATA_PACK" ? "DATA_PACK" : "MOD"
+      const validation = validateGameFileBuffer(
+        buffer.buffer as ArrayBuffer,
+        filename,
+        validationCategory as any,
+      )
+      if (!validation.valid) {
+        throw createGraphQLError(
+          `El archivo descargado para "${item.projectName}" no tiene un formato binario válido.`,
+          "VALIDATION_ERROR",
+        )
+      }
+
+      // SHA-256
+      const shaBuffer = await crypto.subtle.digest("SHA-256", buffer.buffer as ArrayBuffer)
+      const sha256 = Array.from(new Uint8Array(shaBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+        .toLowerCase()
+
+      // Checksum verification
+      if (versionObj?.hashes?.sha512) {
+        const sha512Buffer = await crypto.subtle.digest("SHA-512", buffer.buffer as ArrayBuffer)
+        const computedSha512 = Array.from(new Uint8Array(sha512Buffer))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("")
+          .toLowerCase()
+        if (computedSha512 !== versionObj.hashes.sha512.toLowerCase()) {
+          throw createGraphQLError(
+            `Error de integridad: el hash SHA-512 descargado para "${item.projectName}" no coincide con el proveedor.`,
+            "VALIDATION_ERROR",
+          )
+        }
+      } else if (versionObj?.hashes?.sha1) {
+        const sha1Buffer = await crypto.subtle.digest("SHA-1", buffer.buffer as ArrayBuffer)
+        const computedSha1 = Array.from(new Uint8Array(sha1Buffer))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("")
+          .toLowerCase()
+        if (computedSha1 !== versionObj.hashes.sha1.toLowerCase()) {
+          throw createGraphQLError(
+            `Error de integridad: el hash SHA-1 descargado para "${item.projectName}" no coincide con el proveedor.`,
+            "VALIDATION_ERROR",
+          )
+        }
+      } else if (versionObj?.hashes?.md5) {
+        const computedMd5 = computeMd5Hex(buffer)
+        if (computedMd5 !== versionObj.hashes.md5.toLowerCase()) {
+          throw createGraphQLError(
+            `Error de integridad: el hash MD5 descargado para "${item.projectName}" no coincide con el proveedor.`,
+            "VALIDATION_ERROR",
+          )
+        }
+      }
+
+      // Determine target full path on Wings
+      const logicalTargetPath = getLogicalPathForServerContent(item.contentType, filename, worldName)
+      const wingsFullPath = `/${logicalTargetPath}`
+
+      const pathSegments = wingsFullPath.split("/").filter(Boolean)
+      const wingsFileName = pathSegments.pop() || filename
+      const wingsParentDir = pathSegments.length > 0 ? `/${pathSegments.join("/")}` : "/"
+
+      // Ensure parent directory exists
+      if (item.contentType === "DATA_PACK") {
+        try {
+          await client.createFolder(`/${worldName}`, "datapacks")
+        } catch {
+          // Directory may already exist
+        }
+      } else {
+        try {
+          await client.createFolder("/", "mods")
+        } catch {
+          // Directory may already exist
+        }
+      }
+
+      // Write binary to Wings
+      await client.writeFile(wingsFullPath, buffer)
+
+      const existing = managedRecords.find(
         (m) =>
           m.provider === item.provider &&
           m.projectId === item.projectId &&
           m.contentType === item.contentType,
       )
 
-      if (!tracked) {
-        throw createGraphQLError(
-          `Ya existe un archivo manual en esta ruta (${targetPath}). HiKAT no lo reemplazará automáticamente.`,
-          "CONFLICT",
-        )
-      }
-    }
-  }
+      // If UPDATE had a filename change (old target != new target), delete old file safely
+      if (existing && existing.targetPath !== logicalTargetPath) {
+        const oldSegments = existing.targetPath.replace(/^\/+/, "").split("/")
+        const oldFileName = oldSegments.pop() || ""
+        const oldParentDir = oldSegments.length > 0 ? `/${oldSegments.join("/")}` : "/"
 
-  // Download, validate and write each item to Wings
-  for (const item of itemsToProcess) {
-    const adapter = modProviderManager.getAdapter(item.provider)
-    const versionObj = await adapter.getVersion(
-      env,
-      item.versionId,
-      item.projectId,
-      item.contentType,
-    )
-    const downloadUrl = versionObj?.downloadUrl || ""
-    const filename = versionObj?.filename || item.filename
-
-    if (!downloadUrl) {
-      throw createGraphQLError(
-        `El autor de este archivo en ${item.provider} ha deshabilitado la descarga directa de terceros.`,
-        "VALIDATION_ERROR",
-      )
-    }
-
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 45000)
-
-    let buffer: Uint8Array
-    try {
-      const res = await fetch(downloadUrl, {
-        headers: {
-          "User-Agent": "HiKAT/0.1.0 (contact@hikat.local)",
-        },
-        signal: controller.signal,
-      })
-
-      if (!res.ok) {
-        throw new Error(`Error ${res.status} al descargar "${item.projectName}" desde ${item.provider}`)
+        if (oldFileName && oldFileName !== wingsFileName) {
+          try {
+            await safeDeleteServerFilePhysical(client, oldParentDir, oldFileName)
+          } catch (deleteErr: any) {
+            // Attempt compensation of newly written file
+            await client.deleteFiles(wingsParentDir, [wingsFileName]).catch(() => {})
+            throw createGraphQLError(
+              `No se pudo eliminar el archivo anterior (${oldFileName}) al actualizar a ${wingsFileName}: ${deleteErr.message}`,
+              "INTERNAL_ERROR",
+            )
+          }
+        }
       }
 
-      const arrayBuffer = await res.arrayBuffer()
-      buffer = new Uint8Array(arrayBuffer)
-    } finally {
-      clearTimeout(timeoutId)
-    }
-
-    if (buffer.byteLength === 0) {
-      throw createGraphQLError(`El archivo descargado para "${item.projectName}" está vacío.`, "VALIDATION_ERROR")
-    }
-
-    if (buffer.byteLength > MAX_GAME_FILE_SIZE_BYTES) {
-      throw createGraphQLError(
-        `El archivo descargado para "${item.projectName}" supera el tamaño máximo permitido (100 MB).`,
-        "VALIDATION_ERROR",
-      )
-    }
-
-    // Format & magic bytes validation
-    const validationCategory = item.contentType === "DATA_PACK" ? "DATA_PACK" : "MOD"
-    const validation = validateGameFileBuffer(
-      buffer.buffer as ArrayBuffer,
-      filename,
-      validationCategory as any,
-    )
-    if (!validation.valid) {
-      throw createGraphQLError(
-        `El archivo descargado para "${item.projectName}" no tiene un formato binario válido.`,
-        "VALIDATION_ERROR",
-      )
-    }
-
-    // SHA-256
-    const shaBuffer = await crypto.subtle.digest("SHA-256", buffer.buffer as ArrayBuffer)
-    const sha256 = Array.from(new Uint8Array(shaBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-      .toLowerCase()
-
-    // Checksum verification
-    if (versionObj?.hashes?.sha512) {
-      const sha512Buffer = await crypto.subtle.digest("SHA-512", buffer.buffer as ArrayBuffer)
-      const computedSha512 = Array.from(new Uint8Array(sha512Buffer))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")
-        .toLowerCase()
-      if (computedSha512 !== versionObj.hashes.sha512.toLowerCase()) {
-        throw createGraphQLError(
-          `Error de integridad: el hash SHA-512 descargado para "${item.projectName}" no coincide con el proveedor.`,
-          "VALIDATION_ERROR",
-        )
-      }
-    } else if (versionObj?.hashes?.sha1) {
-      const sha1Buffer = await crypto.subtle.digest("SHA-1", buffer.buffer as ArrayBuffer)
-      const computedSha1 = Array.from(new Uint8Array(sha1Buffer))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")
-        .toLowerCase()
-      if (computedSha1 !== versionObj.hashes.sha1.toLowerCase()) {
-        throw createGraphQLError(
-          `Error de integridad: el hash SHA-1 descargado para "${item.projectName}" no coincide con el proveedor.`,
-          "VALIDATION_ERROR",
-        )
-      }
-    } else if (versionObj?.hashes?.md5) {
-      const computedMd5 = computeMd5Hex(buffer)
-      if (computedMd5 !== versionObj.hashes.md5.toLowerCase()) {
-        throw createGraphQLError(
-          `Error de integridad: el hash MD5 descargado para "${item.projectName}" no coincide con el proveedor.`,
-          "VALIDATION_ERROR",
-        )
-      }
-    }
-
-    // Determine target full path on Wings
-    const logicalTargetPath = getLogicalPathForServerContent(item.contentType, filename, worldName)
-    const wingsFullPath = `/${logicalTargetPath}`
-
-    // Ensure parent directory exists
-    if (item.contentType === "DATA_PACK") {
-      try {
-        await client.createFolder(`/${worldName}`, "datapacks")
-      } catch {
-        // Directory may already exist
-      }
-    } else {
-      try {
-        await client.createFolder("/", "mods")
-      } catch {
-        // Directory may already exist
-      }
-    }
-
-    // Write binary to Wings
-    await client.writeFile(wingsFullPath, buffer)
-
-    // Persist / update record in D1 ONLY AFTER physical write succeeds
-    const now = new Date().toISOString()
-    const existing = managedRecords.find(
-      (m) =>
-        m.provider === item.provider &&
-        m.projectId === item.projectId &&
-        m.contentType === item.contentType,
-    )
-
-    if (existing) {
-      await db
-        .update(schema.serverManagedContent)
-        .set({
+      // Persist / update record in D1 ONLY AFTER physical write and old cleanup succeed
+      const now = new Date().toISOString()
+      if (existing) {
+        await db
+          .update(schema.serverManagedContent)
+          .set({
+            versionId: item.versionId,
+            fileId: item.fileId || null,
+            targetPath: logicalTargetPath,
+            sha256,
+            sizeBytes: buffer.byteLength,
+            updatedAt: now,
+          })
+          .where(eq(schema.serverManagedContent.id, existing.id))
+      } else {
+        await db.insert(schema.serverManagedContent).values({
+          id: crypto.randomUUID(),
+          managementSource: "SERVER_DIRECT",
+          provider: item.provider,
+          projectId: item.projectId,
           versionId: item.versionId,
           fileId: item.fileId || null,
+          contentType: item.contentType,
+          environment: item.environment || "SERVER",
           targetPath: logicalTargetPath,
           sha256,
           sizeBytes: buffer.byteLength,
+          createdAt: now,
           updatedAt: now,
         })
-        .where(eq(schema.serverManagedContent.id, existing.id))
-    } else {
-      await db.insert(schema.serverManagedContent).values({
-        id: crypto.randomUUID(),
-        managementSource: "SERVER_DIRECT",
-        provider: item.provider,
-        projectId: item.projectId,
-        versionId: item.versionId,
-        fileId: item.fileId || null,
-        contentType: item.contentType,
-        environment: item.environment || "SERVER",
-        targetPath: logicalTargetPath,
-        sha256,
-        sizeBytes: buffer.byteLength,
-        createdAt: now,
-        updatedAt: now,
-      })
+      }
     }
-  }
 
-  return getServerManagedContent(db, env, clientOverride)
+    return getServerManagedContent(db, env, clientOverride)
+  } finally {
+    await releaseServerOperationLock(db, lockKey)
+  }
 }
 
 /**
@@ -449,21 +522,44 @@ export async function removeServerManagedContent(
   }
 
   const client = clientOverride || createPterodactylClient(env)
-  const segments = record.targetPath.replace(/^\/+/, "").split("/")
-  const fileName = segments.pop() || ""
-  const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
 
-  // Delete physical file from Wings
-  try {
-    await client.deleteFiles(parentPath, [fileName])
-  } catch {
-    // If physical file is already gone, proceed with D1 cleanup
+  // 1. Guard: Check server status is OFFLINE if content is MOD
+  if (record.contentType === "MOD") {
+    let statusMetrics
+    try {
+      statusMetrics = await getServerStatus(env, client)
+    } catch {
+      throw createGraphQLError(
+        "No se pudo verificar el estado del servidor. Apaga el servidor antes de eliminar mods.",
+        "VALIDATION_ERROR",
+      )
+    }
+    if (statusMetrics.status !== "OFFLINE") {
+      throw createGraphQLError(
+        "Apaga el servidor antes de eliminar mods.",
+        "VALIDATION_ERROR",
+      )
+    }
   }
 
-  // Delete D1 record
-  await db
-    .delete(schema.serverManagedContent)
-    .where(eq(schema.serverManagedContent.id, id))
+  // 2. Guard: Acquire distributed operation lock
+  const lockKey = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
 
-  return true
+  try {
+    const segments = record.targetPath.replace(/^\/+/, "").split("/")
+    const fileName = segments.pop() || ""
+    const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
+
+    // Delete physical file from Wings with safe physical check
+    await safeDeleteServerFilePhysical(client, parentPath, fileName)
+
+    // Delete D1 record only after physical delete succeeds
+    await db
+      .delete(schema.serverManagedContent)
+      .where(eq(schema.serverManagedContent.id, id))
+
+    return true
+  } finally {
+    await releaseServerOperationLock(db, lockKey)
+  }
 }

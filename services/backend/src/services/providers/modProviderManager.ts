@@ -150,18 +150,23 @@ export class ModProviderManager {
 
     if (provider === "MODRINTH") {
       try {
-        const res = await this.modrinth.searchMods(
+        const isAllowedInGame = (item: NormalizedModProject) =>
+          contentType !== "MOD" || item.environment !== "SERVER"
+
+        const res = await this.fetchFilteredFromProvider(
+          this.modrinth,
           env,
           query,
           minecraftVersion,
           loader,
-          limit,
-          offset,
+          offset + limit,
           contentType,
+          isAllowedInGame,
+          50,
         )
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
         return {
-          items: res.items,
+          items: res.items.slice(offset, offset + limit),
           totalCount: res.totalCount,
           providersStatus,
           minecraftVersion,
@@ -196,18 +201,23 @@ export class ModProviderManager {
       }
 
       try {
-        const res = await this.curseforge.searchMods(
+        const isAllowedInGame = (item: NormalizedModProject) =>
+          contentType !== "MOD" || item.environment !== "SERVER"
+
+        const res = await this.fetchFilteredFromProvider(
+          this.curseforge,
           env,
           query,
           minecraftVersion,
           loader,
-          limit,
-          offset,
+          offset + limit,
           contentType,
+          isAllowedInGame,
+          50,
         )
         providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
         return {
-          items: res.items,
+          items: res.items.slice(offset, offset + limit),
           totalCount: res.totalCount,
           providersStatus,
           minecraftVersion,
@@ -227,11 +237,14 @@ export class ModProviderManager {
 
     // "Todos" (ALL providers in parallel with deterministic gap-free chunked pagination)
     const fetchLimit = offset + limit
+    const isAllowedInGame = (item: NormalizedModProject) =>
+      contentType !== "MOD" || item.environment !== "SERVER"
+
     const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-      this.fetchChunkedFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, 100),
+      this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 50),
       this.curseforge.isConfigured(env)
-        ? this.fetchChunkedFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, 50)
-        : Promise.resolve({ items: [], totalCount: 0 }),
+        ? this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 50)
+        : Promise.resolve({ items: [], totalCount: 0, hasMore: false }),
     ])
 
     const allItems: any[] = []
@@ -304,21 +317,30 @@ export class ModProviderManager {
     const loader = contentType === "MOD" ? "NeoForge" : ""
     const providersStatus: ModProviderStatusGql[] = []
 
+    const isAllowedInServer = (item: NormalizedModProject) =>
+      contentType !== "MOD" || item.environment === "SERVER"
+
     let rawResults: { items: NormalizedModProject[]; totalCount: number; providersStatus: ModProviderStatusGql[] }
 
     if (provider === "MODRINTH") {
       try {
-        const res = await this.modrinth.searchMods(
+        const res = await this.fetchFilteredFromProvider(
+          this.modrinth,
           env,
           query,
           minecraftVersion,
           loader,
-          limit,
-          offset,
+          offset + limit,
           contentType,
+          isAllowedInServer,
+          50,
         )
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        rawResults = { items: res.items, totalCount: res.totalCount, providersStatus }
+        rawResults = {
+          items: res.items.slice(offset, offset + limit),
+          totalCount: res.totalCount,
+          providersStatus,
+        }
       } catch (err: any) {
         providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
         rawResults = { items: [], totalCount: 0, providersStatus }
@@ -333,17 +355,23 @@ export class ModProviderManager {
         rawResults = { items: [], totalCount: 0, providersStatus }
       } else {
         try {
-          const res = await this.curseforge.searchMods(
+          const res = await this.fetchFilteredFromProvider(
+            this.curseforge,
             env,
             query,
             minecraftVersion,
             loader,
-            limit,
-            offset,
+            offset + limit,
             contentType,
+            isAllowedInServer,
+            50,
           )
           providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
-          rawResults = { items: res.items, totalCount: res.totalCount, providersStatus }
+          rawResults = {
+            items: res.items.slice(offset, offset + limit),
+            totalCount: res.totalCount,
+            providersStatus,
+          }
         } catch (err: any) {
           providersStatus.push({ provider: "CURSEFORGE", available: false, error: err.message })
           rawResults = { items: [], totalCount: 0, providersStatus }
@@ -353,10 +381,10 @@ export class ModProviderManager {
       // ALL providers
       const fetchLimit = offset + limit
       const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-        this.fetchChunkedFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, 100),
+        this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInServer, 50),
         this.curseforge.isConfigured(env)
-          ? this.fetchChunkedFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, 50)
-          : Promise.resolve({ items: [], totalCount: 0 }),
+          ? this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInServer, 50)
+          : Promise.resolve({ items: [], totalCount: 0, hasMore: false }),
       ])
 
       const allItems: any[] = []
@@ -405,15 +433,9 @@ export class ModProviderManager {
       }
     }
 
-    // For MOD: only show SERVER mods in server search results (or DATA_PACK)
-    let filteredItems = rawResults.items
-    if (contentType === "MOD") {
-      filteredItems = rawResults.items.filter((item) => item.environment === "SERVER")
-    }
-
     return {
-      items: filteredItems as any,
-      totalCount: filteredItems.length,
+      items: rawResults.items as any,
+      totalCount: rawResults.totalCount,
       providersStatus: rawResults.providersStatus,
       minecraftVersion,
       neoForgeVersion,
@@ -497,6 +519,59 @@ export class ModProviderManager {
       isInstalled,
       minecraftVersion,
       neoForgeVersion,
+    }
+  }
+
+  private async fetchFilteredFromProvider(
+    adapter: ModProviderAdapter,
+    env: Env,
+    query: string,
+    minecraftVersion: string,
+    loader: string,
+    neededCount: number,
+    contentType: ContentTypeGql,
+    filterFn: (item: NormalizedModProject) => boolean,
+    pageSize: number = 50,
+  ): Promise<{ items: NormalizedModProject[]; totalCount: number; hasMore: boolean }> {
+    const allFilteredItems: NormalizedModProject[] = []
+    let currentOffset = 0
+    let providerTotalCount = 0
+    const maxPages = 6 // Safety ceiling: up to 300 raw items per provider
+
+    for (let page = 0; page < maxPages; page++) {
+      const res = await adapter.searchMods(
+        env,
+        query,
+        minecraftVersion,
+        loader,
+        pageSize,
+        currentOffset,
+        contentType,
+      )
+      providerTotalCount = res.totalCount
+      if (!res.items || res.items.length === 0) break
+
+      for (const item of res.items) {
+        if (filterFn(item)) {
+          allFilteredItems.push(item)
+        }
+      }
+
+      currentOffset += res.items.length
+      if (
+        allFilteredItems.length >= neededCount + 1 ||
+        currentOffset >= providerTotalCount ||
+        res.items.length < pageSize
+      ) {
+        break
+      }
+    }
+
+    const hasMore = allFilteredItems.length > neededCount || currentOffset < providerTotalCount
+    return {
+      items: allFilteredItems,
+      totalCount: providerTotalCount || allFilteredItems.length,
+      hasMore,
     }
   }
 

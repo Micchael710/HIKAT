@@ -294,6 +294,55 @@ export async function renameServerFile(
 }
 
 /**
+ * Safely deletes a file from Wings while strictly verifying physical existence.
+ * Returns { success: true, wasMissing: boolean }.
+ * If the file was confirmed missing in parent directory listing -> wasMissing: true, success: true.
+ * If file was found and deleted successfully -> wasMissing: false, success: true.
+ * If listing or deletion fails with network/server error -> throws ServerInfrastructureError (fail-closed).
+ */
+export async function safeDeleteServerFilePhysical(
+  client: IPterodactylClient,
+  parentPath: string,
+  fileName: string,
+): Promise<{ success: boolean; wasMissing: boolean }> {
+  if (typeof client.listDirectory === "function") {
+    let listRes
+    try {
+      listRes = await client.listDirectory(parentPath)
+    } catch (err: unknown) {
+      if (err instanceof ServerInfrastructureError) throw err
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        `No se pudo verificar el directorio ${parentPath} antes de eliminar ${fileName}.`,
+        `Safe delete directory check failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+
+    const items = listRes?.data || []
+    const item = items.find((i) => i && i.attributes && i.attributes.name === fileName)
+
+    if (!item) {
+      // Confirmed physically absent
+      return { success: true, wasMissing: true }
+    }
+  }
+
+  // File exists physically (or listDirectory is not provided) -> delete
+  try {
+    await client.deleteFiles(parentPath, [fileName])
+  } catch (err: unknown) {
+    if (err instanceof ServerInfrastructureError) throw err
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+      `Error al eliminar físicamente ${fileName} de ${parentPath}.`,
+      `Safe delete execution failed: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+
+  return { success: true, wasMissing: false }
+}
+
+/**
  * Deletes a file or directory within a sandboxed virtual root.
  */
 export async function deleteServerFile(
@@ -312,6 +361,7 @@ export async function deleteServerFile(
 
   if (db) {
     const cleanRelative = relativePath.replace(/^\/+/, "")
+    const simpleFileName = cleanRelative.split("/").pop() || cleanRelative
     const managed = await db
       .select()
       .from(schema.serverManagedContent)
@@ -321,9 +371,9 @@ export async function deleteServerFile(
       (m) =>
         m.targetPath === cleanRelative ||
         m.targetPath === `mods/${cleanRelative}` ||
-        m.targetPath.endsWith(`/${fileName}`) ||
-        m.targetPath === fileName ||
-        m.targetPath === `mods/${fileName}`,
+        m.targetPath.endsWith(`/${simpleFileName}`) ||
+        m.targetPath === simpleFileName ||
+        m.targetPath === `mods/${simpleFileName}`,
     )
 
     if (match) {
@@ -334,8 +384,8 @@ export async function deleteServerFile(
         )
       }
 
-      // If SERVER_DIRECT: proceed with physical deletion and cascade remove D1 record
-      await client.deleteFiles(parentPath, [fileName])
+      // If SERVER_DIRECT: proceed with safe physical deletion and cascade remove D1 record only on success
+      await safeDeleteServerFilePhysical(client, parentPath, fileName)
       await db
         .delete(schema.serverManagedContent)
         .where(eq(schema.serverManagedContent.id, match.id))

@@ -289,6 +289,7 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       createFolder: vi.fn().mockResolvedValue(undefined),
       writeFile: writeFileSpy,
       deleteFiles: deleteFilesSpy,
+      listDirectory: vi.fn().mockResolvedValue({ data: [] }),
     }
 
     const result = await applyServerReleaseSync(
@@ -315,5 +316,225 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
     expect(syncLogs).toHaveLength(1)
     expect(syncLogs[0]?.status).toBe("APPLIED")
     expect(syncLogs[0]?.releaseId).toBe("rel-pub-2")
+  })
+
+  // Test 4: Backup Timeout and Failure Abort Semantics
+  it("applyServerReleaseSync aborts immediately without filesystem mutation if backup times out or fails", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-timeout",
+      version: "3.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const testBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x10, 0x20])
+    const hashBuf = await crypto.subtle.digest("SHA-256", testBytes)
+    const testHash = Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: "grf-timeout",
+      releaseId: "rel-pub-timeout",
+      name: "timeout-mod.jar",
+      logicalPath: "mods/timeout-mod.jar",
+      category: "MOD",
+      sha256: testHash,
+      sizeBytes: testBytes.length,
+      policy: "NO_MODIFICABLE",
+      effectivePolicy: "NO_MODIFICABLE",
+      isDirectory: false,
+      sourceEnvironment: "BOTH",
+      objectKey: "releases/rel-pub-timeout/mods/timeout-mod.jar",
+      createdAt: nowIso,
+    })
+
+    const writeFileSpy = vi.fn()
+    const deleteFilesSpy = vi.fn()
+
+    const mockFailedBackupClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createBackup: vi.fn().mockResolvedValue({ id: "bk-fail", attributes: { uuid: "bk-fail" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "bk-fail", completed_at: nowIso, is_successful: false },
+      }),
+      createFolder: vi.fn(),
+      writeFile: writeFileSpy,
+      deleteFiles: deleteFilesSpy,
+      listDirectory: vi.fn().mockResolvedValue({ data: [] }),
+    }
+
+    await expect(
+      applyServerReleaseSync(db, env, "admin-1", true, mockFailedBackupClient as any),
+    ).rejects.toThrow("El backup previo a la sincronización no se completó exitosamente")
+
+    // Verify no filesystem writes occurred
+    expect(writeFileSpy).not.toHaveBeenCalled()
+    expect(deleteFilesSpy).not.toHaveBeenCalled()
+
+    // Verify D1 status recorded as FAILED
+    const syncLogs = await db.select().from(schema.serverReleaseSyncs)
+    expect(syncLogs).toHaveLength(1)
+    expect(syncLogs[0]?.status).toBe("FAILED")
+  })
+
+  // Test 5: R2 Preflight Integrity Validation (size, SHA-256, magic bytes)
+  it("applyServerReleaseSync validates R2 binary existence, size, SHA-256 and magic bytes before mutating Wings", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-r2",
+      version: "4.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: "grf-r2",
+      releaseId: "rel-pub-r2",
+      name: "corrupt-mod.jar",
+      logicalPath: "mods/corrupt-mod.jar",
+      category: "MOD",
+      sha256: "expected-sha256-hash",
+      sizeBytes: 10,
+      policy: "NO_MODIFICABLE",
+      effectivePolicy: "NO_MODIFICABLE",
+      isDirectory: false,
+      sourceEnvironment: "BOTH",
+      objectKey: "releases/rel-pub-r2/mods/corrupt-mod.jar",
+      createdAt: nowIso,
+    })
+
+    // Return invalid content (non-ZIP header, wrong size)
+    env.ASSETS.get = vi.fn().mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(new Uint8Array([0x00, 0x00, 0x00]).buffer),
+    })
+
+    const writeFileSpy = vi.fn()
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createFolder: vi.fn(),
+      writeFile: writeFileSpy,
+      deleteFiles: vi.fn(),
+      listDirectory: vi.fn().mockResolvedValue({ data: [] }),
+    }
+
+    await expect(
+      applyServerReleaseSync(db, env, "admin-1", false, mockClient as any),
+    ).rejects.toThrow("Discrepancia de tamaño en R2")
+
+    expect(writeFileSpy).not.toHaveBeenCalled()
+  })
+
+  // Test 6: Manual and Server Direct File Collision Protection
+  it("applyServerReleaseSync rejects overwrite on untracked manual file collision", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-col",
+      version: "5.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const testBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01, 0x02])
+    const hashBuf = await crypto.subtle.digest("SHA-256", testBytes)
+    const testHash = Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: "grf-col",
+      releaseId: "rel-pub-col",
+      name: "manual-colliding.jar",
+      logicalPath: "mods/manual-colliding.jar",
+      category: "MOD",
+      sha256: testHash,
+      sizeBytes: testBytes.length,
+      policy: "NO_MODIFICABLE",
+      effectivePolicy: "NO_MODIFICABLE",
+      isDirectory: false,
+      sourceEnvironment: "BOTH",
+      objectKey: "releases/rel-pub-col/mods/manual-colliding.jar",
+      createdAt: nowIso,
+    })
+
+    env.ASSETS.get = vi.fn().mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(testBytes.buffer),
+    })
+
+    // Mock Wings returning manual file in /mods
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createFolder: vi.fn(),
+      listDirectory: vi.fn().mockResolvedValue({
+        data: [{ attributes: { name: "manual-colliding.jar", is_file: true } }],
+      }),
+      writeFile: vi.fn(),
+      deleteFiles: vi.fn(),
+    }
+
+    await expect(
+      applyServerReleaseSync(db, env, "admin-1", false, mockClient as any),
+    ).rejects.toThrow("Ya existe un archivo manual en esta ruta (mods/manual-colliding.jar)")
+  })
+
+  // Test 7: Fail-closed Server Status in Release Sync Plan
+  it("getServerReleaseSyncPlan fails closed when server status is inaccessible", async () => {
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-status",
+      version: "6.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const mockFailingClient = {
+      getServerResources: vi.fn().mockRejectedValue(new Error("Network timeout")),
+      getServerDetails: vi.fn().mockRejectedValue(new Error("Network timeout")),
+    }
+
+    const plan = await getServerReleaseSyncPlan(db, env, mockFailingClient as any)
+    expect(plan.serverStatus).toBe("DISCONNECTED")
+    expect(plan.canApply).toBe(false)
+    expect(plan.blockReason).toBe("No se pudo confirmar que el servidor esté apagado.")
   })
 })
