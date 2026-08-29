@@ -23,6 +23,11 @@ function renderCustomHook<T>(hook: () => T) {
   })
   return {
     result,
+    rerender: () => {
+      act(() => {
+        root.render(React.createElement(TestComponent))
+      })
+    },
     unmount: () => {
       act(() => {
         root.unmount()
@@ -32,7 +37,7 @@ function renderCustomHook<T>(hook: () => T) {
   }
 }
 
-describe("useLauncherState Hook (Phase 07 Hardening)", () => {
+describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
@@ -127,6 +132,200 @@ describe("useLauncherState Hook (Phase 07 Hardening)", () => {
 
     expect(result.current.appliedSkin).toBe("skin-123")
     expect(result.current.skinsError).toBeNull()
+
+    unmount()
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * Shard 8F: Section Refresh-on-entry tests for Skins & Capes
+   * ───────────────────────────────────────────────────────────── */
+
+  it("Test 1 — Initial mount loads global public catalog", async () => {
+    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
+    const fetchGlobalCapesSpy = vi.spyOn(capeServiceModule, "fetchGlobalCapes")
+
+    const { unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1)
+    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(1)
+
+    unmount()
+  })
+
+  it("Test 2 — Transition Home -> setView('skins') triggers a fresh fetch of global catalogs", async () => {
+    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
+    const fetchGlobalCapesSpy = vi.spyOn(capeServiceModule, "fetchGlobalCapes")
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1)
+    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(1)
+
+    // Navigate to skins section
+    await act(async () => {
+      result.current.setView("skins")
+    })
+
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
+    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(2)
+
+    unmount()
+  })
+
+  it("Test 3 — Authenticated user entering Skins refreshes both public and personal cosmetics", async () => {
+    window.localStorage.setItem("hikat_auth_token", "auth-token-123")
+    vi.spyOn(authService, "getStoredToken").mockReturnValue("auth-token-123")
+
+    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
+    const fetchMyPlayerSkinSpy = vi.spyOn(skinServiceModule, "fetchMyPlayerSkin")
+    const fetchMyActiveSkinSpy = vi.spyOn(skinServiceModule, "fetchMyActiveSkin")
+    const fetchGlobalCapesSpy = vi.spyOn(capeServiceModule, "fetchGlobalCapes")
+    const fetchMyPlayerCapesSpy = vi.spyOn(capeServiceModule, "fetchMyPlayerCapes")
+    const fetchMyActiveCapeSpy = vi.spyOn(capeServiceModule, "fetchMyActiveCape")
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Mount ran 1 round
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1)
+    expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(1)
+    expect(fetchMyActiveSkinSpy).toHaveBeenCalledTimes(1)
+    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(1)
+    expect(fetchMyPlayerCapesSpy).toHaveBeenCalledTimes(1)
+    expect(fetchMyActiveCapeSpy).toHaveBeenCalledTimes(1)
+
+    // Enter skins section
+    await act(async () => {
+      result.current.setView("skins")
+    })
+
+    // Second round triggered
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
+    expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(2)
+    expect(fetchMyActiveSkinSpy).toHaveBeenCalledTimes(2)
+    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(2)
+    expect(fetchMyPlayerCapesSpy).toHaveBeenCalledTimes(2)
+    expect(fetchMyActiveCapeSpy).toHaveBeenCalledTimes(2)
+
+    unmount()
+  })
+
+  it("Test 4 — Re-entry (Home -> Skins -> Home -> Skins) produces a fresh query on each entry", async () => {
+    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1) // Mount
+
+    // 1st entry to Skins
+    await act(async () => {
+      result.current.setView("skins")
+    })
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
+
+    // Back to Home
+    await act(async () => {
+      result.current.setView("home")
+    })
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2) // No new skins fetch on leaving
+
+    // 2nd entry to Skins
+    await act(async () => {
+      result.current.setView("skins")
+    })
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(3)
+
+    unmount()
+  })
+
+  it("Test 5 — While remaining on Skins view, re-renders do NOT spam queries", async () => {
+    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
+
+    const { result, rerender, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1)
+
+    // Enter skins
+    await act(async () => {
+      result.current.setView("skins")
+    })
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
+
+    // Re-render without changing view
+    rerender()
+    rerender()
+
+    // Query count remains unchanged (0 additional calls)
+    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
+
+    unmount()
+  })
+
+  it("Test 6 — Newly published admin skin appears in allSkins upon re-entering Skins section without restarting", async () => {
+    let currentSkins = [
+      {
+        id: "skin-A",
+        name: "Skin Alpha",
+        imageUrl: "/media/skin-a.png",
+        status: "AVAILABLE" as const,
+        createdAt: "2026-08-29T10:00:00Z",
+        updatedAt: "2026-08-29T10:00:00Z",
+      },
+    ]
+
+    vi.spyOn(skinServiceModule, "fetchGlobalSkins").mockImplementation(async () => currentSkins)
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Initially contains skin-A
+    expect(result.current.allSkins.some((s) => s.id === "skin-A")).toBe(true)
+    expect(result.current.allSkins.some((s) => s.id === "skin-B")).toBe(false)
+
+    // Admin publishes skin-B on backend
+    currentSkins = [
+      ...currentSkins,
+      {
+        id: "skin-B",
+        name: "Skin Beta (New)",
+        imageUrl: "/media/skin-b.png",
+        status: "AVAILABLE" as const,
+        createdAt: "2026-08-29T14:00:00Z",
+        updatedAt: "2026-08-29T14:00:00Z",
+      },
+    ]
+
+    // User navigates to Skins
+    await act(async () => {
+      result.current.setView("skins")
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Now allSkins includes skin-B seamlessly
+    expect(result.current.allSkins.some((s) => s.id === "skin-B")).toBe(true)
 
     unmount()
   })

@@ -238,6 +238,18 @@ export function useLauncherState() {
     }
   }, [loadGlobalCatalog, refreshPlayerSkin, refreshPlayerCapes])
 
+  // Refresh catalogs & player cosmetics on entry to "skins" view
+  useEffect(() => {
+    if (view === "skins") {
+      loadGlobalCatalog()
+      if (authService.getStoredToken()) {
+        refreshPlayerSkin()
+        refreshPlayerCapes()
+      }
+    }
+  }, [view, loadGlobalCatalog, refreshPlayerSkin, refreshPlayerCapes])
+
+
   /**
    * Unified derived skins list (No model interpretation)
    */

@@ -22,6 +22,39 @@ interface DownloadPlayButtonProps {
   onPlay?: () => void
 }
 
+export function resolveIdleGameButtonState(
+  manifest: GameManifest | null | undefined,
+): GameButtonState {
+  if (!manifest) {
+    return gameService.isGameInstalled() ? "play" : "unavailable"
+  }
+
+  // 1. Installed and fully synchronized
+  if (manifest.installed && !manifest.hasUpdate) {
+    return "play"
+  }
+
+  // 2. Existing previous installation that needs update/synchronization
+  if (manifest.hasExistingInstall && (manifest.hasUpdate || !manifest.installed)) {
+    return "update"
+  }
+
+  // 3. Fresh installation (hasExistingInstall is false) with downloadable clientFiles or release
+  if (
+    !manifest.hasExistingInstall &&
+    ((manifest.clientFiles && manifest.clientFiles.length > 0) || manifest.version)
+  ) {
+    return "download"
+  }
+
+  // 4. Fallback if marked installed
+  if (manifest.installed) {
+    return "play"
+  }
+
+  return "unavailable"
+}
+
 export default function DownloadPlayButton({
   left,
   top,
@@ -86,27 +119,16 @@ export default function DownloadPlayButton({
       setManifest(res)
       if (res) {
         if (res.totalSizeGB) setTotalGB(res.totalSizeGB)
-        if (res.installed) {
-          setStatus(res.hasUpdate ? "update" : "play")
-        } else if (res.hasExistingInstall || res.hasUpdate) {
-          setStatus("update")
-        } else if ((res.clientFiles && res.clientFiles.length > 0) || res.version) {
-          setStatus("download")
-        } else {
-          setStatus("unavailable")
-        }
+        setStatus(resolveIdleGameButtonState(res))
       } else {
-        if (gameService.isGameInstalled()) {
-          setStatus("play")
-        } else {
-          setStatus("unavailable")
-        }
+        setStatus(resolveIdleGameButtonState(null))
       }
     })
     return () => {
       isMounted = false
     }
   }, [])
+
 
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
@@ -143,13 +165,7 @@ export default function DownloadPlayButton({
       const res: any = await gameService.cancelSync()
       if (res?.success || res === true) {
         isStartingSyncRef.current = false
-        setStatus(
-          manifest?.hasUpdate || manifest?.hasExistingInstall
-            ? "update"
-            : manifest?.clientFiles && manifest.clientFiles.length > 0
-              ? "download"
-              : "unavailable",
-        )
+        setStatus(resolveIdleGameButtonState(manifest))
         setProgress(0)
         setSpeed(0)
         setIsHovered(false)
@@ -208,7 +224,7 @@ export default function DownloadPlayButton({
         .catch((err) => {
           console.error("Sync resume error:", err)
           gameService.setGameInstalled(false)
-          setStatus(manifest?.hasUpdate ? "update" : "download")
+          setStatus(resolveIdleGameButtonState(manifest))
           showToast(t("playButton.syncError"), "error")
         })
         .finally(() => {
@@ -250,7 +266,7 @@ export default function DownloadPlayButton({
         .catch((err: any) => {
           console.error("Sync error:", err)
           gameService.setGameInstalled(false)
-          setStatus(manifest?.hasUpdate ? "update" : "download")
+          setStatus(resolveIdleGameButtonState(manifest))
           showToast(t("playButton.syncError"), "error")
         })
         .finally(() => {
@@ -300,13 +316,13 @@ export default function DownloadPlayButton({
           return
         }
         const verified = await gameService.checkGameManifest()
-        if (verified?.installed) {
+        if (verified?.installed && !verified?.hasUpdate) {
           gameService.setGameInstalled(true)
           setStatus("play")
           showToast(t("playButton.verifySuccess"), "success")
         } else {
           gameService.setGameInstalled(false)
-          setStatus(verified?.hasUpdate ? "update" : "download")
+          setStatus(resolveIdleGameButtonState(verified))
           showToast(t("playButton.verifyError"), "error")
         }
       })
@@ -314,8 +330,9 @@ export default function DownloadPlayButton({
         console.error("Verify repair error:", err)
         gameService.setGameInstalled(false)
         showToast(t("playButton.verifyError"), "error")
-        setStatus(manifest?.hasUpdate ? "update" : "download")
+        setStatus(resolveIdleGameButtonState(manifest))
       })
+
       .finally(() => {
         isStartingSyncRef.current = false
       })

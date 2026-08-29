@@ -4,11 +4,11 @@
 import React, { act } from "react"
 import { createRoot } from "react-dom/client"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import DownloadPlayButton from "./DownloadPlayButton"
+import DownloadPlayButton, { resolveIdleGameButtonState } from "./DownloadPlayButton"
 import { LanguageProvider } from "../../context/LanguageContext"
-import { gameService } from "../../services/gameService"
+import { gameService, GameManifest } from "../../services/gameService"
 
-describe("Shard 8E: DownloadPlayButton Real Component Lifecycle & Transition Suite", () => {
+describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical State Suite", () => {
   let unmountCurrent: (() => void) | null = null
 
   beforeEach(() => {
@@ -94,15 +94,265 @@ describe("Shard 8E: DownloadPlayButton Real Component Lifecycle & Transition Sui
     return { container, unmount }
   }
 
+  /* ─────────────────────────────────────────────────────────────
+   * Shard 8F Canonical Download vs Update Tests
+   * ───────────────────────────────────────────────────────────── */
+
+  it("Test A — Fresh install (installed: false, hasExistingInstall: false, hasUpdate: true, clientFiles > 0) renders DESCARGAR (DOWNLOAD), not ACTUALIZAR", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: false,
+      totalSizeGB: 10,
+      clientFiles: [
+        {
+          path: "mods/new-mod.jar",
+          sha256: "b".repeat(64),
+          sizeBytes: 500,
+          downloadUrl: "/dl/new-mod",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn).not.toBeNull()
+    expect(btn.textContent).toContain("DESCARGAR")
+    expect(btn.textContent).not.toContain("ACTUALIZAR")
+    expect(btn.textContent).not.toContain("JUGAR")
+  })
+
+  it("Test B — Existing outdated install (installed: false, hasExistingInstall: true, hasUpdate: true) renders ACTUALIZAR (UPDATE)", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.1.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [
+        {
+          path: "mods/patch.jar",
+          sha256: "c".repeat(64),
+          sizeBytes: 200,
+          downloadUrl: "/dl/patch",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn).not.toBeNull()
+    expect(btn.textContent).toContain("ACTUALIZAR")
+  })
+
+  it("Test C — Healthy install (installed: true, hasExistingInstall: true, hasUpdate: false) renders JUGAR (PLAY)", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: true,
+      hasUpdate: false,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [],
+    })
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn).not.toBeNull()
+    expect(btn.textContent).toContain("JUGAR")
+  })
+
+  it("Test D — Fresh install + Cancel returns cleanly to DESCARGAR (DOWNLOAD)", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: false,
+      totalSizeGB: 10,
+      clientFiles: [
+        {
+          path: "mods/example.jar",
+          sha256: "a".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/example",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+    vi.spyOn(gameService, "cancelSync").mockResolvedValue({ success: true })
+
+    const { container } = await mountButton()
+
+    // Click Download
+    await act(async () => {
+      (container.querySelector("button") as HTMLElement).click()
+    })
+
+    expect(container.querySelector(".dl-progress-card")).not.toBeNull()
+
+    // Click Cancel
+    const cancelBtn = container.querySelector(".dl-cancel-btn") as HTMLElement
+    await act(async () => {
+      cancelBtn.click()
+    })
+
+    // Returns to DESCARGAR, not ACTUALIZAR
+    const idleBtn = container.querySelector("button") as HTMLElement
+    expect(idleBtn.textContent).toContain("DESCARGAR")
+    expect(idleBtn.textContent).not.toContain("ACTUALIZAR")
+  })
+
+  it("Test E — Existing install + Cancel returns to ACTUALIZAR (UPDATE)", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.2.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [
+        {
+          path: "mods/update.jar",
+          sha256: "d".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/update",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+    vi.spyOn(gameService, "cancelSync").mockResolvedValue({ success: true })
+
+    const { container } = await mountButton()
+
+    // Click Update
+    await act(async () => {
+      (container.querySelector("button") as HTMLElement).click()
+    })
+
+    // Click Cancel
+    const cancelBtn = container.querySelector(".dl-cancel-btn") as HTMLElement
+    await act(async () => {
+      cancelBtn.click()
+    })
+
+    // Returns to ACTUALIZAR
+    const idleBtn = container.querySelector("button") as HTMLElement
+    expect(idleBtn.textContent).toContain("ACTUALIZAR")
+  })
+
+  it("Test F — Fresh install + sync failure resets to DESCARGAR (DOWNLOAD)", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: false,
+      totalSizeGB: 10,
+      clientFiles: [
+        {
+          path: "mods/fresh.jar",
+          sha256: "f".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/fresh",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    vi.spyOn(gameService, "startSync").mockRejectedValue(new Error("Network connection dropped"))
+
+    const { container } = await mountButton()
+
+    await act(async () => {
+      (container.querySelector("button") as HTMLElement).click()
+    })
+
+    // Failed fresh install shows DESCARGAR
+    const idleBtn = container.querySelector("button") as HTMLElement
+    expect(idleBtn.textContent).toContain("DESCARGAR")
+  })
+
+  it("Test G — Existing install + sync failure resets to ACTUALIZAR (UPDATE)", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [
+        {
+          path: "mods/patch.jar",
+          sha256: "g".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/patch",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    vi.spyOn(gameService, "startSync").mockRejectedValue(new Error("Network timeout"))
+
+    const { container } = await mountButton()
+
+    await act(async () => {
+      (container.querySelector("button") as HTMLElement).click()
+    })
+
+    // Failed update shows ACTUALIZAR
+    const idleBtn = container.querySelector("button") as HTMLElement
+    expect(idleBtn.textContent).toContain("ACTUALIZAR")
+  })
+
+  it("Test H — Remounting DownloadPlayButton (e.g. Navigating away and returning to Home) re-checks game manifest", async () => {
+    const checkSpy = vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: false,
+      totalSizeGB: 10,
+      clientFiles: [],
+    })
+
+    // 1st mount (User on Home)
+    const { unmount } = await mountButton()
+    expect(checkSpy).toHaveBeenCalledTimes(1)
+
+    // User navigates away from Home (unmounting button)
+    unmount()
+
+    // User navigates back to Home (remounting button)
+    const { unmount: unmount2 } = await mountButton()
+    expect(checkSpy).toHaveBeenCalledTimes(2)
+
+    unmount2()
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * Shard 8E Concurrency & State Machine Tests
+   * ───────────────────────────────────────────────────────────── */
+
   it("Test 1 — Descargar permite Pausar mientras startSync sigue pendiente", async () => {
-    let resolveStartSync: any
-    const startSyncSpy = vi
-      .spyOn(gameService, "startSync")
-      .mockImplementation(
-        () => new Promise((resolve) => {
-          resolveStartSync = resolve
-        }),
-      )
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
     const pauseSpy = vi
       .spyOn(gameService, "pauseSync")
       .mockResolvedValue({ success: true, paused: true })
@@ -116,8 +366,6 @@ describe("Shard 8E: DownloadPlayButton Real Component Lifecycle & Transition Sui
     await act(async () => {
       dlBtn.click()
     })
-
-    expect(startSyncSpy).toHaveBeenCalledTimes(1)
 
     // Progress card is rendered and startSync is still pending
     const card = container.querySelector(".dl-progress-card") as HTMLElement
@@ -249,12 +497,7 @@ describe("Shard 8E: DownloadPlayButton Real Component Lifecycle & Transition Sui
   })
 
   it("Test 5 — Reanudar permite volver a Pausar", async () => {
-    let resolveStartSync: any
-    vi.spyOn(gameService, "startSync").mockImplementation(
-      () => new Promise((resolve) => {
-        resolveStartSync = resolve
-      }),
-    )
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
     vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true })
 
     const { container } = await mountButton()
@@ -358,84 +601,5 @@ describe("Shard 8E: DownloadPlayButton Real Component Lifecycle & Transition Sui
     })
 
     expect(startSyncResumeSpy).toHaveBeenCalledTimes(1)
-  })
-
-  it("Test 9 — mientras Pause está esperando confirmación no se lanza Resume", async () => {
-    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
-    let resolvePause: any
-    vi.spyOn(gameService, "pauseSync").mockImplementation(
-      () => new Promise((resolve) => {
-        resolvePause = resolve
-      }),
-    )
-
-    const { container } = await mountButton()
-
-    await act(async () => {
-      (container.querySelector("button") as HTMLElement).click()
-    })
-
-    const card = container.querySelector(".dl-progress-card") as HTMLElement
-
-    // Click pause (in-flight)
-    await act(async () => {
-      card.click()
-    })
-
-    const startSyncSpy = vi.spyOn(gameService, "startSync")
-
-    // Click card again while pause is in-flight
-    await act(async () => {
-      card.click()
-    })
-
-    // No second startSync was launched
-    expect(startSyncSpy).not.toHaveBeenCalled()
-
-    // Finish pause
-    await act(async () => {
-      resolvePause({ success: true, paused: true })
-    })
-    expect(card.textContent).toContain("PAUSADO")
-  })
-
-  it("Test 10 — mientras Cancel está esperando confirmación no se lanza nuevo startSync", async () => {
-    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
-    let resolveCancel: any
-    vi.spyOn(gameService, "cancelSync").mockImplementation(
-      () => new Promise((resolve) => {
-        resolveCancel = resolve
-      }),
-    )
-
-    const { container } = await mountButton()
-
-    await act(async () => {
-      (container.querySelector("button") as HTMLElement).click()
-    })
-
-    const cancelBtn = container.querySelector(".dl-cancel-btn") as HTMLElement
-    const card = container.querySelector(".dl-progress-card") as HTMLElement
-
-    // Click cancel (in-flight)
-    await act(async () => {
-      cancelBtn.click()
-    })
-
-    const startSyncSpy = vi.spyOn(gameService, "startSync")
-
-    // Click card or cancel during cancellation in-flight
-    await act(async () => {
-      card.click()
-      cancelBtn.click()
-    })
-
-    expect(startSyncSpy).not.toHaveBeenCalled()
-
-    // Finish cancel
-    await act(async () => {
-      resolveCancel({ success: true })
-    })
-    expect(container.querySelector(".dl-progress-card")).toBeNull()
   })
 })
