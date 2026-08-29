@@ -1,0 +1,225 @@
+// @vitest-environment jsdom
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { gameService } from "./gameService"
+import * as apiClientModule from "./apiClient"
+
+describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suite", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it("1. Filesystem authority: checkGameManifest invalidates localStorage=true when files are missing", async () => {
+    localStorage.setItem("hikat_game_installed", "true")
+
+    // Mock GraphQL response
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          clientFiles: [
+            {
+              path: "mods/example.jar",
+              sha256: "a".repeat(64),
+              sizeBytes: 100,
+              downloadUrl: "/game/download/1",
+              policy: "NO_MODIFICABLE",
+            },
+          ],
+        },
+      },
+    })
+
+    // Mock Electron checkSyncPlan detecting missing files
+    window.electronAPI = {
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        filesToDownload: 1,
+        filesToPrune: 0,
+        totalDownloadBytes: 100,
+        needsUpdate: true,
+        isFullyInstalled: false,
+        hasExistingInstall: false,
+      }),
+    } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.installed).toBe(false)
+    expect(manifest?.hasUpdate).toBe(true)
+    expect(gameService.isGameInstalled()).toBe(false)
+    expect(localStorage.getItem("hikat_game_installed")).toBe("false")
+  })
+
+  it("2. Filesystem authority: checkGameManifest confirms healthy installation", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          clientFiles: [
+            {
+              path: "mods/healthy.jar",
+              sha256: "b".repeat(64),
+              sizeBytes: 200,
+              downloadUrl: "/game/download/2",
+              policy: "NO_MODIFICABLE",
+            },
+          ],
+        },
+      },
+    })
+
+    window.electronAPI = {
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        filesToDownload: 0,
+        filesToPrune: 0,
+        totalDownloadBytes: 0,
+        needsUpdate: false,
+        isFullyInstalled: true,
+        hasExistingInstall: true,
+      }),
+    } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest?.installed).toBe(true)
+    expect(manifest?.hasUpdate).toBe(false)
+    expect(gameService.isGameInstalled()).toBe(true)
+    expect(localStorage.getItem("hikat_game_installed")).toBe("true")
+  })
+
+  it("3. Offline mode: healthy cached manifest allows offline playing", async () => {
+    const cachedModpack = {
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/cached.jar",
+          sha256: "c".repeat(64),
+          sizeBytes: 300,
+          downloadUrl: "/game/download/3",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    }
+    localStorage.setItem("hikat_game_manifest", JSON.stringify(cachedModpack))
+
+    // GraphQL and REST network fail
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      error: "Network offline",
+    })
+    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
+      success: false,
+      error: "Network offline",
+    })
+
+    window.electronAPI = {
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        filesToDownload: 0,
+        filesToPrune: 0,
+        totalDownloadBytes: 0,
+        needsUpdate: false,
+        isFullyInstalled: true,
+      }),
+    } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.version).toBe("1.0.0")
+    expect(manifest?.installed).toBe(true)
+  })
+
+  it("4. Offline mode: damaged files offline prevents playing without destroying existing files", async () => {
+    const cachedModpack = {
+      version: "1.0.0",
+      clientFiles: [
+        {
+          path: "mods/damaged.jar",
+          sha256: "d".repeat(64),
+          sizeBytes: 400,
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    }
+    localStorage.setItem("hikat_game_manifest", JSON.stringify(cachedModpack))
+
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      error: "Network offline",
+    })
+    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
+      success: false,
+      error: "Network offline",
+    })
+
+    window.electronAPI = {
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        filesToDownload: 1,
+        filesToPrune: 0,
+        totalDownloadBytes: 400,
+        needsUpdate: true,
+        isFullyInstalled: false,
+      }),
+    } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest?.installed).toBe(false)
+    expect(gameService.isGameInstalled()).toBe(false)
+  })
+
+  it("5. uninstallGame invokes Electron backend and clears localStorage caches", async () => {
+    localStorage.setItem("hikat_game_installed", "true")
+    localStorage.setItem("hikat_game_manifest", JSON.stringify({ version: "1.0.0" }))
+
+    const uninstallMock = vi.fn().mockResolvedValue({ success: true })
+    window.electronAPI = {
+      uninstallGame: uninstallMock,
+    } as any
+
+    await gameService.uninstallGame()
+    expect(uninstallMock).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem("hikat_game_installed")).toBeNull()
+    expect(localStorage.getItem("hikat_game_manifest")).toBeNull()
+  })
+
+  it("6. startSync, pauseSync, cancelSync and launchGame call electronAPI correctly", async () => {
+    const startSyncMock = vi.fn().mockResolvedValue({ success: true })
+    const pauseSyncMock = vi.fn().mockResolvedValue(true)
+    const cancelSyncMock = vi.fn().mockResolvedValue(true)
+    const launchGameMock = vi.fn().mockResolvedValue({ success: true, pid: 1234 })
+
+    window.electronAPI = {
+      startSync: startSyncMock,
+      pauseSync: pauseSyncMock,
+      cancelSync: cancelSyncMock,
+      launchGame: launchGameMock,
+    } as any
+
+    await gameService.startSync([], "1.0.0")
+    expect(startSyncMock).toHaveBeenCalledWith({ clientFiles: [], modpackVersion: "1.0.0" })
+
+    await gameService.pauseSync()
+    expect(pauseSyncMock).toHaveBeenCalledTimes(1)
+
+    await gameService.cancelSync()
+    expect(cancelSyncMock).toHaveBeenCalledTimes(1)
+
+    await gameService.launchGame({ playerName: "Tester", ramGB: 8 })
+    expect(launchGameMock).toHaveBeenCalledWith({ playerName: "Tester", ramGB: 8 })
+  })
+})

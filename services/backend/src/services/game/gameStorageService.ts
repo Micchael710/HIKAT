@@ -8,6 +8,7 @@ import {
 } from "@hikat/shared"
 import type { Env, BackendGraphQLContext } from "../../types"
 import { getCorsHeaders } from "../../cors"
+import { isClientGameReleaseFile } from "./releaseService"
 
 function jsonResponse(
   body: Record<string, unknown>,
@@ -218,7 +219,7 @@ export async function handleGameFileDownload(
     )
     .get()
 
-  if (!fileRecord) {
+  if (!fileRecord || !isClientGameReleaseFile(fileRecord.file)) {
     return new Response(JSON.stringify({ error: "Archivo de juego no encontrado o no disponible públicamente." }), {
       status: 404,
       headers: { "Content-Type": "application/json", ...cors },

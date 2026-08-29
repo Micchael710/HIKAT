@@ -54,6 +54,7 @@
     "unavailable": "INDISPONÍVEL",
     "downloading": "BAIXANDO",
     "updating": "ATUALIZANDO",
+    "installing": "INSTALANDO",
     "paused": "PAUSADO",
     "resume": "RETOMAR",
     "pause": "PAUSAR",

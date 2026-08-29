@@ -329,6 +329,39 @@ export async function validateDraftReadiness(
   }
 }
 
+/**
+ * Determines whether a game release file belongs to the client launcher.
+ * - Directories are never client files.
+ * - DATA_PACK is strictly server-only.
+ * - MOD:
+ *   - CLIENT -> include
+ *   - BOTH -> include
+ *   - SERVER -> exclude
+ *   - Provider-managed with UNKNOWN/null -> fail-closed (exclude)
+ *   - Custom mod without provider -> include if not SERVER
+ * - RESOURCE_PACK, SHADER_PACK, CONFIG, KUBEJS, SCRIPT, GENERAL, etc. -> include
+ */
+export function isClientGameReleaseFile(file: {
+  isDirectory: number | boolean
+  category: string
+  sourceEnvironment?: string | null
+  sourceProvider?: string | null
+}): boolean {
+  if (file.isDirectory) return false
+  if (file.category === "DATA_PACK") return false
+  if (file.category === "MOD") {
+    if (file.sourceEnvironment === "SERVER") return false
+    if (file.sourceEnvironment === "CLIENT" || file.sourceEnvironment === "BOTH") return true
+    if (file.sourceProvider) {
+      // Provider-managed mod with UNKNOWN/null environment -> fail closed
+      return false
+    }
+    // Custom uploaded mod without provider: include if not explicitly SERVER
+    return true
+  }
+  return true // RESOURCE_PACK, SHADER_PACK, CONFIG, KUBEJS, SCRIPT, GENERAL, etc.
+}
+
 export async function getPublishedModpack(
   db: Database,
   env: Env,
@@ -350,10 +383,8 @@ export async function getPublishedModpack(
   // 1. Resolve effective policies across the entire release tree
   const effectiveMap = resolveReleaseEffectivePolicies(allRecords)
 
-  // 2. Filter out directory records and server-only DATA_PACK files
-  const realFiles = allRecords.filter(
-    (file) => !file.isDirectory && file.category !== "DATA_PACK",
-  )
+  // 2. Filter strictly for client-appropriate files
+  const realFiles = allRecords.filter(isClientGameReleaseFile)
 
   const clientFiles: ClientFileGql[] = realFiles.map((file) => ({
     path: file.logicalPath,

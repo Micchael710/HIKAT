@@ -35,12 +35,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Client Files Sync & Launch Engine
   checkSyncPlan: (payload) => ipcRenderer.invoke("game-check-plan", payload),
   startSync: (payload) => ipcRenderer.invoke("game-start-sync", payload),
+  pauseSync: () => ipcRenderer.invoke("game-pause-sync"),
   cancelSync: () => ipcRenderer.invoke("game-cancel-sync"),
+  uninstallGame: () => ipcRenderer.invoke("game-uninstall"),
   launchGame: (options) => ipcRenderer.invoke("game-launch", options),
   getLaunchStatus: () => ipcRenderer.invoke("game-get-status"),
   onDownloadProgress: (callback) => {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on("game-download-progress", handler)
     return () => ipcRenderer.removeListener("game-download-progress", handler)
+  },
+  onPhaseChange: (callback) => {
+    const handler = (_event, phase) => callback(phase)
+    ipcRenderer.on("game-phase-changed", handler)
+    return () => ipcRenderer.removeListener("game-phase-changed", handler)
   },
 })

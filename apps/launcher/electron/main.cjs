@@ -3,7 +3,12 @@ const path = require("path")
 const http = require("http")
 const fs = require("fs")
 const os = require("os")
-const { executeSync, generateSyncPlan } = require("./client-files-sync.cjs")
+const {
+  executeSync,
+  generateSyncPlan,
+  uninstallGame,
+  loadInstalledManifest,
+} = require("./client-files-sync.cjs")
 const { GameLauncher } = require("./game-launcher.cjs")
 const { setJavaGpuPreference } = require("./gpu-manager.cjs")
 
@@ -23,6 +28,7 @@ try {
 const instanceRoot = path.join(appDataRoot, "game files")
 const gameLauncher = new GameLauncher(app, { instanceRoot })
 let activeSyncCancelSignal = null
+let currentOperationState = "IDLE" // IDLE | SYNCING | PAUSED | INSTALLING | UNINSTALLING
 
 let mainWindow = null
 let splashWindow = null
@@ -455,12 +461,19 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
     const clientFiles = Array.isArray(payload.clientFiles) ? payload.clientFiles : []
     const modpackVersion = String(payload.modpackVersion || "1.0.0")
     const plan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+    const installedManifest = await loadInstalledManifest(instanceRoot)
+
     return {
       success: true,
       filesToDownload: plan.toDownload.length,
       filesToPrune: plan.toPrune.length,
       totalDownloadBytes: plan.totalDownloadBytes,
       needsUpdate: plan.toDownload.length > 0 || plan.toPrune.length > 0,
+      hasExistingInstall: plan.hasExistingInstall,
+      isFullyInstalled:
+        plan.toDownload.length === 0 &&
+        plan.toPrune.length === 0 &&
+        Boolean(installedManifest.modpackVersion),
     }
   } catch (err) {
     console.error("[Main] Failed to generate sync plan:", err)
@@ -469,14 +482,41 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
 })
 
 ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
+  if (
+    currentOperationState !== "IDLE" &&
+    currentOperationState !== "PAUSED"
+  ) {
+    throw new Error(
+      `Cannot start sync: Operation already in progress (${currentOperationState})`,
+    )
+  }
+
   const clientFiles = Array.isArray(payload.clientFiles) ? payload.clientFiles : []
   const modpackVersion = String(payload.modpackVersion || "1.0.0")
 
-  activeSyncCancelSignal = { isCancelled: false }
+  // Strict payload validation
+  for (const file of clientFiles) {
+    if (!file || typeof file.path !== "string" || !file.path.trim()) {
+      throw new Error("Invalid payload: clientFiles contains file without valid path.")
+    }
+    if (typeof file.sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(file.sha256.trim())) {
+      throw new Error(`Invalid payload: file "${file.path}" has invalid SHA-256 hash.`)
+    }
+  }
+
+  currentOperationState = "SYNCING"
+  activeSyncCancelSignal = { isCancelled: false, isPaused: false }
 
   const onProgress = (data) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("game-download-progress", data)
+    }
+  }
+
+  const onPhaseChange = (phase) => {
+    currentOperationState = phase
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("game-phase-changed", phase)
     }
   }
 
@@ -486,10 +526,19 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
       clientFiles,
       modpackVersion,
       onProgress,
+      onPhaseChange,
       cancelSignal: activeSyncCancelSignal,
     })
+
+    if (result.paused) {
+      currentOperationState = "PAUSED"
+    } else {
+      currentOperationState = "IDLE"
+    }
+
     return { success: true, ...result }
   } catch (err) {
+    currentOperationState = "IDLE"
     console.error("[Main] Sync execution failed:", err)
     throw err
   } finally {
@@ -497,14 +546,53 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
   }
 })
 
+ipcMain.handle("game-pause-sync", async () => {
+  if (activeSyncCancelSignal) {
+    activeSyncCancelSignal.isPaused = true
+  }
+  currentOperationState = "PAUSED"
+  return true
+})
+
 ipcMain.handle("game-cancel-sync", async () => {
   if (activeSyncCancelSignal) {
     activeSyncCancelSignal.isCancelled = true
   }
+  currentOperationState = "IDLE"
   return true
 })
 
+ipcMain.handle("game-uninstall", async () => {
+  if (
+    currentOperationState === "SYNCING" ||
+    currentOperationState === "INSTALLING"
+  ) {
+    throw new Error("Cannot uninstall game while synchronization is active.")
+  }
+
+  currentOperationState = "UNINSTALLING"
+  try {
+    const result = await uninstallGame(instanceRoot, appDataRoot)
+    return result
+  } catch (err) {
+    console.error("[Main] Game uninstall failed:", err)
+    throw err
+  } finally {
+    currentOperationState = "IDLE"
+  }
+})
+
 ipcMain.handle("game-launch", async (_event, options = {}) => {
+  if (
+    currentOperationState === "SYNCING" ||
+    currentOperationState === "INSTALLING" ||
+    currentOperationState === "UNINSTALLING"
+  ) {
+    throw new Error(
+      "Cannot launch Minecraft while game synchronization or installation is in progress.",
+    )
+  }
+
   try {
     return await gameLauncher.launch({
       playerName: options.playerName || "Player",
@@ -521,7 +609,10 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
 })
 
 ipcMain.handle("game-get-status", async () => {
-  return gameLauncher.getLaunchStatus()
+  return {
+    ...gameLauncher.getLaunchStatus(),
+    operationState: currentOperationState,
+  }
 })
 
 app.whenReady().then(() => {

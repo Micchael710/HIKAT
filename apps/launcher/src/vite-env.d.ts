@@ -20,6 +20,7 @@ export interface PublishedModpack {
 
 export interface DownloadProgressData {
   progress: number
+  phase?: "DOWNLOADING" | "INSTALLING" | string
   downloadedGB: number
   totalGB: number
   speedMBs: number
@@ -35,6 +36,8 @@ export interface SyncPlanCheckResult {
   filesToPrune: number
   totalDownloadBytes: number
   needsUpdate: boolean
+  hasExistingInstall?: boolean
+  isFullyInstalled?: boolean
   error?: string
 }
 
@@ -58,8 +61,10 @@ interface ElectronAPI {
   openExternal?: (url: string) => void
 
   checkSyncPlan?: (payload: { clientFiles: ClientFile[]; modpackVersion?: string }) => Promise<SyncPlanCheckResult>
-  startSync?: (payload: { clientFiles: ClientFile[]; modpackVersion?: string }) => Promise<{ success: boolean; downloadedCount: number; prunedCount: number }>
+  startSync?: (payload: { clientFiles: ClientFile[]; modpackVersion?: string }) => Promise<{ success: boolean; downloadedCount: number; prunedCount: number; paused?: boolean }>
+  pauseSync?: () => Promise<boolean>
   cancelSync?: () => Promise<boolean>
+  uninstallGame?: () => Promise<{ success: boolean }>
   launchGame?: (options: {
     playerName?: string
     ramGB?: number
@@ -67,10 +72,28 @@ interface ElectronAPI {
     customJavaPath?: string
     customArgs?: string[]
   }) => Promise<{ success: boolean; pid?: number }>
-  getLaunchStatus?: () => Promise<{ status: string; pid?: number | null }>
+  getLaunchStatus?: () => Promise<{ status: string; pid?: number | null; operationState?: string }>
   onDownloadProgress?: (callback: (data: DownloadProgressData) => void) => () => void
+  onPhaseChange?: (callback: (phase: string) => void) => () => void
 }
 
 interface Window {
   electronAPI?: ElectronAPI
+}
+
+declare module "../../electron/client-files-sync.cjs" {
+  export const generateSyncPlan: any
+  export const executeSync: any
+  export const loadInstalledManifest: any
+  export const saveInstalledManifest: any
+  export const loadDownloadSession: any
+  export const saveDownloadSession: any
+  export const cleanStaging: any
+  export const reconcileStagingFiles: any
+  export const getDeterministicStagingFileName: any
+  export const calculateFileSha256: any
+  export const resolveAndValidateDownloadUrl: any
+  export const validateUrlSecurity: any
+  export const getEffectiveApiBaseUrl: any
+  export const uninstallGame: any
 }

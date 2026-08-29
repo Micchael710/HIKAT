@@ -76,7 +76,7 @@ export default function DownloadPlayButton({
     return () => window.removeEventListener("mousedown", handleClickOutside)
   }, [isMenuOpen])
 
-  // Check manifest and server availability on mount
+  // Check manifest and authoritative filesystem state on mount
   useEffect(() => {
     let isMounted = true
     gameService.checkGameManifest().then((res) => {
@@ -84,8 +84,10 @@ export default function DownloadPlayButton({
       setManifest(res)
       if (res) {
         if (res.totalSizeGB) setTotalGB(res.totalSizeGB)
-        if (res.installed || gameService.isGameInstalled()) {
+        if (res.installed) {
           setStatus(res.hasUpdate ? "update" : "play")
+        } else if (res.hasExistingInstall || res.hasUpdate) {
+          setStatus("update")
         } else if ((res.clientFiles && res.clientFiles.length > 0) || res.version) {
           setStatus("download")
         } else {
@@ -104,30 +106,43 @@ export default function DownloadPlayButton({
     }
   }, [])
 
-  // Listen to IPC download progress events if running in Electron
+  // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
-    const unsub = window.electronAPI?.onDownloadProgress?.((data: any) => {
+    const unsubProgress = window.electronAPI?.onDownloadProgress?.((data: any) => {
       setProgress(data.progress)
       setSpeed(data.speedMBs)
       setDownloadedGB(data.downloadedGB)
       if (data.totalGB) setTotalGB(data.totalGB)
       setTimeRemainingMin(data.remainingMinutes)
+      if (data.phase === "INSTALLING") {
+        setStatus("installing")
+      }
       if (data.progress >= 100) {
         gameService.setGameInstalled(true)
         setStatus("play")
       }
     })
+
+    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string) => {
+      if (phase === "INSTALLING") {
+        setStatus("installing")
+      }
+    })
+
     return () => {
-      unsub?.()
+      unsubProgress?.()
+      unsubPhase?.()
     }
   }, [])
 
-  const isExpanded = status === "downloading" || status === "paused"
+  const isExpanded =
+    status === "downloading" || status === "paused" || status === "installing"
 
   const cancel = () => {
+    if (status === "installing") return
     gameService.cancelSync()
     setStatus(
-      manifest?.hasUpdate
+      manifest?.hasUpdate || manifest?.hasExistingInstall
         ? "update"
         : manifest?.clientFiles && manifest.clientFiles.length > 0
           ? "download"
@@ -139,19 +154,32 @@ export default function DownloadPlayButton({
   }
 
   const togglePauseResume = () => {
+    if (status === "installing") return
     if (status === "downloading") {
-      gameService.cancelSync()
+      gameService.pauseSync()
       setStatus("paused")
     } else if (status === "paused") {
       if (manifest?.clientFiles) {
         setStatus("downloading")
-        gameService.startSync(manifest.clientFiles, manifest.version)
+        gameService.startSync(manifest.clientFiles, manifest.version).then((res: any) => {
+          if (res?.paused) {
+            setStatus("paused")
+          } else if (res?.success) {
+            gameService.setGameInstalled(true)
+            setStatus("play")
+            showToast(t("playButton.syncSuccess"), "success")
+          }
+        }).catch((err) => {
+          console.error("Sync resume error:", err)
+          setStatus(manifest.hasUpdate ? "update" : "download")
+          showToast(t("playButton.syncError"), "error")
+        })
       }
     }
   }
 
   const handleClick = async () => {
-    if (status === "unavailable") {
+    if (status === "unavailable" || status === "installing") {
       return
     }
     if (status === "download" || status === "update") {
@@ -161,7 +189,14 @@ export default function DownloadPlayButton({
       }
       setStatus("downloading")
       try {
-        await gameService.startSync(manifest.clientFiles, manifest.version)
+        const res: any = await gameService.startSync(
+          manifest.clientFiles,
+          manifest.version,
+        )
+        if (res?.paused) {
+          setStatus("paused")
+          return
+        }
         gameService.setGameInstalled(true)
         setStatus("play")
         showToast(t("playButton.syncSuccess"), "success")
@@ -204,20 +239,38 @@ export default function DownloadPlayButton({
     showToast(t("playButton.verifying"), "info")
     setStatus("downloading")
     try {
-      await gameService.startSync(manifest.clientFiles, manifest.version)
-      gameService.setGameInstalled(true)
-      setStatus("play")
-      showToast(t("playButton.verifySuccess"), "success")
+      const res: any = await gameService.startSync(
+        manifest.clientFiles,
+        manifest.version,
+      )
+      if (res?.paused) {
+        setStatus("paused")
+        return
+      }
+      const verified = await gameService.checkGameManifest()
+      if (verified?.installed) {
+        gameService.setGameInstalled(true)
+        setStatus("play")
+        showToast(t("playButton.verifySuccess"), "success")
+      } else {
+        setStatus(verified?.hasUpdate ? "update" : "download")
+        showToast(t("playButton.verifyError"), "error")
+      }
     } catch (err: any) {
+      console.error("Verify repair error:", err)
       showToast(t("playButton.verifyError"), "error")
-      setStatus("play")
+      setStatus(manifest.hasUpdate ? "update" : "download")
     }
   }
 
-  const handleUninstallGame = () => {
+  const handleUninstallGame = async () => {
     setIsMenuOpen(false)
-    gameService.uninstallGame()
-    setStatus(manifest?.clientFiles && manifest.clientFiles.length > 0 ? "download" : "unavailable")
+    await gameService.uninstallGame()
+    setStatus(
+      manifest?.clientFiles && manifest.clientFiles.length > 0
+        ? "download"
+        : "unavailable",
+    )
     showToast(t("playButton.uninstallSuccess"), "success")
   }
 
@@ -398,9 +451,10 @@ export default function DownloadPlayButton({
     )
   }
 
-  /* ── DOWNLOADING / PAUSED (Progress card) ── */
+  /* ── DOWNLOADING / PAUSED / INSTALLING (Progress card) ── */
   const dlGB = downloadedGB > 0 ? downloadedGB : (totalGB * progress) / 100
   const isUpdating = manifest?.hasUpdate
+  const isInstalling = status === "installing"
 
   return (
     <div
@@ -433,7 +487,7 @@ export default function DownloadPlayButton({
           border: isDark
             ? "2.5px solid rgba(255, 255, 255, 0.12)"
             : "2.5px solid rgba(0, 0, 0, 0.1)",
-          cursor: "pointer",
+          cursor: isInstalling ? "default" : "pointer",
           position: "relative",
           overflow: "hidden",
           display: "flex",
@@ -494,9 +548,11 @@ export default function DownloadPlayButton({
                 ? isHovered
                   ? t("playButton.resume")
                   : t("playButton.paused")
-                : isUpdating
-                  ? t("playButton.updating")
-                  : t("playButton.downloading")}
+                : isInstalling
+                  ? t("playButton.installing")
+                  : isUpdating
+                    ? t("playButton.updating")
+                    : t("playButton.downloading")}
             </span>
           </div>
 
@@ -576,6 +632,7 @@ export default function DownloadPlayButton({
       <button
         type="button"
         onClick={cancel}
+        disabled={isInstalling}
         title={t("playButton.cancel")}
         className="dl-cancel-btn"
         style={{
@@ -589,10 +646,12 @@ export default function DownloadPlayButton({
             : "1px solid rgba(0, 0, 0, 0.12)",
           color: isDark ? "rgba(255, 255, 255, 0.45)" : "#556677",
           boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
-          cursor: "pointer",
+          cursor: isInstalling ? "not-allowed" : "pointer",
+          opacity: isInstalling ? 0.35 : 1,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          transition: "opacity 0.2s ease",
         }}
       >
         <svg
