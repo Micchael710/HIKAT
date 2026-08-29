@@ -14,6 +14,7 @@ import {
   getServerStatus,
   acquireServerOperationLock,
   releaseServerOperationLock,
+  startServerOperationHeartbeat,
 } from "./serverAdministrationService"
 
 export interface ServerBackupItemData {
@@ -99,11 +100,13 @@ export async function restoreServerBackup(
 
   // 2. Guard: Acquire distributed operation lock
   const lockKey = await acquireServerOperationLock(db, "RESTORE_BACKUP", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
 
   try {
     await client.restoreBackup(backupId.trim(), true)
     return true
   } finally {
+    heartbeat.stop()
     await releaseServerOperationLock(db, lockKey)
   }
 }

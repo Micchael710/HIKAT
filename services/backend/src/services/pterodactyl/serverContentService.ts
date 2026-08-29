@@ -16,6 +16,7 @@ import {
   getServerStatus,
   acquireServerOperationLock,
   releaseServerOperationLock,
+  startServerOperationHeartbeat,
 } from "./serverAdministrationService"
 import { detectActiveWorldName } from "./serverWorldService"
 import { modProviderManager, getLogicalPathForServerContent } from "../providers/modProviderManager"
@@ -92,10 +93,12 @@ function computeMd5Hex(data: Uint8Array): string {
 async function getPhysicalServerFilesSet(
   env: Env,
   clientOverride?: IPterodactylClient,
-): Promise<{ physicalPaths: Set<string>; worldName: string }> {
+  strictFailClosed: boolean = false,
+): Promise<{ physicalPaths: Set<string>; worldName: string; physicalFilesMap: Map<string, { size: number }> }> {
   const client = clientOverride || createPterodactylClient(env)
   const worldName = await detectActiveWorldName(env, client)
   const physicalPaths = new Set<string>()
+  const physicalFilesMap = new Map<string, { size: number }>()
 
   // 1. List /mods
   try {
@@ -104,11 +107,17 @@ async function getPhysicalServerFilesSet(
       for (const item of modsRes.data) {
         if (item?.attributes?.name && item.attributes.is_file) {
           physicalPaths.add(`mods/${item.attributes.name}`)
+          physicalFilesMap.set(`mods/${item.attributes.name}`, { size: item.attributes.size || 0 })
         }
       }
     }
-  } catch {
-    // If /mods directory does not exist or fails to list, ignore
+  } catch (err: any) {
+    if (strictFailClosed) {
+      throw createGraphQLError(
+        "No se pudo verificar de forma segura el contenido actual del servidor. No se realizaron cambios.",
+        "INTERNAL_ERROR",
+      )
+    }
   }
 
   // 2. List /<worldName>/datapacks
@@ -118,16 +127,25 @@ async function getPhysicalServerFilesSet(
       for (const item of dpRes.data) {
         if (item?.attributes?.name && item.attributes.is_file) {
           physicalPaths.add(`${worldName}/datapacks/${item.attributes.name}`)
-          // Also record normalized datapacks/<name> for robust matching
           physicalPaths.add(`datapacks/${item.attributes.name}`)
+          physicalFilesMap.set(`${worldName}/datapacks/${item.attributes.name}`, { size: item.attributes.size || 0 })
+          physicalFilesMap.set(`datapacks/${item.attributes.name}`, { size: item.attributes.size || 0 })
         }
       }
     }
-  } catch {
-    // If datapacks directory does not exist, ignore
+  } catch (err: any) {
+    if (strictFailClosed) {
+      // Datapacks dir might not exist yet before first createFolder; ignore if 404/not found, else throw
+      if (err?.message && !err.message.includes("404") && !err.message.includes("not found")) {
+        throw createGraphQLError(
+          "No se pudo verificar de forma segura el contenido actual del servidor. No se realizaron cambios.",
+          "INTERNAL_ERROR",
+        )
+      }
+    }
   }
 
-  return { physicalPaths, worldName }
+  return { physicalPaths, worldName, physicalFilesMap }
 }
 
 /**
@@ -150,7 +168,7 @@ export async function getServerManagedContent(
   let physicalPaths = new Set<string>()
   let worldName = "world"
   try {
-    const res = await getPhysicalServerFilesSet(env, clientOverride)
+    const res = await getPhysicalServerFilesSet(env, clientOverride, false)
     physicalPaths = res.physicalPaths
     worldName = res.worldName
   } catch {
@@ -239,12 +257,13 @@ export async function installServerContentPlan(
     }
   }
 
-  // 2. Guard: Acquire distributed operation lock
+  // 2. Guard: Acquire distributed operation lock and start heartbeat
   const lockKey = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
 
   try {
     const worldName = await detectActiveWorldName(env, client)
-    const { physicalPaths } = await getPhysicalServerFilesSet(env, client)
+    const { physicalPaths } = await getPhysicalServerFilesSet(env, client, true)
 
     const managedRecords = await db
       .select()
@@ -285,11 +304,20 @@ export async function installServerContentPlan(
             )
           }
         } else {
-          // Physical file exists without any tracking at this targetPath -> manual file collision!
-          throw createGraphQLError(
-            `Ya existe un archivo manual en esta ruta (${targetPath}). HiKAT no lo reemplazará automáticamente.`,
-            "CONFLICT",
+          // Check if this physical file matches a retry for the existing item being updated/installed
+          const existingItem = managedRecords.find(
+            (m) =>
+              m.provider === item.provider &&
+              m.projectId === item.projectId &&
+              m.contentType === item.contentType,
           )
+          if (!existingItem) {
+            // Physical file exists without any tracking at this targetPath -> manual file collision!
+            throw createGraphQLError(
+              `Ya existe un archivo manual en esta ruta (${targetPath}). HiKAT no lo reemplazará automáticamente.`,
+              "CONFLICT",
+            )
+          }
         }
       }
     }
@@ -457,39 +485,47 @@ export async function installServerContentPlan(
 
       // Persist / update record in D1 ONLY AFTER physical write and old cleanup succeed
       const now = new Date().toISOString()
-      if (existing) {
-        await db
-          .update(schema.serverManagedContent)
-          .set({
+      try {
+        if (existing) {
+          await db
+            .update(schema.serverManagedContent)
+            .set({
+              versionId: item.versionId,
+              fileId: item.fileId || null,
+              targetPath: logicalTargetPath,
+              sha256,
+              sizeBytes: buffer.byteLength,
+              updatedAt: now,
+            })
+            .where(eq(schema.serverManagedContent.id, existing.id))
+        } else {
+          await db.insert(schema.serverManagedContent).values({
+            id: crypto.randomUUID(),
+            managementSource: "SERVER_DIRECT",
+            provider: item.provider,
+            projectId: item.projectId,
             versionId: item.versionId,
             fileId: item.fileId || null,
+            contentType: item.contentType,
+            environment: item.environment || "SERVER",
             targetPath: logicalTargetPath,
             sha256,
             sizeBytes: buffer.byteLength,
+            createdAt: now,
             updatedAt: now,
           })
-          .where(eq(schema.serverManagedContent.id, existing.id))
-      } else {
-        await db.insert(schema.serverManagedContent).values({
-          id: crypto.randomUUID(),
-          managementSource: "SERVER_DIRECT",
-          provider: item.provider,
-          projectId: item.projectId,
-          versionId: item.versionId,
-          fileId: item.fileId || null,
-          contentType: item.contentType,
-          environment: item.environment || "SERVER",
-          targetPath: logicalTargetPath,
-          sha256,
-          sizeBytes: buffer.byteLength,
-          createdAt: now,
-          updatedAt: now,
-        })
+        }
+      } catch (d1Err: any) {
+        if (!existing) {
+          await safeDeleteServerFilePhysical(client, wingsParentDir, wingsFileName).catch(() => {})
+        }
+        throw d1Err
       }
     }
 
     return getServerManagedContent(db, env, clientOverride)
   } finally {
+    heartbeat.stop()
     await releaseServerOperationLock(db, lockKey)
   }
 }
@@ -542,8 +578,9 @@ export async function removeServerManagedContent(
     }
   }
 
-  // 2. Guard: Acquire distributed operation lock
+  // 2. Guard: Acquire distributed operation lock and start heartbeat
   const lockKey = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
 
   try {
     const segments = record.targetPath.replace(/^\/+/, "").split("/")
@@ -560,6 +597,7 @@ export async function removeServerManagedContent(
 
     return true
   } finally {
+    heartbeat.stop()
     await releaseServerOperationLock(db, lockKey)
   }
 }

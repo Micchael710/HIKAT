@@ -30,6 +30,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   const [loadingMore, setLoadingMore] = useState(false)
   const [results, setResults] = useState<ModSearchResultItem[]>([])
   const [totalCount, setTotalCount] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
   const [offset, setOffset] = useState(0)
   const [providerStatuses, setProviderStatuses] = useState<ModProviderStatus[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -86,6 +87,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         }
 
         setTotalCount(payload.totalCount || 0)
+        setHasMore(Boolean(payload.hasMore))
         setProviderStatuses(payload.providersStatus || [])
         if (payload.minecraftVersion) {
           setEnvInfo({
@@ -232,7 +234,6 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   }
 
   const failedProviders = providerStatuses.filter((s) => !s.available && s.error)
-  const hasMore = results.length < totalCount
 
   return (
     <div
@@ -634,7 +635,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                         cursor: loadingMore ? "not-allowed" : "pointer",
                       }}
                     >
-                      {loadingMore ? "Cargando..." : `Cargar más (${results.length} de ${totalCount})`}
+                      {loadingMore ? "Cargando..." : "Cargar más"}
                     </button>
                   </div>
                 )}

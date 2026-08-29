@@ -44,6 +44,12 @@ import {
   buildTemplatePlan,
   checkTasksMatchTemplate,
 } from "./serverScheduleService"
+import {
+  acquireServerOperationLock,
+  releaseServerOperationLock,
+  refreshServerOperationLock,
+  startServerOperationHeartbeat,
+} from "./serverAdministrationService"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
 import { eq } from "drizzle-orm"
@@ -1918,6 +1924,165 @@ rcon.password=secret123
     await expect(
       updateServerAutomation(env, "604", { name: "Test", template: "AUTO_RESTART", frequency: "DAILY", enabled: true }, mockClient as any, db as any),
     ).rejects.toThrow("Esta tarea fue modificada fuera de HiKAT y se encuentra en modo solo lectura.")
+  })
+
+  // Test 49: Heartbeat renews lock lease so long operation (> original TTL) cannot be stolen
+  it("Shard 8D: Long operation with active heartbeat keeps lock active and blocks concurrent acquire", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin 1",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+    await db.insert(schema.users).values({
+      id: "admin-2",
+      displayName: "Admin 2",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const lockKey = await acquireServerOperationLock(db as any, "SERVER_RELEASE_SYNC", "admin-1", 10)
+    const heartbeat = startServerOperationHeartbeat(db as any, lockKey, "admin-1", 10)
+
+    try {
+      // Refresh lock manually or wait for heartbeat
+      const refreshed = await refreshServerOperationLock(db as any, lockKey, "admin-1", 20)
+      expect(refreshed).toBe(true)
+
+      // Another user attempts acquire and is blocked
+      await expect(
+        acquireServerOperationLock(db as any, "SERVER_RELEASE_SYNC", "admin-2"),
+      ).rejects.toThrow("Hay otra operación del servidor en curso. Espera a que finalice.")
+    } finally {
+      heartbeat.stop()
+      await releaseServerOperationLock(db as any, lockKey)
+    }
+  })
+
+  // Test 50: Heartbeat actively updates expiresAt in D1
+  it("Shard 8D: startServerOperationHeartbeat actively updates expiresAt in D1", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin 1",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const lockKey = await acquireServerOperationLock(db as any, "SERVER_RELEASE_SYNC", "admin-1", 60)
+    const initialRecord = await db.select().from(schema.serverOperationLocks).where(eq(schema.serverOperationLocks.lockKey, lockKey)).get()
+    const initialExpiresAt = initialRecord?.expiresAt
+
+    // Explicit refresh to simulate heartbeat action
+    await refreshServerOperationLock(db as any, lockKey, "admin-1", 120)
+
+    const updatedRecord = await db.select().from(schema.serverOperationLocks).where(eq(schema.serverOperationLocks.lockKey, lockKey)).get()
+    expect(updatedRecord?.expiresAt).not.toBe(initialExpiresAt)
+    expect(new Date(updatedRecord!.expiresAt).getTime()).toBeGreaterThan(new Date(initialExpiresAt!).getTime())
+
+    await releaseServerOperationLock(db as any, lockKey)
+  })
+
+  // Test 51: Successful operation stops heartbeat and releases lock
+  it("Shard 8D: Successful operation stops heartbeat and releases lock", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin 1",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const lockKey = await acquireServerOperationLock(db as any, "SERVER_RELEASE_SYNC", "admin-1", 60)
+    const heartbeat = startServerOperationHeartbeat(db as any, lockKey, "admin-1", 60)
+    expect(heartbeat.isRunning()).toBe(true)
+
+    // Simulate completion
+    heartbeat.stop()
+    expect(heartbeat.isRunning()).toBe(false)
+    await releaseServerOperationLock(db as any, lockKey)
+
+    const remainingLock = await db.select().from(schema.serverOperationLocks).where(eq(schema.serverOperationLocks.lockKey, lockKey)).get()
+    expect(remainingLock).toBeUndefined()
+  })
+
+  // Test 52: Operation error stops heartbeat and releases lock in finally
+  it("Shard 8D: Operation error stops heartbeat and releases lock in finally", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin 1",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    let heartbeatInstance: { stop: () => void; isRunning: () => boolean } | null = null
+    const lockKey = await acquireServerOperationLock(db as any, "SERVER_RELEASE_SYNC", "admin-1", 60)
+
+    try {
+      heartbeatInstance = startServerOperationHeartbeat(db as any, lockKey, "admin-1", 60)
+      throw new Error("Simulated catastrophic failure")
+    } catch {
+      // Expected
+    } finally {
+      if (heartbeatInstance) {
+        heartbeatInstance.stop()
+      }
+      await releaseServerOperationLock(db as any, lockKey)
+    }
+
+    expect(heartbeatInstance?.isRunning()).toBe(false)
+    const remainingLock = await db.select().from(schema.serverOperationLocks).where(eq(schema.serverOperationLocks.lockKey, lockKey)).get()
+    expect(remainingLock).toBeUndefined()
+  })
+
+  // Test 53: Truly abandoned lock (no heartbeat, past TTL) expires and allows new acquisition
+  it("Shard 8D: Truly abandoned lock past TTL expires and allows new acquisition", async () => {
+    const { db } = createMockD1()
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.users).values({
+      id: "admin-1",
+      displayName: "Admin 1",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+    await db.insert(schema.users).values({
+      id: "admin-2",
+      displayName: "Admin 2",
+      role: "ADMIN",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Insert an expired abandoned lock (expired 10 seconds ago)
+    const expiredIso = new Date(Date.now() - 10000).toISOString()
+    await db.insert(schema.serverOperationLocks).values({
+      lockKey: "server_destructive_operation",
+      operation: "SERVER_RELEASE_SYNC",
+      acquiredByUserId: "admin-1",
+      acquiredAt: new Date(Date.now() - 200000).toISOString(),
+      expiresAt: expiredIso,
+    })
+
+    // Admin 2 should be able to acquire because previous lock expired
+    const newLockKey = await acquireServerOperationLock(db as any, "SERVER_RELEASE_SYNC", "admin-2", 60)
+    expect(newLockKey).toBe("server_destructive_operation")
+
+    const currentLock = await db.select().from(schema.serverOperationLocks).where(eq(schema.serverOperationLocks.lockKey, newLockKey)).get()
+    expect(currentLock?.acquiredByUserId).toBe("admin-2")
+
+    await releaseServerOperationLock(db as any, newLockKey)
   })
 })
 

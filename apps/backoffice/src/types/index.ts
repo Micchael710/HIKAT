@@ -650,6 +650,7 @@ export interface ServerManagedContentItem {
 export interface ServerContentSearchPayload {
   items: ModSearchResultItem[]
   totalCount: number
+  hasMore: boolean
   providersStatus: ModProviderStatus[]
   minecraftVersion: string
   neoForgeVersion: string

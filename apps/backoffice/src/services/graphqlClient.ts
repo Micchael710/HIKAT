@@ -2226,6 +2226,7 @@ export const serverContentApi = {
             updatedAt
           }
           totalCount
+          hasMore
           providersStatus {
             provider
             available

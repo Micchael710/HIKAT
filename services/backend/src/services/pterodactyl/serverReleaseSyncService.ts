@@ -18,6 +18,7 @@ import {
   getServerStatus,
   acquireServerOperationLock,
   releaseServerOperationLock,
+  startServerOperationHeartbeat,
 } from "./serverAdministrationService"
 import { createServerBackup } from "./serverBackupService"
 import { safeDeleteServerFilePhysical } from "./serverFileService"
@@ -27,7 +28,7 @@ export const SERVER_RELEASE_SYNC_BACKUP_TIMEOUT_MS = 180000 // 3 minutes
 
 /**
  * Computes the Server Release Sync Plan by comparing the published game release's
- * BOTH mods with the server's GAME_RELEASE managed content.
+ * BOTH mods with the server's GAME_RELEASE managed content and physical files on Wings.
  */
 export async function getServerReleaseSyncPlan(
   db: Database,
@@ -40,13 +41,32 @@ export async function getServerReleaseSyncPlan(
     .where(eq(schema.gameReleases.status, "PUBLISHED"))
     .get()
 
+  const client = clientOverride || createPterodactylClient(env)
+
   // 1. Check server status for preconditions (fail closed)
   let serverStatus: ServerStatusGql = "UNKNOWN"
   try {
-    const statusMetrics = await getServerStatus(env, clientOverride)
+    const statusMetrics = await getServerStatus(env, client)
     serverStatus = statusMetrics.status as ServerStatusGql
   } catch {
     serverStatus = "DISCONNECTED"
+  }
+
+  // 2. Fetch physical files on Wings /mods
+  const physicalMods = new Set<string>()
+  if (serverStatus !== "DISCONNECTED") {
+    try {
+      const modsListRes = await client.listDirectory("/mods")
+      if (modsListRes && modsListRes.data && Array.isArray(modsListRes.data)) {
+        for (const item of modsListRes.data) {
+          if (item?.attributes?.name && item.attributes.is_file) {
+            physicalMods.add(item.attributes.name)
+          }
+        }
+      }
+    } catch {
+      // If server unreachable or error listing /mods, treat as disconnected/offline guard
+    }
   }
 
   if (!published) {
@@ -67,7 +87,7 @@ export async function getServerReleaseSyncPlan(
     }
   }
 
-  // 2. Fetch desired state: Game release files with category === "MOD" and sourceEnvironment === "BOTH"
+  // 3. Fetch desired state: Game release files with category === "MOD" and sourceEnvironment === "BOTH"
   const desiredFiles = await db
     .select()
     .from(schema.gameReleaseFiles)
@@ -80,7 +100,7 @@ export async function getServerReleaseSyncPlan(
     )
     .all()
 
-  // 3. Fetch current state: server_managed_content with managementSource === "GAME_RELEASE"
+  // 4. Fetch current state: server_managed_content with managementSource === "GAME_RELEASE"
   const currentRecords = await db
     .select()
     .from(schema.serverManagedContent)
@@ -90,7 +110,7 @@ export async function getServerReleaseSyncPlan(
   const items: ServerReleaseSyncPlanItemGql[] = []
   const matchedCurrentIds = new Set<string>()
 
-  // 4. Compare desired against current
+  // 5. Compare desired against current and physical filesystem state
   for (const desired of desiredFiles) {
     const matchedCurrent = currentRecords.find(
       (c) =>
@@ -98,6 +118,8 @@ export async function getServerReleaseSyncPlan(
         (c.provider === desired.sourceProvider && c.projectId === desired.sourceProjectId) ||
         c.targetPath === `mods/${desired.name}`,
     )
+
+    const physicalExists = physicalMods.has(desired.name)
 
     if (!matchedCurrent) {
       // Item needs to be INSTALLED
@@ -123,9 +145,27 @@ export async function getServerReleaseSyncPlan(
         matchedCurrent.sha256 === desired.sha256 &&
         matchedCurrent.targetPath === `mods/${desired.name}`
 
-      if (isIdentical) {
+      if (isIdentical && physicalExists) {
+        // Tracked in D1 AND present on Wings filesystem
         items.push({
           action: "KEEP",
+          filename: desired.name,
+          targetPath: `mods/${desired.name}`,
+          sizeBytes: desired.sizeBytes,
+          sha256: desired.sha256,
+          sourceProvider: (desired.sourceProvider as any) || (matchedCurrent.provider as any) || null,
+          sourceProjectId: desired.sourceProjectId || matchedCurrent.projectId || null,
+          sourceVersionId: desired.sourceVersionId || matchedCurrent.versionId || null,
+          sourceFileId: desired.sourceFileId || matchedCurrent.fileId || null,
+          gameReleaseFileId: desired.id,
+          managedContentId: matchedCurrent.id,
+          currentVersionNumber: currentFileName,
+          desiredVersionNumber: desired.name,
+        })
+      } else if (isIdentical && !physicalExists) {
+        // Physical drift: Tracked in D1 but physically missing from Wings filesystem!
+        items.push({
+          action: "INSTALL",
           filename: desired.name,
           targetPath: `mods/${desired.name}`,
           sizeBytes: desired.sizeBytes,
@@ -159,7 +199,7 @@ export async function getServerReleaseSyncPlan(
     }
   }
 
-  // 5. Identify unreferenced current records to REMOVE
+  // 6. Identify unreferenced current records to REMOVE
   for (const current of currentRecords) {
     if (!matchedCurrentIds.has(current.id)) {
       const currentFileName = current.targetPath.split("/").pop() || current.targetPath
@@ -181,7 +221,7 @@ export async function getServerReleaseSyncPlan(
     }
   }
 
-  // 6. Compute summary
+  // 7. Compute summary
   const summary: ServerReleaseSyncSummaryGql = {
     toInstall: items.filter((i) => i.action === "INSTALL").length,
     toUpdate: items.filter((i) => i.action === "UPDATE").length,
@@ -274,6 +314,7 @@ export async function applyServerReleaseSync(
 
   // 2. Guard: Acquire distributed operation lock
   const lockKey = await acquireServerOperationLock(db, "SERVER_RELEASE_SYNC", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
 
   const syncId = crypto.randomUUID()
   const nowStart = new Date().toISOString()
@@ -371,7 +412,62 @@ export async function applyServerReleaseSync(
       }
     }
 
-    // 5. Authoritative R2 Preflight Validation
+    // 5. Check physical directory and manual collisions on Wings (fail closed)
+    try {
+      await client.createFolder("/", "mods")
+    } catch {
+      // Ignore if folder exists
+    }
+
+    let modsListRes
+    try {
+      modsListRes = await client.listDirectory("/mods")
+    } catch (listErr: any) {
+      throw createGraphQLError(
+        "No se pudo verificar de forma segura el contenido actual del servidor. No se realizaron cambios.",
+        "INTERNAL_ERROR",
+      )
+    }
+
+    const physicalMods = new Set<string>()
+    if (modsListRes && modsListRes.data && Array.isArray(modsListRes.data)) {
+      for (const item of modsListRes.data) {
+        if (item?.attributes?.name && item.attributes.is_file) {
+          physicalMods.add(item.attributes.name)
+        }
+      }
+    }
+
+    for (const desired of desiredFiles) {
+      if (physicalMods.has(desired.name)) {
+        const recordAtTargetPath = allManagedRecords.find(
+          (m) => m.targetPath === `mods/${desired.name}`,
+        )
+
+        if (recordAtTargetPath) {
+          if (recordAtTargetPath.managementSource === "SERVER_DIRECT") {
+            throw createGraphQLError(
+              `La ruta mods/${desired.name} está en conflicto con un mod administrado directamente desde el Servidor.`,
+              "CONFLICT",
+            )
+          }
+          // If GAME_RELEASE: OK
+        } else {
+          // Physical file exists without any D1 tracking!
+          // Check if it's the expected binary for this desired release item (e.g. from prior retry or physical presence):
+          const physicalItem = modsListRes.data.find((item) => item?.attributes?.name === desired.name)
+          const sizeMatches = physicalItem?.attributes?.size === desired.sizeBytes
+          if (!sizeMatches) {
+            throw createGraphQLError(
+              `Ya existe un archivo manual en esta ruta (mods/${desired.name}). HiKAT no lo reemplazará automáticamente.`,
+              "CONFLICT",
+            )
+          }
+        }
+      }
+    }
+
+    // 6. Authoritative R2 Preflight Validation
     if (!env.ASSETS) {
       throw createGraphQLError("El almacenamiento R2 no está configurado.", "INTERNAL_ERROR")
     }
@@ -386,8 +482,8 @@ export async function applyServerReleaseSync(
           c.targetPath === `mods/${desired.name}`,
       )
 
-      if (isIdentical) {
-        continue // KEEP, already matched
+      if (isIdentical && physicalMods.has(desired.name)) {
+        continue // KEEP, already matched and physically present on Wings
       }
 
       // Download and validate from R2
@@ -440,47 +536,6 @@ export async function applyServerReleaseSync(
       stagedBinaries.set(desired.id, buffer)
     }
 
-    // 6. Check physical directory and manual collisions on Wings
-    try {
-      await client.createFolder("/", "mods")
-    } catch {
-      // Ignore if folder exists
-    }
-
-    const modsListRes = await client.listDirectory("/mods").catch(() => ({ data: [] }))
-    const physicalMods = new Set<string>()
-    if (modsListRes && modsListRes.data && Array.isArray(modsListRes.data)) {
-      for (const item of modsListRes.data) {
-        if (item?.attributes?.name && item.attributes.is_file) {
-          physicalMods.add(item.attributes.name)
-        }
-      }
-    }
-
-    for (const desired of desiredFiles) {
-      if (physicalMods.has(desired.name)) {
-        const recordAtTargetPath = allManagedRecords.find(
-          (m) => m.targetPath === `mods/${desired.name}`,
-        )
-
-        if (recordAtTargetPath) {
-          if (recordAtTargetPath.managementSource === "SERVER_DIRECT") {
-            throw createGraphQLError(
-              `La ruta mods/${desired.name} está en conflicto con un mod administrado directamente desde el Servidor.`,
-              "CONFLICT",
-            )
-          }
-          // If GAME_RELEASE: OK
-        } else {
-          // Physical file exists without any D1 tracking -> manual file collision!
-          throw createGraphQLError(
-            `Ya existe un archivo manual en esta ruta (mods/${desired.name}). HiKAT no lo reemplazará automáticamente.`,
-            "CONFLICT",
-          )
-        }
-      }
-    }
-
     // 7. Apply Physical Writes and D1 Reconciliations
     let installedCount = 0
     let updatedCount = 0
@@ -503,7 +558,7 @@ export async function applyServerReleaseSync(
           matchedCurrent.sha256 === desired.sha256 &&
           matchedCurrent.targetPath === `mods/${desired.name}`
 
-        if (isIdentical) {
+        if (isIdentical && physicalMods.has(desired.name)) {
           keptCount++
           continue
         }
@@ -534,12 +589,32 @@ export async function applyServerReleaseSync(
         }
       }
 
-      // Step C: Update D1 record
+      // Step C: Update D1 record (with compensation if new install fails)
       const now = new Date().toISOString()
-      if (matchedCurrent) {
-        await db
-          .update(schema.serverManagedContent)
-          .set({
+      try {
+        if (matchedCurrent) {
+          await db
+            .update(schema.serverManagedContent)
+            .set({
+              managementSource: "GAME_RELEASE",
+              provider: desired.sourceProvider,
+              projectId: desired.sourceProjectId,
+              versionId: desired.sourceVersionId,
+              fileId: desired.sourceFileId || null,
+              contentType: "MOD",
+              environment: "BOTH",
+              targetPath: `mods/${desired.name}`,
+              sha256: desired.sha256,
+              sizeBytes: desired.sizeBytes,
+              gameReleaseId: published.id,
+              gameReleaseFileId: desired.id,
+              updatedAt: now,
+            })
+            .where(eq(schema.serverManagedContent.id, matchedCurrent.id))
+          updatedCount++
+        } else {
+          await db.insert(schema.serverManagedContent).values({
+            id: crypto.randomUUID(),
             managementSource: "GAME_RELEASE",
             provider: desired.sourceProvider,
             projectId: desired.sourceProjectId,
@@ -552,29 +627,17 @@ export async function applyServerReleaseSync(
             sizeBytes: desired.sizeBytes,
             gameReleaseId: published.id,
             gameReleaseFileId: desired.id,
+            createdAt: now,
             updatedAt: now,
           })
-          .where(eq(schema.serverManagedContent.id, matchedCurrent.id))
-        updatedCount++
-      } else {
-        await db.insert(schema.serverManagedContent).values({
-          id: crypto.randomUUID(),
-          managementSource: "GAME_RELEASE",
-          provider: desired.sourceProvider,
-          projectId: desired.sourceProjectId,
-          versionId: desired.sourceVersionId,
-          fileId: desired.sourceFileId || null,
-          contentType: "MOD",
-          environment: "BOTH",
-          targetPath: `mods/${desired.name}`,
-          sha256: desired.sha256,
-          sizeBytes: desired.sizeBytes,
-          gameReleaseId: published.id,
-          gameReleaseFileId: desired.id,
-          createdAt: now,
-          updatedAt: now,
-        })
-        installedCount++
+          installedCount++
+        }
+      } catch (d1Err: any) {
+        // Attempt compensation for new install
+        if (!matchedCurrent) {
+          await safeDeleteServerFilePhysical(client, "/mods", desired.name).catch(() => {})
+        }
+        throw d1Err
       }
     }
 
@@ -636,7 +699,8 @@ export async function applyServerReleaseSync(
     }
     throw err
   } finally {
-    // 9. Release distributed operation lock
+    // 9. Release distributed operation lock and stop heartbeat
+    heartbeat.stop()
     await releaseServerOperationLock(db, lockKey)
   }
 }

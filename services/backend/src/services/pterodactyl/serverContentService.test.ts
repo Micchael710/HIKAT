@@ -396,4 +396,171 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
       removeServerManagedContent(db, env, "smc-online-mod", "admin-1", mockRunningClient as any),
     ).rejects.toThrow("Apaga el servidor antes de eliminar mods.")
   })
+
+  // Test 6: Fail-closed when Directory Listing Fails on installServerContentPlan
+  it("Shard 8D: installServerContentPlan fails closed without mutating filesystem if directory listing fails", async () => {
+    const writeFileSpy = vi.fn()
+    const mockFailingClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockRejectedValue(new Error("Wings 500 Network Error")),
+      writeFile: writeFileSpy,
+    }
+
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "spark-id",
+          projectName: "spark",
+          versionId: "ver-1",
+          versionNumber: "1.0.0",
+          filename: "spark.jar",
+          sizeBytes: 1000,
+          sha256: "hash123",
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: "mods/spark.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: 1000,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    await expect(
+      installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "spark-id", versionId: "ver-1", contentType: "MOD" },
+        "admin-1",
+        mockFailingClient as any,
+      ),
+    ).rejects.toThrow("No se pudo verificar de forma segura el contenido actual del servidor. No se realizaron cambios.")
+
+    expect(writeFileSpy).not.toHaveBeenCalled()
+  })
+
+  // Test 7: D1 Error Compensation after Write
+  it("Shard 8D: installServerContentPlan attempts compensation deletion if D1 insert fails after physical write", async () => {
+    const jarBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00])
+    const hashBuffer = await crypto.subtle.digest("SHA-256", jarBytes)
+    const realSha256 = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("")
+
+    const deleteFilesSpy = vi.fn()
+    const physicalFiles = new Set<string>()
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir.includes("mods")) {
+          return Promise.resolve({
+            data: Array.from(physicalFiles).map((name) => ({ attributes: { name, is_file: true } })),
+          })
+        }
+        return Promise.resolve({ data: [] })
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      writeFile: vi.fn().mockImplementation((path: string) => {
+        physicalFiles.add(path.split("/").pop()!)
+        return Promise.resolve(undefined)
+      }),
+      deleteFiles: deleteFilesSpy.mockImplementation((_dir: string, files: string[]) => {
+        for (const f of files) physicalFiles.delete(f)
+        return Promise.resolve(undefined)
+      }),
+    }
+
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "spark-comp-id",
+          projectName: "spark-comp",
+          versionId: "ver-comp-1",
+          versionNumber: "1.0.0",
+          filename: "spark-comp.jar",
+          sizeBytes: jarBytes.length,
+          sha256: realSha256,
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: "mods/spark-comp.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: jarBytes.length,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const mockAdapter = {
+      getVersion: vi.fn().mockResolvedValue({
+        id: "ver-comp-1",
+        filename: "spark-comp.jar",
+        downloadUrl: "https://cdn.modrinth.com/data/spark/spark-comp.jar",
+        hashes: {},
+      }),
+    }
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(jarBytes, { status: 200, headers: { "Content-Type": "application/java-archive" } }),
+    )
+
+    // Force D1 insert to fail only for serverManagedContent
+    const originalInsert = db.insert.bind(db)
+    vi.spyOn(db, "insert").mockImplementation((table: any) => {
+      if (table === schema.serverManagedContent) {
+        return {
+          values: () => {
+            throw new Error("D1 constraint violation or network timeout")
+          },
+        } as any
+      }
+      return originalInsert(table)
+    })
+
+    await expect(
+      installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "spark-comp-id", versionId: "ver-comp-1", contentType: "MOD" },
+        "admin-1",
+        mockClient as any,
+      ),
+    ).rejects.toThrow("D1 constraint violation or network timeout")
+
+    // Compensation delete must have been called
+    expect(deleteFilesSpy).toHaveBeenCalledWith("/mods", ["spark-comp.jar"])
+
+    fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
 })

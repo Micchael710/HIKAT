@@ -498,6 +498,7 @@ export async function acquireServerOperationLock(
   db: ReturnType<typeof createDatabase>,
   operation: "RESTORE_BACKUP" | "REPLACE_WORLD" | "SERVER_RELEASE_SYNC" | "SERVER_CONTENT_CHANGE",
   userId: string,
+  ttlSeconds: number = 180,
 ): Promise<string> {
   const nowIso = new Date().toISOString()
   const lockKey = "server_destructive_operation"
@@ -536,7 +537,7 @@ export async function acquireServerOperationLock(
 
   // 3. Insert new lock
   const expiresAt = new Date(
-    Date.now() + 180 * 1000, // 3 minutes TTL
+    Date.now() + ttlSeconds * 1000,
   ).toISOString()
 
   try {
@@ -556,6 +557,60 @@ export async function acquireServerOperationLock(
   }
 
   return lockKey
+}
+
+/**
+ * Renews an active distributed operation lock lease if still owned by the given user.
+ */
+export async function refreshServerOperationLock(
+  db: ReturnType<typeof createDatabase>,
+  lockKey: string = "server_destructive_operation",
+  userId: string,
+  ttlSeconds: number = 180,
+): Promise<boolean> {
+  const nowIso = new Date().toISOString()
+  const newExpiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString()
+
+  // Only extend if the lock is active and belongs to this user
+  const updated = await db
+    .update(schema.serverOperationLocks)
+    .set({ expiresAt: newExpiresAt })
+    .where(
+      and(
+        eq(schema.serverOperationLocks.lockKey, lockKey),
+        eq(schema.serverOperationLocks.acquiredByUserId, userId),
+        gt(schema.serverOperationLocks.expiresAt, nowIso),
+      ),
+    )
+    .returning({ lockKey: schema.serverOperationLocks.lockKey })
+    .get()
+
+  return !!updated
+}
+
+/**
+ * Starts a recurring background heartbeat to renew the operation lock until stopped.
+ */
+export function startServerOperationHeartbeat(
+  db: ReturnType<typeof createDatabase>,
+  lockKey: string = "server_destructive_operation",
+  userId: string,
+  intervalMs: number = 30000,
+  ttlSeconds: number = 180,
+): { stop: () => void; isRunning: () => boolean } {
+  let running = true
+  const timer = setInterval(() => {
+    if (!running) return
+    refreshServerOperationLock(db, lockKey, userId, ttlSeconds).catch(() => {})
+  }, intervalMs)
+
+  return {
+    stop: () => {
+      running = false
+      clearInterval(timer)
+    },
+    isRunning: () => running,
+  }
 }
 
 /**

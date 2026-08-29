@@ -19,6 +19,7 @@ import {
   getServerStatus,
   acquireServerOperationLock,
   releaseServerOperationLock,
+  startServerOperationHeartbeat,
 } from "./serverAdministrationService"
 
 export interface ServerWorldInfoData {
@@ -203,6 +204,7 @@ export async function replaceServerWorld(
 
   // 3. Guard: Acquire distributed operation lock
   const lockKey = await acquireServerOperationLock(db, "REPLACE_WORLD", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
 
   // Unpredictable staging directory name
   const stagingDirName = `_staging_world_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
@@ -367,7 +369,8 @@ export async function replaceServerWorld(
       await client.deleteFiles("/", [stagingDirName]).catch(() => {})
     }
 
-    // 12. Always release distributed operation lock
+    // 12. Always release distributed operation lock and stop heartbeat
+    heartbeat.stop()
     await releaseServerOperationLock(db, lockKey)
   }
 }

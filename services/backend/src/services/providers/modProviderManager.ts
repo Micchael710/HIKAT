@@ -167,7 +167,7 @@ export class ModProviderManager {
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
         return {
           items: res.items.slice(offset, offset + limit),
-          totalCount: res.totalCount,
+          totalCount: res.providerTotalCount || res.totalCount,
           providersStatus,
           minecraftVersion,
           neoForgeVersion,
@@ -218,7 +218,7 @@ export class ModProviderManager {
         providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
         return {
           items: res.items.slice(offset, offset + limit),
-          totalCount: res.totalCount,
+          totalCount: res.providerTotalCount || res.totalCount,
           providersStatus,
           minecraftVersion,
           neoForgeVersion,
@@ -244,7 +244,7 @@ export class ModProviderManager {
       this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 50),
       this.curseforge.isConfigured(env)
         ? this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 50)
-        : Promise.resolve({ items: [], totalCount: 0, hasMore: false }),
+        : Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, hasMore: false }),
     ])
 
     const allItems: any[] = []
@@ -252,7 +252,7 @@ export class ModProviderManager {
 
     if (modrinthResult.status === "fulfilled") {
       providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-      totalCount += modrinthResult.value.totalCount
+      totalCount += modrinthResult.value.providerTotalCount || modrinthResult.value.totalCount
     } else {
       providersStatus.push({
         provider: "MODRINTH",
@@ -268,7 +268,7 @@ export class ModProviderManager {
         available: isConf,
         error: isConf ? null : "CurseForge API Key no está configurada.",
       })
-      totalCount += curseforgeResult.value.totalCount
+      totalCount += curseforgeResult.value.providerTotalCount || curseforgeResult.value.totalCount
     } else {
       providersStatus.push({
         provider: "CURSEFORGE",
@@ -320,7 +320,7 @@ export class ModProviderManager {
     const isAllowedInServer = (item: NormalizedModProject) =>
       contentType !== "MOD" || item.environment === "SERVER"
 
-    let rawResults: { items: NormalizedModProject[]; totalCount: number; providersStatus: ModProviderStatusGql[] }
+    let rawResults: { items: NormalizedModProject[]; totalCount: number; hasMore: boolean; providersStatus: ModProviderStatusGql[] }
 
     if (provider === "MODRINTH") {
       try {
@@ -336,14 +336,17 @@ export class ModProviderManager {
           50,
         )
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+        const pageItems = res.items.slice(offset, offset + limit)
+        const pageHasMore = res.items.length > offset + limit || res.hasMore
         rawResults = {
-          items: res.items.slice(offset, offset + limit),
-          totalCount: res.totalCount,
+          items: pageItems,
+          totalCount: res.items.length,
+          hasMore: pageHasMore,
           providersStatus,
         }
       } catch (err: any) {
         providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
-        rawResults = { items: [], totalCount: 0, providersStatus }
+        rawResults = { items: [], totalCount: 0, hasMore: false, providersStatus }
       }
     } else if (provider === "CURSEFORGE") {
       if (!this.curseforge.isConfigured(env)) {
@@ -352,7 +355,7 @@ export class ModProviderManager {
           available: false,
           error: "CurseForge API Key no está configurada en el servidor.",
         })
-        rawResults = { items: [], totalCount: 0, providersStatus }
+        rawResults = { items: [], totalCount: 0, hasMore: false, providersStatus }
       } else {
         try {
           const res = await this.fetchFilteredFromProvider(
@@ -367,14 +370,17 @@ export class ModProviderManager {
             50,
           )
           providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
+          const pageItems = res.items.slice(offset, offset + limit)
+          const pageHasMore = res.items.length > offset + limit || res.hasMore
           rawResults = {
-            items: res.items.slice(offset, offset + limit),
-            totalCount: res.totalCount,
+            items: pageItems,
+            totalCount: res.items.length,
+            hasMore: pageHasMore,
             providersStatus,
           }
         } catch (err: any) {
           providersStatus.push({ provider: "CURSEFORGE", available: false, error: err.message })
-          rawResults = { items: [], totalCount: 0, providersStatus }
+          rawResults = { items: [], totalCount: 0, hasMore: false, providersStatus }
         }
       }
     } else {
@@ -388,11 +394,11 @@ export class ModProviderManager {
       ])
 
       const allItems: any[] = []
-      let totalCount = 0
+      let hasMore = false
 
       if (modrinthResult.status === "fulfilled") {
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        totalCount += modrinthResult.value.totalCount
+        if (modrinthResult.value.hasMore) hasMore = true
       } else {
         providersStatus.push({
           provider: "MODRINTH",
@@ -408,7 +414,7 @@ export class ModProviderManager {
           available: isConf,
           error: isConf ? null : "CurseForge API Key no está configurada.",
         })
-        totalCount += curseforgeResult.value.totalCount
+        if (curseforgeResult.value.hasMore) hasMore = true
       } else {
         providersStatus.push({
           provider: "CURSEFORGE",
@@ -420,15 +426,32 @@ export class ModProviderManager {
       const modrinthItems = modrinthResult.status === "fulfilled" ? modrinthResult.value.items : []
       const curseforgeItems = curseforgeResult.status === "fulfilled" ? curseforgeResult.value.items : []
 
+      const seenIds = new Set<string>()
       const maxLength = Math.max(modrinthItems.length, curseforgeItems.length)
       for (let i = 0; i < maxLength; i++) {
-        if (i < modrinthItems.length) allItems.push(modrinthItems[i])
-        if (i < curseforgeItems.length) allItems.push(curseforgeItems[i])
+        if (i < modrinthItems.length) {
+          const item = modrinthItems[i]
+          if (item && !seenIds.has(`MODRINTH:${item.projectId}`)) {
+            seenIds.add(`MODRINTH:${item.projectId}`)
+            allItems.push(item)
+          }
+        }
+        if (i < curseforgeItems.length) {
+          const item = curseforgeItems[i]
+          if (item && !seenIds.has(`CURSEFORGE:${item.projectId}`)) {
+            seenIds.add(`CURSEFORGE:${item.projectId}`)
+            allItems.push(item)
+          }
+        }
       }
 
+      const pageItems = allItems.slice(offset, offset + limit)
+      const pageHasMore = allItems.length > offset + limit || hasMore
+
       rawResults = {
-        items: allItems.slice(offset, offset + limit),
-        totalCount: totalCount || allItems.length,
+        items: pageItems,
+        totalCount: allItems.length,
+        hasMore: pageHasMore,
         providersStatus,
       }
     }
@@ -436,6 +459,7 @@ export class ModProviderManager {
     return {
       items: rawResults.items as any,
       totalCount: rawResults.totalCount,
+      hasMore: rawResults.hasMore,
       providersStatus: rawResults.providersStatus,
       minecraftVersion,
       neoForgeVersion,
@@ -532,8 +556,9 @@ export class ModProviderManager {
     contentType: ContentTypeGql,
     filterFn: (item: NormalizedModProject) => boolean,
     pageSize: number = 50,
-  ): Promise<{ items: NormalizedModProject[]; totalCount: number; hasMore: boolean }> {
+  ): Promise<{ items: NormalizedModProject[]; totalCount: number; providerTotalCount: number; hasMore: boolean }> {
     const allFilteredItems: NormalizedModProject[] = []
+    const seenKeys = new Set<string>()
     let currentOffset = 0
     let providerTotalCount = 0
     const maxPages = 6 // Safety ceiling: up to 300 raw items per provider
@@ -553,15 +578,18 @@ export class ModProviderManager {
 
       for (const item of res.items) {
         if (filterFn(item)) {
-          allFilteredItems.push(item)
+          const itemKey = `${item.provider}:${item.projectId}`
+          if (!seenKeys.has(itemKey)) {
+            seenKeys.add(itemKey)
+            allFilteredItems.push(item)
+          }
         }
       }
 
       currentOffset += res.items.length
       if (
         allFilteredItems.length >= neededCount + 1 ||
-        currentOffset >= providerTotalCount ||
-        res.items.length < pageSize
+        currentOffset >= providerTotalCount
       ) {
         break
       }
@@ -570,7 +598,8 @@ export class ModProviderManager {
     const hasMore = allFilteredItems.length > neededCount || currentOffset < providerTotalCount
     return {
       items: allFilteredItems,
-      totalCount: providerTotalCount || allFilteredItems.length,
+      totalCount: allFilteredItems.length,
+      providerTotalCount,
       hasMore,
     }
   }

@@ -182,6 +182,13 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       getServerDetails: vi.fn().mockResolvedValue({
         attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
       }),
+      listDirectory: vi.fn().mockResolvedValue({
+        data: [
+          { attributes: { name: "ferritecore.jar", is_file: true } },
+          { attributes: { name: "voicechat-v1.jar", is_file: true } },
+          { attributes: { name: "oldmod.jar", is_file: true } },
+        ],
+      }),
     }
 
     const plan = await getServerReleaseSyncPlan(db, env, mockClient as any)
@@ -318,13 +325,96 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
     expect(syncLogs[0]?.releaseId).toBe("rel-pub-2")
   })
 
-  // Test 4: Backup Timeout and Failure Abort Semantics
-  it("applyServerReleaseSync aborts immediately without filesystem mutation if backup times out or fails", async () => {
+  // Test 4: Real Backup Timeout with Fake Timers
+  it("applyServerReleaseSync aborts immediately when backup times out after SERVER_RELEASE_SYNC_BACKUP_TIMEOUT_MS with fake timers", async () => {
+    vi.useFakeTimers()
+    try {
+      const nowIso = new Date().toISOString()
+
+      await db.insert(schema.gameReleases).values({
+        id: "rel-pub-timeout",
+        version: "3.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        status: "PUBLISHED",
+        publishedAt: nowIso,
+        createdBy: "admin-1",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      })
+
+      const testBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x10, 0x20])
+      const hashBuf = await crypto.subtle.digest("SHA-256", testBytes)
+      const testHash = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "grf-timeout",
+        releaseId: "rel-pub-timeout",
+        name: "timeout-mod.jar",
+        logicalPath: "mods/timeout-mod.jar",
+        category: "MOD",
+        sha256: testHash,
+        sizeBytes: testBytes.length,
+        policy: "NO_MODIFICABLE",
+        effectivePolicy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        objectKey: "releases/rel-pub-timeout/mods/timeout-mod.jar",
+        createdAt: nowIso,
+      })
+
+      const writeFileSpy = vi.fn()
+      const deleteFilesSpy = vi.fn()
+
+      const mockPendingBackupClient = {
+        getServerResources: vi.fn().mockResolvedValue({
+          attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+        }),
+        getServerDetails: vi.fn().mockResolvedValue({
+          attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+        }),
+        createBackup: vi.fn().mockResolvedValue({ id: "bk-pending", attributes: { uuid: "bk-pending" } }),
+        // Always pending (completed_at: null)
+        getBackup: vi.fn().mockResolvedValue({
+          object: "backup",
+          attributes: { uuid: "bk-pending", completed_at: null, is_successful: null },
+        }),
+        createFolder: vi.fn(),
+        writeFile: writeFileSpy,
+        deleteFiles: deleteFilesSpy,
+        listDirectory: vi.fn().mockResolvedValue({ data: [] }),
+      }
+
+      const syncPromise = applyServerReleaseSync(db, env, "admin-1", true, mockPendingBackupClient as any)
+      const assertion = expect(syncPromise).rejects.toThrow("Timeout al esperar la finalización del backup")
+
+      // Advance timers past the 180s (3 minute) timeout
+      await vi.advanceTimersByTimeAsync(190000)
+
+      await assertion
+
+      // Verify no filesystem writes occurred
+      expect(writeFileSpy).not.toHaveBeenCalled()
+      expect(deleteFilesSpy).not.toHaveBeenCalled()
+
+      // Verify D1 status recorded as FAILED
+      const syncLogs = await db.select().from(schema.serverReleaseSyncs)
+      expect(syncLogs).toHaveLength(1)
+      expect(syncLogs[0]?.status).toBe("FAILED")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Test 4b: Backup Failure (is_successful: false) Aborts Execution
+  it("applyServerReleaseSync aborts immediately without filesystem mutation if backup fails (is_successful: false)", async () => {
     const nowIso = new Date().toISOString()
 
     await db.insert(schema.gameReleases).values({
-      id: "rel-pub-timeout",
-      version: "3.0.0",
+      id: "rel-pub-fail",
+      version: "3.1.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
       status: "PUBLISHED",
@@ -341,10 +431,10 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       .join("")
 
     await db.insert(schema.gameReleaseFiles).values({
-      id: "grf-timeout",
-      releaseId: "rel-pub-timeout",
-      name: "timeout-mod.jar",
-      logicalPath: "mods/timeout-mod.jar",
+      id: "grf-fail",
+      releaseId: "rel-pub-fail",
+      name: "fail-mod.jar",
+      logicalPath: "mods/fail-mod.jar",
       category: "MOD",
       sha256: testHash,
       sizeBytes: testBytes.length,
@@ -352,7 +442,7 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       effectivePolicy: "NO_MODIFICABLE",
       isDirectory: false,
       sourceEnvironment: "BOTH",
-      objectKey: "releases/rel-pub-timeout/mods/timeout-mod.jar",
+      objectKey: "releases/rel-pub-fail/mods/fail-mod.jar",
       createdAt: nowIso,
     })
 
@@ -491,7 +581,7 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       arrayBuffer: vi.fn().mockResolvedValue(testBytes.buffer),
     })
 
-    // Mock Wings returning manual file in /mods
+    // Mock Wings returning manual file in /mods with different size
     const mockClient = {
       getServerResources: vi.fn().mockResolvedValue({
         attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
@@ -501,7 +591,7 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       }),
       createFolder: vi.fn(),
       listDirectory: vi.fn().mockResolvedValue({
-        data: [{ attributes: { name: "manual-colliding.jar", is_file: true } }],
+        data: [{ attributes: { name: "manual-colliding.jar", size: 99999, is_file: true } }],
       }),
       writeFile: vi.fn(),
       deleteFiles: vi.fn(),
@@ -536,5 +626,205 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
     expect(plan.serverStatus).toBe("DISCONNECTED")
     expect(plan.canApply).toBe(false)
     expect(plan.blockReason).toBe("No se pudo confirmar que el servidor esté apagado.")
+  })
+
+  // Test 8: Physical Drift Detection in Plan and Restoration on Apply
+  it("Shard 8D: Physical drift flags missing physical files as INSTALL and repairs them on apply", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-drift",
+      version: "7.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const testBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x0a, 0x0b])
+    const hashBuf = await crypto.subtle.digest("SHA-256", testBytes)
+    const testSha256 = Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: "grf-drift-1",
+      releaseId: "rel-pub-drift",
+      name: "drifted-mod.jar",
+      logicalPath: "mods/drifted-mod.jar",
+      category: "MOD",
+      sha256: testSha256,
+      sizeBytes: testBytes.length,
+      policy: "NO_MODIFICABLE",
+      effectivePolicy: "NO_MODIFICABLE",
+      isDirectory: false,
+      sourceEnvironment: "BOTH",
+      objectKey: "releases/rel-pub-drift/mods/drifted-mod.jar",
+      createdAt: nowIso,
+    })
+
+    // D1 has the record, but Wings filesystem will NOT have the file
+    await db.insert(schema.serverManagedContent).values({
+      id: "smc-drift-1",
+      managementSource: "GAME_RELEASE",
+      targetPath: "mods/drifted-mod.jar",
+      sha256: testSha256,
+      sizeBytes: testBytes.length,
+      name: "drifted-mod.jar",
+      contentType: "MOD",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const physicalFiles: string[] = [] // Empty filesystem (drift!)
+
+    const mockDriftClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      listDirectory: vi.fn().mockImplementation(() =>
+        Promise.resolve({ data: physicalFiles.map((name) => ({ attributes: { name, is_file: true } })) }),
+      ),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      writeFile: vi.fn().mockImplementation((path: string) => {
+        physicalFiles.push(path.split("/").pop()!)
+        return Promise.resolve(undefined)
+      }),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+    }
+
+    env.ASSETS.get = vi.fn().mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(testBytes.buffer),
+    })
+
+    // 1. Initial Plan should detect physical drift and report INSTALL (isPending = true)
+    const initialPlan = await getServerReleaseSyncPlan(db, env, mockDriftClient as any)
+    expect(initialPlan.isPending).toBe(true)
+    expect(initialPlan.summary.toInstall).toBe(1)
+    expect(initialPlan.summary.toKeep).toBe(0)
+
+    // 2. Apply should restore the physical file
+    const applyRes = await applyServerReleaseSync(db, env, "admin-1", false, mockDriftClient as any)
+    expect(applyRes.success).toBe(true)
+    expect(mockDriftClient.writeFile).toHaveBeenCalledWith("/mods/drifted-mod.jar", expect.any(Uint8Array))
+
+    // 3. Subsequent plan should report KEEP (isPending = false)
+    const subsequentPlan = await getServerReleaseSyncPlan(db, env, mockDriftClient as any)
+    expect(subsequentPlan.isPending).toBe(false)
+    expect(subsequentPlan.summary.toKeep).toBe(1)
+    expect(subsequentPlan.summary.toInstall).toBe(0)
+  })
+
+  // Test 9: Fail-closed Preflight when Directory Listing Fails on Apply
+  it("Shard 8D: applyServerReleaseSync fails closed without changes if directory listing throws network error", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-err",
+      version: "8.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const writeFileSpy = vi.fn()
+    const deleteFilesSpy = vi.fn()
+
+    const mockFailingListingClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      listDirectory: vi.fn().mockRejectedValue(new Error("Wings 502 Bad Gateway")),
+      writeFile: writeFileSpy,
+      deleteFiles: deleteFilesSpy,
+    }
+
+    await expect(
+      applyServerReleaseSync(db, env, "admin-1", false, mockFailingListingClient as any),
+    ).rejects.toThrow("No se pudo verificar de forma segura el contenido actual del servidor. No se realizaron cambios.")
+
+    expect(writeFileSpy).not.toHaveBeenCalled()
+    expect(deleteFilesSpy).not.toHaveBeenCalled()
+  })
+
+  // Test 10: Retry Recovery on Matching Untracked File
+  it("Shard 8D: applyServerReleaseSync allows recovery without CONFLICT when physical file matches desired size and filename", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-retry",
+      version: "9.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const testBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x99, 0x88])
+    const hashBuf = await crypto.subtle.digest("SHA-256", testBytes)
+    const testSha256 = Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: "grf-retry",
+      releaseId: "rel-pub-retry",
+      name: "retry-mod.jar",
+      logicalPath: "mods/retry-mod.jar",
+      category: "MOD",
+      sha256: testSha256,
+      sizeBytes: testBytes.length,
+      policy: "NO_MODIFICABLE",
+      effectivePolicy: "NO_MODIFICABLE",
+      isDirectory: false,
+      sourceEnvironment: "BOTH",
+      objectKey: "releases/rel-pub-retry/mods/retry-mod.jar",
+      createdAt: nowIso,
+    })
+
+    env.ASSETS.get = vi.fn().mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(testBytes.buffer),
+    })
+
+    // Physical file already exists on Wings with exact expected size (e.g. from prior failed D1 write)
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      listDirectory: vi.fn().mockResolvedValue({
+        data: [{ attributes: { name: "retry-mod.jar", size: testBytes.length, is_file: true } }],
+      }),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const result = await applyServerReleaseSync(db, env, "admin-1", false, mockClient as any)
+    expect(result.success).toBe(true)
+
+    // D1 record should now be created
+    const tracked = await db.select().from(schema.serverManagedContent)
+    expect(tracked).toHaveLength(1)
+    expect(tracked[0]?.targetPath).toBe("mods/retry-mod.jar")
   })
 })

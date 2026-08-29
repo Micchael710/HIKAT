@@ -939,6 +939,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
         },
       ],
       totalCount: 1,
+      hasMore: false,
       providersStatus: [{ provider: "MODRINTH", available: true }],
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",

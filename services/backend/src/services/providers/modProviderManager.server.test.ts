@@ -539,4 +539,122 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     expect(results.items).toHaveLength(2)
     expect(results.items.map((i) => i.projectId)).toEqual(["client-mod-1", "both-mod-1"])
   })
+
+  // Test 9: Filtered pagination fetches through chunks and returns items with accurate hasMore
+  it("Shard 8D: searchServerMods fetches chunks across provider pages without premature termination and computes hasMore", async () => {
+    // Page 1 from provider: 20 items, ALL BOTH environment (0 SERVER)
+    const providerPage1 = Array.from({ length: 20 }, (_, i) => ({
+      projectId: `both-mod-${i + 1}`,
+      name: `Both Mod ${i + 1}`,
+      environment: "BOTH",
+      contentType: "MOD",
+    }))
+
+    // Page 2 from provider: 5 SERVER items
+    const providerPage2 = Array.from({ length: 5 }, (_, i) => ({
+      projectId: `server-mod-${i + 1}`,
+      name: `Server Mod ${i + 1}`,
+      environment: "SERVER",
+      contentType: "MOD",
+    }))
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async (_env, _query, _limit, offset) => {
+        if (offset === 0) {
+          return { items: providerPage1, totalCount: 25 }
+        } else {
+          return { items: providerPage2, totalCount: 25 }
+        }
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+    ;(manager as any).modrinth = mockAdapter
+
+    const results = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "test",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+    )
+
+    // Should have advanced to page 2 to find the 5 SERVER mods
+    expect(results.items).toHaveLength(5)
+    expect(results.items[0]?.projectId).toBe("server-mod-1")
+    expect(results.hasMore).toBe(false)
+  })
+
+  // Test 10: Deduplication across pagination loads
+  it("Shard 8D: searchServerMods deduplicates items and sets hasMore = false on last page", async () => {
+    const providerItems = [
+      { projectId: "srv-dup-1", name: "Srv 1", environment: "SERVER", contentType: "MOD" },
+      { projectId: "srv-dup-2", name: "Srv 2", environment: "SERVER", contentType: "MOD" },
+      { projectId: "srv-dup-1", name: "Srv 1 Duplicate", environment: "SERVER", contentType: "MOD" },
+    ]
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockResolvedValue({
+        items: providerItems,
+        totalCount: 3,
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+    ;(manager as any).modrinth = mockAdapter
+
+    const results = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "test",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+    )
+
+    expect(results.items).toHaveLength(2)
+    expect(results.hasMore).toBe(false)
+  })
+
+  // Test 11: Partial provider failure returns available results gracefully
+  it("Shard 8D: searchServerMods handles partial provider failure gracefully", async () => {
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockResolvedValue({
+        items: [{ projectId: "mr-srv-1", name: "MR Server Mod", environment: "SERVER", contentType: "MOD" }],
+        totalCount: 1,
+      }),
+    }
+
+    const mockCfAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockRejectedValue(new Error("CurseForge 503 Service Unavailable")),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockImplementation((p: string) => {
+      if (p === "CURSEFORGE") return mockCfAdapter as any
+      return mockMrAdapter as any
+    })
+    ;(manager as any).modrinth = mockMrAdapter
+    ;(manager as any).curseforge = mockCfAdapter
+
+    const results = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "test",
+      null,
+      10,
+      0,
+      "MOD",
+    )
+
+    // Should return results from Modrinth without throwing
+    expect(results.items).toHaveLength(1)
+    expect(results.items[0]?.projectId).toBe("mr-srv-1")
+  })
 })

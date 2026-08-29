@@ -245,6 +245,7 @@ export const serverTypeDefs = /* GraphQL */ `
   type ServerContentSearchPayload {
     items: [ModSearchResultItem!]!
     totalCount: Int!
+    hasMore: Boolean!
     providersStatus: [ModProviderStatus!]!
     minecraftVersion: String!
     neoForgeVersion: String!

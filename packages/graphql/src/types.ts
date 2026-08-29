@@ -925,6 +925,7 @@ export interface ServerManagedContentItemGql {
 export interface ServerContentSearchPayloadGql {
   items: ModSearchResultItemGql[]
   totalCount: number
+  hasMore: boolean
   providersStatus: ModProviderStatusGql[]
   minecraftVersion: string
   neoForgeVersion: string
