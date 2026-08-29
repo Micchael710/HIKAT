@@ -108,7 +108,7 @@ export async function executeGraphQL<T>(
   variables: Record<string, unknown> = {},
   isRetry: boolean = false,
 ): Promise<T> {
-  const token = authService.getAccessToken()
+  const token = await authService.ensureValidAccessToken()
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -132,9 +132,12 @@ export async function executeGraphQL<T>(
   // 1. Handle HTTP 401 Unauthenticated
   if (res.status === 401) {
     if (!isRetry) {
-      const newToken = await authService.refresh()
-      if (newToken) {
+      const outcome = await authService.refreshOutcome()
+      if (outcome.kind === "REFRESHED") {
         return executeGraphQL<T>(query, variables, true)
+      }
+      if (outcome.kind === "TRANSIENT_FAILURE") {
+        throw new Error("Error temporal de conexión al renovar sesión con el servidor.")
       }
     }
     authService.clearSession()
@@ -154,9 +157,12 @@ export async function executeGraphQL<T>(
 
     if (hasUnauthenticated) {
       if (!isRetry) {
-        const newToken = await authService.refresh()
-        if (newToken) {
+        const outcome = await authService.refreshOutcome()
+        if (outcome.kind === "REFRESHED") {
           return executeGraphQL<T>(query, variables, true)
+        }
+        if (outcome.kind === "TRANSIENT_FAILURE") {
+          throw new Error("Error temporal de conexión al renovar sesión con el servidor.")
         }
       }
       authService.clearSession()
@@ -1513,7 +1519,7 @@ export const gameApi = {
     uploadUrl: string,
     uploadToken: string,
   ): Promise<{ tokenHash: string; originalFilename?: string; sizeBytes?: number }> {
-    const token = authService.getAccessToken()
+    const token = await authService.ensureValidAccessToken()
     const targetUrl = uploadUrl.startsWith("http") ? uploadUrl : `${BACKEND_URL}${uploadUrl}`
 
     const res = await fetch(targetUrl, {

@@ -2,6 +2,18 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { uploadMediaFile } from "./mediaUploadService"
 import { authService } from "./authService"
 
+function createMockAdminJwt(expiresInSeconds = 900): string {
+  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+  const payload = btoa(
+    JSON.stringify({
+      sub: "admin-1",
+      role: "ADMIN",
+      exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
+    }),
+  )
+  return `${header}.${payload}.mock-sig`
+}
+
 describe("Back Office MediaUploadService", () => {
   beforeEach(() => {
     authService.clearSession()
@@ -9,7 +21,7 @@ describe("Back Office MediaUploadService", () => {
   })
 
   it("validates image format and size limits before upload", async () => {
-    authService.setSession("test-token", "refresh-tok", {
+    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
@@ -34,7 +46,7 @@ describe("Back Office MediaUploadService", () => {
   })
 
   it("validates video format and size limits before upload", async () => {
-    authService.setSession("test-token", "refresh-tok", {
+    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
@@ -59,7 +71,7 @@ describe("Back Office MediaUploadService", () => {
   })
 
   it("completes full ticket request + binary PUT upload flow", async () => {
-    authService.setSession("admin-jwt", "refresh-tok", {
+    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
@@ -108,7 +120,7 @@ describe("Back Office MediaUploadService", () => {
   })
 
   it("refreshes token and retries binary upload with fresh ticket when binary PUT returns 401", async () => {
-    authService.setSession("expiring-jwt", "valid-refresh-tok", {
+    authService.setSession(createMockAdminJwt(600), "valid-refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
@@ -116,6 +128,8 @@ describe("Back Office MediaUploadService", () => {
     const validImageFile = new File(["image-bytes"], "banner.png", {
       type: "image/png",
     })
+
+    const freshJwt = createMockAdminJwt(900)
 
     vi.spyOn(global, "fetch")
       // 1. Initial GraphQL ticket request
@@ -146,7 +160,7 @@ describe("Back Office MediaUploadService", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          accessToken: "fresh-jwt-token",
+          accessToken: freshJwt,
           refreshToken: "new-refresh-token",
           expiresIn: 900,
           tokenType: "Bearer",
@@ -186,6 +200,6 @@ describe("Back Office MediaUploadService", () => {
 
     const result = await uploadMediaFile(validImageFile, "IMAGE")
     expect(result.id).toBe("media-uuid-fresh")
-    expect(authService.getAccessToken()).toBe("fresh-jwt-token")
+    expect(authService.getAccessToken()).toBe(freshJwt)
   })
 })

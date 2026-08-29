@@ -1,7 +1,8 @@
 /**
- * Centralized API Client for HiKAT Launcher
+ * Centralized API & GraphQL Client for HiKAT Launcher
  * Configurable via centralized API authority (VITE_API_URL / local development default)
- * with automatic auth token handling, single-flight refresh, and 401 / UNAUTHENTICATED one-time retry.
+ * with proactive token validation, single-flight refresh, full GraphQL envelope preservation,
+ * and 401 / UNAUTHENTICATED single-retry fallback.
  */
 import { sanitizeUrl, sanitizeInput } from "../utils/security"
 import { getApiBaseUrl } from "../config/api"
@@ -15,8 +16,18 @@ export interface ApiResponse<T = any> {
   status?: number
 }
 
+export interface GraphQLClientResponse<T = any> {
+  success: boolean
+  data?: T
+  error?: string
+  errors?: Array<{ message: string; extensions?: { code?: string; [key: string]: unknown } }>
+}
+
 export const API_BASE_URL = getApiBaseUrl()
 
+/**
+ * REST API Client helper
+ */
 export async function apiClient<T = any>(
   endpoint: string,
   options: RequestInit = {},
@@ -39,7 +50,7 @@ export async function apiClient<T = any>(
     }
   }
 
-  const token = authService.getAccessToken()
+  const token = await authService.ensureValidAccessToken()
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -69,12 +80,26 @@ export async function apiClient<T = any>(
     // Handle HTTP 401 Unauthorized with single-flight refresh and single retry
     if (response.status === 401) {
       if (!isRetry) {
-        const newToken = await authService.refresh()
-        if (newToken) {
+        const outcome = await authService.refreshOutcome()
+        if (outcome.kind === "REFRESHED") {
           return apiClient<T>(endpoint, options, timeoutMs, true)
+        }
+        if (outcome.kind === "TRANSIENT_FAILURE") {
+          return {
+            success: false,
+            status: 401,
+            message: "Error temporal al renovar sesión con el servidor.",
+            error: outcome.error,
+          }
         }
       }
       authService.clearSession()
+      return {
+        success: false,
+        status: 401,
+        message: "Su sesión ha expirado o no está autorizada.",
+        error: "UNAUTHORIZED",
+      }
     }
 
     const data = await response.json().catch(() => null)
@@ -94,7 +119,7 @@ export async function apiClient<T = any>(
     return {
       success: true,
       status: response.status,
-      data: data?.data !== undefined ? data.data : data,
+      data: data as T,
       message: data?.message,
     }
   } catch (err: any) {
@@ -115,28 +140,81 @@ export async function apiClient<T = any>(
 }
 
 /**
- * GraphQL Client helper for Backend queries and mutations
- * Handles single-flight refresh for UNAUTHENTICATED errors and retries once
+ * GraphQL Client helper for Backend queries and mutations.
+ * Preserves complete GraphQL envelope ({ data, errors }), inspects UNAUTHENTICATED errors,
+ * executes proactive token validation and single-flight reactive retry.
  */
 export async function graphqlClient<T = any>(
   query: string,
   variables: Record<string, any> = {},
   timeoutMs = 15000,
   isRetry = false,
-): Promise<{ success: boolean; data?: T; error?: string }> {
-  const res = await apiClient<{ data?: T; errors?: Array<{ message: string; extensions?: { code?: string } }> }>(
-    "/graphql",
-    {
-      method: "POST",
-      body: JSON.stringify({ query, variables }),
-    },
-    timeoutMs,
-    isRetry,
-  )
+): Promise<GraphQLClientResponse<T>> {
+  const baseUrl = getApiBaseUrl()
+  const rawUrl = `${baseUrl.replace(/\/$/, "")}/graphql`
+  const safeUrl = sanitizeUrl(rawUrl)
 
-  if (res.success && res.data) {
-    if (res.data.errors && res.data.errors.length > 0) {
-      const hasUnauthenticated = res.data.errors.some(
+  if (!safeUrl) {
+    return {
+      success: false,
+      error: "URL de endpoint GraphQL bloqueada por seguridad",
+    }
+  }
+
+  // 1. Proactive access token acquisition
+  const token = await authService.ensureValidAccessToken()
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  }
+
+  if (token) {
+    const cleanToken = sanitizeInput(token, 1024)
+    if (cleanToken) {
+      headers["Authorization"] = `Bearer ${cleanToken}`
+    }
+  }
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(safeUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    // 2. Handle HTTP 401 Unauthorized
+    if (response.status === 401) {
+      if (!isRetry) {
+        const outcome = await authService.refreshOutcome()
+        if (outcome.kind === "REFRESHED") {
+          return graphqlClient<T>(query, variables, timeoutMs, true)
+        }
+        if (outcome.kind === "TRANSIENT_FAILURE") {
+          return {
+            success: false,
+            error: "Error temporal de conexión con el servidor de autenticación.",
+          }
+        }
+      }
+      authService.clearSession()
+      return {
+        success: false,
+        error: "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
+      }
+    }
+
+    const payload = await response.json().catch(() => null)
+
+    // 3. Inspect full GraphQL envelope errors (including HTTP 200 with UNAUTHENTICATED)
+    if (payload && payload.errors && Array.isArray(payload.errors) && payload.errors.length > 0) {
+      const hasUnauthenticated = payload.errors.some(
         (e: any) =>
           e.extensions?.code === "UNAUTHENTICATED" ||
           e.message === "UNAUTHENTICATED" ||
@@ -145,32 +223,52 @@ export async function graphqlClient<T = any>(
 
       if (hasUnauthenticated) {
         if (!isRetry) {
-          const newToken = await authService.refresh()
-          if (newToken) {
+          const outcome = await authService.refreshOutcome()
+          if (outcome.kind === "REFRESHED") {
             return graphqlClient<T>(query, variables, timeoutMs, true)
+          }
+          if (outcome.kind === "TRANSIENT_FAILURE") {
+            return {
+              success: false,
+              error: "Error temporal al renovar sesión con el servidor.",
+              errors: payload.errors,
+            }
           }
         }
         authService.clearSession()
         return {
           success: false,
           error: "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
+          errors: payload.errors,
         }
       }
 
       return {
         success: false,
-        error: res.data.errors[0]?.message || "GraphQL query error",
+        error: payload.errors[0]?.message || "GraphQL query error",
+        errors: payload.errors,
       }
     }
-    const resultData = res.data.data !== undefined ? res.data.data : (res.data as unknown as T)
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: payload?.message || `HTTP Error ${response.status}`,
+      }
+    }
+
     return {
       success: true,
-      data: resultData,
+      data: payload?.data as T,
     }
-  }
-
-  return {
-    success: false,
-    error: res.message || res.error || "GraphQL query failed",
+  } catch (err: any) {
+    clearTimeout(timeoutId)
+    const isTimeout = err?.name === "AbortError"
+    return {
+      success: false,
+      error: isTimeout
+        ? "Tiempo de espera agotado al conectar con el servidor"
+        : "No se pudo conectar con el servidor (Modo sin conexión)",
+    }
   }
 }

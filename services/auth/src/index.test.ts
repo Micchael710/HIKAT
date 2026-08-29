@@ -1235,4 +1235,152 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(validRes.status).toBe(302)
     })
   })
+
+  // ==========================================
+  // 12. REFRESH TOKEN ROTATION CAS & CONCURRENCY (SHARD 8F HARDENING)
+  // ==========================================
+  describe("Refresh Token Rotation CAS & Concurrency Protection", () => {
+    it("successfully rotates refresh token and returns full AuthUser contract with email", async () => {
+      await registerWithPassword(
+        db,
+        { email: "rotate-test@hikat.org", password: "Password123!", displayName: "RotateTester" },
+        emailService,
+      )
+
+      const initialSession = await loginWithPassword(
+        db,
+        { email: "rotate-test@hikat.org", password: "Password123!" },
+        keyManager,
+      )
+
+      expect(initialSession.user.email).toBe("rotate-test@hikat.org")
+      expect(initialSession.user.displayName).toBe("RotateTester")
+      expect(initialSession.user.role).toBe("PLAYER")
+
+      // Rotate refresh token
+      const rotatedSession = await rotateRefreshToken(db, initialSession.refreshToken, keyManager)
+
+      expect(rotatedSession.accessToken).toBeDefined()
+      expect(rotatedSession.refreshToken).toBeDefined()
+      expect(rotatedSession.refreshToken).not.toBe(initialSession.refreshToken)
+      expect(rotatedSession.user.id).toBe(initialSession.user.id)
+      expect(rotatedSession.user.email).toBe("rotate-test@hikat.org")
+      expect(rotatedSession.user.displayName).toBe("RotateTester")
+      expect(rotatedSession.user.role).toBe("PLAYER")
+
+      // Old refresh token is marked as consumed
+      const oldHash = await hashToken(initialSession.refreshToken)
+      const oldRecord = await db
+        .select()
+        .from(schema.sessionRefreshTokens)
+        .where(eq(schema.sessionRefreshTokens.tokenHash, oldHash))
+        .get()
+
+      expect(oldRecord?.consumedAt).not.toBeNull()
+
+      // Rotating again with the new refresh token succeeds (B -> C)
+      const secondRotation = await rotateRefreshToken(db, rotatedSession.refreshToken, keyManager)
+      expect(secondRotation.user.email).toBe("rotate-test@hikat.org")
+      expect(secondRotation.refreshToken).not.toBe(rotatedSession.refreshToken)
+    })
+
+    it("two concurrent rotateRefreshToken requests with the same token: exactly ONE succeeds, the loser gets TOKEN_REUSE_DETECTED and creates NO successor", async () => {
+      await registerWithPassword(
+        db,
+        { email: "cas-race@hikat.org", password: "Password123!", displayName: "CasRacer" },
+        emailService,
+      )
+
+      const initialSession = await loginWithPassword(
+        db,
+        { email: "cas-race@hikat.org", password: "Password123!" },
+        keyManager,
+      )
+
+      // Count initial tokens in database for this session
+      const initialTokens = await db
+        .select()
+        .from(schema.sessionRefreshTokens)
+        .where(eq(schema.sessionRefreshTokens.sessionId, initialSession.sessionId))
+        .all()
+      expect(initialTokens).toHaveLength(1)
+
+      // Fire 2 concurrent rotation requests with the identical initial refresh token
+      const results = await Promise.allSettled([
+        rotateRefreshToken(db, initialSession.refreshToken, keyManager),
+        rotateRefreshToken(db, initialSession.refreshToken, keyManager),
+      ])
+
+      const fulfilled = results.filter((r) => r.status === "fulfilled")
+      const rejected = results.filter((r) => r.status === "rejected")
+
+      expect(fulfilled).toHaveLength(1)
+      expect(rejected).toHaveLength(1)
+
+      const error = (rejected[0] as PromiseRejectedResult).reason as Error
+      expect(error.message).toBe(AuthErrorCode.TOKEN_REUSE_DETECTED)
+
+      // Verify that the loser did NOT create a rogue second successor token
+      // Winner added exactly 1 token (total 2 tokens: 1 consumed, 1 new)
+      const finalTokens = await db
+        .select()
+        .from(schema.sessionRefreshTokens)
+        .where(eq(schema.sessionRefreshTokens.sessionId, initialSession.sessionId))
+        .all()
+      expect(finalTokens).toHaveLength(2)
+    })
+
+    it("handles /auth/refresh HTTP endpoint correctly and rotates tokens", async () => {
+      await registerWithPassword(
+        db,
+        { email: "http-refresh@hikat.org", password: "Password123!" },
+        emailService,
+      )
+
+      const session = await loginWithPassword(
+        db,
+        { email: "http-refresh@hikat.org", password: "Password123!" },
+        keyManager,
+      )
+
+      const req = new Request("http://localhost:8788/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: session.refreshToken }),
+      })
+
+      const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+      expect(res.status).toBe(200)
+
+      const data = (await res.json()) as any
+      expect(data.accessToken).toBeDefined()
+      expect(data.refreshToken).toBeDefined()
+      expect(data.user.email).toBe("http-refresh@hikat.org")
+      expect(data.user.role).toBe("PLAYER")
+    })
+
+    it("handles canonical /auth/forgot-password HTTP endpoint", async () => {
+      await registerWithPassword(
+        db,
+        { email: "forgot-canon@hikat.org", password: "Password123!" },
+        emailService,
+      )
+
+      const req = new Request("http://localhost:8788/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "forgot-canon@hikat.org" }),
+      })
+
+      const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+      expect(res.status).toBe(200)
+
+      const data = (await res.json()) as any
+      expect(data.success).toBe(true)
+
+      const sent = emailService.getLastEmailFor("forgot-canon@hikat.org")
+      expect(sent).toBeDefined()
+      expect(sent?.type).toBe("password_reset")
+    })
+  })
 })

@@ -2,6 +2,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { newsApi, serverApi } from "./graphqlClient"
 import { authService } from "./authService"
 
+function createMockAdminJwt(expiresInSeconds = 900): string {
+  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+  const payload = btoa(
+    JSON.stringify({
+      sub: "admin-1",
+      role: "ADMIN",
+      exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
+    }),
+  )
+  return `${header}.${payload}.mock-sig`
+}
 
 describe("Back Office GraphQL News Client", () => {
   beforeEach(() => {
@@ -10,7 +21,8 @@ describe("Back Office GraphQL News Client", () => {
   })
 
   it("fetches admin news list with filters and attaches Bearer token", async () => {
-    authService.setSession("test-bearer-token", "refresh-tok", {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
@@ -56,17 +68,20 @@ describe("Back Office GraphQL News Client", () => {
       expect.stringContaining("/graphql"),
       expect.objectContaining({
         headers: expect.objectContaining({
-          Authorization: "Bearer test-bearer-token",
+          Authorization: `Bearer ${validJwt}`,
         }),
       }),
     )
   })
 
   it("automatically refreshes token and retries once on HTTP 401", async () => {
-    authService.setSession("expired-token", "valid-refresh-tok", {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "valid-refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
+
+    const newJwt = createMockAdminJwt(900)
 
     vi.spyOn(global, "fetch")
       // 1. Initial GraphQL call returns 401
@@ -80,7 +95,7 @@ describe("Back Office GraphQL News Client", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          accessToken: "new-fresh-token",
+          accessToken: newJwt,
           refreshToken: "new-rotated-refresh-tok",
           expiresIn: 900,
           tokenType: "Bearer",
@@ -104,14 +119,17 @@ describe("Back Office GraphQL News Client", () => {
 
     const result = await newsApi.getAdminNews()
     expect(result.items).toEqual([])
-    expect(authService.getAccessToken()).toBe("new-fresh-token")
+    expect(authService.getAccessToken()).toBe(newJwt)
   })
 
   it("automatically refreshes token and retries once when GraphQL returns UNAUTHENTICATED error", async () => {
-    authService.setSession("expired-jwt", "valid-refresh-tok", {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "valid-refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
+
+    const newJwt = createMockAdminJwt(900)
 
     vi.spyOn(global, "fetch")
       // 1. Initial GraphQL returns 200 with UNAUTHENTICATED error
@@ -132,7 +150,7 @@ describe("Back Office GraphQL News Client", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          accessToken: "refreshed-jwt",
+          accessToken: newJwt,
           refreshToken: "refreshed-refresh-tok",
           expiresIn: 900,
           tokenType: "Bearer",
@@ -152,14 +170,17 @@ describe("Back Office GraphQL News Client", () => {
 
     const result = await newsApi.deleteNews("news-123")
     expect(result).toBe(true)
-    expect(authService.getAccessToken()).toBe("refreshed-jwt")
+    expect(authService.getAccessToken()).toBe(newJwt)
   })
 
   it("prevents infinite loops: clears session if retry also fails with UNAUTHENTICATED", async () => {
-    authService.setSession("bad-token", "refresh-tok", {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
+
+    const stillRejectedJwt = createMockAdminJwt(900)
 
     vi.spyOn(global, "fetch")
       // 1. Initial GraphQL returns 401
@@ -173,7 +194,7 @@ describe("Back Office GraphQL News Client", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          accessToken: "new-token-that-is-still-rejected",
+          accessToken: stillRejectedJwt,
           refreshToken: "new-refresh-tok",
           expiresIn: 900,
           tokenType: "Bearer",
@@ -195,7 +216,7 @@ describe("Back Office GraphQL News Client", () => {
   })
 
   it("handles and formats GraphQL validation errors gracefully", async () => {
-    authService.setSession("test-bearer-token", "refresh-tok", {
+    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
@@ -221,6 +242,79 @@ describe("Back Office GraphQL News Client", () => {
       }),
     ).rejects.toThrow("Title must be between 3 and 200 characters")
   })
+
+  it("proactively renews access token before GraphQL call when expiring (<60s)", async () => {
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 30 }))
+    const expiringJwt = `${header}.${payload}.sig`
+
+    authService.setSession(expiringJwt, "valid-refresh-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    let refreshCalled = false
+    let sentBearer = ""
+
+    vi.spyOn(global, "fetch").mockImplementation(async (url: any, opts: any) => {
+      const urlStr = String(url)
+      if (urlStr.includes("/auth/refresh")) {
+        refreshCalled = true
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            accessToken: "proactively-renewed-admin-jwt",
+            refreshToken: "rotated-ref",
+            expiresIn: 900,
+            tokenType: "Bearer",
+            user: { id: "admin-1", role: "ADMIN" },
+          }),
+        } as Response
+      }
+
+      sentBearer = opts?.headers?.Authorization || ""
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            adminNews: { items: [], totalCount: 0, pageInfo: { hasNextPage: false, hasPreviousPage: false } },
+          },
+        }),
+      } as Response
+    })
+
+    await newsApi.getAdminNews()
+
+    expect(refreshCalled).toBe(true)
+    expect(sentBearer).toBe("Bearer proactively-renewed-admin-jwt")
+    expect(authService.getAccessToken()).toBe("proactively-renewed-admin-jwt")
+  })
+
+  it("transient network failure during refresh preserves session and throws error without clearing session", async () => {
+    authService.setSession("expired-jwt", "valid-refresh-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    vi.spyOn(global, "fetch").mockImplementation(async (url: any) => {
+      const urlStr = String(url)
+      if (urlStr.includes("/auth/refresh")) {
+        throw new TypeError("Failed to fetch")
+      }
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "UNAUTHORIZED" }),
+      } as Response
+    })
+
+    await expect(newsApi.getAdminNews()).rejects.toThrow(/Error temporal/)
+    // Session is PRESERVED!
+    expect(authService.getAccessToken()).toBe("expired-jwt")
+    expect(authService.getUser()?.id).toBe("admin-1")
+  })
 })
 
 describe("Back Office GraphQL Server Client (Shard 06)", () => {
@@ -230,7 +324,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
   })
 
   it("fetches serverStatus metrics and limits", async () => {
-    authService.setSession("test-bearer-token", "refresh-tok", {
+    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
@@ -267,7 +361,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
   })
 
   it("executes power actions (start, restart, stop)", async () => {
-    authService.setSession("test-bearer-token", "refresh-tok", {
+    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })
@@ -319,7 +413,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
   })
 
   it("sends server console commands", async () => {
-    authService.setSession("test-bearer-token", "refresh-tok", {
+    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
       id: "admin-1",
       role: "ADMIN",
     })

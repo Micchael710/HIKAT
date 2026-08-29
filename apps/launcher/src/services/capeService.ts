@@ -364,7 +364,7 @@ export async function uploadPlayerCape(
   const { uploadUrl, uploadToken } = ticketRes.data
   const fullUploadUrl = resolveApiAssetUrl(uploadUrl)
 
-  const token = authService.getAccessToken()
+  const token = await authService.ensureValidAccessToken()
   const headers: Record<string, string> = {
     "X-Upload-Token": uploadToken,
     "Content-Type": "image/png",

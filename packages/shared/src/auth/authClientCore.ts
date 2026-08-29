@@ -31,6 +31,11 @@ export interface AuthStorageAdapter {
   clearSession(): Promise<void> | void
 }
 
+export type RefreshOutcome =
+  | { kind: "REFRESHED"; accessToken: string; user: AuthUser }
+  | { kind: "TERMINAL_FAILURE"; error: string; code?: string }
+  | { kind: "TRANSIENT_FAILURE"; error: string; status?: number }
+
 export function parseJwtPayload(token: string): any | null {
   try {
     const parts = token.split(".")
@@ -47,7 +52,7 @@ export function parseJwtPayload(token: string): any | null {
 
 export function isJwtExpired(token: string, bufferSeconds = 30): boolean {
   const payload = parseJwtPayload(token)
-  if (!payload || typeof payload.exp !== "number") return false
+  if (!payload || typeof payload.exp !== "number") return true
   const now = Math.floor(Date.now() / 1000)
   return now >= payload.exp - bufferSeconds
 }
@@ -114,7 +119,7 @@ export class AuthClientCore {
   private session: SessionState | null = null
   private status: AuthStatus = "BOOTSTRAPPING"
   private listeners: Set<SessionListener> = new Set()
-  private refreshPromise: Promise<string | null> | null = null
+  private refreshOutcomePromise: Promise<RefreshOutcome> | null = null
   private persistSession = true
 
   constructor(options: AuthClientOptions) {
@@ -160,6 +165,37 @@ export class AuthClientCore {
 
   public getRefreshToken(): string | null {
     return this.session?.refreshToken || null
+  }
+
+  /**
+   * Ensures an active, non-expired Access JWT is returned.
+   * Proactively rotates tokens if expiration is within bufferSeconds (default 60s).
+   * Differentiates between transient network failures and terminal session revocations.
+   */
+  public async ensureValidAccessToken(bufferSeconds = 60): Promise<string | null> {
+    if (!this.session) {
+      return null
+    }
+
+    const token = this.session.accessToken
+    if (token && !isJwtExpired(token, bufferSeconds)) {
+      return token
+    }
+
+    // Token is expired, close to expiry, or unparseable. Initiate/join single-flight refresh.
+    if (this.session.refreshToken) {
+      const outcome = await this.refreshOutcome()
+      if (outcome.kind === "REFRESHED") {
+        return outcome.accessToken
+      }
+      // If transient error (e.g. offline) and current token hasn't reached hard expiry (buffer=0):
+      if (outcome.kind === "TRANSIENT_FAILURE" && token && !isJwtExpired(token, 0)) {
+        return token
+      }
+      return null
+    }
+
+    return null
   }
 
   public setSession(session: SessionState, persist = true): Promise<void> {
@@ -215,14 +251,25 @@ export class AuthClientCore {
       this.session = stored
       this.persistSession = true
 
-      // If access token is expired, proactively rotate via refresh
-      if (isJwtExpired(stored.accessToken)) {
-        const refreshed = await this.refresh()
-        if (!refreshed || !this.session) {
-          await this.clearSession()
+      // If access token is expired or expiring soon, proactively rotate via refresh
+      if (isJwtExpired(stored.accessToken, 60)) {
+        const outcome = await this.refreshOutcome()
+        if (outcome.kind === "REFRESHED") {
+          return this.session
+        }
+        if (outcome.kind === "TERMINAL_FAILURE") {
           return null
         }
-        return this.session
+        // If transient error during bootstrap (e.g. app opened offline):
+        if (!isJwtExpired(stored.accessToken, 0)) {
+          this.status = "AUTHENTICATED"
+          this.notify()
+          return stored
+        }
+        // Token is hard expired and network is unavailable - keep recoverable session
+        this.status = "AUTHENTICATED"
+        this.notify()
+        return stored
       }
 
       this.status = "AUTHENTICATED"
@@ -319,18 +366,22 @@ export class AuthClientCore {
     }
   }
 
-  public async refresh(): Promise<string | null> {
-    if (this.refreshPromise) {
-      return this.refreshPromise
+  /**
+   * Authoritative single-flight refresh execution with explicit outcome typing.
+   * Dispatches TRANSIENT_FAILURE (network error, timeout, 429, 5xx) vs TERMINAL_FAILURE (401, invalid token, role mismatch).
+   */
+  public async refreshOutcome(): Promise<RefreshOutcome> {
+    if (this.refreshOutcomePromise) {
+      return this.refreshOutcomePromise
     }
 
     const currentRefresh = this.session?.refreshToken
     if (!currentRefresh) {
       await this.clearSession()
-      return null
+      return { kind: "TERMINAL_FAILURE", error: "No refresh token available" }
     }
 
-    this.refreshPromise = (async () => {
+    this.refreshOutcomePromise = (async (): Promise<RefreshOutcome> => {
       try {
         const res = await this.fetcher(`${this.authServiceUrl}/auth/refresh`, {
           method: "POST",
@@ -339,8 +390,26 @@ export class AuthClientCore {
         })
 
         if (!res.ok) {
+          const errBody = (await res.json().catch(() => ({}))) as Record<string, any>
+          const errorCode = errBody.error || errBody.code
+          const errorMessage = errBody.message || errBody.error || `Refresh failed with HTTP ${res.status}`
+
+          // Transient errors (HTTP 429 Rate limited, HTTP 5xx Server Error):
+          if (res.status === 429 || res.status >= 500) {
+            return {
+              kind: "TRANSIENT_FAILURE",
+              error: errorMessage,
+              status: res.status,
+            }
+          }
+
+          // Terminal errors (HTTP 400, 401, 403, 404, etc.):
           await this.clearSession()
-          return null
+          return {
+            kind: "TERMINAL_FAILURE",
+            error: errorMessage,
+            code: errorCode,
+          }
         }
 
         const data = (await res.json()) as {
@@ -353,7 +422,12 @@ export class AuthClientCore {
 
         if (!data.accessToken || !data.user || data.user.role !== this.allowedRole) {
           await this.clearSession()
-          return null
+          return {
+            kind: "TERMINAL_FAILURE",
+            error: data.user?.role !== this.allowedRole
+              ? "Rol de cuenta incompatible con esta aplicación"
+              : "Respuesta de rotación incompleta del servidor",
+          }
         }
 
         // Atomically replace session with rotated tokens, respecting persistSession
@@ -368,16 +442,36 @@ export class AuthClientCore {
           this.persistSession,
         )
 
-        return data.accessToken
-      } catch {
-        await this.clearSession()
-        return null
+        return {
+          kind: "REFRESHED",
+          accessToken: data.accessToken,
+          user: data.user,
+        }
+      } catch (err: any) {
+        // Network / transport exception (offline, timeout, DNS resolution failure)
+        return {
+          kind: "TRANSIENT_FAILURE",
+          error: err?.message || "No se pudo conectar con el servicio de autenticación",
+          status: 0,
+        }
       } finally {
-        this.refreshPromise = null
+        this.refreshOutcomePromise = null
       }
     })()
 
-    return this.refreshPromise
+    return this.refreshOutcomePromise
+  }
+
+  /**
+   * Compatibility wrapper for single-flight token rotation.
+   * Returns newly rotated accessToken on success, or null on failure.
+   */
+  public async refresh(): Promise<string | null> {
+    const outcome = await this.refreshOutcome()
+    if (outcome.kind === "REFRESHED") {
+      return outcome.accessToken
+    }
+    return null
   }
 
   public async logout(): Promise<void> {

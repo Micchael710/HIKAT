@@ -19,6 +19,7 @@ export interface AuthSessionResult {
   sessionId: string
   user: {
     id: string
+    email?: string
     role: AppRole
     displayName: string | null
   }
@@ -29,7 +30,7 @@ export interface AuthSessionResult {
  */
 export async function createSession(
   db: Database,
-  user: { id: string; role: AppRole; displayName: string | null },
+  user: { id: string; email?: string; role: AppRole; displayName: string | null },
   keyManager: JwtKeyManager,
   options?: { sessionExpiryDays?: number },
 ): Promise<AuthSessionResult> {
@@ -140,6 +141,23 @@ export async function rotateRefreshToken(
     throw new Error(AuthErrorCode.UNAUTHORIZED)
   }
 
+  // Look up user email from credentials or external accounts
+  const passCred = await db
+    .select({ email: schema.passwordCredentials.email })
+    .from(schema.passwordCredentials)
+    .where(eq(schema.passwordCredentials.userId, userRecord.id))
+    .get()
+
+  let userEmail = passCred?.email
+  if (!userEmail) {
+    const extAcc = await db
+      .select({ email: schema.externalAccounts.email })
+      .from(schema.externalAccounts)
+      .where(eq(schema.externalAccounts.userId, userRecord.id))
+      .get()
+    userEmail = extAcc?.email || ""
+  }
+
   // 6. Atomic conditional update to mark token as consumed
   // Ensures that two concurrent requests with the exact same token cannot both succeed.
   const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
@@ -196,6 +214,7 @@ export async function rotateRefreshToken(
   // 8. Sign new Access JWT
   const user = {
     id: userRecord.id,
+    email: userEmail,
     role: userRecord.role as AppRole,
     displayName: userRecord.displayName,
   }

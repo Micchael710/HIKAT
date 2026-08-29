@@ -57,7 +57,7 @@ export async function uploadMediaFile(
     sizeBytes: file.size,
   })
 
-  const token = authService.getAccessToken()
+  const token = await authService.ensureValidAccessToken()
   if (!token) {
     throw new MediaUploadError("No hay una sesión activa para subir archivos.")
   }
@@ -84,12 +84,14 @@ export async function uploadMediaFile(
     // If token expired during binary transport, refresh once and retry with fresh ticket
     if (response.status === 401) {
       if (!isRetry) {
-        const refreshedToken = await authService.refresh()
-        if (refreshedToken) {
+        const outcome = await authService.refreshOutcome()
+        if (outcome.kind === "REFRESHED") {
           return uploadMediaFile(file, expectedType, true)
         }
+        if (outcome.kind === "TRANSIENT_FAILURE") {
+          throw new MediaUploadError("Error temporal de conexión al renovar sesión.")
+        }
       }
-      authService.clearSession()
       throw new MediaUploadError("Su sesión ha expirado al subir el archivo.")
     }
 

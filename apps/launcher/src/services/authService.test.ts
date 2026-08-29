@@ -491,6 +491,182 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
       }),
     )
   })
+
+  it("14. graphqlClient preserves GraphQL response with data: null and UNAUTHENTICATED error, refreshing and retrying successfully", async () => {
+    await authService.setSession({
+      accessToken: "expired-jwt",
+      refreshToken: "valid-ref-1",
+      user: { id: "u-p1", email: "player@hikat.org", role: "PLAYER" },
+    })
+
+    let graphqlCalls = 0
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/auth/refresh")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            accessToken: "rotated-acc-1",
+            refreshToken: "rotated-ref-1",
+            expiresIn: 900,
+            tokenType: "Bearer",
+            user: { id: "u-p1", email: "player@hikat.org", role: "PLAYER" },
+          }),
+        }
+      }
+
+      graphqlCalls++
+      if (graphqlCalls === 1) {
+        // Real Yoga response: HTTP 200 with data: null and errors
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: null,
+            errors: [
+              {
+                message: "Authentication required",
+                extensions: { code: "UNAUTHENTICATED" },
+              },
+            ],
+          }),
+        }
+      }
+
+      // Retry request succeeds
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            myPlayerSkin: {
+              id: "skin-123",
+              imageUrl: "https://assets.hikat.org/skin.png",
+            },
+          },
+        }),
+      }
+    })
+
+    const res = await graphqlClient<{ myPlayerSkin: { id: string; imageUrl: string } }>(
+      "query MyPlayerSkin { myPlayerSkin { id imageUrl } }",
+    )
+
+    expect(res.success).toBe(true)
+    expect(res.data?.myPlayerSkin.id).toBe("skin-123")
+    expect(graphqlCalls).toBe(2)
+  })
+
+  it("15. Proactive token renewal runs before GraphQL call when token is expiring (<60s)", async () => {
+    // Generate token expiring in 30s
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 30 }))
+    const expiringToken = `${header}.${payload}.sig`
+
+    await authService.setSession({
+      accessToken: expiringToken,
+      refreshToken: "refresh-for-proactive",
+      user: { id: "u-p1", email: "player@hikat.org", role: "PLAYER" },
+    })
+
+    let refreshCalled = false
+    let sentBearerToken = ""
+
+    mockFetch.mockImplementation(async (url: string, opts: any) => {
+      if (url.includes("/auth/refresh")) {
+        refreshCalled = true
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            accessToken: "proactive-fresh-acc",
+            refreshToken: "proactive-fresh-ref",
+            expiresIn: 900,
+            tokenType: "Bearer",
+            user: { id: "u-p1", email: "player@hikat.org", role: "PLAYER" },
+          }),
+        }
+      }
+
+      // GraphQL endpoint receives proactively renewed token on first call!
+      sentBearerToken = opts?.headers?.Authorization || ""
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: { ping: "pong" },
+        }),
+      }
+    })
+
+    const res = await graphqlClient("query Ping { ping }")
+
+    expect(res.success).toBe(true)
+    expect(refreshCalled).toBe(true)
+    expect(sentBearerToken).toBe("Bearer proactive-fresh-acc")
+    expect(authService.getAccessToken()).toBe("proactive-fresh-acc")
+  })
+
+  it("16. Transient network failure during refresh in graphqlClient preserves session without clearing store", async () => {
+    const clearMock = vi.fn()
+    ;(window as any).electronAPI = {
+      authSaveSession: vi.fn(),
+      authClearSession: clearMock,
+    }
+
+    await authService.setSession({
+      accessToken: "expired-jwt",
+      refreshToken: "offline-refresh-tok",
+      user: { id: "u-p1", email: "player@hikat.org", role: "PLAYER" },
+    })
+
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/auth/refresh")) {
+        // Network throws during refresh
+        throw new TypeError("Failed to fetch")
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: null,
+          errors: [{ message: "UNAUTHENTICATED", extensions: { code: "UNAUTHENTICATED" } }],
+        }),
+      }
+    })
+
+    const res = await graphqlClient("query { mySkin { id } }")
+
+    expect(res.success).toBe(false)
+    // Session is NOT cleared on transient network failure!
+    expect(clearMock).not.toHaveBeenCalled()
+    expect(authService.getStatus()).toBe("AUTHENTICATED")
+    expect(authService.getRefreshToken()).toBe("offline-refresh-tok")
+  })
+
+  it("17. requestPasswordReset calls canonical POST /auth/forgot-password", async () => {
+    let capturedUrl = ""
+    let capturedBody: any = null
+
+    mockFetch.mockImplementation(async (url: string, opts: any) => {
+      capturedUrl = url
+      capturedBody = JSON.parse(opts?.body || "{}")
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          message: "If the email is registered, a password reset email has been sent.",
+        }),
+      }
+    })
+
+    const res = await authService.requestPasswordReset("player@hikat.org")
+
+    expect(res.success).toBe(true)
+    expect(capturedUrl).toContain("/auth/forgot-password")
+    expect(capturedBody.email).toBe("player@hikat.org")
+  })
 })
 
 

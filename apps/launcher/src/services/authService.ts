@@ -137,6 +137,10 @@ class LauncherAuthService {
     return this.client.getAccessToken()
   }
 
+  public getRefreshToken(): string | null {
+    return this.client.getRefreshToken()
+  }
+
   public getStoredToken(): string | null {
     return this.client.getAccessToken()
   }
@@ -258,6 +262,14 @@ class LauncherAuthService {
     }
   }
 
+  public async ensureValidAccessToken(bufferSeconds = 60): Promise<string | null> {
+    return this.client.ensureValidAccessToken(bufferSeconds)
+  }
+
+  public async refreshOutcome() {
+    return this.client.refreshOutcome()
+  }
+
   public async refresh(): Promise<string | null> {
     return this.client.refresh()
   }
@@ -276,7 +288,7 @@ class LauncherAuthService {
 
   public async requestPasswordReset(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
-      const res = await fetch(`${AUTH_URL}/auth/password/reset-request`, {
+      const res = await fetch(`${AUTH_URL}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: sanitizeEmail(email) }),

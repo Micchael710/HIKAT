@@ -3,6 +3,8 @@ import {
   AuthClientCore,
   createMemoryStorageAdapter,
   createWebSessionStorageAdapter,
+  isJwtExpired,
+  parseJwtPayload,
 } from "./authClientCore"
 import {
   generateCodeVerifier,
@@ -10,7 +12,7 @@ import {
   generateRandomState,
 } from "./pkce"
 
-describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
+describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)", () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
@@ -49,6 +51,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     const user = await client.login("player@hikat.org", "Password123!")
 
     expect(user.id).toBe("u-1")
+    expect(user.email).toBe("player@hikat.org")
     expect(client.getAccessToken()).toBe("access-1")
     expect(client.getRefreshToken()).toBe("refresh-1")
     expect(client.getStatus()).toBe("AUTHENTICATED")
@@ -97,7 +100,6 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
 
     expect(launcherClient.getStatus()).toBe("UNAUTHENTICATED")
     expect(launcherClient.getAccessToken()).toBeNull()
-    // Verifies remote revocation was triggered
     expect(mockFetch).toHaveBeenCalledTimes(2)
   })
 
@@ -142,7 +144,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     expect(backofficeClient.getAccessToken()).toBeNull()
   })
 
-  it("4. Refresh rotates tokens and replaces session atomically", async () => {
+  it("4. Refresh rotates tokens and replaces session atomically (double rotation A -> B -> C)", async () => {
     const storage = createMemoryStorageAdapter()
     const client = new AuthClientCore({
       authServiceUrl: "http://localhost:8788",
@@ -152,30 +154,51 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     })
 
     await client.setSession({
-      accessToken: "access-1",
-      refreshToken: "refresh-1",
+      accessToken: "access-A",
+      refreshToken: "refresh-A",
       user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
     })
 
+    // 1st Rotation: A -> B
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({
-        accessToken: "access-2",
-        refreshToken: "refresh-2",
+        accessToken: "access-B",
+        refreshToken: "refresh-B",
         expiresIn: 900,
         tokenType: "Bearer",
         user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
       }),
     })
 
-    const newAccessToken = await client.refresh()
+    const tokenB = await client.refresh()
+    expect(tokenB).toBe("access-B")
+    expect(client.getAccessToken()).toBe("access-B")
+    expect(client.getRefreshToken()).toBe("refresh-B")
+    expect(await storage.loadSession()).toEqual(
+      expect.objectContaining({ accessToken: "access-B", refreshToken: "refresh-B" }),
+    )
 
-    expect(newAccessToken).toBe("access-2")
-    expect(client.getAccessToken()).toBe("access-2")
-    expect(client.getRefreshToken()).toBe("refresh-2")
-    expect(storage.loadSession()).toEqual(
-      expect.objectContaining({ accessToken: "access-2", refreshToken: "refresh-2" }),
+    // 2nd Rotation: B -> C
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "access-C",
+        refreshToken: "refresh-C",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+      }),
+    })
+
+    const tokenC = await client.refresh()
+    expect(tokenC).toBe("access-C")
+    expect(client.getAccessToken()).toBe("access-C")
+    expect(client.getRefreshToken()).toBe("refresh-C")
+    expect(await storage.loadSession()).toEqual(
+      expect.objectContaining({ accessToken: "access-C", refreshToken: "refresh-C" }),
     )
   })
 
@@ -228,7 +251,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 
-  it("6. Refresh failure clears session and sets UNAUTHENTICATED", async () => {
+  it("6. Terminal failure (401 / TOKEN_EXPIRED) clears session and sets UNAUTHENTICATED", async () => {
     const client = new AuthClientCore({
       authServiceUrl: "http://localhost:8788",
       allowedRole: "PLAYER",
@@ -247,15 +270,191 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
       json: async () => ({ error: "TOKEN_EXPIRED", message: "Token has expired" }),
     })
 
-    const token = await client.refresh()
+    const outcome = await client.refreshOutcome()
 
-    expect(token).toBeNull()
+    expect(outcome.kind).toBe("TERMINAL_FAILURE")
     expect(client.getStatus()).toBe("UNAUTHENTICATED")
     expect(client.getAccessToken()).toBeNull()
     expect(client.getSession()).toBeNull()
   })
 
-  it("7. Logout clears local session and calls remote revocation (resilient to network failure)", async () => {
+  it("7. Transient network failure (fetch throws) does NOT clear session", async () => {
+    const storage = createMemoryStorageAdapter()
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      storageAdapter: storage,
+      fetcher: mockFetch,
+    })
+
+    const initialSession = {
+      accessToken: "access-1",
+      refreshToken: "valid-refresh-offline",
+      user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" as const },
+    }
+    await client.setSession(initialSession)
+
+    // Simulate network error / offline
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch (offline)"))
+
+    const outcome = await client.refreshOutcome()
+
+    expect(outcome.kind).toBe("TRANSIENT_FAILURE")
+    // Session is PRESERVED! Not wiped!
+    expect(client.getStatus()).toBe("AUTHENTICATED")
+    expect(client.getSession()?.refreshToken).toBe("valid-refresh-offline")
+    expect((await storage.loadSession())?.refreshToken).toBe("valid-refresh-offline")
+
+    // Subsequent refresh when connection is restored succeeds:
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "access-reconnected",
+        refreshToken: "refresh-reconnected",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+      }),
+    })
+
+    const token = await client.refresh()
+    expect(token).toBe("access-reconnected")
+    expect(client.getAccessToken()).toBe("access-reconnected")
+  })
+
+  it("8. Transient server errors (500, 502, 503, 429) do NOT clear session", async () => {
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      fetcher: mockFetch,
+    })
+
+    await client.setSession({
+      accessToken: "access-1",
+      refreshToken: "valid-refresh-500",
+      user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+    })
+
+    // 503 Service Unavailable
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: "SERVER_UNAVAILABLE" }),
+    })
+
+    const outcome503 = await client.refreshOutcome()
+    expect(outcome503.kind).toBe("TRANSIENT_FAILURE")
+    expect(client.getSession()?.refreshToken).toBe("valid-refresh-500")
+
+    // 429 Too Many Requests
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: "RATE_LIMITED" }),
+    })
+
+    const outcome429 = await client.refreshOutcome()
+    expect(outcome429.kind).toBe("TRANSIENT_FAILURE")
+    expect(client.getSession()?.refreshToken).toBe("valid-refresh-500")
+  })
+
+  it("9. Proactive ensureValidAccessToken refreshes if token within buffer (60s) or expired", async () => {
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      fetcher: mockFetch,
+    })
+
+    // Token expiring in 30 seconds (within 60s buffer)
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 30 }))
+    const expiringJwt = `${header}.${payload}.sig`
+
+    await client.setSession({
+      accessToken: expiringJwt,
+      refreshToken: "refresh-for-proactive",
+      user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+    })
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "fresh-proactive-token",
+        refreshToken: "fresh-proactive-refresh",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+      }),
+    })
+
+    const validToken = await client.ensureValidAccessToken(60)
+
+    expect(validToken).toBe("fresh-proactive-token")
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("10. Proactive ensureValidAccessToken returns current token if far from expiry (>60s)", async () => {
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      fetcher: mockFetch,
+    })
+
+    // Token valid for 10 more minutes
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 600 }))
+    const validJwt = `${header}.${payload}.sig`
+
+    await client.setSession({
+      accessToken: validJwt,
+      refreshToken: "valid-refresh",
+      user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+    })
+
+    const token = await client.ensureValidAccessToken(60)
+
+    expect(token).toBe(validJwt)
+    // NO network refresh called!
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it("11. Malformed or unparseable JWT is treated safely as expired", async () => {
+    expect(isJwtExpired("not-a-jwt")).toBe(true)
+    expect(isJwtExpired("")).toBe(true)
+    expect(isJwtExpired("a.b.c")).toBe(true) // No numeric exp in payload
+
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      fetcher: mockFetch,
+    })
+
+    await client.setSession({
+      accessToken: "malformed-jwt",
+      refreshToken: "refresh-valid",
+      user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+    })
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "valid-new-jwt",
+        refreshToken: "valid-new-ref",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+      }),
+    })
+
+    const result = await client.ensureValidAccessToken(60)
+    expect(result).toBe("valid-new-jwt")
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("12. Logout clears local session and calls remote revocation (resilient to network failure)", async () => {
     const storage = createMemoryStorageAdapter()
     const client = new AuthClientCore({
       authServiceUrl: "http://localhost:8788",
@@ -280,10 +479,14 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     expect(storage.loadSession()).toBeNull()
   })
 
-  it("8. Bootstrap restores valid stored session", async () => {
+  it("13. Bootstrap restores valid stored session", async () => {
     const storage = createMemoryStorageAdapter()
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 600 }))
+    const validJwt = `${header}.${payload}.sig`
+
     storage.saveSession({
-      accessToken: "saved-access",
+      accessToken: validJwt,
       refreshToken: "saved-refresh",
       user: { id: "u-saved", email: "saved@hikat.org", role: "ADMIN" },
     })
@@ -300,10 +503,10 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     expect(restored).not.toBeNull()
     expect(restored?.user.id).toBe("u-saved")
     expect(client.getStatus()).toBe("AUTHENTICATED")
-    expect(client.getAccessToken()).toBe("saved-access")
+    expect(client.getAccessToken()).toBe(validJwt)
   })
 
-  it("9. Bootstrap rejects stored session with mismatched role", async () => {
+  it("14. Bootstrap rejects stored session with mismatched role", async () => {
     const storage = createMemoryStorageAdapter()
     storage.saveSession({
       accessToken: "saved-access",
@@ -323,10 +526,10 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     expect(restored).toBeNull()
     expect(client.getStatus()).toBe("UNAUTHENTICATED")
     expect(client.getSession()).toBeNull()
-    expect(storage.loadSession()).toBeNull()
+    expect(await storage.loadSession()).toBeNull()
   })
 
-  it("10. Exchange OAuth code successfully establishes session with role validation", async () => {
+  it("15. Exchange OAuth code successfully establishes session with role validation", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -352,11 +555,12 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     })
 
     expect(user.id).toBe("u-oauth")
+    expect(user.email).toBe("oauth@hikat.org")
     expect(client.getAccessToken()).toBe("oauth-access")
     expect(client.getStatus()).toBe("AUTHENTICATED")
   })
 
-  it("11. PKCE cryptographic helpers generate valid verifiers, challenges, and random states", async () => {
+  it("16. PKCE cryptographic helpers generate valid verifiers, challenges, and random states", async () => {
     const verifier = generateCodeVerifier(64)
     expect(verifier.length).toBe(64)
 
@@ -369,7 +573,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     expect(state.length).toBe(32)
   })
 
-  it("12. keepSession=true saves to storage adapter; keepSession=false leaves storage empty", async () => {
+  it("17. keepSession=true saves to storage adapter; keepSession=false leaves storage empty", async () => {
     const storage = createMemoryStorageAdapter()
     const client = new AuthClientCore({
       authServiceUrl: "http://localhost:8788",
@@ -387,16 +591,15 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     // With keepSession = false
     await client.setSession(payload, false)
     expect(client.getAccessToken()).toBe("acc-1")
-    expect(storage.loadSession()).toBeNull() // Not persisted
+    expect(await storage.loadSession()).toBeNull() // Not persisted
 
     // With keepSession = true
     await client.setSession(payload, true)
-    expect(storage.loadSession()).toEqual(payload) // Persisted
+    expect(await storage.loadSession()).toEqual(payload) // Persisted
   })
 
-  it("13. Bootstrap with expired access token calls refresh and rotates session", async () => {
+  it("18. Bootstrap with expired access token calls refresh and rotates session", async () => {
     const storage = createMemoryStorageAdapter()
-    // Create an expired JWT token (exp in past)
     const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
     const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 100 }))
     const expiredJwt = `${expiredHeader}.${expiredPayload}.signature`
@@ -436,7 +639,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 
-  it("14. Bootstrap with expired access token and failed refresh clears storage", async () => {
+  it("19. Bootstrap with expired access token and terminal refresh failure clears storage", async () => {
     const storage = createMemoryStorageAdapter()
     const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
     const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 100 }))
@@ -448,11 +651,11 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
       user: { id: "u-exp", email: "p@hikat.org", role: "PLAYER" },
     })
 
-    // Mock failed refresh
+    // Mock failed refresh (401 terminal)
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 401,
-      json: async () => ({ error: "REVOKED" }),
+      json: async () => ({ error: "TOKEN_EXPIRED" }),
     })
 
     const client = new AuthClientCore({
@@ -466,7 +669,8 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
 
     expect(restored).toBeNull()
     expect(client.getStatus()).toBe("UNAUTHENTICATED")
-    expect(storage.loadSession()).toBeNull()
+    expect(await storage.loadSession()).toBeNull()
   })
 })
+
 

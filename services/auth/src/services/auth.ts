@@ -161,6 +161,7 @@ export async function loginWithPassword(
 
   const user = {
     id: credRecord.userId,
+    email: normalizedEmail,
     role: credRecord.userRole as AppRole,
     displayName: credRecord.userDisplayName,
   }
@@ -373,12 +374,13 @@ export async function changePassword(
 export async function getOrCreateOAuthUser(
   db: Database,
   profile: OAuthProviderProfile,
-): Promise<{ id: string; role: AppRole; displayName: string | null }> {
+): Promise<{ id: string; email: string; role: AppRole; displayName: string | null }> {
   // 1. Check if external account is already linked
   const linkedAccount = await db
     .select({
       extId: schema.externalAccounts.id,
       userId: schema.externalAccounts.userId,
+      email: schema.externalAccounts.email,
       role: schema.users.role,
       displayName: schema.users.displayName,
     })
@@ -395,6 +397,7 @@ export async function getOrCreateOAuthUser(
   if (linkedAccount) {
     return {
       id: linkedAccount.userId,
+      email: linkedAccount.email || profile.email || "",
       role: linkedAccount.role as AppRole,
       displayName: linkedAccount.displayName,
     }
@@ -448,6 +451,7 @@ export async function getOrCreateOAuthUser(
 
   return {
     id: userId,
+    email: profile.email || "",
     role: "PLAYER" as AppRole,
     displayName: newUser.displayName ?? null,
   }

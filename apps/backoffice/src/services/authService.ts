@@ -76,6 +76,10 @@ class BackofficeAuthService {
     return this.client.getAccessToken()
   }
 
+  public getRefreshToken(): string | null {
+    return this.client.getRefreshToken()
+  }
+
   public getUser(): AdminUser | null {
     const u = this.client.getUser()
     if (!u) return null
@@ -115,6 +119,14 @@ class BackofficeAuthService {
       role: "ADMIN",
       minecraftUsername: (user as any).minecraftUsername,
     }
+  }
+
+  public async ensureValidAccessToken(bufferSeconds = 60): Promise<string | null> {
+    return this.client.ensureValidAccessToken(bufferSeconds)
+  }
+
+  public async refreshOutcome() {
+    return this.client.refreshOutcome()
   }
 
   public async refresh(): Promise<string | null> {
