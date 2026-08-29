@@ -18,9 +18,11 @@ import {
   calculateFileSha256,
   resolveAndValidateDownloadUrl,
   validateUrlSecurity,
+  getEffectiveApiBaseUrl,
   uninstallGame,
   // @ts-expect-error CJS module without bundled declaration
 } from "../../electron/client-files-sync.cjs"
+
 
 describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
   let tempDir: string
@@ -716,5 +718,73 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       await expect(uninstallGame(tempDir, appDataRoot)).rejects.toThrow(/Security violation/i)
       await expect(uninstallGame("C:\\", appDataRoot)).rejects.toThrow(/Security violation/i)
     })
+
+    it("20. getEffectiveApiBaseUrl returns local backend (http://127.0.0.1:8787) in development and production default in production", () => {
+      const origEnv = process.env.NODE_ENV
+      const origHikatApi = process.env.HIKAT_API_URL
+      const origViteApi = process.env.VITE_API_URL
+      delete process.env.HIKAT_API_URL
+      delete process.env.VITE_API_URL
+
+      try {
+        process.env.NODE_ENV = "development"
+        expect(getEffectiveApiBaseUrl()).toBe("http://127.0.0.1:8787")
+
+        process.env.NODE_ENV = "production"
+        expect(getEffectiveApiBaseUrl()).toBe("https://api.apparatia.net/api/v1")
+
+        // Override takes precedence
+        process.env.HIKAT_API_URL = "http://localhost:9999"
+        expect(getEffectiveApiBaseUrl()).toBe("http://localhost:9999")
+      } finally {
+        process.env.NODE_ENV = origEnv
+        if (origHikatApi) process.env.HIKAT_API_URL = origHikatApi
+        else delete process.env.HIKAT_API_URL
+        if (origViteApi) process.env.VITE_API_URL = origViteApi
+        else delete process.env.VITE_API_URL
+      }
+    })
+
+    it("21. resolveAndValidateDownloadUrl resolves relative manifest paths to local backend in development", () => {
+      const origEnv = process.env.NODE_ENV
+      delete process.env.HIKAT_API_URL
+      delete process.env.VITE_API_URL
+      process.env.NODE_ENV = "development"
+
+      try {
+        const resolved = resolveAndValidateDownloadUrl("/game/download/file-mod-123")
+        expect(resolved).toBe("http://127.0.0.1:8787/game/download/file-mod-123")
+      } finally {
+        process.env.NODE_ENV = origEnv
+      }
+    })
+
+    it("22. Full smoke integration: relative manifest download URLs are downloaded against the specified local serverBaseUrl", async () => {
+      const modContent = "Content for smoke-mod"
+      const modSha = computeSha(modContent)
+      const task = {
+        path: "mods/smoke-mod.jar",
+        sha256: modSha,
+        sizeBytes: Buffer.byteLength(modContent),
+        policy: "NO_MODIFICABLE",
+        downloadUrl: "/files/smoke-mod", // Relative download URL from manifest
+      }
+
+
+      const res = await executeSync({
+        instanceRoot,
+        clientFiles: [task],
+        modpackVersion: "1.0.0",
+        apiBaseUrl: serverBaseUrl,
+      })
+
+      expect(res.success).toBe(true)
+      expect(res.downloadedCount).toBe(1)
+      const installedFile = path.join(instanceRoot, "mods", "smoke-mod.jar")
+      expect(fs.existsSync(installedFile)).toBe(true)
+      const content = await fsp.readFile(installedFile, "utf8")
+      expect(content).toBe("Content for smoke-mod")
+    })
   })
 })
+

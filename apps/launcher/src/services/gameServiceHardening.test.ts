@@ -228,7 +228,12 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     } as any
 
     await gameService.startSync([], "1.0.0")
-    expect(startSyncMock).toHaveBeenCalledWith({ clientFiles: [], modpackVersion: "1.0.0" })
+    expect(startSyncMock).toHaveBeenCalledWith({
+      clientFiles: [],
+      modpackVersion: "1.0.0",
+      apiBaseUrl: "http://127.0.0.1:8787",
+    })
+
 
     const pauseRes = await gameService.pauseSync()
     expect(pauseSyncMock).toHaveBeenCalledTimes(1)

@@ -1,8 +1,10 @@
 /**
  * Centralized API Client for HiKAT Launcher
- * Configurable via VITE_API_URL environment variable with automatic auth token handling
+ * Configurable via centralized API authority (VITE_API_URL / local development default)
+ * with automatic auth token handling.
  */
 import { sanitizeUrl, sanitizeInput } from "../utils/security"
+import { getApiBaseUrl } from "../config/api"
 
 export interface ApiResponse<T = any> {
   success: boolean
@@ -12,8 +14,7 @@ export interface ApiResponse<T = any> {
   status?: number
 }
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "https://api.apparatia.net/api/v1"
+export const API_BASE_URL = getApiBaseUrl()
 
 export async function apiClient<T = any>(
   endpoint: string,
@@ -21,9 +22,10 @@ export async function apiClient<T = any>(
   timeoutMs = 10000,
 ): Promise<ApiResponse<T>> {
   const cleanEndpoint = sanitizeInput(endpoint, 512)
+  const baseUrl = getApiBaseUrl()
   const rawUrl = cleanEndpoint.startsWith("http")
     ? cleanEndpoint
-    : `${API_BASE_URL.replace(/\/$/, "")}/${cleanEndpoint.replace(/^\//, "")}`
+    : `${baseUrl.replace(/\/$/, "")}/${cleanEndpoint.replace(/^\//, "")}`
 
   const safeUrl = sanitizeUrl(rawUrl)
   if (!safeUrl) {
@@ -67,6 +69,9 @@ export async function apiClient<T = any>(
     const data = await response.json().catch(() => null)
 
     if (!response.ok) {
+      if (import.meta.env?.DEV) {
+        console.warn(`[Launcher API] Request to ${safeUrl} returned ${response.status}:`, data)
+      }
       return {
         success: false,
         status: response.status,
@@ -84,6 +89,9 @@ export async function apiClient<T = any>(
   } catch (err: any) {
     clearTimeout(timeoutId)
     const isTimeout = err?.name === "AbortError"
+    if (import.meta.env?.DEV) {
+      console.warn(`[Launcher API] Request to ${safeUrl} failed:`, err?.message || err)
+    }
     return {
       success: false,
       status: 0,

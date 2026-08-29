@@ -480,9 +480,11 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     instanceRoot,
     clientFiles: payload.clientFiles,
     modpackVersion: payload.modpackVersion,
+    apiBaseUrl: payload.apiBaseUrl,
     onProgress,
     onPhaseChange,
   })
+
 })
 
 ipcMain.handle("game-pause-sync", async () => {

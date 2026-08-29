@@ -61,7 +61,7 @@ interface ElectronAPI {
   openExternal?: (url: string) => void
 
   checkSyncPlan?: (payload: { clientFiles: ClientFile[]; modpackVersion?: string }) => Promise<SyncPlanCheckResult>
-  startSync?: (payload: { clientFiles: ClientFile[]; modpackVersion?: string }) => Promise<{ success: boolean; downloadedCount: number; prunedCount: number; paused?: boolean }>
+  startSync?: (payload: { clientFiles: ClientFile[]; modpackVersion?: string; apiBaseUrl?: string }) => Promise<{ success: boolean; downloadedCount: number; prunedCount: number; paused?: boolean }>
   pauseSync?: () => Promise<boolean>
   cancelSync?: () => Promise<boolean>
   uninstallGame?: () => Promise<{ success: boolean }>

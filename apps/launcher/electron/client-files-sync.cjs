@@ -26,15 +26,26 @@ async function calculateFileSha256(filePath) {
 
 /**
  * Resolves effective API base URL.
+ * In development (NODE_ENV !== "production"): defaults to http://127.0.0.1:8787 unless overridden.
+ * In production (NODE_ENV === "production"): defaults to https://api.apparatia.net/api/v1.
  */
 function getEffectiveApiBaseUrl() {
   const envUrl =
     process.env.HIKAT_API_URL ||
     process.env.VITE_API_URL ||
-    process.env.VITE_BACKEND_API_URL ||
-    DEFAULT_API_BASE_URL
-  return envUrl.replace(/\/$/, "")
+    process.env.VITE_BACKEND_API_URL
+
+  if (envUrl && typeof envUrl === "string" && envUrl.trim()) {
+    return envUrl.trim().replace(/\/$/, "")
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    return "http://127.0.0.1:8787"
+  }
+
+  return DEFAULT_API_BASE_URL
 }
+
 
 /**
  * Security: Validates and restricts download URLs to authorized origins only.

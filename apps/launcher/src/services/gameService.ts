@@ -1,4 +1,5 @@
 import { graphqlClient, apiClient } from "./apiClient"
+import { getApiBaseUrl } from "../config/api"
 import type { PublishedModpack, ClientFile, SyncPlanCheckResult } from "../vite-env"
 
 export type GameButtonState =
@@ -198,7 +199,11 @@ export const gameService = {
 
   async startSync(clientFiles: ClientFile[], modpackVersion: string) {
     if (window.electronAPI?.startSync) {
-      return await window.electronAPI.startSync({ clientFiles, modpackVersion })
+      return await window.electronAPI.startSync({
+        clientFiles,
+        modpackVersion,
+        apiBaseUrl: getApiBaseUrl(),
+      })
     }
   },
 

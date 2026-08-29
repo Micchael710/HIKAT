@@ -1,33 +1,13 @@
 import { graphqlClient } from "./apiClient"
+import { resolveApiAssetUrl } from "../config/api"
 import type { GlobalSkin, PlayerSkin, SkinUploadTicket, ActiveSkinSelection } from "../types"
 import {
   validateMinecraftSkinTexture,
   MAX_SKIN_SIZE_BYTES,
 } from "@hikat/shared"
 
-/**
- * Normalizes relative backend asset URLs (/media/content/...) into absolute HTTP URLs
- * without mutating already absolute HTTPS/HTTP or data URLs.
- */
-export function resolveApiAssetUrl(url?: string | null): string {
-  if (!url || typeof url !== "string") return ""
-  const trimmed = url.trim()
-  if (
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://") ||
-    trimmed.startsWith("data:") ||
-    trimmed.startsWith("blob:")
-  ) {
-    return trimmed
-  }
-  const baseUrl = (
-    import.meta.env.VITE_BACKEND_API_URL ||
-    import.meta.env.VITE_API_URL ||
-    "http://localhost:8787"
-  ).replace(/\/$/, "")
-  const cleanPath = trimmed.replace(/^\//, "")
-  return `${baseUrl}/${cleanPath}`
-}
+export { resolveApiAssetUrl }
+
 
 /**
  * Fetches the public global skin catalog (status: AVAILABLE) from HiKAT Backend.

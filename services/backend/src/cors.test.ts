@@ -35,6 +35,36 @@ describe("HiKAT Backend CORS Security", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://127.0.0.1:5174")
   })
 
+  it("permits OPTIONS preflight from Launcher dev server http://localhost:8443 in development", () => {
+    const req = new Request("http://localhost:8787/graphql", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:8443",
+        "Access-Control-Request-Method": "POST",
+      },
+    })
+
+    const res = handleOptionsRequest(req, devEnv)
+    expect(res.status).toBe(204)
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:8443")
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true")
+  })
+
+  it("permits OPTIONS preflight from Launcher dev server http://127.0.0.1:8443 in development", () => {
+    const req = new Request("http://localhost:8787/graphql", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://127.0.0.1:8443",
+        "Access-Control-Request-Method": "POST",
+      },
+    })
+
+    const res = handleOptionsRequest(req, devEnv)
+    expect(res.status).toBe(204)
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://127.0.0.1:8443")
+  })
+
+
   it("rejects unauthorized arbitrary origin by omitting Access-Control-Allow-Origin", () => {
     const req = new Request("http://localhost:8787/graphql", {
       method: "OPTIONS",
