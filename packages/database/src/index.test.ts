@@ -780,6 +780,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0016_game_release_cover_media.sql",
       "0017_server_managed_content.sql",
       "0018_operation_lock_lease.sql",
+      "0019_release_activation_and_deployment_order.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -2264,7 +2265,64 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(foundSync?.status).toBe("PENDING")
     expect(foundSync?.releaseId).toBe(releaseId)
   })
+
+  it("supports updateDeploymentOrder and launcherActiveReleaseId on projectSettings with baseline backfill (Shard 08F)", async () => {
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+    const userId = crypto.randomUUID()
+    const releaseId = crypto.randomUUID()
+    const now = new Date().toISOString()
+
+    await db.insert(schema.users).values({
+      id: userId,
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.insert(schema.gameReleases).values({
+      id: releaseId,
+      version: "1.0.0",
+      status: "PUBLISHED",
+      publishedAt: now,
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // The row 'main' is already created by migration sequence 0006 -> 0019
+    const initialSettings = await db
+      .select()
+      .from(schema.projectSettings)
+      .where(eq(schema.projectSettings.id, "main"))
+      .get()
+
+    expect(initialSettings).toBeDefined()
+    expect(initialSettings?.updateDeploymentOrder).toBe("SERVER_FIRST")
+
+    // Update settings with releaseId and PLAYERS_FIRST
+    await db
+      .update(schema.projectSettings)
+      .set({
+        launcherActiveReleaseId: releaseId,
+        updateDeploymentOrder: "PLAYERS_FIRST",
+        updatedAt: now,
+      })
+      .where(eq(schema.projectSettings.id, "main"))
+
+    const updated = await db
+      .select()
+      .from(schema.projectSettings)
+      .where(eq(schema.projectSettings.id, "main"))
+      .get()
+
+    expect(updated?.updateDeploymentOrder).toBe("PLAYERS_FIRST")
+    expect(updated?.launcherActiveReleaseId).toBe(releaseId)
+  })
 })
+
+
 
 
 

@@ -1,5 +1,13 @@
 export const settingsTypeDefs = /* GraphQL */ `
   """
+  Order of game release deployment to players and server
+  """
+  enum UpdateDeploymentOrder {
+    SERVER_FIRST
+    PLAYERS_FIRST
+  }
+
+  """
   Full project and launcher configuration for administrators
   """
   type AdminSettings {
@@ -12,6 +20,8 @@ export const settingsTypeDefs = /* GraphQL */ `
     websiteUrl: String
     minRamGb: Int!
     recommendedRamGb: Int!
+    updateDeploymentOrder: UpdateDeploymentOrder!
+    launcherActiveReleaseId: ID
     updatedAt: DateTime!
   }
 
@@ -40,6 +50,7 @@ export const settingsTypeDefs = /* GraphQL */ `
     websiteUrl: String
     minRamGb: Int
     recommendedRamGb: Int
+    updateDeploymentOrder: UpdateDeploymentOrder
   }
 
   extend type Query {
@@ -61,3 +72,4 @@ export const settingsTypeDefs = /* GraphQL */ `
     updateAdminSettings(input: UpdateAdminSettingsInput!): AdminSettings!
   }
 `
+

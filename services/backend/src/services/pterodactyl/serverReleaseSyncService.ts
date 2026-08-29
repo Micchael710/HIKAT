@@ -694,7 +694,7 @@ export async function applyServerReleaseSync(
       }
     }
 
-    // 8. Record APPLIED in server_release_syncs table with honest summary
+    // 8. Record APPLIED in server_release_syncs table and ACTIVATE release for launcher in D1
     const nowEnd = new Date().toISOString()
     const finalSummary: ServerReleaseSyncSummaryGql = {
       toInstall: installedCount,
@@ -703,15 +703,24 @@ export async function applyServerReleaseSync(
       toKeep: keptCount,
     }
 
-    await db
-      .update(schema.serverReleaseSyncs)
-      .set({
-        status: "APPLIED",
-        appliedAt: nowEnd,
-        details: JSON.stringify(finalSummary),
-        updatedAt: nowEnd,
-      })
-      .where(eq(schema.serverReleaseSyncs.id, syncId))
+    await db.batch([
+      db
+        .update(schema.serverReleaseSyncs)
+        .set({
+          status: "APPLIED",
+          appliedAt: nowEnd,
+          details: JSON.stringify(finalSummary),
+          updatedAt: nowEnd,
+        })
+        .where(eq(schema.serverReleaseSyncs.id, syncId)),
+      db
+        .update(schema.projectSettings)
+        .set({
+          launcherActiveReleaseId: published.id,
+          updatedAt: nowEnd,
+        })
+        .where(eq(schema.projectSettings.id, "main")),
+    ])
 
     return {
       success: true,
@@ -719,6 +728,7 @@ export async function applyServerReleaseSync(
       syncedCount: installedCount + updatedCount + removedCount,
       status: "APPLIED",
     }
+
   } catch (err: any) {
     // If sync failed at any point, record FAILED in D1
     const now = new Date().toISOString()

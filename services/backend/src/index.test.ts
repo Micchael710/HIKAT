@@ -7138,18 +7138,16 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       )
 
       const batchSpy = vi.fn().mockImplementation(async (queries: any[]) => {
-        // Assert that the batch received exactly 2 statements:
-
+        // Assert that the batch received statements (archive, publish, and optional activation):
         // [0]: update gameReleases set status=ARCHIVED where status=PUBLISHED
-
         // [1]: update gameReleases set version=1.0.1, status=PUBLISHED where id=draft2Id
-
-        expect(queries.length).toBe(2)
+        // [2]: update projectSettings set launcherActiveReleaseId (when activating)
+        expect(queries.length).toBeGreaterThanOrEqual(2)
 
         // Simulate atomic rollback - no changes are written to database
-
         throw batchError
       })
+
 
       // Attach batch implementation to db
       ;(db as any).batch = batchSpy
@@ -7206,9 +7204,10 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const successBatchSpy = vi
         .fn()
         .mockImplementation(async (queries: any[]) => {
-          expect(queries.length).toBe(2)
+          expect(queries.length).toBeGreaterThanOrEqual(2)
 
-          // Execute both queries atomically
+          // Execute queries atomically
+
 
           for (const q of queries) {
             if (typeof q.execute === "function") {

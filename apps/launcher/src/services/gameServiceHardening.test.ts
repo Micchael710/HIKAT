@@ -260,10 +260,77 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
   })
 
   it("10. cancelSync propagates rejection from Electron when in INSTALLING phase", async () => {
+
     window.electronAPI = {
       cancelSync: vi.fn().mockRejectedValue(new Error("Cannot cancel synchronization while installation phase is in progress.")),
     } as any
 
     await expect(gameService.cancelSync()).rejects.toThrow(/installation phase is in progress/i)
   })
+
+  it("11. Shard 8F Compatibility: checkGameManifest respects active release returned by publishedModpack", async () => {
+
+    // When publishedModpack returns active release 1.0.0 (while 1.1.0 is published pending on server)
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          clientFiles: [
+            {
+              path: "mods/active-v10.jar",
+              sha256: "e".repeat(64),
+              sizeBytes: 1000,
+              downloadUrl: "/game/download/10",
+              policy: "NO_MODIFICABLE",
+            },
+          ],
+        },
+      },
+    })
+
+    window.electronAPI = {
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        filesToDownload: 0,
+        filesToPrune: 0,
+        totalDownloadBytes: 0,
+        needsUpdate: false,
+        isFullyInstalled: true,
+        hasExistingInstall: true,
+      }),
+    } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest?.version).toBe("1.0.0")
+    expect(manifest?.clientFiles[0]?.path).toBe("mods/active-v10.jar")
+
+    // After activation of 1.1.0, publishedModpack delivers 1.1.0
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.1.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          clientFiles: [
+            {
+              path: "mods/active-v11.jar",
+              sha256: "f".repeat(64),
+              sizeBytes: 1100,
+              downloadUrl: "/game/download/11",
+              policy: "NO_MODIFICABLE",
+            },
+          ],
+        },
+      },
+    })
+
+    const activatedManifest = await gameService.checkGameManifest()
+    expect(activatedManifest?.version).toBe("1.1.0")
+    expect(activatedManifest?.clientFiles[0]?.path).toBe("mods/active-v11.jar")
+  })
 })
+

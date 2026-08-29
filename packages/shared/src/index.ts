@@ -1714,6 +1714,16 @@ export function mapPterodactylActivityEvent(event: string | null | undefined): {
   return { eventType: "SERVER_ACTIVITY", description: "Actividad del servidor" }
 }
 
+// --- Release Deployment Order Configuration (Shard 08F) ---
+
+export const ALLOWED_UPDATE_DEPLOYMENT_ORDERS = ["SERVER_FIRST", "PLAYERS_FIRST"] as const
+export type UpdateDeploymentOrder = (typeof ALLOWED_UPDATE_DEPLOYMENT_ORDERS)[number]
+export const UpdateDeploymentOrder = {
+  SERVER_FIRST: "SERVER_FIRST",
+  PLAYERS_FIRST: "PLAYERS_FIRST",
+} as const
+
+
 
 
 

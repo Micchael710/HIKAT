@@ -483,25 +483,38 @@ export interface AdminGameOverview {
   draftFingerprint?: string | null
 }
 
-// --- Settings Types (Shard 06.5) ---
+// --- Settings Types (Shard 06.5 & Shard 08F) ---
+
+export type UpdateDeploymentOrder = "SERVER_FIRST" | "PLAYERS_FIRST"
 
 export interface AdminSettings {
   projectName: string
-
   maintenanceEnabled: boolean
-
   maintenanceMessage: string
-
   serverIp: string
-
   serverPort: number
-
   discordUrl?: string | null
   websiteUrl?: string | null
   minRamGb: number
   recommendedRamGb: number
+  updateDeploymentOrder: UpdateDeploymentOrder
+  launcherActiveReleaseId?: string | null
   updatedAt: string
 }
+
+export interface UpdateAdminSettingsInput {
+  projectName?: string
+  maintenanceEnabled?: boolean
+  maintenanceMessage?: string
+  serverIp?: string
+  serverPort?: number
+  discordUrl?: string
+  websiteUrl?: string
+  minRamGb?: number
+  recommendedRamGb?: number
+  updateDeploymentOrder?: UpdateDeploymentOrder
+}
+
 
 
 

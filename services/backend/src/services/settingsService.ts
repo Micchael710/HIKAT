@@ -6,8 +6,7 @@ import type {
   ClientConfigurationGql,
   UpdateAdminSettingsInputGql,
 } from "@hikat/graphql"
-
-import { normalizeIsoDateTime } from "@hikat/shared"
+import { normalizeIsoDateTime, ALLOWED_UPDATE_DEPLOYMENT_ORDERS } from "@hikat/shared"
 
 export function formatAdminSettings(row: schema.ProjectSetting): AdminSettingsGql {
   return {
@@ -20,10 +19,11 @@ export function formatAdminSettings(row: schema.ProjectSetting): AdminSettingsGq
     websiteUrl: row.websiteUrl,
     minRamGb: row.minRamGb,
     recommendedRamGb: row.recommendedRamGb,
+    updateDeploymentOrder: (row.updateDeploymentOrder as any) || "SERVER_FIRST",
+    launcherActiveReleaseId: row.launcherActiveReleaseId || null,
     updatedAt: normalizeIsoDateTime(row.updatedAt),
   }
 }
-
 
 export function formatClientConfiguration(row: schema.ProjectSetting): ClientConfigurationGql {
   return {
@@ -46,7 +46,31 @@ export async function ensureSettingsRecord(db: Database): Promise<schema.Project
     .where(eq(schema.projectSettings.id, "main"))
     .get()
 
-  if (existing) return existing
+  if (existing) {
+    // Bootstrap backfill: If launcherActiveReleaseId is null and a legacy PUBLISHED release exists,
+    // establish it as the initial baseline active release.
+    if (existing.launcherActiveReleaseId === null) {
+      const published = await db
+        .select()
+        .from(schema.gameReleases)
+        .where(eq(schema.gameReleases.status, "PUBLISHED"))
+        .get()
+      if (published) {
+        await db
+          .update(schema.projectSettings)
+          .set({ launcherActiveReleaseId: published.id })
+          .where(eq(schema.projectSettings.id, "main"))
+        existing.launcherActiveReleaseId = published.id
+      }
+    }
+    return existing
+  }
+
+  const published = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(eq(schema.gameReleases.status, "PUBLISHED"))
+    .get()
 
   const now = new Date().toISOString()
   const initial = {
@@ -60,6 +84,8 @@ export async function ensureSettingsRecord(db: Database): Promise<schema.Project
     websiteUrl: "https://hikat.org",
     minRamGb: 4,
     recommendedRamGb: 8,
+    updateDeploymentOrder: "SERVER_FIRST",
+    launcherActiveReleaseId: published?.id || null,
     updatedBy: null,
     updatedAt: now,
   }
@@ -146,6 +172,16 @@ export async function updateAdminSettings(
     updates.recommendedRamGb = recRam
   }
 
+  if (input.updateDeploymentOrder !== undefined && input.updateDeploymentOrder !== null) {
+    if (!ALLOWED_UPDATE_DEPLOYMENT_ORDERS.includes(input.updateDeploymentOrder as any)) {
+      throw createGraphQLError(
+        `Orden de actualización inválido: ${input.updateDeploymentOrder}`,
+        "VALIDATION_ERROR",
+      )
+    }
+    updates.updateDeploymentOrder = input.updateDeploymentOrder
+  }
+
   await db
     .update(schema.projectSettings)
     .set(updates)
@@ -159,3 +195,4 @@ export async function updateAdminSettings(
 
   return formatAdminSettings(updated!)
 }
+

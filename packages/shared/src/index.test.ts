@@ -517,6 +517,12 @@ describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
     expect(fileAncestorCheck.valid).toBe(false)
     expect(fileAncestorCheck.error).toContain("no puede contener")
   })
+  it("exposes UpdateDeploymentOrder constants and validation", async () => {
+    const { ALLOWED_UPDATE_DEPLOYMENT_ORDERS, UpdateDeploymentOrder } = await import("./index")
+    expect(ALLOWED_UPDATE_DEPLOYMENT_ORDERS).toEqual(["SERVER_FIRST", "PLAYERS_FIRST"])
+    expect(UpdateDeploymentOrder.SERVER_FIRST).toBe("SERVER_FIRST")
+    expect(UpdateDeploymentOrder.PLAYERS_FIRST).toBe("PLAYERS_FIRST")
+  })
 })
 
 

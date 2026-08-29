@@ -27,7 +27,9 @@ import {
   formatMediaGql,
   deleteMedia,
 } from "../mediaService"
+import { ensureSettingsRecord } from "../settingsService"
 import type { Env } from "../../types"
+
 
 /**
  * Deterministically computes SHA-256 fingerprint representing the current draft state and its files.
@@ -362,22 +364,92 @@ export function isClientGameReleaseFile(file: {
   return true // RESOURCE_PACK, SHADER_PACK, CONFIG, KUBEJS, SCRIPT, GENERAL, etc.
 }
 
+/**
+ * Checks if a release has any changes that must be physically applied to the server
+ * compared to the current server managed content state.
+ * Server-relevant files are MOD with sourceEnvironment === "BOTH".
+ */
+export async function hasServerRelevantChanges(
+  db: Database,
+  draftFiles: schema.GameReleaseFile[],
+): Promise<boolean> {
+  const desiredBothMods = draftFiles.filter(
+    (f) => !f.isDirectory && f.category === "MOD" && f.sourceEnvironment === "BOTH",
+  )
+
+  const currentServerManaged = await db
+    .select()
+    .from(schema.serverManagedContent)
+    .where(eq(schema.serverManagedContent.managementSource, "GAME_RELEASE"))
+    .all()
+
+  // 1. Check if any desired mod is new or has changed hash/path
+  for (const desired of desiredBothMods) {
+    const matched = currentServerManaged.find(
+      (c) =>
+        c.gameReleaseFileId === desired.id ||
+        (c.provider === desired.sourceProvider && c.projectId === desired.sourceProjectId) ||
+        c.targetPath === `mods/${desired.name}`,
+    )
+    if (!matched) {
+      return true // New mod to install on server
+    }
+    if (matched.sha256 !== desired.sha256 || matched.targetPath !== `mods/${desired.name}`) {
+      return true // Mod updated on server
+    }
+  }
+
+  // 2. Check if any current server managed mod is removed from the release
+  for (const current of currentServerManaged) {
+    const matchedDesired = desiredBothMods.find(
+      (d) =>
+        d.id === current.gameReleaseFileId ||
+        (d.sourceProvider === current.provider && d.sourceProjectId === current.projectId) ||
+        `mods/${d.name}` === current.targetPath,
+    )
+    if (!matchedDesired) {
+      return true // Mod removed on server
+    }
+  }
+
+  return false
+}
+
 export async function getPublishedModpack(
   db: Database,
   env: Env,
 ): Promise<PublishedModpackGql | null> {
-  const published = await db
-    .select()
-    .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "PUBLISHED"))
-    .get()
+  const settings = await ensureSettingsRecord(db)
+  let activeRelease: schema.GameRelease | undefined
 
-  if (!published) return null
+  if (settings.launcherActiveReleaseId) {
+    activeRelease = await db
+      .select()
+      .from(schema.gameReleases)
+      .where(eq(schema.gameReleases.id, settings.launcherActiveReleaseId))
+      .get()
+  } else {
+    // Fallback / legacy bootstrap
+    const published = await db
+      .select()
+      .from(schema.gameReleases)
+      .where(eq(schema.gameReleases.status, "PUBLISHED"))
+      .get()
+    if (published) {
+      activeRelease = published
+      await db
+        .update(schema.projectSettings)
+        .set({ launcherActiveReleaseId: published.id })
+        .where(eq(schema.projectSettings.id, "main"))
+    }
+  }
+
+  if (!activeRelease) return null
 
   const allRecords = await db
     .select()
     .from(schema.gameReleaseFiles)
-    .where(eq(schema.gameReleaseFiles.releaseId, published.id))
+    .where(eq(schema.gameReleaseFiles.releaseId, activeRelease.id))
     .all()
 
   // 1. Resolve effective policies across the entire release tree
@@ -395,13 +467,14 @@ export async function getPublishedModpack(
   }))
 
   return {
-    version: published.version,
-    minecraftVersion: published.minecraftVersion,
-    neoForgeVersion: published.neoForgeVersion,
+    version: activeRelease.version,
+    minecraftVersion: activeRelease.minecraftVersion,
+    neoForgeVersion: activeRelease.neoForgeVersion,
     mandatory: true,
     clientFiles,
   }
 }
+
 
 export async function getAdminGameOverview(
   db: Database,
@@ -884,38 +957,71 @@ export async function publishGameRelease(
 
   const now = new Date().toISOString()
 
-  // 9. ATOMIC CONCURRENT PUBLICATION:
-  // Execute both queries atomically in a single D1 batch with strict draft status preconditions
-  await db.batch([
-    db
-      .update(schema.gameReleases)
+  // 9. ATOMIC CONCURRENT PUBLICATION & ACTIVATION ENGINE:
+  const settings = await ensureSettingsRecord(db)
+  const hasServerChanges = await hasServerRelevantChanges(db, draftFiles)
+
+  let shouldActivate = false
+  if (!settings.launcherActiveReleaseId) {
+    // Initial release baseline activation
+    shouldActivate = true
+  } else if (settings.updateDeploymentOrder === "PLAYERS_FIRST") {
+    shouldActivate = true
+  } else if (settings.updateDeploymentOrder === "SERVER_FIRST") {
+    if (!hasServerChanges) {
+      // 0 server-relevant changes -> activate immediately without waiting for server apply
+      shouldActivate = true
+    } else {
+      // Server-relevant changes present -> remains pending until explicit server apply
+      shouldActivate = false
+    }
+  }
+
+  const archiveQuery = db
+    .update(schema.gameReleases)
+    .set({
+      status: "ARCHIVED",
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(schema.gameReleases.status, "PUBLISHED"),
+        sql`EXISTS (SELECT 1 FROM game_releases WHERE id = ${draft.id} AND status = 'DRAFT')`,
+      ),
+    )
+
+  const publishQuery = db
+    .update(schema.gameReleases)
+    .set({
+      version: targetVersion,
+      status: "PUBLISHED",
+      notes: targetNotes,
+      coverMediaId: targetCoverMediaId,
+      publishedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(schema.gameReleases.id, draft.id),
+        eq(schema.gameReleases.status, "DRAFT"),
+      ),
+    )
+
+  if (shouldActivate) {
+    const activateQuery = db
+      .update(schema.projectSettings)
       .set({
-        status: "ARCHIVED",
+        launcherActiveReleaseId: draft.id,
         updatedAt: now,
       })
-      .where(
-        and(
-          eq(schema.gameReleases.status, "PUBLISHED"),
-          sql`EXISTS (SELECT 1 FROM game_releases WHERE id = ${draft.id} AND status = 'DRAFT')`,
-        ),
-      ),
-    db
-      .update(schema.gameReleases)
-      .set({
-        version: targetVersion,
-        status: "PUBLISHED",
-        notes: targetNotes,
-        coverMediaId: targetCoverMediaId,
-        publishedAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(schema.gameReleases.id, draft.id),
-          eq(schema.gameReleases.status, "DRAFT"),
-        ),
-      ),
-  ])
+      .where(eq(schema.projectSettings.id, "main"))
+
+    await db.batch([archiveQuery, publishQuery, activateQuery])
+  } else {
+    await db.batch([archiveQuery, publishQuery])
+  }
+
+
 
   const published = await db
     .select()

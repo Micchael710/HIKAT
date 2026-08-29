@@ -833,7 +833,9 @@ export interface InstallModPlanInputGql {
   manualOverrides?: ModVersionOverrideInputGql[] | null
 }
 
-// --- Settings Types (Shard 06.5) ---
+// --- Settings Types (Shard 06.5 & Shard 08F) ---
+
+export type UpdateDeploymentOrderGql = "SERVER_FIRST" | "PLAYERS_FIRST"
 
 export interface AdminSettingsGql {
   projectName: string
@@ -853,6 +855,10 @@ export interface AdminSettingsGql {
   minRamGb: number
 
   recommendedRamGb: number
+
+  updateDeploymentOrder: UpdateDeploymentOrderGql
+
+  launcherActiveReleaseId?: string | null
 
   updatedAt: string
 }
@@ -895,7 +901,10 @@ export interface UpdateAdminSettingsInputGql {
   minRamGb?: number | null
 
   recommendedRamGb?: number | null
+
+  updateDeploymentOrder?: UpdateDeploymentOrderGql | null
 }
+
 
 // --- Server Content & Release Sync Types (Shard 08D) ---
 

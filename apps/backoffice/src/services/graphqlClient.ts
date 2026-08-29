@@ -1874,7 +1874,7 @@ export const gameApi = {
 }
 
 
-// --- Settings API Facade (Shard 06.5) ---
+// --- Settings API Facade (Shard 06.5 & Shard 08F) ---
 
 export const settingsApi = {
   async getAdminSettings(): Promise<import("../types").AdminSettings> {
@@ -1890,6 +1890,8 @@ export const settingsApi = {
           websiteUrl
           minRamGb
           recommendedRamGb
+          updateDeploymentOrder
+          launcherActiveReleaseId
           updatedAt
         }
       }
@@ -1898,17 +1900,9 @@ export const settingsApi = {
     return data.adminSettings
   },
 
-  async updateAdminSettings(input: {
-    projectName?: string
-    maintenanceEnabled?: boolean
-    maintenanceMessage?: string
-    serverIp?: string
-    serverPort?: number
-    discordUrl?: string
-    websiteUrl?: string
-    minRamGb?: number
-    recommendedRamGb?: number
-  }): Promise<import("../types").AdminSettings> {
+  async updateAdminSettings(
+    input: import("../types").UpdateAdminSettingsInput,
+  ): Promise<import("../types").AdminSettings> {
     const mutation = /* GraphQL */ `
       mutation UpdateAdminSettings($input: UpdateAdminSettingsInput!) {
         updateAdminSettings(input: $input) {
@@ -1921,6 +1915,8 @@ export const settingsApi = {
           websiteUrl
           minRamGb
           recommendedRamGb
+          updateDeploymentOrder
+          launcherActiveReleaseId
           updatedAt
         }
       }
@@ -1929,6 +1925,7 @@ export const settingsApi = {
     return data.updateAdminSettings
   },
 }
+
 
 // --- Mod Providers API Facade (Shard 08B) ---
 
