@@ -4,9 +4,10 @@
  * HiKAT Launcher Local Development Orchestrator
  *
  * Sequentially boots:
- * 1. Vite dev server (pnpm --filter hikat-launcher dev on http://127.0.0.1:8443)
- * 2. Readiness health check polling http://127.0.0.1:8443
- * 3. Electron desktop application (pnpm --filter hikat-launcher desktop)
+ * 1. Pre-flight port sanitation (frees port 8443 if held by an orphaned process)
+ * 2. Vite dev server (pnpm --filter hikat-launcher dev on http://127.0.0.1:8443)
+ * 3. Readiness health check polling http://127.0.0.1:8443
+ * 4. Electron desktop application (pnpm --filter hikat-launcher desktop)
  *
  * Ensures Electron never falls back to dist/index.html during local development
  * and cleanly terminates both processes on exit.
@@ -16,6 +17,7 @@ import { spawn, execSync } from "node:child_process"
 import http from "node:http"
 
 export const LAUNCHER_DEV_URL = "http://127.0.0.1:8443"
+export const LAUNCHER_PORT = 8443
 export const READY_TIMEOUT_MS = 30000
 export const POLL_INTERVAL_MS = 300
 
@@ -24,6 +26,35 @@ export const pnpmCmd = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
 let viteProcess = null
 let electronProcess = null
 let isShuttingDown = false
+
+export function freePortIfOccupied(port) {
+  try {
+    if (process.platform === "win32") {
+      const output = execSync(`netstat -ano | findstr :${port}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+      const lines = output.trim().split("\n")
+      const pids = new Set()
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/)
+        const pid = parts[parts.length - 1]
+        if (pid && /^\d+$/.test(pid) && pid !== "0" && pid !== String(process.pid)) {
+          pids.add(pid)
+        }
+      }
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" })
+        } catch (_) {}
+      }
+    } else {
+      try {
+        const pids = execSync(`lsof -ti :${port}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
+        if (pids) {
+          execSync(`kill -9 ${pids.split("\n").join(" ")}`, { stdio: "ignore" })
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
 
 export function killProcessTree(proc) {
   if (!proc || !proc.pid) return
@@ -53,6 +84,8 @@ export function cleanup() {
     killProcessTree(viteProcess)
     viteProcess = null
   }
+
+  freePortIfOccupied(LAUNCHER_PORT)
 }
 
 /**
@@ -111,6 +144,9 @@ export async function startDevLauncher() {
   process.on("exit", () => {
     cleanup()
   })
+
+  // Ensure port 8443 is clean before boot
+  freePortIfOccupied(LAUNCHER_PORT)
 
   console.log("[dev:launcher] Starting Launcher Vite dev server...")
 
