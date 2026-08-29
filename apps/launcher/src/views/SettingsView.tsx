@@ -854,7 +854,7 @@ export default function SettingsView({
                           letterSpacing: "0.03em",
                         }}
                       >
-                        Próximamente
+                        {t("settings.comingSoon")}
                       </span>
                     </div>
                     <div
@@ -900,7 +900,7 @@ export default function SettingsView({
                           letterSpacing: "0.03em",
                         }}
                       >
-                        Próximamente
+                        {t("settings.comingSoon")}
                       </span>
                     </div>
                     <div

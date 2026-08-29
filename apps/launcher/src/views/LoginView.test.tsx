@@ -6,8 +6,9 @@ import { createRoot } from "react-dom/client"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import LoginView from "./LoginView"
 import { authService } from "../services/authService"
+import { LanguageProvider } from "../context/LanguageContext"
 
-describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
+describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
   let unmountCurrent: (() => void) | null = null
 
   beforeEach(() => {
@@ -15,6 +16,7 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     sessionStorage.clear()
     localStorage.clear()
     localStorage.setItem("hikat_language", "es")
+    delete (window as any).electronAPI
   })
 
   afterEach(() => {
@@ -43,14 +45,59 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
 
   it("1. Renders Continue with Google and Continue with Discord OAuth buttons", async () => {
     const onLogin = vi.fn()
-    const container = await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
 
     expect(container.textContent).toContain("Continuar con Google")
     expect(container.textContent).toContain("Continuar con Discord")
     expect(container.textContent).toContain("Iniciar Sesión")
+    expect(container.textContent).toContain("o continúa con")
   })
 
-  it("2. Clicking Continue with Google initiates PKCE flow and opens external browser", async () => {
+  it("2. Uses the standard extended HiKAT logo, not reduced logo", async () => {
+    const onLogin = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const img = container.querySelector("img")
+    expect(img).not.toBeNull()
+    expect(img?.src).toContain("logo-white")
+    expect(img?.src).not.toContain("logo-reduced")
+  })
+
+  it("3. Strict layout hierarchy: Credentials form appears BEFORE OAuth buttons", async () => {
+    const onLogin = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const submitBtn = buttons.find((b) => b.textContent?.trim() === "Iniciar Sesión" && b.style.background.includes("linear-gradient"))
+    const googleBtn = buttons.find((b) => b.textContent?.includes("Google"))
+    const discordBtn = buttons.find((b) => b.textContent?.includes("Discord"))
+
+    expect(submitBtn).toBeDefined()
+    expect(googleBtn).toBeDefined()
+    expect(discordBtn).toBeDefined()
+
+    // Verify DOM document position (submit CTA must be BEFORE Google and Discord)
+    const posGoogle = submitBtn!.compareDocumentPosition(googleBtn!)
+    const posDiscord = submitBtn!.compareDocumentPosition(discordBtn!)
+
+    // Node.DOCUMENT_POSITION_FOLLOWING is 4
+    expect(posGoogle & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(posDiscord & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("4. Clicking Continue with Google initiates PKCE flow and opens external browser", async () => {
     const onLogin = vi.fn()
     const openExternalMock = vi.fn()
     ;(window as any).electronAPI = {
@@ -64,7 +111,11 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       state: "test-state",
     })
 
-    const container = await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
 
     const buttons = Array.from(container.querySelectorAll("button"))
     const googleBtn = buttons.find((b) => b.textContent?.includes("Google"))
@@ -80,7 +131,7 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     )
   })
 
-  it("3. Deep link callback completes OAuth PKCE token exchange and calls onLogin", async () => {
+  it("5. Deep link callback completes OAuth PKCE token exchange and calls onLogin", async () => {
     const onLogin = vi.fn()
     let callbackTrigger: ((url: string) => void) | null = null
 
@@ -100,7 +151,11 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       role: "PLAYER",
     })
 
-    await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+    await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
 
     sessionStorage.setItem("hikat_launcher_oauth_verifier", "saved-verifier")
     sessionStorage.setItem("hikat_launcher_oauth_state", "saved-state")
@@ -121,8 +176,7 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     })
   })
 
-
-  it("4. Cold start retrieves pending OAuth deep link on mount and processes login", async () => {
+  it("6. Cold start retrieves pending OAuth deep link on mount and processes login", async () => {
     const onLogin = vi.fn()
     ;(window as any).electronAPI = {
       openExternal: vi.fn(),
@@ -140,7 +194,11 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       role: "PLAYER",
     })
 
-    await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+    await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
 
     await act(async () => {
       await Promise.resolve()
@@ -155,9 +213,7 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     })
   })
 
-
-
-  it("5. Displays error message when OAuth callback returns error parameter", async () => {
+  it("7. Displays error message when OAuth callback returns error parameter", async () => {
     const onLogin = vi.fn()
     let callbackTrigger: ((url: string) => void) | null = null
 
@@ -170,7 +226,11 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       getPendingOAuthCallback: vi.fn().mockResolvedValue(null),
     }
 
-    const container = await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
 
     await act(async () => {
       callbackTrigger!("hikat://auth/callback?error=EMAIL_CONFLICT_LINK_REQUIRED")
@@ -180,7 +240,7 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     expect(onLogin).not.toHaveBeenCalled()
   })
 
-  it("6. Propagates keepSession toggle setting to authService.initiateOAuth", async () => {
+  it("8. Propagates keepSession toggle setting to authService.initiateOAuth", async () => {
     const onLogin = vi.fn()
     ;(window as any).electronAPI = {
       openExternal: vi.fn(),
@@ -193,9 +253,12 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       state: "s-1",
     })
 
-    const container = await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
 
-    // keepSession is true by default
     const buttons = Array.from(container.querySelectorAll("button"))
     const discordBtn = buttons.find((b) => b.textContent?.includes("Discord"))
 
@@ -206,7 +269,7 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     expect(initiateSpy).toHaveBeenCalledWith("DISCORD", true)
   })
 
-  it("7. Callback processor rejects malicious spoofing urls like callback-evil", async () => {
+  it("9. Callback processor rejects malicious spoofing urls like callback-evil", async () => {
     const onLogin = vi.fn()
     let callbackTrigger: ((url: string) => void) | null = null
 
@@ -220,7 +283,11 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     }
 
     const handleCallbackSpy = vi.spyOn(authService, "handleOAuthCallback")
-    await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+    await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
 
     // Trigger spoofed malicious URLs
     await act(async () => {
@@ -233,6 +300,23 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     expect(handleCallbackSpy).not.toHaveBeenCalled()
     expect(onLogin).not.toHaveBeenCalled()
   })
+
+  it("10. Renders in English when language context is set to 'en'", async () => {
+    localStorage.setItem("hikat_language", "en")
+    const onLogin = vi.fn()
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    expect(container.textContent).toContain("Sign In")
+    expect(container.textContent).toContain("Sign Up")
+    expect(container.textContent).toContain("Continue with Google")
+    expect(container.textContent).toContain("Continue with Discord")
+    expect(container.textContent).toContain("or continue with")
+    expect(container.textContent).toContain("Keep me signed in")
+    expect(container.textContent).toContain("Secure authentication")
+  })
 })
-
-

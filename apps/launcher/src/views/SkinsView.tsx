@@ -146,14 +146,14 @@ export default function SkinsView({
         !file.type.includes("png") &&
         !file.name.toLowerCase().endsWith(".png")
       ) {
-        showToast("El archivo de skin debe estar en formato PNG (.png).", "error")
+        showToast(t("skins.invalidSkinType"), "error")
         e.target.value = ""
         return
       }
 
       // 2. Size limit check: max 1MB
       if (file.size > MAX_SKIN_SIZE_BYTES) {
-        showToast("El archivo supera el tamaño máximo permitido de 1 MB.", "error")
+        showToast(t("skins.fileTooLarge"), "error")
         e.target.value = ""
         return
       }
@@ -166,8 +166,7 @@ export default function SkinsView({
         const validation = validateMinecraftSkinTexture(arrayBuffer)
         if (!validation.valid) {
           showToast(
-            validation.error ||
-              "Dimensiones no válidas. Debe ser una skin de Minecraft 64x64 o 64x32.",
+            validation.error || t("skins.invalidSkinDimensions"),
             "error",
           )
           return
@@ -175,11 +174,11 @@ export default function SkinsView({
 
         if (onUploadSkin) {
           await onUploadSkin(file)
-          showToast("¡Skin personalizada subida y aplicada con éxito!", "success", "#38bdf8")
+          showToast(t("skins.skinUploadSuccess"), "success", "#38bdf8")
         }
       } catch (err: any) {
         showToast(
-          err?.message || "Error al subir la skin al servidor. Inténtalo de nuevo.",
+          err?.message || t("skins.invalidSkinDimensions"),
           "error",
         )
       } finally {
@@ -192,19 +191,19 @@ export default function SkinsView({
         !file.type.includes("png") &&
         !file.name.toLowerCase().endsWith(".png")
       ) {
-        showToast("La capa debe estar en formato PNG (.png).", "error")
+        showToast(t("skins.invalidCapeType"), "error")
         e.target.value = ""
         return
       }
 
       if (file.size > MAX_CAPE_SIZE_BYTES) {
-        showToast("El archivo supera el tamaño máximo permitido de 5 MB.", "error")
+        showToast(t("skins.fileTooLarge"), "error")
         e.target.value = ""
         return
       }
 
       if (playerCapes.length >= MAX_PLAYER_CAPES) {
-        showToast(`Has alcanzado el límite de ${MAX_PLAYER_CAPES} capas personalizadas.`, "error")
+        showToast(t("skins.capeLimitReached", { limit: MAX_PLAYER_CAPES }), "error")
         e.target.value = ""
         return
       }
@@ -215,7 +214,7 @@ export default function SkinsView({
         const validation = validateCapeTextureBuffer(arrayBuffer)
         if (!validation.valid) {
           showToast(
-            validation.error || "El archivo no contiene una textura de capa PNG válida.",
+            validation.error || t("skins.invalidCapeDimensions"),
             "error",
           )
           return
@@ -235,18 +234,18 @@ export default function SkinsView({
           const tempCanvas = document.createElement("canvas")
           loadCapeToCanvas(tempCanvas, img)
         } catch {
-          showToast("Esta imagen no tiene un formato de capa compatible.", "error")
+          showToast(t("skins.invalidCapeType"), "error")
           return
         }
 
         if (onUploadCape) {
           const capeName = file.name.replace(/\.[^/.]+$/, "").slice(0, 20) || "Mi Capa"
           await onUploadCape(file, capeName)
-          showToast("¡Capa personalizada subida y guardada con éxito!", "success", "#10b981")
+          showToast(t("skins.capeUploadSuccess"), "success", "#10b981")
         }
       } catch (err: any) {
         showToast(
-          err?.message || "Error al subir la capa al servidor. Inténtalo de nuevo.",
+          err?.message || t("skins.invalidCapeDimensions"),
           "error",
         )
       } finally {
@@ -265,12 +264,12 @@ export default function SkinsView({
       setIsDeleting(true)
       const success = await onDeleteSkin()
       if (success) {
-        showToast("Skin personalizada eliminada correctamente.", "success")
+        showToast(t("skins.skinDeleteSuccess"), "success")
       } else {
-        showToast("No se pudo eliminar la skin personalizada.", "error")
+        showToast(t("skins.skinDeleteError"), "error")
       }
     } catch (err: any) {
-      showToast(err?.message || "Error al eliminar la skin.", "error")
+      showToast(err?.message || t("skins.skinDeleteError"), "error")
     } finally {
       setIsDeleting(false)
     }
@@ -285,12 +284,12 @@ export default function SkinsView({
       setIsDeleting(true)
       const success = await onDeleteCape(capeId)
       if (success) {
-        showToast("Capa eliminada correctamente.", "success")
+        showToast(t("skins.capeDeleteSuccess"), "success")
       } else {
-        showToast("No se pudo eliminar la capa.", "error")
+        showToast(t("skins.capeDeleteError"), "error")
       }
     } catch (err: any) {
-      showToast(err?.message || "Error al eliminar la capa.", "error")
+      showToast(err?.message || t("skins.capeDeleteError"), "error")
     } finally {
       setIsDeleting(false)
     }
@@ -543,10 +542,10 @@ export default function SkinsView({
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
               {isUploading
-                ? "Subiendo..."
+                ? t("common.uploading")
                 : skinType === "skin"
                   ? t("skins.uploadSkin")
-                  : "Subir Capa"}
+                  : t("skins.uploadCape")}
             </button>
           </div>
         </div>
@@ -720,7 +719,7 @@ export default function SkinsView({
                   }}
                 >
                   <span style={{ fontSize: 13, color: "#38bdf8", fontWeight: 600 }}>
-                    Tu skin personalizada activa
+                    {t("skins.activeCustomSkin")}
                   </span>
                   <button
                     type="button"
@@ -744,7 +743,7 @@ export default function SkinsView({
                       <polyline points="3 6 5 6 21 6" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
-                    {isDeleting ? "Eliminando..." : "Eliminar Skin"}
+                    {isDeleting ? t("common.deleting") : t("skins.deleteSkin")}
                   </button>
                 </div>
               )}
@@ -764,7 +763,7 @@ export default function SkinsView({
                   }}
                 >
                   <span style={{ fontSize: 13, color: "#10b981", fontWeight: 600 }}>
-                    Tu capa personalizada activa
+                    {t("skins.activeCustomCape")}
                   </span>
                   <button
                     type="button"
@@ -788,7 +787,7 @@ export default function SkinsView({
                       <polyline points="3 6 5 6 21 6" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
-                    {isDeleting ? "Eliminando..." : "Eliminar Capa"}
+                    {isDeleting ? t("common.deleting") : t("skins.deleteCape")}
                   </button>
                 </div>
               )}

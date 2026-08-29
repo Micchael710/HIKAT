@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef } from "react"
 import { ThemeMode } from "../types"
 import { BASE_FONT } from "../theme/tokens"
-import { loginBg, logoReducedWhite, logoReducedBlack } from "../assets"
+import { loginBg, logoWhite, logoBlack } from "../assets"
 import { IconGoogle, IconDiscord } from "../theme/icons"
 import { useTranslation } from "../context/LanguageContext"
 import {
   sanitizeUsername,
   sanitizeEmail,
-  sanitizeInput,
 } from "../utils/security"
 import { authService } from "../services/authService"
 
@@ -51,9 +50,9 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
 
       if (error) {
         if (error === "EMAIL_CONFLICT_LINK_REQUIRED") {
-          setErrorMessage("Este correo electrónico ya está registrado. Por favor inicia sesión con tu contraseña.")
+          setErrorMessage(t("auth.emailConflictError"))
         } else {
-          setErrorMessage("Error durante la autenticación externa.")
+          setErrorMessage(t("auth.externalAuthError"))
         }
         setIsEnteringWorld(false)
         return
@@ -84,7 +83,6 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         keepSession: pendingKeepSession,
       })
 
-
       pendingOAuthRef.current = null
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.removeItem("hikat_launcher_oauth_verifier")
@@ -97,7 +95,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
       }, 350)
     } catch (err: any) {
       setIsEnteringWorld(false)
-      setErrorMessage(err.message || "Error al completar autenticación.")
+      setErrorMessage(err.message || t("auth.genericAuthError"))
     }
   }
 
@@ -110,7 +108,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
     if (window.electronAPI.getPendingOAuthCallback) {
       window.electronAPI
         .getPendingOAuthCallback()
-        .then((pendingUrl: string | null) => {
+        ?.then((pendingUrl: string | null) => {
           if (pendingUrl) {
             processOAuthCallbackUrl(pendingUrl)
           }
@@ -147,10 +145,9 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         window.open(authUrl, "_blank")
       }
     } catch (err: any) {
-      setErrorMessage(err.message || "No se pudo iniciar el flujo de autenticación.")
+      setErrorMessage(err.message || t("auth.oauthInitError"))
     }
   }
-
 
   const handleSubmit = async () => {
     if (isEnteringWorld) return
@@ -161,12 +158,8 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
       const cleanEmail = sanitizeEmail(email)
       const cleanPassword = password.trim()
 
-      if (!cleanEmail) {
-        setErrorMessage("Por favor ingresa tu correo electrónico.")
-        return
-      }
-      if (!cleanPassword) {
-        setErrorMessage("Por favor ingresa tu contraseña.")
+      if (!cleanEmail || !cleanPassword) {
+        setErrorMessage(t("auth.missingFields"))
         return
       }
 
@@ -184,23 +177,19 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         }, 350)
       } else {
         setIsEnteringWorld(false)
-        setErrorMessage(res.error || "No se pudo iniciar sesión. Verifica tus credenciales.")
+        setErrorMessage(res.error || t("auth.loginFailed"))
       }
     } else {
       const cleanUsername = sanitizeUsername(username)
       const cleanEmail = sanitizeEmail(email)
       const cleanPassword = password.trim()
 
-      if (!cleanUsername) {
-        setErrorMessage("Por favor ingresa un nombre de usuario.")
+      if (!cleanUsername || !cleanEmail || !cleanPassword) {
+        setErrorMessage(t("auth.missingFields"))
         return
       }
-      if (!cleanEmail) {
-        setErrorMessage("Por favor ingresa tu correo electrónico.")
-        return
-      }
-      if (!cleanPassword || cleanPassword.length < 8) {
-        setErrorMessage("La contraseña debe contener al menos 8 caracteres.")
+      if (cleanPassword.length < 8) {
+        setErrorMessage(t("auth.passwordMinLength"))
         return
       }
 
@@ -227,11 +216,11 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         } else {
           setIsEnteringWorld(false)
           setTab("login")
-          setSuccessNotice("¡Cuenta registrada con éxito! Por favor inicia sesión.")
+          setSuccessNotice(t("auth.registrationSuccess"))
         }
       } else {
         setIsEnteringWorld(false)
-        setErrorMessage(res.error || "No se pudo crear la cuenta. Intenta con otro correo o usuario.")
+        setErrorMessage(res.error || t("auth.registrationFailed"))
       }
     }
   }
@@ -325,7 +314,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
           animation: "scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both",
         }}
       >
-        {/* Top: Logo & Title */}
+        {/* 1. Logo & Subtitle */}
         <div
           style={{
             display: "flex",
@@ -336,11 +325,11 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
           }}
         >
           <img
-            src={isDark ? logoReducedWhite : logoReducedBlack}
+            src={isDark ? logoWhite : logoBlack}
             alt="HiKAT Logo"
             style={{
-              height: 46,
-              maxWidth: 220,
+              height: 48,
+              maxWidth: 240,
               objectFit: "contain",
               marginBottom: 12,
               userSelect: "none",
@@ -356,8 +345,8 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             }}
           >
             {tab === "login"
-              ? "Ingresa con tu cuenta para acceder a la red de HiKAT."
-              : "Crea tu cuenta para comenzar a jugar y personalizar tu personaje."}
+              ? t("auth.loginSubtitle")
+              : t("auth.registerSubtitle")}
           </div>
         </div>
 
@@ -413,82 +402,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
           </div>
         )}
 
-        {/* OAuth Buttons (Google & Discord) */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
-          <button
-            type="button"
-            disabled={isEnteringWorld}
-            onClick={() => handleOAuthClick("GOOGLE")}
-            style={{
-              width: "100%",
-              height: 40,
-              borderRadius: 11,
-              border: isDark
-                ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                : "1.5px solid rgba(0, 0, 0, 0.12)",
-              background: isDark ? "#0d1217" : "#ffffff",
-              color: isDark ? "#ffffff" : "#111822",
-              fontSize: 13.5,
-              fontWeight: 600,
-              fontFamily: BASE_FONT,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-              cursor: isEnteringWorld ? "default" : "pointer",
-              transition: "all 0.16s ease",
-            }}
-          >
-            <IconGoogle size={18} />
-            <span>Continuar con Google</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={isEnteringWorld}
-            onClick={() => handleOAuthClick("DISCORD")}
-            style={{
-              width: "100%",
-              height: 40,
-              borderRadius: 11,
-              border: isDark
-                ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                : "1.5px solid rgba(0, 0, 0, 0.12)",
-              background: isDark ? "#0d1217" : "#ffffff",
-              color: isDark ? "#ffffff" : "#111822",
-              fontSize: 13.5,
-              fontWeight: 600,
-              fontFamily: BASE_FONT,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-              cursor: isEnteringWorld ? "default" : "pointer",
-              transition: "all 0.16s ease",
-            }}
-          >
-            <IconDiscord size={18} />
-            <span>Continuar con Discord</span>
-          </button>
-        </div>
-
-        {/* Divider */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 14,
-          }}
-        >
-          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
-          <span style={{ fontSize: 11.5, color: isDark ? "#657788" : "#8899aa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            o con credenciales
-          </span>
-          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
-        </div>
-
-        {/* Segmented Pill Switcher [ Iniciar Sesión | Registrarse ] */}
+        {/* 2. Segmented Pill Switcher [ Sign In | Sign Up ] */}
         <div
           style={{
             display: "flex",
@@ -557,7 +471,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
           })}
         </div>
 
-        {/* Form Fields */}
+        {/* 3. Form Fields (Username for register, Email, Password) */}
         <div
           style={{
             display: "flex",
@@ -568,14 +482,14 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         >
           {tab === "register" && (
             <div style={{ animation: "slideUpFade 0.18s ease" }}>
-              <label style={labelCss}>Nombre de usuario</label>
+              <label style={labelCss}>{t("auth.usernameRegisterLabel")}</label>
               <input
                 type="text"
                 value={username}
                 maxLength={24}
                 autoComplete="username"
                 spellCheck={false}
-                placeholder="Tu nombre de jugador"
+                placeholder={t("auth.usernamePlaceholderRegister")}
                 onChange={(e) => setUsername(sanitizeUsername(e.target.value))}
                 className="launcher-input"
                 style={inputCss}
@@ -587,14 +501,14 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
           )}
 
           <div>
-            <label style={labelCss}>Correo electrónico</label>
+            <label style={labelCss}>{t("auth.emailLabel")}</label>
             <input
               type="email"
               value={email}
               maxLength={254}
               autoComplete="email"
               spellCheck={false}
-              placeholder="jugador@ejemplo.com"
+              placeholder={t("auth.emailPlaceholder")}
               onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
               className="launcher-input"
               style={inputCss}
@@ -605,12 +519,12 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
           </div>
 
           <div>
-            <label style={labelCss}>Contraseña</label>
+            <label style={labelCss}>{t("auth.passwordLabel")}</label>
             <input
               type="password"
               value={password}
               autoComplete={tab === "login" ? "current-password" : "new-password"}
-              placeholder="••••••••"
+              placeholder={t("auth.passwordPlaceholder")}
               onChange={(e) => setPassword(e.target.value)}
               className="launcher-input"
               style={inputCss}
@@ -620,6 +534,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             />
           </div>
 
+          {/* 4. Keep me signed in (Login tab only) */}
           {tab === "login" && (
             <div
               style={{
@@ -689,7 +604,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             </div>
           )}
 
-          {/* Primary CTA Submit Button */}
+          {/* 5. Primary CTA Submit Button */}
           <button
             type="button"
             onClick={handleSubmit}
@@ -715,7 +630,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                 : "0 0 20px rgba(239, 196, 54, 0.35)",
               transition: "transform 0.18s ease, box-shadow 0.18s ease",
               marginTop: 4,
-              marginBottom: 8,
+              marginBottom: 4,
               transform: isEnteringWorld ? "scale(0.98)" : "none",
             }}
           >
@@ -733,27 +648,105 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                 >
                   <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                 </svg>
-                <span>Conectando...</span>
+                <span>{t("auth.connecting")}</span>
               </div>
             ) : (
               <span>
-                {tab === "login" ? "Iniciar Sesión" : "Crear Cuenta"}
+                {tab === "login"
+                  ? t("auth.submitLogin")
+                  : t("auth.submitRegister")}
               </span>
             )}
           </button>
         </div>
 
-        {/* Bottom: Version tag */}
+        {/* 6. Divider ("o continúa con" / "or continue with") */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12,
+            marginTop: 4,
+          }}
+        >
+          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
+          <span style={{ fontSize: 11.5, color: isDark ? "#657788" : "#8899aa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            {t("auth.orContinueWith")}
+          </span>
+          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
+        </div>
+
+        {/* 7. OAuth Buttons (Google & Discord) - Placed below credentials */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          <button
+            type="button"
+            disabled={isEnteringWorld}
+            onClick={() => handleOAuthClick("GOOGLE")}
+            style={{
+              width: "100%",
+              height: 40,
+              borderRadius: 11,
+              border: isDark
+                ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                : "1.5px solid rgba(0, 0, 0, 0.12)",
+              background: isDark ? "#0d1217" : "#ffffff",
+              color: isDark ? "#ffffff" : "#111822",
+              fontSize: 13.5,
+              fontWeight: 600,
+              fontFamily: BASE_FONT,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              cursor: isEnteringWorld ? "default" : "pointer",
+              transition: "all 0.16s ease",
+            }}
+          >
+            <IconGoogle size={18} />
+            <span>{t("auth.continueGoogle")}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isEnteringWorld}
+            onClick={() => handleOAuthClick("DISCORD")}
+            style={{
+              width: "100%",
+              height: 40,
+              borderRadius: 11,
+              border: isDark
+                ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                : "1.5px solid rgba(0, 0, 0, 0.12)",
+              background: isDark ? "#0d1217" : "#ffffff",
+              color: isDark ? "#ffffff" : "#111822",
+              fontSize: 13.5,
+              fontWeight: 600,
+              fontFamily: BASE_FONT,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              cursor: isEnteringWorld ? "default" : "pointer",
+              transition: "all 0.16s ease",
+            }}
+          >
+            <IconDiscord size={18} />
+            <span>{t("auth.continueDiscord")}</span>
+          </button>
+        </div>
+
+        {/* 8. Bottom: Version tag & Security */}
         <div
           style={{
             fontSize: 11,
             color: isDark ? "#4b5563" : "#9ca3af",
             fontFamily: BASE_FONT,
             textAlign: "center",
-            paddingTop: 8,
+            paddingTop: 4,
           }}
         >
-          HiKAT Launcher {LAUNCHER_VERSION} • Autenticación segura
+          HiKAT Launcher {LAUNCHER_VERSION} • {t("auth.secureAuth")}
         </div>
       </div>
     </div>

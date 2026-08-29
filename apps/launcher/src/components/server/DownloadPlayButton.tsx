@@ -696,7 +696,7 @@ export default function DownloadPlayButton({
                 fontSize: 13,
               }}
             >
-              {Math.round(dlGB * 10) / 10} / {totalGB} GB
+              {Math.round(dlGB * 10) / 10} / {totalGB} {t("common.gb")}
             </span>
           )}
 
@@ -708,7 +708,7 @@ export default function DownloadPlayButton({
               fontSize: 13,
             }}
           >
-            {timeRemainingMin > 0 ? `${timeRemainingMin} MIN` : "-- MIN"}
+            {timeRemainingMin > 0 ? `${timeRemainingMin} ${t("common.min")}` : `-- ${t("common.min")}`}
           </span>
         </div>
       </div>
