@@ -1,10 +1,11 @@
 /**
  * Centralized API Client for HiKAT Launcher
  * Configurable via centralized API authority (VITE_API_URL / local development default)
- * with automatic auth token handling.
+ * with automatic auth token handling, single-flight refresh, and 401 / UNAUTHENTICATED one-time retry.
  */
 import { sanitizeUrl, sanitizeInput } from "../utils/security"
 import { getApiBaseUrl } from "../config/api"
+import { authService } from "./authService"
 
 export interface ApiResponse<T = any> {
   success: boolean
@@ -20,6 +21,7 @@ export async function apiClient<T = any>(
   endpoint: string,
   options: RequestInit = {},
   timeoutMs = 10000,
+  isRetry = false,
 ): Promise<ApiResponse<T>> {
   const cleanEndpoint = sanitizeInput(endpoint, 512)
   const baseUrl = getApiBaseUrl()
@@ -37,10 +39,7 @@ export async function apiClient<T = any>(
     }
   }
 
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("hikat_auth_token")
-      : null
+  const token = authService.getAccessToken() || authService.getStoredToken()
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -66,6 +65,15 @@ export async function apiClient<T = any>(
     })
 
     clearTimeout(timeoutId)
+
+    // Handle HTTP 401 Unauthorized with single-flight refresh and single retry
+    if (response.status === 401 && !isRetry) {
+      const newToken = await authService.refresh()
+      if (newToken) {
+        return apiClient<T>(endpoint, options, timeoutMs, true)
+      }
+    }
+
     const data = await response.json().catch(() => null)
 
     if (!response.ok) {
@@ -105,23 +113,40 @@ export async function apiClient<T = any>(
 
 /**
  * GraphQL Client helper for Backend queries and mutations
+ * Handles single-flight refresh for UNAUTHENTICATED errors and retries once
  */
 export async function graphqlClient<T = any>(
   query: string,
   variables: Record<string, any> = {},
   timeoutMs = 15000,
+  isRetry = false,
 ): Promise<{ success: boolean; data?: T; error?: string }> {
-  const res = await apiClient<{ data?: T; errors?: Array<{ message: string }> }>(
+  const res = await apiClient<{ data?: T; errors?: Array<{ message: string; extensions?: { code?: string } }> }>(
     "/graphql",
     {
       method: "POST",
       body: JSON.stringify({ query, variables }),
     },
     timeoutMs,
+    isRetry,
   )
 
   if (res.success && res.data) {
     if (res.data.errors && res.data.errors.length > 0) {
+      const hasUnauthenticated = res.data.errors.some(
+        (e: any) =>
+          e.extensions?.code === "UNAUTHENTICATED" ||
+          e.message === "UNAUTHENTICATED" ||
+          e.message === "Authentication required",
+      )
+
+      if (hasUnauthenticated && !isRetry) {
+        const newToken = await authService.refresh()
+        if (newToken) {
+          return graphqlClient<T>(query, variables, timeoutMs, true)
+        }
+      }
+
       return {
         success: false,
         error: res.data.errors[0]?.message || "GraphQL query error",

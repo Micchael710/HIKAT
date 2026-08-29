@@ -6,6 +6,8 @@ const os = require("os")
 const { GameLauncher } = require("./game-launcher.cjs")
 const { GameOperationManager } = require("./game-operation-manager.cjs")
 const { setJavaGpuPreference } = require("./gpu-manager.cjs")
+const { SettingsStore } = require("./settings-store.cjs")
+const { SecureAuthStore } = require("./secure-auth-store.cjs")
 
 // Single instance lock to prevent duplicate launcher instances and focus existing instance
 const singleInstanceLock = app.requestSingleInstanceLock()
@@ -20,16 +22,28 @@ try {
   app.setPath("userData", path.join(appDataRoot, "launcher"))
 } catch (_) {}
 
+// Protocol client registration for OAuth deep linking (hikat://auth/callback)
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient("hikat", process.execPath, [path.resolve(process.argv[1])])
+  }
+} else {
+  app.setAsDefaultProtocolClient("hikat")
+}
+
 const instanceRoot = path.join(appDataRoot, "game files")
 const gameLauncher = new GameLauncher(app, { instanceRoot })
 const operationManager = new GameOperationManager()
+const settingsStore = new SettingsStore(app.getPath("userData"))
+const authStore = new SecureAuthStore(app.getPath("userData"))
 
 let mainWindow = null
 let splashWindow = null
 let tray = null
 let isQuitRequested = false
-let minimizeToTrayEnabled = true
-let dedicatedGpuEnabled = true
+let minimizeToTrayEnabled = settingsStore.get("minimizeToTray")
+let dedicatedGpuEnabled = settingsStore.get("dedicatedGpu")
+
 
 function getLauncherIcon() {
   try {
@@ -322,9 +336,34 @@ async function createWindow() {
   })
 }
 
-// Second instance handler (when user launches launcher while already running)
-app.on("second-instance", () => {
+function handleDeepLinkUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") return
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol === "hikat:" && parsed.hostname === "auth" && parsed.pathname === "/callback") {
+      focusMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("oauth:callback", rawUrl)
+      }
+    }
+  } catch (_) {}
+}
+
+// Second instance handler (when user launches launcher while already running or via deep link)
+app.on("second-instance", (_event, commandLine) => {
   focusMainWindow()
+  const deepLink = Array.isArray(commandLine)
+    ? commandLine.find((arg) => typeof arg === "string" && arg.startsWith("hikat://"))
+    : null
+  if (deepLink) {
+    handleDeepLinkUrl(deepLink)
+  }
+})
+
+// macOS open-url deep link handler
+app.on("open-url", (event, url) => {
+  event.preventDefault()
+  handleDeepLinkUrl(url)
 })
 
 // IPC Handlers for custom titlebar controls
@@ -367,7 +406,7 @@ ipcMain.handle("system:get-memory", async () => {
   }
 })
 
-// IPC Handlers for Global Settings
+// IPC Handlers for Global Settings (Main Authoritative Storage)
 ipcMain.handle("get-start-with-system", async () => {
   try {
     const settings = app.getLoginItemSettings()
@@ -393,11 +432,13 @@ ipcMain.on("setting-start-with-system", (_event, enabled) => {
 })
 
 ipcMain.handle("get-minimize-to-tray", async () => {
-  return minimizeToTrayEnabled
+  return settingsStore.get("minimizeToTray")
 })
 
 ipcMain.handle("setting-minimize-to-tray", async (_event, enabled) => {
-  minimizeToTrayEnabled = Boolean(enabled)
+  const safeVal = Boolean(enabled)
+  settingsStore.set("minimizeToTray", safeVal)
+  minimizeToTrayEnabled = safeVal
   if (minimizeToTrayEnabled) {
     ensureTray()
   } else {
@@ -410,7 +451,9 @@ ipcMain.handle("setting-minimize-to-tray", async (_event, enabled) => {
 })
 
 ipcMain.on("setting-minimize-to-tray", (_event, enabled) => {
-  minimizeToTrayEnabled = Boolean(enabled)
+  const safeVal = Boolean(enabled)
+  settingsStore.set("minimizeToTray", safeVal)
+  minimizeToTrayEnabled = safeVal
   if (minimizeToTrayEnabled) {
     ensureTray()
   } else {
@@ -421,23 +464,53 @@ ipcMain.on("setting-minimize-to-tray", (_event, enabled) => {
   }
 })
 
+ipcMain.handle("get-dedicated-gpu", async () => {
+  return settingsStore.get("dedicatedGpu")
+})
+
 ipcMain.handle("setting-dedicated-gpu", async (_event, enabled) => {
-  dedicatedGpuEnabled = Boolean(enabled)
+  const safeVal = Boolean(enabled)
+  settingsStore.set("dedicatedGpu", safeVal)
+  dedicatedGpuEnabled = safeVal
   return dedicatedGpuEnabled
 })
 
 ipcMain.on("setting-dedicated-gpu", (_event, enabled) => {
-  dedicatedGpuEnabled = Boolean(enabled)
+  const safeVal = Boolean(enabled)
+  settingsStore.set("dedicatedGpu", safeVal)
+  dedicatedGpuEnabled = safeVal
+})
+
+ipcMain.handle("get-ram-allocation", async () => {
+  return settingsStore.get("ramGB")
+})
+
+ipcMain.handle("setting-ram-allocation", async (_event, ramGB) => {
+  settingsStore.set("ramGB", ramGB)
+  return settingsStore.get("ramGB")
 })
 
 ipcMain.on("setting-ram-allocation", (_event, ramGB) => {
-  const num = Number(ramGB)
-  if (!isNaN(num)) {
-    const safeRam = Math.min(Math.max(Math.round(num), 1), 64)
-  }
+  settingsStore.set("ramGB", ramGB)
+})
+
+// IPC Handlers for Secure Auth Session Storage (safeStorage)
+ipcMain.handle("auth:load-session", async () => {
+  return authStore.loadSession()
+})
+
+ipcMain.handle("auth:save-session", async (_event, session) => {
+  authStore.saveSession(session)
+  return true
+})
+
+ipcMain.handle("auth:clear-session", async () => {
+  authStore.clearSession()
+  return true
 })
 
 ipcMain.on("open-external", (_event, url) => {
+
   if (typeof url === "string") {
     const cleanUrl = url.trim()
     try {

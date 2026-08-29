@@ -36,7 +36,10 @@ export async function fetchGlobalCapes(
     after,
   })
 
-  if (res.success && res.data?.capes?.items) {
+  if (!res.success) {
+    throw new Error(res.error || "Error al consultar el catálogo de capas globales")
+  }
+  if (res.data?.capes?.items) {
     return res.data.capes.items.map((item) => ({
       ...item,
       imageUrl: resolveApiAssetUrl(item.imageUrl),
@@ -47,6 +50,7 @@ export async function fetchGlobalCapes(
 
 /**
  * Fetches all custom capes belonging to the authenticated player.
+ * Throws an Error if the request fails.
  */
 export async function fetchMyPlayerCapes(): Promise<PlayerCape[]> {
   const token =
@@ -68,7 +72,11 @@ export async function fetchMyPlayerCapes(): Promise<PlayerCape[]> {
     }
   `
   const res = await graphqlClient<{ myPlayerCapes: PlayerCape[] }>(query)
-  if (res.success && res.data?.myPlayerCapes) {
+  if (!res.success) {
+    throw new Error(res.error || "Error al consultar las capas del jugador")
+  }
+
+  if (res.data?.myPlayerCapes) {
     return res.data.myPlayerCapes.map((item) => ({
       ...item,
       imageUrl: resolveApiAssetUrl(item.imageUrl),
@@ -79,6 +87,7 @@ export async function fetchMyPlayerCapes(): Promise<PlayerCape[]> {
 
 /**
  * Fetches the authenticated player's currently active cape selection.
+ * Throws an Error if the request fails.
  */
 export async function fetchMyActiveCape(): Promise<ActiveCapeSelection> {
   const defaultNone: ActiveCapeSelection = {
@@ -119,7 +128,11 @@ export async function fetchMyActiveCape(): Promise<ActiveCapeSelection> {
     }
   `
   const res = await graphqlClient<{ myActiveCape: ActiveCapeSelection }>(query)
-  if (res.success && res.data?.myActiveCape) {
+  if (!res.success) {
+    throw new Error(res.error || "Error al consultar la capa activa del jugador")
+  }
+
+  if (res.data?.myActiveCape) {
     const raw = res.data.myActiveCape
     return {
       type: raw.type,
@@ -143,6 +156,7 @@ export async function fetchMyActiveCape(): Promise<ActiveCapeSelection> {
   }
   return defaultNone
 }
+
 
 /**
  * Sets the active cape selection (NONE, GLOBAL, or CUSTOM) for the authenticated player.

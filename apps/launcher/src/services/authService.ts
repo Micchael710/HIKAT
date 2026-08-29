@@ -1,27 +1,28 @@
 /**
  * Centralized Authentication Service for HiKAT Launcher
- * Interacts with the real HiKAT Auth Worker (POST /auth/login, POST /auth/register)
+ * Powered by unified AuthClientCore with strict PLAYER role enforcement,
+ * single-flight token rotation, and Electron Main secure storage persistence.
  */
-import {
-  sanitizeUsername,
-  sanitizeEmail,
-  sanitizeInput,
-} from "../utils/security"
 
-export const AUTH_URL =
-  import.meta.env.VITE_AUTH_API_URL || "http://localhost:8788"
+import {
+  AuthClientCore,
+  AuthStorageAdapter,
+  SessionState,
+  AuthStatus,
+  generateCodeVerifier,
+  generateCodeChallenge,
+  generateRandomState,
+} from "@hikat/shared"
+import { sanitizeUsername, sanitizeEmail, sanitizeInput } from "../utils/security"
+
+export const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || "http://localhost:8788"
 
 export interface UserProfile {
-  id?: string
+  id: string
   username: string
   displayName?: string
   email: string
   role?: string
-  skinUrl?: string
-  capeUrl?: string
-  rank?: string
-  level?: number
-  memberSince?: string
   createdAt?: string
 }
 
@@ -38,35 +39,136 @@ export interface RegisterCredentials {
   password?: string
 }
 
-export interface AuthLoginResponse {
-  accessToken: string
-  refreshToken: string
-  expiresIn: number
-  tokenType: string
-  user: {
-    id: string
-    email: string
-    displayName?: string
-    role?: string
+/**
+ * Storage adapter bridging to Electron Main's safeStorage with safe fallback
+ */
+export function createLauncherStorageAdapter(): AuthStorageAdapter {
+  return {
+    loadSession: async () => {
+      if (typeof window !== "undefined" && window.electronAPI?.authLoadSession) {
+        try {
+          const session = await window.electronAPI.authLoadSession()
+          if (session && session.accessToken && session.user) {
+            return session as SessionState
+          }
+        } catch (_) {}
+      }
+      // Fallback for browser testing / dev mode
+      try {
+        const raw = localStorage.getItem("hikat_auth_session")
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed && parsed.accessToken && parsed.user) {
+            return parsed as SessionState
+          }
+        }
+      } catch (_) {}
+      return null
+    },
+
+    saveSession: async (session) => {
+      if (typeof window !== "undefined" && window.electronAPI?.authSaveSession) {
+        try {
+          await window.electronAPI.authSaveSession(session)
+        } catch (_) {}
+      }
+      // Also cache user profile in localStorage for fast UI rendering
+      try {
+        localStorage.setItem("hikat_auth_session", JSON.stringify(session))
+        localStorage.setItem("hikat_auth_token", session.accessToken)
+        localStorage.setItem(
+          "hikat_last_user",
+          JSON.stringify({
+            id: session.user.id,
+            username: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
+            displayName: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
+            email: session.user.email,
+            role: session.user.role,
+          }),
+        )
+      } catch (_) {}
+    },
+
+    clearSession: async () => {
+      if (typeof window !== "undefined" && window.electronAPI?.authClearSession) {
+        try {
+          await window.electronAPI.authClearSession()
+        } catch (_) {}
+      }
+      try {
+        localStorage.removeItem("hikat_auth_session")
+        localStorage.removeItem("hikat_auth_token")
+        localStorage.removeItem("hikat_refresh_token")
+        localStorage.removeItem("hikat_last_user")
+      } catch (_) {}
+    },
   }
 }
 
-export interface AuthRegisterResponse {
-  success: boolean
-  user: {
-    id: string
-    email: string
-    displayName?: string
-    role?: string
-  }
-  emailVerificationRequired: boolean
-}
+class LauncherAuthService {
+  private client: AuthClientCore
 
-export const authService = {
-  /**
-   * Login user with the real Auth Worker (/auth/login)
-   */
-  async login(credentials: LoginCredentials): Promise<{
+  constructor(storageAdapter?: AuthStorageAdapter) {
+    this.client = new AuthClientCore({
+      authServiceUrl: AUTH_URL,
+      allowedRole: "PLAYER",
+      storageAdapter: storageAdapter || createLauncherStorageAdapter(),
+    })
+  }
+
+  public subscribe(listener: (session: SessionState | null, status: AuthStatus) => void): () => void {
+    return this.client.subscribe(listener)
+  }
+
+  public getStatus(): AuthStatus {
+    return this.client.getStatus()
+  }
+
+  public async bootstrap(): Promise<SessionState | null> {
+    return this.client.bootstrap()
+  }
+
+  public getAccessToken(): string | null {
+    return this.client.getAccessToken()
+  }
+
+  public getStoredToken(): string | null {
+    return this.client.getAccessToken() || (typeof localStorage !== "undefined" ? localStorage.getItem("hikat_auth_token") : null)
+  }
+
+  public getUser(): UserProfile | null {
+    const u = this.client.getUser()
+    if (!u) return this.getCachedUser()
+    return {
+      id: u.id,
+      username: u.displayName || u.email.split("@")[0] || "Jugador",
+      displayName: u.displayName || u.email.split("@")[0] || "Jugador",
+      email: u.email,
+      role: u.role,
+    }
+  }
+
+  public getCachedUser(): UserProfile | null {
+    try {
+      const saved = localStorage.getItem("hikat_last_user")
+      if (!saved) return null
+      const parsed = JSON.parse(saved)
+      if (parsed && (typeof parsed.username === "string" || typeof parsed.email === "string")) {
+        return {
+          id: parsed.id || "",
+          username: sanitizeUsername(parsed.username || parsed.displayName || parsed.email?.split("@")[0]) || "Jugador",
+          displayName: sanitizeUsername(parsed.displayName || parsed.username || parsed.email?.split("@")[0]) || "Jugador",
+          email: sanitizeEmail(parsed.email || ""),
+          role: parsed.role || "PLAYER",
+        }
+      }
+      return null
+    } catch (_) {
+      return null
+    }
+  }
+
+  public async login(credentials: LoginCredentials): Promise<{
     success: boolean
     user?: UserProfile
     token?: string
@@ -83,74 +185,28 @@ export const authService = {
     }
 
     try {
-      const res = await fetch(`${AUTH_URL}/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          email: cleanEmail,
-          password,
-        }),
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        const errorMsg =
-          data.message ||
-          data.error ||
-          (res.status === 401
-            ? "Credenciales inválidas. Verifica tu correo y contraseña."
-            : res.status === 429
-              ? "Demasiados intentos de inicio de sesión. Por favor espera unos momentos."
-              : `Error de autenticación (${res.status})`)
-        return { success: false, error: errorMsg }
-      }
-
-      const payload = data as AuthLoginResponse
-      if (!payload.accessToken || !payload.user) {
-        return {
-          success: false,
-          error: "Respuesta de autenticación incompleta del servidor.",
-        }
-      }
-
-      const cleanToken = sanitizeInput(payload.accessToken, 1024)
-      const userProfile: UserProfile = {
-        id: payload.user.id,
-        username: payload.user.displayName || payload.user.email.split("@")[0] || "Jugador",
-        displayName: payload.user.displayName || payload.user.email.split("@")[0] || "Jugador",
-        email: payload.user.email,
-        role: payload.user.role || "PLAYER",
-      }
-
-      if (cleanToken) {
-        localStorage.setItem("hikat_auth_token", cleanToken)
-        if (payload.refreshToken) {
-          localStorage.setItem("hikat_refresh_token", payload.refreshToken)
-        }
-        localStorage.setItem("hikat_last_user", JSON.stringify(userProfile))
-      }
-
+      const user = await this.client.login(cleanEmail, password)
+      const token = this.client.getAccessToken() || ""
       return {
         success: true,
-        user: userProfile,
-        token: cleanToken,
+        user: {
+          id: user.id,
+          username: user.displayName || user.email.split("@")[0] || "Jugador",
+          displayName: user.displayName || user.email.split("@")[0] || "Jugador",
+          email: user.email,
+          role: user.role,
+        },
+        token,
       }
     } catch (err: any) {
       return {
         success: false,
-        error: "No se pudo conectar con el servidor de autenticación. Verifica tu conexión.",
+        error: err.message || "Error al iniciar sesión.",
       }
     }
-  },
+  }
 
-  /**
-   * Register new user account with Auth Worker (/auth/register)
-   */
-  async register(credentials: RegisterCredentials): Promise<{
+  public async register(credentials: RegisterCredentials): Promise<{
     success: boolean
     user?: UserProfile
     emailVerificationRequired?: boolean
@@ -175,119 +231,104 @@ export const authService = {
     }
 
     try {
-      const res = await fetch(`${AUTH_URL}/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          displayName: cleanUsername || cleanEmail.split("@")[0],
-          email: cleanEmail,
-          password,
-        }),
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        const errorMsg =
-          data.message ||
-          data.error ||
-          (res.status === 409
-            ? "Este correo electrónico ya está registrado."
-            : res.status === 429
-              ? "Demasiados intentos de registro. Por favor espera unos momentos."
-              : `Error al registrar la cuenta (${res.status})`)
-        return { success: false, error: errorMsg }
-      }
-
-      const payload = data as AuthRegisterResponse
-      const userProfile: UserProfile = {
-        id: payload.user?.id,
-        username: payload.user?.displayName || cleanUsername || cleanEmail.split("@")[0],
-        displayName: payload.user?.displayName || cleanUsername || cleanEmail.split("@")[0],
-        email: payload.user?.email || cleanEmail,
-        role: payload.user?.role || "PLAYER",
-      }
-
+      const res = await this.client.register(cleanEmail, password, cleanUsername)
       return {
         success: true,
-        user: userProfile,
-        emailVerificationRequired: Boolean(payload.emailVerificationRequired),
+        user: {
+          id: res.user.id,
+          username: res.user.displayName || cleanUsername || cleanEmail.split("@")[0],
+          displayName: res.user.displayName || cleanUsername || cleanEmail.split("@")[0],
+          email: res.user.email,
+          role: res.user.role,
+        },
+        emailVerificationRequired: res.emailVerificationRequired,
       }
     } catch (err: any) {
       return {
         success: false,
-        error: "No se pudo conectar con el servidor de autenticación.",
+        error: err.message || "Error al registrar la cuenta.",
       }
     }
-  },
+  }
 
-  /**
-   * Request password reset email (/auth/forgot-password)
-   */
-  async requestPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
-    const safeEmail = sanitizeEmail(email)
-    if (!safeEmail) {
-      return { success: false, error: "Ingresa un correo electrónico válido." }
-    }
+  public async refresh(): Promise<string | null> {
+    return this.client.refresh()
+  }
+
+  public async logout(): Promise<void> {
+    await this.client.logout()
+  }
+
+  public clearSession(): void {
+    this.client.clearSession()
+  }
+
+  public setSession(session: SessionState): Promise<void> {
+    return this.client.setSession(session)
+  }
+
+  public async requestPasswordReset(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
-      const res = await fetch(`${AUTH_URL}/auth/forgot-password`, {
+      const res = await fetch(`${AUTH_URL}/auth/password/reset-request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: safeEmail }),
+        body: JSON.stringify({ email: sanitizeEmail(email) }),
       })
-      if (!res.ok) {
-        return { success: false, error: "Error al solicitar restablecimiento de contraseña." }
-      }
-      return { success: true }
+      const data = await res.json().catch(() => ({}))
+      return { success: res.ok, message: data.message, error: data.error }
     } catch {
-      return { success: false, error: "No se pudo conectar con el servidor." }
+      return { success: false, error: "Error al solicitar restablecimiento de contraseña" }
     }
-  },
+  }
 
-  /**
-   * Get cached local session or current user profile with safe JSON parsing
-   */
-  getCachedUser(): UserProfile | null {
-    try {
-      const saved = localStorage.getItem("hikat_last_user")
-      if (!saved) return null
-      const parsed = JSON.parse(saved)
-      if (parsed && (typeof parsed.username === "string" || typeof parsed.email === "string")) {
-        return {
-          ...parsed,
-          username: sanitizeUsername(parsed.username || parsed.displayName || parsed.email?.split("@")[0]) || "Jugador",
-          displayName: sanitizeUsername(parsed.displayName || parsed.username || parsed.email?.split("@")[0]) || "Jugador",
-          email: sanitizeEmail(parsed.email || ""),
-        }
-      }
-      return null
-    } catch (_) {
-      return null
+
+  // --- OAuth PKCE Integration ---
+
+
+  public async initiateOAuth(provider: "GOOGLE" | "DISCORD"): Promise<{
+    authUrl: string
+    codeVerifier: string
+    state: string
+  }> {
+    const codeVerifier = generateCodeVerifier(64)
+    const codeChallenge = await generateCodeChallenge(codeVerifier)
+    const state = generateRandomState(32)
+    const redirectUri = "hikat://auth/callback"
+
+    const authUrl = this.client.createOAuthAuthorizationUrl({
+      provider,
+      redirectUri,
+      state,
+      codeChallenge,
+    })
+
+    return { authUrl, codeVerifier, state }
+  }
+
+  public async handleOAuthCallback(params: {
+    code: string
+    codeVerifier: string
+    state: string
+    expectedState: string
+  }): Promise<UserProfile> {
+    if (params.state !== params.expectedState) {
+      throw new Error("Estado de autenticación inválido (posible ataque CSRF).")
     }
-  },
 
-  /**
-   * Returns the stored access token if available
-   */
-  getStoredToken(): string | null {
-    try {
-      return localStorage.getItem("hikat_auth_token")
-    } catch {
-      return null
+    const user = await this.client.exchangeOAuthCode({
+      code: params.code,
+      codeVerifier: params.codeVerifier,
+      redirectUri: "hikat://auth/callback",
+    })
+
+    return {
+      id: user.id,
+      username: user.displayName || user.email.split("@")[0] || "Jugador",
+      displayName: user.displayName || user.email.split("@")[0] || "Jugador",
+      email: user.email,
+      role: user.role,
     }
-  },
-
-  /**
-   * Log out and clear tokens cleanly
-   */
-  logout(): void {
-    try {
-      localStorage.removeItem("hikat_auth_token")
-      localStorage.removeItem("hikat_refresh_token")
-      localStorage.removeItem("hikat_last_user")
-    } catch (_) {}
-  },
+  }
 }
+
+export const authService = new LauncherAuthService()

@@ -25,15 +25,26 @@ export const ALLOWED_REDIRECT_URIS = [
   "hikat://auth/callback",
   "http://localhost:5173/auth/callback",
   "http://127.0.0.1:5173/auth/callback",
+  "http://localhost:5174/auth/callback",
+  "http://127.0.0.1:5174/auth/callback",
+  "https://admin.hikat.org/auth/callback",
+  "https://app.hikat.org/auth/callback",
 ] as const
 
 export const ALLOWED_LINK_REDIRECT_URIS = [
   "https://app.hikat.org/settings",
   "https://app.hikat.org/account",
+  "https://admin.hikat.org/settings",
   "http://localhost:5173/settings",
   "http://127.0.0.1:5173/settings",
+  "http://localhost:5174/settings",
+  "http://127.0.0.1:5174/settings",
   "hikat://settings/accounts",
 ] as const
+
+export * from "./auth/pkce"
+export * from "./auth/authClientCore"
+
 
 export interface AccessTokenPayload {
   iss: string

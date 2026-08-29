@@ -95,6 +95,8 @@ export interface ConsoleLogEntry {
 export interface AdminUser {
   id: string
 
+  email?: string | null
+
   displayName?: string | null
 
   role: AppRole
@@ -103,6 +105,7 @@ export interface AdminUser {
 
   minecraftUsername?: string | null
 }
+
 
 export interface AuthState {
   isAuthenticated: boolean

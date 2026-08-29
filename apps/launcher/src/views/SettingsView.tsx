@@ -93,18 +93,47 @@ export default function SettingsView({
         .catch(() => {})
     }
 
-    if (window.electronAPI?.setMinimizeToTray) {
-      window.electronAPI.setMinimizeToTray(minimizeToTray)
+    if (window.electronAPI?.getMinimizeToTray) {
+      window.electronAPI
+        .getMinimizeToTray()
+        .then((realState: any) => {
+          if (isMounted && typeof realState === "boolean") {
+            setMinimizeToTrayState(realState)
+            setStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, realState)
+          }
+        })
+        .catch(() => {})
     }
 
-    if (window.electronAPI?.setDedicatedGpu) {
-      window.electronAPI.setDedicatedGpu(dedicatedGPU)
+    if (window.electronAPI?.getDedicatedGpu) {
+      window.electronAPI
+        .getDedicatedGpu()
+        .then((realState: any) => {
+          if (isMounted && typeof realState === "boolean") {
+            setDedicatedGPUState(realState)
+            setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, realState)
+          }
+        })
+        .catch(() => {})
+    }
+
+    if (window.electronAPI?.getRamAllocation) {
+      window.electronAPI
+        .getRamAllocation()
+        .then((realRam: any) => {
+          if (isMounted && typeof realRam === "number" && realRam >= 1) {
+            setRamGBState(realRam)
+            setStoredNumber(STORAGE_KEYS.RAM_GB, realRam)
+          }
+        })
+        .catch(() => {})
     }
 
     return () => {
       isMounted = false
     }
   }, [])
+
 
   const setStartWithSystem = async (v: boolean) => {
     setStartWithSystemState(v)
@@ -795,17 +824,38 @@ export default function SettingsView({
                 </div>
 
                 {/* Actualizaciones automáticas */}
-                <div className="settings-row">
+                <div className="settings-row" style={{ opacity: 0.75 }}>
                   <div>
                     <div
                       style={{
-                        fontSize: 17,
-                        fontWeight: 700,
-                        color: isDark ? "white" : "#111822",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
                         marginBottom: 2,
                       }}
                     >
-                      {t("settings.autoUpdatesTitle")}
+                      <span
+                        style={{
+                          fontSize: 17,
+                          fontWeight: 700,
+                          color: isDark ? "white" : "#111822",
+                        }}
+                      >
+                        {t("settings.autoUpdatesTitle")}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 6,
+                          background: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
+                          color: isDark ? "#8899aa" : "#657788",
+                          letterSpacing: "0.03em",
+                        }}
+                      >
+                        Próximamente
+                      </span>
                     </div>
                     <div
                       style={{
@@ -817,29 +867,41 @@ export default function SettingsView({
                       {t("settings.autoUpdatesDesc")}
                     </div>
                   </div>
-                  <LauncherToggle
-                    checked={autoUpdates}
-                    theme={theme}
-                    onChange={(v) => {
-                      setAutoUpdates(v)
-                      notifySaved()
-                    }}
-                    label={t("settings.autoUpdatesTitle")}
-                  />
                 </div>
 
                 {/* Notificaciones */}
-                <div className="settings-row">
+                <div className="settings-row" style={{ opacity: 0.75 }}>
                   <div>
                     <div
                       style={{
-                        fontSize: 17,
-                        fontWeight: 700,
-                        color: isDark ? "white" : "#111822",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
                         marginBottom: 2,
                       }}
                     >
-                      {t("settings.notificationsTitle")}
+                      <span
+                        style={{
+                          fontSize: 17,
+                          fontWeight: 700,
+                          color: isDark ? "white" : "#111822",
+                        }}
+                      >
+                        {t("settings.notificationsTitle")}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 6,
+                          background: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
+                          color: isDark ? "#8899aa" : "#657788",
+                          letterSpacing: "0.03em",
+                        }}
+                      >
+                        Próximamente
+                      </span>
                     </div>
                     <div
                       style={{
@@ -851,16 +913,8 @@ export default function SettingsView({
                       {t("settings.notificationsDesc")}
                     </div>
                   </div>
-                  <LauncherToggle
-                    checked={notifications}
-                    theme={theme}
-                    onChange={(v) => {
-                      setNotifications(v)
-                      notifySaved()
-                    }}
-                    label={t("settings.notificationsTitle")}
-                  />
                 </div>
+
               </div>
             </div>
           ) : (

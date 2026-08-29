@@ -15,22 +15,32 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // System
   getMemory: () => ipcRenderer.invoke("system:get-memory"),
 
-  // Global Settings
+  // Global Settings (Main Process Authoritative)
   getStartWithSystem: () => ipcRenderer.invoke("get-start-with-system"),
   setStartWithSystem: (enabled) =>
     ipcRenderer.invoke("setting-start-with-system", enabled),
   getMinimizeToTray: () => ipcRenderer.invoke("get-minimize-to-tray"),
   setMinimizeToTray: (enabled) =>
     ipcRenderer.invoke("setting-minimize-to-tray", enabled),
+  getDedicatedGpu: () => ipcRenderer.invoke("get-dedicated-gpu"),
   setDedicatedGpu: (enabled) =>
     ipcRenderer.invoke("setting-dedicated-gpu", enabled),
+  getRamAllocation: () => ipcRenderer.invoke("get-ram-allocation"),
   setRamAllocation: (ramGB) =>
-    ipcRenderer.send("setting-ram-allocation", ramGB),
-  setAutoUpdates: (enabled) =>
-    ipcRenderer.send("setting-auto-updates", enabled),
-  setNotifications: (enabled) =>
-    ipcRenderer.send("setting-notifications", enabled),
+    ipcRenderer.invoke("setting-ram-allocation", ramGB),
   openExternal: (url) => ipcRenderer.send("open-external", url),
+
+  // Secure Auth Session Storage (Main Process Safe Storage)
+  authLoadSession: () => ipcRenderer.invoke("auth:load-session"),
+  authSaveSession: (session) => ipcRenderer.invoke("auth:save-session", session),
+  authClearSession: () => ipcRenderer.invoke("auth:clear-session"),
+
+  // OAuth Deep Link Callback Handler
+  onOAuthCallback: (callback) => {
+    const handler = (_event, url) => callback(url)
+    ipcRenderer.on("oauth:callback", handler)
+    return () => ipcRenderer.removeListener("oauth:callback", handler)
+  },
 
   // Client Files Sync & Launch Engine
   checkSyncPlan: (payload) => ipcRenderer.invoke("game-check-plan", payload),

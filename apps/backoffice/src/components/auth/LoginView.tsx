@@ -1,8 +1,8 @@
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import type { ThemeMode } from "../../types"
 import logoWhite from "../../assets/branding/logo-white.png"
 import logoBlack from "../../assets/branding/logo-black.png"
-import { IconSpinner, IconMoon, IconSun } from "../../theme/icons"
+import { IconSpinner, IconMoon, IconSun, IconGoogle, IconDiscord } from "../../theme/icons"
 import { useAuth } from "../../context/AuthContext"
 
 interface LoginViewProps {
@@ -11,11 +11,51 @@ interface LoginViewProps {
 }
 
 export default function LoginView({ theme, setTheme }: LoginViewProps) {
-  const { login, isLoading } = useAuth()
+  const { login, initiateOAuth, handleOAuthCallback, isLoading } = useAuth()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const isDark = theme === "dark"
+
+  // Process web OAuth PKCE callback if URL contains code & state
+  useEffect(() => {
+    const search = window.location.search
+    if (!search) return
+
+    const params = new URLSearchParams(search)
+    const code = params.get("code")
+    const state = params.get("state")
+    const error = params.get("error")
+
+    if (error) {
+      if (error === "EMAIL_CONFLICT_LINK_REQUIRED") {
+        setErrorMessage("Este correo ya está registrado. Por favor inicia sesión con tu contraseña.")
+      } else {
+        setErrorMessage("Error de autenticación con el proveedor OAuth.")
+      }
+      window.history.replaceState({}, document.title, window.location.pathname)
+      return
+    }
+
+    if (code && state) {
+      const storedVerifier = sessionStorage.getItem("hikat_oauth_verifier") || ""
+      const storedState = sessionStorage.getItem("hikat_oauth_state") || ""
+
+      sessionStorage.removeItem("hikat_oauth_verifier")
+      sessionStorage.removeItem("hikat_oauth_state")
+
+      window.history.replaceState({}, document.title, window.location.pathname)
+
+      handleOAuthCallback({
+        code,
+        codeVerifier: storedVerifier,
+        state,
+        expectedState: storedState,
+      }).catch((err) => {
+        setErrorMessage(err.message || "Error al completar inicio de sesión OAuth.")
+      })
+    }
+  }, [handleOAuthCallback])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -30,6 +70,15 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
       await login(email.trim(), password)
     } catch (err: any) {
       setErrorMessage(err.message || "Error al iniciar sesión.")
+    }
+  }
+
+  const handleOAuthClick = async (provider: "GOOGLE" | "DISCORD") => {
+    setErrorMessage(null)
+    try {
+      await initiateOAuth(provider)
+    } catch (err: any) {
+      setErrorMessage(err.message || "No se pudo iniciar el flujo de autenticación.")
     }
   }
 
@@ -110,7 +159,7 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
       <div
         className="launcher-card"
         style={{
-          width: 420,
+          width: 430,
           maxWidth: "92vw",
           padding: "36px 32px",
           borderRadius: 20,
@@ -135,7 +184,7 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            marginBottom: 28,
+            marginBottom: 24,
             textAlign: "center",
           }}
         >
@@ -203,15 +252,88 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
           </div>
         )}
 
+        {/* OAuth Buttons */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+          <button
+            type="button"
+            disabled={isLoading}
+            onClick={() => handleOAuthClick("GOOGLE")}
+            style={{
+              width: "100%",
+              height: 42,
+              borderRadius: 12,
+              border: isDark
+                ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                : "1.5px solid rgba(0, 0, 0, 0.12)",
+              background: isDark ? "#0d1217" : "#ffffff",
+              color: isDark ? "#ffffff" : "#111822",
+              fontSize: 13.5,
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              cursor: "pointer",
+              transition: "all 0.16s ease",
+            }}
+          >
+            <IconGoogle size={18} />
+            <span>Continuar con Google</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isLoading}
+            onClick={() => handleOAuthClick("DISCORD")}
+            style={{
+              width: "100%",
+              height: 42,
+              borderRadius: 12,
+              border: isDark
+                ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                : "1.5px solid rgba(0, 0, 0, 0.12)",
+              background: isDark ? "#0d1217" : "#ffffff",
+              color: isDark ? "#ffffff" : "#111822",
+              fontSize: 13.5,
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              cursor: "pointer",
+              transition: "all 0.16s ease",
+            }}
+          >
+            <IconDiscord size={18} />
+            <span>Continuar con Discord</span>
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 18,
+          }}
+        >
+          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
+          <span style={{ fontSize: 12, color: isDark ? "#657788" : "#8899aa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            o con credenciales
+          </span>
+          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
+        </div>
+
         {/* Form */}
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 18 }}>
+          <div style={{ marginBottom: 16 }}>
             <label
               htmlFor="email"
               style={{
                 display: "block",
-                marginBottom: 8,
-                fontSize: 13.5,
+                marginBottom: 6,
+                fontSize: 13,
                 fontWeight: 700,
                 color: isDark ? "rgba(255, 255, 255, 0.85)" : "#223344",
               }}
@@ -230,7 +352,7 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
               className="launcher-input"
               style={{
                 width: "100%",
-                height: 44,
+                height: 42,
                 padding: "0 14px",
                 borderRadius: 12,
                 background: isDark ? "#0d1217" : "#f0f3f7",
@@ -238,19 +360,19 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
                   ? "1.5px solid rgba(255, 255, 255, 0.12)"
                   : "1.5px solid rgba(0, 0, 0, 0.12)",
                 color: isDark ? "#ffffff" : "#111822",
-                fontSize: 14.5,
+                fontSize: 14,
                 fontWeight: 500,
               }}
             />
           </div>
 
-          <div style={{ marginBottom: 26 }}>
+          <div style={{ marginBottom: 22 }}>
             <label
               htmlFor="password"
               style={{
                 display: "block",
-                marginBottom: 8,
-                fontSize: 13.5,
+                marginBottom: 6,
+                fontSize: 13,
                 fontWeight: 700,
                 color: isDark ? "rgba(255, 255, 255, 0.85)" : "#223344",
               }}
@@ -269,7 +391,7 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
               className="launcher-input"
               style={{
                 width: "100%",
-                height: 44,
+                height: 42,
                 padding: "0 14px",
                 borderRadius: 12,
                 background: isDark ? "#0d1217" : "#f0f3f7",
@@ -277,7 +399,7 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
                   ? "1.5px solid rgba(255, 255, 255, 0.12)"
                   : "1.5px solid rgba(0, 0, 0, 0.12)",
                 color: isDark ? "#ffffff" : "#111822",
-                fontSize: 14.5,
+                fontSize: 14,
                 fontWeight: 500,
               }}
             />
@@ -289,9 +411,9 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
             className="launcher-btn-primary"
             style={{
               width: "100%",
-              height: 46,
+              height: 44,
               borderRadius: 12,
-              fontSize: 15,
+              fontSize: 14.5,
               fontWeight: 700,
               display: "flex",
               alignItems: "center",

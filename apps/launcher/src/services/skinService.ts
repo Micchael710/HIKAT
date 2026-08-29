@@ -38,7 +38,10 @@ export async function fetchGlobalSkins(
     after,
   })
 
-  if (res.success && res.data?.skins?.items) {
+  if (!res.success) {
+    throw new Error(res.error || "Error al consultar el catálogo de skins globales")
+  }
+  if (res.data?.skins?.items) {
     return res.data.skins.items.map((item) => ({
       ...item,
       imageUrl: resolveApiAssetUrl(item.imageUrl),
@@ -49,6 +52,7 @@ export async function fetchGlobalSkins(
 
 /**
  * Fetches the authenticated player's personal custom skin (or null if none set).
+ * Throws an Error if the network or server request fails.
  */
 export async function fetchMyPlayerSkin(): Promise<PlayerSkin | null> {
   const token =
@@ -69,7 +73,11 @@ export async function fetchMyPlayerSkin(): Promise<PlayerSkin | null> {
     }
   `
   const res = await graphqlClient<{ myPlayerSkin: PlayerSkin | null }>(query)
-  if (res.success && res.data?.myPlayerSkin) {
+  if (!res.success) {
+    throw new Error(res.error || "Error al consultar la skin personalizada del jugador")
+  }
+
+  if (res.data?.myPlayerSkin) {
     return {
       ...res.data.myPlayerSkin,
       imageUrl: resolveApiAssetUrl(res.data.myPlayerSkin.imageUrl),
@@ -80,6 +88,7 @@ export async function fetchMyPlayerSkin(): Promise<PlayerSkin | null> {
 
 /**
  * Fetches the authenticated player's currently active skin selection.
+ * Throws an Error if the request fails.
  */
 export async function fetchMyActiveSkin(): Promise<ActiveSkinSelection | null> {
   const token =
@@ -102,7 +111,11 @@ export async function fetchMyActiveSkin(): Promise<ActiveSkinSelection | null> {
     }
   `
   const res = await graphqlClient<{ myActiveSkin: ActiveSkinSelection | null }>(query)
-  if (res.success && res.data?.myActiveSkin) {
+  if (!res.success) {
+    throw new Error(res.error || "Error al consultar la skin activa del jugador")
+  }
+
+  if (res.data?.myActiveSkin) {
     return {
       ...res.data.myActiveSkin,
       skin: res.data.myActiveSkin.skin
@@ -115,6 +128,7 @@ export async function fetchMyActiveSkin(): Promise<ActiveSkinSelection | null> {
   }
   return null
 }
+
 
 /**
  * Sets the active skin selection (GLOBAL or CUSTOM) for the authenticated player.

@@ -1,7 +1,8 @@
-import React, { useState } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { ThemeMode } from "../types"
 import { BASE_FONT } from "../theme/tokens"
 import { loginBg, logoReducedWhite, logoReducedBlack } from "../assets"
+import { IconGoogle, IconDiscord } from "../theme/icons"
 import { useTranslation } from "../context/LanguageContext"
 import {
   sanitizeUsername,
@@ -28,6 +29,91 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
   const [successNotice, setSuccessNotice] = useState<string | null>(null)
   const [isEnteringWorld, setIsEnteringWorld] = useState(false)
   const isDark = theme === "dark"
+
+  const pendingOAuthRef = useRef<{ codeVerifier: string; state: string } | null>(null)
+
+  // Listen for OAuth deep link callbacks via Electron IPC
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.electronAPI?.onOAuthCallback) {
+      return
+    }
+
+    const removeListener = window.electronAPI.onOAuthCallback(async (rawUrl: string) => {
+      try {
+        const urlObj = new URL(rawUrl)
+        const code = urlObj.searchParams.get("code")
+        const state = urlObj.searchParams.get("state")
+        const error = urlObj.searchParams.get("error")
+
+        if (error) {
+          if (error === "EMAIL_CONFLICT_LINK_REQUIRED") {
+            setErrorMessage("Este correo electrónico ya está registrado. Por favor inicia sesión con tu contraseña.")
+          } else {
+            setErrorMessage("Error durante la autenticación externa.")
+          }
+          setIsEnteringWorld(false)
+          return
+        }
+
+        if (!code || !state) {
+          return
+        }
+
+        const pending = pendingOAuthRef.current || {
+          codeVerifier: sessionStorage.getItem("hikat_launcher_oauth_verifier") || "",
+          state: sessionStorage.getItem("hikat_launcher_oauth_state") || "",
+        }
+
+        if (!pending.codeVerifier || !pending.state) {
+          setErrorMessage("Sesión de autenticación expirada. Intenta nuevamente.")
+          setIsEnteringWorld(false)
+          return
+        }
+
+        setIsEnteringWorld(true)
+        const user = await authService.handleOAuthCallback({
+          code,
+          codeVerifier: pending.codeVerifier,
+          state,
+          expectedState: pending.state,
+        })
+
+        sessionStorage.removeItem("hikat_launcher_oauth_verifier")
+        sessionStorage.removeItem("hikat_launcher_oauth_state")
+        pendingOAuthRef.current = null
+
+        setTimeout(() => {
+          onLogin(user.displayName || user.username)
+        }, 350)
+      } catch (err: any) {
+        setIsEnteringWorld(false)
+        setErrorMessage(err.message || "Error al completar autenticación.")
+      }
+    })
+
+    return () => {
+      removeListener?.()
+    }
+  }, [onLogin])
+
+  const handleOAuthClick = async (provider: "GOOGLE" | "DISCORD") => {
+    setErrorMessage(null)
+    setSuccessNotice(null)
+    try {
+      const { authUrl, codeVerifier, state } = await authService.initiateOAuth(provider)
+      pendingOAuthRef.current = { codeVerifier, state }
+      sessionStorage.setItem("hikat_launcher_oauth_verifier", codeVerifier)
+      sessionStorage.setItem("hikat_launcher_oauth_state", state)
+
+      if (window.electronAPI?.openExternal) {
+        window.electronAPI.openExternal(authUrl)
+      } else {
+        window.open(authUrl, "_blank")
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || "No se pudo iniciar el flujo de autenticación.")
+    }
+  }
 
   const handleSubmit = async () => {
     if (isEnteringWorld) return
@@ -108,309 +194,352 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         }
       } else {
         setIsEnteringWorld(false)
-        setErrorMessage(res.error || "Error al registrar la cuenta. Inténtalo de nuevo.")
+        setErrorMessage(res.error || "No se pudo crear la cuenta. Intenta con otro correo o usuario.")
       }
     }
   }
 
   const inputCss: React.CSSProperties = {
     width: "100%",
-    height: 44,
-    borderRadius: 12,
+    height: 42,
+    background: isDark ? "#0c1117" : "#f1f5f9",
     border: isDark
-      ? "1.5px solid rgba(255, 255, 255, 0.08)"
-      : "1.5px solid rgba(0, 0, 0, 0.1)",
-    background: isDark ? "#0d1217" : "#f0f3f7",
-    color: isDark ? "white" : "#111822",
+      ? "1.5px solid rgba(255, 255, 255, 0.12)"
+      : "1.5px solid rgba(0, 0, 0, 0.12)",
+    borderRadius: 10,
+    color: isDark ? "white" : "#0f172a",
+    padding: "0 14px",
     fontSize: 14,
     fontFamily: BASE_FONT,
     fontWeight: 500,
-    padding: "0 14px",
     outline: "none",
-    boxSizing: "border-box",
     transition: "border-color 0.18s ease, box-shadow 0.18s ease",
   }
 
   const labelCss: React.CSSProperties = {
     display: "block",
-    marginBottom: 5,
-    fontSize: 11,
-    fontWeight: 800,
-    letterSpacing: "0.08em",
-    color: isDark ? "#657788" : "#778899",
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: isDark ? "#8899aa" : "#556677",
     fontFamily: BASE_FONT,
-    textTransform: "uppercase",
+    marginBottom: 6,
+    letterSpacing: "0.02em",
   }
 
   return (
     <div
       style={{
-        display: "flex",
-        width: "100%",
-        height: "100%",
-        background: isDark ? "#090d12" : "#f5f7fa",
-        animation: "screenFadeIn 0.35s ease",
-        overflow: "hidden",
         position: "relative",
+        width: "100vw",
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+        background: isDark ? "#090d12" : "#f8fafc",
       }}
     >
-      {/* Golden Portal Flash Overlay on Entrance */}
-      {isEnteringWorld && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background:
-              "radial-gradient(circle at 60% 50%, rgba(239, 196, 54, 0.45) 0%, rgba(245, 158, 11, 0.2) 40%, transparent 75%)",
-            pointerEvents: "none",
-            zIndex: 90,
-            animation: "portalGlowFlash 0.45s ease forwards",
-          }}
-        />
-      )}
-
-      {/* ── Left Form Panel ── */}
+      {/* Background Graphic */}
       <div
         style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: `url(${loginBg})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          opacity: isDark ? 0.35 : 0.15,
+          filter: "blur(2px)",
+          transform: "scale(1.04)",
+        }}
+      />
+
+      {/* Subtle overlay */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: isDark
+            ? "radial-gradient(ellipse at center, rgba(9, 13, 18, 0.7) 0%, rgba(9, 13, 18, 0.95) 100%)"
+            : "radial-gradient(ellipse at center, rgba(248, 250, 252, 0.6) 0%, rgba(248, 250, 252, 0.92) 100%)",
+        }}
+      />
+
+      {/* Main Authentication Card */}
+      <div
+        style={{
+          position: "relative",
+          zIndex: 10,
           width: 440,
-          flexShrink: 0,
-          height: "100%",
-          background: isDark ? "#090d12" : "#ffffff",
+          maxWidth: "90vw",
+          background: isDark
+            ? "linear-gradient(180deg, rgba(19, 28, 35, 0.96) 0%, rgba(13, 20, 26, 0.96) 100%)"
+            : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 248, 250, 0.98) 100%)",
+          border: isDark
+            ? "1px solid rgba(255, 255, 255, 0.1)"
+            : "1px solid rgba(0, 0, 0, 0.08)",
+          borderRadius: 20,
+          padding: "32px 30px",
+          boxShadow: isDark
+            ? "0 24px 60px rgba(0, 0, 0, 0.65), 0 0 32px rgba(239, 196, 54, 0.12)"
+            : "0 24px 60px rgba(0, 0, 0, 0.1), 0 0 32px rgba(239, 196, 54, 0.08)",
+          backdropFilter: "blur(16px)",
           display: "flex",
           flexDirection: "column",
-          justifyContent: "space-between",
-          padding: "28px 36px 20px",
-          borderRight: isDark
-            ? "1.5px solid rgba(255, 255, 255, 0.08)"
-            : "1.5px solid rgba(0, 0, 0, 0.08)",
-          boxSizing: "border-box",
-          overflowY: "auto",
-          scrollbarWidth: "none",
-          transform: isEnteringWorld ? "translateX(-60px)" : "translateX(0)",
-          opacity: isEnteringWorld ? 0 : 1,
-          transition:
-            "transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.38s ease",
-          zIndex: 2,
+          animation: "scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both",
         }}
       >
-        {/* Top: Branding & Form Container */}
-        <div>
-          {/* Logo */}
+        {/* Top: Logo & Title */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            marginBottom: 20,
+            textAlign: "center",
+          }}
+        >
+          <img
+            src={isDark ? logoReducedWhite : logoReducedBlack}
+            alt="HiKAT Logo"
+            style={{
+              height: 46,
+              maxWidth: 220,
+              objectFit: "contain",
+              marginBottom: 12,
+              userSelect: "none",
+            }}
+            draggable={false}
+          />
+          <div
+            style={{
+              fontSize: 14,
+              color: isDark ? "#8899aa" : "#657788",
+              fontFamily: BASE_FONT,
+              fontWeight: 500,
+            }}
+          >
+            {tab === "login"
+              ? "Ingresa con tu cuenta para acceder a la red de HiKAT."
+              : "Crea tu cuenta para comenzar a jugar y personalizar tu personaje."}
+          </div>
+        </div>
+
+        {/* Error Banner */}
+        {errorMessage && (
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 9,
-              marginBottom: 36,
-            }}
-          >
-            <img
-              src={isDark ? logoReducedWhite : logoReducedBlack}
-              alt="HiKAT"
-              style={{ width: 32, height: 32, objectFit: "contain" }}
-            />
-            <span
-              style={{
-                fontFamily: '"Kanit:Regular", Kanit, sans-serif',
-                fontSize: 24,
-                color: isDark ? "white" : "#111822",
-                letterSpacing: -0.5,
-                lineHeight: 1,
-              }}
-            >
-              HiKAT
-            </span>
-          </div>
-
-          {/* Heading */}
-          <div style={{ marginBottom: 16 }}>
-            <div
-              style={{
-                fontSize: 22,
-                fontWeight: 800,
-                color: isDark ? "white" : "#111822",
-                letterSpacing: "-0.02em",
-                marginBottom: 4,
-                fontFamily: BASE_FONT,
-              }}
-            >
-              {tab === "login" ? t("auth.loginTab") : t("auth.registerTab")}
-            </div>
-            <div
-              style={{
-                fontSize: 13.5,
-                color: isDark ? "#8899aa" : "#556677",
-                fontWeight: 400,
-                lineHeight: 1.4,
-                fontFamily: BASE_FONT,
-              }}
-            >
-              {tab === "login"
-                ? "Inicia sesión con tu cuenta de HiKAT para sincronizar tus skins y partidas."
-                : "Crea tu cuenta para comenzar a jugar y personalizar tu personaje."}
-            </div>
-          </div>
-
-          {/* Error Banner */}
-          {errorMessage && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                background: isDark ? "rgba(239, 68, 68, 0.14)" : "#fee2e2",
-                border: isDark ? "1px solid rgba(239, 68, 68, 0.35)" : "1px solid #fca5a5",
-                borderRadius: 10,
-                padding: "10px 14px",
-                marginBottom: 14,
-                color: isDark ? "#fca5a5" : "#b91c1c",
-                fontSize: 13,
-                fontWeight: 600,
-                animation: "shakeX 0.25s ease",
-              }}
-            >
-              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {/* Success Banner */}
-          {successNotice && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                background: isDark ? "rgba(16, 185, 129, 0.14)" : "#d1fae5",
-                border: isDark ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid #6ee7b7",
-                borderRadius: 10,
-                padding: "10px 14px",
-                marginBottom: 14,
-                color: isDark ? "#6ee7b7" : "#047857",
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                <polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-              <span>{successNotice}</span>
-            </div>
-          )}
-
-          {/* Clean Segmented Pill Switcher [ Iniciar Sesión | Registrarse ] */}
-          <div
-            style={{
-              display: "flex",
-              background: isDark ? "#0d1217" : "#e6ebf0",
-              border: isDark
-                ? "1.5px solid rgba(255, 255, 255, 0.08)"
-                : "1.5px solid rgba(0, 0, 0, 0.08)",
-              borderRadius: 12,
-              padding: 3,
-              gap: 3,
-              marginBottom: 18,
-            }}
-          >
-            {(["login", "register"] as const).map((tCode) => {
-              const isCurrent = tab === tCode
-              return (
-                <button
-                  key={tCode}
-                  type="button"
-                  onClick={() => {
-                    setTab(tCode)
-                    setErrorMessage(null)
-                    setSuccessNotice(null)
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: "8px 0",
-                    borderRadius: 9,
-                    background: isCurrent
-                      ? isDark
-                        ? "#1c2630"
-                        : "#ffffff"
-                      : "transparent",
-                    border: isCurrent
-                      ? isDark
-                        ? "1.5px solid rgba(255, 255, 255, 0.14)"
-                        : "1.5px solid rgba(0, 0, 0, 0.08)"
-                      : "1.5px solid transparent",
-                    color: isCurrent
-                      ? isDark
-                        ? "white"
-                        : "#111822"
-                      : isDark
-                        ? "#7a8b9e"
-                        : "#667788",
-                    boxShadow:
-                      isCurrent && !isDark
-                        ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                        : "none",
-                    fontSize: 13.5,
-                    fontWeight: 700,
-                    fontFamily: BASE_FONT,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    transition: "all 0.16s ease",
-                  }}
-                >
-                  {tCode === "login"
-                    ? t("auth.loginTab")
-                    : t("auth.registerTab")}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Form Fields */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
+              gap: 10,
+              background: isDark ? "rgba(239, 68, 68, 0.14)" : "#fee2e2",
+              border: isDark ? "1px solid rgba(239, 68, 68, 0.35)" : "1px solid #fca5a5",
+              borderRadius: 10,
+              padding: "10px 14px",
               marginBottom: 14,
+              color: isDark ? "#fca5a5" : "#b91c1c",
+              fontSize: 13,
+              fontWeight: 600,
+              animation: "shakeX 0.25s ease",
             }}
           >
-            {tab === "register" && (
-              <div style={{ animation: "slideUpFade 0.18s ease" }}>
-                <label style={labelCss}>Nombre de usuario</label>
-                <input
-                  type="text"
-                  value={username}
-                  maxLength={24}
-                  autoComplete="username"
-                  spellCheck={false}
-                  placeholder="Tu nombre de jugador"
-                  onChange={(e) => setUsername(sanitizeUsername(e.target.value))}
-                  className="launcher-input"
-                  style={inputCss}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSubmit()
-                  }}
-                />
-              </div>
-            )}
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>{errorMessage}</span>
+          </div>
+        )}
 
-            <div>
-              <label style={labelCss}>Correo electrónico</label>
+        {/* Success Banner */}
+        {successNotice && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              background: isDark ? "rgba(16, 185, 129, 0.14)" : "#d1fae5",
+              border: isDark ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid #6ee7b7",
+              borderRadius: 10,
+              padding: "10px 14px",
+              marginBottom: 14,
+              color: isDark ? "#6ee7b7" : "#047857",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+            <span>{successNotice}</span>
+          </div>
+        )}
+
+        {/* OAuth Buttons (Google & Discord) */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          <button
+            type="button"
+            disabled={isEnteringWorld}
+            onClick={() => handleOAuthClick("GOOGLE")}
+            style={{
+              width: "100%",
+              height: 40,
+              borderRadius: 11,
+              border: isDark
+                ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                : "1.5px solid rgba(0, 0, 0, 0.12)",
+              background: isDark ? "#0d1217" : "#ffffff",
+              color: isDark ? "#ffffff" : "#111822",
+              fontSize: 13.5,
+              fontWeight: 600,
+              fontFamily: BASE_FONT,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              cursor: isEnteringWorld ? "default" : "pointer",
+              transition: "all 0.16s ease",
+            }}
+          >
+            <IconGoogle size={18} />
+            <span>Continuar con Google</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isEnteringWorld}
+            onClick={() => handleOAuthClick("DISCORD")}
+            style={{
+              width: "100%",
+              height: 40,
+              borderRadius: 11,
+              border: isDark
+                ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                : "1.5px solid rgba(0, 0, 0, 0.12)",
+              background: isDark ? "#0d1217" : "#ffffff",
+              color: isDark ? "#ffffff" : "#111822",
+              fontSize: 13.5,
+              fontWeight: 600,
+              fontFamily: BASE_FONT,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              cursor: isEnteringWorld ? "default" : "pointer",
+              transition: "all 0.16s ease",
+            }}
+          >
+            <IconDiscord size={18} />
+            <span>Continuar con Discord</span>
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 14,
+          }}
+        >
+          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
+          <span style={{ fontSize: 11.5, color: isDark ? "#657788" : "#8899aa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            o con credenciales
+          </span>
+          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
+        </div>
+
+        {/* Segmented Pill Switcher [ Iniciar Sesión | Registrarse ] */}
+        <div
+          style={{
+            display: "flex",
+            background: isDark ? "#0d1217" : "#e6ebf0",
+            border: isDark
+              ? "1.5px solid rgba(255, 255, 255, 0.08)"
+              : "1.5px solid rgba(0, 0, 0, 0.08)",
+            borderRadius: 12,
+            padding: 3,
+            gap: 3,
+            marginBottom: 16,
+          }}
+        >
+          {(["login", "register"] as const).map((tCode) => {
+            const isCurrent = tab === tCode
+            return (
+              <button
+                key={tCode}
+                type="button"
+                onClick={() => {
+                  setTab(tCode)
+                  setErrorMessage(null)
+                  setSuccessNotice(null)
+                }}
+                style={{
+                  flex: 1,
+                  padding: "7px 0",
+                  borderRadius: 9,
+                  background: isCurrent
+                    ? isDark
+                      ? "#1c2630"
+                      : "#ffffff"
+                    : "transparent",
+                  border: isCurrent
+                    ? isDark
+                      ? "1.5px solid rgba(255, 255, 255, 0.14)"
+                      : "1.5px solid rgba(0, 0, 0, 0.08)"
+                    : "1.5px solid transparent",
+                  color: isCurrent
+                    ? isDark
+                      ? "white"
+                      : "#111822"
+                    : isDark
+                      ? "#7a8b9e"
+                      : "#667788",
+                  boxShadow:
+                    isCurrent && !isDark
+                      ? "0 2px 8px rgba(0, 0, 0, 0.08)"
+                      : "none",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  fontFamily: BASE_FONT,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  transition: "all 0.16s ease",
+                }}
+              >
+                {tCode === "login"
+                  ? t("auth.loginTab")
+                  : t("auth.registerTab")}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Form Fields */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            marginBottom: 14,
+          }}
+        >
+          {tab === "register" && (
+            <div style={{ animation: "slideUpFade 0.18s ease" }}>
+              <label style={labelCss}>Nombre de usuario</label>
               <input
-                type="email"
-                value={email}
-                maxLength={254}
-                autoComplete="email"
+                type="text"
+                value={username}
+                maxLength={24}
+                autoComplete="username"
                 spellCheck={false}
-                placeholder="jugador@ejemplo.com"
-                onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
+                placeholder="Tu nombre de jugador"
+                onChange={(e) => setUsername(sanitizeUsername(e.target.value))}
                 className="launcher-input"
                 style={inputCss}
                 onKeyDown={(e) => {
@@ -418,40 +547,53 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                 }}
               />
             </div>
+          )}
 
-            <div>
-              <label style={labelCss}>Contraseña</label>
-              <input
-                type="password"
-                value={password}
-                maxLength={128}
-                autoComplete={
-                  tab === "login" ? "current-password" : "new-password"
-                }
-                placeholder="••••••••••••"
-                onChange={(e) =>
-                  setPassword(sanitizeInput(e.target.value, 128))
-                }
-                className="launcher-input"
-                style={inputCss}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSubmit()
-                }}
-              />
-            </div>
+          <div>
+            <label style={labelCss}>Correo electrónico</label>
+            <input
+              type="email"
+              value={email}
+              maxLength={254}
+              autoComplete="email"
+              spellCheck={false}
+              placeholder="jugador@ejemplo.com"
+              onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
+              className="launcher-input"
+              style={inputCss}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSubmit()
+              }}
+            />
           </div>
 
-          {/* Options Row (Mantener sesión iniciada) */}
+          <div>
+            <label style={labelCss}>Contraseña</label>
+            <input
+              type="password"
+              value={password}
+              autoComplete={tab === "login" ? "current-password" : "new-password"}
+              placeholder="••••••••"
+              onChange={(e) => setPassword(e.target.value)}
+              className="launcher-input"
+              style={inputCss}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSubmit()
+              }}
+            />
+          </div>
+
           {tab === "login" && (
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                marginBottom: 16,
+                paddingTop: 2,
               }}
             >
               <div
+                onClick={() => setKeepSession(!keepSession)}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -459,42 +601,40 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                   cursor: "pointer",
                   userSelect: "none",
                 }}
-                onClick={() => setKeepSession((v) => !v)}
               >
                 <div
                   style={{
                     width: 16,
                     height: 16,
-                    borderRadius: 5,
-                    flexShrink: 0,
-                    border: keepSession
-                      ? "1.5px solid #efc436"
-                      : isDark
-                        ? "1.5px solid rgba(255, 255, 255, 0.15)"
-                        : "1.5px solid rgba(0, 0, 0, 0.15)",
+                    borderRadius: 4,
                     background: keepSession
                       ? "#efc436"
                       : isDark
-                        ? "#0d1217"
-                        : "#f0f3f7",
+                        ? "#151e28"
+                        : "#e2e8f0",
+                    border: keepSession
+                      ? "1px solid #efc436"
+                      : isDark
+                        ? "1px solid rgba(255, 255, 255, 0.2)"
+                        : "1px solid rgba(0, 0, 0, 0.2)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    transition: "all 0.16s ease",
+                    transition: "all 0.15s ease",
                   }}
                 >
                   {keepSession && (
                     <svg
-                      width={9}
-                      height={9}
-                      viewBox="0 0 12 12"
+                      width={11}
+                      height={11}
+                      viewBox="0 0 24 24"
                       fill="none"
                       stroke="#090d12"
-                      strokeWidth="2.5"
+                      strokeWidth="3.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <path d="M2 6l3 3 5-5" />
+                      <polyline points="20 6 9 17 4 12" />
                     </svg>
                   )}
                 </div>
@@ -528,16 +668,17 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               background: "linear-gradient(135deg, #efc436 0%, #ffd043 100%)",
               border: "none",
               color: "#090d12",
-              fontSize: 15,
+              fontSize: 14.5,
               fontWeight: 800,
               fontFamily: BASE_FONT,
-              letterSpacing: "0.03em",
+              letterSpacing: "0.02em",
               cursor: isEnteringWorld ? "default" : "pointer",
               boxShadow: isEnteringWorld
                 ? "0 0 32px rgba(239, 196, 54, 0.65)"
                 : "0 0 20px rgba(239, 196, 54, 0.35)",
               transition: "transform 0.18s ease, box-shadow 0.18s ease",
-              marginBottom: 10,
+              marginTop: 4,
+              marginBottom: 8,
               transform: isEnteringWorld ? "scale(0.98)" : "none",
             }}
           >
@@ -572,44 +713,11 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             color: isDark ? "#4b5563" : "#9ca3af",
             fontFamily: BASE_FONT,
             textAlign: "center",
-            paddingTop: 12,
+            paddingTop: 8,
           }}
         >
           HiKAT Launcher {LAUNCHER_VERSION} • Autenticación segura
         </div>
-      </div>
-
-      {/* ── Right Splash Image ── */}
-      <div
-        style={{
-          flex: 1,
-          height: "100%",
-          position: "relative",
-          overflow: "hidden",
-          background: isDark ? "#090d12" : "#e2e8f0",
-        }}
-      >
-        <img
-          src={loginBg}
-          alt="HiKAT World"
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            filter: isEnteringWorld ? "brightness(1.2) scale(1.05)" : "none",
-            transition: "filter 0.45s ease, transform 0.45s ease",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: isDark
-              ? "linear-gradient(90deg, #090d12 0%, rgba(9, 13, 18, 0.4) 40%, transparent 100%)"
-              : "linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0.4) 40%, transparent 100%)",
-            pointerEvents: "none",
-          }}
-        />
       </div>
     </div>
   )
