@@ -1382,5 +1382,84 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(sent).toBeDefined()
       expect(sent?.type).toBe("password_reset")
     })
+
+    it("OAuth PKCE /oauth/token exchange returns full AuthUser contract with email and integrates with AuthClientCore", async () => {
+      const codeVerifier = generateSecureToken(43)
+      const codeChallenge = await generatePkceChallenge(codeVerifier)
+      const redirectUri = "hikat://auth/callback"
+
+      const reg = await registerWithPassword(
+        db,
+        { email: "oauth-launcher@hikat.org", password: "Password123!", displayName: "OAuthUser" },
+        emailService,
+      )
+
+      const authCode = await createAuthorizationCode(db, {
+        userId: reg.user.id,
+        codeChallenge,
+        codeChallengeMethod: "S256",
+        redirectUri,
+      })
+
+      // 1. Real HTTP request to POST /oauth/token
+      const req = new Request("http://localhost:8788/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          code: authCode,
+          code_verifier: codeVerifier,
+          redirect_uri: redirectUri,
+        }),
+      })
+
+      const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+      expect(res.status).toBe(200)
+
+      const payload = (await res.json()) as any
+      expect(payload.accessToken).toBeDefined()
+      expect(payload.refreshToken).toBeDefined()
+      expect(payload.user.id).toBe(reg.user.id)
+      expect(payload.user.email).toBe("oauth-launcher@hikat.org")
+      expect(payload.user.role).toBe("PLAYER")
+      expect(payload.user.displayName).toBe("OAuthUser")
+    })
+
+    it("detects token replay: using consumed Refresh A revokes session and invalidates successor Refresh B", async () => {
+      await registerWithPassword(
+        db,
+        { email: "replay-chain@hikat.org", password: "Password123!" },
+        emailService,
+      )
+
+      const initialSession = await loginWithPassword(
+        db,
+        { email: "replay-chain@hikat.org", password: "Password123!" },
+        keyManager,
+      )
+
+      // 1. First rotation: A -> B succeeds
+      const rot1 = await rotateRefreshToken(db, initialSession.refreshToken, keyManager)
+      expect(rot1.refreshToken).toBeDefined()
+      expect(rot1.refreshToken).not.toBe(initialSession.refreshToken)
+
+      // 2. Attacker replays consumed Token A:
+      await expect(rotateRefreshToken(db, initialSession.refreshToken, keyManager)).rejects.toThrow(
+        AuthErrorCode.TOKEN_REUSE_DETECTED,
+      )
+
+      // 3. Database session is confirmed revoked:
+      const sessionDb = await db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, initialSession.sessionId))
+        .get()
+      expect(sessionDb?.revokedAt).not.toBeNull()
+
+      // 4. Successor Token B CANNOT be used anymore because entire session is dead:
+      await expect(rotateRefreshToken(db, rot1.refreshToken, keyManager)).rejects.toThrow(
+        AuthErrorCode.TOKEN_EXPIRED,
+      )
+    })
   })
 })

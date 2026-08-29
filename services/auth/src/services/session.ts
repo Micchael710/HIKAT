@@ -19,10 +19,33 @@ export interface AuthSessionResult {
   sessionId: string
   user: {
     id: string
-    email?: string
+    email: string
     role: AppRole
     displayName: string | null
   }
+}
+
+/**
+ * Resolves canonical email for a user from passwordCredentials or externalAccounts
+ */
+export async function getUserEmail(db: Database, userId: string): Promise<string> {
+  const passCred = await db
+    .select({ email: schema.passwordCredentials.email })
+    .from(schema.passwordCredentials)
+    .where(eq(schema.passwordCredentials.userId, userId))
+    .get()
+
+  if (passCred?.email) {
+    return passCred.email
+  }
+
+  const extAcc = await db
+    .select({ email: schema.externalAccounts.email })
+    .from(schema.externalAccounts)
+    .where(eq(schema.externalAccounts.userId, userId))
+    .get()
+
+  return extAcc?.email || ""
 }
 
 /**
@@ -38,6 +61,8 @@ export async function createSession(
   const now = new Date().toISOString()
   const expiryDays = options?.sessionExpiryDays || DEFAULT_SESSION_EXPIRY_DAYS
   const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString()
+
+  const email = user.email || (await getUserEmail(db, user.id))
 
   // 1. Insert session record
   await db.insert(schema.sessions).values({
@@ -77,7 +102,12 @@ export async function createSession(
     refreshToken: rawRefreshToken,
     expiresIn,
     sessionId,
-    user,
+    user: {
+      id: user.id,
+      email,
+      role: user.role,
+      displayName: user.displayName,
+    },
   }
 }
 
@@ -141,22 +171,7 @@ export async function rotateRefreshToken(
     throw new Error(AuthErrorCode.UNAUTHORIZED)
   }
 
-  // Look up user email from credentials or external accounts
-  const passCred = await db
-    .select({ email: schema.passwordCredentials.email })
-    .from(schema.passwordCredentials)
-    .where(eq(schema.passwordCredentials.userId, userRecord.id))
-    .get()
-
-  let userEmail = passCred?.email
-  if (!userEmail) {
-    const extAcc = await db
-      .select({ email: schema.externalAccounts.email })
-      .from(schema.externalAccounts)
-      .where(eq(schema.externalAccounts.userId, userRecord.id))
-      .get()
-    userEmail = extAcc?.email || ""
-  }
+  const userEmail = await getUserEmail(db, userRecord.id)
 
   // 6. Atomic conditional update to mark token as consumed
   // Ensures that two concurrent requests with the exact same token cannot both succeed.

@@ -4,7 +4,7 @@
  * and observable state engine shared between Launcher and Backoffice.
  */
 
-import type { AppRole } from "../index"
+import { AuthErrorCode, type AppRole } from "../index"
 
 export interface AuthUser {
   id: string
@@ -35,6 +35,12 @@ export type RefreshOutcome =
   | { kind: "REFRESHED"; accessToken: string; user: AuthUser }
   | { kind: "TERMINAL_FAILURE"; error: string; code?: string }
   | { kind: "TRANSIENT_FAILURE"; error: string; status?: number }
+
+export type AccessTokenOutcome =
+  | { kind: "READY"; accessToken: string }
+  | { kind: "NO_SESSION" }
+  | { kind: "TRANSIENT_FAILURE"; error: string; status?: number }
+  | { kind: "TERMINAL_FAILURE"; error: string; code?: string }
 
 export function parseJwtPayload(token: string): any | null {
   try {
@@ -165,37 +171,6 @@ export class AuthClientCore {
 
   public getRefreshToken(): string | null {
     return this.session?.refreshToken || null
-  }
-
-  /**
-   * Ensures an active, non-expired Access JWT is returned.
-   * Proactively rotates tokens if expiration is within bufferSeconds (default 60s).
-   * Differentiates between transient network failures and terminal session revocations.
-   */
-  public async ensureValidAccessToken(bufferSeconds = 60): Promise<string | null> {
-    if (!this.session) {
-      return null
-    }
-
-    const token = this.session.accessToken
-    if (token && !isJwtExpired(token, bufferSeconds)) {
-      return token
-    }
-
-    // Token is expired, close to expiry, or unparseable. Initiate/join single-flight refresh.
-    if (this.session.refreshToken) {
-      const outcome = await this.refreshOutcome()
-      if (outcome.kind === "REFRESHED") {
-        return outcome.accessToken
-      }
-      // If transient error (e.g. offline) and current token hasn't reached hard expiry (buffer=0):
-      if (outcome.kind === "TRANSIENT_FAILURE" && token && !isJwtExpired(token, 0)) {
-        return token
-      }
-      return null
-    }
-
-    return null
   }
 
   public setSession(session: SessionState, persist = true): Promise<void> {
@@ -394,8 +369,26 @@ export class AuthClientCore {
           const errorCode = errBody.error || errBody.code
           const errorMessage = errBody.message || errBody.error || `Refresh failed with HTTP ${res.status}`
 
-          // Transient errors (HTTP 429 Rate limited, HTTP 5xx Server Error):
-          if (res.status === 429 || res.status >= 500) {
+          // 1. Explicit terminal AuthErrorCodes
+          const KNOWN_TERMINAL_CODES = [
+            AuthErrorCode.INVALID_TOKEN,
+            AuthErrorCode.TOKEN_EXPIRED,
+            AuthErrorCode.TOKEN_REUSE_DETECTED,
+            AuthErrorCode.UNAUTHORIZED,
+            AuthErrorCode.FORBIDDEN,
+            AuthErrorCode.ACCOUNT_LOCKED,
+          ]
+          if (errorCode && KNOWN_TERMINAL_CODES.includes(errorCode as any)) {
+            await this.clearSession()
+            return {
+              kind: "TERMINAL_FAILURE",
+              error: errorMessage,
+              code: errorCode,
+            }
+          }
+
+          // 2. Transient status codes (HTTP 429 Rate limited, HTTP 5xx Server Error):
+          if (res.status === 429 || res.status >= 500 || errorCode === AuthErrorCode.RATE_LIMITED) {
             return {
               kind: "TRANSIENT_FAILURE",
               error: errorMessage,
@@ -403,7 +396,17 @@ export class AuthClientCore {
             }
           }
 
-          // Terminal errors (HTTP 400, 401, 403, 404, etc.):
+          // 3. Known client auth status codes (HTTP 400, 401, 403):
+          if (res.status === 400 || res.status === 401 || res.status === 403) {
+            await this.clearSession()
+            return {
+              kind: "TERMINAL_FAILURE",
+              error: errorMessage,
+              code: errorCode,
+            }
+          }
+
+          // 4. Unexpected response fallback: fail-closed with terminal failure
           await this.clearSession()
           return {
             kind: "TERMINAL_FAILURE",
@@ -412,21 +415,28 @@ export class AuthClientCore {
           }
         }
 
-        const data = (await res.json()) as {
-          accessToken: string
-          refreshToken: string
-          expiresIn: number
-          tokenType: string
-          user: AuthUser
-        }
+        const data = (await res.json().catch(() => ({}))) as Record<string, any>
 
-        if (!data.accessToken || !data.user || data.user.role !== this.allowedRole) {
+        const isValidPayload =
+          typeof data.accessToken === "string" &&
+          data.accessToken.trim() !== "" &&
+          typeof data.refreshToken === "string" &&
+          data.refreshToken.trim() !== "" &&
+          data.user &&
+          typeof data.user === "object" &&
+          typeof data.user.id === "string" &&
+          data.user.id.trim() !== "" &&
+          typeof data.user.email === "string" &&
+          data.user.role === this.allowedRole
+
+        if (!isValidPayload) {
           await this.clearSession()
           return {
             kind: "TERMINAL_FAILURE",
-            error: data.user?.role !== this.allowedRole
-              ? "Rol de cuenta incompatible con esta aplicación"
-              : "Respuesta de rotación incompleta del servidor",
+            error:
+              data.user?.role && data.user.role !== this.allowedRole
+                ? "Rol de cuenta incompatible con esta aplicación"
+                : "Respuesta de rotación incompleta o inválida del servidor",
           }
         }
 
@@ -463,6 +473,38 @@ export class AuthClientCore {
   }
 
   /**
+   * Authoritative token acquisition for protected operations.
+   * Preserves exact outcome (READY, NO_SESSION, TRANSIENT_FAILURE, TERMINAL_FAILURE)
+   * so callers avoid sending unprotected requests or triggering duplicate refreshes.
+   */
+  public async getValidAccessTokenOutcome(bufferSeconds = 60): Promise<AccessTokenOutcome> {
+    if (!this.session) {
+      return { kind: "NO_SESSION" }
+    }
+
+    if (!isJwtExpired(this.session.accessToken, bufferSeconds)) {
+      return { kind: "READY", accessToken: this.session.accessToken }
+    }
+
+    const outcome = await this.refreshOutcome()
+    if (outcome.kind === "REFRESHED") {
+      return { kind: "READY", accessToken: outcome.accessToken }
+    }
+    if (outcome.kind === "TRANSIENT_FAILURE") {
+      return {
+        kind: "TRANSIENT_FAILURE",
+        error: outcome.error,
+        status: outcome.status,
+      }
+    }
+    return {
+      kind: "TERMINAL_FAILURE",
+      error: outcome.error,
+      code: outcome.code,
+    }
+  }
+
+  /**
    * Compatibility wrapper for single-flight token rotation.
    * Returns newly rotated accessToken on success, or null on failure.
    */
@@ -472,6 +514,11 @@ export class AuthClientCore {
       return outcome.accessToken
     }
     return null
+  }
+
+  public async ensureValidAccessToken(bufferSeconds = 60): Promise<string | null> {
+    const outcome = await this.getValidAccessTokenOutcome(bufferSeconds)
+    return outcome.kind === "READY" ? outcome.accessToken : null
   }
 
   public async logout(): Promise<void> {

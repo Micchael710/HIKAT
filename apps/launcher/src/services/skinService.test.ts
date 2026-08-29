@@ -225,6 +225,15 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening & Shard 8F)", () => 
       type: "image/png",
     })
 
+    const mockHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const mockPayload = btoa(JSON.stringify({ sub: "user-456", role: "PLAYER", exp: Math.floor(Date.now() / 1000) + 600 }))
+    const validJwt = `${mockHeader}.${mockPayload}.sig`
+    await authService.setSession({
+      accessToken: validJwt,
+      refreshToken: "valid-ref-tok",
+      user: { id: "user-456", email: "player@hikat.org", role: "PLAYER" },
+    })
+
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,

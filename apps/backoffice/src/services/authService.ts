@@ -121,6 +121,10 @@ class BackofficeAuthService {
     }
   }
 
+  public async getValidAccessTokenOutcome(bufferSeconds = 60) {
+    return this.client.getValidAccessTokenOutcome(bufferSeconds)
+  }
+
   public async ensureValidAccessToken(bufferSeconds = 60): Promise<string | null> {
     return this.client.ensureValidAccessToken(bufferSeconds)
   }

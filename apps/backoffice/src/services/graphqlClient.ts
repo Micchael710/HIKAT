@@ -108,14 +108,20 @@ export async function executeGraphQL<T>(
   variables: Record<string, unknown> = {},
   isRetry: boolean = false,
 ): Promise<T> {
-  const token = await authService.ensureValidAccessToken()
+  const tokenOutcome = await authService.getValidAccessTokenOutcome()
+  if (tokenOutcome.kind === "TRANSIENT_FAILURE") {
+    throw new Error(tokenOutcome.error || "Error temporal de conexión al renovar sesión con el servidor.")
+  }
+  if (tokenOutcome.kind === "TERMINAL_FAILURE") {
+    throw new Error("Su sesión ha expirado. Por favor inicie sesión nuevamente.")
+  }
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   }
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`
+  if (tokenOutcome.kind === "READY") {
+    headers["Authorization"] = `Bearer ${tokenOutcome.accessToken}`
   }
 
   let res: Response

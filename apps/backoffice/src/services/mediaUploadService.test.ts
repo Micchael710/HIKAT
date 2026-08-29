@@ -122,6 +122,7 @@ describe("Back Office MediaUploadService", () => {
   it("refreshes token and retries binary upload with fresh ticket when binary PUT returns 401", async () => {
     authService.setSession(createMockAdminJwt(600), "valid-refresh-tok", {
       id: "admin-1",
+      email: "admin@hikat.org",
       role: "ADMIN",
     })
 
@@ -164,7 +165,7 @@ describe("Back Office MediaUploadService", () => {
           refreshToken: "new-refresh-token",
           expiresIn: 900,
           tokenType: "Bearer",
-          user: { id: "admin-1", role: "ADMIN" },
+          user: { id: "admin-1", email: "admin@hikat.org", role: "ADMIN" },
         }),
       } as Response)
       // 4. Retried GraphQL ticket request with new token
@@ -201,5 +202,46 @@ describe("Back Office MediaUploadService", () => {
     const result = await uploadMediaFile(validImageFile, "IMAGE")
     expect(result.id).toBe("media-uuid-fresh")
     expect(authService.getAccessToken()).toBe(freshJwt)
+  })
+
+  it("rejects binary upload when token is unavailable without calling binary PUT fetch and never sends Bearer null/undefined", async () => {
+    authService.clearSession()
+
+    const validImageFile = new File(["image-bytes"], "banner.png", {
+      type: "image/png",
+    })
+
+    let putFetchCalled = 0
+    let capturedAuth: string | undefined
+
+    vi.spyOn(global, "fetch").mockImplementation(async (url: any, opts: any) => {
+      if (opts?.method === "PUT") {
+        putFetchCalled++
+        capturedAuth = opts?.headers?.Authorization
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            createContentMediaUpload: {
+              uploadUrl: "/media/content/upload",
+              uploadToken: "ticket-no-token",
+              expiresAt: "2026-08-26T12:00:00Z",
+              maxSizeBytes: 5242880,
+              expectedMimeType: "image/png",
+              allowedMimeTypes: ["image/png"],
+            },
+          },
+        }),
+      } as Response
+    })
+
+    await expect(uploadMediaFile(validImageFile, "IMAGE")).rejects.toThrow(
+      "No hay una sesión activa para subir archivos.",
+    )
+
+    expect(putFetchCalled).toBe(0)
+    expect(capturedAuth).toBeUndefined()
   })
 })

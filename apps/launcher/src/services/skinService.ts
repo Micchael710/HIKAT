@@ -298,13 +298,18 @@ export async function uploadPlayerSkin(
   const { uploadUrl, uploadToken } = ticketRes.data
   const fullUploadUrl = resolveApiAssetUrl(uploadUrl)
 
-  const token = await authService.ensureValidAccessToken()
+  const tokenOutcome = await authService.getValidAccessTokenOutcome()
+  if (tokenOutcome.kind !== "READY") {
+    if (tokenOutcome.kind === "TRANSIENT_FAILURE") {
+      throw new Error(tokenOutcome.error || "Error temporal al renovar sesión con el servidor.")
+    }
+    throw new Error("No hay una sesión activa para subir la skin.")
+  }
+
   const headers: Record<string, string> = {
+    Authorization: `Bearer ${tokenOutcome.accessToken}`,
     "X-Upload-Token": uploadToken,
     "Content-Type": "image/png",
-  }
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`
   }
 
 

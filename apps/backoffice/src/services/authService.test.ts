@@ -10,6 +10,7 @@ describe("Back Office AuthService", () => {
   it("successfully authenticates an ADMIN user and keeps tokens in memory", async () => {
     const mockUser = {
       id: "admin-1",
+      email: "admin@hikat.org",
       displayName: "Admin User",
       role: "ADMIN" as const,
       minecraftUsername: "admin_mc",
@@ -37,6 +38,7 @@ describe("Back Office AuthService", () => {
   it("rejects login if user role is not ADMIN", async () => {
     const mockPlayerUser = {
       id: "player-1",
+      email: "player@hikat.org",
       displayName: "Player User",
       role: "PLAYER" as const,
       minecraftUsername: "player_mc",
@@ -71,6 +73,7 @@ describe("Back Office AuthService", () => {
   it("handles token refresh with rotation and notifies subscribers", async () => {
     const mockUser = {
       id: "admin-1",
+      email: "admin@hikat.org",
       displayName: "Admin User",
       role: "ADMIN" as const,
     }
@@ -103,6 +106,7 @@ describe("Back Office AuthService", () => {
   it("clears memory and notifies subscribers on failed refresh", async () => {
     const mockUser = {
       id: "admin-1",
+      email: "admin@hikat.org",
       displayName: "Admin User",
       role: "ADMIN" as const,
     }
@@ -127,6 +131,7 @@ describe("Back Office AuthService", () => {
   it("clears memory on logout", async () => {
     const mockUser = {
       id: "admin-1",
+      email: "admin@hikat.org",
       displayName: "Admin User",
       role: "ADMIN" as const,
     }

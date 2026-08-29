@@ -671,6 +671,147 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
     expect(client.getStatus()).toBe("UNAUTHENTICATED")
     expect(await storage.loadSession()).toBeNull()
   })
+
+  it("20. getValidAccessTokenOutcome on hard-expired JWT with network failure returns TRANSIENT_FAILURE and preserves session", async () => {
+    const storage = createMemoryStorageAdapter()
+    const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 500 }))
+    const expiredJwt = `${expiredHeader}.${expiredPayload}.sig`
+
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      storageAdapter: storage,
+      fetcher: mockFetch,
+    })
+
+    await client.setSession({
+      accessToken: expiredJwt,
+      refreshToken: "refresh-offline-test",
+      user: { id: "u-1", email: "offline@hikat.org", role: "PLAYER" },
+    })
+
+    // Simulate network error on refresh
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch (offline / transport loss)"))
+
+    const outcome = await client.getValidAccessTokenOutcome()
+
+    expect(outcome.kind).toBe("TRANSIENT_FAILURE")
+    expect(client.getStatus()).toBe("AUTHENTICATED")
+    expect(client.getRefreshToken()).toBe("refresh-offline-test")
+    expect((await storage.loadSession())?.refreshToken).toBe("refresh-offline-test")
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("21. 200 OK /auth/refresh with missing refreshToken fails closed and does NOT persist partial session", async () => {
+    const storage = createMemoryStorageAdapter()
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      storageAdapter: storage,
+      fetcher: mockFetch,
+    })
+
+    await client.setSession({
+      accessToken: "old-access",
+      refreshToken: "initial-refresh",
+      user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+    })
+
+    // Server returns 200 with accessToken but MISSING refreshToken
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "new-access-only",
+        refreshToken: "", // Empty / absent
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+      }),
+    })
+
+    const outcome = await client.refreshOutcome()
+
+    expect(outcome.kind).toBe("TERMINAL_FAILURE")
+    expect(client.getStatus()).toBe("UNAUTHENTICATED")
+    expect(client.getSession()).toBeNull()
+    expect(await storage.loadSession()).toBeNull()
+  })
+
+  it("22. 200 OK /auth/refresh with missing user.email fails closed and does NOT persist partial session", async () => {
+    const storage = createMemoryStorageAdapter()
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      storageAdapter: storage,
+      fetcher: mockFetch,
+    })
+
+    await client.setSession({
+      accessToken: "old-access",
+      refreshToken: "initial-refresh",
+      user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" },
+    })
+
+    // Server returns 200 with missing user email
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "new-access",
+        refreshToken: "new-refresh",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-1", role: "PLAYER" }, // Missing email
+      }),
+    })
+
+    const outcome = await client.refreshOutcome()
+
+    expect(outcome.kind).toBe("TERMINAL_FAILURE")
+    expect(client.getStatus()).toBe("UNAUTHENTICATED")
+    expect(client.getSession()).toBeNull()
+    expect(await storage.loadSession()).toBeNull()
+  })
+
+  it("23. Valid rotation persists full updated session (A/A -> valid B/B)", async () => {
+    const storage = createMemoryStorageAdapter()
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      storageAdapter: storage,
+      fetcher: mockFetch,
+    })
+
+    await client.setSession({
+      accessToken: "access-A",
+      refreshToken: "refresh-A",
+      user: { id: "u-1", email: "a@hikat.org", role: "PLAYER" },
+    })
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "access-B",
+        refreshToken: "refresh-B",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-1", email: "a@hikat.org", role: "PLAYER" },
+      }),
+    })
+
+    const outcome = await client.refreshOutcome()
+
+    expect(outcome.kind).toBe("REFRESHED")
+    expect(client.getAccessToken()).toBe("access-B")
+    expect(client.getRefreshToken()).toBe("refresh-B")
+    const persisted = await storage.loadSession()
+    expect(persisted?.accessToken).toBe("access-B")
+    expect(persisted?.refreshToken).toBe("refresh-B")
+    expect(persisted?.user.email).toBe("a@hikat.org")
+  })
 })
 
 

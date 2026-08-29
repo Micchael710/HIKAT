@@ -57,8 +57,11 @@ export async function uploadMediaFile(
     sizeBytes: file.size,
   })
 
-  const token = await authService.ensureValidAccessToken()
-  if (!token) {
+  const tokenOutcome = await authService.getValidAccessTokenOutcome()
+  if (tokenOutcome.kind !== "READY") {
+    if (tokenOutcome.kind === "TRANSIENT_FAILURE") {
+      throw new MediaUploadError(tokenOutcome.error || "Error temporal al renovar sesión.")
+    }
     throw new MediaUploadError("No hay una sesión activa para subir archivos.")
   }
 
@@ -73,7 +76,7 @@ export async function uploadMediaFile(
   const response = await fetch(targetUrl, {
     method: "PUT",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${tokenOutcome.accessToken}`,
       "X-Upload-Token": ticket.uploadToken,
       "Content-Type": mimeType,
     },

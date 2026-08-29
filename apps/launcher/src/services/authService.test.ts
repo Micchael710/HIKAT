@@ -667,6 +667,79 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(capturedUrl).toContain("/auth/forgot-password")
     expect(capturedBody.email).toBe("player@hikat.org")
   })
+
+  it("18. Hard-expired JWT with network failure terminates in transient error without sending GraphQL request or calling clearSession", async () => {
+    const clearMock = vi.fn()
+    ;(window as any).electronAPI = {
+      authSaveSession: vi.fn(),
+      authClearSession: clearMock,
+    }
+
+    const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 300 }))
+    const expiredJwt = `${expiredHeader}.${expiredPayload}.sig`
+
+    await authService.setSession({
+      accessToken: expiredJwt,
+      refreshToken: "offline-refresh-tok",
+      user: { id: "u-p1", email: "player@hikat.org", role: "PLAYER" },
+    })
+
+    let refreshCallCount = 0
+    let graphqlCallCount = 0
+
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/auth/refresh")) {
+        refreshCallCount++
+        throw new TypeError("Failed to fetch (offline network error)")
+      }
+      if (url.includes("/graphql")) {
+        graphqlCallCount++
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: { secret: "should-not-be-called" } }),
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    })
+
+    const res = await graphqlClient("query ProtectedData { secret }")
+
+    expect(res.success).toBe(false)
+    expect(res.error).toContain("Failed to fetch")
+    // Protected GraphQL request MUST NOT be sent without valid token:
+    expect(graphqlCallCount).toBe(0)
+    // /auth/refresh was called EXACTLY ONCE:
+    expect(refreshCallCount).toBe(1)
+    // Session is NOT cleared on transient network error:
+    expect(clearMock).not.toHaveBeenCalled()
+    expect(authService.getStatus()).toBe("AUTHENTICATED")
+    expect(authService.getRefreshToken()).toBe("offline-refresh-tok")
+  })
+
+  it("19. Protected binary upload rejects when token unavailable and never sends Authorization Bearer null/undefined", async () => {
+    // Clear session so no token is available
+    await authService.clearSession()
+
+    const outcome = await authService.getValidAccessTokenOutcome()
+    expect(outcome.kind).toBe("NO_SESSION")
+
+    let putFetchCount = 0
+    let lastAuthHeader: string | undefined = undefined
+
+    mockFetch.mockImplementation(async (url: string, opts: any) => {
+      if (opts?.method === "PUT") {
+        putFetchCount++
+        lastAuthHeader = opts?.headers?.Authorization
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    })
+
+    // Binary upload must not execute PUT fetch when no valid token exists
+    expect(putFetchCount).toBe(0)
+    expect(lastAuthHeader).toBeUndefined()
+  })
 })
 
 

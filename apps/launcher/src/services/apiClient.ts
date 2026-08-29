@@ -50,7 +50,23 @@ export async function apiClient<T = any>(
     }
   }
 
-  const token = await authService.ensureValidAccessToken()
+  const tokenOutcome = await authService.getValidAccessTokenOutcome()
+  if (tokenOutcome.kind === "TRANSIENT_FAILURE") {
+    return {
+      success: false,
+      status: 0,
+      message: "Error temporal al renovar sesión con el servidor.",
+      error: tokenOutcome.error,
+    }
+  }
+  if (tokenOutcome.kind === "TERMINAL_FAILURE") {
+    return {
+      success: false,
+      status: 401,
+      message: "Su sesión ha expirado o no está autorizada.",
+      error: "UNAUTHORIZED",
+    }
+  }
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -58,8 +74,8 @@ export async function apiClient<T = any>(
     ...(options.headers as Record<string, string>),
   }
 
-  if (token) {
-    const cleanToken = sanitizeInput(token, 1024)
+  if (tokenOutcome.kind === "READY") {
+    const cleanToken = sanitizeInput(tokenOutcome.accessToken, 1024)
     if (cleanToken) {
       headers["Authorization"] = `Bearer ${cleanToken}`
     }
@@ -161,16 +177,28 @@ export async function graphqlClient<T = any>(
     }
   }
 
-  // 1. Proactive access token acquisition
-  const token = await authService.ensureValidAccessToken()
+  // 1. Authoritative access token acquisition
+  const tokenOutcome = await authService.getValidAccessTokenOutcome()
+  if (tokenOutcome.kind === "TRANSIENT_FAILURE") {
+    return {
+      success: false,
+      error: tokenOutcome.error || "Error temporal al renovar sesión con el servidor.",
+    }
+  }
+  if (tokenOutcome.kind === "TERMINAL_FAILURE") {
+    return {
+      success: false,
+      error: "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
+    }
+  }
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
   }
 
-  if (token) {
-    const cleanToken = sanitizeInput(token, 1024)
+  if (tokenOutcome.kind === "READY") {
+    const cleanToken = sanitizeInput(tokenOutcome.accessToken, 1024)
     if (cleanToken) {
       headers["Authorization"] = `Bearer ${cleanToken}`
     }

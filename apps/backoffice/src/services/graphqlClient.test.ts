@@ -99,7 +99,7 @@ describe("Back Office GraphQL News Client", () => {
           refreshToken: "new-rotated-refresh-tok",
           expiresIn: 900,
           tokenType: "Bearer",
-          user: { id: "admin-1", role: "ADMIN" },
+          user: { id: "admin-1", email: "admin@hikat.org", role: "ADMIN" },
         }),
       } as Response)
       // 3. Retried GraphQL call succeeds with new token
@@ -126,6 +126,7 @@ describe("Back Office GraphQL News Client", () => {
     const validJwt = createMockAdminJwt(600)
     authService.setSession(validJwt, "valid-refresh-tok", {
       id: "admin-1",
+      email: "admin@hikat.org",
       role: "ADMIN",
     })
 
@@ -154,7 +155,7 @@ describe("Back Office GraphQL News Client", () => {
           refreshToken: "refreshed-refresh-tok",
           expiresIn: 900,
           tokenType: "Bearer",
-          user: { id: "admin-1", role: "ADMIN" },
+          user: { id: "admin-1", email: "admin@hikat.org", role: "ADMIN" },
         }),
       } as Response)
       // 3. Retried GraphQL call succeeds
@@ -177,6 +178,7 @@ describe("Back Office GraphQL News Client", () => {
     const validJwt = createMockAdminJwt(600)
     authService.setSession(validJwt, "refresh-tok", {
       id: "admin-1",
+      email: "admin@hikat.org",
       role: "ADMIN",
     })
 
@@ -198,7 +200,7 @@ describe("Back Office GraphQL News Client", () => {
           refreshToken: "new-refresh-tok",
           expiresIn: 900,
           tokenType: "Bearer",
-          user: { id: "admin-1", role: "ADMIN" },
+          user: { id: "admin-1", email: "admin@hikat.org", role: "ADMIN" },
         }),
       } as Response)
       // 3. Retried GraphQL returns 401 again
@@ -268,7 +270,7 @@ describe("Back Office GraphQL News Client", () => {
             refreshToken: "rotated-ref",
             expiresIn: 900,
             tokenType: "Bearer",
-            user: { id: "admin-1", role: "ADMIN" },
+            user: { id: "admin-1", email: "admin@hikat.org", role: "ADMIN" },
           }),
         } as Response
       }
@@ -295,6 +297,7 @@ describe("Back Office GraphQL News Client", () => {
   it("transient network failure during refresh preserves session and throws error without clearing session", async () => {
     authService.setSession("expired-jwt", "valid-refresh-tok", {
       id: "admin-1",
+      email: "admin@hikat.org",
       role: "ADMIN",
     })
 
@@ -310,7 +313,7 @@ describe("Back Office GraphQL News Client", () => {
       } as Response
     })
 
-    await expect(newsApi.getAdminNews()).rejects.toThrow(/Error temporal/)
+    await expect(newsApi.getAdminNews()).rejects.toThrow(/Failed to fetch|Error temporal/)
     // Session is PRESERVED!
     expect(authService.getAccessToken()).toBe("expired-jwt")
     expect(authService.getUser()?.id).toBe("admin-1")
@@ -431,6 +434,49 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
     const res = await serverApi.sendServerCommand("say Hola mundo")
     expect(res.success).toBe(true)
     expect(res.message).toBe("Comando enviado correctamente.")
+  })
+
+  it("terminates in transient error without sending GraphQL query when hard-expired JWT refresh encounters network failure", async () => {
+    const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 300 }))
+    const expiredJwt = `${expiredHeader}.${expiredPayload}.sig`
+
+    authService.setSession(expiredJwt, "offline-refresh-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    let refreshCalled = 0
+    let graphqlCalled = 0
+
+    vi.spyOn(global, "fetch").mockImplementation(async (url: any) => {
+      const urlStr = String(url)
+      if (urlStr.includes("/auth/refresh")) {
+        refreshCalled++
+        throw new TypeError("Failed to fetch (offline network error)")
+      }
+      if (urlStr.includes("/graphql")) {
+        graphqlCalled++
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: { adminNews: { items: [], totalCount: 0 } } }),
+        } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    await expect(newsApi.getAdminNews()).rejects.toThrow(
+      "Failed to fetch (offline network error)",
+    )
+
+    // GraphQL request must NOT be sent
+    expect(graphqlCalled).toBe(0)
+    // /auth/refresh was called EXACTLY ONCE
+    expect(refreshCalled).toBe(1)
+    // Session is PRESERVED, not cleared
+    expect(authService.getRefreshToken()).toBe("offline-refresh-tok")
+    expect(authService.getUser()).not.toBeNull()
   })
 })
 
