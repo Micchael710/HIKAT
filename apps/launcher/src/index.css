@@ -324,6 +324,15 @@ img, svg, a {
   }
 }
 
+@keyframes breatheGlowRed {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2), 0 0 20px rgba(239, 68, 68, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.45), 0 0 32px rgba(239, 68, 68, 0.3);
+  }
+}
+
 /* Profile Pill & Dropdown Card */
 @keyframes profileDropIn {
   0% {
@@ -542,6 +551,34 @@ img, svg, a {
   border-color: rgba(0, 0, 0, 0.3) !important;
   background: #f0f4f8 !important;
   color: #111822 !important;
+}
+
+.launcher-btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border: 2px solid rgba(239, 68, 68, 0.28);
+  color: #f87171;
+  transition: border-color 0.22s ease, background 0.22s ease, color 0.22s ease, transform 0.2s ease, box-shadow 0.22s ease;
+}
+
+[data-theme="light"] .launcher-btn-danger {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1.5px solid rgba(239, 68, 68, 0.3);
+  color: #dc2626;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.08);
+}
+
+.launcher-btn-danger:hover {
+  border-color: rgba(239, 68, 68, 0.85) !important;
+  background: rgba(239, 68, 68, 0.22) !important;
+  color: #fca5a5 !important;
+  transform: translateY(-2px);
+  animation: breatheGlowRed 2s ease-in-out infinite !important;
+}
+
+[data-theme="light"] .launcher-btn-danger:hover {
+  border-color: rgba(220, 38, 38, 0.85) !important;
+  background: rgba(239, 68, 68, 0.16) !important;
+  color: #b91c1c !important;
 }
 
 .launcher-btn-primary {

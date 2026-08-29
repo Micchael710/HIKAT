@@ -506,8 +506,58 @@ export default function SkinsView({
             })}
           </div>
 
-          {/* Right Action Tools: Upload Button */}
+          {/* Right Action Tools: Delete Custom & Upload Buttons */}
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {/* Delete Custom Button */}
+            {((skinType === "skin" && appliedSkin === "player-custom" && Boolean(playerSkin)) ||
+              (skinType === "capa" && playerCapes.some((pc) => pc.id === appliedCape))) && (
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={(e) => {
+                  if (skinType === "skin") {
+                    handleDeletePersonalSkin(e)
+                  } else {
+                    handleDeletePersonalCape(appliedCape, e)
+                  }
+                }}
+                className="launcher-btn-danger"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  height: 44,
+                  padding: "0 22px",
+                  borderRadius: 14,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  fontFamily: BASE_FONT,
+                  cursor: isDeleting ? "default" : "pointer",
+                  opacity: isDeleting ? 0.7 : 1,
+                }}
+              >
+                <svg
+                  width={16}
+                  height={16}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+                {isDeleting
+                  ? t("common.deleting")
+                  : skinType === "skin"
+                    ? t("skins.deleteSkin")
+                    : t("skins.deleteCape")}
+              </button>
+            )}
+
+            {/* Upload Button */}
             <button
               type="button"
               disabled={isUploading}
@@ -704,93 +754,6 @@ export default function SkinsView({
                 </div>
               ))}
 
-              {/* Action row for personal custom skin */}
-              {skinType === "skin" && appliedSkin === "player-custom" && playerSkin && (
-                <div
-                  style={{
-                    marginTop: 6,
-                    paddingTop: 10,
-                    borderTop: isDark
-                      ? "1px solid rgba(255,255,255,0.08)"
-                      : "1px solid rgba(0,0,0,0.08)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span style={{ fontSize: 13, color: "#38bdf8", fontWeight: 600 }}>
-                    {t("skins.activeCustomSkin")}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleDeletePersonalSkin}
-                    disabled={isDeleting}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      background: "rgba(239, 68, 68, 0.12)",
-                      border: "1px solid rgba(239, 68, 68, 0.25)",
-                      borderRadius: 8,
-                      padding: "5px 12px",
-                      color: "#f87171",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: isDeleting ? "default" : "pointer",
-                    }}
-                  >
-                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
-                    {isDeleting ? t("common.deleting") : t("skins.deleteSkin")}
-                  </button>
-                </div>
-              )}
-
-              {/* Action row for personal custom cape */}
-              {skinType === "capa" && playerCapes.some((pc) => pc.id === appliedCape) && (
-                <div
-                  style={{
-                    marginTop: 6,
-                    paddingTop: 10,
-                    borderTop: isDark
-                      ? "1px solid rgba(255,255,255,0.08)"
-                      : "1px solid rgba(0,0,0,0.08)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span style={{ fontSize: 13, color: "#10b981", fontWeight: 600 }}>
-                    {t("skins.activeCustomCape")}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => handleDeletePersonalCape(appliedCape, e)}
-                    disabled={isDeleting}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      background: "rgba(239, 68, 68, 0.12)",
-                      border: "1px solid rgba(239, 68, 68, 0.25)",
-                      borderRadius: 8,
-                      padding: "5px 12px",
-                      color: "#f87171",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: isDeleting ? "default" : "pointer",
-                    }}
-                  >
-                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
-                    {isDeleting ? t("common.deleting") : t("skins.deleteCape")}
-                  </button>
-                </div>
-              )}
             </div>
           </div>
 
