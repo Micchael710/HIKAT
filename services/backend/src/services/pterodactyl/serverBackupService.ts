@@ -99,15 +99,16 @@ export async function restoreServerBackup(
   }
 
   // 2. Guard: Acquire distributed operation lock
-  const lockKey = await acquireServerOperationLock(db, "RESTORE_BACKUP", userId)
-  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
+  const lockHandle = await acquireServerOperationLock(db, "RESTORE_BACKUP", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   try {
+    heartbeat.assertLeaseOwned()
     await client.restoreBackup(backupId.trim(), true)
     return true
   } finally {
     heartbeat.stop()
-    await releaseServerOperationLock(db, lockKey)
+    await releaseServerOperationLock(db, lockHandle)
   }
 }
 

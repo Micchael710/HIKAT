@@ -491,15 +491,30 @@ export async function getServerConsoleWebsocketCredentials(
   return client.getWebsocketCredentials()
 }
 
+export interface ServerOperationLockHandle {
+  lockKey: string
+  leaseId: string
+  userId: string
+  operation: "RESTORE_BACKUP" | "REPLACE_WORLD" | "SERVER_RELEASE_SYNC" | "SERVER_CONTENT_CHANGE"
+}
+
+export interface ServerOperationHeartbeat {
+  stop: () => void
+  isRunning: () => boolean
+  isLeaseLost: () => boolean
+  assertLeaseOwned: () => void
+}
+
 /**
- * Acquires a distributed operation lock in D1 for destructive operations (RESTORE_BACKUP, REPLACE_WORLD).
+ * Acquires a distributed operation lock in D1 for destructive operations (RESTORE_BACKUP, REPLACE_WORLD, SERVER_RELEASE_SYNC, SERVER_CONTENT_CHANGE).
+ * Generates an authoritative leaseId ensuring strict lease ownership.
  */
 export async function acquireServerOperationLock(
   db: ReturnType<typeof createDatabase>,
   operation: "RESTORE_BACKUP" | "REPLACE_WORLD" | "SERVER_RELEASE_SYNC" | "SERVER_CONTENT_CHANGE",
   userId: string,
   ttlSeconds: number = 180,
-): Promise<string> {
+): Promise<ServerOperationLockHandle> {
   const nowIso = new Date().toISOString()
   const lockKey = "server_destructive_operation"
 
@@ -535,7 +550,8 @@ export async function acquireServerOperationLock(
     )
   }
 
-  // 3. Insert new lock
+  // 3. Insert new lock with unique leaseId
+  const leaseId = crypto.randomUUID()
   const expiresAt = new Date(
     Date.now() + ttlSeconds * 1000,
   ).toISOString()
@@ -543,6 +559,7 @@ export async function acquireServerOperationLock(
   try {
     await db.insert(schema.serverOperationLocks).values({
       lockKey,
+      leaseId,
       operation,
       acquiredByUserId: userId,
       acquiredAt: nowIso,
@@ -556,32 +573,49 @@ export async function acquireServerOperationLock(
     )
   }
 
-  return lockKey
+  return {
+    lockKey,
+    leaseId,
+    userId,
+    operation,
+  }
 }
 
 /**
- * Renews an active distributed operation lock lease if still owned by the given user.
+ * Renews an active distributed operation lock lease if still owned by the specific leaseId, user and operation.
  */
 export async function refreshServerOperationLock(
   db: ReturnType<typeof createDatabase>,
-  lockKey: string = "server_destructive_operation",
-  userId: string,
+  handle: ServerOperationLockHandle | string,
+  userIdOrTtl?: string | number,
   ttlSeconds: number = 180,
 ): Promise<boolean> {
+  const effectiveUserId = typeof userIdOrTtl === "string" ? userIdOrTtl : undefined
+  const effectiveTtl = typeof userIdOrTtl === "number" ? userIdOrTtl : ttlSeconds
   const nowIso = new Date().toISOString()
-  const newExpiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString()
+  const newExpiresAt = new Date(Date.now() + effectiveTtl * 1000).toISOString()
 
-  // Only extend if the lock is active and belongs to this user
+  let conditions
+  if (typeof handle === "object") {
+    conditions = and(
+      eq(schema.serverOperationLocks.lockKey, handle.lockKey),
+      eq(schema.serverOperationLocks.leaseId, handle.leaseId),
+      eq(schema.serverOperationLocks.acquiredByUserId, handle.userId),
+      eq(schema.serverOperationLocks.operation, handle.operation),
+      gt(schema.serverOperationLocks.expiresAt, nowIso),
+    )
+  } else {
+    conditions = and(
+      eq(schema.serverOperationLocks.lockKey, handle),
+      eq(schema.serverOperationLocks.acquiredByUserId, effectiveUserId || ""),
+      gt(schema.serverOperationLocks.expiresAt, nowIso),
+    )
+  }
+
   const updated = await db
     .update(schema.serverOperationLocks)
     .set({ expiresAt: newExpiresAt })
-    .where(
-      and(
-        eq(schema.serverOperationLocks.lockKey, lockKey),
-        eq(schema.serverOperationLocks.acquiredByUserId, userId),
-        gt(schema.serverOperationLocks.expiresAt, nowIso),
-      ),
-    )
+    .where(conditions)
     .returning({ lockKey: schema.serverOperationLocks.lockKey })
     .get()
 
@@ -590,18 +624,28 @@ export async function refreshServerOperationLock(
 
 /**
  * Starts a recurring background heartbeat to renew the operation lock until stopped.
+ * Sets leaseLost = true if lock renewal fails, enabling fail-closed asserts.
  */
 export function startServerOperationHeartbeat(
   db: ReturnType<typeof createDatabase>,
-  lockKey: string = "server_destructive_operation",
-  userId: string,
+  handle: ServerOperationLockHandle | string = "server_destructive_operation",
+  userId?: string,
   intervalMs: number = 30000,
   ttlSeconds: number = 180,
-): { stop: () => void; isRunning: () => boolean } {
+): ServerOperationHeartbeat {
   let running = true
-  const timer = setInterval(() => {
+  let leaseLost = false
+
+  const timer = setInterval(async () => {
     if (!running) return
-    refreshServerOperationLock(db, lockKey, userId, ttlSeconds).catch(() => {})
+    try {
+      const ok = await refreshServerOperationLock(db, handle, userId, ttlSeconds)
+      if (!ok) {
+        leaseLost = true
+      }
+    } catch {
+      leaseLost = true
+    }
   }, intervalMs)
 
   return {
@@ -610,20 +654,41 @@ export function startServerOperationHeartbeat(
       clearInterval(timer)
     },
     isRunning: () => running,
+    isLeaseLost: () => leaseLost,
+    assertLeaseOwned: () => {
+      if (leaseLost) {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_BUSY,
+          "Se perdió el bloqueo de operación del servidor. Operación abortada.",
+          "Operation lock lease was lost or expired during active operation",
+        )
+      }
+    },
   }
 }
 
 /**
- * Releases a distributed operation lock in D1.
+ * Releases a distributed operation lock in D1 scoped to its unique leaseId when provided.
  */
 export async function releaseServerOperationLock(
   db: ReturnType<typeof createDatabase>,
-  lockKey: string = "server_destructive_operation",
+  handle: ServerOperationLockHandle | string = "server_destructive_operation",
 ): Promise<void> {
   try {
-    await db
-      .delete(schema.serverOperationLocks)
-      .where(eq(schema.serverOperationLocks.lockKey, lockKey))
+    if (typeof handle === "object") {
+      await db
+        .delete(schema.serverOperationLocks)
+        .where(
+          and(
+            eq(schema.serverOperationLocks.lockKey, handle.lockKey),
+            eq(schema.serverOperationLocks.leaseId, handle.leaseId),
+          ),
+        )
+    } else {
+      await db
+        .delete(schema.serverOperationLocks)
+        .where(eq(schema.serverOperationLocks.lockKey, handle))
+    }
   } catch {}
 }
 

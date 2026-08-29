@@ -31,6 +31,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   const [results, setResults] = useState<ModSearchResultItem[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [hasMore, setHasMore] = useState(false)
+  const [cursor, setCursor] = useState<string | null>(null)
   const [offset, setOffset] = useState(0)
   const [providerStatuses, setProviderStatuses] = useState<ModProviderStatus[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +63,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     contentType: ContentType,
     providerTab: ModProvider | "ALL",
     currentOffset: number = 0,
+    searchCursor: string | null = null,
     isLoadMore: boolean = false,
   ) => {
     const currentReqId = ++requestIdRef.current
@@ -76,7 +78,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     const providerArg = providerTab === "ALL" ? null : providerTab
 
     graphqlClient
-      .searchServerContent(searchQuery, contentType, providerArg, PAGE_SIZE, currentOffset)
+      .searchServerContent(searchQuery, contentType, providerArg, PAGE_SIZE, currentOffset, searchCursor)
       .then((payload) => {
         if (currentReqId !== requestIdRef.current) return
 
@@ -87,7 +89,8 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         }
 
         setTotalCount(payload.totalCount || 0)
-        setHasMore(Boolean(payload.hasMore))
+        setHasMore(Boolean(payload.hasMore && payload.nextCursor))
+        setCursor(payload.nextCursor || null)
         setProviderStatuses(payload.providersStatus || [])
         if (payload.minecraftVersion) {
           setEnvInfo({
@@ -114,7 +117,8 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
       debounceTimer.current = null
     }
     setOffset(0)
-    executeSearch(query, selectedContentType, selectedProviderTab, 0, false)
+    setCursor(null)
+    executeSearch(query, selectedContentType, selectedProviderTab, 0, null, false)
 
     return () => {
       if (debounceTimer.current) {
@@ -139,19 +143,21 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     const val = e.target.value
     setQuery(val)
     setOffset(0)
+    setCursor(null)
 
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current)
     }
     debounceTimer.current = setTimeout(() => {
-      executeSearch(val, selectedContentType, selectedProviderTab, 0, false)
+      executeSearch(val, selectedContentType, selectedProviderTab, 0, null, false)
     }, 350)
   }
 
   const handleLoadMore = () => {
+    if (!cursor || !hasMore || loadingMore) return
     const nextOffset = offset + PAGE_SIZE
     setOffset(nextOffset)
-    executeSearch(query, selectedContentType, selectedProviderTab, nextOffset, true)
+    executeSearch(query, selectedContentType, selectedProviderTab, nextOffset, cursor, true)
   }
 
   // When a mod is selected, load detail
@@ -619,7 +625,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                   })}
                 </div>
 
-                {hasMore && (
+                {hasMore && Boolean(cursor) && (
                   <div style={{ textAlign: "center", padding: "12px 0" }}>
                     <button
                       type="button"

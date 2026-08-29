@@ -203,8 +203,8 @@ export async function replaceServerWorld(
   const activeWorldName = await detectActiveWorldName(env, client)
 
   // 3. Guard: Acquire distributed operation lock
-  const lockKey = await acquireServerOperationLock(db, "REPLACE_WORLD", userId)
-  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
+  const lockHandle = await acquireServerOperationLock(db, "REPLACE_WORLD", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   // Unpredictable staging directory name
   const stagingDirName = `_staging_world_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
@@ -241,6 +241,7 @@ export async function replaceServerWorld(
     }
 
     // 5. Create automatic pre-backup
+    heartbeat.assertLeaseOwned()
     try {
       const backupRes = await client.createBackup(`Copia previa a reemplazo de mundo (${activeWorldName})`)
       preBackupUuid = backupRes.attributes.uuid
@@ -256,6 +257,7 @@ export async function replaceServerWorld(
     await waitForBackupCompletion(client, preBackupUuid, backupOptions)
 
     // 6. Create unpredictable staging directory inside container
+    heartbeat.assertLeaseOwned()
     await client.createFolder("/", stagingDirName)
     stagingCreated = true
 
@@ -327,6 +329,7 @@ export async function replaceServerWorld(
     }
 
     // 9. Execute world replacement phase (active world touched ONLY after staging is fully validated)
+    heartbeat.assertLeaseOwned()
     try {
       // Delete zip inside staging before moving/renaming world
       await client.deleteFiles(`/${stagingDirName}`, [cleanFileName]).catch(() => {})
@@ -371,6 +374,6 @@ export async function replaceServerWorld(
 
     // 12. Always release distributed operation lock and stop heartbeat
     heartbeat.stop()
-    await releaseServerOperationLock(db, lockKey)
+    await releaseServerOperationLock(db, lockHandle)
   }
 }

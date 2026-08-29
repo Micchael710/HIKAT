@@ -470,6 +470,7 @@ export const resolvers = {
         provider?: ModProviderGql | null
         limit?: number | null
         offset?: number | null
+        cursor?: string | null
       },
       context: BackendGraphQLContext,
     ): Promise<ServerContentSearchPayloadGql> => {
@@ -485,6 +486,7 @@ export const resolvers = {
         args.limit || 20,
         args.offset || 0,
         args.contentType || "MOD",
+        args.cursor,
       )
     },
 

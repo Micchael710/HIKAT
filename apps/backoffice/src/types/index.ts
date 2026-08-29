@@ -651,6 +651,7 @@ export interface ServerContentSearchPayload {
   items: ModSearchResultItem[]
   totalCount: number
   hasMore: boolean
+  nextCursor?: string | null
   providersStatus: ModProviderStatus[]
   minecraftVersion: string
   neoForgeVersion: string

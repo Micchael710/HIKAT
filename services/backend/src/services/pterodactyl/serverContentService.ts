@@ -20,7 +20,7 @@ import {
 } from "./serverAdministrationService"
 import { detectActiveWorldName } from "./serverWorldService"
 import { modProviderManager, getLogicalPathForServerContent } from "../providers/modProviderManager"
-import { safeDeleteServerFilePhysical } from "./serverFileService"
+import { safeDeleteServerFilePhysical, getPhysicalFileSha256 } from "./serverFileService"
 
 function computeMd5Hex(data: Uint8Array): string {
   function md5cycle(x: Int32Array, k: Int32Array) {
@@ -258,8 +258,8 @@ export async function installServerContentPlan(
   }
 
   // 2. Guard: Acquire distributed operation lock and start heartbeat
-  const lockKey = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
-  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
+  const lockHandle = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   try {
     const worldName = await detectActiveWorldName(env, client)
@@ -300,21 +300,6 @@ export async function installServerContentPlan(
             const currentFileName = trackedAtTarget.targetPath.split("/").pop() || trackedAtTarget.targetPath
             throw createGraphQLError(
               `La ruta ${targetPath} está ocupada por otro contenido administrado (${currentFileName}).`,
-              "CONFLICT",
-            )
-          }
-        } else {
-          // Check if this physical file matches a retry for the existing item being updated/installed
-          const existingItem = managedRecords.find(
-            (m) =>
-              m.provider === item.provider &&
-              m.projectId === item.projectId &&
-              m.contentType === item.contentType,
-          )
-          if (!existingItem) {
-            // Physical file exists without any tracking at this targetPath -> manual file collision!
-            throw createGraphQLError(
-              `Ya existe un archivo manual en esta ruta (${targetPath}). HiKAT no lo reemplazará automáticamente.`,
               "CONFLICT",
             )
           }
@@ -438,6 +423,33 @@ export async function installServerContentPlan(
       const wingsFileName = pathSegments.pop() || filename
       const wingsParentDir = pathSegments.length > 0 ? `/${pathSegments.join("/")}` : "/"
 
+      // Check if a physical file already exists at targetPath without D1 tracking
+      const isPhysicalTarget =
+        physicalPaths.has(logicalTargetPath) ||
+        physicalPaths.has(`mods/${wingsFileName}`) ||
+        physicalPaths.has(`${worldName}/datapacks/${wingsFileName}`) ||
+        physicalPaths.has(`datapacks/${wingsFileName}`)
+
+      if (isPhysicalTarget) {
+        const tracked = managedRecords.find(
+          (m) =>
+            m.targetPath === logicalTargetPath ||
+            m.targetPath === `mods/${wingsFileName}` ||
+            m.targetPath === `${worldName}/datapacks/${wingsFileName}`,
+        )
+
+        if (!tracked) {
+          // Verify physical file SHA-256 before adopting or overwriting
+          const physicalSha = await getPhysicalFileSha256(client, wingsFullPath)
+          if (!physicalSha || physicalSha.toLowerCase() !== sha256.toLowerCase()) {
+            throw createGraphQLError(
+              `Ya existe un archivo manual en esta ruta (${logicalTargetPath}). HiKAT no lo reemplazará automáticamente.`,
+              "CONFLICT",
+            )
+          }
+        }
+      }
+
       // Ensure parent directory exists
       if (item.contentType === "DATA_PACK") {
         try {
@@ -453,6 +465,9 @@ export async function installServerContentPlan(
         }
       }
 
+      // Assert lease owned before writing to Wings
+      heartbeat.assertLeaseOwned()
+
       // Write binary to Wings
       await client.writeFile(wingsFullPath, buffer)
 
@@ -465,6 +480,7 @@ export async function installServerContentPlan(
 
       // If UPDATE had a filename change (old target != new target), delete old file safely
       if (existing && existing.targetPath !== logicalTargetPath) {
+        heartbeat.assertLeaseOwned()
         const oldSegments = existing.targetPath.replace(/^\/+/, "").split("/")
         const oldFileName = oldSegments.pop() || ""
         const oldParentDir = oldSegments.length > 0 ? `/${oldSegments.join("/")}` : "/"
@@ -484,6 +500,7 @@ export async function installServerContentPlan(
       }
 
       // Persist / update record in D1 ONLY AFTER physical write and old cleanup succeed
+      heartbeat.assertLeaseOwned()
       const now = new Date().toISOString()
       try {
         if (existing) {
@@ -526,7 +543,7 @@ export async function installServerContentPlan(
     return getServerManagedContent(db, env, clientOverride)
   } finally {
     heartbeat.stop()
-    await releaseServerOperationLock(db, lockKey)
+    await releaseServerOperationLock(db, lockHandle)
   }
 }
 
@@ -579,16 +596,22 @@ export async function removeServerManagedContent(
   }
 
   // 2. Guard: Acquire distributed operation lock and start heartbeat
-  const lockKey = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
-  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
+  const lockHandle = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   try {
     const segments = record.targetPath.replace(/^\/+/, "").split("/")
     const fileName = segments.pop() || ""
     const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
 
+    // Assert lease owned before physical deletion
+    heartbeat.assertLeaseOwned()
+
     // Delete physical file from Wings with safe physical check
     await safeDeleteServerFilePhysical(client, parentPath, fileName)
+
+    // Assert lease owned before D1 record deletion
+    heartbeat.assertLeaseOwned()
 
     // Delete D1 record only after physical delete succeeds
     await db
@@ -598,6 +621,6 @@ export async function removeServerManagedContent(
     return true
   } finally {
     heartbeat.stop()
-    await releaseServerOperationLock(db, lockKey)
+    await releaseServerOperationLock(db, lockHandle)
   }
 }

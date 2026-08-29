@@ -246,6 +246,7 @@ export const serverTypeDefs = /* GraphQL */ `
     items: [ModSearchResultItem!]!
     totalCount: Int!
     hasMore: Boolean!
+    nextCursor: String
     providersStatus: [ModProviderStatus!]!
     minecraftVersion: String!
     neoForgeVersion: String!
@@ -413,7 +414,7 @@ export const serverTypeDefs = /* GraphQL */ `
     """
     Searches server-only content (SERVER mods and DATA_PACKs) against published environment - requires ADMIN role
     """
-    searchServerContent(query: String!, provider: ModProvider, limit: Int, offset: Int, contentType: ContentType): ServerContentSearchPayload!
+    searchServerContent(query: String!, provider: ModProvider, limit: Int, offset: Int, cursor: String, contentType: ContentType): ServerContentSearchPayload!
 
     """
     Retrieves details for a server-side project scoped to the published environment - requires ADMIN role

@@ -343,6 +343,31 @@ export async function safeDeleteServerFilePhysical(
 }
 
 /**
+ * Safely downloads a file from Wings via signed download URL and computes its SHA-256 hash.
+ * Returns lowercase hex SHA-256 string, or null if download/verification fails.
+ */
+export async function getPhysicalFileSha256(
+  client: IPterodactylClient,
+  filePath: string,
+): Promise<string | null> {
+  try {
+    const cleanPath = filePath.startsWith("/") ? filePath : `/${filePath}`
+    const signedUrlRes = await client.getFileDownload(cleanPath)
+    if (!signedUrlRes?.attributes?.url) return null
+    const response = await fetch(signedUrlRes.attributes.url)
+    if (!response.ok) return null
+    const buffer = await response.arrayBuffer()
+    const hashBuf = await crypto.subtle.digest("SHA-256", buffer)
+    return Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+/**
  * Deletes a file or directory within a sandboxed virtual root.
  */
 export async function deleteServerFile(

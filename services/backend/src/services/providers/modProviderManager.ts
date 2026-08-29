@@ -52,6 +52,37 @@ export function getLogicalPathForServerContent(
   return `mods/${cleanFilename}`
 }
 
+interface ServerSearchCursorData {
+  q: string
+  ct: string
+  mrOff?: number
+  cfOff?: number
+}
+
+function encodeServerSearchCursor(data: ServerSearchCursorData): string {
+  const json = JSON.stringify(data)
+  return Buffer.from(json, "utf-8").toString("base64url")
+}
+
+function decodeServerSearchCursor(
+  cursorStr: string | null | undefined,
+  expectedQuery: string,
+  expectedContentType: string,
+): ServerSearchCursorData | null {
+  if (!cursorStr || typeof cursorStr !== "string" || !cursorStr.trim()) return null
+  try {
+    const json = Buffer.from(cursorStr, "base64url").toString("utf-8")
+    const parsed = JSON.parse(json) as ServerSearchCursorData
+    const normExpectedQuery = expectedQuery.trim().toLowerCase()
+    if (parsed && parsed.q === normExpectedQuery && parsed.ct === expectedContentType) {
+      return parsed
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 export class ModProviderManager {
   private modrinth = new ModrinthAdapter()
   private curseforge = new CurseForgeAdapter()
@@ -304,6 +335,7 @@ export class ModProviderManager {
     limit: number = 20,
     offset: number = 0,
     contentType: ContentTypeGql = "MOD",
+    cursor?: string | null,
   ): Promise<ServerContentSearchPayloadGql> {
     if (contentType !== "MOD" && contentType !== "DATA_PACK") {
       throw createGraphQLError(
@@ -320,9 +352,19 @@ export class ModProviderManager {
     const isAllowedInServer = (item: NormalizedModProject) =>
       contentType !== "MOD" || item.environment === "SERVER"
 
-    let rawResults: { items: NormalizedModProject[]; totalCount: number; hasMore: boolean; providersStatus: ModProviderStatusGql[] }
+    const normQuery = query.trim().toLowerCase()
+    const decodedCursor = decodeServerSearchCursor(cursor, query, contentType)
+
+    let rawResults: {
+      items: NormalizedModProject[]
+      totalCount: number
+      hasMore: boolean
+      nextCursor: string | null
+      providersStatus: ModProviderStatusGql[]
+    }
 
     if (provider === "MODRINTH") {
+      const startOffset = decodedCursor?.mrOff ?? (cursor ? 0 : offset)
       try {
         const res = await this.fetchFilteredFromProvider(
           this.modrinth,
@@ -330,23 +372,27 @@ export class ModProviderManager {
           query,
           minecraftVersion,
           loader,
-          offset + limit,
+          limit,
           contentType,
           isAllowedInServer,
+          startOffset,
           50,
         )
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        const pageItems = res.items.slice(offset, offset + limit)
-        const pageHasMore = res.items.length > offset + limit || res.hasMore
+        const nextCursor = res.nextRawOffset !== null
+          ? encodeServerSearchCursor({ q: normQuery, ct: contentType, mrOff: res.nextRawOffset })
+          : null
+
         rawResults = {
-          items: pageItems,
+          items: res.items,
           totalCount: res.items.length,
-          hasMore: pageHasMore,
+          hasMore: res.hasMore,
+          nextCursor,
           providersStatus,
         }
       } catch (err: any) {
         providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
-        rawResults = { items: [], totalCount: 0, hasMore: false, providersStatus }
+        rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
       }
     } else if (provider === "CURSEFORGE") {
       if (!this.curseforge.isConfigured(env)) {
@@ -355,8 +401,9 @@ export class ModProviderManager {
           available: false,
           error: "CurseForge API Key no está configurada en el servidor.",
         })
-        rawResults = { items: [], totalCount: 0, hasMore: false, providersStatus }
+        rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
       } else {
+        const startOffset = decodedCursor?.cfOff ?? (cursor ? 0 : offset)
         try {
           const res = await this.fetchFilteredFromProvider(
             this.curseforge,
@@ -364,41 +411,73 @@ export class ModProviderManager {
             query,
             minecraftVersion,
             loader,
-            offset + limit,
+            limit,
             contentType,
             isAllowedInServer,
+            startOffset,
             50,
           )
           providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
-          const pageItems = res.items.slice(offset, offset + limit)
-          const pageHasMore = res.items.length > offset + limit || res.hasMore
+          const nextCursor = res.nextRawOffset !== null
+            ? encodeServerSearchCursor({ q: normQuery, ct: contentType, cfOff: res.nextRawOffset })
+            : null
+
           rawResults = {
-            items: pageItems,
+            items: res.items,
             totalCount: res.items.length,
-            hasMore: pageHasMore,
+            hasMore: res.hasMore,
+            nextCursor,
             providersStatus,
           }
         } catch (err: any) {
           providersStatus.push({ provider: "CURSEFORGE", available: false, error: err.message })
-          rawResults = { items: [], totalCount: 0, hasMore: false, providersStatus }
+          rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
         }
       }
     } else {
       // ALL providers
-      const fetchLimit = offset + limit
+      const mrStartOffset = decodedCursor?.mrOff ?? (cursor ? 0 : offset)
+      const cfStartOffset = decodedCursor?.cfOff ?? (cursor ? 0 : offset)
+
       const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-        this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInServer, 50),
+        this.fetchFilteredFromProvider(
+          this.modrinth,
+          env,
+          query,
+          minecraftVersion,
+          loader,
+          limit,
+          contentType,
+          isAllowedInServer,
+          mrStartOffset,
+          50,
+        ),
         this.curseforge.isConfigured(env)
-          ? this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInServer, 50)
-          : Promise.resolve({ items: [], totalCount: 0, hasMore: false }),
+          ? this.fetchFilteredFromProvider(
+              this.curseforge,
+              env,
+              query,
+              minecraftVersion,
+              loader,
+              limit,
+              contentType,
+              isAllowedInServer,
+              cfStartOffset,
+              50,
+            )
+          : Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false }),
       ])
 
-      const allItems: any[] = []
+      let nextMrOff: number | undefined
+      let nextCfOff: number | undefined
       let hasMore = false
 
       if (modrinthResult.status === "fulfilled") {
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        if (modrinthResult.value.hasMore) hasMore = true
+        if (modrinthResult.value.nextRawOffset !== null) {
+          nextMrOff = modrinthResult.value.nextRawOffset
+          hasMore = true
+        }
       } else {
         providersStatus.push({
           provider: "MODRINTH",
@@ -414,7 +493,10 @@ export class ModProviderManager {
           available: isConf,
           error: isConf ? null : "CurseForge API Key no está configurada.",
         })
-        if (curseforgeResult.value.hasMore) hasMore = true
+        if (curseforgeResult.value.nextRawOffset !== null) {
+          nextCfOff = curseforgeResult.value.nextRawOffset
+          hasMore = true
+        }
       } else {
         providersStatus.push({
           provider: "CURSEFORGE",
@@ -426,6 +508,7 @@ export class ModProviderManager {
       const modrinthItems = modrinthResult.status === "fulfilled" ? modrinthResult.value.items : []
       const curseforgeItems = curseforgeResult.status === "fulfilled" ? curseforgeResult.value.items : []
 
+      const allItems: NormalizedModProject[] = []
       const seenIds = new Set<string>()
       const maxLength = Math.max(modrinthItems.length, curseforgeItems.length)
       for (let i = 0; i < maxLength; i++) {
@@ -445,13 +528,21 @@ export class ModProviderManager {
         }
       }
 
-      const pageItems = allItems.slice(offset, offset + limit)
-      const pageHasMore = allItems.length > offset + limit || hasMore
+      const pageItems = allItems.slice(0, limit)
+      const nextCursor = hasMore
+        ? encodeServerSearchCursor({
+            q: normQuery,
+            ct: contentType,
+            mrOff: nextMrOff,
+            cfOff: nextCfOff,
+          })
+        : null
 
       rawResults = {
         items: pageItems,
-        totalCount: allItems.length,
-        hasMore: pageHasMore,
+        totalCount: pageItems.length,
+        hasMore,
+        nextCursor,
         providersStatus,
       }
     }
@@ -460,6 +551,7 @@ export class ModProviderManager {
       items: rawResults.items as any,
       totalCount: rawResults.totalCount,
       hasMore: rawResults.hasMore,
+      nextCursor: rawResults.nextCursor,
       providersStatus: rawResults.providersStatus,
       minecraftVersion,
       neoForgeVersion,
@@ -552,16 +644,25 @@ export class ModProviderManager {
     query: string,
     minecraftVersion: string,
     loader: string,
-    neededCount: number,
+    limit: number,
     contentType: ContentTypeGql,
     filterFn: (item: NormalizedModProject) => boolean,
+    startRawOffset: number = 0,
     pageSize: number = 50,
-  ): Promise<{ items: NormalizedModProject[]; totalCount: number; providerTotalCount: number; hasMore: boolean }> {
+  ): Promise<{
+    items: NormalizedModProject[]
+    totalCount: number
+    providerTotalCount: number
+    nextRawOffset: number | null
+    hasMore: boolean
+  }> {
     const allFilteredItems: NormalizedModProject[] = []
     const seenKeys = new Set<string>()
-    let currentOffset = 0
+    let currentOffset = startRawOffset
     let providerTotalCount = 0
-    const maxPages = 6 // Safety ceiling: up to 300 raw items per provider
+    const maxPages = 6 // Safety ceiling: up to 300 raw items per search step
+
+    let reachedEnd = false
 
     for (let page = 0; page < maxPages; page++) {
       const res = await adapter.searchMods(
@@ -574,7 +675,10 @@ export class ModProviderManager {
         contentType,
       )
       providerTotalCount = res.totalCount
-      if (!res.items || res.items.length === 0) break
+      if (!res.items || res.items.length === 0) {
+        reachedEnd = true
+        break
+      }
 
       for (const item of res.items) {
         if (filterFn(item)) {
@@ -587,19 +691,25 @@ export class ModProviderManager {
       }
 
       currentOffset += res.items.length
-      if (
-        allFilteredItems.length >= neededCount + 1 ||
-        currentOffset >= providerTotalCount
-      ) {
+      if (currentOffset >= providerTotalCount) {
+        reachedEnd = true
+        break
+      }
+
+      if (allFilteredItems.length >= limit) {
         break
       }
     }
 
-    const hasMore = allFilteredItems.length > neededCount || currentOffset < providerTotalCount
+    const hasMore = !reachedEnd && (currentOffset < providerTotalCount || allFilteredItems.length > limit)
+    const nextRawOffset = hasMore ? currentOffset : null
+    const pageItems = allFilteredItems.slice(0, limit)
+
     return {
-      items: allFilteredItems,
-      totalCount: allFilteredItems.length,
+      items: pageItems,
+      totalCount: pageItems.length,
       providerTotalCount,
+      nextRawOffset,
       hasMore,
     }
   }

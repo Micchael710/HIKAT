@@ -761,8 +761,8 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
     expect(deleteFilesSpy).not.toHaveBeenCalled()
   })
 
-  // Test 10: Retry Recovery on Matching Untracked File
-  it("Shard 8D: applyServerReleaseSync allows recovery without CONFLICT when physical file matches desired size and filename", async () => {
+  // Test 10: Retry Recovery on Matching Untracked File with exact SHA-256
+  it("Shard 8D: applyServerReleaseSync allows recovery without CONFLICT when physical file matches desired size AND exact SHA-256", async () => {
     const nowIso = new Date().toISOString()
 
     await db.insert(schema.gameReleases).values({
@@ -803,7 +803,11 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       arrayBuffer: vi.fn().mockResolvedValue(testBytes.buffer),
     })
 
-    // Physical file already exists on Wings with exact expected size (e.g. from prior failed D1 write)
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(testBytes, { status: 200 }),
+    )
+
+    // Physical file already exists on Wings with exact expected size and exact SHA-256
     const mockClient = {
       getServerResources: vi.fn().mockResolvedValue({
         attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
@@ -814,6 +818,9 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       createFolder: vi.fn().mockResolvedValue(undefined),
       listDirectory: vi.fn().mockResolvedValue({
         data: [{ attributes: { name: "retry-mod.jar", size: testBytes.length, is_file: true } }],
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({
+        attributes: { url: "https://wings.hikat.net/signed-download/retry-mod.jar" },
       }),
       writeFile: vi.fn().mockResolvedValue(undefined),
       deleteFiles: vi.fn().mockResolvedValue(undefined),
@@ -826,5 +833,80 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
     const tracked = await db.select().from(schema.serverManagedContent)
     expect(tracked).toHaveLength(1)
     expect(tracked[0]?.targetPath).toBe("mods/retry-mod.jar")
+
+    fetchSpy.mockRestore()
+  })
+
+  // Test 11: Untracked Physical File with Same Size but DIFFERENT SHA-256 is Rejected
+  it("Shard 8D: applyServerReleaseSync rejects untracked physical file when SHA-256 differs even if size matches", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-diff-sha",
+      version: "10.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const expectedBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01, 0x02])
+    const hashBuf = await crypto.subtle.digest("SHA-256", expectedBytes)
+    const expectedSha256 = Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    const manualBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x99, 0x99]) // Same length (6), different content
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: "grf-diff-sha",
+      releaseId: "rel-pub-diff-sha",
+      name: "diff-sha-mod.jar",
+      logicalPath: "mods/diff-sha-mod.jar",
+      category: "MOD",
+      sha256: expectedSha256,
+      sizeBytes: expectedBytes.length,
+      policy: "NO_MODIFICABLE",
+      effectivePolicy: "NO_MODIFICABLE",
+      isDirectory: false,
+      sourceEnvironment: "BOTH",
+      objectKey: "releases/rel-pub-diff-sha/mods/diff-sha-mod.jar",
+      createdAt: nowIso,
+    })
+
+    env.ASSETS.get = vi.fn().mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(expectedBytes.buffer),
+    })
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(manualBytes, { status: 200 }),
+    )
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      listDirectory: vi.fn().mockResolvedValue({
+        data: [{ attributes: { name: "diff-sha-mod.jar", size: expectedBytes.length, is_file: true } }],
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({
+        attributes: { url: "https://wings.hikat.net/signed-download/diff-sha-mod.jar" },
+      }),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+    }
+
+    await expect(
+      applyServerReleaseSync(db, env, "admin-1", false, mockClient as any),
+    ).rejects.toThrow("Ya existe un archivo manual en esta ruta (mods/diff-sha-mod.jar). HiKAT no lo reemplazará automáticamente.")
+
+    fetchSpy.mockRestore()
   })
 })

@@ -55,6 +55,7 @@ export const serverOperationLocks = sqliteTable(
   "server_operation_locks",
   {
     lockKey: text("lock_key").primaryKey(),
+    leaseId: text("lease_id"),
     operation: text("operation").notNull(),
     acquiredByUserId: text("acquired_by_user_id")
       .notNull()

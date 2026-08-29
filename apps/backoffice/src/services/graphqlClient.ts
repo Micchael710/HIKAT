@@ -2191,6 +2191,7 @@ export const serverContentApi = {
     provider?: import("../types").ModProvider | null,
     limit?: number,
     offset?: number,
+    cursor?: string | null,
   ): Promise<import("../types").ServerContentSearchPayload> {
     const gqlQuery = /* GraphQL */ `
       query SearchServerContent(
@@ -2199,6 +2200,7 @@ export const serverContentApi = {
         $provider: ModProvider
         $limit: Int
         $offset: Int
+        $cursor: String
       ) {
         searchServerContent(
           query: $query
@@ -2206,6 +2208,7 @@ export const serverContentApi = {
           provider: $provider
           limit: $limit
           offset: $offset
+          cursor: $cursor
         ) {
           items {
             provider
@@ -2227,6 +2230,7 @@ export const serverContentApi = {
           }
           totalCount
           hasMore
+          nextCursor
           providersStatus {
             provider
             available
@@ -2244,6 +2248,7 @@ export const serverContentApi = {
       provider,
       limit,
       offset,
+      cursor,
     })
     return data.searchServerContent
   },

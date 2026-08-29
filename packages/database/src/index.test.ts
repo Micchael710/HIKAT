@@ -779,6 +779,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0015_content_providers_expansion.sql",
       "0016_game_release_cover_media.sql",
       "0017_server_managed_content.sql",
+      "0018_operation_lock_lease.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard

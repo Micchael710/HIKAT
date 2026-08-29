@@ -995,5 +995,98 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
 
     expect(onNavigateToGameMock).toHaveBeenCalledTimes(1)
   })
+
+  it("Shard 08D Test 5: ServerModSearchModal passes cursor to Cargar más and appends results", async () => {
+    const { ServerModSearchModal } = await import("./providers/ServerModSearchModal")
+    const { graphqlClient } = await import("../../services/graphqlClient")
+
+    const searchSpy = vi.spyOn(graphqlClient, "searchServerContent")
+      .mockResolvedValueOnce({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "srv-mod-1",
+            name: "Server Mod 1",
+            summary: "Server utility",
+            author: "author1",
+            downloads: 100,
+            categories: ["utility"],
+            contentType: "MOD",
+            environment: "SERVER",
+            latestVersion: "1.0.0",
+          },
+        ],
+        totalCount: 2,
+        hasMore: true,
+        nextCursor: "opaque-cursor-token-1",
+        providersStatus: [{ provider: "MODRINTH", available: true }],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        isPublishedEnvironment: true,
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "srv-mod-2",
+            name: "Server Mod 2",
+            summary: "Server utility 2",
+            author: "author2",
+            downloads: 200,
+            categories: ["utility"],
+            contentType: "MOD",
+            environment: "SERVER",
+            latestVersion: "1.0.0",
+          },
+        ],
+        totalCount: 2,
+        hasMore: false,
+        nextCursor: null,
+        providersStatus: [{ provider: "MODRINTH", available: true }],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        isPublishedEnvironment: true,
+      })
+
+    await act(async () => {
+      render(
+        <ServerModSearchModal
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          onNavigateToGame={onNavigateToGameMock}
+        />,
+      )
+    })
+
+    // Initial item is visible
+    expect(await screen.findByText("Server Mod 1")).toBeDefined()
+
+    // "Cargar más" button is visible because hasMore = true and nextCursor is present
+    const loadMoreBtn = await screen.findByRole("button", { name: /Cargar más/i })
+    expect(loadMoreBtn).toBeDefined()
+
+    // Click "Cargar más"
+    await act(async () => {
+      fireEvent.click(loadMoreBtn)
+    })
+
+    // Expect searchServerContent to have been called with nextCursor
+    expect(searchSpy).toHaveBeenLastCalledWith(
+      "",
+      "MOD",
+      null,
+      20,
+      20,
+      "opaque-cursor-token-1",
+    )
+
+    // Both items are now visible
+    expect(screen.getByText("Server Mod 1")).toBeDefined()
+    expect(await screen.findByText("Server Mod 2")).toBeDefined()
+
+    // Button disappears because second response returned hasMore: false / nextCursor: null
+    expect(screen.queryByRole("button", { name: /Cargar más/i })).toBeNull()
+  })
 })
+
 

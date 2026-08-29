@@ -926,6 +926,7 @@ export interface ServerContentSearchPayloadGql {
   items: ModSearchResultItemGql[]
   totalCount: number
   hasMore: boolean
+  nextCursor?: string | null
   providersStatus: ModProviderStatusGql[]
   minecraftVersion: string
   neoForgeVersion: string

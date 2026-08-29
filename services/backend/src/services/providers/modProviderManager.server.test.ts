@@ -656,5 +656,184 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     // Should return results from Modrinth without throwing
     expect(results.items).toHaveLength(1)
     expect(results.items[0]?.projectId).toBe("mr-srv-1")
+    expect(results.providersStatus).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ provider: "MODRINTH", available: true }),
+        expect.objectContaining({ provider: "CURSEFORGE", available: false }),
+      ]),
+    )
+  })
+
+  // Test 12: Cursor-based pagination scans past raw 300 items across multiple pages with 0 duplicates
+  it("Shard 8D: Cursor-based pagination seamlessly scans past raw index 300 without infinite loop or duplicates", async () => {
+    // Generate 1000 items in provider (50 items per page, 20 pages)
+    // Even items are BOTH, Odd items are SERVER
+    const allProviderItems = Array.from({ length: 1000 }, (_, i) => ({
+      projectId: `mod-${i}`,
+      name: `Mod ${i}`,
+      environment: i % 2 === 1 ? "SERVER" : "BOTH",
+      contentType: "MOD",
+    }))
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async (_env, _query, _mc, _l, limit, offset) => {
+        const slice = allProviderItems.slice(offset, offset + limit)
+        return { items: slice, totalCount: allProviderItems.length }
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+    ;(manager as any).modrinth = mockAdapter
+
+    const seenProjectIds = new Set<string>()
+    let currentCursor: string | null = null
+    let pageCount = 0
+    let totalCollected = 0
+
+    // Fetch page 1 (limit 20)
+    const page1 = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "test",
+      "MODRINTH",
+      20,
+      0,
+      "MOD",
+      currentCursor,
+    )
+
+    expect(page1.items.length).toBe(20)
+    expect(page1.hasMore).toBe(true)
+    expect(page1.nextCursor).toBeDefined()
+    expect(page1.nextCursor).not.toBeNull()
+
+    for (const item of page1.items) {
+      expect(seenProjectIds.has(item.projectId)).toBe(false)
+      seenProjectIds.add(item.projectId)
+    }
+    totalCollected += page1.items.length
+    currentCursor = page1.nextCursor || null
+
+    // Paginating 15 consecutive times to go way past raw index 300 (reaching raw 600+)
+    while (currentCursor && pageCount < 15) {
+      pageCount++
+      const nextPage = await manager.searchServerMods(
+        mockEnv,
+        db,
+        "test",
+        "MODRINTH",
+        20,
+        0,
+        "MOD",
+        currentCursor,
+      )
+
+      for (const item of nextPage.items) {
+        expect(seenProjectIds.has(item.projectId)).toBe(false) // 0 duplicates across cursor pages
+        seenProjectIds.add(item.projectId)
+      }
+      totalCollected += nextPage.items.length
+      currentCursor = nextPage.nextCursor || null
+    }
+
+    expect(pageCount).toBe(15)
+    expect(totalCollected).toBeGreaterThan(300) // Successfully collected >300 items past the 300 limit barrier
+  })
+
+  // Test 13: Cursor with sparse provider results continues scanning and returns nextCursor
+  it("Shard 8D: Sparse provider results return items and valid nextCursor without failing", async () => {
+    // Pages 0..3 have 0 SERVER items (200 items of BOTH), Page 4 has 10 SERVER items
+    const allProviderItems = Array.from({ length: 500 }, (_, i) => ({
+      projectId: `sparse-mod-${i}`,
+      name: `Sparse Mod ${i}`,
+      environment: i >= 200 && i < 210 ? "SERVER" : "BOTH",
+      contentType: "MOD",
+    }))
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async (_env, _query, _mc, _l, limit, offset) => {
+        const slice = allProviderItems.slice(offset, offset + limit)
+        return { items: slice, totalCount: allProviderItems.length }
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+    ;(manager as any).modrinth = mockAdapter
+
+    const res = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "sparse-search",
+      "MODRINTH",
+      20,
+      0,
+      "MOD",
+      null,
+    )
+
+    // Should have found the 10 SERVER items at raw index 200..210 within the 6-page (300 raw item) scan window
+    expect(res.items.length).toBe(10)
+    expect(res.hasMore).toBe(true)
+    expect(res.nextCursor).not.toBeNull()
+  })
+
+  // Test 14: ALL providers cursor handles independent offsets and partial failure
+  it("Shard 8D: ALL providers cursor manages independent cursors and handles partial failure", async () => {
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async (_env, _query, _mc, _l, limit, offset) => {
+        const items = Array.from({ length: limit }, (_, i) => ({
+          projectId: `mr-srv-${offset + i}`,
+          name: `MR Srv ${offset + i}`,
+          environment: "SERVER",
+          contentType: "MOD",
+        }))
+        return { items, totalCount: 100 }
+      }),
+    }
+
+    const mockCfAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockRejectedValue(new Error("CF timeout")),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockImplementation((p: string) => {
+      if (p === "CURSEFORGE") return mockCfAdapter as any
+      return mockMrAdapter as any
+    })
+    ;(manager as any).modrinth = mockMrAdapter
+    ;(manager as any).curseforge = mockCfAdapter
+
+    const page1 = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "all-test",
+      null,
+      20,
+      0,
+      "MOD",
+      null,
+    )
+
+    expect(page1.items.length).toBe(20)
+    expect(page1.hasMore).toBe(true)
+    expect(page1.nextCursor).not.toBeNull()
+
+    // Page 2 using cursor
+    const page2 = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "all-test",
+      null,
+      20,
+      0,
+      "MOD",
+      page1.nextCursor,
+    )
+
+    expect(page2.items.length).toBe(20)
+    expect(page2.items[0]?.projectId).toBe("mr-srv-50")
   })
 })

@@ -222,6 +222,10 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
     }
 
     const { modProviderManager } = await import("../providers/modProviderManager")
+    const jarBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x11, 0x22])
+    const hashBuffer = await crypto.subtle.digest("SHA-256", jarBytes)
+    const realSha256 = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("")
+
     vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
       items: [
         {
@@ -231,8 +235,8 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
           versionId: "ver-1",
           versionNumber: "1.0.0",
           filename: "spark.jar",
-          sizeBytes: 1000,
-          sha256: "hash123",
+          sizeBytes: jarBytes.length,
+          sha256: realSha256,
           contentType: "MOD",
           environment: "SERVER",
           targetPath: "mods/spark.jar",
@@ -244,11 +248,25 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
           availableCompatibleVersions: [],
         },
       ],
-      totalDownloadSizeBytes: 1000,
+      totalDownloadSizeBytes: jarBytes.length,
       conflicts: [],
       optionalDependencies: [],
       isValid: true,
       requiresGameUpdate: false,
+    })
+
+    const mockAdapter = {
+      getVersion: vi.fn().mockResolvedValue({
+        id: "ver-1",
+        filename: "spark.jar",
+        downloadUrl: "https://cdn.modrinth.com/data/spark/spark.jar",
+        hashes: {},
+      }),
+    }
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(jarBytes.slice(0), { status: 200, headers: { "Content-Type": "application/java-archive" } })
     })
 
     await expect(
@@ -265,6 +283,8 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
         mockClient as any,
       ),
     ).rejects.toThrow("Ya existe un archivo manual en esta ruta")
+
+    fetchSpy.mockRestore()
   })
 
   // Test 4: Removal Protection for GAME_RELEASE and Safe Deletion for SERVER_DIRECT
@@ -559,6 +579,191 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
 
     // Compensation delete must have been called
     expect(deleteFilesSpy).toHaveBeenCalledWith("/mods", ["spark-comp.jar"])
+
+    fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // Test 8: installServerContentPlan rejects when unmanaged physical file has different SHA-256
+  it("Shard 8D: installServerContentPlan rejects installation with CONFLICT when unmanaged file has different SHA-256", async () => {
+    const jarBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x11, 0x22])
+    const hashBuffer = await crypto.subtle.digest("SHA-256", jarBytes)
+    const realSha256 = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("")
+
+    const manualBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x99, 0x99])
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir.includes("mods")) {
+          return Promise.resolve({
+            data: [{ attributes: { name: "manual-mod.jar", is_file: true } }],
+          })
+        }
+        return Promise.resolve({ data: [] })
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({
+        attributes: { url: "https://wings.hikat.net/signed-download/mods/manual-mod.jar" },
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "manual-mod-id",
+          projectName: "manual-mod",
+          versionId: "ver-manual-1",
+          versionNumber: "1.0.0",
+          filename: "manual-mod.jar",
+          sizeBytes: jarBytes.length,
+          sha256: realSha256,
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: "mods/manual-mod.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: jarBytes.length,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const mockAdapter = {
+      getVersion: vi.fn().mockResolvedValue({
+        id: "ver-manual-1",
+        filename: "manual-mod.jar",
+        downloadUrl: "https://cdn.modrinth.com/data/manual/manual-mod.jar",
+        hashes: {},
+      }),
+    }
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    // Download for version returns jarBytes, while download for physical file returns manualBytes
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
+      if (String(url).includes("signed-download")) {
+        return new Response(manualBytes, { status: 200 })
+      }
+      return new Response(jarBytes, { status: 200, headers: { "Content-Type": "application/java-archive" } })
+    })
+
+    await expect(
+      installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "manual-mod-id", versionId: "ver-manual-1", contentType: "MOD" },
+        "admin-1",
+        mockClient as any,
+      ),
+    ).rejects.toThrow("Ya existe un archivo manual en esta ruta (mods/manual-mod.jar). HiKAT no lo reemplazará automáticamente.")
+
+    fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // Test 9: installServerContentPlan allows adoption when unmanaged physical file matches exact SHA-256
+  it("Shard 8D: installServerContentPlan adopts unmanaged file when exact SHA-256 matches", async () => {
+    const jarBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x33, 0x44])
+    const hashBuffer = await crypto.subtle.digest("SHA-256", jarBytes)
+    const realSha256 = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("")
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (dir.includes("mods")) {
+          return Promise.resolve({
+            data: [{ attributes: { name: "matching-mod.jar", is_file: true } }],
+          })
+        }
+        return Promise.resolve({ data: [] })
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({
+        attributes: { url: "https://wings.hikat.net/signed-download/mods/matching-mod.jar" },
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "matching-mod-id",
+          projectName: "matching-mod",
+          versionId: "ver-match-1",
+          versionNumber: "1.0.0",
+          filename: "matching-mod.jar",
+          sizeBytes: jarBytes.length,
+          sha256: realSha256,
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: "mods/matching-mod.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: jarBytes.length,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const mockAdapter = {
+      getVersion: vi.fn().mockResolvedValue({
+        id: "ver-match-1",
+        filename: "matching-mod.jar",
+        downloadUrl: "https://cdn.modrinth.com/data/matching/matching-mod.jar",
+        hashes: {},
+      }),
+    }
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(jarBytes.slice(0), { status: 200, headers: { "Content-Type": "application/java-archive" } })
+    })
+
+    const result = await installServerContentPlan(
+      db,
+      env,
+      { provider: "MODRINTH", projectId: "matching-mod-id", versionId: "ver-match-1", contentType: "MOD" },
+      "admin-1",
+      mockClient as any,
+    )
+
+    expect(result).toBeDefined()
+    const tracked = await db.select().from(schema.serverManagedContent)
+    expect(tracked).toHaveLength(1)
+    expect(tracked[0]?.targetPath).toBe("mods/matching-mod.jar")
 
     fetchSpy.mockRestore()
     vi.restoreAllMocks()

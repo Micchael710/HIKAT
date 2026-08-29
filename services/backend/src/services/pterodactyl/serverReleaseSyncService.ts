@@ -21,7 +21,9 @@ import {
   startServerOperationHeartbeat,
 } from "./serverAdministrationService"
 import { createServerBackup } from "./serverBackupService"
-import { safeDeleteServerFilePhysical } from "./serverFileService"
+import { safeDeleteServerFilePhysical, getPhysicalFileSha256 } from "./serverFileService"
+
+// ... imports remain ...
 
 export const SERVER_RELEASE_SYNC_BACKUP_POLL_INTERVAL_MS = 2000
 export const SERVER_RELEASE_SYNC_BACKUP_TIMEOUT_MS = 180000 // 3 minutes
@@ -313,8 +315,8 @@ export async function applyServerReleaseSync(
   }
 
   // 2. Guard: Acquire distributed operation lock
-  const lockKey = await acquireServerOperationLock(db, "SERVER_RELEASE_SYNC", userId)
-  const heartbeat = startServerOperationHeartbeat(db, lockKey, userId)
+  const lockHandle = await acquireServerOperationLock(db, "SERVER_RELEASE_SYNC", userId)
+  const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   const syncId = crypto.randomUUID()
   const nowStart = new Date().toISOString()
@@ -362,6 +364,7 @@ export async function applyServerReleaseSync(
 
     // 4. Pre-sync backup with strict timeout and failure abort semantics
     if (createBackup) {
+      heartbeat.assertLeaseOwned()
       let backupId: string | null = null
       try {
         const backupItem = await createServerBackup(env, "Pre-Release Sync Backup", client)
@@ -454,10 +457,19 @@ export async function applyServerReleaseSync(
           // If GAME_RELEASE: OK
         } else {
           // Physical file exists without any D1 tracking!
-          // Check if it's the expected binary for this desired release item (e.g. from prior retry or physical presence):
+          // Check if it's the expected binary for this desired release item:
           const physicalItem = modsListRes.data.find((item) => item?.attributes?.name === desired.name)
           const sizeMatches = physicalItem?.attributes?.size === desired.sizeBytes
           if (!sizeMatches) {
+            throw createGraphQLError(
+              `Ya existe un archivo manual en esta ruta (mods/${desired.name}). HiKAT no lo reemplazará automáticamente.`,
+              "CONFLICT",
+            )
+          }
+
+          // Authoritatively verify physical file SHA-256
+          const physicalSha = await getPhysicalFileSha256(client, `mods/${desired.name}`)
+          if (!physicalSha || physicalSha.toLowerCase() !== desired.sha256.toLowerCase()) {
             throw createGraphQLError(
               `Ya existe un archivo manual en esta ruta (mods/${desired.name}). HiKAT no lo reemplazará automáticamente.`,
               "CONFLICT",
@@ -537,6 +549,7 @@ export async function applyServerReleaseSync(
     }
 
     // 7. Apply Physical Writes and D1 Reconciliations
+    heartbeat.assertLeaseOwned()
     let installedCount = 0
     let updatedCount = 0
     let removedCount = 0
@@ -545,6 +558,7 @@ export async function applyServerReleaseSync(
     const matchedCurrentIds = new Set<string>()
 
     for (const desired of desiredFiles) {
+      heartbeat.assertLeaseOwned()
       const matchedCurrent = currentRecords.find(
         (c) =>
           c.gameReleaseFileId === desired.id ||
@@ -642,8 +656,10 @@ export async function applyServerReleaseSync(
     }
 
     // Step D: Apply REMOVE for unreferenced GAME_RELEASE items
+    heartbeat.assertLeaseOwned()
     for (const current of currentRecords) {
       if (!matchedCurrentIds.has(current.id)) {
+        heartbeat.assertLeaseOwned()
         const fileName = current.targetPath.split("/").pop() || current.targetPath
         // Safe physical delete
         await safeDeleteServerFilePhysical(client, "/mods", fileName)
@@ -701,6 +717,6 @@ export async function applyServerReleaseSync(
   } finally {
     // 9. Release distributed operation lock and stop heartbeat
     heartbeat.stop()
-    await releaseServerOperationLock(db, lockKey)
+    await releaseServerOperationLock(db, lockHandle)
   }
 }
