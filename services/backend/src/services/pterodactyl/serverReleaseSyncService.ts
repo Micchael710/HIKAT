@@ -55,6 +55,7 @@ export async function getServerReleaseSyncPlan(
   }
 
   // 2. Fetch physical files on Wings /mods
+  let physicalFilesAvailable = false
   const physicalMods = new Set<string>()
   if (serverStatus !== "DISCONNECTED") {
     try {
@@ -65,13 +66,26 @@ export async function getServerReleaseSyncPlan(
             physicalMods.add(item.attributes.name)
           }
         }
+        physicalFilesAvailable = true
       }
     } catch {
-      // If server unreachable or error listing /mods, treat as disconnected/offline guard
+      // If server unreachable or error listing /mods, keep physicalFilesAvailable = false
     }
   }
 
   if (!published) {
+    const canApply = serverStatus === "OFFLINE" && physicalFilesAvailable
+    let blockReason: string | null = null
+    if (!canApply) {
+      if (serverStatus === "DISCONNECTED" || serverStatus === "UNKNOWN") {
+        blockReason = "El servidor no está disponible."
+      } else if (serverStatus !== "OFFLINE") {
+        blockReason = "Apaga el servidor antes de aplicar cambios de mods."
+      } else if (!physicalFilesAvailable) {
+        blockReason = "No se pudieron verificar los archivos del servidor."
+      }
+    }
+
     return {
       releaseId: null,
       releaseVersion: null,
@@ -84,8 +98,8 @@ export async function getServerReleaseSyncPlan(
         toKeep: 0,
       },
       serverStatus,
-      canApply: serverStatus === "OFFLINE",
-      blockReason: serverStatus === "OFFLINE" ? null : (serverStatus === "DISCONNECTED" || serverStatus === "UNKNOWN" ? "No se pudo confirmar que el servidor esté apagado." : "Apaga el servidor antes de aplicar cambios de mods."),
+      canApply,
+      blockReason,
     }
   }
 
@@ -147,40 +161,42 @@ export async function getServerReleaseSyncPlan(
         matchedCurrent.sha256 === desired.sha256 &&
         matchedCurrent.targetPath === `mods/${desired.name}`
 
-      if (isIdentical && physicalExists) {
-        // Tracked in D1 AND present on Wings filesystem
-        items.push({
-          action: "KEEP",
-          filename: desired.name,
-          targetPath: `mods/${desired.name}`,
-          sizeBytes: desired.sizeBytes,
-          sha256: desired.sha256,
-          sourceProvider: (desired.sourceProvider as any) || (matchedCurrent.provider as any) || null,
-          sourceProjectId: desired.sourceProjectId || matchedCurrent.projectId || null,
-          sourceVersionId: desired.sourceVersionId || matchedCurrent.versionId || null,
-          sourceFileId: desired.sourceFileId || matchedCurrent.fileId || null,
-          gameReleaseFileId: desired.id,
-          managedContentId: matchedCurrent.id,
-          currentVersionNumber: currentFileName,
-          desiredVersionNumber: desired.name,
-        })
-      } else if (isIdentical && !physicalExists) {
-        // Physical drift: Tracked in D1 but physically missing from Wings filesystem!
-        items.push({
-          action: "INSTALL",
-          filename: desired.name,
-          targetPath: `mods/${desired.name}`,
-          sizeBytes: desired.sizeBytes,
-          sha256: desired.sha256,
-          sourceProvider: (desired.sourceProvider as any) || (matchedCurrent.provider as any) || null,
-          sourceProjectId: desired.sourceProjectId || matchedCurrent.projectId || null,
-          sourceVersionId: desired.sourceVersionId || matchedCurrent.versionId || null,
-          sourceFileId: desired.sourceFileId || matchedCurrent.fileId || null,
-          gameReleaseFileId: desired.id,
-          managedContentId: matchedCurrent.id,
-          currentVersionNumber: currentFileName,
-          desiredVersionNumber: desired.name,
-        })
+      if (isIdentical) {
+        if (!physicalFilesAvailable || physicalExists) {
+          // Tracked in D1 AND present on Wings filesystem (or logical plan when filesystem is unavailable)
+          items.push({
+            action: "KEEP",
+            filename: desired.name,
+            targetPath: `mods/${desired.name}`,
+            sizeBytes: desired.sizeBytes,
+            sha256: desired.sha256,
+            sourceProvider: (desired.sourceProvider as any) || (matchedCurrent.provider as any) || null,
+            sourceProjectId: desired.sourceProjectId || matchedCurrent.projectId || null,
+            sourceVersionId: desired.sourceVersionId || matchedCurrent.versionId || null,
+            sourceFileId: desired.sourceFileId || matchedCurrent.fileId || null,
+            gameReleaseFileId: desired.id,
+            managedContentId: matchedCurrent.id,
+            currentVersionNumber: currentFileName,
+            desiredVersionNumber: desired.name,
+          })
+        } else {
+          // Physical drift: Filesystem is available, tracked in D1, but physically missing from Wings filesystem!
+          items.push({
+            action: "INSTALL",
+            filename: desired.name,
+            targetPath: `mods/${desired.name}`,
+            sizeBytes: desired.sizeBytes,
+            sha256: desired.sha256,
+            sourceProvider: (desired.sourceProvider as any) || (matchedCurrent.provider as any) || null,
+            sourceProjectId: desired.sourceProjectId || matchedCurrent.projectId || null,
+            sourceVersionId: desired.sourceVersionId || matchedCurrent.versionId || null,
+            sourceFileId: desired.sourceFileId || matchedCurrent.fileId || null,
+            gameReleaseFileId: desired.id,
+            managedContentId: matchedCurrent.id,
+            currentVersionNumber: currentFileName,
+            desiredVersionNumber: desired.name,
+          })
+        }
       } else {
         items.push({
           action: "UPDATE",
@@ -232,12 +248,17 @@ export async function getServerReleaseSyncPlan(
   }
 
   const isPending = summary.toInstall > 0 || summary.toUpdate > 0 || summary.toRemove > 0
-  const canApply = serverStatus === "OFFLINE"
-  const blockReason = !canApply
-    ? (serverStatus === "DISCONNECTED" || serverStatus === "UNKNOWN"
-        ? "No se pudo confirmar que el servidor esté apagado."
-        : "Apaga el servidor antes de aplicar cambios de mods.")
-    : null
+  const canApply = serverStatus === "OFFLINE" && physicalFilesAvailable
+  let blockReason: string | null = null
+  if (!canApply) {
+    if (serverStatus === "DISCONNECTED" || serverStatus === "UNKNOWN") {
+      blockReason = "El servidor no está disponible."
+    } else if (serverStatus !== "OFFLINE") {
+      blockReason = "Apaga el servidor antes de aplicar cambios de mods."
+    } else if (!physicalFilesAvailable) {
+      blockReason = "No se pudieron verificar los archivos del servidor."
+    }
+  }
 
   return {
     releaseId: published.id,

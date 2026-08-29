@@ -4,8 +4,9 @@ import type {
   AdminGameOverview,
   AdminGameFile,
   GameRelease,
+  ServerReleaseSyncPlan,
 } from "../../types"
-import { gameApi } from "../../services/graphqlClient"
+import { gameApi, serverContentApi } from "../../services/graphqlClient"
 import {
   IconRocket,
   IconTrash,
@@ -18,6 +19,7 @@ import {
 } from "../../theme/icons"
 import GameFilesExplorer from "./GameFilesExplorer"
 import PublishReleaseModal from "./PublishReleaseModal"
+import { ServerReleaseSyncModal } from "../server/ServerReleaseSyncModal"
 import LiveToast from "../common/LiveToast"
 
 interface GameViewProps {
@@ -32,6 +34,10 @@ export default function GameView({ theme }: GameViewProps) {
   const [history, setHistory] = useState<GameRelease[]>([])
   const [selectedHistoryRelease, setSelectedHistoryRelease] = useState<GameRelease | null>(null)
 
+  // Server update handoff state
+  const [serverPlan, setServerPlan] = useState<ServerReleaseSyncPlan | null>(null)
+  const [isServerChangesModalOpen, setIsServerChangesModalOpen] = useState(false)
+
   const [isLoading, setIsLoading] = useState(true)
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [isPreparingDraft, setIsPreparingDraft] = useState(false)
@@ -43,6 +49,15 @@ export default function GameView({ theme }: GameViewProps) {
 
   const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
     setToast({ message, type })
+  }, [])
+
+  const fetchServerPlan = useCallback(async () => {
+    try {
+      const plan = await serverContentApi.getServerReleaseSyncPlan()
+      setServerPlan(plan)
+    } catch {
+      // Best-effort: Server might be disconnected or Pterodactyl down
+    }
   }, [])
 
   const fetchOverview = useCallback(async () => {
@@ -72,7 +87,8 @@ export default function GameView({ theme }: GameViewProps) {
 
   useEffect(() => {
     fetchOverview()
-  }, [fetchOverview])
+    fetchServerPlan()
+  }, [fetchOverview, fetchServerPlan])
 
   useEffect(() => {
     if (activeTab === "history") {
@@ -414,6 +430,95 @@ export default function GameView({ theme }: GameViewProps) {
       ) : (
         /* Current / Draft Explorer View */
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {/* Pending Server Changes Banner */}
+          {serverPlan?.isPending && (
+            <div
+              data-testid="game-pending-server-changes-banner"
+              style={{
+                padding: "16px 20px",
+                borderRadius: "14px",
+                backgroundColor: isDark ? "rgba(59, 130, 246, 0.12)" : "#eff6ff",
+                border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.3)" : "#bfdbfe"}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "14px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ color: "#3b82f6", display: "flex", alignItems: "center" }}>
+                  <IconRocket style={{ width: 22, height: 22 }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: "15px", fontWeight: "700", color: isDark ? "#f1f5f9" : "#1e3a8a" }}>
+                    Cambios pendientes en el servidor
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      color: isDark ? "#93c5fd" : "#3b82f6",
+                      marginTop: "2px",
+                      display: "flex",
+                      gap: "8px",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span>{serverPlan.summary.toInstall} para instalar</span>
+                    <span>•</span>
+                    <span>{serverPlan.summary.toUpdate} para actualizar</span>
+                    {serverPlan.summary.toRemove > 0 && (
+                      <>
+                        <span>•</span>
+                        <span>{serverPlan.summary.toRemove} para eliminar</span>
+                      </>
+                    )}
+                    <span>•</span>
+                    <span
+                      style={{
+                        color:
+                          serverPlan.serverStatus === "OFFLINE"
+                            ? "#22c55e"
+                            : serverPlan.serverStatus === "ONLINE"
+                            ? "#f59e0b"
+                            : "#ef4444",
+                        fontWeight: "600",
+                      }}
+                    >
+                      {serverPlan.serverStatus === "OFFLINE"
+                        ? "🟢 Servidor apagado y listo"
+                        : serverPlan.serverStatus === "ONLINE"
+                        ? "🟠 Servidor encendido (apágalo para aplicar)"
+                        : "🔴 Servidor no disponible"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                data-testid="button-open-server-changes-from-game"
+                onClick={() => setIsServerChangesModalOpen(true)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: "#3b82f6",
+                  color: "#ffffff",
+                  fontWeight: "700",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                Revisar cambios
+              </button>
+            </div>
+          )}
+
           {/* Status Header Banner Card */}
           <div
             style={{
@@ -657,7 +762,26 @@ export default function GameView({ theme }: GameViewProps) {
           onPublished={(ver, count) => {
             showToast(`Versión ${ver} publicada correctamente. ${count} archivos disponibles.`, "success")
             fetchOverview()
+            fetchServerPlan()
           }}
+          onReviewServerChanges={(plan) => {
+            setServerPlan(plan)
+            setIsServerChangesModalOpen(true)
+          }}
+        />
+      )}
+
+      {/* Server Changes / Sync Modal */}
+      {isServerChangesModalOpen && serverPlan && (
+        <ServerReleaseSyncModal
+          theme={theme}
+          plan={serverPlan}
+          onClose={() => setIsServerChangesModalOpen(false)}
+          onSuccess={() => {
+            fetchServerPlan()
+            fetchOverview()
+          }}
+          onToast={showToast}
         />
       )}
 

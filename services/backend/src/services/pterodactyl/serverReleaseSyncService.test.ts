@@ -625,7 +625,7 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
     const plan = await getServerReleaseSyncPlan(db, env, mockFailingClient as any)
     expect(plan.serverStatus).toBe("DISCONNECTED")
     expect(plan.canApply).toBe(false)
-    expect(plan.blockReason).toBe("No se pudo confirmar que el servidor esté apagado.")
+    expect(plan.blockReason).toBe("El servidor no está disponible.")
   })
 
   // Test 8: Physical Drift Detection in Plan and Restoration on Apply
@@ -908,5 +908,251 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
     ).rejects.toThrow("Ya existe un archivo manual en esta ruta (mods/diff-sha-mod.jar). HiKAT no lo reemplazará automáticamente.")
 
     fetchSpy.mockRestore()
+  })
+
+  // Test 12: Disconnected Pterodactyl computes logical plan accurately without false physical drift (KEEP, INSTALL, UPDATE, REMOVE) and sets canApply = false
+  it("Shard 8D: Disconnected Pterodactyl computes logical plan accurately without false physical drift and sets canApply = false", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-disconn",
+      version: "2.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    await db.insert(schema.gameReleaseFiles).values([
+      // 1. Identical to D1 (Logical KEEP, should NOT become INSTALL even though physical check is unavailable)
+      {
+        id: "grf-d1-keep",
+        releaseId: "rel-pub-disconn",
+        name: "keep-mod.jar",
+        logicalPath: "mods/keep-mod.jar",
+        category: "MOD",
+        sha256: "hash-keep",
+        sizeBytes: 1000,
+        policy: "NO_MODIFICABLE",
+        effectivePolicy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        sourceProjectId: "keep-id",
+        objectKey: "releases/rel-pub-disconn/mods/keep-mod.jar",
+        createdAt: nowIso,
+      },
+      // 2. New desired mod (Logical INSTALL)
+      {
+        id: "grf-d1-new",
+        releaseId: "rel-pub-disconn",
+        name: "new-mod.jar",
+        logicalPath: "mods/new-mod.jar",
+        category: "MOD",
+        sha256: "hash-new",
+        sizeBytes: 2000,
+        policy: "NO_MODIFICABLE",
+        effectivePolicy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        sourceProjectId: "new-id",
+        objectKey: "releases/rel-pub-disconn/mods/new-mod.jar",
+        createdAt: nowIso,
+      },
+      // 3. Changed desired mod (Logical UPDATE)
+      {
+        id: "grf-d1-update",
+        releaseId: "rel-pub-disconn",
+        name: "update-v2.jar",
+        logicalPath: "mods/update-v2.jar",
+        category: "MOD",
+        sha256: "hash-v2",
+        sizeBytes: 3000,
+        policy: "NO_MODIFICABLE",
+        effectivePolicy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        sourceProjectId: "update-id",
+        objectKey: "releases/rel-pub-disconn/mods/update-v2.jar",
+        createdAt: nowIso,
+      },
+    ])
+
+    // Current D1 records
+    await db.insert(schema.serverManagedContent).values([
+      {
+        id: "smc-keep",
+        managementSource: "GAME_RELEASE",
+        projectId: "keep-id",
+        targetPath: "mods/keep-mod.jar",
+        sha256: "hash-keep",
+        sizeBytes: 1000,
+        name: "keep-mod.jar",
+        contentType: "MOD",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+      {
+        id: "smc-update",
+        managementSource: "GAME_RELEASE",
+        projectId: "update-id",
+        targetPath: "mods/update-v1.jar",
+        sha256: "hash-v1",
+        sizeBytes: 2500,
+        name: "update-v1.jar",
+        contentType: "MOD",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+      // 4. Removed mod (Logical REMOVE)
+      {
+        id: "smc-remove",
+        managementSource: "GAME_RELEASE",
+        projectId: "removed-id",
+        targetPath: "mods/removed-mod.jar",
+        sha256: "hash-removed",
+        sizeBytes: 4000,
+        name: "removed-mod.jar",
+        contentType: "MOD",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ])
+
+    // Mock client throws on getServerResources (DISCONNECTED)
+    const mockClient = {
+      getServerResources: vi.fn().mockRejectedValue(new Error("Connection refused (Wings down)")),
+    }
+
+    const plan = await getServerReleaseSyncPlan(db, env, mockClient as any)
+
+    expect(plan.serverStatus).toBe("DISCONNECTED")
+    expect(plan.canApply).toBe(false)
+    expect(plan.blockReason).toBe("El servidor no está disponible.")
+    expect(plan.isPending).toBe(true)
+
+    expect(plan.summary.toKeep).toBe(1) // keep-mod.jar is KEEP, NOT false INSTALL
+    expect(plan.summary.toInstall).toBe(1) // new-mod.jar is INSTALL
+    expect(plan.summary.toUpdate).toBe(1) // update-v2.jar is UPDATE
+    expect(plan.summary.toRemove).toBe(1) // removed-mod.jar is REMOVE
+
+    const keepItem = plan.items.find((i) => i.filename === "keep-mod.jar")
+    expect(keepItem?.action).toBe("KEEP")
+
+    const installItem = plan.items.find((i) => i.filename === "new-mod.jar")
+    expect(installItem?.action).toBe("INSTALL")
+
+    const updateItem = plan.items.find((i) => i.filename === "update-v2.jar")
+    expect(updateItem?.action).toBe("UPDATE")
+
+    const removeItem = plan.items.find((i) => i.filename === "removed-mod.jar")
+    expect(removeItem?.action).toBe("REMOVE")
+  })
+
+  // Test 13: Online / Offline server with physical file missing performs physical drift repair (INSTALL)
+  it("Shard 8D: Connected server detects missing physical file on disk and marks as INSTALL (physical drift repair)", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-drift",
+      version: "3.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    await db.insert(schema.gameReleaseFiles).values([
+      {
+        id: "grf-drift-1",
+        releaseId: "rel-pub-drift",
+        name: "drift-mod.jar",
+        logicalPath: "mods/drift-mod.jar",
+        category: "MOD",
+        sha256: "hash-drift",
+        sizeBytes: 1000,
+        policy: "NO_MODIFICABLE",
+        effectivePolicy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        sourceProjectId: "drift-id",
+        objectKey: "releases/rel-pub-drift/mods/drift-mod.jar",
+        createdAt: nowIso,
+      },
+    ])
+
+    // D1 says it's already managed and identical
+    await db.insert(schema.serverManagedContent).values([
+      {
+        id: "smc-drift-1",
+        managementSource: "GAME_RELEASE",
+        projectId: "drift-id",
+        targetPath: "mods/drift-mod.jar",
+        sha256: "hash-drift",
+        sizeBytes: 1000,
+        name: "drift-mod.jar",
+        contentType: "MOD",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ])
+
+    // Wings is connected (offline), but /mods directory does NOT contain drift-mod.jar
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      listDirectory: vi.fn().mockResolvedValue({
+        data: [], // empty filesystem!
+      }),
+    }
+
+    const plan = await getServerReleaseSyncPlan(db, env, mockClient as any)
+
+    expect(plan.serverStatus).toBe("OFFLINE")
+    expect(plan.canApply).toBe(true)
+    expect(plan.summary.toInstall).toBe(1) // Physical drift repair detected: marked as INSTALL!
+    expect(plan.items[0]?.action).toBe("INSTALL")
+  })
+
+  // Test 14: Server offline but listDirectory fails sets canApply = false and descriptive blockReason
+  it("Shard 8D: Server offline but listDirectory fails sets canApply = false and blockReason", async () => {
+    const nowIso = new Date().toISOString()
+
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-list-fail",
+      version: "4.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      publishedAt: nowIso,
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      listDirectory: vi.fn().mockRejectedValue(new Error("Wings daemon IO error")),
+    }
+
+    const plan = await getServerReleaseSyncPlan(db, env, mockClient as any)
+
+    expect(plan.serverStatus).toBe("OFFLINE")
+    expect(plan.canApply).toBe(false)
+    expect(plan.blockReason).toBe("No se pudieron verificar los archivos del servidor.")
   })
 })

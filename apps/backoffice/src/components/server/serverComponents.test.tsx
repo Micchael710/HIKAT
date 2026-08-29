@@ -875,18 +875,61 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
 
     // Banner is visible
     expect(screen.getByTestId("server-release-sync-banner")).toBeDefined()
+    expect(screen.getByText("Cambios pendientes en el servidor")).toBeDefined()
     expect(screen.getByText("+1 para instalar")).toBeDefined()
 
-    // Click "Revisar y sincronizar"
+    // Click "Revisar cambios"
     const openSyncBtn = screen.getByTestId("button-open-release-sync")
+    expect(openSyncBtn.textContent).toContain("Revisar cambios")
     await act(async () => {
       fireEvent.click(openSyncBtn)
     })
 
     // Modal is rendered
     expect(screen.getByTestId("server-release-sync-modal")).toBeDefined()
-    expect(screen.getByTestId("checkbox-pre-sync-backup")).toBeDefined()
+    expect(screen.getByRole("heading", { name: "Aplicar cambios al servidor" })).toBeDefined()
+    expect(screen.getByText(/Crear copia de seguridad antes de aplicar los cambios/i)).toBeDefined()
     expect(screen.getByTestId("button-apply-release-sync")).toBeDefined()
+  })
+
+  it("Shard 08D Test 2b: ServerFilesView renders pending release banner even when getServerFiles fails (disconnected)", async () => {
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverApi, "getServerFiles").mockRejectedValue(new Error("Server offline / Pterodactyl down"))
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([])
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [
+        {
+          action: "INSTALL",
+          filename: "new-mod.jar",
+          targetPath: "mods/new-mod.jar",
+          sizeBytes: 5000,
+          sha256: "hash-new",
+        },
+      ],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "DISCONNECTED",
+      canApply: false,
+    })
+
+    await act(async () => {
+      render(
+        <ServerFilesView
+          theme="dark"
+          serverStatus="DISCONNECTED"
+          onToast={onToastMock}
+          onNavigateToGame={onNavigateToGameMock}
+        />,
+      )
+    })
+
+    // Banner is still visible despite getServerFiles error
+    expect(screen.getByTestId("server-release-sync-banner")).toBeDefined()
+    expect(screen.getByText("Cambios pendientes en el servidor")).toBeDefined()
+    expect(screen.getByText("+1 para instalar")).toBeDefined()
   })
 
   it("Shard 08D Test 3: ServerReleaseSyncModal disables apply button if server is not OFFLINE", async () => {
@@ -915,8 +958,10 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     })
 
     expect(screen.getByTestId("sync-server-not-offline-warning")).toBeDefined()
+    expect(screen.getByText(/Apaga el servidor antes de aplicar cambios de mods/i)).toBeDefined()
     const applyBtn = screen.getByTestId("button-apply-release-sync") as HTMLButtonElement
     expect(applyBtn.disabled).toBe(true)
+    expect(applyBtn.textContent).toContain("Aplicar cambios al servidor")
   })
 
   it("Shard 08D Test 4: ServerModSearchModal renders BOTH mod redirect warning and CTA", async () => {

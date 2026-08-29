@@ -6,7 +6,7 @@ import GameView from "./GameView"
 import GameFilesExplorer from "./GameFilesExplorer"
 import TextFileEditorModal from "./TextFileEditorModal"
 import PublishReleaseModal from "./PublishReleaseModal"
-import { gameApi, serverApi, graphqlClient } from "../../services/graphqlClient"
+import { gameApi, serverApi, serverContentApi, graphqlClient } from "../../services/graphqlClient"
 import * as mediaUploadService from "../../services/mediaUploadService"
 import { ModSearchModal } from "./providers/ModSearchModal"
 
@@ -1623,7 +1623,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.queryByText("jei.jar")).toBeNull()
     })
 
-    it("15. Step 3 resumen, 16. readiness checklist, 17. backup checkbox desmarcado por defecto, 20. doble submit bloqueado", async () => {
+    it("15. Step 3 resumen, 16. readiness checklist, 17. sin checkbox de backup en publicación", async () => {
       vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({
         ...mockDraftRelease,
         version: "1.0.1",
@@ -1652,6 +1652,15 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ...mockDraftRelease,
         status: "PUBLISHED",
         version: "1.0.1",
+      })
+      vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+        releaseId: "rel-1",
+        releaseVersion: "1.0.1",
+        isPending: false,
+        items: [],
+        summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 4 },
+        serverStatus: "OFFLINE",
+        canApply: true,
       })
 
       const onClose = vi.fn()
@@ -1691,11 +1700,10 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.getByText("✓ Sin conflictos de ruta")).toBeDefined()
       expect(screen.getByText("✓ Almacenamiento R2 verificado")).toBeDefined()
 
-      // 17. Backup Checkbox is UNCHECKED by default
-      const backupCheckbox = screen.getByRole("checkbox") as HTMLInputElement
-      expect(backupCheckbox.checked).toBe(false)
+      // 17. NO backup checkbox in publish modal
+      expect(screen.queryByRole("checkbox")).toBeNull()
 
-      // Publish without backup
+      // Publish
       const publishBtn = screen.getByRole("button", { name: /Publicar actualización oficial/i })
       await act(async () => {
         fireEvent.click(publishBtn)
@@ -1707,10 +1715,10 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         coverMediaId: null,
       })
       expect(onPublished).toHaveBeenCalledWith("1.0.1", 4)
-      expect(onClose).toHaveBeenCalled()
+      expect(screen.getByRole("heading", { name: "Actualización publicada", level: 2 })).toBeDefined()
     })
 
-    it("18. backup flow: si está marcado, crea backup, muestra polling y publica tras éxito", async () => {
+    it("18. publicación exitosa con servidor desconectado: publica correctamente y muestra aviso de servidor no disponible", async () => {
       vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
       const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview")
       overviewSpy.mockResolvedValueOnce({
@@ -1732,31 +1740,17 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         draftRelease: null,
         pendingChangesCount: 0,
       })
-      const backupCreateSpy = vi.spyOn(serverApi, "createServerBackup").mockResolvedValue({
-        id: "backup-test-123",
-        name: "Pre-release v1.0.1",
-        bytes: 1024,
-        isSuccessful: false,
-        isLocked: false,
-        createdAt: new Date().toISOString(),
-        completedAt: null,
-      })
-      const backupPollSpy = vi.spyOn(serverApi, "getServerBackups").mockResolvedValue([
-        {
-          id: "backup-test-123",
-          name: "Pre-release v1.0.1",
-          bytes: 1024,
-          isSuccessful: true,
-          isLocked: false,
-          createdAt: new Date().toISOString(),
-          completedAt: new Date().toISOString(),
-        },
-      ])
+
       const publishSpy = vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
         ...mockDraftRelease,
         status: "PUBLISHED",
         version: "1.0.1",
       })
+
+      // Server is disconnected / plan throws error
+      vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockRejectedValue(
+        new Error("Pterodactyl offline / disconnected"),
+      )
 
       const onClose = vi.fn()
       const onPublished = vi.fn()
@@ -1781,52 +1775,63 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
       })
 
-      // Check the backup checkbox
-      const backupCheckbox = screen.getByRole("checkbox") as HTMLInputElement
-      fireEvent.click(backupCheckbox)
-      expect(backupCheckbox.checked).toBe(true)
-
       // Publish
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: /Publicar actualización oficial/i }))
       })
 
-      expect(backupCreateSpy).toHaveBeenCalledWith("Pre-release v1.0.1")
-      expect(backupPollSpy).toHaveBeenCalled()
       expect(publishSpy).toHaveBeenCalled()
       expect(onPublished).toHaveBeenCalledWith("1.0.1", 4)
+      expect(screen.getByRole("heading", { name: "Actualización publicada", level: 2 })).toBeDefined()
+      expect(screen.getByText(/No se pudo comprobar el estado del servidor en este momento/i)).toBeDefined()
     })
 
-    it("19. backup failure: si backup falla, aborta publish y muestra error", async () => {
+    it("19. post-publish card con servidor OFFLINE: muestra cambios pendientes y clic en revisar llama onReviewServerChanges", async () => {
       vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
-      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview")
+      overviewSpy.mockResolvedValueOnce({
         publishedRelease: mockPublishedRelease,
         draftRelease: { ...mockDraftRelease, version: "1.0.1" },
         changes: mockChanges,
         readiness: mockReadiness,
         pendingChangesCount: 2,
       })
-      vi.spyOn(serverApi, "createServerBackup").mockResolvedValue({
-        id: "backup-fail-123",
-        name: "Pre-release v1.0.1",
-        bytes: 0,
-        isSuccessful: false,
-        isLocked: false,
-        createdAt: new Date().toISOString(),
-        completedAt: null,
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
       })
-      vi.spyOn(serverApi, "getServerBackups").mockResolvedValue([
-        {
-          id: "backup-fail-123",
-          name: "Pre-release v1.0.1",
-          bytes: 0,
-          isSuccessful: false, // Failed!
-          isLocked: false,
-          createdAt: new Date().toISOString(),
-          completedAt: new Date().toISOString(),
-        },
-      ])
-      const publishSpy = vi.spyOn(gameApi, "publishGameRelease")
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: { ...mockPublishedRelease, version: "1.0.1" },
+        draftRelease: null,
+        pendingChangesCount: 0,
+      })
+
+      vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
+        ...mockDraftRelease,
+        status: "PUBLISHED",
+        version: "1.0.1",
+      })
+
+      const mockPlan = {
+        releaseId: "rel-1",
+        releaseVersion: "1.0.1",
+        isPending: true,
+        items: [
+          { action: "INSTALL" as const, filename: "new-mod.jar", targetPath: "mods/new-mod.jar", sizeBytes: 1024, sha256: "h1" },
+        ],
+        summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 3 },
+        serverStatus: "OFFLINE" as const,
+        canApply: true,
+      }
+
+      vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(mockPlan)
+
+      const onClose = vi.fn()
+      const onPublished = vi.fn()
+      const onReviewServerChanges = vi.fn()
 
       render(
         <PublishReleaseModal
@@ -1835,8 +1840,9 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
           publishedRelease={mockPublishedRelease}
           changes={mockChanges}
           readiness={mockReadiness}
-          onClose={vi.fn()}
-          onPublished={vi.fn()}
+          onClose={onClose}
+          onPublished={onPublished}
+          onReviewServerChanges={onReviewServerChanges}
         />,
       )
 
@@ -1846,16 +1852,23 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       await act(async () => {
         fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
       })
-
-      // Check backup and publish
-      fireEvent.click(screen.getByRole("checkbox"))
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: /Publicar actualización oficial/i }))
       })
 
-      // Publish should NOT have been called
-      expect(publishSpy).not.toHaveBeenCalled()
-      expect(screen.getByText(/No se pudo completar la copia de seguridad/i)).toBeDefined()
+      // Post publish card is visible
+      expect(screen.getByTestId("post-publish-server-changes-card")).toBeDefined()
+      expect(screen.getByText(/Servidor apagado y listo/i)).toBeDefined()
+
+      const reviewBtn = screen.getByTestId("button-post-publish-review-server")
+      expect(reviewBtn.textContent).toContain("Revisar cambios del servidor")
+
+      await act(async () => {
+        fireEvent.click(reviewBtn)
+      })
+
+      expect(onReviewServerChanges).toHaveBeenCalledWith(mockPlan)
+      expect(onClose).toHaveBeenCalled()
     })
 
     it("21. History View: muestra cover, versión, status, fecha, notas y visor de archivos de solo lectura", async () => {
@@ -2285,72 +2298,69 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(onPublished).not.toHaveBeenCalled()
     })
 
-    it("29. backup timeout via fake timers: backup nunca completa -> timer avanza -> aborta con timeout sin publicar", async () => {
-      vi.useFakeTimers()
-
-      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
+    it("29. GameView muestra banner de cambios pendientes cuando serverPlan.isPending === true y lo oculta tras aplicar", async () => {
       vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
         publishedRelease: mockPublishedRelease,
-        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
-        changes: mockChanges,
-        readiness: mockReadiness,
-        pendingChangesCount: 2,
+        draftRelease: null,
+        pendingChangesCount: 0,
       })
-      vi.spyOn(serverApi, "createServerBackup").mockResolvedValue({
-        id: "backup-timeout-1",
-        name: "Pre-release v1.0.1",
-        bytes: 0,
-        isSuccessful: false,
-        isLocked: false,
-        createdAt: new Date().toISOString(),
-        completedAt: null, // Stays in progress forever
+
+      const pendingPlan = {
+        releaseId: "rel-1",
+        releaseVersion: "1.0.1",
+        isPending: true,
+        items: [
+          { action: "INSTALL" as const, filename: "both-mod.jar", targetPath: "mods/both-mod.jar", sizeBytes: 2048, sha256: "h1" },
+        ],
+        summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 2 },
+        serverStatus: "OFFLINE" as const,
+        canApply: true,
+      }
+
+      const syncPlanSpy = vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(pendingPlan)
+      const applySyncSpy = vi.spyOn(graphqlClient, "applyServerReleaseSync").mockResolvedValue({
+        success: true,
+        message: "Cambios aplicados correctamente.",
+        syncedCount: 1,
+        status: "APPLIED",
       })
-      vi.spyOn(serverApi, "getServerBackups").mockResolvedValue([
-        {
-          id: "backup-timeout-1",
-          name: "Pre-release v1.0.1",
-          bytes: 0,
-          isSuccessful: false,
-          isLocked: false,
-          createdAt: new Date().toISOString(),
-          completedAt: null,
-        },
-      ])
-      const publishSpy = vi.spyOn(gameApi, "publishGameRelease")
 
-      render(
-        <PublishReleaseModal
-          theme="dark"
-          draftRelease={mockDraftRelease}
-          publishedRelease={mockPublishedRelease}
-          changes={mockChanges}
-          readiness={mockReadiness}
-          onClose={vi.fn()}
-          onPublished={vi.fn()}
-        />,
-      )
+      render(<GameView theme="dark" />)
 
+      // Banner is visible
+      const banner = await screen.findByTestId("game-pending-server-changes-banner")
+      expect(banner).toBeDefined()
+      expect(screen.getByText("Cambios pendientes en el servidor")).toBeDefined()
+      expect(screen.getByText(/1 para instalar/i)).toBeDefined()
+      expect(screen.getByText(/Servidor apagado y listo/i)).toBeDefined()
+
+      // Click "Revisar cambios" on the banner
+      const reviewBtn = screen.getByTestId("button-open-server-changes-from-game")
       await act(async () => {
-        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+        fireEvent.click(reviewBtn)
       })
+
+      // ServerReleaseSyncModal is open
+      expect(screen.getByTestId("server-release-sync-modal")).toBeDefined()
+
+      // Apply changes
+      syncPlanSpy.mockResolvedValueOnce({
+        ...pendingPlan,
+        isPending: false,
+        summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 3 },
+      })
+
+      const applyBtn = screen.getByTestId("button-apply-release-sync")
       await act(async () => {
-        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+        fireEvent.click(applyBtn)
       })
 
-      // Check backup and publish
-      fireEvent.click(screen.getByRole("checkbox"))
+      expect(applySyncSpy).toHaveBeenCalledWith(true)
 
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /Publicar actualización oficial/i }))
-        await vi.advanceTimersByTimeAsync(190000)
+      // Banner is now removed
+      await waitFor(() => {
+        expect(screen.queryByTestId("game-pending-server-changes-banner")).toBeNull()
       })
-
-      expect(publishSpy).not.toHaveBeenCalled()
-      expect(
-        screen.getByText(/Tiempo de espera agotado al generar la copia de seguridad/i),
-      ).toBeDefined()
-
-      vi.useRealTimers()
     })
   })
 })

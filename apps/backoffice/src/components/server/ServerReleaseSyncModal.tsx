@@ -37,14 +37,14 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
     try {
       const res = await graphqlClient.applyServerReleaseSync(createBackup)
       if (res.success) {
-        onToast(res.message || "Sincronización de release completada con éxito.", "success")
+        onToast(res.message || "Cambios aplicados al servidor con éxito.", "success")
         onSuccess()
         onClose()
       } else {
-        setError(res.message || "Error al aplicar la sincronización.")
+        setError(res.message || "Error al aplicar los cambios al servidor.")
       }
     } catch (err: any) {
-      setError(err.message || "Error inesperado al aplicar la sincronización.")
+      setError(err.message || "Error inesperado al aplicar los cambios.")
     } finally {
       setIsApplying(false)
     }
@@ -94,10 +94,10 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
         >
           <div>
             <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "700", color: isDark ? "#f9fafb" : "#111827" }}>
-              Sincronizar Release con el Servidor
+              Aplicar cambios al servidor
             </h2>
             <div style={{ fontSize: "13px", color: isDark ? "#9ca3af" : "#6b7280", marginTop: "2px" }}>
-              Versión publicada: <strong>v{plan.releaseVersion || "—"}</strong>
+              Versión de la actualización: <strong>v{plan.releaseVersion || "—"}</strong>
             </div>
           </div>
 
@@ -192,7 +192,7 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
               <div>
                 <strong>El servidor no está apagado.</strong> Estado actual: <strong>{plan.serverStatus}</strong>.
                 <br />
-                Apaga el servidor antes de sincronizar archivos de mods para prevenir bloqueos y daños de datos.
+                Apaga el servidor antes de aplicar cambios de mods para prevenir bloqueos y daños de datos.
               </div>
             </div>
           )}
@@ -302,7 +302,7 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
               htmlFor="checkbox-pre-sync-backup"
               style={{ fontSize: "13px", color: isDark ? "#e5e7eb" : "#374151", cursor: "pointer" }}
             >
-              Crear copia de seguridad automática del servidor antes de aplicar la sincronización
+              Crear copia de seguridad antes de aplicar los cambios (recomendado)
             </label>
           </div>
 
@@ -365,7 +365,7 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
               cursor: isApplying || !isServerOffline ? "not-allowed" : "pointer",
             }}
           >
-            {isApplying ? "Sincronizando..." : "Aplicar sincronización"}
+            {isApplying ? "Aplicando cambios..." : "Aplicar cambios al servidor"}
           </button>
         </div>
       </div>

@@ -71,23 +71,38 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     if (manual) setIsRefreshing(true)
     setError(null)
     try {
-      const [filesData, managedData, planData] = await Promise.all([
+      const [filesResult, managedResult, planResult] = await Promise.allSettled([
         serverApi.getServerFiles("SERVER", currentPath || undefined),
-        serverContentApi.getServerManagedContent().catch(() => []),
-        serverContentApi.getServerReleaseSyncPlan().catch(() => null),
+        serverContentApi.getServerManagedContent(),
+        serverContentApi.getServerReleaseSyncPlan(),
       ])
 
       if (isMountedRef.current) {
-        // Sort directories first, then alphabetically
-        const sorted = [...filesData].sort((a, b) => {
-          if (a.isFile === b.isFile) {
-            return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-          }
-          return a.isFile ? 1 : -1
-        })
-        setFiles(sorted)
-        setManagedContent(managedData)
-        setSyncPlan(planData)
+        if (filesResult.status === "fulfilled") {
+          // Sort directories first, then alphabetically
+          const sorted = [...filesResult.value].sort((a, b) => {
+            if (a.isFile === b.isFile) {
+              return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+            }
+            return a.isFile ? 1 : -1
+          })
+          setFiles(sorted)
+        } else {
+          setFiles([])
+          setError(
+            filesResult.reason instanceof Error
+              ? filesResult.reason.message
+              : "No se pudieron cargar los archivos del servidor.",
+          )
+        }
+
+        if (managedResult.status === "fulfilled") {
+          setManagedContent(managedResult.value)
+        }
+
+        if (planResult.status === "fulfilled") {
+          setSyncPlan(planResult.value)
+        }
       }
     } catch (err: unknown) {
       if (isMountedRef.current) {
@@ -328,7 +343,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
             </div>
             <div>
               <div style={{ fontSize: "0.95rem", fontWeight: 700, color: isDark ? "#f3f4f6" : "#1e3a8a" }}>
-                Hay cambios pendientes de la versión publicada del modpack para sincronizar con el servidor
+                Cambios pendientes en el servidor
               </div>
               <div style={{ fontSize: "0.82rem", color: isDark ? "#93c5fd" : "#3b82f6", marginTop: 2, display: "flex", gap: 10 }}>
                 <span>+{syncPlan.summary.toInstall} para instalar</span>
@@ -358,7 +373,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
               cursor: "pointer",
             }}
           >
-            <span>Revisar y sincronizar</span>
+            <span>Revisar cambios</span>
           </button>
         </div>
       )}
