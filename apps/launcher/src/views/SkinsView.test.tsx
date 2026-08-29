@@ -185,4 +185,38 @@ describe("SkinsView Component — Custom Skin & Cape Delete Button Placement", (
 
     expect(onDeleteCape).toHaveBeenCalledWith("cape-custom-1")
   })
+
+  it("5. Renders localized 'No Skin' and 'No Cape' when language is 'en'", async () => {
+    localStorage.setItem("hikat_language", "en")
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <SkinsView
+          username="TestUser"
+          appliedSkin="none"
+          setAppliedSkin={vi.fn()}
+          appliedCape="none"
+          setAppliedCape={vi.fn()}
+          playerSkin={null}
+        />
+      </LanguageProvider>,
+    )
+
+    // Skin tab: "No Skin" should be rendered in the placeholder
+    expect(container.textContent).toContain("No Skin")
+    expect(container.textContent).not.toContain("Sin Skin")
+
+    // Switch to Capes tab
+    const tabs = Array.from(container.querySelectorAll("button"))
+    const capesTab = tabs.find((b) => b.textContent?.includes("Capes"))
+    expect(capesTab).toBeDefined()
+
+    await act(async () => {
+      capesTab?.click()
+    })
+
+    // Cape tab: "No Cape" should be rendered in the placeholder
+    expect(container.textContent).toContain("No Cape")
+    expect(container.textContent).not.toContain("Sin Capa")
+  })
 })

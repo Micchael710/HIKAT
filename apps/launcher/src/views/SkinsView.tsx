@@ -868,7 +868,7 @@ export default function SkinsView({
                                 justifyContent: "center",
                               }}
                             >
-                              <span style={{ fontSize: 13, color: "#64748b" }}>Sin Skin</span>
+                              <span style={{ fontSize: 13, color: "#64748b" }}>{t("skins.noSkin")}</span>
                             </div>
                           ) : (
                             <SkinCardPreview
@@ -892,7 +892,7 @@ export default function SkinsView({
                               justifyContent: "center",
                             }}
                           >
-                            <span style={{ fontSize: 13, color: "#64748b" }}>Sin Capa</span>
+                            <span style={{ fontSize: 13, color: "#64748b" }}>{t("skins.noCape")}</span>
                           </div>
                         ) : (
                           <CapeCardPreview
