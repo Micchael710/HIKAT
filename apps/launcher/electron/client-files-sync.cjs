@@ -38,10 +38,11 @@ function getEffectiveApiBaseUrl() {
 
 /**
  * Security: Validates and restricts download URLs to authorized origins only.
- * Prevents arbitrary host downloads, bad protocols (file://, javascript:, etc.), and unverified redirects.
+ * - In production: HTTPS only, localhost strictly blocked, only apparatia.net domains allowed.
+ * - In dev/test: localhost (HTTP/HTTPS) allowed, external domains must be HTTPS and apparatia.net.
  */
 function validateUrlSecurity(parsedUrl) {
-  const isDev = process.env.NODE_ENV !== "production"
+  const isProduction = process.env.NODE_ENV === "production"
   const hostname = parsedUrl.hostname.toLowerCase()
   const isLocalhost =
     hostname === "localhost" ||
@@ -49,6 +50,31 @@ function validateUrlSecurity(parsedUrl) {
     hostname === "::1" ||
     hostname === "[::1]"
 
+  if (isProduction) {
+    if (isLocalhost) {
+      throw new Error("Localhost download URLs are forbidden in production mode.")
+    }
+    if (parsedUrl.protocol !== "https:") {
+      throw new Error(
+        `Non-HTTPS download URL is strictly forbidden in production: "${parsedUrl.protocol}"`,
+      )
+    }
+    const allowedHosts = [
+      "api.apparatia.net",
+      "apparatia.net",
+      "assets.apparatia.net",
+      "cdn.apparatia.net",
+      "backend.apparatia.net",
+    ]
+    const isAllowed =
+      allowedHosts.includes(hostname) || hostname.endsWith(".apparatia.net")
+    if (!isAllowed) {
+      throw new Error(`Unauthorized external download host blocked: "${hostname}"`)
+    }
+    return true
+  }
+
+  // Development / Test mode
   if (isLocalhost) {
     if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
       throw new Error(`Invalid protocol for localhost download: "${parsedUrl.protocol}"`)
@@ -57,7 +83,7 @@ function validateUrlSecurity(parsedUrl) {
   }
 
   if (parsedUrl.protocol !== "https:") {
-    throw new Error(`Non-HTTPS download URL is strictly forbidden in production: "${parsedUrl.protocol}"`)
+    throw new Error(`Non-HTTPS external download URL is forbidden: "${parsedUrl.protocol}"`)
   }
 
   const allowedHosts = [
@@ -67,10 +93,8 @@ function validateUrlSecurity(parsedUrl) {
     "cdn.apparatia.net",
     "backend.apparatia.net",
   ]
-
   const isAllowed =
     allowedHosts.includes(hostname) || hostname.endsWith(".apparatia.net")
-
   if (!isAllowed) {
     throw new Error(`Unauthorized external download host blocked: "${hostname}"`)
   }
@@ -150,9 +174,19 @@ async function saveInstalledManifest(instanceRoot, manifestData) {
   const metaDir = path.join(instanceRoot, ".hikat")
   await fsp.mkdir(metaDir, { recursive: true })
   const manifestPath = path.join(metaDir, "installed-manifest.json")
-  const tempPath = path.join(metaDir, `installed-manifest.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`)
+  const tempPath = path.join(
+    metaDir,
+    `installed-manifest.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`,
+  )
   await fsp.writeFile(tempPath, JSON.stringify(manifestData, null, 2), "utf8")
-  await fsp.rename(tempPath, manifestPath)
+  try {
+    await fsp.rename(tempPath, manifestPath)
+  } catch (_) {
+    if (fs.existsSync(manifestPath)) {
+      await fsp.unlink(manifestPath)
+    }
+    await fsp.rename(tempPath, manifestPath)
+  }
 }
 
 /**
@@ -180,7 +214,14 @@ async function saveDownloadSession(instanceRoot, sessionData) {
     `session.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`,
   )
   await fsp.writeFile(tempPath, JSON.stringify(sessionData, null, 2), "utf8")
-  await fsp.rename(tempPath, sessionPath)
+  try {
+    await fsp.rename(tempPath, sessionPath)
+  } catch (_) {
+    if (fs.existsSync(sessionPath)) {
+      await fsp.unlink(sessionPath)
+    }
+    await fsp.rename(tempPath, sessionPath)
+  }
 }
 
 /**
@@ -205,7 +246,6 @@ async function reconcileStagingFiles(instanceRoot, toDownloadTasks) {
 
   await fsp.mkdir(filesDir, { recursive: true })
 
-  // Expected filename set
   const expectedFileNames = new Set()
 
   for (const task of toDownloadTasks) {
@@ -326,23 +366,36 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
         })
         plan.totalDownloadBytes += sizeBytes
       } else {
-        // File exists locally: check if admin published a new official hash
-        const lastOfficialSha256 = previousFilesMap[normalizedRelative]?.officialSha256
-        if (lastOfficialSha256 && lastOfficialSha256.toLowerCase() === expectedSha256) {
-          // Official hash unchanged -> preserve user's local modification
-          plan.toPreserveUser.push({ path: normalizedRelative, safeAbsolute })
+        // File exists physically on disk. Check its physical hash:
+        let localSha256 = null
+        try {
+          localSha256 = await calculateFileSha256(safeAbsolute)
+        } catch (_) {}
+
+        if (localSha256 && localSha256 === expectedSha256) {
+          // Physical file already matches expected official hash (e.g. freshly applied or unchanged official)
+          plan.toRetain.push({ path: normalizedRelative, safeAbsolute })
           plan.hasExistingInstall = true
         } else {
-          // Admin published new official hash -> download updated admin version
-          plan.toDownload.push({
-            path: normalizedRelative,
-            safeAbsolute,
-            downloadUrl: item.downloadUrl,
-            sha256: expectedSha256,
-            sizeBytes,
-            policy,
-          })
-          plan.totalDownloadBytes += sizeBytes
+          // Physical file differs from expected official hash:
+          // Check if previous official hash matches expected official hash:
+          const lastOfficialSha256 = previousFilesMap[normalizedRelative]?.officialSha256
+          if (lastOfficialSha256 && lastOfficialSha256.toLowerCase() === expectedSha256) {
+            // Admin official hash has not changed -> preserve user local edit
+            plan.toPreserveUser.push({ path: normalizedRelative, safeAbsolute })
+            plan.hasExistingInstall = true
+          } else {
+            // Admin published NEW official hash -> download updated admin version
+            plan.toDownload.push({
+              path: normalizedRelative,
+              safeAbsolute,
+              downloadUrl: item.downloadUrl,
+              sha256: expectedSha256,
+              sizeBytes,
+              policy,
+            })
+            plan.totalDownloadBytes += sizeBytes
+          }
         }
       }
     }
@@ -469,7 +522,8 @@ async function downloadToStaging(task, stagingPath, onChunkBytes, cancelSignal, 
 /**
  * Executes the complete sync process:
  *  - Phase A: Download (staging, pause/resume/cancel support, SHA-256 validation)
- *  - Phase B: Installation (atomic file replacement, strict prune verification, final post-validation)
+ *  - Phase A -> B Barrier: Re-check cancel / pause before entering install phase
+ *  - Phase B: Installation (atomic temp sibling replace, strict prune verification, final post-validation)
  */
 async function executeSync({
   instanceRoot,
@@ -482,7 +536,7 @@ async function executeSync({
 }) {
   // Generate initial sync plan against local filesystem
   const plan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
-  const { stagingDir, filesDir } = getStagingPaths(instanceRoot)
+  const { filesDir } = getStagingPaths(instanceRoot)
 
   await fsp.mkdir(filesDir, { recursive: true })
 
@@ -622,7 +676,7 @@ async function executeSync({
             totalCount: plan.toDownload.length,
           }
         }
-        // Network or download error: persist session so far to retain valid files
+        // Network error: preserve session so far
         await saveDownloadSession(instanceRoot, {
           modpackVersion,
           status: "ERROR",
@@ -640,7 +694,28 @@ async function executeSync({
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Phase B: Installation (Atomic Apply, Prune, Final Verify)
+  // Barrier: Re-validate Cancel and Pause before entering Phase B
+  // ─────────────────────────────────────────────────────────────
+  if (cancelSignal?.isCancelled) {
+    await cleanStaging(instanceRoot)
+    throw new Error("Sync cancelled by user.")
+  }
+  if (cancelSignal?.isPaused) {
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion,
+      status: "PAUSED",
+      updatedAt: new Date().toISOString(),
+      files: sessionCompletedFiles,
+    })
+    return {
+      paused: true,
+      downloadedCount: stagedFiles.length,
+      totalCount: plan.toDownload.length,
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Phase B: Installation (Atomic Apply via Temp Sibling, Prune, Final Verify)
   // ─────────────────────────────────────────────────────────────
   currentPhase = "INSTALLING"
   if (typeof onPhaseChange === "function") {
@@ -663,10 +738,46 @@ async function executeSync({
     }
   }
 
-  // 2. Safe per-file copy to instanceRoot
+  // 2. Safe per-file copy to instanceRoot via temp siblings
   for (const { task, stagingFilePath } of stagedFiles) {
-    await fsp.mkdir(path.dirname(task.safeAbsolute), { recursive: true })
-    await fsp.copyFile(stagingFilePath, task.safeAbsolute)
+    const targetDir = path.dirname(task.safeAbsolute)
+    await fsp.mkdir(targetDir, { recursive: true })
+
+    const tempSibling = path.join(
+      targetDir,
+      `.hikat_tmp_${path.basename(task.safeAbsolute)}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.tmp`,
+    )
+
+    try {
+      await fsp.copyFile(stagingFilePath, tempSibling)
+
+      // Verify size and SHA-256 of temp sibling
+      const tempStat = await fsp.stat(tempSibling)
+      if (task.sizeBytes > 0 && tempStat.size !== task.sizeBytes) {
+        throw new Error(`Temp copy size mismatch for ${task.path}`)
+      }
+      const tempSha = await calculateFileSha256(tempSibling)
+      if (tempSha !== task.sha256.toLowerCase()) {
+        throw new Error(`Temp copy hash mismatch for ${task.path}`)
+      }
+
+      // Safe replace: on Windows, rename can fail if destination exists, so we replace safely
+      try {
+        await fsp.rename(tempSibling, task.safeAbsolute)
+      } catch (_) {
+        if (fs.existsSync(task.safeAbsolute)) {
+          await fsp.unlink(task.safeAbsolute)
+        }
+        await fsp.rename(tempSibling, task.safeAbsolute)
+      }
+    } catch (err) {
+      try {
+        if (fs.existsSync(tempSibling)) {
+          await fsp.unlink(tempSibling)
+        }
+      } catch (_) {}
+      throw err
+    }
   }
 
   // 3. Prune obsolete files in strict directories (Fail-hard on error)
@@ -732,7 +843,6 @@ async function uninstallGame(instanceRoot, appDataRoot) {
   const resolvedInstance = path.resolve(instanceRoot)
   const resolvedAppData = path.resolve(appDataRoot)
 
-  // Disallow root of drive, empty paths, or paths outside appDataRoot
   const relative = path.relative(resolvedAppData, resolvedInstance)
   if (
     !relative ||

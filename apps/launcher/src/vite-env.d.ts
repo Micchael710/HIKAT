@@ -97,3 +97,19 @@ declare module "../../electron/client-files-sync.cjs" {
   export const getEffectiveApiBaseUrl: any
   export const uninstallGame: any
 }
+
+declare module "../../electron/game-operation-manager.cjs" {
+  export class GameOperationManager {
+    state: string
+    activeOperationPromise: any
+    activeCancelSignal: any
+    operationCounter: number
+    getState(): string
+    checkPlan(options: any): Promise<any>
+    startSync(options: any): Promise<any>
+    pauseSync(): Promise<any>
+    cancelSync(instanceRoot: string): Promise<any>
+    launchGame(gameLauncher: any, options?: any): Promise<any>
+    uninstallGame(instanceRoot: string, appDataRoot: string): Promise<any>
+  }
+}

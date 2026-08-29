@@ -172,18 +172,27 @@ export const gameService = {
     } catch (_) {}
   },
 
-  async uninstallGame(): Promise<void> {
+  async uninstallGame(): Promise<boolean> {
     try {
       if (window.electronAPI?.uninstallGame) {
-        await window.electronAPI.uninstallGame()
+        const res = await window.electronAPI.uninstallGame()
+        if (res && res.success) {
+          try {
+            localStorage.removeItem("hikat_game_installed")
+            localStorage.removeItem("hikat_game_manifest")
+          } catch (_) {}
+          return true
+        }
+        return false
       }
-    } catch (err) {
-      console.error("[GameService] Uninstall error:", err)
-    } finally {
       try {
         localStorage.removeItem("hikat_game_installed")
         localStorage.removeItem("hikat_game_manifest")
       } catch (_) {}
+      return true
+    } catch (err) {
+      console.error("[GameService] Uninstall error:", err)
+      return false
     }
   },
 

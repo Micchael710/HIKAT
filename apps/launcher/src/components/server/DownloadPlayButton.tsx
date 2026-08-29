@@ -117,10 +117,6 @@ export default function DownloadPlayButton({
       if (data.phase === "INSTALLING") {
         setStatus("installing")
       }
-      if (data.progress >= 100) {
-        gameService.setGameInstalled(true)
-        setStatus("play")
-      }
     })
 
     const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string) => {
@@ -171,6 +167,7 @@ export default function DownloadPlayButton({
           }
         }).catch((err) => {
           console.error("Sync resume error:", err)
+          gameService.setGameInstalled(false)
           setStatus(manifest.hasUpdate ? "update" : "download")
           showToast(t("playButton.syncError"), "error")
         })
@@ -197,11 +194,14 @@ export default function DownloadPlayButton({
           setStatus("paused")
           return
         }
-        gameService.setGameInstalled(true)
-        setStatus("play")
-        showToast(t("playButton.syncSuccess"), "success")
+        if (res?.success) {
+          gameService.setGameInstalled(true)
+          setStatus("play")
+          showToast(t("playButton.syncSuccess"), "success")
+        }
       } catch (err: any) {
         console.error("Sync error:", err)
+        gameService.setGameInstalled(false)
         setStatus(manifest.hasUpdate ? "update" : "download")
         showToast(t("playButton.syncError"), "error")
       }
@@ -253,25 +253,31 @@ export default function DownloadPlayButton({
         setStatus("play")
         showToast(t("playButton.verifySuccess"), "success")
       } else {
+        gameService.setGameInstalled(false)
         setStatus(verified?.hasUpdate ? "update" : "download")
         showToast(t("playButton.verifyError"), "error")
       }
     } catch (err: any) {
       console.error("Verify repair error:", err)
+      gameService.setGameInstalled(false)
       showToast(t("playButton.verifyError"), "error")
-      setStatus(manifest.hasUpdate ? "update" : "download")
+      setStatus(manifest?.hasUpdate ? "update" : "download")
     }
   }
 
   const handleUninstallGame = async () => {
     setIsMenuOpen(false)
-    await gameService.uninstallGame()
-    setStatus(
-      manifest?.clientFiles && manifest.clientFiles.length > 0
-        ? "download"
-        : "unavailable",
-    )
-    showToast(t("playButton.uninstallSuccess"), "success")
+    const success = await gameService.uninstallGame()
+    if (success) {
+      setStatus(
+        manifest?.clientFiles && manifest.clientFiles.length > 0
+          ? "download"
+          : "unavailable",
+      )
+      showToast(t("playButton.uninstallSuccess"), "success")
+    } else {
+      showToast(t("playButton.uninstallError") || "Error al desinstalar el juego", "error")
+    }
   }
 
   /* ── IDLE / UNAVAILABLE / DOWNLOAD / UPDATE / PLAY ── */

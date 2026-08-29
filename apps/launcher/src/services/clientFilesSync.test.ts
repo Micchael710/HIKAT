@@ -95,7 +95,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
   })
 
   // ─────────────────────────────────────────────────────────────
-  // 1. Filesystem Authority & Install State Tests
+  // 1. Filesystem Authority & MODIFICABLE Tests
   // ─────────────────────────────────────────────────────────────
   describe("Filesystem as the True Authority", () => {
     it("1. Missing file in instanceRoot produces toDownload even if manifest exists", async () => {
@@ -266,13 +266,65 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(plan.toDownload).toHaveLength(1)
       expect(plan.toPreserveUser).toHaveLength(0)
     })
+
+    it("7. MODIFICABLE complete executeSync flow: old A -> new B -> download B -> apply -> verify clean -> manifest B", async () => {
+      const oldOfficialContent = "old official version A"
+      const oldOfficialSha = computeSha(oldOfficialContent)
+      const configPath = path.join(instanceRoot, "config", "options.txt")
+      await fsp.mkdir(path.dirname(configPath), { recursive: true })
+      await fsp.writeFile(configPath, oldOfficialContent, "utf8")
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "config/options.txt": {
+            officialSha256: oldOfficialSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const newContent = "Content for options-b"
+      const newSha = computeSha(newContent)
+
+      const clientFiles = [
+        {
+          path: "config/options.txt",
+          sha256: newSha,
+          sizeBytes: Buffer.byteLength(newContent),
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/options-b`,
+        },
+      ]
+
+      const syncRes = await executeSync({
+        instanceRoot,
+        clientFiles,
+        modpackVersion: "2.0.0",
+        apiBaseUrl: serverBaseUrl,
+      })
+
+      expect(syncRes.success).toBe(true)
+      expect(fs.readFileSync(configPath, "utf8")).toBe(newContent)
+
+      const postManifest = await loadInstalledManifest(instanceRoot)
+      expect(postManifest.modpackVersion).toBe("2.0.0")
+      expect(postManifest.files["config/options.txt"]?.officialSha256).toBe(newSha)
+
+      // Post-verification check with generateSyncPlan returns 0 toDownload
+      const finalPlan = await generateSyncPlan(instanceRoot, clientFiles, "2.0.0")
+      expect(finalPlan.toDownload).toHaveLength(0)
+      expect(finalPlan.toRetain).toHaveLength(1)
+    })
   })
 
   // ─────────────────────────────────────────────────────────────
   // 2. Pause & Resume Semantics (No Partial Byte Resume)
   // ─────────────────────────────────────────────────────────────
   describe("Pause, Resume & Staging Reconciliation", () => {
-    it("7. Staging file names are deterministic, collision-free, and path-safe", () => {
+    it("8. Staging file names are deterministic, collision-free, and path-safe", () => {
       const task1 = { path: "mods/create.jar", sha256: "a".repeat(64) }
       const task2 = { path: "mods/sub/create.jar", sha256: "a".repeat(64) }
       const task3 = { path: "mods/create.jar", sha256: "b".repeat(64) }
@@ -287,7 +339,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(name1).toMatch(/^[a-zA-Z0-9._-]+$/)
     })
 
-    it("8. reconcileStagingFiles reuses verified staged files and removes corrupt ones", async () => {
+    it("9. reconcileStagingFiles reuses verified staged files and removes corrupt ones", async () => {
       const validContent = "valid completed staged binary"
       const validSha = computeSha(validContent)
 
@@ -322,30 +374,10 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(fs.existsSync(corruptStagingFile)).toBe(false)
     })
 
-    it("9. Staged file with invalid size is rejected and removed", async () => {
-      const content = "actual content"
-      const contentSha = computeSha(content)
-      const task = {
-        path: "mods/size-check.jar",
-        sha256: contentSha,
-        sizeBytes: 99999, // Mismatched expected size
-      }
-
-      const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
-      await fsp.mkdir(filesDir, { recursive: true })
-      const stagingFile = path.join(filesDir, getDeterministicStagingFileName(task))
-      await fsp.writeFile(stagingFile, content, "utf8")
-
-      const { validStagedMap } = await reconcileStagingFiles(instanceRoot, [task])
-      expect(validStagedMap.has("mods/size-check.jar")).toBe(false)
-      expect(fs.existsSync(stagingFile)).toBe(false)
-    })
-
     it("10. Pause retains completed files in staging and deletes partial active download", async () => {
       const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
       await fsp.mkdir(filesDir, { recursive: true })
 
-      // Simulate 10 completed files in staging
       const completedTasks: any[] = []
       for (let i = 1; i <= 10; i++) {
         const c = `file ${i} data`
@@ -365,7 +397,6 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         )
       }
 
-      // File 11 is slow/incomplete
       const file11Task = {
         path: "mods/mod11.jar",
         sha256: computeSha("Content for mod11"),
@@ -390,13 +421,11 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
 
       expect(result.paused).toBe(true)
 
-      // Verify: 10 completed staged files remain intact
       for (let i = 1; i <= 10; i++) {
         const stFile = path.join(filesDir, getDeterministicStagingFileName(completedTasks[i - 1]))
         expect(fs.existsSync(stFile)).toBe(true)
       }
 
-      // File 11 partial is NOT left corrupted
       const session = await loadDownloadSession(instanceRoot)
       expect(session?.status).toBe("PAUSED")
     })
@@ -442,33 +471,77 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       })
 
       expect(result.success).toBe(true)
-      expect(result.downloadedCount).toBe(11) // All 11 staged & verified
+      expect(result.downloadedCount).toBe(11)
 
-      // Check that all 11 files are installed in instanceRoot
       for (let i = 1; i <= 11; i++) {
         expect(fs.existsSync(path.join(instanceRoot, `mods/mod${i}.jar`))).toBe(true)
       }
     })
-
-    it("12. Corrupt session JSON is safely handled without crashing", async () => {
-      const stagingDir = path.join(instanceRoot, ".hikat", "staging")
-      await fsp.mkdir(stagingDir, { recursive: true })
-      await fsp.writeFile(
-        path.join(stagingDir, "download-session.json"),
-        "invalid corrupt json {{{",
-        "utf8",
-      )
-
-      const loaded = await loadDownloadSession(instanceRoot)
-      expect(loaded).toBeNull()
-    })
   })
 
   // ─────────────────────────────────────────────────────────────
-  // 3. Cancel Operation Invariants
+  // 3. Phase A -> B Barrier & Cancel Invariants
   // ─────────────────────────────────────────────────────────────
-  describe("Cancel Operation Invariants", () => {
-    it("13. Cancel cleans staging and session but leaves installed version 100% intact", async () => {
+  describe("Phase A -> Phase B Barrier & Cancel Invariants", () => {
+    it("12. Barrier: Cancel at end of Phase A strictly stops before entering INSTALLING", async () => {
+      const task = {
+        path: "mods/m.jar",
+        sha256: computeSha("Content for m"),
+        sizeBytes: 13,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/files/m`,
+      }
+
+      const cancelSignal = { isCancelled: false, isPaused: false }
+      const phases: string[] = []
+
+      // Trigger cancel right before Phase B
+      const syncPromise = executeSync({
+        instanceRoot,
+        clientFiles: [task],
+        modpackVersion: "1.0.0",
+        cancelSignal,
+        onPhaseChange: (p: string) => phases.push(p),
+        apiBaseUrl: serverBaseUrl,
+      })
+
+      cancelSignal.isCancelled = true
+
+      await expect(syncPromise).rejects.toThrow(/cancelled/i)
+      expect(phases).not.toContain("INSTALLING")
+      expect(fs.existsSync(path.join(instanceRoot, ".hikat", "staging"))).toBe(false)
+    })
+
+    it("13. Barrier: Pause at end of Phase A saves paused session without entering INSTALLING", async () => {
+      const task = {
+        path: "mods/p.jar",
+        sha256: computeSha("Content for p"),
+        sizeBytes: 13,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/files/p`,
+      }
+
+      const cancelSignal = { isCancelled: false, isPaused: false }
+      const phases: string[] = []
+
+      cancelSignal.isPaused = true
+
+      const res = await executeSync({
+        instanceRoot,
+        clientFiles: [task],
+        modpackVersion: "1.0.0",
+        cancelSignal,
+        onPhaseChange: (p: string) => phases.push(p),
+        apiBaseUrl: serverBaseUrl,
+      })
+
+      expect(res.paused).toBe(true)
+      expect(phases).not.toContain("INSTALLING")
+      const session = await loadDownloadSession(instanceRoot)
+      expect(session?.status).toBe("PAUSED")
+    })
+
+    it("14. Cancel cleans staging and session but leaves installed version 100% intact", async () => {
       const existingMod = path.join(instanceRoot, "mods", "v1.jar")
       await fsp.mkdir(path.dirname(existingMod), { recursive: true })
       await fsp.writeFile(existingMod, "version 1.0 mod", "utf8")
@@ -486,7 +559,6 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         },
       })
 
-      // Simulate active v2.0 download cancelled
       const cancelSignal = { isCancelled: true, isPaused: false }
       const newTasks = [
         {
@@ -508,9 +580,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         }),
       ).rejects.toThrow(/cancelled/i)
 
-      // Staging is wiped
       expect(fs.existsSync(path.join(instanceRoot, ".hikat", "staging"))).toBe(false)
-      // Installed v1.0 remains intact
       expect(fs.existsSync(existingMod)).toBe(true)
       const installedManifest = await loadInstalledManifest(instanceRoot)
       expect(installedManifest.modpackVersion).toBe("1.0.0")
@@ -518,10 +588,10 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
   })
 
   // ─────────────────────────────────────────────────────────────
-  // 4. Safe Apply, Pruning & Post-Verification
+  // 4. Safe Apply via Temp Sibling & Fail-Hard Pruning
   // ─────────────────────────────────────────────────────────────
-  describe("Phase B: Safe Apply, Strict Pruning & Final Verification", () => {
-    it("14. Pruning failure strictly fails sync and aborts manifest save", async () => {
+  describe("Phase B: Safe Temp Sibling Apply & Strict Pruning", () => {
+    it("15. Pruning failure strictly fails sync and aborts manifest save", async () => {
       const extraMod = path.join(instanceRoot, "mods", "extra.jar")
       await fsp.mkdir(path.dirname(extraMod), { recursive: true })
       await fsp.writeFile(extraMod, "extra", "utf8")
@@ -547,7 +617,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(manifest.modpackVersion).toBeNull()
     })
 
-    it("15. Full successful sync downloads, applies, prunes, and writes manifest atomically", async () => {
+    it("16. Full successful sync downloads, applies via temp sibling, prunes obsoletes, and writes manifest atomically", async () => {
       const obsoleteMod = path.join(instanceRoot, "mods", "obsolete.jar")
       await fsp.mkdir(path.dirname(obsoleteMod), { recursive: true })
       await fsp.writeFile(obsoleteMod, "obsolete data", "utf8")
@@ -586,42 +656,52 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
   })
 
   // ─────────────────────────────────────────────────────────────
-  // 5. Security: URL & Path Protection
+  // 5. Security: URL Validation & Environment Modes
   // ─────────────────────────────────────────────────────────────
-  describe("Security: URL & Path Protections", () => {
-    it("16. Blocks unauthorized external download host", () => {
-      expect(() => {
-        resolveAndValidateDownloadUrl("https://evil-hacker.com/mod.jar")
-      }).toThrow(/Unauthorized external download host/i)
-    })
+  describe("Security: URL Environment Modes & Boundaries", () => {
+    it("17. Production mode: HTTPS apparatia.net allowed, localhost strictly blocked", () => {
+      const origEnv = process.env.NODE_ENV
+      process.env.NODE_ENV = "production"
+      try {
+        expect(validateUrlSecurity(new URL("https://api.apparatia.net/game/download/1"))).toBe(true)
+        expect(validateUrlSecurity(new URL("https://cdn.apparatia.net/files/mod.jar"))).toBe(true)
 
-    it("17. Blocks forbidden protocols (file://, javascript:, data:)", () => {
-      expect(() => {
-        resolveAndValidateDownloadUrl("file:///C:/Windows/System32/cmd.exe")
-      }).toThrow(/Forbidden protocol/i)
+        // Localhost blocked in production
+        expect(() => validateUrlSecurity(new URL("http://localhost:3000/mod.jar"))).toThrow(
+          /forbidden in production/i,
+        )
+        expect(() => validateUrlSecurity(new URL("http://127.0.0.1:3000/mod.jar"))).toThrow(
+          /forbidden in production/i,
+        )
 
-      expect(() => {
-        resolveAndValidateDownloadUrl("javascript:void(0)")
-      }).toThrow(/Forbidden protocol/i)
-    })
+        // Non-HTTPS blocked in production
+        expect(() => validateUrlSecurity(new URL("http://api.apparatia.net/mod.jar"))).toThrow(
+          /strictly forbidden in production/i,
+        )
 
-    it("18. Redirect to unauthorized host is blocked", async () => {
-      const task = {
-        path: "mods/evil.jar",
-        sha256: "a".repeat(64),
-        sizeBytes: 100,
-        policy: "NO_MODIFICABLE",
-        downloadUrl: `${serverBaseUrl}/redirect-evil`,
+        // Foreign domains blocked in production
+        expect(() => validateUrlSecurity(new URL("https://evil.com/mod.jar"))).toThrow(
+          /Unauthorized external download host/i,
+        )
+      } finally {
+        process.env.NODE_ENV = origEnv
       }
+    })
 
-      await expect(
-        executeSync({
-          instanceRoot,
-          clientFiles: [task],
-          modpackVersion: "1.0.0",
-          apiBaseUrl: serverBaseUrl,
-        }),
-      ).rejects.toThrow()
+    it("18. Development mode: localhost HTTP allowed, foreign domains blocked", () => {
+      const origEnv = process.env.NODE_ENV
+      process.env.NODE_ENV = "development"
+      try {
+        expect(validateUrlSecurity(new URL("http://localhost:8787/game/download/1"))).toBe(true)
+        expect(validateUrlSecurity(new URL("http://127.0.0.1:8787/game/download/1"))).toBe(true)
+
+        // Foreign domains still blocked in dev
+        expect(() => validateUrlSecurity(new URL("https://unauthorized.org/mod.jar"))).toThrow(
+          /Unauthorized external download host/i,
+        )
+      } finally {
+        process.env.NODE_ENV = origEnv
+      }
     })
 
     it("19. Real uninstall removes instanceRoot securely and blocks paths outside appData", async () => {

@@ -182,7 +182,7 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     expect(gameService.isGameInstalled()).toBe(false)
   })
 
-  it("5. uninstallGame invokes Electron backend and clears localStorage caches", async () => {
+  it("5. uninstallGame invokes Electron backend and clears localStorage caches on success", async () => {
     localStorage.setItem("hikat_game_installed", "true")
     localStorage.setItem("hikat_game_manifest", JSON.stringify({ version: "1.0.0" }))
 
@@ -191,13 +191,30 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
       uninstallGame: uninstallMock,
     } as any
 
-    await gameService.uninstallGame()
+    const success = await gameService.uninstallGame()
+    expect(success).toBe(true)
     expect(uninstallMock).toHaveBeenCalledTimes(1)
     expect(localStorage.getItem("hikat_game_installed")).toBeNull()
     expect(localStorage.getItem("hikat_game_manifest")).toBeNull()
   })
 
-  it("6. startSync, pauseSync, cancelSync and launchGame call electronAPI correctly", async () => {
+  it("6. uninstallGame preserves localStorage and returns false when Electron uninstall fails", async () => {
+    localStorage.setItem("hikat_game_installed", "true")
+    localStorage.setItem("hikat_game_manifest", JSON.stringify({ version: "1.0.0" }))
+
+    const uninstallMock = vi.fn().mockResolvedValue({ success: false })
+    window.electronAPI = {
+      uninstallGame: uninstallMock,
+    } as any
+
+    const success = await gameService.uninstallGame()
+    expect(success).toBe(false)
+    expect(uninstallMock).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem("hikat_game_installed")).toBe("true")
+    expect(localStorage.getItem("hikat_game_manifest")).not.toBeNull()
+  })
+
+  it("7. startSync, pauseSync, cancelSync and launchGame call electronAPI correctly", async () => {
     const startSyncMock = vi.fn().mockResolvedValue({ success: true })
     const pauseSyncMock = vi.fn().mockResolvedValue(true)
     const cancelSyncMock = vi.fn().mockResolvedValue(true)
