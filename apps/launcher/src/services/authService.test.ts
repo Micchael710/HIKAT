@@ -329,4 +329,79 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(lastUser.accessToken).toBeUndefined()
     expect(lastUser.refreshToken).toBeUndefined()
   })
+
+  it("10. OAuth handleOAuthCallback with keepSession=true persists to SecureAuthStore", async () => {
+    const saveMock = vi.fn()
+    const clearMock = vi.fn()
+    ;(window as any).electronAPI = {
+      authSaveSession: saveMock,
+      authClearSession: clearMock,
+      authClearPendingOAuth: vi.fn(),
+    }
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "oauth-persisted-acc",
+        refreshToken: "oauth-persisted-ref",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-oauth-1", email: "oauth@hikat.org", displayName: "OAuthUser", role: "PLAYER" },
+      }),
+    })
+
+    const user = await authService.handleOAuthCallback({
+      code: "valid-oauth-code",
+      codeVerifier: "valid-verifier-12345",
+      state: "valid-state-abc",
+      expectedState: "valid-state-abc",
+      keepSession: true,
+    })
+
+    expect(user.id).toBe("u-oauth-1")
+    expect(authService.getAccessToken()).toBe("oauth-persisted-acc")
+    expect(saveMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: "oauth-persisted-acc",
+        refreshToken: "oauth-persisted-ref",
+      }),
+    )
+  })
+
+  it("11. OAuth handleOAuthCallback with keepSession=false leaves session in memory-only", async () => {
+    const saveMock = vi.fn()
+    const clearMock = vi.fn()
+    ;(window as any).electronAPI = {
+      authSaveSession: saveMock,
+      authClearSession: clearMock,
+      authClearPendingOAuth: vi.fn(),
+    }
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "oauth-memory-acc",
+        refreshToken: "oauth-memory-ref",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-oauth-2", email: "oauth2@hikat.org", displayName: "MemoryUser", role: "PLAYER" },
+      }),
+    })
+
+    const user = await authService.handleOAuthCallback({
+      code: "valid-oauth-code-2",
+      codeVerifier: "valid-verifier-67890",
+      state: "valid-state-xyz",
+      expectedState: "valid-state-xyz",
+      keepSession: false,
+    })
+
+    expect(user.id).toBe("u-oauth-2")
+    expect(authService.getAccessToken()).toBe("oauth-memory-acc")
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(clearMock).toHaveBeenCalled()
+  })
 })
+

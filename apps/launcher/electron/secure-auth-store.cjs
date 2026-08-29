@@ -127,17 +127,24 @@ class SecureAuthStore {
         provider: data.provider || "GOOGLE",
         codeVerifier: data.codeVerifier,
         state: data.state,
-        expiresAt: data.expiresAt || (Date.now() + 10 * 60 * 1000), // 10 minutes max
+        keepSession: typeof data.keepSession === "boolean" ? data.keepSession : true,
+        expiresAt: data.expiresAt || Date.now() + 10 * 60 * 1000, // 10 minutes max
+      }
+
+      if (!this.isEncryptionAvailable()) {
+        if (process.env.NODE_ENV === "test" || process.env.VITEST) {
+          // Allow plaintext only in local unit test suite
+          const jsonStr = JSON.stringify(this.pendingOAuth)
+          const tempPath = `${this.pendingOAuthFilePath}.tmp.${Date.now()}`
+          fs.writeFileSync(tempPath, Buffer.from(jsonStr, "utf-8"), { mode: 0o600 })
+          fs.renameSync(tempPath, this.pendingOAuthFilePath)
+        }
+        // In production, keep pending OAuth in memory-only if encryption is unavailable
+        return
       }
 
       const jsonStr = JSON.stringify(this.pendingOAuth)
-      let bufferToWrite
-      if (this.isEncryptionAvailable()) {
-        bufferToWrite = electronSafeStorage.encryptString(jsonStr)
-      } else {
-        bufferToWrite = Buffer.from(jsonStr, "utf-8")
-      }
-
+      const bufferToWrite = electronSafeStorage.encryptString(jsonStr)
       const tempPath = `${this.pendingOAuthFilePath}.tmp.${Date.now()}`
       fs.writeFileSync(tempPath, bufferToWrite, { mode: 0o600 })
       fs.renameSync(tempPath, this.pendingOAuthFilePath)
@@ -150,13 +157,14 @@ class SecureAuthStore {
         const fileData = fs.readFileSync(this.pendingOAuthFilePath)
         let jsonStr = ""
         if (this.isEncryptionAvailable()) {
-          try {
-            jsonStr = electronSafeStorage.decryptString(fileData)
-          } catch {
-            jsonStr = fileData.toString("utf-8")
-          }
+          jsonStr = electronSafeStorage.decryptString(fileData)
         } else {
-          jsonStr = fileData.toString("utf-8")
+          if (process.env.NODE_ENV === "test" || process.env.VITEST) {
+            jsonStr = fileData.toString("utf-8")
+          } else {
+            this.clearPendingOAuth()
+            return null
+          }
         }
         this.pendingOAuth = JSON.parse(jsonStr)
       }
@@ -175,6 +183,7 @@ class SecureAuthStore {
       return null
     }
   }
+
 
   clearPendingOAuth() {
     this.pendingOAuth = null

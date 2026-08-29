@@ -8,6 +8,8 @@ const { GameOperationManager } = require("./game-operation-manager.cjs")
 const { setJavaGpuPreference } = require("./gpu-manager.cjs")
 const { SettingsStore } = require("./settings-store.cjs")
 const { SecureAuthStore } = require("./secure-auth-store.cjs")
+const { parseValidOAuthCallbackUrl } = require("./url-utils.cjs")
+
 
 // Single instance lock to prevent duplicate launcher instances and focus existing instance
 const singleInstanceLock = app.requestSingleInstanceLock()
@@ -340,7 +342,11 @@ let pendingDeepLinkUrl = null
 
 function extractDeepLinkFromArgs(args) {
   if (!Array.isArray(args)) return null
-  return args.find((arg) => typeof arg === "string" && arg.startsWith("hikat://auth/callback")) || null
+  for (const arg of args) {
+    const valid = parseValidOAuthCallbackUrl(arg)
+    if (valid) return valid
+  }
+  return null
 }
 
 const initialDeepLink = extractDeepLinkFromArgs(process.argv)
@@ -349,17 +355,14 @@ if (initialDeepLink) {
 }
 
 function handleDeepLinkUrl(rawUrl) {
-  if (!rawUrl || typeof rawUrl !== "string") return
-  try {
-    const parsed = new URL(rawUrl)
-    if (parsed.protocol === "hikat:" && parsed.hostname === "auth" && parsed.pathname === "/callback") {
-      focusMainWindow()
-      pendingDeepLinkUrl = rawUrl
-      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
-        mainWindow.webContents.send("oauth:callback", rawUrl)
-      }
-    }
-  } catch (_) {}
+  const validUrl = parseValidOAuthCallbackUrl(rawUrl)
+  if (!validUrl) return
+
+  focusMainWindow()
+  pendingDeepLinkUrl = validUrl
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+    mainWindow.webContents.send("oauth:callback", validUrl)
+  }
 }
 
 // Second instance handler (when user launches launcher while already running or via deep link)
@@ -376,6 +379,7 @@ app.on("open-url", (event, url) => {
   event.preventDefault()
   handleDeepLinkUrl(url)
 })
+
 
 
 // IPC Handlers for custom titlebar controls

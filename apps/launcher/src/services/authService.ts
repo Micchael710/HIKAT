@@ -290,7 +290,10 @@ class LauncherAuthService {
 
   // --- OAuth PKCE Integration ---
 
-  public async initiateOAuth(provider: "GOOGLE" | "DISCORD"): Promise<{
+  public async initiateOAuth(
+    provider: "GOOGLE" | "DISCORD",
+    keepSession = true,
+  ): Promise<{
     authUrl: string
     codeVerifier: string
     state: string
@@ -314,6 +317,7 @@ class LauncherAuthService {
           provider,
           codeVerifier,
           state,
+          keepSession,
           expiresAt: Date.now() + 10 * 60 * 1000,
         })
       } catch (_) {}
@@ -324,6 +328,7 @@ class LauncherAuthService {
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.setItem("hikat_launcher_oauth_verifier", codeVerifier)
         sessionStorage.setItem("hikat_launcher_oauth_state", state)
+        sessionStorage.setItem("hikat_launcher_oauth_keep_session", keepSession ? "true" : "false")
       }
     } catch (_) {}
 
@@ -335,15 +340,22 @@ class LauncherAuthService {
     codeVerifier?: string
     state: string
     expectedState?: string
+    keepSession?: boolean
   }): Promise<UserProfile> {
     let verifier = params.codeVerifier || ""
+    let keepSession = params.keepSession
 
-    // If verifier not passed directly, fetch from Electron Main pending OAuth store
-    if (!verifier && typeof window !== "undefined" && window.electronAPI?.authGetPendingOAuth) {
+    // If verifier or keepSession not passed directly, fetch from Electron Main pending OAuth store
+    if ((!verifier || keepSession === undefined) && typeof window !== "undefined" && window.electronAPI?.authGetPendingOAuth) {
       try {
         const pending = await window.electronAPI.authGetPendingOAuth(params.state)
-        if (pending && pending.codeVerifier) {
-          verifier = pending.codeVerifier
+        if (pending) {
+          if (!verifier && pending.codeVerifier) {
+            verifier = pending.codeVerifier
+          }
+          if (keepSession === undefined && typeof pending.keepSession === "boolean") {
+            keepSession = pending.keepSession
+          }
         }
       } catch (_) {}
     }
@@ -355,6 +367,12 @@ class LauncherAuthService {
         verifier = sessionStorage.getItem("hikat_launcher_oauth_verifier") || ""
       }
     }
+    if (keepSession === undefined && typeof sessionStorage !== "undefined") {
+      const savedKeep = sessionStorage.getItem("hikat_launcher_oauth_keep_session")
+      if (savedKeep !== null) {
+        keepSession = savedKeep === "true"
+      }
+    }
 
     if (!verifier) {
       throw new Error("Estado de autenticación inválido o sesión OAuth expirada.")
@@ -364,6 +382,8 @@ class LauncherAuthService {
       throw new Error("Estado de autenticación inválido (posible ataque CSRF).")
     }
 
+    const finalKeepSession = typeof keepSession === "boolean" ? keepSession : true
+
     try {
       const user = await this.client.exchangeOAuthCode(
         {
@@ -371,16 +391,20 @@ class LauncherAuthService {
           codeVerifier: verifier,
           redirectUri: "hikat://auth/callback",
         },
-        true,
+        finalKeepSession,
       )
 
       // Clean pending state on success
       if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {
-        window.electronAPI.authClearPendingOAuth().catch(() => {})
+        try {
+          const p = window.electronAPI.authClearPendingOAuth()
+          if (p && typeof p.catch === "function") p.catch(() => {})
+        } catch (_) {}
       }
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.removeItem("hikat_launcher_oauth_verifier")
         sessionStorage.removeItem("hikat_launcher_oauth_state")
+        sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
       }
 
       return {
@@ -393,15 +417,21 @@ class LauncherAuthService {
     } catch (err) {
       // Clean pending state on error
       if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {
-        window.electronAPI.authClearPendingOAuth().catch(() => {})
+        try {
+          const p = window.electronAPI.authClearPendingOAuth()
+          if (p && typeof p.catch === "function") p.catch(() => {})
+        } catch (_) {}
       }
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.removeItem("hikat_launcher_oauth_verifier")
         sessionStorage.removeItem("hikat_launcher_oauth_state")
+        sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
       }
       throw err
     }
+
   }
+
 }
 
 export const authService = new LauncherAuthService()

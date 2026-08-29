@@ -74,7 +74,7 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       googleBtn?.click()
     })
 
-    expect(authService.initiateOAuth).toHaveBeenCalledWith("GOOGLE")
+    expect(authService.initiateOAuth).toHaveBeenCalledWith("GOOGLE", true)
     expect(openExternalMock).toHaveBeenCalledWith(
       "http://localhost:8788/oauth/authorize?provider=google&state=test-state",
     )
@@ -117,6 +117,7 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       codeVerifier: "saved-verifier",
       state: "saved-state",
       expectedState: "saved-state",
+      keepSession: true,
     })
   })
 
@@ -149,8 +150,10 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       codeVerifier: undefined,
       state: "coldstate",
       expectedState: undefined,
+      keepSession: true,
     })
   })
+
 
   it("5. Displays error message when OAuth callback returns error parameter", async () => {
     const onLogin = vi.fn()
@@ -174,5 +177,60 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
     expect(container.textContent).toContain("Este correo electrónico ya está registrado")
     expect(onLogin).not.toHaveBeenCalled()
   })
+
+  it("6. Propagates keepSession toggle setting to authService.initiateOAuth", async () => {
+    const onLogin = vi.fn()
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn(() => () => {}),
+    }
+
+    const initiateSpy = vi.spyOn(authService, "initiateOAuth").mockResolvedValue({
+      authUrl: "http://localhost:8788/oauth/authorize?provider=google&state=test",
+      codeVerifier: "v-1",
+      state: "s-1",
+    })
+
+    const container = await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+
+    // keepSession is true by default
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const discordBtn = buttons.find((b) => b.textContent?.includes("Discord"))
+
+    await act(async () => {
+      discordBtn?.click()
+    })
+
+    expect(initiateSpy).toHaveBeenCalledWith("DISCORD", true)
+  })
+
+  it("7. Callback processor rejects malicious spoofing urls like callback-evil", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+      getPendingOAuthCallback: vi.fn().mockResolvedValue(null),
+    }
+
+    const handleCallbackSpy = vi.spyOn(authService, "handleOAuthCallback")
+    await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+
+    // Trigger spoofed malicious URLs
+    await act(async () => {
+      callbackTrigger!("hikat://auth/callback-evil?code=evil&state=fake")
+      callbackTrigger!("https://auth/callback?code=evil&state=fake")
+      callbackTrigger!("hikat://evil/callback?code=evil&state=fake")
+    })
+
+    // None should reach authService!
+    expect(handleCallbackSpy).not.toHaveBeenCalled()
+    expect(onLogin).not.toHaveBeenCalled()
+  })
 })
+
 

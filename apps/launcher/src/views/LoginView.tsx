@@ -30,11 +30,21 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
   const [isEnteringWorld, setIsEnteringWorld] = useState(false)
   const isDark = theme === "dark"
 
-  const pendingOAuthRef = useRef<{ codeVerifier: string; state: string } | null>(null)
+  const pendingOAuthRef = useRef<{
+    codeVerifier: string
+    state: string
+    keepSession: boolean
+  } | null>(null)
 
   const processOAuthCallbackUrl = async (rawUrl: string) => {
     try {
       const urlObj = new URL(rawUrl)
+      if (urlObj.protocol !== "hikat:") return
+      const host = urlObj.hostname || urlObj.host
+      if (host !== "auth") return
+      const cleanPath = urlObj.pathname.replace(/\/+$/, "")
+      if (cleanPath !== "/callback") return
+
       const code = urlObj.searchParams.get("code")
       const state = urlObj.searchParams.get("state")
       const error = urlObj.searchParams.get("error")
@@ -63,6 +73,10 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         (typeof sessionStorage !== "undefined"
           ? sessionStorage.getItem("hikat_launcher_oauth_state") || undefined
           : undefined)
+      const pendingKeepSession =
+        pendingOAuthRef.current?.keepSession !== undefined
+          ? pendingOAuthRef.current.keepSession
+          : keepSession
 
       setIsEnteringWorld(true)
       const user = await authService.handleOAuthCallback({
@@ -70,14 +84,15 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         codeVerifier: pendingVerifier,
         state,
         expectedState,
+        keepSession: pendingKeepSession,
       })
 
       pendingOAuthRef.current = null
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.removeItem("hikat_launcher_oauth_verifier")
         sessionStorage.removeItem("hikat_launcher_oauth_state")
+        sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
       }
-
 
       setTimeout(() => {
         onLogin(user.displayName || user.username)
@@ -114,17 +129,19 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         removeListener?.()
       }
     }
-  }, [onLogin])
-
+  }, [onLogin, keepSession])
 
   const handleOAuthClick = async (provider: "GOOGLE" | "DISCORD") => {
     setErrorMessage(null)
     setSuccessNotice(null)
     try {
-      const { authUrl, codeVerifier, state } = await authService.initiateOAuth(provider)
-      pendingOAuthRef.current = { codeVerifier, state }
-      sessionStorage.setItem("hikat_launcher_oauth_verifier", codeVerifier)
-      sessionStorage.setItem("hikat_launcher_oauth_state", state)
+      const { authUrl, codeVerifier, state } = await authService.initiateOAuth(provider, keepSession)
+      pendingOAuthRef.current = { codeVerifier, state, keepSession }
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.setItem("hikat_launcher_oauth_verifier", codeVerifier)
+        sessionStorage.setItem("hikat_launcher_oauth_state", state)
+        sessionStorage.setItem("hikat_launcher_oauth_keep_session", keepSession ? "true" : "false")
+      }
 
       if (window.electronAPI?.openExternal) {
         window.electronAPI.openExternal(authUrl)
@@ -135,6 +152,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
       setErrorMessage(err.message || "No se pudo iniciar el flujo de autenticación.")
     }
   }
+
 
   const handleSubmit = async () => {
     if (isEnteringWorld) return

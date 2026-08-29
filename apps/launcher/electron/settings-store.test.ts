@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+
 import fs from "fs"
 import path from "path"
 import os from "os"
@@ -134,5 +135,48 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
     // Once retrieved, it is automatically cleared
     expect(authStore2.getPendingOAuth("oauth-state-abcde")).toBeNull()
   })
+
+  it("8. In production without safeStorage, savePendingOAuth never writes plaintext file and operates memory-only", () => {
+    const originalNodeEnv = process.env.NODE_ENV
+    const originalVitest = process.env.VITEST
+
+    try {
+      // Simulate production environment
+      process.env.NODE_ENV = "production"
+      delete process.env.VITEST
+
+      const authStore = new SecureAuthStore(tempDir)
+      // Force encryption unavailable
+      vi.spyOn(authStore, "isEncryptionAvailable").mockReturnValue(false)
+
+      authStore.savePendingOAuth({
+        provider: "DISCORD",
+        codeVerifier: "pkce-secret-12345",
+        state: "state-secret-999",
+        expiresAt: Date.now() + 60000,
+      })
+
+      const pendingFile = path.join(tempDir, "pending-oauth.enc")
+      // Strict verification: NO plaintext file was written!
+      expect(fs.existsSync(pendingFile)).toBe(false)
+
+      // Operates in memory-only for current session
+      const retrieved = authStore.getPendingOAuth("state-secret-999")
+      expect(retrieved).not.toBeNull()
+      expect(retrieved.codeVerifier).toBe("pkce-secret-12345")
+      expect(retrieved.provider).toBe("DISCORD")
+
+      // A restarted store in production without safeStorage will find NO file and return null
+      const restartedStore = new SecureAuthStore(tempDir)
+      vi.spyOn(restartedStore, "isEncryptionAvailable").mockReturnValue(false)
+      expect(restartedStore.getPendingOAuth("state-secret-999")).toBeNull()
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv
+      if (originalVitest !== undefined) {
+        process.env.VITEST = originalVitest
+      }
+    }
+  })
 })
+
 
