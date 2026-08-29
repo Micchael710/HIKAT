@@ -420,29 +420,15 @@ export async function getPublishedModpack(
   env: Env,
 ): Promise<PublishedModpackGql | null> {
   const settings = await ensureSettingsRecord(db)
-  let activeRelease: schema.GameRelease | undefined
-
-  if (settings.launcherActiveReleaseId) {
-    activeRelease = await db
-      .select()
-      .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.id, settings.launcherActiveReleaseId))
-      .get()
-  } else {
-    // Fallback / legacy bootstrap
-    const published = await db
-      .select()
-      .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "PUBLISHED"))
-      .get()
-    if (published) {
-      activeRelease = published
-      await db
-        .update(schema.projectSettings)
-        .set({ launcherActiveReleaseId: published.id })
-        .where(eq(schema.projectSettings.id, "main"))
-    }
+  if (!settings.launcherActiveReleaseId) {
+    return null
   }
+
+  const activeRelease = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(eq(schema.gameReleases.id, settings.launcherActiveReleaseId))
+    .get()
 
   if (!activeRelease) return null
 
@@ -457,6 +443,7 @@ export async function getPublishedModpack(
 
   // 2. Filter strictly for client-appropriate files
   const realFiles = allRecords.filter(isClientGameReleaseFile)
+
 
   const clientFiles: ClientFileGql[] = realFiles.map((file) => ({
     path: file.logicalPath,
@@ -962,10 +949,7 @@ export async function publishGameRelease(
   const hasServerChanges = await hasServerRelevantChanges(db, draftFiles)
 
   let shouldActivate = false
-  if (!settings.launcherActiveReleaseId) {
-    // Initial release baseline activation
-    shouldActivate = true
-  } else if (settings.updateDeploymentOrder === "PLAYERS_FIRST") {
+  if (settings.updateDeploymentOrder === "PLAYERS_FIRST") {
     shouldActivate = true
   } else if (settings.updateDeploymentOrder === "SERVER_FIRST") {
     if (!hasServerChanges) {
@@ -976,6 +960,7 @@ export async function publishGameRelease(
       shouldActivate = false
     }
   }
+
 
   const archiveQuery = db
     .update(schema.gameReleases)

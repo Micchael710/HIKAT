@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { Database, createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
-import { eq, and } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 
 import {
   getPublishedModpack,
@@ -9,10 +9,12 @@ import {
   prepareGameDraft,
   hasServerRelevantChanges,
 } from "./releaseService"
+import { handleGameFileDownload } from "./gameStorageService"
 import {
   getAdminSettings,
   updateAdminSettings,
   ensureSettingsRecord,
+  getClientConfiguration,
 } from "../settingsService"
 import {
   getServerReleaseSyncPlan,
@@ -28,6 +30,7 @@ function createMockR2(files: Map<string, Uint8Array> = new Map()): any {
       if (!data) return null
       return {
         arrayBuffer: async () => data.buffer,
+        body: data,
         size: data.byteLength,
       }
     },
@@ -180,7 +183,6 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
       PTERODACTYL_SERVER_ID: "srv_test_id",
     } as unknown as Env
 
-
     adminId = crypto.randomUUID()
     playerId = crypto.randomUUID()
     const now = new Date().toISOString()
@@ -206,7 +208,7 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
   // A. Settings Lifecycle & Authorization
   // ==========================================
   describe("A. Settings Lifecycle & Authorization", () => {
-    it("1 & 2. Fresh installation defaults to SERVER_FIRST and can be read", async () => {
+    it("1 & 2. Fresh installation defaults to SERVER_FIRST and launcherActiveReleaseId is null", async () => {
       const settings = await getAdminSettings(db)
       expect(settings.updateDeploymentOrder).toBe("SERVER_FIRST")
       expect(settings.launcherActiveReleaseId).toBeNull()
@@ -254,77 +256,24 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
     })
   })
 
-  // ==========================================
-  // B. Migration / Bootstrap
-  // ==========================================
-  describe("B. Migration / Bootstrap", () => {
-    it("7. Existing DB with PUBLISHED release and null active pointer establishes baseline active", async () => {
-      const relId = crypto.randomUUID()
-      const now = new Date().toISOString()
-      await db.insert(schema.gameReleases).values({
-        id: relId,
-        version: "1.0.0",
-        status: "PUBLISHED",
-        publishedAt: now,
-        createdBy: adminId,
-        createdAt: now,
-        updatedAt: now,
-      })
+  // =========================================================================
+  // B. First Release SERVER_FIRST & Fail-Closed Activation Semantics (Blocker 1)
+  // =========================================================================
+  describe("B. First Release SERVER_FIRST & Fail-Closed Activation Semantics", () => {
+    it("7 (Section 9 Mandatory E2E): Fresh installation with SERVER_FIRST: first release with BOTH does NOT activate upon publish; activates only upon successful server apply", async () => {
+      // 1. Fresh installation state
+      const initialSettings = await getAdminSettings(db)
+      expect(initialSettings.updateDeploymentOrder).toBe("SERVER_FIRST")
+      expect(initialSettings.launcherActiveReleaseId).toBeNull()
 
-      // Active pointer is null initially
-      const row = await db.select().from(schema.projectSettings).where(eq(schema.projectSettings.id, "main")).get()
-      expect(row?.launcherActiveReleaseId).toBeNull()
-
-      // ensureSettingsRecord performs safe backfill
-      const bootstrapped = await ensureSettingsRecord(db)
-      expect(bootstrapped.launcherActiveReleaseId).toBe(relId)
-
-      // getPublishedModpack delivers the bootstrapped baseline
-      const modpack = await getPublishedModpack(db, testEnv)
-      expect(modpack?.version).toBe("1.0.0")
-    })
-
-    it("8. Repeated bootstrap preserves existing active pointer and does not overwrite", async () => {
-      const rel1 = crypto.randomUUID()
-      const now = new Date().toISOString()
-      await db.insert(schema.gameReleases).values({
-        id: rel1,
-        version: "1.0.0",
-        status: "PUBLISHED",
-        publishedAt: now,
-        createdBy: adminId,
-        createdAt: now,
-        updatedAt: now,
-      })
-
-      await ensureSettingsRecord(db)
-
-      // Active pointer is rel1
-      let settings = await getAdminSettings(db)
-      expect(settings.launcherActiveReleaseId).toBe(rel1)
-
-      // Subsequent calls don't change it
-      await ensureSettingsRecord(db)
-      settings = await getAdminSettings(db)
-      expect(settings.launcherActiveReleaseId).toBe(rel1)
-    })
-  })
-
-  // ==========================================
-  // C. SERVER_FIRST Workflow
-  // ==========================================
-  describe("C. SERVER_FIRST Workflow", () => {
-    it("9, 10, 11, 12, 13. Full SERVER_FIRST lifecycle with server apply success and failure semantics", async () => {
-      // 1. Initial State: Publish v1.0.0 with both mod A
-      await updateAdminSettings(db, { updateDeploymentOrder: "SERVER_FIRST" }, adminId)
-
-      const draft1 = await prepareGameDraft(db, adminId)
+      // 2. Prepare draft 1.0.0 with a BOTH mod
+      const draft = await prepareGameDraft(db, adminId)
       const jarA = await createValidJarBuffer("mod-a-1.0.jar")
       r2Files.set("game-files/mod-a-1.0.jar", jarA.buffer)
 
       await db.insert(schema.gameReleaseFiles).values({
         id: crypto.randomUUID(),
-        releaseId: draft1.id,
+        releaseId: draft.id,
         name: "mod-a-1.0.jar",
         logicalPath: "mods/mod-a-1.0.jar",
         category: "MOD",
@@ -333,110 +282,321 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
         policy: "NO_MODIFICABLE",
         objectKey: "game-files/mod-a-1.0.jar",
         sourceEnvironment: "BOTH",
-        sourceProvider: "MODRINTH",
-        sourceProjectId: "proj-a",
-        sourceVersionId: "ver-a-1",
-        sourceFileId: "f-a-1",
       })
 
-      // Publish v1.0.0 (initial baseline activation)
+      // 3. Publish release 1.0.0
       await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
 
-      let launcherPack = await getPublishedModpack(db, testEnv)
-      expect(launcherPack?.version).toBe("1.0.0")
+      // Verify: release 1.0.0 is PUBLISHED in D1
+      const publishedRow = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft.id)).get()
+      expect(publishedRow?.status).toBe("PUBLISHED")
 
-      // Seed server with v1.0.0 content
-      await db.insert(schema.serverManagedContent).values({
-        id: crypto.randomUUID(),
-        managementSource: "GAME_RELEASE",
-        provider: "MODRINTH",
-        projectId: "proj-a",
-        versionId: "ver-a-1",
-        contentType: "MOD",
-        environment: "BOTH",
-        targetPath: "mods/mod-a-1.0.jar",
-        sha256: jarA.sha256,
-        sizeBytes: jarA.buffer.byteLength,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      })
+      // Verify: launcherActiveReleaseId is STILL NULL (NOT auto-activated)
+      const settingsAfterPublish = await getAdminSettings(db)
+      expect(settingsAfterPublish.launcherActiveReleaseId).toBeNull()
 
-      // 2. Create and Publish v1.1.0 containing server-relevant change (mod-a updated to 1.1)
-      const draft2 = await prepareGameDraft(db, adminId)
-      // Delete old file from draft
-      await db.delete(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft2.id))
+      // Verify: getPublishedModpack() returns NULL
+      const modpackBeforeApply = await getPublishedModpack(db, testEnv)
+      expect(modpackBeforeApply).toBeNull()
 
-      const jarA2 = await createValidJarBuffer("mod-a-1.1.jar")
-      r2Files.set("game-files/mod-a-1.1.jar", jarA2.buffer)
+      // 4. Server Release Sync shows pending installation for 1.0.0
+      const mockClient = createMockPterodactylClient({ status: "offline" })
+      const plan = await getServerReleaseSyncPlan(db, testEnv, mockClient)
+      expect(plan.isPending).toBe(true)
+      expect(plan.releaseVersion).toBe("1.0.0")
+
+      // 5. Apply server release sync successfully
+      const syncResult = await applyServerReleaseSync(db, testEnv, adminId, false, mockClient)
+      expect(syncResult.success).toBe(true)
+
+      // Verify: launcherActiveReleaseId is NOW 1.0.0
+      const settingsAfterApply = await getAdminSettings(db)
+      expect(settingsAfterApply.launcherActiveReleaseId).toBe(draft.id)
+
+      // Verify: getPublishedModpack() NOW delivers version 1.0.0
+      const modpackAfterApply = await getPublishedModpack(db, testEnv)
+      expect(modpackAfterApply).not.toBeNull()
+      expect(modpackAfterApply?.version).toBe("1.0.0")
+    })
+
+    it("8 (Section 10): First release SERVER_FIRST + server unavailable/failure leaves active pointer NULL", async () => {
+      // 1. Fresh install, SERVER_FIRST
+      const draft = await prepareGameDraft(db, adminId)
+      const jarA = await createValidJarBuffer("mod-a-1.0.jar")
+      r2Files.set("game-files/mod-a-1.0.jar", jarA.buffer)
 
       await db.insert(schema.gameReleaseFiles).values({
         id: crypto.randomUUID(),
+        releaseId: draft.id,
+        name: "mod-a-1.0.jar",
+        logicalPath: "mods/mod-a-1.0.jar",
+        category: "MOD",
+        sha256: jarA.sha256,
+        sizeBytes: jarA.buffer.byteLength,
+        policy: "NO_MODIFICABLE",
+        objectKey: "game-files/mod-a-1.0.jar",
+        sourceEnvironment: "BOTH",
+      })
+
+      await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
+
+      // Attempt apply with unavailable server
+      const offlineClient = createMockPterodactylClient({ unavailable: true })
+      await expect(applyServerReleaseSync(db, testEnv, adminId, false, offlineClient)).rejects.toThrow()
+
+      // Pointer MUST remain null
+      expect((await getAdminSettings(db)).launcherActiveReleaseId).toBeNull()
+      expect(await getPublishedModpack(db, testEnv)).toBeNull()
+
+      // Attempt apply with disk write failure
+      const writeFailClient = createMockPterodactylClient({ status: "offline", failWrite: true })
+      await expect(applyServerReleaseSync(db, testEnv, adminId, false, writeFailClient)).rejects.toThrow()
+
+      expect((await getAdminSettings(db)).launcherActiveReleaseId).toBeNull()
+      expect(await getPublishedModpack(db, testEnv)).toBeNull()
+    })
+
+    it("9 (Section 11): ensureSettingsRecord, getAdminSettings, getClientConfiguration, getPublishedModpack are strictly READ-ONLY and never mutate active pointer", async () => {
+      // 1. Publish 1.0.0 with BOTH under SERVER_FIRST (active = null)
+      const draft = await prepareGameDraft(db, adminId)
+      const jarA = await createValidJarBuffer("mod-a-1.0.jar")
+      r2Files.set("game-files/mod-a-1.0.jar", jarA.buffer)
+
+      await db.insert(schema.gameReleaseFiles).values({
+        id: crypto.randomUUID(),
+        releaseId: draft.id,
+        name: "mod-a-1.0.jar",
+        logicalPath: "mods/mod-a-1.0.jar",
+        category: "MOD",
+        sha256: jarA.sha256,
+        sizeBytes: jarA.buffer.byteLength,
+        policy: "NO_MODIFICABLE",
+        objectKey: "game-files/mod-a-1.0.jar",
+        sourceEnvironment: "BOTH",
+      })
+
+      await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
+
+      // 2. Call reading methods repeatedly
+      for (let i = 0; i < 5; i++) {
+        await ensureSettingsRecord(db)
+        const adminSet = await getAdminSettings(db)
+        expect(adminSet.launcherActiveReleaseId).toBeNull()
+
+        const clientCfg = await getClientConfiguration(db)
+        expect(clientCfg).toBeDefined()
+
+        const modpack = await getPublishedModpack(db, testEnv)
+        expect(modpack).toBeNull()
+      }
+
+      // Check DB directly: launcherActiveReleaseId is still NULL
+      const row = await db.select().from(schema.projectSettings).where(eq(schema.projectSettings.id, "main")).get()
+      expect(row?.launcherActiveReleaseId).toBeNull()
+    })
+  })
+
+  // =========================================================================
+  // C. Active ARCHIVED Release & Real Public Download Endpoint (Blocker 4 & 5)
+  // =========================================================================
+  describe("C. Active ARCHIVED Release & Real Public Download Endpoint", () => {
+    it("10 (Section 12): Active release transitioning to ARCHIVED (when a newer release is published pending server apply) continues serving manifest and binary downloads via handleGameFileDownload", async () => {
+      // 1. Setup active release 1.0.0
+      const draft1 = await prepareGameDraft(db, adminId)
+      const jar1 = await createValidJarBuffer("mod-a-1.0.jar")
+      const file1Id = crypto.randomUUID()
+      const objectKey1 = `game-files/${draft1.id}/mod-a-1.0.jar`
+      r2Files.set(objectKey1, jar1.buffer)
+
+      await db.insert(schema.gameReleaseFiles).values({
+        id: file1Id,
+        releaseId: draft1.id,
+        name: "mod-a-1.0.jar",
+        logicalPath: "mods/mod-a-1.0.jar",
+        category: "MOD",
+        sha256: jar1.sha256,
+        sizeBytes: jar1.buffer.byteLength,
+        policy: "NO_MODIFICABLE",
+        objectKey: objectKey1,
+        sourceEnvironment: "BOTH",
+      })
+
+      await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
+
+      // Apply 1.0.0 on server so it becomes active
+      const mockClient = createMockPterodactylClient({ status: "offline" })
+      await applyServerReleaseSync(db, testEnv, adminId, false, mockClient)
+
+      // Confirm 1.0.0 is active
+      expect((await getAdminSettings(db)).launcherActiveReleaseId).toBe(draft1.id)
+
+      // 2. Publish 1.1.0 with BOTH mod changed in SERVER_FIRST mode
+      const draft2 = await prepareGameDraft(db, adminId)
+      const jar2 = await createValidJarBuffer("mod-a-1.1.jar")
+      const file2Id = crypto.randomUUID()
+      const objectKey2 = `game-files/${draft2.id}/mod-a-1.1.jar`
+      r2Files.set(objectKey2, jar2.buffer)
+
+      await db.delete(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft2.id))
+      await db.insert(schema.gameReleaseFiles).values({
+        id: file2Id,
         releaseId: draft2.id,
         name: "mod-a-1.1.jar",
         logicalPath: "mods/mod-a-1.1.jar",
         category: "MOD",
-        sha256: jarA2.sha256,
-        sizeBytes: jarA2.buffer.byteLength,
+        sha256: jar2.sha256,
+        sizeBytes: jar2.buffer.byteLength,
         policy: "NO_MODIFICABLE",
-        objectKey: "game-files/mod-a-1.1.jar",
+        objectKey: objectKey2,
         sourceEnvironment: "BOTH",
-        sourceProvider: "MODRINTH",
-        sourceProjectId: "proj-a",
-        sourceVersionId: "ver-a-2",
-        sourceFileId: "f-a-2",
       })
 
-      // Publish v1.1.0 in SERVER_FIRST mode
       await publishGameRelease(db, testEnv, { version: "1.1.0" }, adminId)
 
-      // Test 9: 1.1.0 is PUBLISHED, but Launcher STILL sees 1.0.0!
-      launcherPack = await getPublishedModpack(db, testEnv)
-      expect(launcherPack?.version).toBe("1.0.0")
+      // Verify DB statuses: 1.0.0 is ARCHIVED, 1.1.0 is PUBLISHED
+      const rel1 = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft1.id)).get()
+      const rel2 = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft2.id)).get()
+      expect(rel1?.status).toBe("ARCHIVED")
+      expect(rel2?.status).toBe("PUBLISHED")
 
-      // Server Release Sync plan shows pending changes
-      const syncPlan = await getServerReleaseSyncPlan(db, testEnv)
-      expect(syncPlan.isPending).toBe(true)
-      expect(syncPlan.releaseVersion).toBe("1.1.0")
+      // Verify active pointer is STILL 1.0.0
+      expect((await getAdminSettings(db)).launcherActiveReleaseId).toBe(draft1.id)
 
-      // Test 12: If server is unavailable, apply fails closed and launcher STILL sees 1.0.0
-      const offlineClient = createMockPterodactylClient({ unavailable: true })
-      await expect(applyServerReleaseSync(db, testEnv, adminId, false, offlineClient)).rejects.toThrow()
-      launcherPack = await getPublishedModpack(db, testEnv)
-      expect(launcherPack?.version).toBe("1.0.0")
+      // Verify getPublishedModpack() serves 1.0.0
+      const modpack = await getPublishedModpack(db, testEnv)
+      expect(modpack?.version).toBe("1.0.0")
 
-      // Test 11: If server apply fails (e.g. disk write failure), launcher STILL sees 1.0.0
-      const failingClient = createMockPterodactylClient({
-        status: "offline",
-        failWrite: true,
-        files: new Map([["mods/mod-a-1.0.jar", jarA.buffer]]),
+      // Verify REAL download endpoint for active (ARCHIVED) 1.0.0 file delivers 200 OK with R2 content
+      const req1 = new Request(`http://localhost/game/download/${file1Id}`)
+      const res1 = await handleGameFileDownload(req1, testEnv, db, file1Id)
+      expect(res1.status).toBe(200)
+      expect(res1.headers.get("Content-Disposition")).toContain("mod-a-1.0.jar")
+      const downloadedBuf1 = new Uint8Array(await res1.arrayBuffer())
+      expect(downloadedBuf1.byteLength).toBe(jar1.buffer.byteLength)
+    })
+
+    it("11 (Sections 13 & 14): Security authority: non-active files (archived non-active, published non-active, draft, server-only) return 404, and permissions switch dynamically upon activation", async () => {
+      // 1. Initial State: 1.0.0 ACTIVE, 1.1.0 PUBLISHED pending
+      const draft1 = await prepareGameDraft(db, adminId)
+      const jar1 = await createValidJarBuffer("client-1.0.jar")
+      const file1Id = crypto.randomUUID()
+      r2Files.set("key-1", jar1.buffer)
+
+      // Also add a SERVER-only file to active 1.0.0
+      const jarServer = await createValidJarBuffer("server-only.jar")
+      const serverFileId = crypto.randomUUID()
+      r2Files.set("key-srv", jarServer.buffer)
+
+      await db.insert(schema.gameReleaseFiles).values([
+        {
+          id: file1Id,
+          releaseId: draft1.id,
+          name: "client-1.0.jar",
+          logicalPath: "mods/client-1.0.jar",
+          category: "MOD",
+          sha256: jar1.sha256,
+          sizeBytes: jar1.buffer.byteLength,
+          policy: "NO_MODIFICABLE",
+          objectKey: "key-1",
+          sourceEnvironment: "BOTH",
+        },
+        {
+          id: serverFileId,
+          releaseId: draft1.id,
+          name: "server-only.jar",
+          logicalPath: "mods/server-only.jar",
+          category: "MOD",
+          sha256: jarServer.sha256,
+          sizeBytes: jarServer.buffer.byteLength,
+          policy: "NO_MODIFICABLE",
+          objectKey: "key-srv",
+          sourceEnvironment: "SERVER",
+        },
+      ])
+
+      await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
+      const mockClient = createMockPterodactylClient({ status: "offline" })
+      await applyServerReleaseSync(db, testEnv, adminId, false, mockClient)
+
+      // 2. Publish 1.1.0 (pending)
+      const draft2 = await prepareGameDraft(db, adminId)
+      const jar2 = await createValidJarBuffer("client-1.1.jar")
+      const file2Id = crypto.randomUUID()
+      r2Files.set("key-2", jar2.buffer)
+
+      await db.delete(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft2.id))
+      await db.insert(schema.gameReleaseFiles).values({
+        id: file2Id,
+        releaseId: draft2.id,
+        name: "client-1.1.jar",
+        logicalPath: "mods/client-1.1.jar",
+        category: "MOD",
+        sha256: jar2.sha256,
+        sizeBytes: jar2.buffer.byteLength,
+        policy: "NO_MODIFICABLE",
+        objectKey: "key-2",
+        sourceEnvironment: "BOTH",
       })
-      await expect(applyServerReleaseSync(db, testEnv, adminId, false, failingClient)).rejects.toThrow()
-      launcherPack = await getPublishedModpack(db, testEnv)
-      expect(launcherPack?.version).toBe("1.0.0")
 
-      // Test 10: Server apply SUCCESS -> updates server applied & activates 1.1.0 for Launcher!
-      const healthyClient = createMockPterodactylClient({
-        status: "offline",
-        files: new Map([["mods/mod-a-1.0.jar", jarA.buffer]]),
+      await publishGameRelease(db, testEnv, { version: "1.1.0" }, adminId)
+
+      // 3. Create a DRAFT 1.2.0
+      const draft3 = await prepareGameDraft(db, adminId)
+      const jarDraft = await createValidJarBuffer("draft.jar")
+      const draftFileId = crypto.randomUUID()
+      r2Files.set("key-draft", jarDraft.buffer)
+      await db.insert(schema.gameReleaseFiles).values({
+        id: draftFileId,
+        releaseId: draft3.id,
+        name: "draft.jar",
+        logicalPath: "mods/draft.jar",
+        category: "MOD",
+        sha256: jarDraft.sha256,
+        sizeBytes: jarDraft.buffer.byteLength,
+        policy: "NO_MODIFICABLE",
+        objectKey: "key-draft",
+        sourceEnvironment: "CLIENT",
       })
-      const syncResult = await applyServerReleaseSync(db, testEnv, adminId, false, healthyClient)
-      expect(syncResult.success).toBe(true)
 
-      // Now Launcher receives 1.1.0!
-      launcherPack = await getPublishedModpack(db, testEnv)
-      expect(launcherPack?.version).toBe("1.1.0")
-      expect(launcherPack?.clientFiles[0]?.path).toBe("mods/mod-a-1.1.jar")
+      // === PERMISSION CHECKS BEFORE ACTIVATION (active = 1.0.0) ===
+      // Active 1.0 file -> 200 OK
+      const resActive = await handleGameFileDownload(new Request(`http://localhost/game/download/${file1Id}`), testEnv, db, file1Id)
+      expect(resActive.status).toBe(200)
+
+      // Pending 1.1 file (PUBLISHED but not active) -> 404
+      const resPending = await handleGameFileDownload(new Request(`http://localhost/game/download/${file2Id}`), testEnv, db, file2Id)
+      expect(resPending.status).toBe(404)
+
+      // DRAFT file -> 404
+      const resDraft = await handleGameFileDownload(new Request(`http://localhost/game/download/${draftFileId}`), testEnv, db, draftFileId)
+      expect(resDraft.status).toBe(404)
+
+      // SERVER-only file of active release -> 404 (strictly filtered)
+      const resServer = await handleGameFileDownload(new Request(`http://localhost/game/download/${serverFileId}`), testEnv, db, serverFileId)
+      expect(resServer.status).toBe(404)
+
+      // === APPLY 1.1.0 ON SERVER (activates 1.1.0) ===
+      const syncRes = await applyServerReleaseSync(db, testEnv, adminId, false, mockClient)
+      expect(syncRes.success).toBe(true)
+      expect((await getAdminSettings(db)).launcherActiveReleaseId).toBe(draft2.id)
+
+      // === PERMISSION CHECKS AFTER ACTIVATION (active = 1.1.0) ===
+      // Old 1.0 file (now archived non-active) -> 404
+      const resOld = await handleGameFileDownload(new Request(`http://localhost/game/download/${file1Id}`), testEnv, db, file1Id)
+      expect(resOld.status).toBe(404)
+
+      // New 1.1 file (now active) -> 200 OK
+      const resNew = await handleGameFileDownload(new Request(`http://localhost/game/download/${file2Id}`), testEnv, db, file2Id)
+      expect(resNew.status).toBe(200)
     })
   })
 
-  // ==========================================
-  // D. CLIENT-Only Release
-  // ==========================================
-  describe("D. CLIENT-Only Release", () => {
-    it("14. SERVER_FIRST + release with 0 server-relevant changes activates immediately without physical server connection", async () => {
-      await updateAdminSettings(db, { updateDeploymentOrder: "SERVER_FIRST" }, adminId)
-
-      // Baseline v1.0.0
+  // =========================================================================
+  // D. CLIENT-Only & PLAYERS_FIRST Immediate Activation
+  // =========================================================================
+  describe("D. CLIENT-Only & PLAYERS_FIRST Immediate Activation", () => {
+    it("12 (Section 15): SERVER_FIRST with 0 server-relevant changes activates immediately without physical server connection", async () => {
+      // 1. Establish 1.0.0 active baseline
       const draft1 = await prepareGameDraft(db, adminId)
       const jarBoth = await createValidJarBuffer("both-mod.jar")
       r2Files.set("game-files/both-mod.jar", jarBoth.buffer)
@@ -455,23 +615,12 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
       })
 
       await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
+      const mockClient = createMockPterodactylClient({ status: "offline" })
+      await applyServerReleaseSync(db, testEnv, adminId, false, mockClient)
+      expect((await getAdminSettings(db)).launcherActiveReleaseId).toBe(draft1.id)
 
-      // Record in serverManagedContent that both-mod.jar is applied on server
-      await db.insert(schema.serverManagedContent).values({
-        id: crypto.randomUUID(),
-        managementSource: "GAME_RELEASE",
-        targetPath: "mods/both-mod.jar",
-        sha256: jarBoth.sha256,
-        sizeBytes: jarBoth.buffer.byteLength,
-        environment: "BOTH",
-        contentType: "MOD",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      })
-
-      // Draft 2: Adds a CLIENT-ONLY mod (e.g. Sodium/Iris) and a RESOURCE_PACK
+      // 2. Draft 2 adds ONLY client-hud.jar (CLIENT) and faithful.zip (RESOURCE_PACK)
       const draft2 = await prepareGameDraft(db, adminId)
-
       const jarClient = await createValidJarBuffer("client-hud.jar")
       const packZip = await createValidJarBuffer("faithful.zip")
       r2Files.set("game-files/client-hud.jar", jarClient.buffer)
@@ -512,104 +661,81 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
       await publishGameRelease(db, testEnv, { version: "1.1.0" }, adminId)
 
       // Activates IMMEDIATELY for players without requiring server apply!
+      expect((await getAdminSettings(db)).launcherActiveReleaseId).toBe(draft2.id)
       const launcherPack = await getPublishedModpack(db, testEnv)
       expect(launcherPack?.version).toBe("1.1.0")
       expect(launcherPack?.clientFiles.some((f) => f.path === "mods/client-hud.jar")).toBe(true)
-      expect(launcherPack?.clientFiles.some((f) => f.path === "resourcepacks/faithful.zip")).toBe(true)
     })
-  })
 
-  // ==========================================
-  // E. PLAYERS_FIRST Workflow
-  // ==========================================
-  describe("E. PLAYERS_FIRST Workflow", () => {
-    it("15, 16, 17. PLAYERS_FIRST activates immediately upon publication while server remains pending", async () => {
-      // Baseline 1.0.0
+    it("13 (Section 16): PLAYERS_FIRST activates immediately upon publish, permits downloads, and keeps server sync pending", async () => {
       await updateAdminSettings(db, { updateDeploymentOrder: "PLAYERS_FIRST" }, adminId)
 
-      const draft1 = await prepareGameDraft(db, adminId)
-      const jarA = await createValidJarBuffer("mod-a.jar")
-      r2Files.set("game-files/mod-a.jar", jarA.buffer)
+      const draft = await prepareGameDraft(db, adminId)
+      const jar = await createValidJarBuffer("mod-players.jar")
+      const fileId = crypto.randomUUID()
+      r2Files.set("game-files/mod-players.jar", jar.buffer)
 
       await db.insert(schema.gameReleaseFiles).values({
-        id: crypto.randomUUID(),
-        releaseId: draft1.id,
-        name: "mod-a.jar",
-        logicalPath: "mods/mod-a.jar",
-        category: "MOD",
-        sha256: jarA.sha256,
-        sizeBytes: jarA.buffer.byteLength,
-        policy: "NO_MODIFICABLE",
-        objectKey: "game-files/mod-a.jar",
-        sourceEnvironment: "BOTH",
-      })
-
-      await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
-
-      // Draft 2 with new BOTH mod
-      const draft2 = await prepareGameDraft(db, adminId)
-      const jarB = await createValidJarBuffer("mod-b.jar")
-      r2Files.set("game-files/mod-b.jar", jarB.buffer)
-
-      await db.insert(schema.gameReleaseFiles).values({
-        id: crypto.randomUUID(),
-        releaseId: draft2.id,
-        name: "mod-b.jar",
-        logicalPath: "mods/mod-b.jar",
-        category: "MOD",
-        sha256: jarB.sha256,
-        sizeBytes: jarB.buffer.byteLength,
-        policy: "NO_MODIFICABLE",
-        objectKey: "game-files/mod-b.jar",
-        sourceEnvironment: "BOTH",
-      })
-
-      // Publish in PLAYERS_FIRST
-      await publishGameRelease(db, testEnv, { version: "1.1.0" }, adminId)
-
-      // Test 15 & 17: Launcher immediately gets 1.1.0
-      const launcherPack = await getPublishedModpack(db, testEnv)
-      expect(launcherPack?.version).toBe("1.1.0")
-
-      // Test 16: Server sync plan continues to show pending server changes for 1.1.0
-      const plan = await getServerReleaseSyncPlan(db, testEnv)
-      expect(plan.isPending).toBe(true)
-      expect(plan.summary.toInstall).toBeGreaterThan(0)
-    })
-  })
-
-  // ==========================================
-  // F. Setting Changes
-  // ==========================================
-  describe("F. Setting Changes", () => {
-    it("18 & 19. Changing setting does not activate pending release or rollback active release", async () => {
-      // 1. Under SERVER_FIRST, publish 1.1.0 with server changes (pending)
-      await updateAdminSettings(db, { updateDeploymentOrder: "SERVER_FIRST" }, adminId)
-
-      const draft1 = await prepareGameDraft(db, adminId)
-      const jar = await createValidJarBuffer("test.jar")
-      r2Files.set("game-files/test.jar", jar.buffer)
-
-      await db.insert(schema.gameReleaseFiles).values({
-        id: crypto.randomUUID(),
-        releaseId: draft1.id,
-        name: "test.jar",
-        logicalPath: "mods/test.jar",
+        id: fileId,
+        releaseId: draft.id,
+        name: "mod-players.jar",
+        logicalPath: "mods/mod-players.jar",
         category: "MOD",
         sha256: jar.sha256,
         sizeBytes: jar.buffer.byteLength,
         policy: "NO_MODIFICABLE",
-        objectKey: "game-files/test.jar",
+        objectKey: "game-files/mod-players.jar",
         sourceEnvironment: "BOTH",
       })
 
+      // Publish in PLAYERS_FIRST
       await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
 
-      // Draft 2
+      // Active pointer updated immediately
+      expect((await getAdminSettings(db)).launcherActiveReleaseId).toBe(draft.id)
+      const launcherPack = await getPublishedModpack(db, testEnv)
+      expect(launcherPack?.version).toBe("1.0.0")
+
+      // Real download succeeds immediately
+      const res = await handleGameFileDownload(new Request(`http://localhost/game/download/${fileId}`), testEnv, db, fileId)
+      expect(res.status).toBe(200)
+
+      // Server sync plan shows pending server changes
+      const mockClient = createMockPterodactylClient({ status: "offline" })
+      const plan = await getServerReleaseSyncPlan(db, testEnv, mockClient)
+      expect(plan.isPending).toBe(true)
+    })
+  })
+
+  // =========================================================================
+  // E. Setting Changes & Successive Releases
+  // =========================================================================
+  describe("E. Setting Changes & Successive Releases", () => {
+    it("14. Changing setting does not activate pending release or rollback active release", async () => {
+      // 1. Establish 1.0.0 active
+      await updateAdminSettings(db, { updateDeploymentOrder: "PLAYERS_FIRST" }, adminId)
+      const draft1 = await prepareGameDraft(db, adminId)
+      const jar1 = await createValidJarBuffer("test1.jar")
+      r2Files.set("game-files/test1.jar", jar1.buffer)
+      await db.insert(schema.gameReleaseFiles).values({
+        id: crypto.randomUUID(),
+        releaseId: draft1.id,
+        name: "test1.jar",
+        logicalPath: "mods/test1.jar",
+        category: "MOD",
+        sha256: jar1.sha256,
+        sizeBytes: jar1.buffer.byteLength,
+        policy: "NO_MODIFICABLE",
+        objectKey: "game-files/test1.jar",
+        sourceEnvironment: "BOTH",
+      })
+      await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
+
+      // 2. Switch to SERVER_FIRST and publish 1.1.0 (pending)
+      await updateAdminSettings(db, { updateDeploymentOrder: "SERVER_FIRST" }, adminId)
       const draft2 = await prepareGameDraft(db, adminId)
       const jar2 = await createValidJarBuffer("test2.jar")
       r2Files.set("game-files/test2.jar", jar2.buffer)
-
       await db.insert(schema.gameReleaseFiles).values({
         id: crypto.randomUUID(),
         releaseId: draft2.id,
@@ -622,32 +748,25 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
         objectKey: "game-files/test2.jar",
         sourceEnvironment: "BOTH",
       })
-
       await publishGameRelease(db, testEnv, { version: "1.1.0" }, adminId)
+
       expect((await getPublishedModpack(db, testEnv))?.version).toBe("1.0.0")
 
-      // Test 18: Change SERVER_FIRST -> PLAYERS_FIRST: DOES NOT retroactively activate 1.1.0!
+      // Change SERVER_FIRST -> PLAYERS_FIRST: DOES NOT retroactively activate 1.1.0
       await updateAdminSettings(db, { updateDeploymentOrder: "PLAYERS_FIRST" }, adminId)
       expect((await getPublishedModpack(db, testEnv))?.version).toBe("1.0.0")
 
-      // Test 19: Change PLAYERS_FIRST -> SERVER_FIRST: DOES NOT rollback
+      // Change PLAYERS_FIRST -> SERVER_FIRST: DOES NOT rollback
       await updateAdminSettings(db, { updateDeploymentOrder: "SERVER_FIRST" }, adminId)
       expect((await getPublishedModpack(db, testEnv))?.version).toBe("1.0.0")
     })
-  })
 
-  // ==========================================
-  // G. Successive Releases
-  // ==========================================
-  describe("G. Successive Releases", () => {
-    it("20, 21, 22, 23, 24, 25. Publishing 1.1 then 1.2 before apply allows applying 1.2 directly without sequential queue", async () => {
-      await updateAdminSettings(db, { updateDeploymentOrder: "SERVER_FIRST" }, adminId)
-
-      // Baseline 1.0.0
+    it("15. Publishing 1.1 then 1.2 before apply allows applying 1.2 directly without sequential queue", async () => {
+      // 1. Establish 1.0.0 active
+      await updateAdminSettings(db, { updateDeploymentOrder: "PLAYERS_FIRST" }, adminId)
       const draft1 = await prepareGameDraft(db, adminId)
       const jar1 = await createValidJarBuffer("mod-1.0.jar")
       r2Files.set("game-files/mod-1.0.jar", jar1.buffer)
-
       await db.insert(schema.gameReleaseFiles).values({
         id: crypto.randomUUID(),
         releaseId: draft1.id,
@@ -660,14 +779,15 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
         objectKey: "game-files/mod-1.0.jar",
         sourceEnvironment: "BOTH",
       })
-
       await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
 
-      // Publish 1.1.0 (superseded later)
+      // 2. Switch to SERVER_FIRST
+      await updateAdminSettings(db, { updateDeploymentOrder: "SERVER_FIRST" }, adminId)
+
+      // 3. Publish 1.1.0 (pending)
       const draft2 = await prepareGameDraft(db, adminId)
       const jar2 = await createValidJarBuffer("mod-1.1.jar")
       r2Files.set("game-files/mod-1.1.jar", jar2.buffer)
-
       await db.insert(schema.gameReleaseFiles).values({
         id: crypto.randomUUID(),
         releaseId: draft2.id,
@@ -680,14 +800,12 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
         objectKey: "game-files/mod-1.1.jar",
         sourceEnvironment: "BOTH",
       })
-
       await publishGameRelease(db, testEnv, { version: "1.1.0" }, adminId)
 
-      // Publish 1.2.0 BEFORE applying 1.1.0
+      // 4. Publish 1.2.0 BEFORE applying 1.1.0
       const draft3 = await prepareGameDraft(db, adminId)
       const jar3 = await createValidJarBuffer("mod-1.2.jar")
       r2Files.set("game-files/mod-1.2.jar", jar3.buffer)
-
       await db.insert(schema.gameReleaseFiles).values({
         id: crypto.randomUUID(),
         releaseId: draft3.id,
@@ -700,18 +818,17 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
         objectKey: "game-files/mod-1.2.jar",
         sourceEnvironment: "BOTH",
       })
-
       await publishGameRelease(db, testEnv, { version: "1.2.0" }, adminId)
 
       // Launcher is still on 1.0.0
       expect((await getPublishedModpack(db, testEnv))?.version).toBe("1.0.0")
 
       // Server target is 1.2.0
-      const plan = await getServerReleaseSyncPlan(db, testEnv)
+      const mockClient = createMockPterodactylClient({ status: "offline" })
+      const plan = await getServerReleaseSyncPlan(db, testEnv, mockClient)
       expect(plan.releaseVersion).toBe("1.2.0")
 
       // Apply 1.2.0
-      const mockClient = createMockPterodactylClient({ status: "offline" })
       const res = await applyServerReleaseSync(db, testEnv, adminId, false, mockClient)
       expect(res.success).toBe(true)
 
@@ -720,11 +837,12 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
     })
   })
 
-  // ==========================================
-  // H. Content Classification & 8E Preservation
-  // ==========================================
-  describe("H. Content Classification & 8E Preservation", () => {
-    it("26. Active release manifest strictly excludes SERVER-only mods, UNKNOWN provider mods, and DATA_PACK", async () => {
+  // =========================================================================
+  // F. Content Classification, Binary Identity, & Provider Independence
+  // =========================================================================
+  describe("F. Content Classification, Binary Identity, & Provider Independence", () => {
+    it("16. Active release manifest strictly excludes SERVER-only mods, UNKNOWN provider mods, and DATA_PACK", async () => {
+      await updateAdminSettings(db, { updateDeploymentOrder: "PLAYERS_FIRST" }, adminId)
       const draft = await prepareGameDraft(db, adminId)
 
       const jarClient = await createValidJarBuffer("client-only.jar")
@@ -840,18 +958,14 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
       expect(paths).toContain("resourcepacks/pack.zip")
       expect(paths).toContain("shaderpacks/shader.zip")
 
-      // Excluded (Fail-closed):
+      // Excluded:
       expect(paths).not.toContain("mods/server-only.jar")
       expect(paths).not.toContain("mods/unknown.jar")
       expect(paths).not.toContain("datapacks/datapack.zip")
     })
-  })
 
-  // ==========================================
-  // I. Binary Identity & Integrity
-  // ==========================================
-  describe("I. Binary Identity & Integrity", () => {
-    it("27. Release SHA == Launcher manifest SHA == Server plan SHA for BOTH files", async () => {
+    it("17. Binary integrity: Release SHA == Launcher manifest SHA == Server plan SHA for BOTH files", async () => {
+      await updateAdminSettings(db, { updateDeploymentOrder: "PLAYERS_FIRST" }, adminId)
       const draft = await prepareGameDraft(db, adminId)
       const jar = await createValidJarBuffer("both-mod.jar")
       r2Files.set("game-files/both-mod.jar", jar.buffer)
@@ -885,17 +999,14 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
       expect(launcherItem?.sha256).toBe(jar.sha256)
 
       // 3. Server Plan
-      const serverPlan = await getServerReleaseSyncPlan(db, testEnv)
+      const mockClient = createMockPterodactylClient({ status: "offline" })
+      const serverPlan = await getServerReleaseSyncPlan(db, testEnv, mockClient)
       const serverItem = serverPlan.items.find((i) => i.targetPath === "mods/both-mod.jar")
       expect(serverItem?.sha256).toBe(jar.sha256)
     })
-  })
 
-  // ==========================================
-  // J. Provider Independence
-  // ==========================================
-  describe("J. Provider Independence", () => {
-    it("28, 29, 30. When providers are unavailable, published manifest and server sync execute purely from HiKAT R2/D1", async () => {
+    it("18. Provider independence: when upstream provider is offline, manifest and server sync execute purely from HiKAT R2/D1", async () => {
+      await updateAdminSettings(db, { updateDeploymentOrder: "PLAYERS_FIRST" }, adminId)
       const draft = await prepareGameDraft(db, adminId)
       const jar = await createValidJarBuffer("provider-mod.jar")
       r2Files.set("game-files/provider-mod.jar", jar.buffer)
@@ -918,7 +1029,7 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
 
       await publishGameRelease(db, testEnv, { version: "1.0.0" }, adminId)
 
-      // Modrinth / CurseForge APIs are never called for serving manifest or syncing
+      // Manifest delivers without calling Modrinth
       const launcherPack = await getPublishedModpack(db, testEnv)
       expect(launcherPack?.version).toBe("1.0.0")
 

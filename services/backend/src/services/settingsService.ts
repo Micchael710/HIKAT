@@ -47,30 +47,8 @@ export async function ensureSettingsRecord(db: Database): Promise<schema.Project
     .get()
 
   if (existing) {
-    // Bootstrap backfill: If launcherActiveReleaseId is null and a legacy PUBLISHED release exists,
-    // establish it as the initial baseline active release.
-    if (existing.launcherActiveReleaseId === null) {
-      const published = await db
-        .select()
-        .from(schema.gameReleases)
-        .where(eq(schema.gameReleases.status, "PUBLISHED"))
-        .get()
-      if (published) {
-        await db
-          .update(schema.projectSettings)
-          .set({ launcherActiveReleaseId: published.id })
-          .where(eq(schema.projectSettings.id, "main"))
-        existing.launcherActiveReleaseId = published.id
-      }
-    }
     return existing
   }
-
-  const published = await db
-    .select()
-    .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "PUBLISHED"))
-    .get()
 
   const now = new Date().toISOString()
   const initial = {
@@ -85,7 +63,7 @@ export async function ensureSettingsRecord(db: Database): Promise<schema.Project
     minRamGb: 4,
     recommendedRamGb: 8,
     updateDeploymentOrder: "SERVER_FIRST",
-    launcherActiveReleaseId: published?.id || null,
+    launcherActiveReleaseId: null,
     updatedBy: null,
     updatedAt: now,
   }
@@ -93,6 +71,7 @@ export async function ensureSettingsRecord(db: Database): Promise<schema.Project
   await db.insert(schema.projectSettings).values(initial)
   return initial
 }
+
 
 export async function getAdminSettings(db: Database): Promise<AdminSettingsGql> {
   const settings = await ensureSettingsRecord(db)

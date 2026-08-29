@@ -2,13 +2,13 @@ import { eq, and, sql } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   validateGameFileBuffer,
-  sanitizeGameFileName,
   type GameFileCategory,
   MAX_GAME_FILE_SIZE_BYTES,
 } from "@hikat/shared"
 import type { Env, BackendGraphQLContext } from "../../types"
 import { getCorsHeaders } from "../../cors"
 import { isClientGameReleaseFile } from "./releaseService"
+import { ensureSettingsRecord } from "../settingsService"
 
 function jsonResponse(
   body: Record<string, unknown>,
@@ -182,7 +182,7 @@ export async function handleGameFileUpload(
 
 /**
  * Handles binary game file downloads: GET /game/download/:fileId
- * Public endpoint: strictly allows downloading files belonging to a PUBLISHED release.
+ * Public endpoint: strictly allows downloading files belonging to the active release (launcherActiveReleaseId).
  */
 export async function handleGameFileDownload(
   request: Request,
@@ -199,7 +199,16 @@ export async function handleGameFileDownload(
     })
   }
 
-  // 1. Verify that fileId belongs to a currently PUBLISHED release
+  // 1. Fetch settings to get current launcherActiveReleaseId
+  const settings = await ensureSettingsRecord(db)
+  if (!settings.launcherActiveReleaseId) {
+    return new Response(JSON.stringify({ error: "No hay ninguna versión activa actualmente." }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", ...cors },
+    })
+  }
+
+  // 2. Verify that fileId belongs strictly to the currently active release for players
   const fileRecord = await db
     .select({
       file: schema.gameReleaseFiles,
@@ -213,7 +222,7 @@ export async function handleGameFileDownload(
     .where(
       and(
         eq(schema.gameReleaseFiles.id, fileId),
-        eq(schema.gameReleases.status, "PUBLISHED"),
+        eq(schema.gameReleaseFiles.releaseId, settings.launcherActiveReleaseId),
         eq(schema.gameReleaseFiles.isDirectory, 0),
       ),
     )
@@ -226,7 +235,7 @@ export async function handleGameFileDownload(
     })
   }
 
-  // 2. Fetch object from R2
+  // 3. Fetch object from R2
   const r2Object = await env.ASSETS.get(fileRecord.file.objectKey)
   if (!r2Object) {
     return new Response(JSON.stringify({ error: "Objeto de archivo no encontrado en el almacenamiento." }), {
@@ -243,7 +252,7 @@ export async function handleGameFileDownload(
       ? "application/zip"
       : "application/octet-stream"
 
-  // 3. Check client If-None-Match header
+  // 4. Check client If-None-Match header
   const clientEtag = request.headers.get("if-none-match")?.replace(/^W\//, "").replace(/"/g, "")
   if (clientEtag && clientEtag.toLowerCase() === fileRecord.file.sha256.toLowerCase()) {
     return new Response(null, {

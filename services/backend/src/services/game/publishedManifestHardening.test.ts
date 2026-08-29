@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
+import { eq } from "drizzle-orm"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
 import { createTestR2Bucket } from "../../testUtils/mockR2"
@@ -47,7 +48,14 @@ describe("Shard 8E: Authoritative Client Manifest & Backend Security Suite", () 
       createdAt: now,
       updatedAt: now,
     })
+
+    // Set launcher active release pointer for the fixture
+    await db
+      .update(schema.projectSettings)
+      .set({ launcherActiveReleaseId: releaseId })
+      .where(eq(schema.projectSettings.id, "main"))
   })
+
 
   it("1. includes CLIENT mod in publishedModpack.clientFiles", async () => {
     const fileId = crypto.randomUUID()

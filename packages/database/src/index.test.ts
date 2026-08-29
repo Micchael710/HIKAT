@@ -2266,7 +2266,7 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(foundSync?.releaseId).toBe(releaseId)
   })
 
-  it("supports updateDeploymentOrder and launcherActiveReleaseId on projectSettings with baseline backfill (Shard 08F)", async () => {
+  it("supports updateDeploymentOrder and launcherActiveReleaseId on projectSettings (Shard 08F)", async () => {
     const d1 = createTestD1()
     const db = createDatabase(d1)
     const userId = crypto.randomUUID()
@@ -2291,7 +2291,7 @@ describe("@hikat/database schema and D1 operations", () => {
       updatedAt: now,
     })
 
-    // The row 'main' is already created by migration sequence 0006 -> 0019
+    // The row 'main' is created by migration sequence
     const initialSettings = await db
       .select()
       .from(schema.projectSettings)
@@ -2320,7 +2320,88 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(updated?.updateDeploymentOrder).toBe("PLAYERS_FIRST")
     expect(updated?.launcherActiveReleaseId).toBe(releaseId)
   })
+
+  it("Migration 0019 deterministic backfill: backfills latest PUBLISHED release for legacy databases", async () => {
+    const sqlite = new DatabaseSync(":memory:")
+    sqlite.exec("PRAGMA foreign_keys = ON;")
+
+    // Apply migrations 0001 through 0018 (pre-08F state)
+    const migrationsDir = join(__dirname, "../migrations")
+    const sqlFiles = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql") && !f.startsWith("0019"))
+      .sort()
+
+    for (const file of sqlFiles) {
+      const sqlContent = readFileSync(join(migrationsDir, file), "utf-8")
+      for (const statement of sqlContent.split("--> statement-breakpoint")) {
+        const trimmed = statement.trim()
+        if (trimmed) sqlite.exec(trimmed)
+      }
+    }
+
+    // Seed legacy releases in pre-0019 DB:
+    // rel-archived: archived
+    // rel-published: published at 2026-02-01
+    // rel-draft: draft
+    const now = new Date().toISOString()
+    sqlite.exec(`INSERT INTO users (id, display_name, role, created_at, updated_at) VALUES ('u1', 'Admin', 'ADMIN', '${now}', '${now}');`)
+    sqlite.exec(`INSERT INTO game_releases (id, version, status, published_at, created_by, created_at, updated_at) VALUES ('rel-archived', '0.9.0', 'ARCHIVED', '2026-01-01T00:00:00.000Z', 'u1', '${now}', '${now}');`)
+    sqlite.exec(`INSERT INTO game_releases (id, version, status, published_at, created_by, created_at, updated_at) VALUES ('rel-published', '1.0.0', 'PUBLISHED', '2026-02-01T00:00:00.000Z', 'u1', '${now}', '${now}');`)
+    sqlite.exec(`INSERT INTO game_releases (id, version, status, published_at, created_by, created_at, updated_at) VALUES ('rel-draft', '1.1.0', 'DRAFT', NULL, 'u1', '${now}', '${now}');`)
+
+    // Now apply migration 0019
+    const mig0019Content = readFileSync(join(migrationsDir, "0019_release_activation_and_deployment_order.sql"), "utf-8")
+    for (const statement of mig0019Content.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim()
+      if (trimmed) sqlite.exec(trimmed)
+    }
+
+    // Query project_settings
+    const stmt = sqlite.prepare("SELECT launcher_active_release_id, update_deployment_order FROM project_settings WHERE id = 'main'")
+    const result: any = stmt.get()
+
+    expect(result.update_deployment_order).toBe("SERVER_FIRST")
+    expect(result.launcher_active_release_id).toBe("rel-published")
+
+  })
+
+  it("Migration 0019 backfill: leaves launcher_active_release_id NULL when no legacy published releases exist", async () => {
+    const sqlite = new DatabaseSync(":memory:")
+    sqlite.exec("PRAGMA foreign_keys = ON;")
+
+    const migrationsDir = join(__dirname, "../migrations")
+    const sqlFiles = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql") && !f.startsWith("0019"))
+      .sort()
+
+    for (const file of sqlFiles) {
+      const sqlContent = readFileSync(join(migrationsDir, file), "utf-8")
+      for (const statement of sqlContent.split("--> statement-breakpoint")) {
+        const trimmed = statement.trim()
+        if (trimmed) sqlite.exec(trimmed)
+      }
+    }
+
+    // Only DRAFT release in legacy DB
+    const now = new Date().toISOString()
+    sqlite.exec(`INSERT INTO users (id, display_name, role, created_at, updated_at) VALUES ('u1', 'Admin', 'ADMIN', '${now}', '${now}');`)
+    sqlite.exec(`INSERT INTO game_releases (id, version, status, published_at, created_by, created_at, updated_at) VALUES ('rel-draft-only', '1.0.0', 'DRAFT', NULL, 'u1', '${now}', '${now}');`)
+
+    // Apply migration 0019
+    const mig0019Content = readFileSync(join(migrationsDir, "0019_release_activation_and_deployment_order.sql"), "utf-8")
+    for (const statement of mig0019Content.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim()
+      if (trimmed) sqlite.exec(trimmed)
+    }
+
+    const stmt = sqlite.prepare("SELECT launcher_active_release_id, update_deployment_order FROM project_settings WHERE id = 'main'")
+    const result: any = stmt.get()
+
+    expect(result.update_deployment_order).toBe("SERVER_FIRST")
+    expect(result.launcher_active_release_id).toBeNull()
+  })
 })
+
 
 
 

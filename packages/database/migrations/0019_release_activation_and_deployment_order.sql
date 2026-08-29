@@ -9,7 +9,10 @@ CREATE INDEX IF NOT EXISTS `project_settings_launcher_active_release_id_idx` ON 
 --> statement-breakpoint
 UPDATE `project_settings`
 SET `launcher_active_release_id` = (
-  SELECT `id` FROM `game_releases` WHERE `status` = 'PUBLISHED' LIMIT 1
+  SELECT `id` FROM `game_releases`
+  WHERE `status` = 'PUBLISHED'
+  ORDER BY `published_at` DESC, `created_at` DESC
+  LIMIT 1
 )
 WHERE `id` = 'main' AND `launcher_active_release_id` IS NULL AND EXISTS (
   SELECT 1 FROM `game_releases` WHERE `status` = 'PUBLISHED'
