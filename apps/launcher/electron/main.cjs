@@ -359,11 +359,20 @@ function handleDeepLinkUrl(rawUrl) {
   if (!validUrl) return
 
   focusMainWindow()
-  pendingDeepLinkUrl = validUrl
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+
+  if (
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.webContents &&
+    !mainWindow.webContents.isLoading()
+  ) {
+    pendingDeepLinkUrl = null
     mainWindow.webContents.send("oauth:callback", validUrl)
+  } else {
+    pendingDeepLinkUrl = validUrl
   }
 }
+
 
 // Second instance handler (when user launches launcher while already running or via deep link)
 app.on("second-instance", (_event, commandLine) => {

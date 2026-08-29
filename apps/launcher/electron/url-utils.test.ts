@@ -46,4 +46,60 @@ describe("Electron OAuth Deep Link URL Validation Suite (Shard 8F)", () => {
     expect(parseValidOAuthCallbackUrl("not a url")).toBeNull()
     expect(parseValidOAuthCallbackUrl(12345 as any)).toBeNull()
   })
+
+  it("7. Pending callback consume-once: first call returns URL and subsequent calls return null", () => {
+    let pendingDeepLinkUrl: string | null = "hikat://auth/callback?code=abc12345&state=xyz98765"
+
+    const consumeCallback = () => {
+      const url = parseValidOAuthCallbackUrl(pendingDeepLinkUrl)
+      pendingDeepLinkUrl = null
+      return url
+    }
+
+    // First call consumes the URL
+    expect(consumeCallback()).toBe("hikat://auth/callback?code=abc12345&state=xyz98765")
+    // Second call returns null (consumed)
+    expect(consumeCallback()).toBeNull()
+    expect(pendingDeepLinkUrl).toBeNull()
+  })
+
+  it("8. Already-running delivery dispatches directly and leaves pending buffer empty (no replay)", () => {
+    let pendingDeepLinkUrl: string | null = null
+    const dispatchedEvents: string[] = []
+
+    const mockMainWindow = {
+      isDestroyed: () => false,
+      webContents: {
+        isLoading: () => false,
+        send: (_channel: string, url: string) => {
+          dispatchedEvents.push(url)
+        },
+      },
+    }
+
+    const handleDeepLink = (rawUrl: string) => {
+      const validUrl = parseValidOAuthCallbackUrl(rawUrl)
+      if (!validUrl) return
+
+      if (
+        mockMainWindow &&
+        !mockMainWindow.isDestroyed() &&
+        mockMainWindow.webContents &&
+        !mockMainWindow.webContents.isLoading()
+      ) {
+        pendingDeepLinkUrl = null
+        mockMainWindow.webContents.send("oauth:callback", validUrl)
+      } else {
+        pendingDeepLinkUrl = validUrl
+      }
+    }
+
+    handleDeepLink("hikat://auth/callback?code=live123&state=live456")
+
+    expect(dispatchedEvents).toHaveLength(1)
+    expect(dispatchedEvents[0]).toBe("hikat://auth/callback?code=live123&state=live456")
+    // Strict guarantee: pending buffer is NOT left with old callback
+    expect(pendingDeepLinkUrl).toBeNull()
+  })
 })
+

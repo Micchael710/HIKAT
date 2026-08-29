@@ -117,9 +117,10 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       codeVerifier: "saved-verifier",
       state: "saved-state",
       expectedState: "saved-state",
-      keepSession: true,
+      keepSession: undefined,
     })
   })
+
 
   it("4. Cold start retrieves pending OAuth deep link on mount and processes login", async () => {
     const onLogin = vi.fn()
@@ -150,9 +151,10 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       codeVerifier: undefined,
       state: "coldstate",
       expectedState: undefined,
-      keepSession: true,
+      keepSession: undefined,
     })
   })
+
 
 
   it("5. Displays error message when OAuth callback returns error parameter", async () => {

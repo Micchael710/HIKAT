@@ -73,10 +73,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         (typeof sessionStorage !== "undefined"
           ? sessionStorage.getItem("hikat_launcher_oauth_state") || undefined
           : undefined)
-      const pendingKeepSession =
-        pendingOAuthRef.current?.keepSession !== undefined
-          ? pendingOAuthRef.current.keepSession
-          : keepSession
+      const pendingKeepSession = pendingOAuthRef.current?.keepSession
 
       setIsEnteringWorld(true)
       const user = await authService.handleOAuthCallback({
@@ -86,6 +83,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         expectedState,
         keepSession: pendingKeepSession,
       })
+
 
       pendingOAuthRef.current = null
       if (typeof sessionStorage !== "undefined") {

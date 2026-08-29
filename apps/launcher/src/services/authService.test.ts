@@ -403,5 +403,94 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(saveMock).not.toHaveBeenCalled()
     expect(clearMock).toHaveBeenCalled()
   })
+
+  it("12. Cold-start OAuth callback with pending store keepSession=false preserves memory-only session", async () => {
+    const saveMock = vi.fn()
+    const clearMock = vi.fn()
+    ;(window as any).electronAPI = {
+      authSaveSession: saveMock,
+      authClearSession: clearMock,
+      authClearPendingOAuth: vi.fn(),
+      authGetPendingOAuth: vi.fn().mockResolvedValue({
+        provider: "GOOGLE",
+        codeVerifier: "cold-verifier-12345",
+        state: "cold-state-abc",
+        keepSession: false, // User had unchecked keepSession when starting OAuth
+      }),
+    }
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "cold-memory-acc",
+        refreshToken: "cold-memory-ref",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-cold-mem", email: "coldmem@hikat.org", displayName: "ColdMemory", role: "PLAYER" },
+      }),
+    })
+
+    // Cold-start delivers code and state with NO local verifier and keepSession=undefined
+    const user = await authService.handleOAuthCallback({
+      code: "cold-code-1",
+      state: "cold-state-abc",
+      expectedState: undefined,
+      keepSession: undefined,
+    })
+
+    expect(user.id).toBe("u-cold-mem")
+    expect(authService.getAccessToken()).toBe("cold-memory-acc")
+    // Session is memory-only: NOT saved to Electron Main store
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(clearMock).toHaveBeenCalled()
+  })
+
+  it("13. Cold-start OAuth callback with pending store keepSession=true preserves persistent session", async () => {
+    const saveMock = vi.fn()
+    const clearMock = vi.fn()
+    ;(window as any).electronAPI = {
+      authSaveSession: saveMock,
+      authClearSession: clearMock,
+      authClearPendingOAuth: vi.fn(),
+      authGetPendingOAuth: vi.fn().mockResolvedValue({
+        provider: "DISCORD",
+        codeVerifier: "cold-verifier-persist",
+        state: "cold-state-persist",
+        keepSession: true,
+      }),
+    }
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "cold-persist-acc",
+        refreshToken: "cold-persist-ref",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-cold-pers", email: "coldpers@hikat.org", displayName: "ColdPersist", role: "PLAYER" },
+      }),
+    })
+
+    // Cold-start delivers code and state with NO local verifier and keepSession=undefined
+    const user = await authService.handleOAuthCallback({
+      code: "cold-code-2",
+      state: "cold-state-persist",
+      expectedState: undefined,
+      keepSession: undefined,
+    })
+
+    expect(user.id).toBe("u-cold-pers")
+    expect(authService.getAccessToken()).toBe("cold-persist-acc")
+    // Session is persisted to Electron Main store
+    expect(saveMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: "cold-persist-acc",
+        refreshToken: "cold-persist-ref",
+      }),
+    )
+  })
 })
+
 
