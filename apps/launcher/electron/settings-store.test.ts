@@ -102,4 +102,37 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
     authStore2.clearSession()
     expect(authStore2.loadSession()).toBeNull()
   })
+
+  it("7. SecureAuthStore pending OAuth state persists across restarts and clears on retrieval", () => {
+    const authStore1 = new SecureAuthStore(tempDir)
+    authStore1.savePendingOAuth({
+      provider: "GOOGLE",
+      codeVerifier: "pkce-verifier-12345",
+      state: "oauth-state-abcde",
+      expiresAt: Date.now() + 60000,
+    })
+
+    // Simulate process restart
+    const authStore2 = new SecureAuthStore(tempDir)
+
+    // Mismatched state returns null
+    expect(authStore2.getPendingOAuth("wrong-state")).toBeNull()
+
+    // Re-save to test valid retrieval
+    authStore2.savePendingOAuth({
+      provider: "GOOGLE",
+      codeVerifier: "pkce-verifier-12345",
+      state: "oauth-state-abcde",
+      expiresAt: Date.now() + 60000,
+    })
+
+    const pending = authStore2.getPendingOAuth("oauth-state-abcde")
+    expect(pending).not.toBeNull()
+    expect(pending.codeVerifier).toBe("pkce-verifier-12345")
+    expect(pending.provider).toBe("GOOGLE")
+
+    // Once retrieved, it is automatically cleared
+    expect(authStore2.getPendingOAuth("oauth-state-abcde")).toBeNull()
+  })
 })
+

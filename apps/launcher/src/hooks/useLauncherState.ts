@@ -32,13 +32,7 @@ import {
 import { authService } from "../services/authService"
 
 export function useLauncherState() {
-  const [screen, setScreen] = useState<LauncherScreen>(() => {
-    if (typeof window !== "undefined") {
-      const token = authService.getStoredToken()
-      if (token) return "home"
-    }
-    return "login"
-  })
+  const [screen, setScreen] = useState<LauncherScreen>("login")
 
   const [username, setUsername] = useState<string>(() => {
     if (typeof window !== "undefined") {
@@ -81,45 +75,82 @@ export function useLauncherState() {
   const [capesError, setCapesError] = useState<string | null>(null)
 
   /**
+   * Authoritative Auth Session Lifecycle Subscription & Bootstrap
+   */
+  useEffect(() => {
+    const unsubscribe = authService.subscribe((session, status) => {
+      if (status === "AUTHENTICATED" && session?.user?.role === "PLAYER") {
+        setScreen("home")
+        setUsername(session.user.displayName || session.user.email.split("@")[0] || "Jugador")
+      } else if (status === "UNAUTHENTICATED") {
+        setScreen("login")
+        setPlayerSkin(null)
+        setPlayerCapes([])
+      }
+    })
+
+    authService.bootstrap().catch(() => {})
+
+    return () => {
+      unsubscribe()
+    }
+  }, [])
+
+  /**
    * Loads public catalogs (skins & capes)
+   * Failures are isolated: catalog failures preserve existing catalog state.
    */
   const loadGlobalCatalog = useCallback(async () => {
     try {
-      const [globals, gCapes] = await Promise.all([
-        fetchGlobalSkins().catch(() => []),
-        fetchGlobalCapes().catch(() => []),
+      const [globalsRes, gCapesRes] = await Promise.allSettled([
+        fetchGlobalSkins(),
+        fetchGlobalCapes(),
       ])
-      setGlobalSkins(globals)
-      setGlobalCapes(gCapes)
+      if (globalsRes.status === "fulfilled" && Array.isArray(globalsRes.value)) {
+        setGlobalSkins(globalsRes.value)
+      }
+      if (gCapesRes.status === "fulfilled" && Array.isArray(gCapesRes.value)) {
+        setGlobalCapes(gCapesRes.value)
+      }
     } catch (_) {}
   }, [])
 
   /**
    * Refreshes the authenticated player's personal custom skin and active selection
+   * Network errors preserve existing custom skin data and do not wipe to null.
    */
   const refreshPlayerSkin = useCallback(async () => {
-    const token = authService.getStoredToken()
-    if (!token) {
+    if (!authService.getAccessToken()) {
       setPlayerSkin(null)
       return
     }
     try {
       setSkinsLoading(true)
-      const [mine, active] = await Promise.all([
+      const [mineRes, activeRes] = await Promise.allSettled([
         fetchMyPlayerSkin(),
         fetchMyActiveSkin(),
       ])
-      setPlayerSkin(mine)
-      if (active) {
+
+      if (mineRes.status === "fulfilled") {
+        // Legitimate null (player has no custom skin) or player skin object
+        setPlayerSkin(mineRes.value)
+      }
+      if (activeRes.status === "fulfilled" && activeRes.value) {
+        const active = activeRes.value
         if (active.type === "CUSTOM") {
           setAppliedSkin("player-custom")
         } else if (active.type === "GLOBAL" && active.skinId) {
           setAppliedSkin(active.skinId)
         }
-      } else if (mine) {
+      } else if (mineRes.status === "fulfilled" && mineRes.value) {
         setAppliedSkin("player-custom")
       }
-      setSkinsError(null)
+
+      if (mineRes.status === "rejected") {
+        setSkinsError(mineRes.reason?.message || "No se pudo sincronizar la skin del jugador.")
+      } else {
+        setSkinsError(null)
+      }
     } catch (err: any) {
       setSkinsError(err?.message || "No se pudo sincronizar la skin del jugador.")
     } finally {
@@ -129,22 +160,26 @@ export function useLauncherState() {
 
   /**
    * Refreshes the authenticated player's capes collection and active cape selection
+   * Network errors preserve existing capes data.
    */
   const refreshPlayerCapes = useCallback(async () => {
-    const token = authService.getStoredToken()
-    if (!token) {
+    if (!authService.getAccessToken()) {
       setPlayerCapes([])
       setAppliedCape("none")
       return
     }
     try {
       setCapesLoading(true)
-      const [mine, active] = await Promise.all([
+      const [mineRes, activeRes] = await Promise.allSettled([
         fetchMyPlayerCapes(),
         fetchMyActiveCape(),
       ])
-      setPlayerCapes(mine)
-      if (active) {
+
+      if (mineRes.status === "fulfilled" && Array.isArray(mineRes.value)) {
+        setPlayerCapes(mineRes.value)
+      }
+      if (activeRes.status === "fulfilled" && activeRes.value) {
+        const active = activeRes.value
         if (active.type === "NONE") {
           setAppliedCape("none")
         } else if (active.type === "CUSTOM" && active.playerCapeId) {
@@ -153,7 +188,12 @@ export function useLauncherState() {
           setAppliedCape(active.capeId)
         }
       }
-      setCapesError(null)
+
+      if (mineRes.status === "rejected") {
+        setCapesError(mineRes.reason?.message || "No se pudo sincronizar las capas.")
+      } else {
+        setCapesError(null)
+      }
     } catch (err: any) {
       setCapesError(err?.message || "No se pudo sincronizar las capas.")
     } finally {
@@ -168,8 +208,7 @@ export function useLauncherState() {
     async (skinId: string) => {
       const previousSkin = appliedSkin
       setAppliedSkin(skinId)
-      const token = authService.getStoredToken()
-      if (!token) return
+      if (!authService.getAccessToken()) return
 
       try {
         let res: { success: boolean; data?: any; error?: string }
@@ -202,8 +241,7 @@ export function useLauncherState() {
     async (capeId: string) => {
       const previousCape = appliedCape
       setAppliedCape(capeId)
-      const token = authService.getStoredToken()
-      if (!token) return
+      if (!authService.getAccessToken()) return
 
       try {
         let res: { success: boolean; data?: any; error?: string }
@@ -232,7 +270,7 @@ export function useLauncherState() {
   // Initial load: fetch global catalog on mount, and player data if authenticated
   useEffect(() => {
     loadGlobalCatalog()
-    if (authService.getStoredToken()) {
+    if (authService.getAccessToken()) {
       refreshPlayerSkin()
       refreshPlayerCapes()
     }
@@ -242,13 +280,12 @@ export function useLauncherState() {
   useEffect(() => {
     if (view === "skins") {
       loadGlobalCatalog()
-      if (authService.getStoredToken()) {
+      if (authService.getAccessToken()) {
         refreshPlayerSkin()
         refreshPlayerCapes()
       }
     }
   }, [view, loadGlobalCatalog, refreshPlayerSkin, refreshPlayerCapes])
-
 
   /**
    * Unified derived skins list (No model interpretation)
@@ -287,9 +324,29 @@ export function useLauncherState() {
 
   // Resolve active skin data for 3D preview and player badge
   const activeSkinData = useMemo(() => {
+    if (appliedSkin === "player-custom") {
+      if (playerSkin) {
+        return {
+          id: "player-custom",
+          name: "Mi Skin",
+          badge: "CUSTOM" as const,
+          accent: "#38bdf8",
+          customImgUrl: playerSkin.imageUrl,
+          skinUrl: playerSkin.imageUrl,
+        }
+      }
+      return {
+        id: "player-custom",
+        name: "Mi Skin",
+        badge: "CUSTOM" as const,
+        accent: "#38bdf8",
+        customImgUrl: undefined,
+        skinUrl: undefined,
+      }
+    }
     const found = allSkins.find((s) => s.id === appliedSkin)
     return found || allSkins[0] || DEFAULT_SKINS[0]
-  }, [allSkins, appliedSkin])
+  }, [allSkins, appliedSkin, playerSkin])
 
   const activeSkinAccent = useMemo(() => {
     return hexToRGB(

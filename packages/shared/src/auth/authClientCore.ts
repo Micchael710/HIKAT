@@ -31,6 +31,28 @@ export interface AuthStorageAdapter {
   clearSession(): Promise<void> | void
 }
 
+export function parseJwtPayload(token: string): any | null {
+  try {
+    const parts = token.split(".")
+    if (parts.length !== 3) return null
+    const base64Url = parts[1]
+    if (!base64Url) return null
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/")
+    const jsonStr = typeof atob === "function" ? atob(base64) : Buffer.from(base64, "base64").toString("utf-8")
+    return JSON.parse(jsonStr)
+  } catch {
+    return null
+  }
+}
+
+export function isJwtExpired(token: string, bufferSeconds = 30): boolean {
+  const payload = parseJwtPayload(token)
+  if (!payload || typeof payload.exp !== "number") return false
+  const now = Math.floor(Date.now() / 1000)
+  return now >= payload.exp - bufferSeconds
+}
+
+
 export function createMemoryStorageAdapter(): AuthStorageAdapter {
   let session: SessionState | null = null
   return {
@@ -93,6 +115,7 @@ export class AuthClientCore {
   private status: AuthStatus = "BOOTSTRAPPING"
   private listeners: Set<SessionListener> = new Set()
   private refreshPromise: Promise<string | null> | null = null
+  private persistSession = true
 
   constructor(options: AuthClientOptions) {
     this.authServiceUrl = options.authServiceUrl.replace(/\/$/, "")
@@ -139,7 +162,7 @@ export class AuthClientCore {
     return this.session?.refreshToken || null
   }
 
-  public setSession(session: SessionState): Promise<void> {
+  public setSession(session: SessionState, persist = true): Promise<void> {
     if (!session.user || session.user.role !== this.allowedRole) {
       const errorMsg =
         this.allowedRole === "ADMIN"
@@ -154,10 +177,16 @@ export class AuthClientCore {
       throw new Error(errorMsg)
     }
 
+    this.persistSession = persist
     this.session = session
     this.status = "AUTHENTICATED"
     this.notify()
-    return Promise.resolve(this.storageAdapter.saveSession(session))
+
+    if (persist) {
+      return Promise.resolve(this.storageAdapter.saveSession(session))
+    } else {
+      return Promise.resolve(this.storageAdapter.clearSession())
+    }
   }
 
   public clearSession(): Promise<void> {
@@ -167,14 +196,13 @@ export class AuthClientCore {
     return Promise.resolve(this.storageAdapter.clearSession())
   }
 
-
   public async bootstrap(): Promise<SessionState | null> {
     this.status = "BOOTSTRAPPING"
     this.notify()
 
     try {
       const stored = await Promise.resolve(this.storageAdapter.loadSession())
-      if (!stored || !stored.accessToken || !stored.user) {
+      if (!stored || !stored.accessToken || !stored.refreshToken || !stored.user) {
         await this.clearSession()
         return null
       }
@@ -185,6 +213,18 @@ export class AuthClientCore {
       }
 
       this.session = stored
+      this.persistSession = true
+
+      // If access token is expired, proactively rotate via refresh
+      if (isJwtExpired(stored.accessToken)) {
+        const refreshed = await this.refresh()
+        if (!refreshed || !this.session) {
+          await this.clearSession()
+          return null
+        }
+        return this.session
+      }
+
       this.status = "AUTHENTICATED"
       this.notify()
 
@@ -195,7 +235,7 @@ export class AuthClientCore {
     }
   }
 
-  public async login(email: string, password: string): Promise<AuthUser> {
+  public async login(email: string, password: string, keepSession = true): Promise<AuthUser> {
     const cleanEmail = email.trim().toLowerCase()
     const cleanPass = password || ""
 
@@ -231,13 +271,16 @@ export class AuthClientCore {
       throw new Error("Respuesta de autenticación incompleta del servidor.")
     }
 
-    await this.setSession({
-      accessToken: payload.accessToken,
-      refreshToken: payload.refreshToken,
-      expiresIn: payload.expiresIn,
-      tokenType: payload.tokenType,
-      user: payload.user,
-    })
+    await this.setSession(
+      {
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken,
+        expiresIn: payload.expiresIn,
+        tokenType: payload.tokenType,
+        user: payload.user,
+      },
+      keepSession,
+    )
 
     return payload.user
   }
@@ -276,7 +319,6 @@ export class AuthClientCore {
     }
   }
 
-
   public async refresh(): Promise<string | null> {
     if (this.refreshPromise) {
       return this.refreshPromise
@@ -314,14 +356,17 @@ export class AuthClientCore {
           return null
         }
 
-        // Atomically replace session with rotated tokens
-        await this.setSession({
-          accessToken: data.accessToken,
-          refreshToken: data.refreshToken,
-          expiresIn: data.expiresIn,
-          tokenType: data.tokenType,
-          user: data.user,
-        })
+        // Atomically replace session with rotated tokens, respecting persistSession
+        await this.setSession(
+          {
+            accessToken: data.accessToken,
+            refreshToken: data.refreshToken,
+            expiresIn: data.expiresIn,
+            tokenType: data.tokenType,
+            user: data.user,
+          },
+          this.persistSession,
+        )
 
         return data.accessToken
       } catch {
@@ -349,22 +394,25 @@ export class AuthClientCore {
   private async logoutWithToken(access: string | null, refresh: string | null): Promise<void> {
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" }
-      if (access) {
-        headers["Authorization"] = `Bearer ${access}`
-      }
+      if (access) headers["Authorization"] = `Bearer ${access}`
       await this.fetcher(`${this.authServiceUrl}/auth/logout`, {
         method: "POST",
         headers,
         body: JSON.stringify({ refreshToken: refresh }),
       })
-    } catch {}
+    } catch (_) {}
   }
 
-  public async exchangeOAuthCode(params: {
-    code: string
-    codeVerifier: string
-    redirectUri: string
-  }): Promise<AuthUser> {
+  // --- OAuth PKCE Integration ---
+
+  public async exchangeOAuthCode(
+    params: {
+      code: string
+      codeVerifier: string
+      redirectUri: string
+    },
+    keepSession = true,
+  ): Promise<AuthUser> {
     const res = await this.fetcher(`${this.authServiceUrl}/oauth/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -394,7 +442,6 @@ export class AuthClientCore {
       throw new Error(data.message || data.error || "Error al completar la autenticación con el proveedor.")
     }
 
-
     const payload = data as {
       accessToken: string
       refreshToken: string
@@ -407,13 +454,16 @@ export class AuthClientCore {
       throw new Error("Respuesta de autenticación OAuth incompleta.")
     }
 
-    await this.setSession({
-      accessToken: payload.accessToken,
-      refreshToken: payload.refreshToken,
-      expiresIn: payload.expiresIn,
-      tokenType: payload.tokenType,
-      user: payload.user,
-    })
+    await this.setSession(
+      {
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken,
+        expiresIn: payload.expiresIn,
+        tokenType: payload.tokenType,
+        user: payload.user,
+      },
+      keepSession,
+    )
 
     return payload.user
   }
@@ -424,13 +474,15 @@ export class AuthClientCore {
     state: string
     codeChallenge: string
   }): string {
-    const url = new URL(`${this.authServiceUrl}/oauth/authorize`)
-    url.searchParams.set("response_type", "code")
-    url.searchParams.set("provider", params.provider.toLowerCase())
-    url.searchParams.set("redirect_uri", params.redirectUri)
-    url.searchParams.set("code_challenge", params.codeChallenge)
-    url.searchParams.set("code_challenge_method", "S256")
-    url.searchParams.set("state", params.state)
-    return url.toString()
+    const query = new URLSearchParams({
+      provider: params.provider.toLowerCase(),
+      response_type: "code",
+      redirect_uri: params.redirectUri,
+      state: params.state,
+      code_challenge: params.codeChallenge,
+      code_challenge_method: "S256",
+    })
+
+    return `${this.authServiceUrl}/oauth/authorize?${query.toString()}`
   }
 }

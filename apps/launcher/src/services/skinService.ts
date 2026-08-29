@@ -1,6 +1,8 @@
 import { graphqlClient } from "./apiClient"
 import { resolveApiAssetUrl } from "../config/api"
+import { authService } from "./authService"
 import type { GlobalSkin, PlayerSkin, SkinUploadTicket, ActiveSkinSelection } from "../types"
+
 import {
   validateMinecraftSkinTexture,
   MAX_SKIN_SIZE_BYTES,
@@ -55,10 +57,7 @@ export async function fetchGlobalSkins(
  * Throws an Error if the network or server request fails.
  */
 export async function fetchMyPlayerSkin(): Promise<PlayerSkin | null> {
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("hikat_auth_token")
-      : null
+  const token = authService.getAccessToken()
   if (!token) return null
 
   const query = /* GraphQL */ `
@@ -91,11 +90,9 @@ export async function fetchMyPlayerSkin(): Promise<PlayerSkin | null> {
  * Throws an Error if the request fails.
  */
 export async function fetchMyActiveSkin(): Promise<ActiveSkinSelection | null> {
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("hikat_auth_token")
-      : null
+  const token = authService.getAccessToken()
   if (!token) return null
+
 
   const query = /* GraphQL */ `
     query MyActiveSkin {
@@ -301,10 +298,7 @@ export async function uploadPlayerSkin(
   const { uploadUrl, uploadToken } = ticketRes.data
   const fullUploadUrl = resolveApiAssetUrl(uploadUrl)
 
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("hikat_auth_token")
-      : null
+  const token = authService.getAccessToken()
   const headers: Record<string, string> = {
     "X-Upload-Token": uploadToken,
     "Content-Type": "image/png",
@@ -312,6 +306,7 @@ export async function uploadPlayerSkin(
   if (token) {
     headers["Authorization"] = `Bearer ${token}`
   }
+
 
   // 3. Binary PUT upload
   const uploadRes = await fetch(fullUploadUrl, {

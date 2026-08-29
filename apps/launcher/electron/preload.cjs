@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   authLoadSession: () => ipcRenderer.invoke("auth:load-session"),
   authSaveSession: (session) => ipcRenderer.invoke("auth:save-session", session),
   authClearSession: () => ipcRenderer.invoke("auth:clear-session"),
+  authSavePendingOAuth: (data) => ipcRenderer.invoke("auth:save-pending-oauth", data),
+  authGetPendingOAuth: (state) => ipcRenderer.invoke("auth:get-pending-oauth", state),
+  authClearPendingOAuth: () => ipcRenderer.invoke("auth:clear-pending-oauth"),
 
   // OAuth Deep Link Callback Handler
   onOAuthCallback: (callback) => {
@@ -41,6 +44,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("oauth:callback", handler)
     return () => ipcRenderer.removeListener("oauth:callback", handler)
   },
+  getPendingOAuthCallback: () => ipcRenderer.invoke("oauth:get-pending-callback"),
 
   // Client Files Sync & Launch Engine
   checkSyncPlan: (payload) => ipcRenderer.invoke("game-check-plan", payload),

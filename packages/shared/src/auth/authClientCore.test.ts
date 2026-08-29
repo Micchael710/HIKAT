@@ -368,4 +368,105 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity)", () => {
     const state = generateRandomState(32)
     expect(state.length).toBe(32)
   })
+
+  it("12. keepSession=true saves to storage adapter; keepSession=false leaves storage empty", async () => {
+    const storage = createMemoryStorageAdapter()
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      storageAdapter: storage,
+      fetcher: mockFetch,
+    })
+
+    const payload = {
+      accessToken: "acc-1",
+      refreshToken: "ref-1",
+      user: { id: "u-1", email: "p@hikat.org", role: "PLAYER" as const },
+    }
+
+    // With keepSession = false
+    await client.setSession(payload, false)
+    expect(client.getAccessToken()).toBe("acc-1")
+    expect(storage.loadSession()).toBeNull() // Not persisted
+
+    // With keepSession = true
+    await client.setSession(payload, true)
+    expect(storage.loadSession()).toEqual(payload) // Persisted
+  })
+
+  it("13. Bootstrap with expired access token calls refresh and rotates session", async () => {
+    const storage = createMemoryStorageAdapter()
+    // Create an expired JWT token (exp in past)
+    const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 100 }))
+    const expiredJwt = `${expiredHeader}.${expiredPayload}.signature`
+
+    storage.saveSession({
+      accessToken: expiredJwt,
+      refreshToken: "valid-refresh-token",
+      user: { id: "u-exp", email: "p@hikat.org", role: "PLAYER" },
+    })
+
+    // Mock refresh endpoint
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accessToken: "refreshed-jwt",
+        refreshToken: "rotated-refresh",
+        expiresIn: 900,
+        tokenType: "Bearer",
+        user: { id: "u-exp", email: "p@hikat.org", role: "PLAYER" },
+      }),
+    })
+
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      storageAdapter: storage,
+      fetcher: mockFetch,
+    })
+
+    const restored = await client.bootstrap()
+
+    expect(restored).not.toBeNull()
+    expect(client.getAccessToken()).toBe("refreshed-jwt")
+    expect(client.getRefreshToken()).toBe("rotated-refresh")
+    expect(client.getStatus()).toBe("AUTHENTICATED")
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("14. Bootstrap with expired access token and failed refresh clears storage", async () => {
+    const storage = createMemoryStorageAdapter()
+    const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 100 }))
+    const expiredJwt = `${expiredHeader}.${expiredPayload}.signature`
+
+    storage.saveSession({
+      accessToken: expiredJwt,
+      refreshToken: "invalid-refresh-token",
+      user: { id: "u-exp", email: "p@hikat.org", role: "PLAYER" },
+    })
+
+    // Mock failed refresh
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "REVOKED" }),
+    })
+
+    const client = new AuthClientCore({
+      authServiceUrl: "http://localhost:8788",
+      allowedRole: "PLAYER",
+      storageAdapter: storage,
+      fetcher: mockFetch,
+    })
+
+    const restored = await client.bootstrap()
+
+    expect(restored).toBeNull()
+    expect(client.getStatus()).toBe("UNAUTHENTICATED")
+    expect(storage.loadSession()).toBeNull()
+  })
 })
+

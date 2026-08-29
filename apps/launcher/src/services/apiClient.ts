@@ -39,7 +39,7 @@ export async function apiClient<T = any>(
     }
   }
 
-  const token = authService.getAccessToken() || authService.getStoredToken()
+  const token = authService.getAccessToken()
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -67,11 +67,14 @@ export async function apiClient<T = any>(
     clearTimeout(timeoutId)
 
     // Handle HTTP 401 Unauthorized with single-flight refresh and single retry
-    if (response.status === 401 && !isRetry) {
-      const newToken = await authService.refresh()
-      if (newToken) {
-        return apiClient<T>(endpoint, options, timeoutMs, true)
+    if (response.status === 401) {
+      if (!isRetry) {
+        const newToken = await authService.refresh()
+        if (newToken) {
+          return apiClient<T>(endpoint, options, timeoutMs, true)
+        }
       }
+      authService.clearSession()
     }
 
     const data = await response.json().catch(() => null)
@@ -140,10 +143,17 @@ export async function graphqlClient<T = any>(
           e.message === "Authentication required",
       )
 
-      if (hasUnauthenticated && !isRetry) {
-        const newToken = await authService.refresh()
-        if (newToken) {
-          return graphqlClient<T>(query, variables, timeoutMs, true)
+      if (hasUnauthenticated) {
+        if (!isRetry) {
+          const newToken = await authService.refresh()
+          if (newToken) {
+            return graphqlClient<T>(query, variables, timeoutMs, true)
+          }
+        }
+        authService.clearSession()
+        return {
+          success: false,
+          error: "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
         }
       }
 

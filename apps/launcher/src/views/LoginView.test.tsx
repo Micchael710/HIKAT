@@ -119,4 +119,60 @@ describe("Launcher LoginView Component (OAuth & Auth Parity)", () => {
       expectedState: "saved-state",
     })
   })
+
+  it("4. Cold start retrieves pending OAuth deep link on mount and processes login", async () => {
+    const onLogin = vi.fn()
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn(() => () => {}),
+      getPendingOAuthCallback: vi
+        .fn()
+        .mockResolvedValue("hikat://auth/callback?code=coldcode&state=coldstate"),
+    }
+
+    vi.spyOn(authService, "handleOAuthCallback").mockResolvedValueOnce({
+      id: "u-cold",
+      username: "ColdPlayer",
+      displayName: "ColdPlayer",
+      email: "cold@hikat.org",
+      role: "PLAYER",
+    })
+
+    await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(authService.handleOAuthCallback).toHaveBeenCalledWith({
+      code: "coldcode",
+      codeVerifier: undefined,
+      state: "coldstate",
+      expectedState: undefined,
+    })
+  })
+
+  it("5. Displays error message when OAuth callback returns error parameter", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+      getPendingOAuthCallback: vi.fn().mockResolvedValue(null),
+    }
+
+    const container = await renderComponent(<LoginView onLogin={onLogin} theme="dark" />)
+
+    await act(async () => {
+      callbackTrigger!("hikat://auth/callback?error=EMAIL_CONFLICT_LINK_REQUIRED")
+    })
+
+    expect(container.textContent).toContain("Este correo electrónico ya está registrado")
+    expect(onLogin).not.toHaveBeenCalled()
+  })
 })
+

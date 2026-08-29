@@ -336,13 +336,26 @@ async function createWindow() {
   })
 }
 
+let pendingDeepLinkUrl = null
+
+function extractDeepLinkFromArgs(args) {
+  if (!Array.isArray(args)) return null
+  return args.find((arg) => typeof arg === "string" && arg.startsWith("hikat://auth/callback")) || null
+}
+
+const initialDeepLink = extractDeepLinkFromArgs(process.argv)
+if (initialDeepLink) {
+  pendingDeepLinkUrl = initialDeepLink
+}
+
 function handleDeepLinkUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== "string") return
   try {
     const parsed = new URL(rawUrl)
     if (parsed.protocol === "hikat:" && parsed.hostname === "auth" && parsed.pathname === "/callback") {
       focusMainWindow()
-      if (mainWindow && !mainWindow.isDestroyed()) {
+      pendingDeepLinkUrl = rawUrl
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
         mainWindow.webContents.send("oauth:callback", rawUrl)
       }
     }
@@ -352,9 +365,7 @@ function handleDeepLinkUrl(rawUrl) {
 // Second instance handler (when user launches launcher while already running or via deep link)
 app.on("second-instance", (_event, commandLine) => {
   focusMainWindow()
-  const deepLink = Array.isArray(commandLine)
-    ? commandLine.find((arg) => typeof arg === "string" && arg.startsWith("hikat://"))
-    : null
+  const deepLink = extractDeepLinkFromArgs(commandLine)
   if (deepLink) {
     handleDeepLinkUrl(deepLink)
   }
@@ -365,6 +376,7 @@ app.on("open-url", (event, url) => {
   event.preventDefault()
   handleDeepLinkUrl(url)
 })
+
 
 // IPC Handlers for custom titlebar controls
 ipcMain.on("window-minimize", () => {
@@ -508,6 +520,27 @@ ipcMain.handle("auth:clear-session", async () => {
   authStore.clearSession()
   return true
 })
+
+ipcMain.handle("auth:save-pending-oauth", async (_event, data) => {
+  authStore.savePendingOAuth(data)
+  return true
+})
+
+ipcMain.handle("auth:get-pending-oauth", async (_event, state) => {
+  return authStore.getPendingOAuth(state)
+})
+
+ipcMain.handle("auth:clear-pending-oauth", async () => {
+  authStore.clearPendingOAuth()
+  return true
+})
+
+ipcMain.handle("oauth:get-pending-callback", async () => {
+  const url = pendingDeepLinkUrl
+  pendingDeepLinkUrl = null
+  return url
+})
+
 
 ipcMain.on("open-external", (_event, url) => {
 

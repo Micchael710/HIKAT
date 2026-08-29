@@ -32,69 +32,90 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
 
   const pendingOAuthRef = useRef<{ codeVerifier: string; state: string } | null>(null)
 
-  // Listen for OAuth deep link callbacks via Electron IPC
+  const processOAuthCallbackUrl = async (rawUrl: string) => {
+    try {
+      const urlObj = new URL(rawUrl)
+      const code = urlObj.searchParams.get("code")
+      const state = urlObj.searchParams.get("state")
+      const error = urlObj.searchParams.get("error")
+
+      if (error) {
+        if (error === "EMAIL_CONFLICT_LINK_REQUIRED") {
+          setErrorMessage("Este correo electrónico ya está registrado. Por favor inicia sesión con tu contraseña.")
+        } else {
+          setErrorMessage("Error durante la autenticación externa.")
+        }
+        setIsEnteringWorld(false)
+        return
+      }
+
+      if (!code || !state) {
+        return
+      }
+
+      const pendingVerifier =
+        pendingOAuthRef.current?.codeVerifier ||
+        (typeof sessionStorage !== "undefined"
+          ? sessionStorage.getItem("hikat_launcher_oauth_verifier") || undefined
+          : undefined)
+      const expectedState =
+        pendingOAuthRef.current?.state ||
+        (typeof sessionStorage !== "undefined"
+          ? sessionStorage.getItem("hikat_launcher_oauth_state") || undefined
+          : undefined)
+
+      setIsEnteringWorld(true)
+      const user = await authService.handleOAuthCallback({
+        code,
+        codeVerifier: pendingVerifier,
+        state,
+        expectedState,
+      })
+
+      pendingOAuthRef.current = null
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("hikat_launcher_oauth_verifier")
+        sessionStorage.removeItem("hikat_launcher_oauth_state")
+      }
+
+
+      setTimeout(() => {
+        onLogin(user.displayName || user.username)
+      }, 350)
+    } catch (err: any) {
+      setIsEnteringWorld(false)
+      setErrorMessage(err.message || "Error al completar autenticación.")
+    }
+  }
+
+  // Listen for OAuth deep link callbacks via Electron IPC & check cold-start pending callbacks
   useEffect(() => {
-    if (typeof window === "undefined" || !window.electronAPI?.onOAuthCallback) {
+    if (typeof window === "undefined" || !window.electronAPI) {
       return
     }
 
-    const removeListener = window.electronAPI.onOAuthCallback(async (rawUrl: string) => {
-      try {
-        const urlObj = new URL(rawUrl)
-        const code = urlObj.searchParams.get("code")
-        const state = urlObj.searchParams.get("state")
-        const error = urlObj.searchParams.get("error")
-
-        if (error) {
-          if (error === "EMAIL_CONFLICT_LINK_REQUIRED") {
-            setErrorMessage("Este correo electrónico ya está registrado. Por favor inicia sesión con tu contraseña.")
-          } else {
-            setErrorMessage("Error durante la autenticación externa.")
+    if (window.electronAPI.getPendingOAuthCallback) {
+      window.electronAPI
+        .getPendingOAuthCallback()
+        .then((pendingUrl: string | null) => {
+          if (pendingUrl) {
+            processOAuthCallbackUrl(pendingUrl)
           }
-          setIsEnteringWorld(false)
-          return
-        }
-
-        if (!code || !state) {
-          return
-        }
-
-        const pending = pendingOAuthRef.current || {
-          codeVerifier: sessionStorage.getItem("hikat_launcher_oauth_verifier") || "",
-          state: sessionStorage.getItem("hikat_launcher_oauth_state") || "",
-        }
-
-        if (!pending.codeVerifier || !pending.state) {
-          setErrorMessage("Sesión de autenticación expirada. Intenta nuevamente.")
-          setIsEnteringWorld(false)
-          return
-        }
-
-        setIsEnteringWorld(true)
-        const user = await authService.handleOAuthCallback({
-          code,
-          codeVerifier: pending.codeVerifier,
-          state,
-          expectedState: pending.state,
         })
+        .catch(() => {})
+    }
 
-        sessionStorage.removeItem("hikat_launcher_oauth_verifier")
-        sessionStorage.removeItem("hikat_launcher_oauth_state")
-        pendingOAuthRef.current = null
+    if (window.electronAPI.onOAuthCallback) {
+      const removeListener = window.electronAPI.onOAuthCallback((rawUrl: string) => {
+        processOAuthCallbackUrl(rawUrl)
+      })
 
-        setTimeout(() => {
-          onLogin(user.displayName || user.username)
-        }, 350)
-      } catch (err: any) {
-        setIsEnteringWorld(false)
-        setErrorMessage(err.message || "Error al completar autenticación.")
+      return () => {
+        removeListener?.()
       }
-    })
-
-    return () => {
-      removeListener?.()
     }
   }, [onLogin])
+
 
   const handleOAuthClick = async (provider: "GOOGLE" | "DISCORD") => {
     setErrorMessage(null)

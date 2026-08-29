@@ -57,6 +57,8 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
   it("handleApplySkin updates optimistically and reverts appliedSkin if Backend returns success: false", async () => {
     window.localStorage.setItem("hikat_auth_token", "fake-token")
     vi.spyOn(authService, "getStoredToken").mockReturnValue("fake-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-token")
+
 
     const setMyActiveSkinSpy = vi
       .spyOn(skinServiceModule, "setMyActiveSkin")
@@ -87,6 +89,8 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
   it("handleApplySkin reverts appliedSkin if Backend throws an exception", async () => {
     window.localStorage.setItem("hikat_auth_token", "fake-token")
     vi.spyOn(authService, "getStoredToken").mockReturnValue("fake-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-token")
+
 
     vi.spyOn(skinServiceModule, "setMyActiveSkin").mockRejectedValue(
       new Error("Network connection lost"),
@@ -111,6 +115,8 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
   it("handleApplySkin keeps appliedSkin when Backend succeeds", async () => {
     window.localStorage.setItem("hikat_auth_token", "fake-token")
     vi.spyOn(authService, "getStoredToken").mockReturnValue("fake-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-token")
+
 
     vi.spyOn(skinServiceModule, "setMyActiveSkin").mockResolvedValue({
       success: true,
@@ -183,6 +189,8 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
   it("Test 3 — Authenticated user entering Skins refreshes both public and personal cosmetics", async () => {
     window.localStorage.setItem("hikat_auth_token", "auth-token-123")
     vi.spyOn(authService, "getStoredToken").mockReturnValue("auth-token-123")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-123")
+
 
     const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
     const fetchMyPlayerSkinSpy = vi.spyOn(skinServiceModule, "fetchMyPlayerSkin")
@@ -329,4 +337,107 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     unmount()
   })
+
+  it("Test 7 — Catalog failure preserves existing catalog items (does not replace with [])", async () => {
+    let shouldFail = false
+    vi.spyOn(skinServiceModule, "fetchGlobalSkins").mockImplementation(async () => {
+      if (shouldFail) {
+        throw new Error("Network timeout")
+      }
+      return [
+        {
+          id: "skin-A",
+          name: "Skin Alpha",
+          imageUrl: "/media/skin-a.png",
+          status: "AVAILABLE" as const,
+          createdAt: "2026-08-29T10:00:00Z",
+          updatedAt: "2026-08-29T10:00:00Z",
+        },
+      ]
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.allSkins.some((s) => s.id === "skin-A")).toBe(true)
+
+    // Now simulate network failure on re-entering skins
+    shouldFail = true
+    await act(async () => {
+      result.current.setView("skins")
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Existing skin-A is preserved!
+    expect(result.current.allSkins.some((s) => s.id === "skin-A")).toBe(true)
+
+    unmount()
+  })
+
+  it("Test 8 — CUSTOM to GLOBAL and GLOBAL to CUSTOM switching persists applied state", async () => {
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("valid-token")
+    vi.spyOn(skinServiceModule, "setMyActiveSkin").mockResolvedValue({
+      success: true,
+      data: { type: "GLOBAL", skinId: "skin-glob" },
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Switch to GLOBAL
+    await act(async () => {
+      await result.current.setAppliedSkin("skin-glob")
+    })
+    expect(result.current.appliedSkin).toBe("skin-glob")
+
+    // Switch back to CUSTOM
+    vi.spyOn(skinServiceModule, "setMyActiveSkin").mockResolvedValue({
+      success: true,
+      data: { type: "CUSTOM", skinId: null },
+    })
+    await act(async () => {
+      await result.current.setAppliedSkin("player-custom")
+    })
+    expect(result.current.appliedSkin).toBe("player-custom")
+
+    unmount()
+  })
+
+  it("Test 9 — Custom skin persists and remains active/visible when access token refreshes", async () => {
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("refreshed-token")
+    vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue({
+      id: "pskin-persisted",
+      userId: "u-1",
+      imageUrl: "/media/my_custom_skin.png",
+      createdAt: "2026-08-29T10:00:00Z",
+      updatedAt: "2026-08-29T10:00:00Z",
+    })
+    vi.spyOn(skinServiceModule, "fetchMyActiveSkin").mockResolvedValue({
+      type: "CUSTOM",
+      skinId: null,
+      skin: null,
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.playerSkin?.id).toBe("pskin-persisted")
+    expect(result.current.appliedSkin).toBe("player-custom")
+    expect(result.current.activeSkinData?.customImgUrl).toBe("/media/my_custom_skin.png")
+
+    unmount()
+  })
 })
+

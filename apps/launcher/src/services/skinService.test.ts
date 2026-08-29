@@ -23,11 +23,13 @@ import {
   uploadPlayerCape,
 } from "./capeService"
 import * as apiClientModule from "./apiClient"
+import { authService } from "./authService"
 
-describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
+describe("Launcher Skin & Cape Services (Phase 07 Hardening & Shard 8F)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    authService.clearSession()
   })
 
   it("resolves asset URLs correctly (relative vs absolute)", () => {
@@ -68,7 +70,7 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
   })
 
   it("fetches player personal custom skin when token exists", async () => {
-    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-jwt-token")
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
@@ -89,7 +91,7 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
   })
 
   it("fetches player active skin selection", async () => {
-    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-jwt-token")
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
@@ -111,7 +113,7 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
   })
 
   it("sets player active skin selection", async () => {
-    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-jwt-token")
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
@@ -134,6 +136,7 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
   })
 
   it("returns null for fetchMyPlayerSkin when unauthenticated", async () => {
+    vi.spyOn(authService, "getAccessToken").mockReturnValue(null)
     const mySkin = await fetchMyPlayerSkin()
     expect(mySkin).toBeNull()
   })
@@ -175,7 +178,7 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
   })
 
   it("uploads player skin end-to-end consuming flat backend response ({ id, ... })", async () => {
-    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-jwt-token")
 
     vi.spyOn(apiClientModule, "graphqlClient").mockImplementation(async (query) => {
       if (typeof query === "string" && query.includes("createPlayerSkinUpload")) {
@@ -282,7 +285,7 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
   })
 
   it("fetches player capes and active cape selection", async () => {
-    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-jwt-token")
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
@@ -305,7 +308,7 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
   })
 
   it("sets active cape to NONE canonical", async () => {
-    window.localStorage.setItem("hikat_auth_token", "fake-jwt-token")
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-jwt-token")
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: {
@@ -335,4 +338,3 @@ describe("Launcher Skin & Cape Services (Phase 07 Hardening)", () => {
     )
   })
 })
-

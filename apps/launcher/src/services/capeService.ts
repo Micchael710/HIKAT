@@ -1,6 +1,8 @@
 import { graphqlClient } from "./apiClient"
 import { resolveApiAssetUrl } from "./skinService"
+import { authService } from "./authService"
 import type { GlobalCape, PlayerCape, CapeUploadTicket, ActiveCapeSelection } from "../types"
+
 import {
   validateCapeTextureBuffer,
   MAX_CAPE_SIZE_BYTES,
@@ -53,10 +55,7 @@ export async function fetchGlobalCapes(
  * Throws an Error if the request fails.
  */
 export async function fetchMyPlayerCapes(): Promise<PlayerCape[]> {
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("hikat_auth_token")
-      : null
+  const token = authService.getAccessToken()
   if (!token) return []
 
   const query = /* GraphQL */ `
@@ -100,11 +99,9 @@ export async function fetchMyActiveCape(): Promise<ActiveCapeSelection> {
     name: "Sin capa",
   }
 
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("hikat_auth_token")
-      : null
+  const token = authService.getAccessToken()
   if (!token) return defaultNone
+
 
   const query = /* GraphQL */ `
     query MyActiveCape {
@@ -367,10 +364,7 @@ export async function uploadPlayerCape(
   const { uploadUrl, uploadToken } = ticketRes.data
   const fullUploadUrl = resolveApiAssetUrl(uploadUrl)
 
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("hikat_auth_token")
-      : null
+  const token = authService.getAccessToken()
   const headers: Record<string, string> = {
     "X-Upload-Token": uploadToken,
     "Content-Type": "image/png",
@@ -378,6 +372,7 @@ export async function uploadPlayerCape(
   if (token) {
     headers["Authorization"] = `Bearer ${token}`
   }
+
 
   // 3. Binary PUT upload
   const uploadRes = await fetch(fullUploadUrl, {

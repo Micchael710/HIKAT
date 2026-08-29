@@ -26,7 +26,6 @@ export interface UserProfile {
   createdAt?: string
 }
 
-
 export interface LoginCredentials {
   email: string
   password?: string
@@ -40,29 +39,29 @@ export interface RegisterCredentials {
 }
 
 /**
- * Storage adapter bridging to Electron Main's safeStorage with safe fallback
+ * Storage adapter bridging strictly to Electron Main's SecureAuthStore (safeStorage).
+ * No refresh tokens or full session secrets are ever stored in renderer localStorage.
  */
 export function createLauncherStorageAdapter(): AuthStorageAdapter {
   return {
     loadSession: async () => {
+      // Clean any legacy insecure token storage from previous versions
+      try {
+        if (typeof localStorage !== "undefined") {
+          localStorage.removeItem("hikat_auth_session")
+          localStorage.removeItem("hikat_auth_token")
+          localStorage.removeItem("hikat_refresh_token")
+        }
+      } catch (_) {}
+
       if (typeof window !== "undefined" && window.electronAPI?.authLoadSession) {
         try {
           const session = await window.electronAPI.authLoadSession()
-          if (session && session.accessToken && session.user) {
+          if (session && session.accessToken && session.refreshToken && session.user) {
             return session as SessionState
           }
         } catch (_) {}
       }
-      // Fallback for browser testing / dev mode
-      try {
-        const raw = localStorage.getItem("hikat_auth_session")
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          if (parsed && parsed.accessToken && parsed.user) {
-            return parsed as SessionState
-          }
-        }
-      } catch (_) {}
       return null
     },
 
@@ -72,20 +71,24 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
           await window.electronAPI.authSaveSession(session)
         } catch (_) {}
       }
-      // Also cache user profile in localStorage for fast UI rendering
+
+      // In Renderer localStorage, ONLY cache non-sensitive user profile for instant UI display
       try {
-        localStorage.setItem("hikat_auth_session", JSON.stringify(session))
-        localStorage.setItem("hikat_auth_token", session.accessToken)
-        localStorage.setItem(
-          "hikat_last_user",
-          JSON.stringify({
-            id: session.user.id,
-            username: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
-            displayName: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
-            email: session.user.email,
-            role: session.user.role,
-          }),
-        )
+        if (typeof localStorage !== "undefined") {
+          localStorage.removeItem("hikat_auth_session")
+          localStorage.removeItem("hikat_auth_token")
+          localStorage.removeItem("hikat_refresh_token")
+          localStorage.setItem(
+            "hikat_last_user",
+            JSON.stringify({
+              id: session.user.id,
+              username: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
+              displayName: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
+              email: session.user.email,
+              role: session.user.role,
+            }),
+          )
+        }
       } catch (_) {}
     },
 
@@ -96,10 +99,12 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
         } catch (_) {}
       }
       try {
-        localStorage.removeItem("hikat_auth_session")
-        localStorage.removeItem("hikat_auth_token")
-        localStorage.removeItem("hikat_refresh_token")
-        localStorage.removeItem("hikat_last_user")
+        if (typeof localStorage !== "undefined") {
+          localStorage.removeItem("hikat_auth_session")
+          localStorage.removeItem("hikat_auth_token")
+          localStorage.removeItem("hikat_refresh_token")
+          localStorage.removeItem("hikat_last_user")
+        }
       } catch (_) {}
     },
   }
@@ -133,7 +138,7 @@ class LauncherAuthService {
   }
 
   public getStoredToken(): string | null {
-    return this.client.getAccessToken() || (typeof localStorage !== "undefined" ? localStorage.getItem("hikat_auth_token") : null)
+    return this.client.getAccessToken()
   }
 
   public getUser(): UserProfile | null {
@@ -150,6 +155,7 @@ class LauncherAuthService {
 
   public getCachedUser(): UserProfile | null {
     try {
+      if (typeof localStorage === "undefined") return null
       const saved = localStorage.getItem("hikat_last_user")
       if (!saved) return null
       const parsed = JSON.parse(saved)
@@ -176,6 +182,7 @@ class LauncherAuthService {
   }> {
     const cleanEmail = sanitizeEmail(credentials.email)
     const password = credentials.password || ""
+    const keepSession = credentials.keepSession ?? true
 
     if (!cleanEmail || !password) {
       return {
@@ -185,7 +192,7 @@ class LauncherAuthService {
     }
 
     try {
-      const user = await this.client.login(cleanEmail, password)
+      const user = await this.client.login(cleanEmail, password, keepSession)
       const token = this.client.getAccessToken() || ""
       return {
         success: true,
@@ -263,8 +270,8 @@ class LauncherAuthService {
     this.client.clearSession()
   }
 
-  public setSession(session: SessionState): Promise<void> {
-    return this.client.setSession(session)
+  public setSession(session: SessionState, persist = true): Promise<void> {
+    return this.client.setSession(session, persist)
   }
 
   public async requestPasswordReset(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
@@ -281,9 +288,7 @@ class LauncherAuthService {
     }
   }
 
-
   // --- OAuth PKCE Integration ---
-
 
   public async initiateOAuth(provider: "GOOGLE" | "DISCORD"): Promise<{
     authUrl: string
@@ -302,31 +307,99 @@ class LauncherAuthService {
       codeChallenge,
     })
 
+    // Store pending PKCE state in Electron Main store (persists across cold restarts)
+    if (typeof window !== "undefined" && window.electronAPI?.authSavePendingOAuth) {
+      try {
+        await window.electronAPI.authSavePendingOAuth({
+          provider,
+          codeVerifier,
+          state,
+          expiresAt: Date.now() + 10 * 60 * 1000,
+        })
+      } catch (_) {}
+    }
+
+    // Web fallback
+    try {
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.setItem("hikat_launcher_oauth_verifier", codeVerifier)
+        sessionStorage.setItem("hikat_launcher_oauth_state", state)
+      }
+    } catch (_) {}
+
     return { authUrl, codeVerifier, state }
   }
 
   public async handleOAuthCallback(params: {
     code: string
-    codeVerifier: string
+    codeVerifier?: string
     state: string
-    expectedState: string
+    expectedState?: string
   }): Promise<UserProfile> {
-    if (params.state !== params.expectedState) {
+    let verifier = params.codeVerifier || ""
+
+    // If verifier not passed directly, fetch from Electron Main pending OAuth store
+    if (!verifier && typeof window !== "undefined" && window.electronAPI?.authGetPendingOAuth) {
+      try {
+        const pending = await window.electronAPI.authGetPendingOAuth(params.state)
+        if (pending && pending.codeVerifier) {
+          verifier = pending.codeVerifier
+        }
+      } catch (_) {}
+    }
+
+    // Fallback to sessionStorage
+    if (!verifier && typeof sessionStorage !== "undefined") {
+      const savedState = sessionStorage.getItem("hikat_launcher_oauth_state")
+      if (savedState === params.state) {
+        verifier = sessionStorage.getItem("hikat_launcher_oauth_verifier") || ""
+      }
+    }
+
+    if (!verifier) {
+      throw new Error("Estado de autenticación inválido o sesión OAuth expirada.")
+    }
+
+    if (params.expectedState && params.state !== params.expectedState) {
       throw new Error("Estado de autenticación inválido (posible ataque CSRF).")
     }
 
-    const user = await this.client.exchangeOAuthCode({
-      code: params.code,
-      codeVerifier: params.codeVerifier,
-      redirectUri: "hikat://auth/callback",
-    })
+    try {
+      const user = await this.client.exchangeOAuthCode(
+        {
+          code: params.code,
+          codeVerifier: verifier,
+          redirectUri: "hikat://auth/callback",
+        },
+        true,
+      )
 
-    return {
-      id: user.id,
-      username: user.displayName || user.email.split("@")[0] || "Jugador",
-      displayName: user.displayName || user.email.split("@")[0] || "Jugador",
-      email: user.email,
-      role: user.role,
+      // Clean pending state on success
+      if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {
+        window.electronAPI.authClearPendingOAuth().catch(() => {})
+      }
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("hikat_launcher_oauth_verifier")
+        sessionStorage.removeItem("hikat_launcher_oauth_state")
+      }
+
+      return {
+        id: user.id,
+        username: user.displayName || user.email.split("@")[0] || "Jugador",
+        displayName: user.displayName || user.email.split("@")[0] || "Jugador",
+        email: user.email,
+        role: user.role,
+      }
+    } catch (err) {
+      // Clean pending state on error
+      if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {
+        window.electronAPI.authClearPendingOAuth().catch(() => {})
+      }
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("hikat_launcher_oauth_verifier")
+        sessionStorage.removeItem("hikat_launcher_oauth_state")
+      }
+      throw err
     }
   }
 }
