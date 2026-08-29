@@ -55,6 +55,7 @@ export function getLogicalPathForServerContent(
 interface ServerSearchCursorData {
   q: string
   ct: string
+  mode: "MODRINTH" | "CURSEFORGE" | "ALL"
   mrOff?: number
   cfOff?: number
 }
@@ -68,19 +69,40 @@ function decodeServerSearchCursor(
   cursorStr: string | null | undefined,
   expectedQuery: string,
   expectedContentType: string,
+  expectedMode: "MODRINTH" | "CURSEFORGE" | "ALL",
 ): ServerSearchCursorData | null {
   if (!cursorStr || typeof cursorStr !== "string" || !cursorStr.trim()) return null
+  let parsed: ServerSearchCursorData
   try {
     const json = Buffer.from(cursorStr, "base64url").toString("utf-8")
-    const parsed = JSON.parse(json) as ServerSearchCursorData
-    const normExpectedQuery = expectedQuery.trim().toLowerCase()
-    if (parsed && parsed.q === normExpectedQuery && parsed.ct === expectedContentType) {
-      return parsed
-    }
-    return null
+    parsed = JSON.parse(json) as ServerSearchCursorData
   } catch {
-    return null
+    throw createGraphQLError(
+      "Cursor de paginación inválido o corrupto.",
+      "VALIDATION_ERROR",
+    )
   }
+
+  const normExpectedQuery = expectedQuery.trim().toLowerCase()
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    parsed.q !== normExpectedQuery ||
+    parsed.ct !== expectedContentType ||
+    parsed.mode !== expectedMode
+  ) {
+    throw createGraphQLError(
+      "El cursor de paginación no coincide con la consulta, tipo de contenido o proveedor solicitados.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  return parsed
+}
+
+export interface ScannedFilteredItem {
+  item: NormalizedModProject
+  rawIndex: number
 }
 
 export class ModProviderManager {
@@ -193,11 +215,13 @@ export class ModProviderManager {
           offset + limit,
           contentType,
           isAllowedInGame,
+          0,
           50,
         )
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+        const mappedItems = res.items.map((i) => i.item)
         return {
-          items: res.items.slice(offset, offset + limit),
+          items: mappedItems.slice(offset, offset + limit),
           totalCount: res.providerTotalCount || res.totalCount,
           providersStatus,
           minecraftVersion,
@@ -244,11 +268,13 @@ export class ModProviderManager {
           offset + limit,
           contentType,
           isAllowedInGame,
+          0,
           50,
         )
         providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
+        const mappedItems = res.items.map((i) => i.item)
         return {
-          items: res.items.slice(offset, offset + limit),
+          items: mappedItems.slice(offset, offset + limit),
           totalCount: res.providerTotalCount || res.totalCount,
           providersStatus,
           minecraftVersion,
@@ -272,13 +298,13 @@ export class ModProviderManager {
       contentType !== "MOD" || item.environment !== "SERVER"
 
     const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-      this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 50),
+      this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50),
       this.curseforge.isConfigured(env)
-        ? this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 50)
-        : Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, hasMore: false }),
+        ? this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50)
+        : Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false }),
     ])
 
-    const allItems: any[] = []
+    const allItems: NormalizedModProject[] = []
     let totalCount = 0
 
     if (modrinthResult.status === "fulfilled") {
@@ -308,14 +334,14 @@ export class ModProviderManager {
       })
     }
 
-    const modrinthItems = modrinthResult.status === "fulfilled" ? modrinthResult.value.items : []
-    const curseforgeItems = curseforgeResult.status === "fulfilled" ? curseforgeResult.value.items : []
+    const modrinthItems = modrinthResult.status === "fulfilled" ? modrinthResult.value.items.map((i) => i.item) : []
+    const curseforgeItems = curseforgeResult.status === "fulfilled" ? curseforgeResult.value.items.map((i) => i.item) : []
 
     // Interleave results preserving relevance ranking deterministically
     const maxLength = Math.max(modrinthItems.length, curseforgeItems.length)
     for (let i = 0; i < maxLength; i++) {
-      if (i < modrinthItems.length) allItems.push(modrinthItems[i])
-      if (i < curseforgeItems.length) allItems.push(curseforgeItems[i])
+      if (i < modrinthItems.length) allItems.push(modrinthItems[i]!)
+      if (i < curseforgeItems.length) allItems.push(curseforgeItems[i]!)
     }
 
     return {
@@ -353,7 +379,8 @@ export class ModProviderManager {
       contentType !== "MOD" || item.environment === "SERVER"
 
     const normQuery = query.trim().toLowerCase()
-    const decodedCursor = decodeServerSearchCursor(cursor, query, contentType)
+    const mode: "MODRINTH" | "CURSEFORGE" | "ALL" = provider ? provider : "ALL"
+    const decodedCursor = decodeServerSearchCursor(cursor, query, contentType, mode)
 
     let rawResults: {
       items: NormalizedModProject[]
@@ -379,18 +406,24 @@ export class ModProviderManager {
           50,
         )
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        const nextCursor = res.nextRawOffset !== null
-          ? encodeServerSearchCursor({ q: normQuery, ct: contentType, mrOff: res.nextRawOffset })
+        const nextCursor = res.hasMore && res.nextRawOffset !== null
+          ? encodeServerSearchCursor({
+              q: normQuery,
+              ct: contentType,
+              mode: "MODRINTH",
+              mrOff: res.nextRawOffset,
+            })
           : null
 
         rawResults = {
-          items: res.items,
+          items: res.items.map((i) => i.item),
           totalCount: res.items.length,
           hasMore: res.hasMore,
           nextCursor,
           providersStatus,
         }
       } catch (err: any) {
+        if (err.extensions?.code === "VALIDATION_ERROR") throw err
         providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
         rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
       }
@@ -418,18 +451,24 @@ export class ModProviderManager {
             50,
           )
           providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
-          const nextCursor = res.nextRawOffset !== null
-            ? encodeServerSearchCursor({ q: normQuery, ct: contentType, cfOff: res.nextRawOffset })
+          const nextCursor = res.hasMore && res.nextRawOffset !== null
+            ? encodeServerSearchCursor({
+                q: normQuery,
+                ct: contentType,
+                mode: "CURSEFORGE",
+                cfOff: res.nextRawOffset,
+              })
             : null
 
           rawResults = {
-            items: res.items,
+            items: res.items.map((i) => i.item),
             totalCount: res.items.length,
             hasMore: res.hasMore,
             nextCursor,
             providersStatus,
           }
         } catch (err: any) {
+          if (err.extensions?.code === "VALIDATION_ERROR") throw err
           providersStatus.push({ provider: "CURSEFORGE", available: false, error: err.message })
           rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
         }
@@ -468,16 +507,18 @@ export class ModProviderManager {
           : Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false }),
       ])
 
-      let nextMrOff: number | undefined
-      let nextCfOff: number | undefined
-      let hasMore = false
+      let mrItems: ScannedFilteredItem[] = []
+      let cfItems: ScannedFilteredItem[] = []
+      let mrHasMore = false
+      let cfHasMore = false
+      let mrTotalCount = 0
+      let cfTotalCount = 0
 
       if (modrinthResult.status === "fulfilled") {
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        if (modrinthResult.value.nextRawOffset !== null) {
-          nextMrOff = modrinthResult.value.nextRawOffset
-          hasMore = true
-        }
+        mrItems = modrinthResult.value.items
+        mrHasMore = modrinthResult.value.hasMore
+        mrTotalCount = modrinthResult.value.providerTotalCount
       } else {
         providersStatus.push({
           provider: "MODRINTH",
@@ -493,10 +534,9 @@ export class ModProviderManager {
           available: isConf,
           error: isConf ? null : "CurseForge API Key no está configurada.",
         })
-        if (curseforgeResult.value.nextRawOffset !== null) {
-          nextCfOff = curseforgeResult.value.nextRawOffset
-          hasMore = true
-        }
+        cfItems = curseforgeResult.value.items
+        cfHasMore = curseforgeResult.value.hasMore
+        cfTotalCount = curseforgeResult.value.providerTotalCount
       } else {
         providersStatus.push({
           provider: "CURSEFORGE",
@@ -505,36 +545,77 @@ export class ModProviderManager {
         })
       }
 
-      const modrinthItems = modrinthResult.status === "fulfilled" ? modrinthResult.value.items : []
-      const curseforgeItems = curseforgeResult.status === "fulfilled" ? curseforgeResult.value.items : []
-
-      const allItems: NormalizedModProject[] = []
+      const pageItems: NormalizedModProject[] = []
       const seenIds = new Set<string>()
-      const maxLength = Math.max(modrinthItems.length, curseforgeItems.length)
-      for (let i = 0; i < maxLength; i++) {
-        if (i < modrinthItems.length) {
-          const item = modrinthItems[i]
-          if (item && !seenIds.has(`MODRINTH:${item.projectId}`)) {
-            seenIds.add(`MODRINTH:${item.projectId}`)
-            allItems.push(item)
+      let mrConsumed = 0
+      let cfConsumed = 0
+
+      const maxLen = Math.max(mrItems.length, cfItems.length)
+      for (let i = 0; i < maxLen; i++) {
+        if (i < mrItems.length && pageItems.length < limit) {
+          const entry = mrItems[i]
+          if (entry && !seenIds.has(`MODRINTH:${entry.item.projectId}`)) {
+            seenIds.add(`MODRINTH:${entry.item.projectId}`)
+            pageItems.push(entry.item)
+            mrConsumed = i + 1
           }
         }
-        if (i < curseforgeItems.length) {
-          const item = curseforgeItems[i]
-          if (item && !seenIds.has(`CURSEFORGE:${item.projectId}`)) {
-            seenIds.add(`CURSEFORGE:${item.projectId}`)
-            allItems.push(item)
+        if (i < cfItems.length && pageItems.length < limit) {
+          const entry = cfItems[i]
+          if (entry && !seenIds.has(`CURSEFORGE:${entry.item.projectId}`)) {
+            seenIds.add(`CURSEFORGE:${entry.item.projectId}`)
+            pageItems.push(entry.item)
+            cfConsumed = i + 1
           }
+        }
+        if (pageItems.length >= limit) {
+          break
         }
       }
 
-      const pageItems = allItems.slice(0, limit)
+      let nextMrOff: number | undefined
+      let nextCfOff: number | undefined
+
+      if (modrinthResult.status === "fulfilled") {
+        if (mrConsumed > 0) {
+          const lastConsumed = mrItems[mrConsumed - 1]
+          if (lastConsumed) {
+            const nextOffset = lastConsumed.rawIndex + 1
+            if (nextOffset < mrTotalCount || mrHasMore) {
+              nextMrOff = nextOffset
+            }
+          }
+        } else if (mrItems.length > 0) {
+          nextMrOff = mrStartOffset
+        } else if (mrHasMore) {
+          nextMrOff = modrinthResult.value.nextRawOffset ?? mrStartOffset
+        }
+      }
+
+      if (curseforgeResult.status === "fulfilled" && this.curseforge.isConfigured(env)) {
+        if (cfConsumed > 0) {
+          const lastConsumed = cfItems[cfConsumed - 1]
+          if (lastConsumed) {
+            const nextOffset = lastConsumed.rawIndex + 1
+            if (nextOffset < cfTotalCount || cfHasMore) {
+              nextCfOff = nextOffset
+            }
+          }
+        } else if (cfItems.length > 0) {
+          nextCfOff = cfStartOffset
+        } else if (cfHasMore) {
+          nextCfOff = curseforgeResult.value.nextRawOffset ?? cfStartOffset
+        }
+      }
+
+      const hasMore = Boolean(nextMrOff !== undefined || nextCfOff !== undefined)
       const nextCursor = hasMore
         ? encodeServerSearchCursor({
             q: normQuery,
             ct: contentType,
-            mrOff: nextMrOff,
-            cfOff: nextCfOff,
+            mode: "ALL",
+            mrOff: nextMrOff ?? (modrinthResult.status === "fulfilled" ? mrTotalCount : mrStartOffset),
+            cfOff: nextCfOff ?? (curseforgeResult.status === "fulfilled" ? cfTotalCount : cfStartOffset),
           })
         : null
 
@@ -605,7 +686,6 @@ export class ModProviderManager {
         and(
           eq(schema.serverManagedContent.provider, provider),
           eq(schema.serverManagedContent.projectId, projectId),
-          eq(schema.serverManagedContent.contentType, contentType),
         ),
       )
       .get()
@@ -650,21 +730,20 @@ export class ModProviderManager {
     startRawOffset: number = 0,
     pageSize: number = 50,
   ): Promise<{
-    items: NormalizedModProject[]
+    items: ScannedFilteredItem[]
     totalCount: number
     providerTotalCount: number
     nextRawOffset: number | null
     hasMore: boolean
   }> {
-    const allFilteredItems: NormalizedModProject[] = []
+    const allFilteredItems: ScannedFilteredItem[] = []
     const seenKeys = new Set<string>()
     let currentOffset = startRawOffset
     let providerTotalCount = 0
-    const maxPages = 6 // Safety ceiling: up to 300 raw items per search step
-
+    const maxBatches = 6 // Safety ceiling: up to 300 raw items per search step
     let reachedEnd = false
 
-    for (let page = 0; page < maxPages; page++) {
+    for (let batch = 0; batch < maxBatches; batch++) {
       const res = await adapter.searchMods(
         env,
         query,
@@ -680,14 +759,27 @@ export class ModProviderManager {
         break
       }
 
-      for (const item of res.items) {
-        if (filterFn(item)) {
+      let batchReachedLimit = false
+      for (let i = 0; i < res.items.length; i++) {
+        const rawIdx = currentOffset + i
+        const item = res.items[i]
+        if (item && filterFn(item)) {
           const itemKey = `${item.provider}:${item.projectId}`
           if (!seenKeys.has(itemKey)) {
             seenKeys.add(itemKey)
-            allFilteredItems.push(item)
+            allFilteredItems.push({ item, rawIndex: rawIdx })
           }
         }
+
+        if (allFilteredItems.length >= limit) {
+          currentOffset = rawIdx + 1
+          batchReachedLimit = true
+          break
+        }
+      }
+
+      if (batchReachedLimit) {
+        break
       }
 
       currentOffset += res.items.length
@@ -695,19 +787,14 @@ export class ModProviderManager {
         reachedEnd = true
         break
       }
-
-      if (allFilteredItems.length >= limit) {
-        break
-      }
     }
 
-    const hasMore = !reachedEnd && (currentOffset < providerTotalCount || allFilteredItems.length > limit)
+    const hasMore = !reachedEnd && currentOffset < providerTotalCount
     const nextRawOffset = hasMore ? currentOffset : null
-    const pageItems = allFilteredItems.slice(0, limit)
 
     return {
-      items: pageItems,
-      totalCount: pageItems.length,
+      items: allFilteredItems,
+      totalCount: allFilteredItems.length,
       providerTotalCount,
       nextRawOffset,
       hasMore,

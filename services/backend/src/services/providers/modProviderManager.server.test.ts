@@ -664,10 +664,94 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     )
   })
 
-  // Test 12: Cursor-based pagination scans past raw 300 items across multiple pages with 0 duplicates
+  // Test 12: Single Provider — 50 consecutive SERVER items with limit 20 produces exactly 3 pages without skips or duplicates
+  it("Shard 8D: Single Provider — 50 consecutive SERVER items with limit 20 produces exactly Page 1 (0..19), Page 2 (20..39), Page 3 (40..49)", async () => {
+    const all50Items = Array.from({ length: 50 }, (_, i) => ({
+      projectId: `srv-item-${i}`,
+      name: `Server Item ${i}`,
+      environment: "SERVER",
+      contentType: "MOD",
+    }))
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async (_env, _query, _mc, _l, limit, offset) => {
+        const slice = all50Items.slice(offset, offset + limit)
+        return { items: slice, totalCount: 50 }
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+    ;(manager as any).modrinth = mockAdapter
+
+    // Page 1 (limit 20)
+    const page1 = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "server-mod",
+      "MODRINTH",
+      20,
+      0,
+      "MOD",
+      null,
+    )
+
+    expect(page1.items).toHaveLength(20)
+    expect(page1.items.map((i) => i.projectId)).toEqual(
+      Array.from({ length: 20 }, (_, i) => `srv-item-${i}`),
+    )
+    expect(page1.hasMore).toBe(true)
+    expect(page1.nextCursor).not.toBeNull()
+
+    // Page 2 (limit 20 using cursor)
+    const page2 = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "server-mod",
+      "MODRINTH",
+      20,
+      0,
+      "MOD",
+      page1.nextCursor,
+    )
+
+    expect(page2.items).toHaveLength(20)
+    expect(page2.items.map((i) => i.projectId)).toEqual(
+      Array.from({ length: 20 }, (_, i) => `srv-item-${i + 20}`),
+    )
+    expect(page2.hasMore).toBe(true)
+    expect(page2.nextCursor).not.toBeNull()
+
+    // Page 3 (limit 20 using cursor)
+    const page3 = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "server-mod",
+      "MODRINTH",
+      20,
+      0,
+      "MOD",
+      page2.nextCursor,
+    )
+
+    expect(page3.items).toHaveLength(10)
+    expect(page3.items.map((i) => i.projectId)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `srv-item-${i + 40}`),
+    )
+    expect(page3.hasMore).toBe(false)
+    expect(page3.nextCursor).toBeNull()
+
+    // Verify 0 duplicates across all 3 pages
+    const combinedIds = [
+      ...page1.items.map((i) => i.projectId),
+      ...page2.items.map((i) => i.projectId),
+      ...page3.items.map((i) => i.projectId),
+    ]
+    expect(new Set(combinedIds).size).toBe(50)
+  })
+
+  // Test 13: Cursor-based pagination scans past raw 300 items across multiple pages with 0 duplicates
   it("Shard 8D: Cursor-based pagination seamlessly scans past raw index 300 without infinite loop or duplicates", async () => {
-    // Generate 1000 items in provider (50 items per page, 20 pages)
-    // Even items are BOTH, Odd items are SERVER
     const allProviderItems = Array.from({ length: 1000 }, (_, i) => ({
       projectId: `mod-${i}`,
       name: `Mod ${i}`,
@@ -705,7 +789,6 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
 
     expect(page1.items.length).toBe(20)
     expect(page1.hasMore).toBe(true)
-    expect(page1.nextCursor).toBeDefined()
     expect(page1.nextCursor).not.toBeNull()
 
     for (const item of page1.items) {
@@ -738,16 +821,16 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     }
 
     expect(pageCount).toBe(15)
-    expect(totalCollected).toBeGreaterThan(300) // Successfully collected >300 items past the 300 limit barrier
+    expect(totalCollected).toBeGreaterThan(300)
   })
 
-  // Test 13: Cursor with sparse provider results continues scanning and returns nextCursor
-  it("Shard 8D: Sparse provider results return items and valid nextCursor without failing", async () => {
-    // Pages 0..3 have 0 SERVER items (200 items of BOTH), Page 4 has 10 SERVER items
-    const allProviderItems = Array.from({ length: 500 }, (_, i) => ({
+  // Test 14: Sparse provider results preserve leftovers in next page
+  it("Shard 8D: Sparse provider results (raw 0..199 BOTH, raw 200..224 SERVER) preserve leftovers in next page", async () => {
+    // 0..199 = BOTH, 200..224 = SERVER (25 items), 225..299 = BOTH
+    const allProviderItems = Array.from({ length: 300 }, (_, i) => ({
       projectId: `sparse-mod-${i}`,
       name: `Sparse Mod ${i}`,
-      environment: i >= 200 && i < 210 ? "SERVER" : "BOTH",
+      environment: i >= 200 && i < 225 ? "SERVER" : "BOTH",
       contentType: "MOD",
     }))
 
@@ -762,7 +845,8 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
     ;(manager as any).modrinth = mockAdapter
 
-    const res = await manager.searchServerMods(
+    // Page 1: returns items 200..219 (20 items)
+    const page1 = await manager.searchServerMods(
       mockEnv,
       db,
       "sparse-search",
@@ -773,30 +857,66 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
       null,
     )
 
-    // Should have found the 10 SERVER items at raw index 200..210 within the 6-page (300 raw item) scan window
-    expect(res.items.length).toBe(10)
-    expect(res.hasMore).toBe(true)
-    expect(res.nextCursor).not.toBeNull()
+    expect(page1.items).toHaveLength(20)
+    expect(page1.items[0]?.projectId).toBe("sparse-mod-200")
+    expect(page1.items[19]?.projectId).toBe("sparse-mod-219")
+    expect(page1.hasMore).toBe(true)
+    expect(page1.nextCursor).not.toBeNull()
+
+    // Page 2: returns leftover items 220..224 (5 items)
+    const page2 = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "sparse-search",
+      "MODRINTH",
+      20,
+      0,
+      "MOD",
+      page1.nextCursor,
+    )
+
+    expect(page2.items).toHaveLength(5)
+    expect(page2.items.map((i) => i.projectId)).toEqual([
+      "sparse-mod-220",
+      "sparse-mod-221",
+      "sparse-mod-222",
+      "sparse-mod-223",
+      "sparse-mod-224",
+    ])
+    expect(page2.hasMore).toBe(false)
+    expect(page2.nextCursor).toBeNull()
   })
 
-  // Test 14: ALL providers cursor handles independent offsets and partial failure
-  it("Shard 8D: ALL providers cursor manages independent cursors and handles partial failure", async () => {
+  // Test 15: ALL providers preserves leftovers across pages with zero skips and zero duplicates
+  it("Shard 8D: ALL providers with 20 MR SERVER and 20 CF SERVER preserves leftovers across pages", async () => {
+    const mrItems = Array.from({ length: 20 }, (_, i) => ({
+      projectId: `mr-srv-${i}`,
+      name: `MR Srv ${i}`,
+      environment: "SERVER",
+      contentType: "MOD",
+    }))
+
+    const cfItems = Array.from({ length: 20 }, (_, i) => ({
+      projectId: `cf-srv-${i}`,
+      name: `CF Srv ${i}`,
+      environment: "SERVER",
+      contentType: "MOD",
+    }))
+
     const mockMrAdapter = {
       isConfigured: () => true,
       searchMods: vi.fn().mockImplementation(async (_env, _query, _mc, _l, limit, offset) => {
-        const items = Array.from({ length: limit }, (_, i) => ({
-          projectId: `mr-srv-${offset + i}`,
-          name: `MR Srv ${offset + i}`,
-          environment: "SERVER",
-          contentType: "MOD",
-        }))
-        return { items, totalCount: 100 }
+        const slice = mrItems.slice(offset, offset + limit)
+        return { items: slice, totalCount: 20 }
       }),
     }
 
     const mockCfAdapter = {
       isConfigured: () => true,
-      searchMods: vi.fn().mockRejectedValue(new Error("CF timeout")),
+      searchMods: vi.fn().mockImplementation(async (_env, _query, _mc, _l, limit, offset) => {
+        const slice = cfItems.slice(offset, offset + limit)
+        return { items: slice, totalCount: 20 }
+      }),
     }
 
     vi.spyOn(manager, "getAdapter").mockImplementation((p: string) => {
@@ -806,10 +926,11 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     ;(manager as any).modrinth = mockMrAdapter
     ;(manager as any).curseforge = mockCfAdapter
 
+    // Page 1 (limit 20: 10 MR + 10 CF interleaved)
     const page1 = await manager.searchServerMods(
       mockEnv,
       db,
-      "all-test",
+      "all-interleave",
       null,
       20,
       0,
@@ -817,15 +938,20 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
       null,
     )
 
-    expect(page1.items.length).toBe(20)
+    expect(page1.items).toHaveLength(20)
+    // Deterministic interleaving: mr-0, cf-0, mr-1, cf-1 ...
+    expect(page1.items[0]?.projectId).toBe("mr-srv-0")
+    expect(page1.items[1]?.projectId).toBe("cf-srv-0")
+    expect(page1.items[18]?.projectId).toBe("mr-srv-9")
+    expect(page1.items[19]?.projectId).toBe("cf-srv-9")
     expect(page1.hasMore).toBe(true)
     expect(page1.nextCursor).not.toBeNull()
 
-    // Page 2 using cursor
+    // Page 2 (limit 20: remaining 10 MR + 10 CF)
     const page2 = await manager.searchServerMods(
       mockEnv,
       db,
-      "all-test",
+      "all-interleave",
       null,
       20,
       0,
@@ -833,7 +959,125 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
       page1.nextCursor,
     )
 
-    expect(page2.items.length).toBe(20)
-    expect(page2.items[0]?.projectId).toBe("mr-srv-50")
+    expect(page2.items).toHaveLength(20)
+    expect(page2.items[0]?.projectId).toBe("mr-srv-10")
+    expect(page2.items[1]?.projectId).toBe("cf-srv-10")
+    expect(page2.items[18]?.projectId).toBe("mr-srv-19")
+    expect(page2.items[19]?.projectId).toBe("cf-srv-19")
+    expect(page2.hasMore).toBe(false)
+    expect(page2.nextCursor).toBeNull()
+
+    // All 40 items present, 0 duplicates
+    const allProjectIds = [
+      ...page1.items.map((i) => i.projectId),
+      ...page2.items.map((i) => i.projectId),
+    ]
+    expect(new Set(allProjectIds).size).toBe(40)
+  })
+
+  // Test 16: Cursor validation — Modrinth cursor used in CurseForge throws VALIDATION_ERROR
+  it("Shard 8D: Cursor generated for MODRINTH throws VALIDATION_ERROR when reused in CURSEFORGE", async () => {
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockResolvedValue({
+        items: [{ projectId: "mr-1", name: "MR 1", environment: "SERVER", contentType: "MOD" }],
+        totalCount: 10,
+      }),
+    }
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockMrAdapter as any)
+    ;(manager as any).modrinth = mockMrAdapter
+
+    const mrPage = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "test-query",
+      "MODRINTH",
+      1,
+      0,
+      "MOD",
+      null,
+    )
+    expect(mrPage.nextCursor).not.toBeNull()
+
+    // Try using mrCursor in CURSEFORGE search
+    await expect(
+      manager.searchServerMods(
+        mockEnv,
+        db,
+        "test-query",
+        "CURSEFORGE",
+        1,
+        0,
+        "MOD",
+        mrPage.nextCursor,
+      ),
+    ).rejects.toThrow("El cursor de paginación no coincide con la consulta, tipo de contenido o proveedor solicitados.")
+  })
+
+  // Test 17: Cursor validation — mismatched query or contentType throws VALIDATION_ERROR
+  it("Shard 8D: Cursor with mismatched query or contentType throws VALIDATION_ERROR", async () => {
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockResolvedValue({
+        items: [{ projectId: "mr-1", name: "MR 1", environment: "SERVER", contentType: "MOD" }],
+        totalCount: 10,
+      }),
+    }
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockMrAdapter as any)
+    ;(manager as any).modrinth = mockMrAdapter
+
+    const mrPage = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "query-a",
+      "MODRINTH",
+      1,
+      0,
+      "MOD",
+      null,
+    )
+    expect(mrPage.nextCursor).not.toBeNull()
+
+    // Different query
+    await expect(
+      manager.searchServerMods(
+        mockEnv,
+        db,
+        "query-b",
+        "MODRINTH",
+        1,
+        0,
+        "MOD",
+        mrPage.nextCursor,
+      ),
+    ).rejects.toThrow("El cursor de paginación no coincide con la consulta, tipo de contenido o proveedor solicitados.")
+
+    // Different contentType
+    await expect(
+      manager.searchServerMods(
+        mockEnv,
+        db,
+        "query-a",
+        "MODRINTH",
+        1,
+        0,
+        "DATA_PACK",
+        mrPage.nextCursor,
+      ),
+    ).rejects.toThrow("El cursor de paginación no coincide con la consulta, tipo de contenido o proveedor solicitados.")
+
+    // Corrupted cursor string
+    await expect(
+      manager.searchServerMods(
+        mockEnv,
+        db,
+        "query-a",
+        "MODRINTH",
+        1,
+        0,
+        "MOD",
+        "invalid-non-base64-json!@@@",
+      ),
+    ).rejects.toThrow("Cursor de paginación inválido o corrupto.")
   })
 })
