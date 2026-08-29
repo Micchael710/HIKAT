@@ -1625,12 +1625,25 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ...mockDraftRelease,
         version: "1.0.1",
       })
-      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview")
+      overviewSpy.mockResolvedValueOnce({
         publishedRelease: mockPublishedRelease,
         draftRelease: { ...mockDraftRelease, version: "1.0.1" },
         changes: mockChanges,
         readiness: mockReadiness,
         pendingChangesCount: 2,
+      })
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: { ...mockPublishedRelease, version: "1.0.1" },
+        draftRelease: null,
+        pendingChangesCount: 0,
       })
       const publishSpy = vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
         ...mockDraftRelease,
@@ -1696,12 +1709,25 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     it("18. backup flow: si está marcado, crea backup, muestra polling y publica tras éxito", async () => {
       vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
-      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview")
+      overviewSpy.mockResolvedValueOnce({
         publishedRelease: mockPublishedRelease,
         draftRelease: { ...mockDraftRelease, version: "1.0.1" },
         changes: mockChanges,
         readiness: mockReadiness,
         pendingChangesCount: 2,
+      })
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: { ...mockPublishedRelease, version: "1.0.1" },
+        draftRelease: null,
+        pendingChangesCount: 0,
       })
       const backupCreateSpy = vi.spyOn(serverApi, "createServerBackup").mockResolvedValue({
         id: "backup-test-123",
@@ -1897,6 +1923,431 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.getByText(/Novedades de la versión 1.0.0 con portada/i)).toBeDefined()
       expect(screen.getByText("server.properties")).toBeDefined()
       expect(screen.getByText(/Modo Lectura/i)).toBeDefined()
+    })
+
+    it("22. failed metadata cleanup: upload cover A -> falla updateGameDraftMetadata -> deleteContentMedia se llama para A", async () => {
+      const deleteMediaSpy = vi.spyOn(graphqlClient, "deleteContentMedia").mockResolvedValue(true)
+      vi.spyOn(mediaUploadService, "uploadMediaFile").mockResolvedValue({
+        id: "cover-transient-1",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 4096,
+        url: "http://localhost/media/content/cover-transient-1",
+        createdAt: new Date().toISOString(),
+      })
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockRejectedValueOnce(new Error("Database write error"))
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      // Upload Cover A
+      const file = new File(["dummy"], "coverA.png", { type: "image/png" })
+      const dropzone = screen.getByText(/Arrastra o haz clic para seleccionar imagen o video/i)
+      await act(async () => {
+        fireEvent.drop(dropzone, { dataTransfer: { files: [file] } })
+      })
+
+      expect(screen.getByAltText("Portada de actualización")).toBeDefined()
+
+      // Attempt to advance to Step 2 -> fails
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+
+      // Verification: deleteContentMedia was called on cover-transient-1
+      expect(deleteMediaSpy).toHaveBeenCalledWith("cover-transient-1")
+      expect(screen.getByText(/Database write error/i)).toBeDefined()
+      expect(screen.queryByAltText("Portada de actualización")).toBeNull()
+    })
+
+    it("23. replace transient cover: upload A -> upload B -> deleteContentMedia se llama para A", async () => {
+      const deleteMediaSpy = vi.spyOn(graphqlClient, "deleteContentMedia").mockResolvedValue(true)
+      const uploadSpy = vi.spyOn(mediaUploadService, "uploadMediaFile")
+
+      uploadSpy.mockResolvedValueOnce({
+        id: "cover-transient-A",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 4096,
+        url: "http://localhost/media/content/cover-transient-A",
+        createdAt: new Date().toISOString(),
+      })
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      // 1. Upload Cover A
+      const fileA = new File(["dummyA"], "coverA.png", { type: "image/png" })
+      const dropzone = screen.getByText(/Arrastra o haz clic para seleccionar imagen o video/i)
+      await act(async () => {
+        fireEvent.drop(dropzone, { dataTransfer: { files: [fileA] } })
+      })
+
+      expect(screen.getByAltText("Portada de actualización")).toBeDefined()
+
+      // 2. Upload Cover B (replace)
+      uploadSpy.mockResolvedValueOnce({
+        id: "cover-transient-B",
+        mediaType: "IMAGE",
+        mimeType: "image/webp",
+        sizeBytes: 2048,
+        url: "http://localhost/media/content/cover-transient-B",
+        createdAt: new Date().toISOString(),
+      })
+
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+      const fileB = new File(["dummyB"], "coverB.webp", { type: "image/webp" })
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [fileB] } })
+      })
+
+      // Verification: Cover A was deleted
+      expect(deleteMediaSpy).toHaveBeenCalledWith("cover-transient-A")
+    })
+
+    it("24. remove transient cover: upload A -> Quitar -> deleteContentMedia se llama para A", async () => {
+      const deleteMediaSpy = vi.spyOn(graphqlClient, "deleteContentMedia").mockResolvedValue(true)
+      vi.spyOn(mediaUploadService, "uploadMediaFile").mockResolvedValue({
+        id: "cover-transient-to-remove",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 4096,
+        url: "http://localhost/media/content/cover-transient-to-remove",
+        createdAt: new Date().toISOString(),
+      })
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      // Upload Cover
+      const file = new File(["dummy"], "cover.png", { type: "image/png" })
+      const dropzone = screen.getByText(/Arrastra o haz clic para seleccionar imagen o video/i)
+      await act(async () => {
+        fireEvent.drop(dropzone, { dataTransfer: { files: [file] } })
+      })
+
+      // Click Quitar
+      const removeBtn = screen.getByText("Quitar")
+      await act(async () => {
+        fireEvent.click(removeBtn)
+      })
+
+      expect(deleteMediaSpy).toHaveBeenCalledWith("cover-transient-to-remove")
+      expect(screen.queryByAltText("Portada de actualización")).toBeNull()
+    })
+
+    it("25. close modal transient cleanup: upload A -> cerrar modal -> deleteContentMedia se llama para A", async () => {
+      const deleteMediaSpy = vi.spyOn(graphqlClient, "deleteContentMedia").mockResolvedValue(true)
+      vi.spyOn(mediaUploadService, "uploadMediaFile").mockResolvedValue({
+        id: "cover-transient-on-close",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 4096,
+        url: "http://localhost/media/content/cover-transient-on-close",
+        createdAt: new Date().toISOString(),
+      })
+
+      const onClose = vi.fn()
+      const { unmount } = render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={onClose}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      // Upload Cover
+      const file = new File(["dummy"], "cover.png", { type: "image/png" })
+      const dropzone = screen.getByText(/Arrastra o haz clic para seleccionar imagen o video/i)
+      await act(async () => {
+        fireEvent.drop(dropzone, { dataTransfer: { files: [file] } })
+      })
+
+      // Cancel button
+      const cancelBtn = screen.getByText("Cancelar")
+      await act(async () => {
+        fireEvent.click(cancelBtn)
+      })
+
+      expect(onClose).toHaveBeenCalled()
+      expect(deleteMediaSpy).toHaveBeenCalledWith("cover-transient-on-close")
+
+      unmount()
+    })
+
+    it("26. review freshness: Step 2 y Step 3 cargan overview fresco y muestran datos en vivo", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({
+        ...mockDraftRelease,
+        version: "1.0.1",
+      })
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: {
+          ...mockDraftRelease,
+          version: "1.0.1",
+          files: [
+            ...mockDraftRelease.files,
+            {
+              id: "fresh-live-file",
+              name: "fresh-mod.jar",
+              logicalPath: "mods/fresh-mod.jar",
+              category: "MOD",
+              sha256: "fresh-sha",
+              sizeBytes: 1234,
+              policy: "MODIFICABLE",
+              explicitPolicy: null,
+              effectivePolicy: "MODIFICABLE",
+              isInherited: true,
+              isDirectory: false,
+              changeStatus: "ADDED",
+              sourceProvider: "MODRINTH",
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        },
+        changes: {
+          added: 2,
+          updated: 1,
+          removed: 1,
+          unchanged: 1,
+          total: 5,
+        },
+        readiness: mockReadiness,
+        draftFingerprint: "fingerprint-fresh-123",
+        pendingChangesCount: 4,
+      })
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      // Step 1 -> Step 2
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+
+      // Verify overview was refreshed and fresh data rendered in Step 2
+      expect(overviewSpy).toHaveBeenCalled()
+      expect(screen.getByText("+2 añadidos")).toBeDefined()
+      expect(screen.getByText("fresh-mod.jar")).toBeDefined()
+    })
+
+    it("27. failure to refresh overview in Step 3 blocks advance and displays error without silent catch", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview")
+
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      // Step 1 -> Step 2
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+
+      // Simulate overview failure when attempting Step 2 -> Step 3
+      overviewSpy.mockRejectedValueOnce(new Error("Network disconnect on overview"))
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      // Should remain on Step 2 and show error message
+      expect(screen.getByText(/Network disconnect on overview/i)).toBeDefined()
+      expect(screen.queryByText("Versión oficial definitiva")).toBeNull()
+    })
+
+    it("28. post-publication verification failure: si overview post-publish no coincide o falla, muestra error para recargar y NO re-publica", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview")
+
+      // Step 1 -> Step 2
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+
+      // Step 2 -> Step 3
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+
+      const publishSpy = vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
+        ...mockDraftRelease,
+        status: "PUBLISHED",
+        version: "1.0.1",
+      })
+
+      // Post-publish verification returns mismatch / stale version
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: mockPublishedRelease, // still "1.0.0"
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        pendingChangesCount: 2,
+      })
+
+      const onClose = vi.fn()
+      const onPublished = vi.fn()
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={onClose}
+          onPublished={onPublished}
+        />,
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      // Click Publish
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Publicar actualización oficial/i }))
+      })
+
+      expect(publishSpy).toHaveBeenCalledTimes(1)
+      expect(
+        screen.getByText(/La publicación fue procesada, pero no pudo verificarse el estado activo/i),
+      ).toBeDefined()
+      expect(onClose).not.toHaveBeenCalled()
+      expect(onPublished).not.toHaveBeenCalled()
+    })
+
+    it("29. backup timeout via fake timers: backup nunca completa -> timer avanza -> aborta con timeout sin publicar", async () => {
+      vi.useFakeTimers()
+
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+      vi.spyOn(serverApi, "createServerBackup").mockResolvedValue({
+        id: "backup-timeout-1",
+        name: "Pre-release v1.0.1",
+        bytes: 0,
+        isSuccessful: false,
+        isLocked: false,
+        createdAt: new Date().toISOString(),
+        completedAt: null, // Stays in progress forever
+      })
+      vi.spyOn(serverApi, "getServerBackups").mockResolvedValue([
+        {
+          id: "backup-timeout-1",
+          name: "Pre-release v1.0.1",
+          bytes: 0,
+          isSuccessful: false,
+          isLocked: false,
+          createdAt: new Date().toISOString(),
+          completedAt: null,
+        },
+      ])
+      const publishSpy = vi.spyOn(gameApi, "publishGameRelease")
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      // Check backup and publish
+      fireEvent.click(screen.getByRole("checkbox"))
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Publicar actualización oficial/i }))
+        await vi.advanceTimersByTimeAsync(190000)
+      })
+
+      expect(publishSpy).not.toHaveBeenCalled()
+      expect(
+        screen.getByText(/Tiempo de espera agotado al generar la copia de seguridad/i),
+      ).toBeDefined()
+
+      vi.useRealTimers()
     })
   })
 })

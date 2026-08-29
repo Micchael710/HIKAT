@@ -25,8 +25,52 @@ import {
   getContentMediaById,
   getContentMediaByIds,
   formatMediaGql,
+  deleteMedia,
 } from "../mediaService"
 import type { Env } from "../../types"
+
+/**
+ * Deterministically computes SHA-256 fingerprint representing the current draft state and its files.
+ */
+export async function computeDraftFingerprint(
+  draft: schema.GameRelease,
+  files: schema.GameReleaseFile[],
+): Promise<string> {
+  const sortedFiles = [...files].sort((a, b) => a.logicalPath.localeCompare(b.logicalPath))
+  const serializedFiles = sortedFiles
+    .map((f) =>
+      [
+        f.id,
+        f.logicalPath,
+        f.sha256,
+        f.sizeBytes,
+        f.policy || "",
+        f.category,
+        f.isDirectory ? "1" : "0",
+        f.sourceProvider || "",
+        f.sourceProjectId || "",
+        f.sourceVersionId || "",
+        f.sourceFileId || "",
+        f.sourceEnvironment || "",
+      ].join(":"),
+    )
+    .join("|")
+
+  const raw = [
+    draft.id,
+    draft.version,
+    draft.notes || "",
+    draft.coverMediaId || "",
+    draft.minecraftVersion,
+    draft.neoForgeVersion,
+    serializedFiles,
+  ].join("#")
+
+  const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw))
+  return Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+}
 
 /**
  * Builds a directory explicit policy map from release records and computes effective policy for each record.
@@ -249,20 +293,25 @@ export async function validateDraftReadiness(
   }
 
   // 3. Verify object existence in R2 strictly for real files (skipping directory records)
-  if (env.ASSETS) {
-    for (const f of realFiles) {
-      try {
-        const head = await env.ASSETS.head(f.objectKey)
-        if (!head) {
+  if (realFiles.length > 0) {
+    if (!env.ASSETS) {
+      storageVerified = false
+      issues.push("El almacenamiento de archivos no está disponible.")
+    } else {
+      for (const f of realFiles) {
+        try {
+          const head = await env.ASSETS.head(f.objectKey)
+          if (!head) {
+            storageVerified = false
+            issues.push(`El archivo "${f.name}" no se encontró en el almacenamiento.`)
+          } else if (head.size !== f.sizeBytes) {
+            storageVerified = false
+            issues.push(`El tamaño en almacenamiento de "${f.name}" no coincide.`)
+          }
+        } catch {
           storageVerified = false
-          issues.push(`El archivo "${f.name}" no se encontró en el almacenamiento.`)
-        } else if (head.size !== f.sizeBytes) {
-          storageVerified = false
-          issues.push(`El tamaño en almacenamiento de "${f.name}" no coincide.`)
+          issues.push(`Error al verificar almacenamiento de "${f.name}".`)
         }
-      } catch {
-        storageVerified = false
-        issues.push(`Error al verificar almacenamiento de "${f.name}".`)
       }
     }
   }
@@ -362,6 +411,7 @@ export async function getAdminGameOverview(
   let pendingChangesCount = 0
   let changes: GameDraftChangesGql | null = null
   let readiness: GameDraftReadinessGql | null = null
+  let draftFingerprint: string | null = null
 
   if (draft) {
     const draftFiles = await db
@@ -373,6 +423,7 @@ export async function getAdminGameOverview(
     const changeAnalysis = computeDraftChanges(publishedFiles, draftFiles)
     changes = changeAnalysis.changes
     readiness = await validateDraftReadiness(env, draft, draftFiles, db)
+    draftFingerprint = await computeDraftFingerprint(draft, draftFiles)
 
     const draftCover = draft.coverMediaId ? coverMediaMap.get(draft.coverMediaId) : null
     draftGql = formatGameRelease(draft, draftFiles, changeAnalysis.taggedFiles, draftCover, env, request)
@@ -385,6 +436,7 @@ export async function getAdminGameOverview(
     pendingChangesCount,
     changes,
     readiness,
+    draftFingerprint,
   }
 }
 
@@ -610,10 +662,25 @@ export async function updateGameDraftMetadata(
     targetCover = (await getContentMediaById(db, draft.coverMediaId)) || null
   }
 
+  const previousCoverMediaId = draft.coverMediaId
+
   await db
     .update(schema.gameReleases)
     .set(updates)
     .where(eq(schema.gameReleases.id, draft.id))
+
+  // Clean up previous cover media if replaced and no longer referenced
+  if (
+    previousCoverMediaId &&
+    updates.coverMediaId !== undefined &&
+    updates.coverMediaId !== previousCoverMediaId
+  ) {
+    try {
+      await deleteMedia(db, env, previousCoverMediaId)
+    } catch {
+      // Media is still in use by other entities, which is expected
+    }
+  }
 
   const updatedDraft = await db
     .select()
@@ -649,6 +716,8 @@ export async function discardGameDraft(db: Database, env?: Env): Promise<boolean
     .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
     .all()
 
+  const oldCoverMediaId = draft.coverMediaId
+
   // Cascade delete removes gameReleaseFiles belonging to the draft
   await db.delete(schema.gameReleases).where(eq(schema.gameReleases.id, draft.id))
 
@@ -669,6 +738,15 @@ export async function discardGameDraft(db: Database, env?: Env): Promise<boolean
           // Ignore cleanup errors
         }
       }
+    }
+  }
+
+  // Safely clean up orphaned cover media if not referenced elsewhere
+  if (oldCoverMediaId && env) {
+    try {
+      await deleteMedia(db, env, oldCoverMediaId)
+    } catch {
+      // Media is still in use by other releases / entities, preserve it
     }
   }
 
@@ -751,7 +829,18 @@ export async function publishGameRelease(
     throw createGraphQLError(`No se puede publicar la actualización: ${errorMsg}`, "VALIDATION_ERROR")
   }
 
-  // 7. Check for existing version collision
+  // 7. Authoritative Review Fingerprint Validation
+  if (input.expectedDraftFingerprint) {
+    const currentFingerprint = await computeDraftFingerprint(draft, draftFiles)
+    if (input.expectedDraftFingerprint !== currentFingerprint) {
+      throw createGraphQLError(
+        "El borrador cambió después de ser revisado. Revisa los cambios nuevamente antes de publicar.",
+        "CONFLICT",
+      )
+    }
+  }
+
+  // 8. Check for existing version collision
   const existingVersion = await db
     .select()
     .from(schema.gameReleases)
@@ -764,8 +853,8 @@ export async function publishGameRelease(
 
   const now = new Date().toISOString()
 
-  // 8. ATOMIC PUBLICATION:
-  // Execute both queries atomically in a single D1 batch
+  // 9. ATOMIC CONCURRENT PUBLICATION:
+  // Execute both queries atomically in a single D1 batch with strict draft status preconditions
   await db.batch([
     db
       .update(schema.gameReleases)
@@ -773,7 +862,12 @@ export async function publishGameRelease(
         status: "ARCHIVED",
         updatedAt: now,
       })
-      .where(eq(schema.gameReleases.status, "PUBLISHED")),
+      .where(
+        and(
+          eq(schema.gameReleases.status, "PUBLISHED"),
+          sql`EXISTS (SELECT 1 FROM game_releases WHERE id = ${draft.id} AND status = 'DRAFT')`,
+        ),
+      ),
     db
       .update(schema.gameReleases)
       .set({
@@ -784,17 +878,31 @@ export async function publishGameRelease(
         publishedAt: now,
         updatedAt: now,
       })
-      .where(eq(schema.gameReleases.id, draft.id)),
+      .where(
+        and(
+          eq(schema.gameReleases.id, draft.id),
+          eq(schema.gameReleases.status, "DRAFT"),
+        ),
+      ),
   ])
 
   const published = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.id, draft.id))
+    .where(
+      and(
+        eq(schema.gameReleases.id, draft.id),
+        eq(schema.gameReleases.status, "PUBLISHED"),
+        eq(schema.gameReleases.publishedAt, now),
+      ),
+    )
     .get()
 
   if (!published) {
-    throw createGraphQLError("Error al publicar la actualización.", "INTERNAL_ERROR")
+    throw createGraphQLError(
+      "El borrador ya fue publicado o procesado por otra solicitud.",
+      "CONFLICT",
+    )
   }
 
   return formatGameRelease(published, draftFiles, undefined, targetCoverMedia, env, request)

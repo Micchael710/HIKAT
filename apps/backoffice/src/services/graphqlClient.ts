@@ -1370,6 +1370,7 @@ export const gameApi = {
             storageVerified
             issues
           }
+          draftFingerprint
         }
       }
     `

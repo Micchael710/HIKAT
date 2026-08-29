@@ -638,6 +638,7 @@ export interface AdminGameOverviewGql {
   pendingChangesCount: number
   changes?: GameDraftChangesGql | null
   readiness?: GameDraftReadinessGql | null
+  draftFingerprint?: string | null
 }
 
 export interface GameFileUploadPayloadGql {
@@ -691,6 +692,7 @@ export interface PublishGameReleaseInputGql {
   version?: string | null
   notes?: string | null
   coverMediaId?: string | null
+  expectedDraftFingerprint?: string | null
 }
 
 // --- Mod Providers Types (Shard 08B) ---

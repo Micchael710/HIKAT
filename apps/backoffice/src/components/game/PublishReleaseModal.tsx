@@ -11,7 +11,7 @@ import {
   suggestNextPatchVersion,
   formatBytesToHuman,
 } from "@hikat/shared"
-import { gameApi, serverApi } from "../../services/graphqlClient"
+import { gameApi, serverApi, graphqlClient } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
 import {
   IconCross,
@@ -40,6 +40,9 @@ interface PublishReleaseModalProps {
 type Step = 1 | 2 | 3
 type ChangeFilter = "ALL" | "ADDED" | "UPDATED" | "REMOVED"
 
+export const BACKUP_POLL_INTERVAL_MS = 2000
+export const BACKUP_TIMEOUT_MS = 180000 // 3 minutes
+
 export default function PublishReleaseModal({
   theme,
   draftRelease,
@@ -54,6 +57,12 @@ export default function PublishReleaseModal({
   // Step wizard state
   const [currentStep, setCurrentStep] = useState<Step>(1)
 
+  // Live draft state (freshened on step transitions)
+  const [currentDraft, setCurrentDraft] = useState<GameRelease>(draftRelease)
+  const [currentChanges, setCurrentChanges] = useState<GameDraftChanges | null>(changes || null)
+  const [currentReadiness, setCurrentReadiness] = useState<GameDraftReadiness | null>(initialReadiness || null)
+  const [currentFingerprint, setCurrentFingerprint] = useState<string | null>(null)
+
   // Step 1: Details state
   const initialVersion =
     draftRelease.version && !draftRelease.version.startsWith("draft-")
@@ -64,7 +73,14 @@ export default function PublishReleaseModal({
   const [cover, setCover] = useState<ContentMedia | null>(draftRelease.cover || null)
   const [coverMediaId, setCoverMediaId] = useState<string | null>(draftRelease.coverMediaId || null)
 
-  // Cover upload state
+  // Cover upload and orphan compensation lifecycle tracking
+  const initialCoverRef = useRef<{ id: string | null; cover: ContentMedia | null }>({
+    id: draftRelease.coverMediaId || null,
+    cover: draftRelease.cover || null,
+  })
+  const transientMediaIdsRef = useRef<Set<string>>(new Set())
+  const isPublishedRef = useRef(false)
+
   const [isCoverUploading, setIsCoverUploading] = useState(false)
   const [coverUploadError, setCoverUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -77,15 +93,39 @@ export default function PublishReleaseModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitStatusText, setSubmitStatusText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [liveReadiness, setLiveReadiness] = useState<GameDraftReadiness | null>(initialReadiness || null)
 
   const isMountedRef = useRef(true)
+
+  const cleanupTransientMedia = async (mediaId: string) => {
+    try {
+      await graphqlClient.deleteContentMedia(mediaId)
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
   useEffect(() => {
     isMountedRef.current = true
     return () => {
       isMountedRef.current = false
+      if (!isPublishedRef.current) {
+        for (const id of Array.from(transientMediaIdsRef.current)) {
+          cleanupTransientMedia(id)
+        }
+      }
     }
   }, [])
+
+  const handleCloseModal = async () => {
+    if (!isPublishedRef.current) {
+      for (const id of Array.from(transientMediaIdsRef.current)) {
+        if (id !== currentDraft.coverMediaId) {
+          cleanupTransientMedia(id)
+        }
+      }
+    }
+    onClose()
+  }
 
   // Cover file selection / drop handler
   const handleCoverFileSelected = async (file: File) => {
@@ -103,6 +143,17 @@ export default function PublishReleaseModal({
     try {
       const uploaded = await uploadMediaFile(file, isImage ? "IMAGE" : "VIDEO")
       if (isMountedRef.current) {
+        // If previous cover was transient, clean it up before switching to new one
+        if (
+          coverMediaId &&
+          coverMediaId !== initialCoverRef.current.id &&
+          transientMediaIdsRef.current.has(coverMediaId)
+        ) {
+          cleanupTransientMedia(coverMediaId)
+          transientMediaIdsRef.current.delete(coverMediaId)
+        }
+
+        transientMediaIdsRef.current.add(uploaded.id)
         setCover(uploaded)
         setCoverMediaId(uploaded.id)
       }
@@ -118,12 +169,20 @@ export default function PublishReleaseModal({
   }
 
   const handleRemoveCover = () => {
+    if (
+      coverMediaId &&
+      coverMediaId !== initialCoverRef.current.id &&
+      transientMediaIdsRef.current.has(coverMediaId)
+    ) {
+      cleanupTransientMedia(coverMediaId)
+      transientMediaIdsRef.current.delete(coverMediaId)
+    }
     setCover(null)
     setCoverMediaId(null)
     setCoverUploadError(null)
   }
 
-  // Navigate to Step 2 with validation & metadata persistence
+  // Navigate to Step 2 with validation, metadata persistence & fresh overview request
   const handleGoToStep2 = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     setError(null)
@@ -139,44 +198,71 @@ export default function PublishReleaseModal({
       return
     }
 
-    // Persist draft metadata
     try {
       await gameApi.updateGameDraftMetadata({
         version: trimmedVersion,
         notes: notes.trim() || null,
         coverMediaId: coverMediaId || null,
       })
-      // Refresh readiness
+
+      // Fetch fresh live overview
       const overview = await gameApi.getAdminGameOverview()
+      if (!overview.draftRelease) {
+        throw new Error("No se encontró ningún borrador activo.")
+      }
+
       if (isMountedRef.current) {
-        setLiveReadiness(overview.readiness || null)
+        setCurrentDraft(overview.draftRelease)
+        setCurrentChanges(overview.changes || null)
+        setCurrentReadiness(overview.readiness || null)
+        setCurrentFingerprint(overview.draftFingerprint || null)
         setCurrentStep(2)
       }
     } catch (err: any) {
+      // Compensate: If newly uploaded transient cover failed to persist, clean it up
+      if (
+        coverMediaId &&
+        coverMediaId !== initialCoverRef.current.id &&
+        transientMediaIdsRef.current.has(coverMediaId)
+      ) {
+        await cleanupTransientMedia(coverMediaId)
+        transientMediaIdsRef.current.delete(coverMediaId)
+        if (isMountedRef.current) {
+          setCover(initialCoverRef.current.cover)
+          setCoverMediaId(initialCoverRef.current.id)
+        }
+      }
       if (isMountedRef.current) {
         setError(err.message || "Error al guardar los detalles del borrador.")
       }
     }
   }
 
-  // Navigate to Step 3
+  // Navigate to Step 3 with fresh overview request
   const handleGoToStep3 = async () => {
     setError(null)
     try {
       const overview = await gameApi.getAdminGameOverview()
+      if (!overview.draftRelease) {
+        throw new Error("No se encontró ningún borrador activo.")
+      }
+
       if (isMountedRef.current) {
-        setLiveReadiness(overview.readiness || null)
+        setCurrentDraft(overview.draftRelease)
+        setCurrentChanges(overview.changes || null)
+        setCurrentReadiness(overview.readiness || null)
+        setCurrentFingerprint(overview.draftFingerprint || null)
         setCurrentStep(3)
       }
-    } catch {
+    } catch (err: any) {
       if (isMountedRef.current) {
-        setCurrentStep(3)
+        setError(err.message || "No se pudo actualizar el estado del borrador para la confirmación.")
       }
     }
   }
 
-  // Changed files from draft
-  const changedFiles = draftRelease.files.filter(
+  // Changed files from live draft
+  const changedFiles = currentDraft.files.filter(
     (f) => f.changeStatus && f.changeStatus !== "UNCHANGED",
   )
 
@@ -185,9 +271,9 @@ export default function PublishReleaseModal({
     return f.changeStatus === changeFilter
   })
 
-  const isReady = liveReadiness ? liveReadiness.isReady : draftRelease.files.length > 0
+  const isReady = currentReadiness ? currentReadiness.isReady : currentDraft.files.length > 0
 
-  // Optional Backup Polling Logic
+  // Optional Backup Polling Logic with configurable timeout & poll interval
   const executeBackupFlow = async (targetVersion: string): Promise<boolean> => {
     setSubmitStatusText("Iniciando copia de seguridad del servidor...")
     const backupName = `Pre-release v${targetVersion}`
@@ -197,15 +283,12 @@ export default function PublishReleaseModal({
       throw new Error("No se pudo iniciar la copia de seguridad.")
     }
 
-    // Poll until completedAt & isSuccessful or timeout (max 60 seconds)
     const backupId = backup.id
     const startTime = Date.now()
-    const timeoutMs = 60000
-    const pollIntervalMs = 1500
 
     setSubmitStatusText("Generando copia de seguridad en Pterodactyl...")
 
-    while (Date.now() - startTime < timeoutMs) {
+    while (Date.now() - startTime < BACKUP_TIMEOUT_MS) {
       const backupsList = await serverApi.getServerBackups()
       const found = backupsList.find((b) => b.id === backupId)
 
@@ -217,14 +300,14 @@ export default function PublishReleaseModal({
         }
       }
 
-      await new Promise((res) => setTimeout(res, pollIntervalMs))
+      await new Promise((res) => setTimeout(res, BACKUP_POLL_INTERVAL_MS))
       if (!isMountedRef.current) return false
     }
 
-    throw new Error("Tiempo de espera agotado al generar la copia de seguridad.")
+    throw new Error("Tiempo de espera agotado al generar la copia de seguridad. La actualización no fue publicada.")
   }
 
-  // Final Publication Handler
+  // Final Publication Handler with review fingerprint & post-publication verification
   const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isSubmitting) return
@@ -237,9 +320,9 @@ export default function PublishReleaseModal({
       return
     }
 
-    if (liveReadiness && !liveReadiness.isReady) {
-      const issueMsg = liveReadiness.issues.length
-        ? liveReadiness.issues.join(". ")
+    if (currentReadiness && !currentReadiness.isReady) {
+      const issueMsg = currentReadiness.issues.length
+        ? currentReadiness.issues.join(". ")
         : "El borrador no está listo para publicar."
       setError(`No se puede publicar la actualización: ${issueMsg}`)
       return
@@ -265,8 +348,27 @@ export default function PublishReleaseModal({
         version: trimmedVersion,
         notes: notes.trim() || null,
         coverMediaId: coverMediaId || null,
+        expectedDraftFingerprint: currentFingerprint || undefined,
       })
 
+      // 3. Post-publication verification
+      setSubmitStatusText("Verificando publicación en vivo...")
+      try {
+        const verifyOverview = await gameApi.getAdminGameOverview()
+        if (
+          verifyOverview.publishedRelease?.version !== trimmedVersion ||
+          verifyOverview.draftRelease?.id === currentDraft.id
+        ) {
+          throw new Error("Verification mismatch")
+        }
+      } catch {
+        setError(
+          "La publicación fue procesada, pero no pudo verificarse el estado activo. Recarga la página antes de intentar nuevamente.",
+        )
+        return
+      }
+
+      isPublishedRef.current = true
       onPublished(trimmedVersion, published.files.length)
       onClose()
     } catch (err: any) {
@@ -351,7 +453,7 @@ export default function PublishReleaseModal({
               </h2>
             </div>
             <button
-              onClick={onClose}
+              onClick={handleCloseModal}
               disabled={isSubmitting}
               style={{
                 background: "none",
@@ -464,7 +566,7 @@ export default function PublishReleaseModal({
                     Minecraft
                   </span>
                   <div style={{ fontSize: "15px", fontWeight: "700", color: isDark ? "#f1f5f9" : "#0f172a", marginTop: "2px" }}>
-                    {draftRelease.minecraftVersion} <span style={{ fontSize: "11px", fontWeight: "500", color: isDark ? "#64748b" : "#94a3b8" }}>(Borrador)</span>
+                    {currentDraft.minecraftVersion} <span style={{ fontSize: "11px", fontWeight: "500", color: isDark ? "#64748b" : "#94a3b8" }}>(Borrador)</span>
                   </div>
                 </div>
                 <div>
@@ -472,7 +574,7 @@ export default function PublishReleaseModal({
                     NeoForge
                   </span>
                   <div style={{ fontSize: "15px", fontWeight: "700", color: isDark ? "#f1f5f9" : "#0f172a", marginTop: "2px" }}>
-                    {draftRelease.neoForgeVersion} <span style={{ fontSize: "11px", fontWeight: "500", color: isDark ? "#64748b" : "#94a3b8" }}>(Borrador)</span>
+                    {currentDraft.neoForgeVersion} <span style={{ fontSize: "11px", fontWeight: "500", color: isDark ? "#64748b" : "#94a3b8" }}>(Borrador)</span>
                   </div>
                 </div>
               </div>
@@ -558,6 +660,18 @@ export default function PublishReleaseModal({
                 >
                   Portada de la actualización (opcional)
                 </label>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,video/mp4,video/webm"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      handleCoverFileSelected(e.target.files[0])
+                    }
+                  }}
+                />
 
                 {cover ? (
                   /* Preview Card */
@@ -663,18 +777,6 @@ export default function PublishReleaseModal({
                       cursor: isCoverUploading ? "not-allowed" : "pointer",
                     }}
                   >
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,video/mp4,video/webm"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        if (e.target.files?.[0]) {
-                          handleCoverFileSelected(e.target.files[0])
-                        }
-                      }}
-                    />
-
                     {isCoverUploading ? (
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
                         <IconSpinner size={24} />
@@ -717,7 +819,7 @@ export default function PublishReleaseModal({
               >
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleCloseModal}
                   style={{
                     padding: "9px 16px",
                     borderRadius: "8px",
@@ -755,7 +857,7 @@ export default function PublishReleaseModal({
           {currentStep === 2 && (
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
               {/* Change Summary Card */}
-              {changes && (
+              {currentChanges && (
                 <div
                   style={{
                     padding: "14px 18px",
@@ -778,16 +880,16 @@ export default function PublishReleaseModal({
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
                     <span style={{ fontSize: "14px", fontWeight: "700", color: "#22c55e" }}>
-                      +{changes.added} añadidos
+                      +{currentChanges.added} añadidos
                     </span>
                     <span style={{ fontSize: "14px", fontWeight: "700", color: "#38bdf8" }}>
-                      ↑ {changes.updated} actualizados
+                      ↑ {currentChanges.updated} actualizados
                     </span>
                     <span style={{ fontSize: "14px", fontWeight: "700", color: "#ef4444" }}>
-                      − {changes.removed} eliminados
+                      − {currentChanges.removed} eliminados
                     </span>
                     <span style={{ fontSize: "14px", color: isDark ? "#94a3b8" : "#64748b" }}>
-                      = {changes.unchanged} sin cambios
+                      = {currentChanges.unchanged} sin cambios
                     </span>
                   </div>
                 </div>
@@ -798,9 +900,9 @@ export default function PublishReleaseModal({
                 {(
                   [
                     { key: "ALL", label: `Todos los cambios (${changedFiles.length})` },
-                    { key: "ADDED", label: `Añadidos (+${changes?.added || 0})` },
-                    { key: "UPDATED", label: `Actualizados (↑${changes?.updated || 0})` },
-                    { key: "REMOVED", label: `Eliminados (−${changes?.removed || 0})` },
+                    { key: "ADDED", label: `Añadidos (+${currentChanges?.added || 0})` },
+                    { key: "UPDATED", label: `Actualizados (↑${currentChanges?.updated || 0})` },
+                    { key: "REMOVED", label: `Eliminados (−${currentChanges?.removed || 0})` },
                   ] as const
                 ).map((tab) => (
                   <button
@@ -963,9 +1065,9 @@ export default function PublishReleaseModal({
               </div>
 
               {/* Unchanged summary notice */}
-              {changes && changes.unchanged > 0 && (
+              {currentChanges && currentChanges.unchanged > 0 && (
                 <div style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b", textAlign: "center" }}>
-                  ✓ {changes.unchanged} archivos permanecen sin cambios respecto a la versión oficial anterior.
+                  ✓ {currentChanges.unchanged} archivos permanecen sin cambios respecto a la versión oficial anterior.
                 </div>
               )}
 
@@ -1041,7 +1143,7 @@ export default function PublishReleaseModal({
                       Entorno
                     </span>
                     <div style={{ fontSize: "13px", fontWeight: "600", color: isDark ? "#cbd5e1" : "#334155" }}>
-                      MC {draftRelease.minecraftVersion} • NeoForge {draftRelease.neoForgeVersion}
+                      MC {currentDraft.minecraftVersion} • NeoForge {currentDraft.neoForgeVersion}
                     </div>
                   </div>
                 </div>
@@ -1070,7 +1172,7 @@ export default function PublishReleaseModal({
                 </div>
 
                 {/* Change Counters Pill */}
-                {changes && (
+                {currentChanges && (
                   <div
                     style={{
                       display: "flex",
@@ -1080,10 +1182,10 @@ export default function PublishReleaseModal({
                       fontSize: "12px",
                     }}
                   >
-                    <span style={{ color: "#22c55e", fontWeight: "600" }}>+{changes.added} añadidos</span>
-                    <span style={{ color: "#38bdf8", fontWeight: "600" }}>↑ {changes.updated} actualizados</span>
-                    <span style={{ color: "#ef4444", fontWeight: "600" }}>− {changes.removed} eliminados</span>
-                    <span style={{ color: isDark ? "#94a3b8" : "#64748b" }}>{changes.total} archivos totales</span>
+                    <span style={{ color: "#22c55e", fontWeight: "600" }}>+{currentChanges.added} añadidos</span>
+                    <span style={{ color: "#38bdf8", fontWeight: "600" }}>↑ {currentChanges.updated} actualizados</span>
+                    <span style={{ color: "#ef4444", fontWeight: "600" }}>− {currentChanges.removed} eliminados</span>
+                    <span style={{ color: isDark ? "#94a3b8" : "#64748b" }}>{currentChanges.total} archivos totales</span>
                   </div>
                 )}
               </div>
@@ -1102,26 +1204,26 @@ export default function PublishReleaseModal({
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px" }}>
-                  <div style={{ color: liveReadiness?.validVersion ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                    {liveReadiness?.validVersion ? "✓" : "✗"} Versión SemVer válida
+                  <div style={{ color: currentReadiness?.validVersion ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
+                    {currentReadiness?.validVersion ? "✓" : "✗"} Versión SemVer válida
                   </div>
-                  <div style={{ color: liveReadiness?.uniqueVersion ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                    {liveReadiness?.uniqueVersion ? "✓" : "✗"} Versión disponible
+                  <div style={{ color: currentReadiness?.uniqueVersion ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
+                    {currentReadiness?.uniqueVersion ? "✓" : "✗"} Versión disponible
                   </div>
-                  <div style={{ color: liveReadiness?.hasFiles ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                    {liveReadiness?.hasFiles ? "✓" : "✗"} Archivos descargables
+                  <div style={{ color: currentReadiness?.hasFiles ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
+                    {currentReadiness?.hasFiles ? "✓" : "✗"} Archivos descargables
                   </div>
-                  <div style={{ color: liveReadiness?.noConflicts ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                    {liveReadiness?.noConflicts ? "✓" : "✗"} Sin conflictos de ruta
+                  <div style={{ color: currentReadiness?.noConflicts ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
+                    {currentReadiness?.noConflicts ? "✓" : "✗"} Sin conflictos de ruta
                   </div>
-                  <div style={{ color: liveReadiness?.storageVerified ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                    {liveReadiness?.storageVerified ? "✓" : "✗"} Almacenamiento R2 verificado
+                  <div style={{ color: currentReadiness?.storageVerified ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
+                    {currentReadiness?.storageVerified ? "✓" : "✗"} Almacenamiento R2 verificado
                   </div>
                 </div>
 
-                {liveReadiness?.issues && liveReadiness.issues.length > 0 && (
+                {currentReadiness?.issues && currentReadiness.issues.length > 0 && (
                   <div style={{ marginTop: "10px", fontSize: "12px", color: "#ef4444" }}>
-                    {liveReadiness.issues.join(". ")}
+                    {currentReadiness.issues.join(". ")}
                   </div>
                 )}
               </div>
@@ -1220,7 +1322,7 @@ export default function PublishReleaseModal({
                 <div style={{ display: "flex", gap: "10px" }}>
                   <button
                     type="button"
-                    onClick={onClose}
+                    onClick={handleCloseModal}
                     disabled={isSubmitting}
                     style={{
                       padding: "9px 16px",

@@ -440,6 +440,7 @@ export interface PublishGameReleaseInput {
   version?: string | null
   notes?: string | null
   coverMediaId?: string | null
+  expectedDraftFingerprint?: string | null
 }
 
 export interface GameRelease {
@@ -478,6 +479,8 @@ export interface AdminGameOverview {
   changes?: GameDraftChanges | null
 
   readiness?: GameDraftReadiness | null
+
+  draftFingerprint?: string | null
 }
 
 // --- Settings Types (Shard 06.5) ---

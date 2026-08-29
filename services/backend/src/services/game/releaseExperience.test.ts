@@ -616,10 +616,153 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
       // Restored db.batch
       vi.restoreAllMocks()
     })
+
+    it("34. concurrent publish guard: segunda publicación sobre el mismo draft falla con CONFLICT y deja exactamente un PUBLISHED", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      await saveGameFileContent(db, { logicalPath: "config/app.toml", content: "server = 1" }, adminId, env)
+      await updateGameDraftMetadata(db, env, { version: "1.0.0" }, adminId)
+
+      // Request A publishes first
+      const publishedA = await publishGameRelease(db, env, { version: "1.0.0" }, adminId)
+      expect(publishedA.status).toBe("PUBLISHED")
+
+      // Request B attempts stale/concurrent publish of the same draft
+      await expect(
+        publishGameRelease(db, env, { version: "1.0.0" }, adminId),
+      ).rejects.toThrow(/No hay ningún borrador|El borrador ya fue publicado/i)
+
+      // Verify that EXACTLY 1 PUBLISHED exists and is the result of A
+      const allReleases = await db.select().from(schema.gameReleases).all()
+      const publishedReleases = allReleases.filter((r) => r.status === "PUBLISHED")
+      expect(publishedReleases.length).toBe(1)
+      expect(publishedReleases[0]?.id).toBe(draft.id)
+      expect(publishedReleases[0]?.version).toBe("1.0.0")
+    })
   })
 
-  describe("6. Scope Discipline & Invariant Preservation", () => {
-    it("34. DATA_PACK continúa fuera de publishedModpack.clientFiles", async () => {
+  describe("6. Hardening: Storage Fail-Closed, Orphan Compensation & Review Fingerprint", () => {
+    it("35. archivo real + ASSETS undefined -> storageVerified=false, isReady=false", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      await updateGameDraftMetadata(db, env, { version: "2.0.0" }, adminId)
+      await saveGameFileContent(db, { logicalPath: "config/real.toml", content: "data = 1" }, adminId, env)
+
+      const draftFiles = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft.id)).all()
+      const updatedDraft = (await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft.id)).get())!
+
+      // Env without ASSETS
+      const envWithoutAssets: Env = {
+        DB: env.DB,
+        ENVIRONMENT: "test",
+      }
+
+      const readiness = await validateDraftReadiness(envWithoutAssets, updatedDraft, draftFiles, db)
+      expect(readiness.storageVerified).toBe(false)
+      expect(readiness.isReady).toBe(false)
+      expect(readiness.issues.some((i) => i.includes("almacenamiento de archivos no está disponible"))).toBe(true)
+    })
+
+    it("36. discardGameDraft limpia cover huérfana de D1 y R2 si no está referenciada en otro lugar", async () => {
+      const coverId = await createMockMedia("IMAGE", "image/png")
+      await mockR2.put(`content/media/${coverId}.png`, new Uint8Array(2048))
+
+      await prepareGameDraft(db, adminId)
+      await updateGameDraftMetadata(db, env, { coverMediaId: coverId }, adminId)
+
+      // Discard draft
+      const discarded = await discardGameDraft(db, env)
+      expect(discarded).toBe(true)
+
+      // Verify cover media is deleted from D1 and R2
+      const mediaInDb = await db.select().from(schema.contentMedia).where(eq(schema.contentMedia.id, coverId)).get()
+      expect(mediaInDb).toBeUndefined()
+
+      const r2Object = await mockR2.head(`content/media/${coverId}.png`)
+      expect(r2Object).toBeNull()
+    })
+
+    it("37. discardGameDraft preserva cover si está compartida con release PUBLISHED o ARCHIVED", async () => {
+      const sharedCoverId = await createMockMedia("IMAGE", "image/png")
+      await mockR2.put(`content/media/${sharedCoverId}.png`, new Uint8Array(2048))
+
+      // 1. Create and publish release v1.0.0 using sharedCoverId
+      await prepareGameDraft(db, adminId)
+      await saveGameFileContent(db, { logicalPath: "config/a.toml", content: "a = 1" }, adminId, env)
+      await publishGameRelease(db, env, { version: "1.0.0", coverMediaId: sharedCoverId }, adminId)
+
+      // 2. Create new draft that inherits sharedCoverId
+      await prepareGameDraft(db, adminId)
+
+      // 3. Discard the draft
+      await discardGameDraft(db, env)
+
+      // 4. Verify shared cover STILL exists in D1 and R2 because it is used by v1.0.0
+      const mediaInDb = await db.select().from(schema.contentMedia).where(eq(schema.contentMedia.id, sharedCoverId)).get()
+      expect(mediaInDb).toBeDefined()
+      expect(mediaInDb?.id).toBe(sharedCoverId)
+
+      const r2Object = await mockR2.head(`content/media/${sharedCoverId}.png`)
+      expect(r2Object).not.toBeNull()
+    })
+
+    it("38. updateGameDraftMetadata reemplazando cover limpia la anterior huérfana", async () => {
+      const oldCoverId = await createMockMedia("IMAGE", "image/png")
+      const newCoverId = await createMockMedia("IMAGE", "image/webp")
+      await mockR2.put(`content/media/${oldCoverId}.png`, new Uint8Array(2048))
+      await mockR2.put(`content/media/${newCoverId}.webp`, new Uint8Array(2048))
+
+      await prepareGameDraft(db, adminId)
+      await updateGameDraftMetadata(db, env, { coverMediaId: oldCoverId }, adminId)
+
+      // Replace old cover with new cover
+      await updateGameDraftMetadata(db, env, { coverMediaId: newCoverId }, adminId)
+
+      // Old cover should be deleted
+      const oldMedia = await db.select().from(schema.contentMedia).where(eq(schema.contentMedia.id, oldCoverId)).get()
+      expect(oldMedia).toBeUndefined()
+
+      // New cover remains
+      const newMedia = await db.select().from(schema.contentMedia).where(eq(schema.contentMedia.id, newCoverId)).get()
+      expect(newMedia).toBeDefined()
+    })
+
+    it("39. review fingerprint: publish con fingerprint correcto publica; con fingerprint cambiado rechaza con CONFLICT", async () => {
+      await prepareGameDraft(db, adminId)
+      await saveGameFileContent(db, { logicalPath: "config/base.toml", content: "b = 1" }, adminId, env)
+      await updateGameDraftMetadata(db, env, { version: "1.0.0" }, adminId)
+
+      const overview = await getAdminGameOverview(db, env)
+      expect(overview.draftFingerprint).toBeDefined()
+      const reviewedFingerprint = overview.draftFingerprint!
+
+      // 1. Modifying draft file changes fingerprint -> publication with stale fingerprint fails
+      await saveGameFileContent(db, { logicalPath: "config/new.toml", content: "n = 1" }, adminId, env)
+
+      await expect(
+        publishGameRelease(
+          db,
+          env,
+          { version: "1.0.0", expectedDraftFingerprint: reviewedFingerprint },
+          adminId,
+        ),
+      ).rejects.toThrow(/El borrador cambió después de ser revisado/i)
+
+      // 2. Fetch fresh fingerprint and publish successfully
+      const freshOverview = await getAdminGameOverview(db, env)
+      const freshFingerprint = freshOverview.draftFingerprint!
+
+      const published = await publishGameRelease(
+        db,
+        env,
+        { version: "1.0.0", expectedDraftFingerprint: freshFingerprint },
+        adminId,
+      )
+
+      expect(published.status).toBe("PUBLISHED")
+    })
+  })
+
+  describe("7. Scope Discipline & Invariant Preservation", () => {
+    it("40. DATA_PACK continúa fuera de publishedModpack.clientFiles", async () => {
       await prepareGameDraft(db, adminId)
       await saveGameFileContent(db, { logicalPath: "config/client.json", content: "{}" }, adminId, env)
       await saveGameFileContent(db, { logicalPath: "datapacks/custom/pack.mcmeta", content: '{"pack":{}}' }, adminId, env)
@@ -632,7 +775,7 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
       expect(modpack?.clientFiles.some((f) => f.path.includes("datapacks"))).toBe(false)
     })
 
-    it("35. metadata provider/source de 8B sigue intacta tras la publicación", async () => {
+    it("41. metadata provider/source de 8B sigue intacta tras la publicación", async () => {
       const draft = await prepareGameDraft(db, adminId)
       const now = new Date().toISOString()
 
@@ -668,7 +811,7 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
       expect(providerMod?.sourceEnvironment).toBe("BOTH")
     })
 
-    it("36. no aparece ningún server-sync side effect durante publish", async () => {
+    it("42. no aparece ningún server-sync side effect durante publish", async () => {
       // Publication is purely a metadata and catalog transition in D1; verify no external network calls or server side effects
       await prepareGameDraft(db, adminId)
       await saveGameFileContent(db, { logicalPath: "config/main.toml", content: "data = 1" }, adminId, env)

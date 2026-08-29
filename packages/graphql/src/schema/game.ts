@@ -194,6 +194,7 @@ export const gameTypeDefs = /* GraphQL */ `
     pendingChangesCount: Int!
     changes: GameDraftChanges
     readiness: GameDraftReadiness
+    draftFingerprint: String
   }
 
   """
@@ -382,6 +383,7 @@ export const gameTypeDefs = /* GraphQL */ `
     version: String
     notes: String
     coverMediaId: ID
+    expectedDraftFingerprint: String
   }
 
   input ModVersionOverrideInput {
