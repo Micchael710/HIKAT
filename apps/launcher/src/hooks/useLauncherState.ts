@@ -13,6 +13,7 @@ import {
   DEFAULT_CAPES,
 } from "../types"
 import { CANVAS_W, MIN_WINDOW_W, hexToRGB } from "../theme/tokens"
+import { useDynamicAccent } from "../utils/dynamicAccent"
 import {
   fetchGlobalSkins,
   fetchMyPlayerSkin,
@@ -348,11 +349,14 @@ export function useLauncherState() {
     return found || allSkins[0] || DEFAULT_SKINS[0]
   }, [allSkins, appliedSkin, playerSkin])
 
-  const activeSkinAccent = useMemo(() => {
-    return hexToRGB(
-      activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8",
-    )
-  }, [activeSkinData])
+  const activeSkinTexture =
+    activeSkinData?.customImgUrl || activeSkinData?.skinUrl
+  const activeSkinFallback =
+    activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8"
+  const activeSkinAccent = useDynamicAccent(
+    activeSkinTexture,
+    activeSkinFallback,
+  )
 
   /**
    * Unified derived capes list

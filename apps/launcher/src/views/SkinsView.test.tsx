@@ -219,4 +219,35 @@ describe("SkinsView Component — Custom Skin & Cape Delete Button Placement", (
     expect(container.textContent).toContain("No Cape")
     expect(container.textContent).not.toContain("Sin Capa")
   })
+
+  it("6. Renders PERSONAL badge on custom items with dynamic accent color", async () => {
+    const container = await renderComponent(
+      <LanguageProvider>
+        <SkinsView
+          username="TestUser"
+          appliedSkin="player-custom"
+          setAppliedSkin={vi.fn()}
+          appliedCape="none"
+          setAppliedCape={vi.fn()}
+          playerSkin={mockCustomSkin}
+          allSkins={[
+            {
+              id: "player-custom",
+              name: "Mi Skin",
+              badge: "CUSTOM",
+              customImgUrl: mockCustomSkin.imageUrl,
+            },
+          ]}
+        />
+      </LanguageProvider>,
+    )
+
+    const personalBadge = container.querySelector(
+      '[data-testid="skin-card-personal-badge"]',
+    ) as HTMLElement
+    expect(personalBadge).not.toBeNull()
+    expect(personalBadge?.style.background).toContain("rgba(")
+    expect(personalBadge?.style.color).toContain("rgb(")
+  })
 })
+

@@ -439,5 +439,23 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     unmount()
   })
+
+  it("Test 10 — activeSkinAccent provides dynamic accent structure for launcher sidebar", async () => {
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.activeSkinAccent).toBeDefined()
+    expect(typeof result.current.activeSkinAccent.r).toBe("number")
+    expect(typeof result.current.activeSkinAccent.g).toBe("number")
+    expect(typeof result.current.activeSkinAccent.b).toBe("number")
+    expect(typeof result.current.activeSkinAccent.hex).toBe("string")
+    expect(typeof result.current.activeSkinAccent.css).toBe("string")
+
+    unmount()
+  })
 })
+
 

@@ -102,23 +102,18 @@ function SkinCapeItemCard({
         {/* Badge if custom */}
         {isCustom && (
           <div
+            data-testid="skin-card-personal-badge"
             style={{
               position: "absolute",
               top: 8,
               right: 8,
-              background:
-                skinType === "capa"
-                  ? "rgba(16, 185, 129, 0.2)"
-                  : "rgba(56, 189, 248, 0.2)",
-              border:
-                skinType === "capa"
-                  ? "1px solid rgba(16, 185, 129, 0.4)"
-                  : "1px solid rgba(56, 189, 248, 0.4)",
+              background: `rgba(${accent.css}, 0.2)`,
+              border: `1px solid rgba(${accent.css}, 0.45)`,
               borderRadius: 6,
               padding: "2px 8px",
               fontSize: 10,
               fontWeight: 800,
-              color: skinType === "capa" ? "#10b981" : "#38bdf8",
+              color: `rgb(${accent.css})`,
               letterSpacing: "0.05em",
               zIndex: 3,
             }}
@@ -867,6 +862,7 @@ export default function SkinsView({
                         ? previewCape?.customImgUrl || previewCape?.capeUrl
                         : undefined
                     }
+                    accentHex={currentAccent.hex}
                     width={380}
                     height={520}
                     isCapeMode={skinType === "capa"}
