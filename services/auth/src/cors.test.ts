@@ -10,7 +10,7 @@ describe("HiKAT Auth Worker CORS Security", () => {
   const devEnv = { ENVIRONMENT: "development" }
   const prodEnv = { ENVIRONMENT: "production" }
 
-  it("permits OPTIONS preflight from http://localhost:5174 in development", () => {
+  it("1. Permits OPTIONS preflight from http://localhost:5174 in development", () => {
     const req = new Request("http://localhost:8788/auth/login", {
       method: "OPTIONS",
       headers: {
@@ -27,7 +27,7 @@ describe("HiKAT Auth Worker CORS Security", () => {
     expect(res.headers.get("Vary")).toBe("Origin")
   })
 
-  it("permits OPTIONS preflight from http://127.0.0.1:5174 in development", () => {
+  it("2. Permits OPTIONS preflight from http://127.0.0.1:5174 in development", () => {
     const req = new Request("http://localhost:8788/auth/login", {
       method: "OPTIONS",
       headers: {
@@ -42,7 +42,37 @@ describe("HiKAT Auth Worker CORS Security", () => {
     expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true")
   })
 
-  it("does NOT include Access-Control-Allow-Origin for unauthorized arbitrary origin", () => {
+  it("3. Permits OPTIONS preflight from Launcher dev server http://localhost:8443 in development", () => {
+    const req = new Request("http://localhost:8788/auth/login", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:8443",
+        "Access-Control-Request-Method": "POST",
+      },
+    })
+
+    const res = handleOptionsRequest(req, devEnv)
+    expect(res.status).toBe(204)
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:8443")
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true")
+    expect(res.headers.get("Vary")).toBe("Origin")
+  })
+
+  it("4. Permits OPTIONS preflight from Launcher dev server http://127.0.0.1:8443 in development", () => {
+    const req = new Request("http://localhost:8788/auth/login", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://127.0.0.1:8443",
+        "Access-Control-Request-Method": "POST",
+      },
+    })
+
+    const res = handleOptionsRequest(req, devEnv)
+    expect(res.status).toBe(204)
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://127.0.0.1:8443")
+  })
+
+  it("5. Rejects unauthorized arbitrary origin by omitting Access-Control-Allow-Origin", () => {
     const req = new Request("http://localhost:8788/auth/login", {
       method: "OPTIONS",
       headers: {
@@ -54,11 +84,11 @@ describe("HiKAT Auth Worker CORS Security", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull()
   })
 
-  it("does NOT permit localhost origins in production unless explicitly configured", () => {
+  it("6. Does NOT permit localhost / 8443 in production unless explicitly configured", () => {
     const req = new Request("https://auth.hikat.org/auth/login", {
       method: "OPTIONS",
       headers: {
-        Origin: "http://localhost:5174",
+        Origin: "http://localhost:8443",
       },
     })
 
@@ -80,7 +110,7 @@ describe("HiKAT Auth Worker CORS Security", () => {
     expect(resExplicit.headers.get("Access-Control-Allow-Origin")).toBe("https://custom-admin.example.com")
   })
 
-  it("permits official production origins in production (e.g. https://admin.hikat.org)", () => {
+  it("7. Permits official production origins in production (e.g. https://admin.hikat.org, https://app.hikat.org)", () => {
     const req = new Request("https://auth.hikat.org/auth/login", {
       method: "OPTIONS",
       headers: {
@@ -93,7 +123,7 @@ describe("HiKAT Auth Worker CORS Security", () => {
     expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true")
   })
 
-  it("preserves CORS headers on Auth error responses when origin is valid", async () => {
+  it("8. Preserves CORS headers on Auth error responses when origin is valid", async () => {
     const rawD1 = createTestD1()
     const db = createDatabase(rawD1)
     const keyManager = await createDevKeyManager()
@@ -103,7 +133,7 @@ describe("HiKAT Auth Worker CORS Security", () => {
     const req = new Request("http://localhost:8788/auth/login", {
       method: "POST",
       headers: {
-        Origin: "http://localhost:5174",
+        Origin: "http://localhost:8443",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ email: "test@hikat.org" }),
@@ -118,7 +148,7 @@ describe("HiKAT Auth Worker CORS Security", () => {
     })
 
     expect(res.status).toBe(400)
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5174")
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:8443")
     expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true")
     expect(res.headers.get("Vary")).toBe("Origin")
   })

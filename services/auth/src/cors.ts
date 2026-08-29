@@ -19,6 +19,8 @@ const DEFAULT_DEV_ORIGINS = [
   "http://127.0.0.1:5173",
   "http://localhost:5174",
   "http://127.0.0.1:5174",
+  "http://localhost:8443",
+  "http://127.0.0.1:8443",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
   "http://localhost:8787",
@@ -26,6 +28,7 @@ const DEFAULT_DEV_ORIGINS = [
   "http://localhost:8788",
   "http://127.0.0.1:8788",
 ]
+
 
 export function getCorsHeaders(request: Request, env: { ENVIRONMENT?: string; CORS_ALLOW_ORIGIN?: string }): HeadersInit {
   const origin = request.headers.get("origin")

@@ -11,12 +11,14 @@
     "lint": "eslint .",
     "format": "oxfmt .",
     "db:generate": "pnpm --filter @hikat/database db:generate",
-    "db:migrate:local": "pnpm --filter @hikat/backend-service exec wrangler d1 migrations apply hikat-d1 --local --persist-to ../../.wrangler/state",
     "local:create-admin": "tsx scripts/createAdmin.ts",
     "dev:auth": "pnpm --filter @hikat/auth-service dev",
     "dev:backend": "pnpm --filter @hikat/backend-service dev",
-    "dev:backoffice": "pnpm --filter hikat-backoffice dev"
+    "dev:backoffice": "pnpm --filter hikat-backoffice dev",
+    "dev:launcher": "node scripts/devLauncher.mjs"
+
   },
+
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "better-sqlite3": "^13.0.3",
