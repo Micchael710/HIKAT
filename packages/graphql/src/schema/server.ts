@@ -211,6 +211,158 @@ export const serverTypeDefs = /* GraphQL */ `
     url: String!
   }
 
+  enum ServerManagedContentSource {
+    SERVER_DIRECT
+    GAME_RELEASE
+  }
+
+  enum ServerManagedContentStatus {
+    INSTALLED
+    UPDATE_AVAILABLE
+    MISSING
+  }
+
+  type ServerManagedContentItem {
+    id: ID!
+    managementSource: String!
+    provider: ModProvider
+    projectId: String
+    versionId: String
+    fileId: String
+    contentType: ContentType!
+    environment: String
+    targetPath: String!
+    sha256: String!
+    sizeBytes: Float!
+    gameReleaseId: String
+    gameReleaseFileId: String
+    status: String!
+    name: String!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type ServerContentSearchPayload {
+    items: [ModSearchResultItem!]!
+    totalCount: Int!
+    providersStatus: [ModProviderStatus!]!
+    minecraftVersion: String!
+    neoForgeVersion: String!
+    isPublishedEnvironment: Boolean!
+  }
+
+  type ServerContentPlanItem {
+    provider: ModProvider!
+    projectId: String!
+    projectName: String!
+    versionId: String!
+    fileId: String
+    versionNumber: String!
+    filename: String!
+    sizeBytes: Float!
+    sha256: String
+    contentType: ContentType!
+    environment: String
+    targetPath: String!
+    isRoot: Boolean!
+    isDependency: Boolean!
+    isRequired: Boolean!
+    isInstalled: Boolean!
+    action: ModPlanAction!
+    installedManagedId: String
+    installedVersionNumber: String
+    availableCompatibleVersions: [ModProjectVersion!]!
+  }
+
+  type ServerContentInstallationPlan {
+    items: [ServerContentPlanItem!]!
+    totalDownloadSizeBytes: Float!
+    conflicts: [String!]!
+    optionalDependencies: [ServerContentPlanItem!]!
+    isValid: Boolean!
+    requiresGameUpdate: Boolean!
+    gameUpdateReason: String
+  }
+
+  input ResolveServerContentPlanInput {
+    provider: ModProvider!
+    projectId: String!
+    versionId: String!
+    contentType: ContentType
+    manualOverrides: [ModVersionOverrideInput!]
+  }
+
+  input InstallServerContentPlanInput {
+    provider: ModProvider!
+    projectId: String!
+    versionId: String!
+    contentType: ContentType
+    manualOverrides: [ModVersionOverrideInput!]
+  }
+
+  enum ServerReleaseSyncPlanAction {
+    INSTALL
+    UPDATE
+    REMOVE
+    KEEP
+  }
+
+  type ServerReleaseSyncPlanItem {
+    action: ServerReleaseSyncPlanAction!
+    filename: String!
+    targetPath: String!
+    sizeBytes: Float!
+    sha256: String!
+    sourceProvider: ModProvider
+    sourceProjectId: String
+    sourceVersionId: String
+    sourceFileId: String
+    gameReleaseFileId: String
+    managedContentId: String
+    currentVersionNumber: String
+    desiredVersionNumber: String
+  }
+
+  type ServerReleaseSyncSummary {
+    toInstall: Int!
+    toUpdate: Int!
+    toRemove: Int!
+    toKeep: Int!
+  }
+
+  type ServerReleaseSyncPlan {
+    releaseId: ID
+    releaseVersion: String
+    isPending: Boolean!
+    items: [ServerReleaseSyncPlanItem!]!
+    summary: ServerReleaseSyncSummary!
+    serverStatus: ServerStatus!
+    canApply: Boolean!
+    blockReason: String
+  }
+
+  enum ServerReleaseSyncStatusEnum {
+    PENDING
+    APPLYING
+    APPLIED
+    FAILED
+  }
+
+  type ServerReleaseSyncStatus {
+    releaseId: ID
+    releaseVersion: String
+    status: ServerReleaseSyncStatusEnum!
+    appliedAt: String
+    details: String
+  }
+
+  type ServerReleaseSyncResult {
+    success: Boolean!
+    message: String!
+    syncedCount: Int!
+    status: ServerReleaseSyncStatusEnum!
+  }
+
   extend type Query {
     """
     Retrieves current server operational status and resource metrics - requires ADMIN role
@@ -251,6 +403,36 @@ export const serverTypeDefs = /* GraphQL */ `
     Reads an allowlisted text file from a sandboxed virtual root - requires ADMIN role
     """
     serverTextFile(root: ServerFileRoot!, relativePath: String!): ServerFileContent!
+
+    """
+    Lists all content tracked as managed on the server - requires ADMIN role
+    """
+    serverManagedContent: [ServerManagedContentItem!]!
+
+    """
+    Searches server-only content (SERVER mods and DATA_PACKs) against published environment - requires ADMIN role
+    """
+    searchServerContent(query: String!, provider: ModProvider, limit: Int, offset: Int, contentType: ContentType): ServerContentSearchPayload!
+
+    """
+    Retrieves details for a server-side project scoped to the published environment - requires ADMIN role
+    """
+    serverContentProjectDetail(provider: ModProvider!, projectId: String!, contentType: ContentType): ModProjectDetail!
+
+    """
+    Resolves dependency plan for installing content directly on the server - requires ADMIN role
+    """
+    resolveServerContentPlan(input: ResolveServerContentPlanInput!): ServerContentInstallationPlan!
+
+    """
+    Computes release synchronization plan comparing published release BOTH mods against server state - requires ADMIN role
+    """
+    serverReleaseSyncPlan: ServerReleaseSyncPlan!
+
+    """
+    Retrieves status of server release synchronization - requires ADMIN role
+    """
+    serverReleaseSyncStatus: ServerReleaseSyncStatus
   }
 
   extend type Mutation {
@@ -378,5 +560,20 @@ export const serverTypeDefs = /* GraphQL */ `
     Generates a signed download URL for a file within a sandboxed virtual root - requires ADMIN role
     """
     createServerFileDownloadUrl(root: ServerFileRoot!, relativePath: String!): ServerSignedUrlPayload!
+
+    """
+    Installs server content (SERVER mod or DATA_PACK) directly on the physical server - requires ADMIN role
+    """
+    installServerContentPlan(input: InstallServerContentPlanInput!): [ServerManagedContentItem!]!
+
+    """
+    Removes server-direct managed content physically and from tracking - requires ADMIN role
+    """
+    removeServerManagedContent(id: ID!): Boolean!
+
+    """
+    Applies release synchronization to server (syncs BOTH mods from published release to server) - requires ADMIN role
+    """
+    applyServerReleaseSync(createBackup: Boolean): ServerReleaseSyncResult!
   }
 `

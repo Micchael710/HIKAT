@@ -2154,6 +2154,339 @@ export const modProvidersApi = {
   },
 }
 
+// --- Server Content & Release Sync API (Shard 08D) ---
+
+export const serverContentApi = {
+  async getServerManagedContent(): Promise<import("../types").ServerManagedContentItem[]> {
+    const query = /* GraphQL */ `
+      query ServerManagedContent {
+        serverManagedContent {
+          id
+          managementSource
+          provider
+          projectId
+          versionId
+          fileId
+          contentType
+          environment
+          targetPath
+          sha256
+          sizeBytes
+          gameReleaseId
+          gameReleaseFileId
+          status
+          name
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ serverManagedContent: import("../types").ServerManagedContentItem[] }>(query)
+    return data.serverManagedContent || []
+  },
+
+  async searchServerContent(
+    query: string,
+    contentType?: import("../types").ContentType | null,
+    provider?: import("../types").ModProvider | null,
+    limit?: number,
+    offset?: number,
+  ): Promise<import("../types").ServerContentSearchPayload> {
+    const gqlQuery = /* GraphQL */ `
+      query SearchServerContent(
+        $query: String!
+        $contentType: ContentType
+        $provider: ModProvider
+        $limit: Int
+        $offset: Int
+      ) {
+        searchServerContent(
+          query: $query
+          contentType: $contentType
+          provider: $provider
+          limit: $limit
+          offset: $offset
+        ) {
+          items {
+            provider
+            projectId
+            slug
+            name
+            summary
+            description
+            author
+            iconUrl
+            downloads
+            follows
+            categories
+            contentType
+            environment
+            latestVersion
+            publishedAt
+            updatedAt
+          }
+          totalCount
+          providersStatus {
+            provider
+            available
+            error
+          }
+          minecraftVersion
+          neoForgeVersion
+          isPublishedEnvironment
+        }
+      }
+    `
+    const data = await executeGraphQL<{ searchServerContent: import("../types").ServerContentSearchPayload }>(gqlQuery, {
+      query,
+      contentType: contentType || "MOD",
+      provider,
+      limit,
+      offset,
+    })
+    return data.searchServerContent
+  },
+
+  async getServerContentProjectDetail(
+    provider: import("../types").ModProvider,
+    projectId: string,
+    contentType?: import("../types").ContentType | null,
+  ): Promise<import("../types").ModProjectDetail> {
+    const gqlQuery = /* GraphQL */ `
+      query ServerContentProjectDetail(
+        $provider: ModProvider!
+        $projectId: String!
+        $contentType: ContentType
+      ) {
+        serverContentProjectDetail(
+          provider: $provider
+          projectId: $projectId
+          contentType: $contentType
+        ) {
+          provider
+          projectId
+          slug
+          name
+          summary
+          description
+          author
+          iconUrl
+          downloads
+          contentType
+          environment
+          compatibleVersions {
+            id
+            fileId
+            versionNumber
+            name
+            releaseType
+            gameVersions
+            loaders
+            publishedAt
+            downloads
+            filename
+            sizeBytes
+            sha256
+            dependencies {
+              projectId
+              versionId
+              fileId
+              dependencyType
+              projectName
+              fileName
+            }
+          }
+          installedVersion
+          isInstalled
+          minecraftVersion
+          neoForgeVersion
+        }
+      }
+    `
+    const data = await executeGraphQL<{ serverContentProjectDetail: import("../types").ModProjectDetail }>(gqlQuery, {
+      provider,
+      projectId,
+      contentType: contentType || "MOD",
+    })
+    return data.serverContentProjectDetail
+  },
+
+  async resolveServerContentPlan(
+    input: import("../types").ResolveServerContentPlanInput,
+  ): Promise<import("../types").ServerContentInstallationPlan> {
+    const gqlQuery = /* GraphQL */ `
+      query ResolveServerContentPlan($input: ResolveServerContentPlanInput!) {
+        resolveServerContentPlan(input: $input) {
+          items {
+            provider
+            projectId
+            projectName
+            versionId
+            fileId
+            versionNumber
+            filename
+            sizeBytes
+            sha256
+            contentType
+            environment
+            targetPath
+            isRoot
+            isDependency
+            isRequired
+            isInstalled
+            action
+            installedManagedId
+            installedVersionNumber
+            availableCompatibleVersions {
+              id
+              fileId
+              versionNumber
+              name
+              releaseType
+              gameVersions
+              loaders
+              publishedAt
+              downloads
+              filename
+              sizeBytes
+            }
+          }
+          totalDownloadSizeBytes
+          conflicts
+          optionalDependencies {
+            provider
+            projectId
+            projectName
+            versionId
+            fileId
+            versionNumber
+            filename
+            sizeBytes
+            contentType
+            isInstalled
+          }
+          isValid
+          requiresGameUpdate
+          gameUpdateReason
+        }
+      }
+    `
+    const data = await executeGraphQL<{ resolveServerContentPlan: import("../types").ServerContentInstallationPlan }>(gqlQuery, {
+      input,
+    })
+    return data.resolveServerContentPlan
+  },
+
+  async installServerContentPlan(
+    input: import("../types").InstallServerContentPlanInput,
+  ): Promise<import("../types").ServerManagedContentItem[]> {
+    const mutation = /* GraphQL */ `
+      mutation InstallServerContentPlan($input: InstallServerContentPlanInput!) {
+        installServerContentPlan(input: $input) {
+          id
+          managementSource
+          provider
+          projectId
+          versionId
+          fileId
+          contentType
+          environment
+          targetPath
+          sha256
+          sizeBytes
+          gameReleaseId
+          gameReleaseFileId
+          status
+          name
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ installServerContentPlan: import("../types").ServerManagedContentItem[] }>(mutation, { input })
+    return data.installServerContentPlan
+  },
+
+  async removeServerManagedContent(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation RemoveServerManagedContent($id: ID!) {
+        removeServerManagedContent(id: $id)
+      }
+    `
+    const data = await executeGraphQL<{ removeServerManagedContent: boolean }>(mutation, { id })
+    return data.removeServerManagedContent
+  },
+
+  async getServerReleaseSyncPlan(): Promise<import("../types").ServerReleaseSyncPlan> {
+    const query = /* GraphQL */ `
+      query ServerReleaseSyncPlan {
+        serverReleaseSyncPlan {
+          releaseId
+          releaseVersion
+          isPending
+          items {
+            action
+            filename
+            targetPath
+            sizeBytes
+            sha256
+            sourceProvider
+            sourceProjectId
+            sourceVersionId
+            sourceFileId
+            gameReleaseFileId
+            managedContentId
+            currentVersionNumber
+            desiredVersionNumber
+          }
+          summary {
+            toInstall
+            toUpdate
+            toRemove
+            toKeep
+          }
+          serverStatus
+          canApply
+          blockReason
+        }
+      }
+    `
+    const data = await executeGraphQL<{ serverReleaseSyncPlan: import("../types").ServerReleaseSyncPlan }>(query)
+    return data.serverReleaseSyncPlan
+  },
+
+  async getServerReleaseSyncStatus(): Promise<import("../types").ServerReleaseSyncStatus | null> {
+    const query = /* GraphQL */ `
+      query ServerReleaseSyncStatus {
+        serverReleaseSyncStatus {
+          releaseId
+          releaseVersion
+          status
+          appliedAt
+          details
+        }
+      }
+    `
+    const data = await executeGraphQL<{ serverReleaseSyncStatus: import("../types").ServerReleaseSyncStatus | null }>(query)
+    return data.serverReleaseSyncStatus
+  },
+
+  async applyServerReleaseSync(createBackup?: boolean): Promise<import("../types").ServerReleaseSyncResult> {
+    const mutation = /* GraphQL */ `
+      mutation ApplyServerReleaseSync($createBackup: Boolean) {
+        applyServerReleaseSync(createBackup: $createBackup) {
+          success
+          message
+          syncedCount
+          status
+        }
+      }
+    `
+    const data = await executeGraphQL<{ applyServerReleaseSync: import("../types").ServerReleaseSyncResult }>(mutation, { createBackup })
+    return data.applyServerReleaseSync
+  },
+}
+
 export const graphqlClient = {
   ...newsApi,
   ...serverApi,
@@ -2161,7 +2494,9 @@ export const graphqlClient = {
   ...gameApi,
   ...settingsApi,
   ...modProvidersApi,
+  ...serverContentApi,
 }
+
 
 
 

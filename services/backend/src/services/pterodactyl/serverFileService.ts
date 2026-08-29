@@ -11,6 +11,8 @@ import {
   SERVER_ERROR_CODES,
   type ServerFileRoot,
 } from "@hikat/shared"
+import { eq } from "drizzle-orm"
+import { schema, type Database } from "@hikat/database"
 import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
 import { ServerInfrastructureError } from "./pterodactylClient"
@@ -244,6 +246,7 @@ export async function renameServerFile(
   relativePath: string,
   newName: string,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<boolean> {
   const client = clientOverride || createPterodactylClient(env)
 
@@ -260,6 +263,32 @@ export async function renameServerFile(
   const oldName = segments.pop() || ""
   const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
 
+  // Block renaming managed content
+  if (db) {
+    const cleanRelative = relativePath.replace(/^\/+/, "")
+    const fileName = cleanRelative.split("/").pop() || cleanRelative
+    const managed = await db
+      .select()
+      .from(schema.serverManagedContent)
+      .all()
+
+    const match = managed.find(
+      (m) =>
+        m.targetPath === cleanRelative ||
+        m.targetPath === `mods/${cleanRelative}` ||
+        m.targetPath.endsWith(`/${fileName}`) ||
+        m.targetPath === fileName ||
+        m.targetPath === `mods/${fileName}`,
+    )
+
+    if (match) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        "No se pueden renombrar archivos administrados por HiKAT.",
+      )
+    }
+  }
+
   await client.renameFile(parentPath, oldName, cleanNewName)
   return true
 }
@@ -272,6 +301,7 @@ export async function deleteServerFile(
   root: ServerFileRoot,
   relativePath: string,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<boolean> {
   const client = clientOverride || createPterodactylClient(env)
   const fullPath = await resolveSafePath(env, root, relativePath, client)
@@ -279,6 +309,39 @@ export async function deleteServerFile(
   const segments = fullPath.split("/").filter(Boolean)
   const fileName = segments.pop() || ""
   const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
+
+  if (db) {
+    const cleanRelative = relativePath.replace(/^\/+/, "")
+    const managed = await db
+      .select()
+      .from(schema.serverManagedContent)
+      .all()
+
+    const match = managed.find(
+      (m) =>
+        m.targetPath === cleanRelative ||
+        m.targetPath === `mods/${cleanRelative}` ||
+        m.targetPath.endsWith(`/${fileName}`) ||
+        m.targetPath === fileName ||
+        m.targetPath === `mods/${fileName}`,
+    )
+
+    if (match) {
+      if (match.managementSource === "GAME_RELEASE") {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          "Este archivo pertenece a la release del modpack. Modifícalo desde Juego → Actualizaciones.",
+        )
+      }
+
+      // If SERVER_DIRECT: proceed with physical deletion and cascade remove D1 record
+      await client.deleteFiles(parentPath, [fileName])
+      await db
+        .delete(schema.serverManagedContent)
+        .where(eq(schema.serverManagedContent.id, match.id))
+      return true
+    }
+  }
 
   await client.deleteFiles(parentPath, [fileName])
   return true

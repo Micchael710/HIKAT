@@ -226,7 +226,7 @@ export interface IPterodactylClient {
   getFileDownload(filePath: string): Promise<PterodactylSignedUrlResponse>
   getFileUploadUrl(): Promise<PterodactylSignedUrlResponse>
   renameFile(root: string, from: string, to: string): Promise<void>
-  writeFile(filePath: string, content: string): Promise<void>
+  writeFile(filePath: string, content: string | Uint8Array | ArrayBuffer): Promise<void>
   createFolder(root: string, name: string): Promise<void>
   deleteFiles(root: string, files: string[]): Promise<void>
   compressFiles(root: string, files: string[]): Promise<PterodactylFileResponse>

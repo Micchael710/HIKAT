@@ -18,7 +18,7 @@ import ServerFilesView from "./ServerFilesView"
 import ServerTasksView from "./ServerTasksView"
 import { consoleService } from "../../services/consoleService"
 import { authService } from "../../services/authService"
-import { serverApi } from "../../services/graphqlClient"
+import { serverApi, serverContentApi } from "../../services/graphqlClient"
 
 describe("Back Office Server Administration Helpers & Validations (Shard 06, 06A, 06B & 06C)", () => {
   it("formats byte values into human units correctly", () => {
@@ -382,6 +382,14 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
       { name: "server.properties", isFile: true, isSymlink: false, sizeBytes: 1024, mimeType: "text/plain", modifiedAt: new Date().toISOString() },
     ])
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([])
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      isPending: false,
+      items: [],
+      summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "ONLINE",
+      canApply: true,
+    })
 
     await act(async () => {
       render(<ServerOverviewView theme="dark" />)
@@ -515,6 +523,14 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([])
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      isPending: false,
+      items: [],
+      summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "ONLINE",
+      canApply: true,
+    })
   })
 
   afterEach(() => {
@@ -742,6 +758,241 @@ describe("Phase 07: ServerTasksView Custom Action Toggle Preservation", () => {
       delaySeconds: null,
       enabled: true,
     })
+  })
+})
+
+describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () => {
+  const onToastMock = vi.fn()
+  const onNavigateToGameMock = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it("Shard 08D Test 1: ServerFilesView renders 'Buscar contenido' button and managed badges", async () => {
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
+      { name: "ferritecore.jar", isFile: true, isSymlink: false, sizeBytes: 1000, modifiedAt: new Date().toISOString() },
+      { name: "chunky.jar", isFile: true, isSymlink: false, sizeBytes: 2000, modifiedAt: new Date().toISOString() },
+      { name: "untracked.jar", isFile: true, isSymlink: false, sizeBytes: 3000, modifiedAt: new Date().toISOString() },
+    ])
+
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([
+      {
+        id: "smc-1",
+        managementSource: "GAME_RELEASE",
+        name: "ferritecore.jar",
+        targetPath: "mods/ferritecore.jar",
+        sha256: "hash1",
+        sizeBytes: 1000,
+        contentType: "MOD",
+        status: "INSTALLED",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: "smc-2",
+        managementSource: "SERVER_DIRECT",
+        name: "chunky.jar",
+        targetPath: "mods/chunky.jar",
+        sha256: "hash2",
+        sizeBytes: 2000,
+        contentType: "MOD",
+        status: "INSTALLED",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      isPending: false,
+      items: [],
+      summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 1 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+    })
+
+    await act(async () => {
+      render(
+        <ServerFilesView
+          theme="dark"
+          serverStatus="OFFLINE"
+          onToast={onToastMock}
+          onNavigateToGame={onNavigateToGameMock}
+        />,
+      )
+    })
+
+    // "Buscar contenido" button exists
+    expect(screen.getByTestId("button-open-server-search")).toBeDefined()
+
+    // Badges exist for managed files
+    expect(screen.getByTestId("badge-managed-game_release")).toBeDefined()
+    expect(screen.getByText("Release")).toBeDefined()
+    expect(screen.getByTestId("badge-managed-server_direct")).toBeDefined()
+    expect(screen.getByText("Servidor")).toBeDefined()
+  })
+
+  it("Shard 08D Test 2: ServerFilesView renders pending release sync banner and opens modal", async () => {
+    const { serverContentApi } = await import("../../services/graphqlClient")
+
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([])
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([])
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [
+        {
+          action: "INSTALL",
+          filename: "new-mod.jar",
+          targetPath: "mods/new-mod.jar",
+          sizeBytes: 5000,
+          sha256: "hash-new",
+        },
+      ],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+    })
+
+    await act(async () => {
+      render(
+        <ServerFilesView
+          theme="dark"
+          serverStatus="OFFLINE"
+          onToast={onToastMock}
+          onNavigateToGame={onNavigateToGameMock}
+        />,
+      )
+    })
+
+    // Banner is visible
+    expect(screen.getByTestId("server-release-sync-banner")).toBeDefined()
+    expect(screen.getByText("+1 para instalar")).toBeDefined()
+
+    // Click "Revisar y sincronizar"
+    const openSyncBtn = screen.getByTestId("button-open-release-sync")
+    await act(async () => {
+      fireEvent.click(openSyncBtn)
+    })
+
+    // Modal is rendered
+    expect(screen.getByTestId("server-release-sync-modal")).toBeDefined()
+    expect(screen.getByTestId("checkbox-pre-sync-backup")).toBeDefined()
+    expect(screen.getByTestId("button-apply-release-sync")).toBeDefined()
+  })
+
+  it("Shard 08D Test 3: ServerReleaseSyncModal disables apply button if server is not OFFLINE", async () => {
+    const { ServerReleaseSyncModal } = await import("./ServerReleaseSyncModal")
+
+    const runningPlan = {
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "ONLINE" as const,
+      canApply: false,
+    }
+
+    await act(async () => {
+      render(
+        <ServerReleaseSyncModal
+          theme="dark"
+          plan={runningPlan}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          onToast={onToastMock}
+        />,
+      )
+    })
+
+    expect(screen.getByTestId("sync-server-not-offline-warning")).toBeDefined()
+    const applyBtn = screen.getByTestId("button-apply-release-sync") as HTMLButtonElement
+    expect(applyBtn.disabled).toBe(true)
+  })
+
+  it("Shard 08D Test 4: ServerModSearchModal renders BOTH mod redirect warning and CTA", async () => {
+    const { ServerModSearchModal } = await import("./providers/ServerModSearchModal")
+    const { graphqlClient } = await import("../../services/graphqlClient")
+
+    vi.spyOn(graphqlClient, "searchServerContent").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "ferrite-id",
+          name: "FerriteCore",
+          summary: "Memory optimization",
+          author: "malte0811",
+          downloads: 500000,
+          categories: ["optimization"],
+          contentType: "MOD",
+          environment: "BOTH",
+          latestVersion: "6.0.1",
+        },
+      ],
+      totalCount: 1,
+      providersStatus: [{ provider: "MODRINTH", available: true }],
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      isPublishedEnvironment: true,
+    })
+
+    vi.spyOn(graphqlClient, "getServerContentProjectDetail").mockResolvedValue({
+      provider: "MODRINTH",
+      projectId: "ferrite-id",
+      name: "FerriteCore",
+      summary: "Memory optimization",
+      description: "Optimizes memory",
+      author: "malte0811",
+      downloads: 500000,
+      contentType: "MOD",
+      environment: "BOTH",
+      compatibleVersions: [],
+      isInstalled: false,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    await act(async () => {
+      render(
+        <ServerModSearchModal
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          onNavigateToGame={onNavigateToGameMock}
+        />,
+      )
+    })
+
+    // Content type tabs: MOD and DATA_PACK exist
+    expect(screen.getByTestId("server-tab-content-mod")).toBeDefined()
+    expect(screen.getByTestId("server-tab-content-datapack")).toBeDefined()
+
+    // Select FerriteCore mod
+    const modItem = await screen.findByText("FerriteCore")
+    await act(async () => {
+      fireEvent.click(modItem)
+    })
+
+    // BOTH redirect alert is displayed
+    const redirectAlert = await screen.findByTestId("alert-both-mod-redirect")
+    expect(redirectAlert).toBeDefined()
+    expect(screen.getByText("Añadir desde Actualizaciones →")).toBeDefined()
+
+    // Click redirect button
+    const redirectBtn = screen.getByTestId("button-redirect-to-game")
+    await act(async () => {
+      fireEvent.click(redirectBtn)
+    })
+
+    expect(onNavigateToGameMock).toHaveBeenCalledTimes(1)
   })
 })
 

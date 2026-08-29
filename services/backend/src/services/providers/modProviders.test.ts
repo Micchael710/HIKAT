@@ -283,14 +283,14 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(dpVersions[0]!.contentType).toBe("DATA_PACK")
       expect(dpVersions[0]!.filename).toBe("hybrid-dp.zip")
 
-      // Manager integration: Requesting DATA_PACK with MOD versionId -> REJECT
+      // Manager integration: Requesting DATA_PACK in Game flow -> REJECT per Shard 08D
       await expect(
         manager.resolveInstallationPlan(
           env,
           db,
           { provider: "MODRINTH", projectId: "hybrid-proj", versionId: "ver-mod-jar", contentType: "DATA_PACK" },
         ),
-      ).rejects.toThrow(/no corresponde al tipo solicitado/)
+      ).rejects.toThrow(/Los Data Packs se administran exclusivamente desde Servidor → Archivos/)
 
       // Manager integration: Requesting MOD with DATA_PACK versionId -> REJECT
       await expect(
@@ -311,15 +311,15 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(validModPlan.items[0]!.contentType).toBe("MOD")
       expect(validModPlan.items[0]!.logicalPath).toBe("mods/hybrid-mod.jar")
 
-      // Manager integration: Requesting DATA_PACK with DATA_PACK versionId -> ACCEPT
-      const validDpPlan = await manager.resolveInstallationPlan(
+      // Server integration: Requesting DATA_PACK with DATA_PACK versionId via resolveServerInstallationPlan -> ACCEPT
+      const validDpPlan = await manager.resolveServerInstallationPlan(
         env,
         db,
         { provider: "MODRINTH", projectId: "hybrid-proj", versionId: "ver-dp-zip", contentType: "DATA_PACK" },
       )
       expect(validDpPlan.isValid).toBe(true)
       expect(validDpPlan.items[0]!.contentType).toBe("DATA_PACK")
-      expect(validDpPlan.items[0]!.logicalPath).toBe("datapacks/hybrid-dp.zip")
+      expect(validDpPlan.items[0]!.targetPath).toBe("world/datapacks/hybrid-dp.zip")
     })
 
     it("parses SHA-512 and SHA-1 hashes from Modrinth without inventing SHA-256", async () => {
@@ -1315,17 +1315,15 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(rp?.category).toBe("RESOURCE_PACK")
       expect(rp?.policy).toBe("MODIFICABLE")
 
-      // 2. Install Data Pack
-      const dpFiles = await installModPlan(
-        db,
-        env,
-        { provider: "MODRINTH", projectId: "dp-proj", versionId: "ver-dp", contentType: "DATA_PACK" },
-        adminUserId,
-      )
-      const dp = dpFiles.find((f) => f.logicalPath === "datapacks/terralith.zip")
-      expect(dp).toBeDefined()
-      expect(dp?.category).toBe("DATA_PACK")
-      expect(dp?.policy).toBe("NO_MODIFICABLE")
+      // 2. Data Pack installation in Game flow throws Shard 08D error
+      await expect(
+        installModPlan(
+          db,
+          env,
+          { provider: "MODRINTH", projectId: "dp-proj", versionId: "ver-dp", contentType: "DATA_PACK" },
+          adminUserId,
+        ),
+      ).rejects.toThrow(/Los Data Packs se administran exclusivamente desde Servidor → Archivos/)
 
       // 3. Install Shader
       const shaderFiles = await installModPlan(
@@ -1869,7 +1867,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         return { ok: false, status: 404 }
       })
 
-      const plan = await manager.resolveInstallationPlan(
+      const plan = await manager.resolveServerInstallationPlan(
         env,
         db,
         { provider: "MODRINTH", projectId: "dp-parent", versionId: "ver-dp-parent", contentType: "DATA_PACK" },
@@ -1877,9 +1875,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
 
       expect(plan.isValid).toBe(true)
       expect(plan.items.length).toBe(2)
-      expect(plan.items[0]!.logicalPath).toBe("datapacks/dp-parent.zip")
+      expect(plan.items[0]!.targetPath).toBe("world/datapacks/dp-parent.zip")
       expect(plan.items[0]!.contentType).toBe("DATA_PACK")
-      expect(plan.items[1]!.logicalPath).toBe("datapacks/dp-child.zip")
+      expect(plan.items[1]!.targetPath).toBe("world/datapacks/dp-child.zip")
       expect(plan.items[1]!.contentType).toBe("DATA_PACK")
     })
 
@@ -1922,12 +1920,12 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           return { ok: true, status: 200, json: async () => ({ id: "dp-with-mod-dep", title: "DP With Mod Dep", all_project_types: ["datapack"], categories: ["datapack"] }) }
         }
         if (u.includes("/project/mod-cloth")) {
-          return { ok: true, status: 200, json: async () => ({ id: "mod-cloth", title: "Cloth Config", project_type: "mod", categories: ["technology"] }) }
+          return { ok: true, status: 200, json: async () => ({ id: "mod-cloth", title: "Cloth Config", project_type: "mod", client_side: "unsupported", server_side: "required", categories: ["technology"] }) }
         }
         return { ok: false, status: 404 }
       })
 
-      const plan = await manager.resolveInstallationPlan(
+      const plan = await manager.resolveServerInstallationPlan(
         env,
         db,
         { provider: "MODRINTH", projectId: "dp-with-mod-dep", versionId: "ver-dp-root", contentType: "DATA_PACK" },
@@ -1935,9 +1933,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
 
       expect(plan.isValid).toBe(true)
       expect(plan.items.length).toBe(2)
-      expect(plan.items[0]!.logicalPath).toBe("datapacks/dp-root.zip")
+      expect(plan.items[0]!.targetPath).toBe("world/datapacks/dp-root.zip")
       expect(plan.items[0]!.contentType).toBe("DATA_PACK")
-      expect(plan.items[1]!.logicalPath).toBe("mods/cloth.jar")
+      expect(plan.items[1]!.targetPath).toBe("mods/cloth.jar")
       expect(plan.items[1]!.contentType).toBe("MOD")
     })
 
@@ -1999,7 +1997,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(plan.items[1]!.contentType).toBe("MOD")
     })
 
-    it("resolves pinned dependency whose version determines DATA_PACK", async () => {
+    it("flags conflict when a Game Release MOD depends on a DATA_PACK per Shard 08D rules", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
         if (u.includes("/project/root-with-pinned/version")) {
@@ -2064,12 +2062,8 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { provider: "MODRINTH", projectId: "root-with-pinned", versionId: "ver-root-pin", contentType: "MOD" },
       )
 
-      expect(plan.isValid).toBe(true)
-      expect(plan.items.length).toBe(2)
-      expect(plan.items[0]!.logicalPath).toBe("mods/root-pin.jar")
-      expect(plan.items[0]!.contentType).toBe("MOD")
-      expect(plan.items[1]!.logicalPath).toBe("datapacks/hybrid.zip")
-      expect(plan.items[1]!.contentType).toBe("DATA_PACK")
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.some((c) => c.includes("Data Pack") && c.includes("Servidor → Archivos"))).toBe(true)
     })
 
     it("flags conflict for ambiguous multi-type dependency without silently guessing MOD", async () => {
@@ -3205,7 +3199,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           return { ok: false, status: 404 }
         })
 
-        const plan = await manager.resolveInstallationPlan(env, db, {
+        const plan = await manager.resolveServerInstallationPlan(env, db, {
           provider: "MODRINTH",
           projectId: "real-dp",
           versionId: "ver-dp-1",
@@ -3215,7 +3209,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         expect(plan.isValid).toBe(true)
         expect(plan.items.length).toBe(1)
         expect(plan.items[0]!.contentType).toBe("DATA_PACK")
-        expect(plan.items[0]!.logicalPath).toBe("datapacks/real-dp.zip")
+        expect(plan.items[0]!.targetPath).toBe("world/datapacks/real-dp.zip")
       })
 
       it("rejects when requesting DATA_PACK but available versions for current Minecraft version are only MOD", async () => {
@@ -3261,7 +3255,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         ).rejects.toThrow(/no es compatible con el tipo solicitado \(DATA_PACK\)/)
 
         await expect(
-          manager.resolveInstallationPlan(env, db, {
+          manager.resolveServerInstallationPlan(env, db, {
             provider: "MODRINTH",
             projectId: "only-mod",
             versionId: "ver-mod-1",

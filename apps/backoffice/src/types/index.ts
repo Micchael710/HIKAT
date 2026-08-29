@@ -622,3 +622,139 @@ export interface ServerSignedUrlPayload {
   url: string
 }
 
+// --- Server Managed Content & Release Sync Types (Shard 08D) ---
+
+export type ServerManagedContentSource = "SERVER_DIRECT" | "GAME_RELEASE"
+export type ServerManagedContentStatus = "INSTALLED" | "UPDATE_AVAILABLE" | "MISSING"
+
+export interface ServerManagedContentItem {
+  id: string
+  managementSource: ServerManagedContentSource
+  provider?: ModProvider | null
+  projectId?: string | null
+  versionId?: string | null
+  fileId?: string | null
+  contentType: ContentType
+  environment?: ModEnvironment | null
+  targetPath: string
+  sha256: string
+  sizeBytes: number
+  gameReleaseId?: string | null
+  gameReleaseFileId?: string | null
+  status: ServerManagedContentStatus
+  name: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ServerContentSearchPayload {
+  items: ModSearchResultItem[]
+  totalCount: number
+  providersStatus: ModProviderStatus[]
+  minecraftVersion: string
+  neoForgeVersion: string
+  isPublishedEnvironment: boolean
+}
+
+export interface ServerContentPlanItem {
+  provider: ModProvider
+  projectId: string
+  projectName: string
+  versionId: string
+  fileId?: string | null
+  versionNumber: string
+  filename: string
+  sizeBytes: number
+  sha256?: string | null
+  contentType: ContentType
+  environment?: ModEnvironment | null
+  targetPath: string
+  isRoot: boolean
+  isDependency: boolean
+  isRequired: boolean
+  isInstalled: boolean
+  action: ModPlanAction
+  installedManagedId?: string | null
+  installedVersionNumber?: string | null
+  availableCompatibleVersions: ModProjectVersion[]
+}
+
+export interface ServerContentInstallationPlan {
+  items: ServerContentPlanItem[]
+  totalDownloadSizeBytes: number
+  conflicts: string[]
+  optionalDependencies: ServerContentPlanItem[]
+  isValid: boolean
+  requiresGameUpdate: boolean
+  gameUpdateReason?: string | null
+}
+
+export interface ResolveServerContentPlanInput {
+  provider: ModProvider
+  projectId: string
+  versionId: string
+  contentType?: ContentType | null
+  manualOverrides?: ModVersionOverrideInput[] | null
+}
+
+export interface InstallServerContentPlanInput {
+  provider: ModProvider
+  projectId: string
+  versionId: string
+  contentType?: ContentType | null
+  manualOverrides?: ModVersionOverrideInput[] | null
+}
+
+export type ServerReleaseSyncPlanAction = "INSTALL" | "UPDATE" | "REMOVE" | "KEEP"
+
+export interface ServerReleaseSyncPlanItem {
+  action: ServerReleaseSyncPlanAction
+  filename: string
+  targetPath: string
+  sizeBytes: number
+  sha256: string
+  sourceProvider?: ModProvider | null
+  sourceProjectId?: string | null
+  sourceVersionId?: string | null
+  sourceFileId?: string | null
+  gameReleaseFileId?: string | null
+  managedContentId?: string | null
+  currentVersionNumber?: string | null
+  desiredVersionNumber?: string | null
+}
+
+export interface ServerReleaseSyncSummary {
+  toInstall: number
+  toUpdate: number
+  toRemove: number
+  toKeep: number
+}
+
+export interface ServerReleaseSyncPlan {
+  releaseId?: string | null
+  releaseVersion?: string | null
+  isPending: boolean
+  items: ServerReleaseSyncPlanItem[]
+  summary: ServerReleaseSyncSummary
+  serverStatus: ServerStatus
+  canApply: boolean
+  blockReason?: string | null
+}
+
+export type ServerReleaseSyncStatusEnum = "PENDING" | "APPLYING" | "APPLIED" | "FAILED"
+
+export interface ServerReleaseSyncStatus {
+  releaseId?: string | null
+  releaseVersion?: string | null
+  status: ServerReleaseSyncStatusEnum
+  appliedAt?: string | null
+  details?: string | null
+}
+
+export interface ServerReleaseSyncResult {
+  success: boolean
+  message: string
+  syncedCount: number
+  status: ServerReleaseSyncStatusEnum
+}
+

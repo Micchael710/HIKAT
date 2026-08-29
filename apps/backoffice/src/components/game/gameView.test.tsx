@@ -751,10 +751,10 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.getByTestId("compatible-env-indicator").textContent).toContain("Minecraft 1.21.1")
       expect(screen.getByTestId("compatible-env-indicator").textContent).toContain("NeoForge")
 
-      // 4. Verify content type tabs and provider tabs
+      // 4. Verify content type tabs and provider tabs (Shard 08D: Game updates has MOD, RESOURCE_PACK, SHADER; DATA_PACK is in Server)
       expect(screen.getByTestId("tab-content-mod")).toBeDefined()
       expect(screen.getByTestId("tab-content-resource_pack")).toBeDefined()
-      expect(screen.getByTestId("tab-content-data_pack")).toBeDefined()
+      expect(screen.queryByTestId("tab-content-data_pack")).toBeNull()
       expect(screen.getByTestId("tab-content-shader")).toBeDefined()
 
       expect(screen.getByTestId("tab-provider-all")).toBeDefined()
@@ -981,42 +981,45 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     it("cancels pending debounce and invalidates in-flight requests when switching content type tab", async () => {
       vi.useFakeTimers()
-      const searchSpy = vi.spyOn(graphqlClient, "searchMods").mockImplementation(async (query, contentType, provider, limit, offset) => {
-        return {
-          items: [],
-          totalCount: 0,
-          minecraftVersion: "1.21.1",
-          neoForgeVersion: "21.1.65",
-          providersStatus: [],
-        }
-      })
+      try {
+        const searchSpy = vi.spyOn(graphqlClient, "searchMods").mockImplementation(async (query, contentType, provider, limit, offset) => {
+          return {
+            items: [],
+            totalCount: 0,
+            minecraftVersion: "1.21.1",
+            neoForgeVersion: "21.1.65",
+            providersStatus: [],
+          }
+        })
 
-      render(
-        <ModSearchModal
-          onClose={vi.fn()}
-          onSuccess={vi.fn()}
-        />,
-      )
+        render(
+          <ModSearchModal
+            onClose={vi.fn()}
+            onSuccess={vi.fn()}
+          />,
+        )
 
-      // 1. Type in search input to trigger debounce
-      const searchInput = screen.getByTestId("input-mod-search")
-      await act(async () => {
-        fireEvent.change(searchInput, { target: { value: "test query" } })
-      })
+        // 1. Type in search input to trigger debounce
+        const searchInput = screen.getByTestId("input-mod-search")
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: "test query" } })
+        })
 
-      // 2. Immediately switch to Data Packs tab before debounce timer fires
-      await act(async () => {
-        fireEvent.click(screen.getByTestId("tab-content-data_pack"))
-      })
+        // 2. Immediately switch to Resource Packs tab before debounce timer fires
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("tab-content-resource_pack"))
+        })
 
-      // 3. Advance fake timers
-      await act(async () => {
-        vi.advanceTimersByTime(500)
-      })
+        // 3. Advance fake timers
+        await act(async () => {
+          vi.advanceTimersByTime(500)
+        })
 
-      // 4. Verify the search request executed for DATA_PACK and not for old MOD
-      expect(searchSpy).toHaveBeenCalledWith("test query", "DATA_PACK", null, 20, 0)
-      vi.useRealTimers()
+        // 4. Verify the search request executed for RESOURCE_PACK and not for old MOD
+        expect(searchSpy).toHaveBeenCalledWith("test query", "RESOURCE_PACK", null, 20, 0)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it("renders optional dependencies section with explicit notice and does not count them in install button", async () => {

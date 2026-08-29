@@ -233,7 +233,6 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
             {[
               { type: "MOD" as ContentType, label: "Mods", testId: "tab-content-mod" },
               { type: "RESOURCE_PACK" as ContentType, label: "Resource Packs", testId: "tab-content-resource_pack" },
-              { type: "DATA_PACK" as ContentType, label: "Data Packs", testId: "tab-content-data_pack" },
               { type: "SHADER" as ContentType, label: "Shaders", testId: "tab-content-shader" },
             ].map((tab) => {
               const isSelected = selectedContentType === tab.type

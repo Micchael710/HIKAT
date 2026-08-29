@@ -28,6 +28,7 @@ import {
 
 interface ServerOverviewViewProps {
   theme: ThemeMode
+  onNavigate?: (section: any) => void
 }
 
 export type ServerSubTab = "general" | "console" | "files" | "backups" | "tasks"
@@ -40,7 +41,7 @@ const SUB_TABS: Array<{ id: ServerSubTab; label: string; icon: React.ReactNode }
   { id: "tasks", label: "Tasks", icon: <IconCalendar size={18} /> },
 ]
 
-export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
+export default function ServerOverviewView({ theme, onNavigate }: ServerOverviewViewProps) {
   const isDark = theme === "dark"
   const [activeTab, setActiveTab] = useState<ServerSubTab>("general")
   const [infraState, setInfraState] = useState<"CHECKING" | "CONNECTED" | "DISCONNECTED">("CHECKING")
@@ -685,7 +686,11 @@ export default function ServerOverviewView({ theme }: ServerOverviewViewProps) {
       )}
 
       {activeTab === "files" && (
-        <ServerFilesView theme={theme} onToast={showToast} />
+        <ServerFilesView
+          theme={theme}
+          onToast={showToast}
+          onNavigateToGame={() => onNavigate?.("game")}
+        />
       )}
 
       {activeTab === "backups" && (

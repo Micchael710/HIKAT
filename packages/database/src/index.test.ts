@@ -778,6 +778,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0014_mod_providers_metadata.sql",
       "0015_content_providers_expansion.sql",
       "0016_game_release_cover_media.sql",
+      "0017_server_managed_content.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -837,6 +838,10 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(tables).toContain("game_file_upload_tokens")
 
     expect(tables).toContain("project_settings")
+
+    expect(tables).toContain("server_managed_content")
+
+    expect(tables).toContain("server_release_syncs")
 
     expect(tables).not.toContain("content_posts")
 
@@ -2069,7 +2074,7 @@ describe("@hikat/database schema and D1 operations", () => {
     expect(orphanedFiles.length).toBe(0)
   })
 
-  it("performs real D1-safe upgrade from migration 0013 to 0014, adding mod provider metadata columns and index", () => {
+  it("performs real D1-safe upgrade from migration 0013 to 0014, adding mod provider metadata columns and index", async () => {
     const sqlite = new DatabaseSync(":memory:")
     sqlite.exec("PRAGMA foreign_keys = ON;")
 
@@ -2180,7 +2185,85 @@ describe("@hikat/database schema and D1 operations", () => {
     sqlite.exec(`DELETE FROM content_media WHERE id = '${mediaId}';`)
     const relAfterDelete = sqlite.prepare("SELECT * FROM game_releases WHERE id = ?").get(releaseId) as any
     expect(relAfterDelete.cover_media_id).toBeNull()
+
+    // 8. Apply migration 0017 (adds server_managed_content and server_release_syncs tables)
+    const file0017 = sqlFiles.find((f) => f.startsWith("0017_"))
+    expect(file0017).toBeDefined()
+    const sql0017 = readFileSync(join(migrationsDir, file0017!), "utf-8")
+    for (const statement of sql0017.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim()
+      if (trimmed) sqlite.exec(trimmed)
+    }
+
+    const d1 = createTestD1()
+    const db = createDatabase(d1)
+
+    // Insert user and release
+    await db.insert(schema.users).values({
+      id: userId,
+      displayName: "Admin",
+      role: "ADMIN",
+      createdAt: now,
+      updatedAt: now,
+    })
+    await db.insert(schema.gameReleases).values({
+      id: releaseId,
+      version: "1.0.0",
+      status: "DRAFT",
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    // Insert server managed content (SERVER_DIRECT)
+    const managedId1 = crypto.randomUUID()
+    await db.insert(schema.serverManagedContent).values({
+      id: managedId1,
+      managementSource: "SERVER_DIRECT",
+      provider: "MODRINTH",
+      projectId: "spark",
+      versionId: "v1.0.0",
+      fileId: "f1",
+      contentType: "MOD",
+      environment: "SERVER",
+      targetPath: "mods/spark-1.21.1.jar",
+      sha256: "abc123sha256",
+      sizeBytes: 10240,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const foundDirect = await db
+      .select()
+      .from(schema.serverManagedContent)
+      .where(eq(schema.serverManagedContent.id, managedId1))
+      .get()
+
+    expect(foundDirect).toBeDefined()
+    expect(foundDirect?.managementSource).toBe("SERVER_DIRECT")
+    expect(foundDirect?.targetPath).toBe("mods/spark-1.21.1.jar")
+
+    // Insert server release sync record
+    const syncId = crypto.randomUUID()
+    await db.insert(schema.serverReleaseSyncs).values({
+      id: syncId,
+      releaseId: releaseId,
+      status: "PENDING",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const foundSync = await db
+      .select()
+      .from(schema.serverReleaseSyncs)
+      .where(eq(schema.serverReleaseSyncs.id, syncId))
+      .get()
+
+    expect(foundSync).toBeDefined()
+    expect(foundSync?.status).toBe("PENDING")
+    expect(foundSync?.releaseId).toBe(releaseId)
   })
 })
+
 
 

@@ -106,7 +106,7 @@ function BackofficeShell({
           {section === "dashboard" && <DashboardView theme={theme} onNavigate={setSection} />}
           {section === "news" && <NewsListView theme={theme} />}
           {section === "skins" && <SkinsView theme={theme} />}
-          {section === "server" && <ServerOverviewView theme={theme} />}
+          {section === "server" && <ServerOverviewView theme={theme} onNavigate={setSection} />}
           {section === "game" && <GameView theme={theme} />}
           {section === "settings" && <SettingsView theme={theme} />}
         </main>

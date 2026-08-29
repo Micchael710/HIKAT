@@ -134,7 +134,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
     endpoint: string,
     options: {
       method?: string
-      body?: Record<string, unknown> | string
+      body?: Record<string, unknown> | string | Uint8Array | ArrayBuffer
       rawBody?: boolean
       isTextResponse?: boolean
     } = {},
@@ -148,10 +148,10 @@ export class PterodactylHttpClient implements IPterodactylClient {
       Accept: "Application/vnd.pterodactyl.v1+json",
     }
 
-    let requestBody: string | undefined
+    let requestBody: any | undefined
     if (options.body !== undefined) {
-      if (options.rawBody && typeof options.body === "string") {
-        headers["Content-Type"] = "text/plain"
+      if (options.rawBody) {
+        headers["Content-Type"] = typeof options.body === "string" ? "text/plain" : "application/octet-stream"
         requestBody = options.body
       } else {
         headers["Content-Type"] = "application/json"
@@ -433,7 +433,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
     )
   }
 
-  async writeFile(filePath: string, content: string): Promise<void> {
+  async writeFile(filePath: string, content: string | Uint8Array | ArrayBuffer): Promise<void> {
     const fileParam = encodeURIComponent(filePath)
     await this.request<void>(
       `/api/client/servers/${encodeURIComponent(this.serverId)}/files/write?file=${fileParam}`,

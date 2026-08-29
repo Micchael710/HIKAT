@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @ts-ignore
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 import React, { act } from "react"

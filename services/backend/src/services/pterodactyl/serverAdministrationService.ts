@@ -496,7 +496,7 @@ export async function getServerConsoleWebsocketCredentials(
  */
 export async function acquireServerOperationLock(
   db: ReturnType<typeof createDatabase>,
-  operation: "RESTORE_BACKUP" | "REPLACE_WORLD",
+  operation: "RESTORE_BACKUP" | "REPLACE_WORLD" | "SERVER_RELEASE_SYNC",
   userId: string,
 ): Promise<string> {
   const nowIso = new Date().toISOString()

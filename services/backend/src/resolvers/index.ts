@@ -80,6 +80,14 @@ import type {
   InstallModPlanInputGql,
   ContentTypeGql,
   ModEnvironmentGql,
+  ServerManagedContentItemGql,
+  ServerContentSearchPayloadGql,
+  ServerContentInstallationPlanGql,
+  ResolveServerContentPlanInputGql,
+  InstallServerContentPlanInputGql,
+  ServerReleaseSyncPlanGql,
+  ServerReleaseSyncStatusGql,
+  ServerReleaseSyncResultGql,
 } from "@hikat/graphql"
 
 import {
@@ -145,6 +153,16 @@ import {
   prepareServerFileUploadUrl,
   createServerFileDownloadUrl,
 } from "../services/pterodactyl/serverFileService"
+import {
+  getServerManagedContent,
+  installServerContentPlan,
+  removeServerManagedContent,
+} from "../services/pterodactyl/serverContentService"
+import {
+  getServerReleaseSyncPlan,
+  getServerReleaseSyncStatus,
+  applyServerReleaseSync,
+} from "../services/pterodactyl/serverReleaseSyncService"
 import { getAdminDashboard } from "../services/dashboardService"
 
 import {
@@ -428,6 +446,104 @@ export const resolvers = {
     ): Promise<ServerFileContentGql> => {
       requireAdmin(context)
       return readServerTextFile(context.env, args.root, args.relativePath)
+    },
+
+    // --- Server Managed Content & Release Sync Queries (Require ADMIN - Shard 08D) ---
+
+    serverManagedContent: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerManagedContentItemGql[]> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getServerManagedContent(context.db, context.env)
+    },
+
+    searchServerContent: async (
+      _parent: unknown,
+      args: {
+        query: string
+        contentType?: ContentTypeGql | null
+        provider?: ModProviderGql | null
+        limit?: number | null
+        offset?: number | null
+      },
+      context: BackendGraphQLContext,
+    ): Promise<ServerContentSearchPayloadGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return modProviderManager.searchServerMods(
+        context.env,
+        context.db,
+        args.query,
+        args.provider,
+        args.limit || 20,
+        args.offset || 0,
+        args.contentType || "MOD",
+      )
+    },
+
+    serverContentProjectDetail: async (
+      _parent: unknown,
+      args: { provider: ModProviderGql; projectId: string; contentType?: ContentTypeGql | null },
+      context: BackendGraphQLContext,
+    ): Promise<ModProjectDetailGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return modProviderManager.getServerProjectDetail(
+        context.env,
+        context.db,
+        args.provider,
+        args.projectId,
+        args.contentType || "MOD",
+      )
+    },
+
+    resolveServerContentPlan: async (
+      _parent: unknown,
+      args: { input: ResolveServerContentPlanInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ServerContentInstallationPlanGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return modProviderManager.resolveServerInstallationPlan(
+        context.env,
+        context.db,
+        args.input,
+      )
+    },
+
+    serverReleaseSyncPlan: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerReleaseSyncPlanGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getServerReleaseSyncPlan(context.db, context.env)
+    },
+
+    serverReleaseSyncStatus: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerReleaseSyncStatusGql | null> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getServerReleaseSyncStatus(context.db)
     },
 
 
@@ -1008,7 +1124,7 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return renameServerFile(context.env, args.root, args.relativePath, args.newName)
+      return renameServerFile(context.env, args.root, args.relativePath, args.newName, undefined, context.db)
     },
 
     deleteServerFile: async (
@@ -1017,7 +1133,50 @@ export const resolvers = {
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return deleteServerFile(context.env, args.root, args.relativePath)
+      return deleteServerFile(context.env, args.root, args.relativePath, undefined, context.db)
+    },
+
+    // --- Server Managed Content & Release Sync Mutations (Require ADMIN - Shard 08D) ---
+
+    installServerContentPlan: async (
+      _parent: unknown,
+      args: { input: InstallServerContentPlanInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ServerManagedContentItemGql[]> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return installServerContentPlan(context.db, context.env, args.input, identity.userId)
+    },
+
+    removeServerManagedContent: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return removeServerManagedContent(context.db, context.env, args.id, identity.userId)
+    },
+
+    applyServerReleaseSync: async (
+      _parent: unknown,
+      args: { createBackup?: boolean | null },
+      context: BackendGraphQLContext,
+    ): Promise<ServerReleaseSyncResultGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return applyServerReleaseSync(
+        context.db,
+        context.env,
+        identity.userId,
+        Boolean(args.createBackup),
+      )
     },
 
     writeServerTextFile: async (

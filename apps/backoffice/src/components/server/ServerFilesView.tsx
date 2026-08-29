@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react"
-import type { ThemeMode, ServerFileItem, ServerStatus } from "../../types"
-import { serverApi } from "../../services/graphqlClient"
+import type { ThemeMode, ServerFileItem, ServerStatus, ServerManagedContentItem, ServerReleaseSyncPlan } from "../../types"
+import { serverApi, serverContentApi } from "../../services/graphqlClient"
 import { formatBytesToHuman, isAllowlistedTextFile } from "@hikat/shared"
 import {
   IconFolder,
@@ -16,22 +16,33 @@ import {
   IconAlertCircle,
   IconCheck,
   IconCross,
+  IconRocket,
 } from "../../theme/icons"
+import { ServerModSearchModal } from "./providers/ServerModSearchModal"
+import { ServerReleaseSyncModal } from "./ServerReleaseSyncModal"
 
 interface ServerFilesViewProps {
   theme: ThemeMode
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
+  onNavigateToGame?: () => void
 }
 
-export default function ServerFilesView({ theme, serverStatus, onToast }: ServerFilesViewProps) {
+export default function ServerFilesView({ theme, serverStatus, onToast, onNavigateToGame }: ServerFilesViewProps) {
   const isDark = theme === "dark"
   const isDisconnected = serverStatus === "DISCONNECTED"
   const [currentPath, setCurrentPath] = useState("")
   const [files, setFiles] = useState<ServerFileItem[]>([])
+  const [managedContent, setManagedContent] = useState<ServerManagedContentItem[]>([])
+  const [syncPlan, setSyncPlan] = useState<ServerReleaseSyncPlan | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Shard 08D Modals state
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false)
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
+  const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<{ file: ServerFileItem; managed: ServerManagedContentItem } | null>(null)
 
   // Modals state
   const [newFolderName, setNewFolderName] = useState("")
@@ -60,16 +71,23 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
     if (manual) setIsRefreshing(true)
     setError(null)
     try {
-      const data = await serverApi.getServerFiles("SERVER", currentPath || undefined)
+      const [filesData, managedData, planData] = await Promise.all([
+        serverApi.getServerFiles("SERVER", currentPath || undefined),
+        serverContentApi.getServerManagedContent().catch(() => []),
+        serverContentApi.getServerReleaseSyncPlan().catch(() => null),
+      ])
+
       if (isMountedRef.current) {
         // Sort directories first, then alphabetically
-        const sorted = [...data].sort((a, b) => {
+        const sorted = [...filesData].sort((a, b) => {
           if (a.isFile === b.isFile) {
             return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
           }
           return a.isFile ? 1 : -1
         })
         setFiles(sorted)
+        setManagedContent(managedData)
+        setSyncPlan(planData)
       }
     } catch (err: unknown) {
       if (isMountedRef.current) {
@@ -259,8 +277,92 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
 
   const pathSegments = currentPath.split("/").filter(Boolean)
 
+  const getManagedRecord = (file: ServerFileItem) => {
+    const fullPath = currentPath ? `${currentPath}/${file.name}` : file.name
+    const normalized = fullPath.replace(/^\//, "")
+    return managedContent.find(
+      (m) => m.targetPath === normalized || m.targetPath === fullPath || m.name === file.name,
+    )
+  }
+
+  const handleAttemptRename = (file: ServerFileItem) => {
+    const managed = getManagedRecord(file)
+    if (managed) {
+      onToast("No se pueden renombrar archivos administrados por HiKAT.", "error")
+      return
+    }
+    setRenameTarget(file)
+    setNewName(file.name)
+  }
+
+  const handleAttemptDelete = (file: ServerFileItem) => {
+    const managed = getManagedRecord(file)
+    if (managed && managed.managementSource === "GAME_RELEASE") {
+      setBlockedDeleteTarget({ file, managed })
+      return
+    }
+    setDeleteTarget(file)
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Pending Release Sync Banner */}
+      {syncPlan?.isPending && (
+        <div
+          data-testid="server-release-sync-banner"
+          style={{
+            padding: "16px 20px",
+            borderRadius: 14,
+            background: isDark ? "rgba(59, 130, 246, 0.12)" : "#eff6ff",
+            border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.3)" : "#bfdbfe"}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 14,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ color: "#3b82f6", display: "flex", alignItems: "center" }}>
+              <IconRocket style={{ width: 22, height: 22 }} />
+            </div>
+            <div>
+              <div style={{ fontSize: "0.95rem", fontWeight: 700, color: isDark ? "#f3f4f6" : "#1e3a8a" }}>
+                Hay cambios pendientes de la versión publicada del modpack para sincronizar con el servidor
+              </div>
+              <div style={{ fontSize: "0.82rem", color: isDark ? "#93c5fd" : "#3b82f6", marginTop: 2, display: "flex", gap: 10 }}>
+                <span>+{syncPlan.summary.toInstall} para instalar</span>
+                <span>•</span>
+                <span>↑{syncPlan.summary.toUpdate} para actualizar</span>
+                <span>•</span>
+                <span>−{syncPlan.summary.toRemove} para eliminar</span>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            data-testid="button-open-release-sync"
+            onClick={() => setIsSyncModalOpen(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 18px",
+              borderRadius: 10,
+              border: "none",
+              background: "#3b82f6",
+              color: "#ffffff",
+              fontWeight: 700,
+              fontSize: "0.85rem",
+              cursor: "pointer",
+            }}
+          >
+            <span>Revisar y sincronizar</span>
+          </button>
+        </div>
+      )}
+
       {/* Header Actions Bar */}
       <div
         style={{
@@ -284,6 +386,30 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
 
         {/* Global Directory Actions */}
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button
+            type="button"
+            data-testid="button-open-server-search"
+            onClick={() => setIsSearchModalOpen(true)}
+            disabled={isDisconnected}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 14px",
+              borderRadius: 10,
+              border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.3)" : "#93c5fd"}`,
+              background: isDark ? "rgba(59, 130, 246, 0.15)" : "#eff6ff",
+              color: isDark ? "#60a5fa" : "#1d4ed8",
+              fontWeight: 700,
+              fontSize: "0.85rem",
+              cursor: isDisconnected ? "not-allowed" : "pointer",
+              opacity: isDisconnected ? 0.5 : 1,
+            }}
+          >
+            <IconPlus size={16} />
+            <span>Buscar contenido</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setIsNewFolderModalOpen(true)}
@@ -486,6 +612,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
             <tbody>
               {files.map((file) => {
                 const isEditable = file.isFile && !file.isSymlink && isAllowlistedTextFile(file.name)
+                const managed = getManagedRecord(file)
                 return (
                   <tr
                     key={file.name}
@@ -521,6 +648,35 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
                             }}
                           >
                             Enlace
+                          </span>
+                        )}
+                        {managed && (
+                          <span
+                            data-testid={`badge-managed-${managed.managementSource.toLowerCase()}`}
+                            style={{
+                              fontSize: "0.72rem",
+                              padding: "2px 6px",
+                              borderRadius: 6,
+                              background:
+                                managed.managementSource === "GAME_RELEASE"
+                                  ? isDark
+                                    ? "rgba(99, 102, 241, 0.2)"
+                                    : "#e0e7ff"
+                                  : isDark
+                                  ? "rgba(14, 165, 233, 0.2)"
+                                  : "#e0f2fe",
+                              color:
+                                managed.managementSource === "GAME_RELEASE"
+                                  ? isDark
+                                    ? "#818cf8"
+                                    : "#4338ca"
+                                  : isDark
+                                  ? "#38bdf8"
+                                  : "#0369a1",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {managed.managementSource === "GAME_RELEASE" ? "Release" : "Servidor"}
                           </span>
                         )}
                       </div>
@@ -575,18 +731,16 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
 
                         <button
                           type="button"
-                          title="Renombrar"
-                          onClick={() => {
-                            setRenameTarget(file)
-                            setNewName(file.name)
-                          }}
+                          title={managed ? "No se pueden renombrar archivos administrados por HiKAT" : "Renombrar"}
+                          onClick={() => handleAttemptRename(file)}
+                          disabled={!!managed}
                           style={{
                             padding: "6px 8px",
                             borderRadius: 8,
                             border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e2e8f0"}`,
                             background: "transparent",
-                            color: isDark ? "rgba(255,255,255,0.7)" : "#475569",
-                            cursor: "pointer",
+                            color: managed ? (isDark ? "rgba(255,255,255,0.2)" : "#cbd5e1") : isDark ? "rgba(255,255,255,0.7)" : "#475569",
+                            cursor: managed ? "not-allowed" : "pointer",
                             display: "flex",
                             alignItems: "center",
                           }}
@@ -597,7 +751,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
                         <button
                           type="button"
                           title="Eliminar"
-                          onClick={() => setDeleteTarget(file)}
+                          onClick={() => handleAttemptDelete(file)}
                           style={{
                             padding: "6px 8px",
                             borderRadius: 8,
@@ -1067,6 +1221,119 @@ export default function ServerFilesView({ theme, serverStatus, onToast }: Server
           </div>
         </div>
       )}
+
+      {/* Blocked Delete for GAME_RELEASE Modal */}
+      {blockedDeleteTarget && (
+        <div
+          data-testid="modal-blocked-delete"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.65)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 460,
+              borderRadius: 20,
+              background: isDark ? "#131c23" : "#ffffff",
+              border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"}`,
+              padding: 28,
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ color: "#f59e0b", fontSize: "28px" }}>ℹ️</div>
+              <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: isDark ? "#ffffff" : "#0f172a" }}>
+                Archivo de la versión del juego
+              </h3>
+            </div>
+
+            <p style={{ margin: 0, fontSize: "0.875rem", color: isDark ? "rgba(255,255,255,0.8)" : "#334155", lineHeight: 1.5 }}>
+              El archivo <strong>{blockedDeleteTarget.file.name}</strong> pertenece a la release oficial del modpack.
+              Para eliminarlo o actualizarlo de manera sincronizada con el cliente de los jugadores, modifícalo desde <strong>Juego → Actualizaciones</strong>.
+            </p>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => setBlockedDeleteTarget(null)}
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: 10,
+                  border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#cbd5e1"}`,
+                  background: "transparent",
+                  color: isDark ? "#ffffff" : "#334155",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Entendido
+              </button>
+
+              {onNavigateToGame && (
+                <button
+                  type="button"
+                  data-testid="button-navigate-game-from-delete"
+                  onClick={() => {
+                    setBlockedDeleteTarget(null)
+                    onNavigateToGame()
+                  }}
+                  style={{
+                    padding: "10px 18px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "#3b82f6",
+                    color: "#ffffff",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Ir a Actualizaciones →
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Shard 08D Modals */}
+      {isSearchModalOpen && (
+        <ServerModSearchModal
+          onClose={() => setIsSearchModalOpen(false)}
+          onSuccess={() => {
+            onToast("Contenido añadido al servidor con éxito.", "success")
+            fetchFiles(true)
+          }}
+          onNavigateToGame={onNavigateToGame}
+        />
+      )}
+
+      {isSyncModalOpen && syncPlan && (
+        <ServerReleaseSyncModal
+          theme={theme}
+          plan={syncPlan}
+          onClose={() => setIsSyncModalOpen(false)}
+          onSuccess={() => {
+            fetchFiles(true)
+          }}
+          onToast={onToast}
+        />
+      )}
     </div>
   )
 }
+
