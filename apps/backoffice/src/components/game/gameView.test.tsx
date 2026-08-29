@@ -5,7 +5,9 @@ import { render, screen, act, cleanup, fireEvent, waitFor } from "@testing-libra
 import GameView from "./GameView"
 import GameFilesExplorer from "./GameFilesExplorer"
 import TextFileEditorModal from "./TextFileEditorModal"
-import { gameApi, graphqlClient } from "../../services/graphqlClient"
+import PublishReleaseModal from "./PublishReleaseModal"
+import { gameApi, serverApi, graphqlClient } from "../../services/graphqlClient"
+import * as mediaUploadService from "../../services/mediaUploadService"
 import { ModSearchModal } from "./providers/ModSearchModal"
 
 describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
@@ -132,6 +134,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       readiness: {
         isReady: true,
         validVersion: true,
+        uniqueVersion: true,
+        hasFiles: true,
         noConflicts: true,
         storageVerified: true,
         issues: [],
@@ -149,7 +153,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(screen.getByText("Nuevo Archivo")).toBeDefined()
     expect(screen.getByText("Subir Archivos")).toBeDefined()
     expect(screen.getByText("Subir Carpeta")).toBeDefined()
-    expect(screen.getByText("Publicar actualización")).toBeDefined()
+    expect(screen.getByText("Revisar y publicar")).toBeDefined()
     expect(screen.getByText("Descartar borrador")).toBeDefined()
 
     // Double click on folder row 'config' to navigate into it
@@ -1150,6 +1154,752 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(installBtn.textContent).toBe("Añadir a la actualización")
     })
   })
+
+  describe("HiKAT Shard 8C: Release Experience & Publication Suite (React & Wizards)", () => {
+    const mockDraftRelease: import("../../types").GameRelease = {
+      id: "rel-draft-8c",
+      version: "draft-1700000000",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "DRAFT",
+      notes: "Notas iniciales del borrador",
+      publishedAt: null,
+      coverMediaId: null,
+      cover: null,
+      files: [
+        {
+          id: "f-added",
+          name: "jei.jar",
+          logicalPath: "mods/jei.jar",
+          category: "MOD",
+          sha256: "hash-jei",
+          sizeBytes: 250000,
+          policy: "NO_MODIFICABLE",
+          explicitPolicy: null,
+          effectivePolicy: "NO_MODIFICABLE",
+          isInherited: true,
+          isDirectory: false,
+          changeStatus: "ADDED",
+          sourceProvider: "MODRINTH",
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: "f-updated",
+          name: "config.toml",
+          logicalPath: "config/config.toml",
+          category: "CONFIG",
+          sha256: "hash-cfg-new",
+          sizeBytes: 1500,
+          policy: "MODIFICABLE",
+          explicitPolicy: null,
+          effectivePolicy: "MODIFICABLE",
+          isInherited: true,
+          isDirectory: false,
+          changeStatus: "UPDATED",
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: "tombstone-f-removed",
+          name: "old-mod.jar",
+          logicalPath: "mods/old-mod.jar",
+          category: "MOD",
+          sha256: "hash-old",
+          sizeBytes: 10000,
+          policy: "NO_MODIFICABLE",
+          explicitPolicy: null,
+          effectivePolicy: "NO_MODIFICABLE",
+          isInherited: true,
+          isDirectory: false,
+          changeStatus: "REMOVED",
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: "f-unchanged",
+          name: "unchanged.json",
+          logicalPath: "config/unchanged.json",
+          category: "CONFIG",
+          sha256: "hash-unchanged",
+          sizeBytes: 800,
+          policy: "MODIFICABLE",
+          explicitPolicy: null,
+          effectivePolicy: "MODIFICABLE",
+          isInherited: true,
+          isDirectory: false,
+          changeStatus: "UNCHANGED",
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    const mockPublishedRelease: import("../../types").GameRelease = {
+      id: "rel-pub-8c",
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      notes: "Release 1.0.0",
+      publishedAt: "2026-08-20T10:00:00Z",
+      coverMediaId: "cover-img-1",
+      cover: {
+        id: "cover-img-1",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 10240,
+        url: "http://localhost/media/content/cover-img-1",
+        createdAt: "2026-08-20T10:00:00Z",
+      },
+      files: [],
+      createdAt: "2026-08-20T10:00:00Z",
+      updatedAt: "2026-08-20T10:00:00Z",
+    }
+
+    const mockChanges: import("../../types").GameDraftChanges = {
+      added: 1,
+      updated: 1,
+      removed: 1,
+      unchanged: 1,
+      total: 3,
+    }
+
+    const mockReadiness: import("../../types").GameDraftReadiness = {
+      isReady: true,
+      validVersion: true,
+      uniqueVersion: true,
+      hasFiles: true,
+      noConflicts: true,
+      storageVerified: true,
+      issues: [],
+    }
+
+    beforeEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    afterEach(() => {
+      cleanup()
+    })
+
+    it("1. versión SemVer inicial sugerida / prellenada (suggestNextPatchVersion)", async () => {
+      const onClose = vi.fn()
+      const onPublished = vi.fn()
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={onClose}
+          onPublished={onPublished}
+        />,
+      )
+
+      const versionInput = screen.getByPlaceholderText("Ej. 1.0.1") as HTMLInputElement
+      expect(versionInput.value).toBe("1.0.1") // Suggested next patch from 1.0.0
+    })
+
+    it("2. versión inválida bloquea avanzar al paso 2 y muestra mensaje de error", async () => {
+      const onClose = vi.fn()
+      const onPublished = vi.fn()
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={onClose}
+          onPublished={onPublished}
+        />,
+      )
+
+      const versionInput = screen.getByPlaceholderText("Ej. 1.0.1")
+      fireEvent.change(versionInput, { target: { value: "invalid-semver" } })
+
+      const nextBtn = screen.getByText("Siguiente: Revisar cambios →")
+      await act(async () => {
+        fireEvent.click(nextBtn)
+      })
+
+      expect(screen.getByText(/Formato de versión inválido/i)).toBeDefined()
+      // Step 2 must NOT be rendered
+      expect(screen.queryByText("Resumen de cambios a publicar")).toBeNull()
+    })
+
+    it("3. notes se pueden escribir en textarea", async () => {
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      const notesTextarea = screen.getByPlaceholderText(/Describe los cambios, novedades/i) as HTMLTextAreaElement
+      fireEvent.change(notesTextarea, { target: { value: "Nuevas correcciones y shaders." } })
+      expect(notesTextarea.value).toBe("Nuevas correcciones y shaders.")
+    })
+
+    it("4. Minecraft y NeoForge se muestran en modo solo lectura", async () => {
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      expect(screen.getByText("1.21.1")).toBeDefined()
+      expect(screen.getByText("21.1.65")).toBeDefined()
+    })
+
+    it("5. uploader de cover acepta imagen y 7. preview de cover renderiza <img>", async () => {
+      const mockImageUpload: import("../../types").ContentMedia = {
+        id: "media-img-99",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 2048,
+        url: "http://localhost/media/content/media-img-99",
+        createdAt: new Date().toISOString(),
+      }
+
+      vi.spyOn(mediaUploadService, "uploadMediaFile").mockResolvedValue(mockImageUpload)
+
+      const { container } = render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+      expect(fileInput).toBeDefined()
+
+      const file = new File(["fake-image-bytes"], "cover.png", { type: "image/png" })
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } })
+      })
+
+      // Image preview rendered
+      await waitFor(() => {
+        const img = screen.getByAltText("Portada de actualización") as HTMLImageElement
+        expect(img).toBeDefined()
+        expect(img.src).toContain("media-img-99")
+        expect(screen.getByText("Reemplazar")).toBeDefined()
+        expect(screen.getByText("Quitar")).toBeDefined()
+      })
+    })
+
+    it("6. uploader de cover acepta video y 7. preview de cover renderiza <video>", async () => {
+      const mockVideoUpload: import("../../types").ContentMedia = {
+        id: "media-vid-99",
+        mediaType: "VIDEO",
+        mimeType: "video/mp4",
+        sizeBytes: 1048576,
+        url: "http://localhost/media/content/media-vid-99",
+        createdAt: new Date().toISOString(),
+      }
+
+      vi.spyOn(mediaUploadService, "uploadMediaFile").mockResolvedValue(mockVideoUpload)
+
+      const { container } = render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(["fake-video-bytes"], "trailer.mp4", { type: "video/mp4" })
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } })
+      })
+
+      await waitFor(() => {
+        expect(container.querySelector("video")).toBeDefined()
+        expect(screen.getByText(/VIDEO \(video\/mp4\)/i)).toBeDefined()
+      })
+    })
+
+    it("8. botón quitar cover limpia selección", async () => {
+      const draftWithCover: import("../../types").GameRelease = {
+        ...mockDraftRelease,
+        coverMediaId: "cov-1",
+        cover: {
+          id: "cov-1",
+          mediaType: "IMAGE",
+          mimeType: "image/webp",
+          sizeBytes: 500,
+          url: "http://localhost/media/cov-1",
+          createdAt: new Date().toISOString(),
+        },
+      }
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={draftWithCover}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      expect(screen.getByAltText("Portada de actualización")).toBeDefined()
+      const removeBtn = screen.getByText("Quitar")
+      await act(async () => {
+        fireEvent.click(removeBtn)
+      })
+
+      expect(screen.queryByAltText("Portada de actualización")).toBeNull()
+      expect(screen.getByText(/Arrastra o haz clic para seleccionar imagen o video/i)).toBeDefined()
+    })
+
+    it("9. upload en progreso deshabilita botones y muestra spinner", async () => {
+      let resolveUpload: (val: any) => void
+      const uploadPromise = new Promise((res) => {
+        resolveUpload = res
+      })
+      vi.spyOn(mediaUploadService, "uploadMediaFile").mockReturnValue(uploadPromise as any)
+
+      const { container } = render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(["bytes"], "cover.png", { type: "image/png" })
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } })
+      })
+
+      expect(screen.getByText(/Subiendo portada a Cloudflare R2.../i)).toBeDefined()
+      const nextBtn = screen.getByText("Siguiente: Revisar cambios →") as HTMLButtonElement
+      expect(nextBtn.disabled).toBe(true)
+
+      // Resolve upload
+      await act(async () => {
+        resolveUpload!({
+          id: "cov-done",
+          mediaType: "IMAGE",
+          mimeType: "image/png",
+          sizeBytes: 100,
+          url: "http://localhost/media/cov-done",
+          createdAt: new Date().toISOString(),
+        })
+      })
+
+      await waitFor(() => {
+        expect(nextBtn.disabled).toBe(false)
+      })
+    })
+
+    it("10. error de upload se muestra sin resetear campos del formulario", async () => {
+      vi.spyOn(mediaUploadService, "uploadMediaFile").mockRejectedValue(new Error("Storage limit exceeded"))
+
+      const { container } = render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      const versionInput = screen.getByPlaceholderText("Ej. 1.0.1") as HTMLInputElement
+      fireEvent.change(versionInput, { target: { value: "1.0.5" } })
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(["bytes"], "cover.png", { type: "image/png" })
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } })
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText("Storage limit exceeded")).toBeDefined()
+      })
+      // Form input preserved
+      expect(versionInput.value).toBe("1.0.5")
+    })
+
+    it("11. Step 2 counters, 12. lista de cambios con tags, 13. tombstones como REMOVED y 14. filtro de cambios", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({
+        ...mockDraftRelease,
+        version: "1.0.1",
+      })
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      // Advance to Step 2
+      const nextBtn = screen.getByText("Siguiente: Revisar cambios →")
+      await act(async () => {
+        fireEvent.click(nextBtn)
+      })
+
+      // 11. Counters
+      expect(screen.getByText("+1 añadidos")).toBeDefined()
+      expect(screen.getByText("↑ 1 actualizados")).toBeDefined()
+      expect(screen.getByText("− 1 eliminados")).toBeDefined()
+      expect(screen.getByText("= 1 sin cambios")).toBeDefined()
+
+      // 12. Tags & 13. Tombstones
+      expect(screen.getByText("AÑADIDO")).toBeDefined()
+      expect(screen.getByText("ACTUALIZADO")).toBeDefined()
+      expect(screen.getByText("ELIMINADO")).toBeDefined()
+      expect(screen.getByText("old-mod.jar")).toBeDefined()
+
+      // 14. Change filters
+      const addedFilter = screen.getByText("Añadidos (+1)")
+      await act(async () => {
+        fireEvent.click(addedFilter)
+      })
+
+      expect(screen.getByText("jei.jar")).toBeDefined()
+      expect(screen.queryByText("old-mod.jar")).toBeNull()
+
+      const removedFilter = screen.getByText("Eliminados (−1)")
+      await act(async () => {
+        fireEvent.click(removedFilter)
+      })
+
+      expect(screen.getByText("old-mod.jar")).toBeDefined()
+      expect(screen.queryByText("jei.jar")).toBeNull()
+    })
+
+    it("15. Step 3 resumen, 16. readiness checklist, 17. backup checkbox desmarcado por defecto, 20. doble submit bloqueado", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({
+        ...mockDraftRelease,
+        version: "1.0.1",
+      })
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+      const publishSpy = vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
+        ...mockDraftRelease,
+        status: "PUBLISHED",
+        version: "1.0.1",
+      })
+
+      const onClose = vi.fn()
+      const onPublished = vi.fn()
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={onClose}
+          onPublished={onPublished}
+        />,
+      )
+
+      // Step 1 -> Step 2
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+
+      // Step 2 -> Step 3
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      // 15. Summary
+      expect(screen.getByText("v1.0.1")).toBeDefined()
+      expect(screen.getByText(/MC 1.21.1 • NeoForge 21.1.65/i)).toBeDefined()
+
+      // 16. Readiness Checklist
+      expect(screen.getByText("✓ Verificación de preparación completada")).toBeDefined()
+      expect(screen.getByText("✓ Versión SemVer válida")).toBeDefined()
+      expect(screen.getByText("✓ Versión disponible")).toBeDefined()
+      expect(screen.getByText("✓ Archivos descargables")).toBeDefined()
+      expect(screen.getByText("✓ Sin conflictos de ruta")).toBeDefined()
+      expect(screen.getByText("✓ Almacenamiento R2 verificado")).toBeDefined()
+
+      // 17. Backup Checkbox is UNCHECKED by default
+      const backupCheckbox = screen.getByRole("checkbox") as HTMLInputElement
+      expect(backupCheckbox.checked).toBe(false)
+
+      // Publish without backup
+      const publishBtn = screen.getByRole("button", { name: /Publicar actualización oficial/i })
+      await act(async () => {
+        fireEvent.click(publishBtn)
+      })
+
+      expect(publishSpy).toHaveBeenCalledWith({
+        version: "1.0.1",
+        notes: "Notas iniciales del borrador",
+        coverMediaId: null,
+      })
+      expect(onPublished).toHaveBeenCalledWith("1.0.1", 4)
+      expect(onClose).toHaveBeenCalled()
+    })
+
+    it("18. backup flow: si está marcado, crea backup, muestra polling y publica tras éxito", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+      const backupCreateSpy = vi.spyOn(serverApi, "createServerBackup").mockResolvedValue({
+        id: "backup-test-123",
+        name: "Pre-release v1.0.1",
+        bytes: 1024,
+        isSuccessful: false,
+        isLocked: false,
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+      })
+      const backupPollSpy = vi.spyOn(serverApi, "getServerBackups").mockResolvedValue([
+        {
+          id: "backup-test-123",
+          name: "Pre-release v1.0.1",
+          bytes: 1024,
+          isSuccessful: true,
+          isLocked: false,
+          createdAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+        },
+      ])
+      const publishSpy = vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
+        ...mockDraftRelease,
+        status: "PUBLISHED",
+        version: "1.0.1",
+      })
+
+      const onClose = vi.fn()
+      const onPublished = vi.fn()
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={onClose}
+          onPublished={onPublished}
+        />,
+      )
+
+      // Step 1 -> Step 2 -> Step 3
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      // Check the backup checkbox
+      const backupCheckbox = screen.getByRole("checkbox") as HTMLInputElement
+      fireEvent.click(backupCheckbox)
+      expect(backupCheckbox.checked).toBe(true)
+
+      // Publish
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Publicar actualización oficial/i }))
+      })
+
+      expect(backupCreateSpy).toHaveBeenCalledWith("Pre-release v1.0.1")
+      expect(backupPollSpy).toHaveBeenCalled()
+      expect(publishSpy).toHaveBeenCalled()
+      expect(onPublished).toHaveBeenCalledWith("1.0.1", 4)
+    })
+
+    it("19. backup failure: si backup falla, aborta publish y muestra error", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: { ...mockDraftRelease, version: "1.0.1" },
+        changes: mockChanges,
+        readiness: mockReadiness,
+        pendingChangesCount: 2,
+      })
+      vi.spyOn(serverApi, "createServerBackup").mockResolvedValue({
+        id: "backup-fail-123",
+        name: "Pre-release v1.0.1",
+        bytes: 0,
+        isSuccessful: false,
+        isLocked: false,
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+      })
+      vi.spyOn(serverApi, "getServerBackups").mockResolvedValue([
+        {
+          id: "backup-fail-123",
+          name: "Pre-release v1.0.1",
+          bytes: 0,
+          isSuccessful: false, // Failed!
+          isLocked: false,
+          createdAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+        },
+      ])
+      const publishSpy = vi.spyOn(gameApi, "publishGameRelease")
+
+      render(
+        <PublishReleaseModal
+          theme="dark"
+          draftRelease={mockDraftRelease}
+          publishedRelease={mockPublishedRelease}
+          changes={mockChanges}
+          readiness={mockReadiness}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />,
+      )
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      // Check backup and publish
+      fireEvent.click(screen.getByRole("checkbox"))
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Publicar actualización oficial/i }))
+      })
+
+      // Publish should NOT have been called
+      expect(publishSpy).not.toHaveBeenCalled()
+      expect(screen.getByText(/No se pudo completar la copia de seguridad/i)).toBeDefined()
+    })
+
+    it("21. History View: muestra cover, versión, status, fecha, notas y visor de archivos de solo lectura", async () => {
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: null,
+        pendingChangesCount: 0,
+      })
+      vi.spyOn(gameApi, "getGameReleaseHistory").mockResolvedValue([
+        {
+          id: "rel-hist-v100",
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          status: "PUBLISHED",
+          notes: "Novedades de la versión 1.0.0 con portada e integración total.",
+          publishedAt: "2026-08-20T10:00:00Z",
+          coverMediaId: "cover-100",
+          cover: {
+            id: "cover-100",
+            mediaType: "IMAGE",
+            mimeType: "image/png",
+            sizeBytes: 5000,
+            url: "http://localhost/media/content/cover-100",
+            createdAt: "2026-08-20T10:00:00Z",
+          },
+          files: [
+            {
+              id: "hf-1",
+              name: "server.properties",
+              logicalPath: "server.properties",
+              category: "CONFIG",
+              sha256: "prop-sha",
+              sizeBytes: 500,
+              policy: "NO_MODIFICABLE",
+              explicitPolicy: null,
+              effectivePolicy: "NO_MODIFICABLE",
+              isInherited: true,
+              isDirectory: false,
+              createdAt: "2026-08-20T10:00:00Z",
+            },
+          ],
+          createdAt: "2026-08-20T10:00:00Z",
+          updatedAt: "2026-08-20T10:00:00Z",
+        },
+      ])
+
+      render(<GameView theme="dark" />)
+
+      // Switch to history tab
+      const historyTab = screen.getByText("Historial de versiones")
+      await act(async () => {
+        fireEvent.click(historyTab)
+      })
+
+      // Cover, version, status, files, date
+      expect(screen.getByAltText("Portada v1.0.0")).toBeDefined()
+      expect(screen.getByText("v1.0.0")).toBeDefined()
+      expect(screen.getByText("Publicada (Activa)")).toBeDefined()
+      expect(screen.getByText(/1 archivos/i)).toBeDefined()
+
+      // Expand to view notes and read-only explorer
+      const expandBtn = screen.getByText("Abrir explorador ▼")
+      await act(async () => {
+        fireEvent.click(expandBtn)
+      })
+
+      expect(screen.getByText(/Novedades de la versión 1.0.0 con portada/i)).toBeDefined()
+      expect(screen.getByText("server.properties")).toBeDefined()
+      expect(screen.getByText(/Modo Lectura/i)).toBeDefined()
+    })
+  })
 })
+
 
 

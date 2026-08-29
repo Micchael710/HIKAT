@@ -264,6 +264,8 @@ export interface GameDraftChanges {
 export interface GameDraftReadiness {
   isReady: boolean
   validVersion: boolean
+  uniqueVersion: boolean
+  hasFiles: boolean
   noConflicts: boolean
   storageVerified: boolean
   issues: string[]
@@ -428,6 +430,18 @@ export interface InstallModPlanInput {
   manualOverrides?: ModVersionOverrideInput[] | null
 }
 
+export interface UpdateGameDraftMetadataInput {
+  version?: string | null
+  notes?: string | null
+  coverMediaId?: string | null
+}
+
+export interface PublishGameReleaseInput {
+  version?: string | null
+  notes?: string | null
+  coverMediaId?: string | null
+}
+
 export interface GameRelease {
   id: string
 
@@ -440,6 +454,10 @@ export interface GameRelease {
   status: GameReleaseStatus
 
   notes?: string | null
+
+  coverMediaId?: string | null
+
+  cover?: ContentMedia | null
 
   publishedAt?: string | null
 

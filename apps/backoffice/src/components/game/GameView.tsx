@@ -118,6 +118,8 @@ export default function GameView({ theme }: GameViewProps) {
   const hasDraft = !!draft
   const activeRelease = draft || published
   const files = activeRelease?.files || []
+  const changes = overview?.changes
+  const readiness = overview?.readiness
 
   return (
     <div style={{ padding: "28px", maxWidth: "1380px", margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
@@ -279,42 +281,102 @@ export default function GameView({ theme }: GameViewProps) {
                         backgroundColor: isSelected ? (isDark ? "rgba(99, 102, 241, 0.05)" : "#f8fafc") : "transparent",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                        <span
-                          style={{
-                            fontSize: "17px",
-                            fontWeight: "700",
-                            color: isDark ? "#f1f5f9" : "#0f172a",
-                          }}
-                        >
-                          v{rel.version}
-                        </span>
-                        <span
-                          style={{
-                            padding: "3px 8px",
-                            borderRadius: "6px",
-                            fontSize: "11px",
-                            fontWeight: "600",
-                            backgroundColor:
-                              rel.status === "PUBLISHED"
-                                ? "rgba(34, 197, 94, 0.15)"
-                                : isDark
-                                ? "#334155"
-                                : "#f1f5f9",
-                            color: rel.status === "PUBLISHED" ? "#22c55e" : isDark ? "#cbd5e1" : "#64748b",
-                          }}
-                        >
-                          {rel.status === "PUBLISHED" ? "Publicada (Activa)" : "Histórica"}
-                        </span>
-                        <span style={{ fontSize: "13px", color: isDark ? "#94a3b8" : "#64748b" }}>
-                          {rel.publishedAt ? new Date(rel.publishedAt).toLocaleDateString() : ""}
-                        </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                        {/* Cover thumbnail / indicator */}
+                        {rel.cover ? (
+                          <div
+                            style={{
+                              width: "48px",
+                              height: "48px",
+                              borderRadius: "8px",
+                              overflow: "hidden",
+                              backgroundColor: isDark ? "#0f172a" : "#f1f5f9",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {rel.cover.mediaType === "IMAGE" ? (
+                              <img
+                                src={rel.cover.url}
+                                alt={`Portada v${rel.version}`}
+                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                              />
+                            ) : (
+                              <div
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  backgroundColor: "#1e293b",
+                                  color: "#38bdf8",
+                                  fontSize: "10px",
+                                  fontWeight: "700",
+                                }}
+                              >
+                                VIDEO
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              width: "48px",
+                              height: "48px",
+                              borderRadius: "8px",
+                              backgroundColor: isDark ? "#0f172a" : "#f1f5f9",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: isDark ? "#64748b" : "#94a3b8",
+                              fontSize: "10px",
+                              flexShrink: 0,
+                            }}
+                          >
+                            MODPACK
+                          </div>
+                        )}
+
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            <span
+                              style={{
+                                fontSize: "17px",
+                                fontWeight: "700",
+                                color: isDark ? "#f1f5f9" : "#0f172a",
+                              }}
+                            >
+                              v{rel.version}
+                            </span>
+                            <span
+                              style={{
+                                padding: "3px 8px",
+                                borderRadius: "6px",
+                                fontSize: "11px",
+                                fontWeight: "600",
+                                backgroundColor:
+                                  rel.status === "PUBLISHED"
+                                    ? "rgba(34, 197, 94, 0.15)"
+                                    : isDark
+                                    ? "#334155"
+                                    : "#f1f5f9",
+                                color: rel.status === "PUBLISHED" ? "#22c55e" : isDark ? "#cbd5e1" : "#64748b",
+                              }}
+                            >
+                              {rel.status === "PUBLISHED" ? "Publicada (Activa)" : "Histórica"}
+                            </span>
+                            <span style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                              MC {rel.minecraftVersion} • NeoForge {rel.neoForgeVersion}
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: "12px", color: isDark ? "#64748b" : "#94a3b8", marginTop: "2px" }}>
+                            {rel.publishedAt ? `Publicada el ${new Date(rel.publishedAt).toLocaleDateString()}` : "Sin fecha de publicación"} • {rel.files.length} archivos
+                          </div>
+                        </div>
                       </div>
 
                       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                        <span style={{ fontSize: "13px", color: isDark ? "#94a3b8" : "#64748b" }}>
-                          {rel.files.length} archivos
-                        </span>
                         <span style={{ fontSize: "13px", color: "#3b82f6", fontWeight: "600" }}>
                           {isSelected ? "Ocultar explorador ▲" : "Abrir explorador ▼"}
                         </span>
@@ -376,7 +438,7 @@ export default function GameView({ theme }: GameViewProps) {
               }}
             >
               <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px", flexWrap: "wrap" }}>
                   <span
                     style={{
                       padding: "4px 10px",
@@ -398,6 +460,15 @@ export default function GameView({ theme }: GameViewProps) {
                   >
                     {published ? `v${published.version}` : "Sin versión previa"}
                   </span>
+
+                  {/* Change counters badge in banner when draft is active */}
+                  {hasDraft && changes && (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "12px", fontWeight: "600" }}>
+                      <span style={{ color: "#22c55e" }}>+{changes.added}</span>
+                      <span style={{ color: "#38bdf8" }}>↑ {changes.updated}</span>
+                      <span style={{ color: "#ef4444" }}>− {changes.removed}</span>
+                    </div>
+                  )}
                 </div>
                 <p style={{ margin: 0, fontSize: "14px", color: isDark ? "#94a3b8" : "#64748b" }}>
                   {hasDraft
@@ -469,7 +540,7 @@ export default function GameView({ theme }: GameViewProps) {
                       }}
                     >
                       <IconRocket style={{ width: 16, height: 16 }} />
-                      <span>Publicar actualización</span>
+                      <span>Revisar y publicar</span>
                     </button>
                   </>
                 )}
@@ -477,7 +548,7 @@ export default function GameView({ theme }: GameViewProps) {
             </div>
 
             {/* Readiness Checklist when Draft is Active */}
-            {hasDraft && overview?.readiness && (
+            {hasDraft && readiness && (
               <div
                 style={{
                   marginTop: "16px",
@@ -497,7 +568,7 @@ export default function GameView({ theme }: GameViewProps) {
                       alignItems: "center",
                       gap: "6px",
                       fontSize: "13px",
-                      color: files.filter((f) => !f.isDirectory && f.changeStatus !== "REMOVED").length > 0 ? "#22c55e" : "#ef4444",
+                      color: readiness.hasFiles ? "#22c55e" : "#ef4444",
                     }}
                   >
                     <IconCheck style={{ width: 16, height: 16 }} />
@@ -509,7 +580,7 @@ export default function GameView({ theme }: GameViewProps) {
                       alignItems: "center",
                       gap: "6px",
                       fontSize: "13px",
-                      color: overview.readiness.noConflicts ? "#22c55e" : "#ef4444",
+                      color: readiness.noConflicts ? "#22c55e" : "#ef4444",
                     }}
                   >
                     <IconCheck style={{ width: 16, height: 16 }} />
@@ -521,7 +592,7 @@ export default function GameView({ theme }: GameViewProps) {
                       alignItems: "center",
                       gap: "6px",
                       fontSize: "13px",
-                      color: overview.readiness.storageVerified ? "#22c55e" : "#ef4444",
+                      color: readiness.storageVerified ? "#22c55e" : "#ef4444",
                     }}
                   >
                     <IconCheck style={{ width: 16, height: 16 }} />
@@ -530,7 +601,7 @@ export default function GameView({ theme }: GameViewProps) {
                 </div>
 
                 <div>
-                  {overview.readiness.isReady ? (
+                  {readiness.isReady ? (
                     <span
                       style={{
                         fontSize: "12px",

@@ -1,6 +1,7 @@
 import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core"
 import { sql } from "drizzle-orm"
 import { users } from "./users"
+import { contentMedia } from "./news"
 
 export const gameReleases = sqliteTable(
   "game_releases",
@@ -11,6 +12,9 @@ export const gameReleases = sqliteTable(
     neoForgeVersion: text("neoforge_version").notNull().default("21.1.65"),
     status: text("status").notNull().default("DRAFT"),
     notes: text("notes"),
+    coverMediaId: text("cover_media_id").references(() => contentMedia.id, {
+      onDelete: "set null",
+    }),
     publishedAt: text("published_at"),
     createdBy: text("created_by")
       .notNull()
@@ -25,6 +29,7 @@ export const gameReleases = sqliteTable(
   (table) => [
     index("game_releases_status_idx").on(table.status),
     index("game_releases_published_at_idx").on(table.publishedAt),
+    index("game_releases_cover_media_id_idx").on(table.coverMediaId),
     uniqueIndex("game_releases_single_published_idx")
       .on(table.status)
       .where(sql`"status" = 'PUBLISHED'`),

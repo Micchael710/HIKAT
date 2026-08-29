@@ -6367,38 +6367,78 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       expect(draftData.data.prepareGameDraft.files.length).toBe(1)
 
-      // 3. Query overview to verify change tracking & readiness
-
-      const overviewReq = new Request("http://localhost/graphql", {
+      // 3. Query overview to verify change tracking & initial unready state (due to draft-... version)
+      const overviewReq1 = new Request("http://localhost/graphql", {
         method: "POST",
-
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${coreAdminToken}`,
         },
-
         body: JSON.stringify({
           query: `
             query {
               adminGameOverview {
                 draftRelease { id version files { id name changeStatus } }
                 changes { added updated removed unchanged total }
-                readiness { isReady validVersion noConflicts storageVerified issues }
+                readiness { isReady validVersion uniqueVersion hasFiles noConflicts storageVerified issues }
               }
             }
           `,
         }),
       })
 
-      const overviewRes = await worker.fetch(overviewReq, testEnv)
+      const overviewRes1 = await worker.fetch(overviewReq1, testEnv)
+      const overviewData1 = (await overviewRes1.json()) as any
+      expect(overviewData1.errors).toBeUndefined()
+      expect(overviewData1.data.adminGameOverview.changes.unchanged).toBe(1)
+      expect(overviewData1.data.adminGameOverview.readiness.validVersion).toBe(false)
+      expect(overviewData1.data.adminGameOverview.readiness.isReady).toBe(false)
 
-      const overviewData = (await overviewRes.json()) as any
+      // Update draft metadata with valid SemVer version
+      const updateMetaReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({
+          query: `
+            mutation {
+              updateGameDraftMetadata(input: { version: "1.0.1" }) {
+                id
+                version
+              }
+            }
+          `,
+        }),
+      })
+      const updateMetaRes = await worker.fetch(updateMetaReq, testEnv)
+      const updateMetaData = (await updateMetaRes.json()) as any
+      expect(updateMetaData.errors).toBeUndefined()
+      expect(updateMetaData.data.updateGameDraftMetadata.version).toBe("1.0.1")
 
-      expect(overviewData.errors).toBeUndefined()
-
-      expect(overviewData.data.adminGameOverview.changes.unchanged).toBe(1)
-
-      expect(overviewData.data.adminGameOverview.readiness.isReady).toBe(true)
+      // Query overview again to verify readiness is now true
+      const overviewReq2 = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${coreAdminToken}`,
+        },
+        body: JSON.stringify({
+          query: `
+            query {
+              adminGameOverview {
+                readiness { isReady validVersion uniqueVersion hasFiles noConflicts storageVerified issues }
+              }
+            }
+          `,
+        }),
+      })
+      const overviewRes2 = await worker.fetch(overviewReq2, testEnv)
+      const overviewData2 = (await overviewRes2.json()) as any
+      expect(overviewData2.data.adminGameOverview.readiness.isReady).toBe(true)
+      expect(overviewData2.data.adminGameOverview.readiness.validVersion).toBe(true)
+      expect(overviewData2.data.adminGameOverview.readiness.uniqueVersion).toBe(true)
 
       // 4. Query game release history
 

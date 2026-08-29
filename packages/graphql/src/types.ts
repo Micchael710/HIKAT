@@ -573,6 +573,8 @@ export interface GameDraftChangesGql {
 export interface GameDraftReadinessGql {
   isReady: boolean
   validVersion: boolean
+  uniqueVersion: boolean
+  hasFiles: boolean
   noConflicts: boolean
   storageVerified: boolean
   issues: string[]
@@ -622,6 +624,8 @@ export interface GameReleaseGql {
   neoForgeVersion: string
   status: GameReleaseStatusGql
   notes?: string | null
+  coverMediaId?: string | null
+  cover?: ContentMediaGql | null
   publishedAt?: string | null
   files: AdminGameFileGql[]
   createdAt: string
@@ -677,9 +681,16 @@ export interface PrepareGameDraftInputGql {
   baseReleaseId?: string | null
 }
 
-export interface PublishGameReleaseInputGql {
-  version: string
+export interface UpdateGameDraftMetadataInputGql {
+  version?: string | null
   notes?: string | null
+  coverMediaId?: string | null
+}
+
+export interface PublishGameReleaseInputGql {
+  version?: string | null
+  notes?: string | null
+  coverMediaId?: string | null
 }
 
 // --- Mod Providers Types (Shard 08B) ---

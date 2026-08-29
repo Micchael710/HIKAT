@@ -6,6 +6,7 @@ import { createTestR2Bucket } from "../../testUtils/mockR2"
 import {
   prepareGameDraft,
   discardGameDraft,
+  updateGameDraftMetadata,
   publishGameRelease,
   getPublishedModpack,
   getAdminGameOverview,
@@ -421,8 +422,15 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
     expect(readiness.isReady).toBe(false)
     expect(readiness.issues).toContain("El borrador no contiene ningún archivo o mod descargable.")
 
-    // 2. Add a real downloadable file -> readiness passes without checking R2 for the empty folder
+    // 2. Add a real downloadable file and set valid version -> readiness passes
     await saveGameFileContent(db, { logicalPath: "config/main.toml", content: "enabled = true" }, adminId, env)
+    await updateGameDraftMetadata(db, env, { version: "1.0.0" }, adminId)
+
+    const updatedDraft = (await db
+      .select()
+      .from(schema.gameReleases)
+      .where(eq(schema.gameReleases.id, draft.id))
+      .get())!
 
     files = await db
       .select()
@@ -430,8 +438,10 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
       .all()
 
-    readiness = await validateDraftReadiness(env, draft, files)
+    readiness = await validateDraftReadiness(env, updatedDraft, files, db)
     expect(readiness.isReady).toBe(true)
+    expect(readiness.validVersion).toBe(true)
+    expect(readiness.uniqueVersion).toBe(true)
     expect(readiness.storageVerified).toBe(true)
     expect(readiness.issues.length).toBe(0)
   })

@@ -777,6 +777,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0013_game_files_enhancements.sql",
       "0014_mod_providers_metadata.sql",
       "0015_content_providers_expansion.sql",
+      "0016_game_release_cover_media.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -2147,13 +2148,38 @@ describe("@hikat/database schema and D1 operations", () => {
     const fileAfter0015 = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(fileId) as any
     expect(fileAfter0015.source_environment).toBeNull()
 
+    // 7. Apply migration 0016 (adds cover_media_id referencing content_media)
+    const file0016 = sqlFiles.find((f) => f.startsWith("0016_"))
+    expect(file0016).toBeDefined()
+    const sql0016 = readFileSync(join(migrationsDir, file0016!), "utf-8")
+    for (const statement of sql0016.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim()
+      if (trimmed) sqlite.exec(trimmed)
+    }
+
+    const relBefore = sqlite.prepare("SELECT * FROM game_releases WHERE id = ?").get(releaseId) as any
+    expect(relBefore.cover_media_id).toBeNull()
+
+    // Insert media into content_media and reference it in game_releases
+    const mediaId = "cover-media-test-1"
     sqlite.exec(`
-      UPDATE game_release_files
-      SET source_environment = 'BOTH'
-      WHERE id = '${fileId}';
+      INSERT INTO content_media (id, object_key, media_type, mime_type, size_bytes, created_by, created_at)
+      VALUES ('${mediaId}', 'content/media/cover.png', 'IMAGE', 'image/png', 1024, '${userId}', '${now}');
     `)
-    const fileUpdatedEnv = sqlite.prepare("SELECT * FROM game_release_files WHERE id = ?").get(fileId) as any
-    expect(fileUpdatedEnv.source_environment).toBe("BOTH")
+
+    sqlite.exec(`
+      UPDATE game_releases
+      SET cover_media_id = '${mediaId}'
+      WHERE id = '${releaseId}';
+    `)
+
+    const relAfter = sqlite.prepare("SELECT * FROM game_releases WHERE id = ?").get(releaseId) as any
+    expect(relAfter.cover_media_id).toBe(mediaId)
+
+    // Test ON DELETE SET NULL on content_media
+    sqlite.exec(`DELETE FROM content_media WHERE id = '${mediaId}';`)
+    const relAfterDelete = sqlite.prepare("SELECT * FROM game_releases WHERE id = ?").get(releaseId) as any
+    expect(relAfterDelete.cover_media_id).toBeNull()
   })
 })
 

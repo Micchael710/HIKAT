@@ -13,6 +13,7 @@ import type {
   SyncPolicyGql,
   PublishGameReleaseInputGql,
   PrepareGameDraftInputGql,
+  UpdateGameDraftMetadataInputGql,
 } from "@hikat/graphql"
 import {
   validateSemVer,
@@ -20,6 +21,11 @@ import {
   resolveEffectiveGamePolicy,
   type SyncPolicy,
 } from "@hikat/shared"
+import {
+  getContentMediaById,
+  getContentMediaByIds,
+  formatMediaGql,
+} from "../mediaService"
 import type { Env } from "../../types"
 
 /**
@@ -83,6 +89,9 @@ export function formatGameRelease(
   release: schema.GameRelease,
   files: schema.GameReleaseFile[],
   taggedFiles?: AdminGameFileGql[],
+  coverMedia?: schema.ContentMedia | null,
+  env?: Env,
+  request?: Request,
 ): GameReleaseGql {
   const effectiveMap = resolveReleaseEffectivePolicies(files)
   return {
@@ -91,7 +100,9 @@ export function formatGameRelease(
     minecraftVersion: release.minecraftVersion,
     neoForgeVersion: release.neoForgeVersion,
     status: release.status as any,
-    notes: release.notes,
+    notes: release.notes || null,
+    coverMediaId: release.coverMediaId || null,
+    cover: coverMedia && env ? formatMediaGql(coverMedia, env, request) : null,
     publishedAt: release.publishedAt ? normalizeIsoDateTime(release.publishedAt) : null,
     files: taggedFiles || files.map((f) => formatAdminGameFile(f, effectiveMap.get(f.id))),
     createdAt: normalizeIsoDateTime(release.createdAt),
@@ -179,21 +190,55 @@ export function computeDraftChanges(
 
 export async function validateDraftReadiness(
   env: Env,
-  draft: { version: string; minecraftVersion?: string; neoForgeVersion?: string },
+  draft: { id?: string; version: string; minecraftVersion?: string; neoForgeVersion?: string },
   draftFiles: schema.GameReleaseFile[],
+  db?: Database,
+  targetVersion?: string,
 ): Promise<GameDraftReadinessGql> {
   const issues: string[] = []
   let noConflicts = true
   let storageVerified = true
-  const validVersion = true
 
   const realFiles = draftFiles.filter((f) => !f.isDirectory)
+  const hasFiles = realFiles.length > 0
 
-  if (realFiles.length === 0) {
+  if (!hasFiles) {
     issues.push("El borrador no contiene ningún archivo o mod descargable.")
   }
 
-  // Check unique logical paths
+  // 1. Version SemVer evaluation
+  const versionToValidate = String(targetVersion || draft.version || "").trim()
+  let validVersion = false
+  let uniqueVersion = false
+
+  if (!versionToValidate || versionToValidate.startsWith("draft-") || !validateSemVer(versionToValidate)) {
+    validVersion = false
+    issues.push("Se debe configurar una versión válida en formato SemVer antes de publicar.")
+  } else {
+    validVersion = true
+    if (db) {
+      const collision = await db
+        .select()
+        .from(schema.gameReleases)
+        .where(
+          and(
+            eq(schema.gameReleases.version, versionToValidate),
+            draft.id ? sql`${schema.gameReleases.id} != ${draft.id}` : sql`1=1`,
+          ),
+        )
+        .get()
+      if (collision) {
+        uniqueVersion = false
+        issues.push(`La versión "${versionToValidate}" ya existe en el historial.`)
+      } else {
+        uniqueVersion = true
+      }
+    } else {
+      uniqueVersion = true
+    }
+  }
+
+  // 2. Check unique logical paths
   const pathSet = new Set<string>()
   for (const f of draftFiles) {
     if (pathSet.has(f.logicalPath)) {
@@ -203,7 +248,7 @@ export async function validateDraftReadiness(
     pathSet.add(f.logicalPath)
   }
 
-  // Verify object existence in R2 strictly for real files (skipping directory records)
+  // 3. Verify object existence in R2 strictly for real files (skipping directory records)
   if (env.ASSETS) {
     for (const f of realFiles) {
       try {
@@ -222,11 +267,13 @@ export async function validateDraftReadiness(
     }
   }
 
-  const isReady = validVersion && noConflicts && storageVerified && realFiles.length > 0
+  const isReady = validVersion && uniqueVersion && hasFiles && noConflicts && storageVerified
 
   return {
     isReady,
     validVersion,
+    uniqueVersion,
+    hasFiles,
     noConflicts,
     storageVerified,
     issues,
@@ -279,6 +326,7 @@ export async function getPublishedModpack(
 export async function getAdminGameOverview(
   db: Database,
   env: Env,
+  request?: Request,
 ): Promise<AdminGameOverviewGql> {
   const published = await db
     .select()
@@ -292,6 +340,12 @@ export async function getAdminGameOverview(
     .where(eq(schema.gameReleases.status, "DRAFT"))
     .get()
 
+  // Fetch cover media for published and draft in batch
+  const coverIds: string[] = []
+  if (published?.coverMediaId) coverIds.push(published.coverMediaId)
+  if (draft?.coverMediaId) coverIds.push(draft.coverMediaId)
+  const coverMediaMap = await getContentMediaByIds(db, coverIds)
+
   let publishedGql: GameReleaseGql | null = null
   let publishedFiles: schema.GameReleaseFile[] = []
   if (published) {
@@ -300,7 +354,8 @@ export async function getAdminGameOverview(
       .from(schema.gameReleaseFiles)
       .where(eq(schema.gameReleaseFiles.releaseId, published.id))
       .all()
-    publishedGql = formatGameRelease(published, publishedFiles)
+    const publishedCover = published.coverMediaId ? coverMediaMap.get(published.coverMediaId) : null
+    publishedGql = formatGameRelease(published, publishedFiles, undefined, publishedCover, env, request)
   }
 
   let draftGql: GameReleaseGql | null = null
@@ -317,9 +372,10 @@ export async function getAdminGameOverview(
 
     const changeAnalysis = computeDraftChanges(publishedFiles, draftFiles)
     changes = changeAnalysis.changes
-    readiness = await validateDraftReadiness(env, draft, draftFiles)
+    readiness = await validateDraftReadiness(env, draft, draftFiles, db)
 
-    draftGql = formatGameRelease(draft, draftFiles, changeAnalysis.taggedFiles)
+    const draftCover = draft.coverMediaId ? coverMediaMap.get(draft.coverMediaId) : null
+    draftGql = formatGameRelease(draft, draftFiles, changeAnalysis.taggedFiles, draftCover, env, request)
     pendingChangesCount = changes.added + changes.updated + changes.removed
   }
 
@@ -334,6 +390,8 @@ export async function getAdminGameOverview(
 
 export async function getGameReleaseHistory(
   db: Database,
+  env?: Env,
+  request?: Request,
 ): Promise<GameReleaseGql[]> {
   const releases = await db
     .select()
@@ -342,6 +400,11 @@ export async function getGameReleaseHistory(
     .orderBy(desc(schema.gameReleases.publishedAt), desc(schema.gameReleases.createdAt))
     .all()
 
+  const coverIds = releases
+    .map((r) => r.coverMediaId)
+    .filter((id): id is string => Boolean(id))
+  const coverMediaMap = await getContentMediaByIds(db, coverIds)
+
   const result: GameReleaseGql[] = []
   for (const rel of releases) {
     const files = await db
@@ -349,7 +412,8 @@ export async function getGameReleaseHistory(
       .from(schema.gameReleaseFiles)
       .where(eq(schema.gameReleaseFiles.releaseId, rel.id))
       .all()
-    result.push(formatGameRelease(rel, files))
+    const coverMedia = rel.coverMediaId ? coverMediaMap.get(rel.coverMediaId) : null
+    result.push(formatGameRelease(rel, files, undefined, coverMedia, env, request))
   }
   return result
 }
@@ -358,6 +422,8 @@ export async function prepareGameDraft(
   db: Database,
   userId: string,
   input?: PrepareGameDraftInputGql | null,
+  env?: Env,
+  request?: Request,
 ): Promise<GameReleaseGql> {
   // 1. Check if a draft already exists
   const existingDraft = await db
@@ -372,7 +438,11 @@ export async function prepareGameDraft(
       .from(schema.gameReleaseFiles)
       .where(eq(schema.gameReleaseFiles.releaseId, existingDraft.id))
       .all()
-    return formatGameRelease(existingDraft, files)
+    let coverMedia: schema.ContentMedia | undefined
+    if (existingDraft.coverMediaId) {
+      coverMedia = await getContentMediaById(db, existingDraft.coverMediaId)
+    }
+    return formatGameRelease(existingDraft, files, undefined, coverMedia, env, request)
   }
 
   // 2. Locate base release (provided baseReleaseId or currently published)
@@ -402,6 +472,7 @@ export async function prepareGameDraft(
     neoForgeVersion: baseRelease?.neoForgeVersion || "21.1.65",
     status: "DRAFT",
     notes: baseRelease?.notes || null,
+    coverMediaId: baseRelease?.coverMediaId || null,
     createdBy: userId,
     createdAt: now,
     updatedAt: now,
@@ -451,7 +522,116 @@ export async function prepareGameDraft(
     throw createGraphQLError("No se pudo crear el borrador de actualización.", "INTERNAL_ERROR")
   }
 
-  return formatGameRelease(draftRelease, clonedFiles)
+  let clonedCover: schema.ContentMedia | undefined
+  if (draftRelease.coverMediaId) {
+    clonedCover = await getContentMediaById(db, draftRelease.coverMediaId)
+  }
+
+  return formatGameRelease(draftRelease, clonedFiles, undefined, clonedCover, env, request)
+}
+
+export async function updateGameDraftMetadata(
+  db: Database,
+  env: Env,
+  input: UpdateGameDraftMetadataInputGql,
+  _userId: string,
+  request?: Request,
+): Promise<GameReleaseGql> {
+  const draft = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .get()
+
+  if (!draft) {
+    throw createGraphQLError("No hay ningún borrador de actualización pendiente para modificar.", "NOT_FOUND")
+  }
+
+  const updates: Partial<schema.GameRelease> = {
+    updatedAt: new Date().toISOString(),
+  }
+
+  // 1. Version validation & uniqueness
+  if (input.version !== undefined && input.version !== null) {
+    const trimmed = input.version.trim()
+    if (!trimmed) {
+      throw createGraphQLError("La versión del juego no puede estar vacía.", "VALIDATION_ERROR")
+    }
+    if (!validateSemVer(trimmed)) {
+      throw createGraphQLError(
+        "Formato de versión inválido. Debe seguir el formato SemVer (ejemplo: 1.0.1).",
+        "VALIDATION_ERROR",
+      )
+    }
+
+    const collision = await db
+      .select()
+      .from(schema.gameReleases)
+      .where(
+        and(
+          eq(schema.gameReleases.version, trimmed),
+          sql`${schema.gameReleases.id} != ${draft.id}`,
+        ),
+      )
+      .get()
+
+    if (collision) {
+      throw createGraphQLError(`La versión ${trimmed} ya existe en el historial.`, "CONFLICT")
+    }
+
+    updates.version = trimmed
+  }
+
+  // 2. Notes validation
+  if (input.notes !== undefined) {
+    if (input.notes !== null && input.notes.length > 5000) {
+      throw createGraphQLError("Las notas de la versión no pueden superar los 5000 caracteres.", "VALIDATION_ERROR")
+    }
+    updates.notes = input.notes ? input.notes.trim() || null : null
+  }
+
+  // 3. Cover media validation
+  let targetCover: schema.ContentMedia | null = null
+  if (input.coverMediaId !== undefined) {
+    if (input.coverMediaId === null || input.coverMediaId.trim() === "") {
+      updates.coverMediaId = null
+    } else {
+      const media = await getContentMediaById(db, input.coverMediaId.trim())
+      if (!media) {
+        throw createGraphQLError(`El recurso multimedia '${input.coverMediaId}' no fue encontrado.`, "NOT_FOUND")
+      }
+      if (media.mediaType !== "IMAGE" && media.mediaType !== "VIDEO") {
+        throw createGraphQLError("La portada de la versión debe ser una imagen o un video.", "VALIDATION_ERROR")
+      }
+      updates.coverMediaId = media.id
+      targetCover = media
+    }
+  } else if (draft.coverMediaId) {
+    targetCover = (await getContentMediaById(db, draft.coverMediaId)) || null
+  }
+
+  await db
+    .update(schema.gameReleases)
+    .set(updates)
+    .where(eq(schema.gameReleases.id, draft.id))
+
+  const updatedDraft = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(eq(schema.gameReleases.id, draft.id))
+    .get()
+
+  if (!updatedDraft) {
+    throw createGraphQLError("Error al actualizar la metadata del borrador.", "INTERNAL_ERROR")
+  }
+
+  const draftFiles = await db
+    .select()
+    .from(schema.gameReleaseFiles)
+    .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
+    .all()
+
+  return formatGameRelease(updatedDraft, draftFiles, undefined, targetCover, env, request)
 }
 
 export async function discardGameDraft(db: Database, env?: Env): Promise<boolean> {
@@ -499,19 +679,9 @@ export async function publishGameRelease(
   db: Database,
   env: Env,
   input: PublishGameReleaseInputGql,
-  userId: string,
+  _userId: string,
+  request?: Request,
 ): Promise<GameReleaseGql> {
-  const version = String(input.version || "").trim()
-  if (!version) {
-    throw createGraphQLError("La versión del juego es obligatoria.", "VALIDATION_ERROR")
-  }
-  if (!validateSemVer(version)) {
-    throw createGraphQLError(
-      "Formato de versión inválido. Debe seguir el formato SemVer (ejemplo: 1.4.3).",
-      "VALIDATION_ERROR",
-    )
-  }
-
   // 1. Locate active draft
   const draft = await db
     .select()
@@ -523,38 +693,78 @@ export async function publishGameRelease(
     throw createGraphQLError("No hay ningún borrador de actualización pendiente para publicar.", "NOT_FOUND")
   }
 
-  // 2. Fetch draft files
+  // 2. Resolve target version
+  const rawVersion = input.version !== undefined && input.version !== null ? input.version : draft.version
+  const targetVersion = String(rawVersion || "").trim()
+
+  if (!targetVersion || targetVersion.startsWith("draft-")) {
+    throw createGraphQLError("La versión del juego es obligatoria y debe ser SemVer.", "VALIDATION_ERROR")
+  }
+  if (!validateSemVer(targetVersion)) {
+    throw createGraphQLError(
+      "Formato de versión inválido. Debe seguir el formato SemVer (ejemplo: 1.4.3).",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  // 3. Resolve target notes
+  let targetNotes: string | null = draft.notes || null
+  if (input.notes !== undefined) {
+    if (input.notes !== null && input.notes.length > 5000) {
+      throw createGraphQLError("Las notas de la versión no pueden superar los 5000 caracteres.", "VALIDATION_ERROR")
+    }
+    targetNotes = input.notes ? input.notes.trim() || null : null
+  }
+
+  // 4. Resolve target coverMediaId
+  let targetCoverMediaId: string | null = draft.coverMediaId || null
+  let targetCoverMedia: schema.ContentMedia | null = null
+  if (input.coverMediaId !== undefined) {
+    if (input.coverMediaId === null || input.coverMediaId.trim() === "") {
+      targetCoverMediaId = null
+    } else {
+      const media = await getContentMediaById(db, input.coverMediaId.trim())
+      if (!media) {
+        throw createGraphQLError(`El recurso multimedia '${input.coverMediaId}' no fue encontrado.`, "NOT_FOUND")
+      }
+      if (media.mediaType !== "IMAGE" && media.mediaType !== "VIDEO") {
+        throw createGraphQLError("La portada de la versión debe ser una imagen o un video.", "VALIDATION_ERROR")
+      }
+      targetCoverMediaId = media.id
+      targetCoverMedia = media
+    }
+  } else if (draft.coverMediaId) {
+    targetCoverMedia = (await getContentMediaById(db, draft.coverMediaId)) || null
+  }
+
+  // 5. Fetch draft files
   const draftFiles = await db
     .select()
     .from(schema.gameReleaseFiles)
     .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
     .all()
 
-  if (draftFiles.length === 0) {
-    throw createGraphQLError("No puedes publicar una versión sin archivos o mods.", "VALIDATION_ERROR")
-  }
-
-  // 3. Pre-publication Readiness Verification
-  const readiness = await validateDraftReadiness(env, draft, draftFiles)
+  // 6. Authoritative Pre-publication Readiness Verification
+  const readiness = await validateDraftReadiness(env, draft, draftFiles, db, targetVersion)
   if (!readiness.isReady) {
     const errorMsg = readiness.issues.length > 0 ? readiness.issues.join(". ") : "El borrador no está listo para publicar."
     throw createGraphQLError(`No se puede publicar la actualización: ${errorMsg}`, "VALIDATION_ERROR")
   }
 
-  // 4. Check for existing version collision
+  // 7. Check for existing version collision
   const existingVersion = await db
     .select()
     .from(schema.gameReleases)
-    .where(and(eq(schema.gameReleases.version, version), sql`${schema.gameReleases.id} != ${draft.id}`))
+    .where(and(eq(schema.gameReleases.version, targetVersion), sql`${schema.gameReleases.id} != ${draft.id}`))
     .get()
 
   if (existingVersion) {
-    throw createGraphQLError(`La versión ${version} ya existe en el historial.`, "CONFLICT")
+    throw createGraphQLError(`La versión ${targetVersion} ya existe en el historial.`, "CONFLICT")
   }
 
   const now = new Date().toISOString()
 
-  // 5. ATOMIC PUBLICATION:
+  // 8. ATOMIC PUBLICATION:
   // Execute both queries atomically in a single D1 batch
   await db.batch([
     db
@@ -567,15 +777,15 @@ export async function publishGameRelease(
     db
       .update(schema.gameReleases)
       .set({
-        version,
+        version: targetVersion,
         status: "PUBLISHED",
-        notes: input.notes?.trim() || null,
+        notes: targetNotes,
+        coverMediaId: targetCoverMediaId,
         publishedAt: now,
         updatedAt: now,
       })
       .where(eq(schema.gameReleases.id, draft.id)),
   ])
-
 
   const published = await db
     .select()
@@ -587,5 +797,5 @@ export async function publishGameRelease(
     throw createGraphQLError("Error al publicar la actualización.", "INTERNAL_ERROR")
   }
 
-  return formatGameRelease(published, draftFiles)
+  return formatGameRelease(published, draftFiles, undefined, targetCoverMedia, env, request)
 }

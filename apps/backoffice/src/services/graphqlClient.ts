@@ -1281,6 +1281,15 @@ export const gameApi = {
             neoForgeVersion
             status
             notes
+            coverMediaId
+            cover {
+              id
+              mediaType
+              mimeType
+              sizeBytes
+              url
+              createdAt
+            }
             publishedAt
             files {
               id
@@ -1294,6 +1303,11 @@ export const gameApi = {
               effectivePolicy
               isInherited
               isDirectory
+              sourceProvider
+              sourceProjectId
+              sourceVersionId
+              sourceFileId
+              sourceEnvironment
               createdAt
             }
             createdAt
@@ -1306,6 +1320,15 @@ export const gameApi = {
             neoForgeVersion
             status
             notes
+            coverMediaId
+            cover {
+              id
+              mediaType
+              mimeType
+              sizeBytes
+              url
+              createdAt
+            }
             publishedAt
             files {
               id
@@ -1320,6 +1343,11 @@ export const gameApi = {
               isInherited
               isDirectory
               changeStatus
+              sourceProvider
+              sourceProjectId
+              sourceVersionId
+              sourceFileId
+              sourceEnvironment
               createdAt
             }
             createdAt
@@ -1336,6 +1364,8 @@ export const gameApi = {
           readiness {
             isReady
             validVersion
+            uniqueVersion
+            hasFiles
             noConflicts
             storageVerified
             issues
@@ -1357,6 +1387,15 @@ export const gameApi = {
           neoForgeVersion
           status
           notes
+          coverMediaId
+          cover {
+            id
+            mediaType
+            mimeType
+            sizeBytes
+            url
+            createdAt
+          }
           publishedAt
           files {
             id
@@ -1370,6 +1409,11 @@ export const gameApi = {
             effectivePolicy
             isInherited
             isDirectory
+            sourceProvider
+            sourceProjectId
+            sourceVersionId
+            sourceFileId
+            sourceEnvironment
             createdAt
           }
           createdAt
@@ -1387,7 +1431,19 @@ export const gameApi = {
         prepareGameDraft(input: $input) {
           id
           version
+          minecraftVersion
+          neoForgeVersion
           status
+          notes
+          coverMediaId
+          cover {
+            id
+            mediaType
+            mimeType
+            sizeBytes
+            url
+            createdAt
+          }
           files {
             id
             name
@@ -1400,7 +1456,15 @@ export const gameApi = {
             effectivePolicy
             isInherited
             isDirectory
+            sourceProvider
+            sourceProjectId
+            sourceVersionId
+            sourceFileId
+            sourceEnvironment
+            createdAt
           }
+          createdAt
+          updatedAt
         }
       }
     `
@@ -1676,19 +1740,27 @@ export const gameApi = {
     return data.restoreGameFile
   },
 
-  async publishGameRelease(input: {
-    version: string
-    notes?: string
-  }): Promise<import("../types").GameRelease> {
+  async updateGameDraftMetadata(
+    input: import("../types").UpdateGameDraftMetadataInput,
+  ): Promise<import("../types").GameRelease> {
     const mutation = /* GraphQL */ `
-      mutation PublishGameRelease($input: PublishGameReleaseInput!) {
-        publishGameRelease(input: $input) {
+      mutation UpdateGameDraftMetadata($input: UpdateGameDraftMetadataInput!) {
+        updateGameDraftMetadata(input: $input) {
           id
           version
           minecraftVersion
           neoForgeVersion
           status
           notes
+          coverMediaId
+          cover {
+            id
+            mediaType
+            mimeType
+            sizeBytes
+            url
+            createdAt
+          }
           publishedAt
           files {
             id
@@ -1702,8 +1774,66 @@ export const gameApi = {
             effectivePolicy
             isInherited
             isDirectory
+            changeStatus
+            sourceProvider
+            sourceProjectId
+            sourceVersionId
+            sourceFileId
+            sourceEnvironment
             createdAt
           }
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ updateGameDraftMetadata: import("../types").GameRelease }>(mutation, { input })
+    return data.updateGameDraftMetadata
+  },
+
+  async publishGameRelease(
+    input: import("../types").PublishGameReleaseInput,
+  ): Promise<import("../types").GameRelease> {
+    const mutation = /* GraphQL */ `
+      mutation PublishGameRelease($input: PublishGameReleaseInput!) {
+        publishGameRelease(input: $input) {
+          id
+          version
+          minecraftVersion
+          neoForgeVersion
+          status
+          notes
+          coverMediaId
+          cover {
+            id
+            mediaType
+            mimeType
+            sizeBytes
+            url
+            createdAt
+          }
+          publishedAt
+          files {
+            id
+            name
+            logicalPath
+            category
+            sha256
+            sizeBytes
+            policy
+            explicitPolicy
+            effectivePolicy
+            isInherited
+            isDirectory
+            sourceProvider
+            sourceProjectId
+            sourceVersionId
+            sourceFileId
+            sourceEnvironment
+            createdAt
+          }
+          createdAt
+          updatedAt
         }
       }
     `

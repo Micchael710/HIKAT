@@ -14,6 +14,7 @@ import {
   playerSkins,
   capes,
   playerCapes,
+  gameReleases,
   ContentMedia,
 } from "@hikat/database"
 
@@ -425,6 +426,24 @@ export async function deleteMedia(
   if (referencingPlayerCape) {
     throw createGraphQLError(
       `Cannot delete media asset because it is currently in use by player cape '${referencingPlayerCape.name}' (${referencingPlayerCape.id})`,
+      "CONFLICT",
+    )
+  }
+
+  // Check if referenced by any game release (DRAFT, PUBLISHED, ARCHIVED)
+  const referencingRelease = await db
+    .select({
+      id: gameReleases.id,
+      version: gameReleases.version,
+      status: gameReleases.status,
+    })
+    .from(gameReleases)
+    .where(eq(gameReleases.coverMediaId, mediaId))
+    .get()
+
+  if (referencingRelease) {
+    throw createGraphQLError(
+      `Cannot delete media asset because it is currently in use as cover for game release '${referencingRelease.version}' (${referencingRelease.id})`,
       "CONFLICT",
     )
   }

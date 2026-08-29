@@ -114,6 +114,8 @@ export const gameTypeDefs = /* GraphQL */ `
   type GameDraftReadiness {
     isReady: Boolean!
     validVersion: Boolean!
+    uniqueVersion: Boolean!
+    hasFiles: Boolean!
     noConflicts: Boolean!
     storageVerified: Boolean!
     issues: [String!]!
@@ -175,6 +177,8 @@ export const gameTypeDefs = /* GraphQL */ `
     neoForgeVersion: String!
     status: GameReleaseStatus!
     notes: String
+    coverMediaId: ID
+    cover: ContentMedia
     publishedAt: DateTime
     files: [AdminGameFile!]!
     createdAt: DateTime!
@@ -368,9 +372,16 @@ export const gameTypeDefs = /* GraphQL */ `
     baseReleaseId: ID
   }
 
-  input PublishGameReleaseInput {
-    version: String!
+  input UpdateGameDraftMetadataInput {
+    version: String
     notes: String
+    coverMediaId: ID
+  }
+
+  input PublishGameReleaseInput {
+    version: String
+    notes: String
+    coverMediaId: ID
   }
 
   input ModVersionOverrideInput {
@@ -523,6 +534,11 @@ export const gameTypeDefs = /* GraphQL */ `
     Restore a removed game file back to the active draft - requires ADMIN role
     """
     restoreGameFile(id: ID!): AdminGameFile!
+
+    """
+    Update metadata (version, notes, coverMediaId) of the active draft - requires ADMIN role
+    """
+    updateGameDraftMetadata(input: UpdateGameDraftMetadataInput!): GameRelease!
 
     """
     Atomically publish the active draft as the new official version - requires ADMIN role

@@ -47,6 +47,7 @@ import type {
   SyncPolicyGql,
   PrepareGameDraftInputGql,
   PublishGameReleaseInputGql,
+  UpdateGameDraftMetadataInputGql,
   AdminSettingsGql,
   ClientConfigurationGql,
   UpdateAdminSettingsInputGql,
@@ -189,6 +190,7 @@ import {
   getAdminGameOverview,
   prepareGameDraft,
   discardGameDraft,
+  updateGameDraftMetadata,
   publishGameRelease,
   getGameReleaseHistory,
 } from "../services/game/releaseService"
@@ -652,7 +654,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getAdminGameOverview(context.db, context.env)
+      return getAdminGameOverview(context.db, context.env, context.request)
     },
 
     gameReleaseHistory: async (
@@ -664,7 +666,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getGameReleaseHistory(context.db)
+      return getGameReleaseHistory(context.db, context.env, context.request)
     },
 
     adminGameFiles: async (
@@ -1427,7 +1429,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return prepareGameDraft(context.db, identity.userId, args.input)
+      return prepareGameDraft(context.db, identity.userId, args.input, context.env, context.request)
     },
 
     discardGameDraft: async (
@@ -1586,6 +1588,18 @@ export const resolvers = {
       return restoreGameFile(context.db, args.id, identity.userId)
     },
 
+    updateGameDraftMetadata: async (
+      _parent: unknown,
+      args: { input: UpdateGameDraftMetadataInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<GameReleaseGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateGameDraftMetadata(context.db, context.env, args.input, identity.userId, context.request)
+    },
+
     publishGameRelease: async (
       _parent: unknown,
       args: { input: PublishGameReleaseInputGql },
@@ -1596,7 +1610,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return publishGameRelease(context.db, context.env, args.input, identity.userId)
+      return publishGameRelease(context.db, context.env, args.input, identity.userId, context.request)
     },
 
     installModPlan: async (
