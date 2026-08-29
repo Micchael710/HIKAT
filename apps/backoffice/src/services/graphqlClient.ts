@@ -1525,13 +1525,20 @@ export const gameApi = {
     uploadUrl: string,
     uploadToken: string,
   ): Promise<{ tokenHash: string; originalFilename?: string; sizeBytes?: number }> {
-    const token = await authService.ensureValidAccessToken()
+    const tokenOutcome = await authService.getValidAccessTokenOutcome()
+    if (tokenOutcome.kind !== "READY") {
+      if (tokenOutcome.kind === "TRANSIENT_FAILURE") {
+        throw new Error(tokenOutcome.error || "Error temporal al renovar sesión con el servidor.")
+      }
+      throw new Error("No hay una sesión activa para subir el archivo de juego.")
+    }
+
     const targetUrl = uploadUrl.startsWith("http") ? uploadUrl : `${BACKEND_URL}${uploadUrl}`
 
     const res = await fetch(targetUrl, {
       method: "PUT",
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${tokenOutcome.accessToken}`,
         "X-Upload-Token": uploadToken,
       },
       body: file,

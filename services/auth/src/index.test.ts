@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
 import {
+  AuthClientCore,
   AuthErrorCode,
   AUTH_AUDIENCE_API,
   AUTH_AUDIENCE_GAME,
@@ -35,6 +36,7 @@ import { MockEmailService } from "./services/email"
 import { checkRateLimit, clearInMemoryRateLimits } from "./services/rateLimiter"
 import {
   createSession,
+  getUserEmail,
   rotateRefreshToken,
   revokeSession,
   validateActiveSession,
@@ -1383,7 +1385,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(sent?.type).toBe("password_reset")
     })
 
-    it("OAuth PKCE /oauth/token exchange returns full AuthUser contract with email and integrates with AuthClientCore", async () => {
+    it("OAuth PKCE /oauth/token exchange returns full AuthUser contract with email and integrates end-to-end with AuthClientCore", async () => {
       const codeVerifier = generateSecureToken(43)
       const codeChallenge = await generatePkceChallenge(codeVerifier)
       const redirectUri = "hikat://auth/callback"
@@ -1401,28 +1403,53 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         redirectUri,
       })
 
-      // 1. Real HTTP request to POST /oauth/token
-      const req = new Request("http://localhost:8788/oauth/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "authorization_code",
-          code: authCode,
-          code_verifier: codeVerifier,
-          redirect_uri: redirectUri,
-        }),
+      // 1. Instantiate AuthClientCore configured with mock fetcher that routes to handleRequest
+      const client = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "PLAYER",
+        fetcher: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const req = new Request(input, init)
+          return handleRequest({ request: req, env: {}, db, keyManager, emailService })
+        },
       })
 
-      const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
-      expect(res.status).toBe(200)
+      // 2. Consume OAuth code through AuthClientCore.exchangeOAuthCode
+      const authUser = await client.exchangeOAuthCode({
+        code: authCode,
+        codeVerifier,
+        redirectUri,
+      })
 
-      const payload = (await res.json()) as any
-      expect(payload.accessToken).toBeDefined()
-      expect(payload.refreshToken).toBeDefined()
-      expect(payload.user.id).toBe(reg.user.id)
-      expect(payload.user.email).toBe("oauth-launcher@hikat.org")
-      expect(payload.user.role).toBe("PLAYER")
-      expect(payload.user.displayName).toBe("OAuthUser")
+      expect(authUser.id).toBe(reg.user.id)
+      expect(authUser.email).toBe("oauth-launcher@hikat.org")
+      expect(authUser.role).toBe("PLAYER")
+      expect(authUser.displayName).toBe("OAuthUser")
+
+      expect(client.getStatus()).toBe("AUTHENTICATED")
+      expect(client.getAccessToken()).toBeTruthy()
+      expect(client.getRefreshToken()).toBeTruthy()
+      expect(client.getUser()?.email).toBe("oauth-launcher@hikat.org")
+    })
+
+    it("user without recoverable email fails createSession with UNAUTHORIZED and never emits email: ''", async () => {
+      // Insert a headless user with no password credentials and no external accounts
+      const headlessUserId = "headless-user-no-email"
+      await db.insert(schema.users).values({
+        id: headlessUserId,
+        role: "PLAYER",
+        displayName: "NoEmailUser",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // createSession without email throws UNAUTHORIZED fail-closed error
+      await expect(
+        createSession(db, { id: headlessUserId, role: "PLAYER", displayName: "NoEmailUser" }, keyManager),
+      ).rejects.toThrow(AuthErrorCode.UNAUTHORIZED)
+    })
+
+    it("getUserEmail fails closed with UNAUTHORIZED when neither password nor external email exists", async () => {
+      await expect(getUserEmail(db, "non-existent-user-id")).rejects.toThrow(AuthErrorCode.UNAUTHORIZED)
     })
 
     it("detects token replay: using consumed Refresh A revokes session and invalidates successor Refresh B", async () => {

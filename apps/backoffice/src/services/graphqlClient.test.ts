@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { newsApi, serverApi } from "./graphqlClient"
+import { newsApi, serverApi, gameApi } from "./graphqlClient"
 import { authService } from "./authService"
 
 function createMockAdminJwt(expiresInSeconds = 900): string {
@@ -477,6 +477,134 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
     // Session is PRESERVED, not cleared
     expect(authService.getRefreshToken()).toBe("offline-refresh-tok")
     expect(authService.getUser()).not.toBeNull()
+  })
+})
+
+describe("Back Office Game Binary Upload Suite", () => {
+  beforeEach(() => {
+    authService.clearSession()
+    vi.restoreAllMocks()
+  })
+
+  it("1. NO_SESSION: uploadGameBinary rejects and calls fetch PUT exactly 0 times", async () => {
+    authService.clearSession()
+
+    let putFetchCount = 0
+    vi.spyOn(global, "fetch").mockImplementation(async (_url: any, opts: any) => {
+      if (opts?.method === "PUT") {
+        putFetchCount++
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    const testFile = new File(["mods-bytes"], "sodium.jar", { type: "application/java-archive" })
+
+    await expect(
+      gameApi.uploadGameBinary(testFile, "/game/upload/binary", "ticket-tok-123"),
+    ).rejects.toThrow("No hay una sesión activa para subir el archivo de juego.")
+
+    expect(putFetchCount).toBe(0)
+  })
+
+  it("2. hard-expired access token + refresh TRANSIENT_FAILURE: calls fetch PUT exactly 0 times, /auth/refresh exactly 1 time, and preserves session", async () => {
+    const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 300 }))
+    const expiredJwt = `${expiredHeader}.${expiredPayload}.sig`
+
+    authService.setSession(expiredJwt, "offline-ref-game", {
+      id: "admin-1",
+      email: "admin@hikat.org",
+      role: "ADMIN",
+    })
+
+    let refreshCalled = 0
+    let putCalled = 0
+
+    vi.spyOn(global, "fetch").mockImplementation(async (url: any, opts: any) => {
+      const urlStr = String(url)
+      if (urlStr.includes("/auth/refresh")) {
+        refreshCalled++
+        throw new TypeError("Network offline during game upload refresh")
+      }
+      if (opts?.method === "PUT") {
+        putCalled++
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ tokenHash: "hash123" }),
+        } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    const testFile = new File(["bytes"], "iris.jar", { type: "application/java-archive" })
+
+    await expect(
+      gameApi.uploadGameBinary(testFile, "/game/upload/binary", "ticket-tok-123"),
+    ).rejects.toThrow("Network offline during game upload refresh")
+
+    expect(putCalled).toBe(0)
+    expect(refreshCalled).toBe(1)
+    expect(authService.getStatus()).toBe("AUTHENTICATED")
+    expect(authService.getRefreshToken()).toBe("offline-ref-game")
+  })
+
+  it("3. READY: calls fetch PUT exactly 1 time with valid Authorization Bearer header", async () => {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "ref-tok", {
+      id: "admin-1",
+      email: "admin@hikat.org",
+      role: "ADMIN",
+    })
+
+    let putCalled = 0
+    let capturedAuth: string | undefined
+    let capturedUploadToken: string | undefined
+
+    vi.spyOn(global, "fetch").mockImplementation(async (_url: any, opts: any) => {
+      if (opts?.method === "PUT") {
+        putCalled++
+        capturedAuth = opts?.headers?.Authorization
+        capturedUploadToken = opts?.headers?.["X-Upload-Token"]
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ tokenHash: "sha256-hash-game", originalFilename: "sodium.jar", sizeBytes: 1024 }),
+        } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    const testFile = new File(["jar-bytes"], "sodium.jar", { type: "application/java-archive" })
+    const res = await gameApi.uploadGameBinary(testFile, "/game/upload/binary", "ticket-tok-456")
+
+    expect(res.tokenHash).toBe("sha256-hash-game")
+    expect(putCalled).toBe(1)
+    expect(capturedAuth).toBe(`Bearer ${validJwt}`)
+    expect(capturedUploadToken).toBe("ticket-tok-456")
+  })
+
+  it("4. Explicitly verifies that Authorization header is never 'Bearer null' or 'Bearer undefined'", async () => {
+    authService.clearSession()
+
+    const capturedAuthHeaders: (string | undefined)[] = []
+
+    vi.spyOn(global, "fetch").mockImplementation(async (_url: any, opts: any) => {
+      capturedAuthHeaders.push(opts?.headers?.Authorization)
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    const testFile = new File(["bytes"], "config.json", { type: "application/json" })
+
+    await expect(
+      gameApi.uploadGameBinary(testFile, "/game/upload/binary", "ticket-tok-789"),
+    ).rejects.toThrow()
+
+    expect(capturedAuthHeaders).toHaveLength(0)
+    for (const h of capturedAuthHeaders) {
+      expect(h).not.toBe("Bearer null")
+      expect(h).not.toBe("Bearer undefined")
+    }
   })
 })
 

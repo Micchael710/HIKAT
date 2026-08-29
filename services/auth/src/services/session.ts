@@ -26,7 +26,8 @@ export interface AuthSessionResult {
 }
 
 /**
- * Resolves canonical email for a user from passwordCredentials or externalAccounts
+ * Resolves canonical email for a user from passwordCredentials or externalAccounts.
+ * Strictly guarantees a non-empty string or throws UNAUTHORIZED fail-closed error.
  */
 export async function getUserEmail(db: Database, userId: string): Promise<string> {
   const passCred = await db
@@ -35,8 +36,8 @@ export async function getUserEmail(db: Database, userId: string): Promise<string
     .where(eq(schema.passwordCredentials.userId, userId))
     .get()
 
-  if (passCred?.email) {
-    return passCred.email
+  if (passCred?.email && typeof passCred.email === "string" && passCred.email.trim() !== "") {
+    return passCred.email.trim().toLowerCase()
   }
 
   const extAcc = await db
@@ -45,7 +46,11 @@ export async function getUserEmail(db: Database, userId: string): Promise<string
     .where(eq(schema.externalAccounts.userId, userId))
     .get()
 
-  return extAcc?.email || ""
+  if (extAcc?.email && typeof extAcc.email === "string" && extAcc.email.trim() !== "") {
+    return extAcc.email.trim().toLowerCase()
+  }
+
+  throw new Error(AuthErrorCode.UNAUTHORIZED)
 }
 
 /**
@@ -62,7 +67,10 @@ export async function createSession(
   const expiryDays = options?.sessionExpiryDays || DEFAULT_SESSION_EXPIRY_DAYS
   const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString()
 
-  const email = user.email || (await getUserEmail(db, user.id))
+  const email =
+    user.email && typeof user.email === "string" && user.email.trim() !== ""
+      ? user.email.trim().toLowerCase()
+      : await getUserEmail(db, user.id)
 
   // 1. Insert session record
   await db.insert(schema.sessions).values({
