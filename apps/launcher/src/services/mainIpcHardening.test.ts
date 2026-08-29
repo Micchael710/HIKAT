@@ -7,6 +7,7 @@ import http from "http"
 import crypto from "crypto"
 import {
   GameOperationManager,
+  validateSyncPayload,
   // @ts-expect-error CJS module without bundled declaration
 } from "../../electron/game-operation-manager.cjs"
 import {
@@ -80,6 +81,9 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     } catch (_) {}
   })
 
+  // ─────────────────────────────────────────────────────────────
+  // 1. Concurrency & State Machine Invariants
+  // ─────────────────────────────────────────────────────────────
   it("1. Pause while stream is active: waits for stream close, persists staging, transitions to PAUSED", async () => {
     const task = {
       path: "mods/slow.jar",
@@ -112,7 +116,6 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
 
   it("2. Resume immediately from PAUSED: does not create a 2nd concurrent sync", async () => {
     manager.state = "PAUSED"
-    const mockLauncher = { launch: vi.fn() }
 
     const task = {
       path: "mods/fast.jar",
@@ -205,21 +208,17 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
   })
 
   it("6. First operation finally does not nullify cancelSignal of newer operation", async () => {
-    // Op 1 runs and finishes
     manager.operationCounter = 1
     const op1Signal = { isCancelled: false, isPaused: false, id: 1 }
     manager.activeCancelSignal = op1Signal
 
-    // Op 2 starts
     const op2Signal = { isCancelled: false, isPaused: false, id: 2 }
     manager.activeCancelSignal = op2Signal
 
-    // Op 1 finally handler triggers with id: 1
     if (manager.activeCancelSignal?.id === 1) {
       manager.activeCancelSignal = null
     }
 
-    // Active signal for Op 2 is preserved
     expect(manager.activeCancelSignal).toBe(op2Signal)
     expect(manager.activeCancelSignal.id).toBe(2)
   })
@@ -269,5 +268,193 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     await expect(manager.uninstallGame(instanceRoot, appDataRoot)).rejects.toThrow(
       /Cannot uninstall game while synchronization is active/i,
     )
+  })
+
+  // ─────────────────────────────────────────────────────────────
+  // 2. Strict Real IPC Payload Validation & Pruning Protection (Tests 9-22)
+  // ─────────────────────────────────────────────────────────────
+  it("9. Rejects clientFiles if not an array", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: "not-an-array" as any,
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/clientFiles must be an array/i)
+  })
+
+  it("10. Rejects empty clientFiles in startSync without pruning existing files", async () => {
+    // Put a valid mod in instanceRoot
+    const modPath = path.join(instanceRoot, "mods", "important.jar")
+    await fsp.mkdir(path.dirname(modPath), { recursive: true })
+    await fsp.writeFile(modPath, "important mod binary", "utf8")
+
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/clientFiles cannot be empty for startSync/i)
+
+    // Verify existing mod was NOT pruned!
+    expect(fs.existsSync(modPath)).toBe(true)
+    expect(manager.getState()).toBe("IDLE")
+  })
+
+  it("11. Rejects file with empty path", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/invalid path string/i)
+  })
+
+  it("12. Rejects path with ../ relative traversal segments", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/../../evil.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/traversal segments/i)
+  })
+
+  it("13. Rejects absolute path", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "/etc/passwd", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/cannot be absolute/i)
+
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "C:\\Windows\\System32\\cmd.exe", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/cannot be absolute/i)
+  })
+
+  it("14. Rejects invalid or malformed SHA-256 hash", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "too-short", sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/invalid SHA-256 hash/i)
+
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "z".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/invalid SHA-256 hash/i)
+  })
+
+  it("15. Rejects negative sizeBytes", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: -5, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/invalid sizeBytes/i)
+  })
+
+  it("16. Rejects non-finite sizeBytes", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: NaN, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/invalid sizeBytes/i)
+
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: Infinity, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/invalid sizeBytes/i)
+  })
+
+  it("17. Rejects invalid policy", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "INVALID_POLICY", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/invalid policy/i)
+  })
+
+  it("18. Rejects empty downloadUrl", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/invalid downloadUrl/i)
+  })
+
+  it("19. Rejects duplicate logical paths in manifest", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [
+          { path: "mods/dup.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl1" },
+          { path: "mods/dup.jar", sha256: "b".repeat(64), sizeBytes: 200, policy: "NO_MODIFICABLE", downloadUrl: "/dl2" },
+        ],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow(/duplicate logical path found/i)
+  })
+
+  it("20. Rejects invalid or empty modpackVersion", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "",
+      }),
+    ).rejects.toThrow(/modpackVersion must be a non-empty string/i)
+  })
+
+  it("21. Invalid payload does NOT execute sync or alter operation state", async () => {
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/m.jar", sha256: "bad-sha", sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow()
+
+    expect(manager.getState()).toBe("IDLE")
+    expect(manager.activeOperationPromise).toBeNull()
+  })
+
+  it("22. Invalid payload does NOT delete or prune existing game files", async () => {
+    const existingFile = path.join(instanceRoot, "mods", "retained.jar")
+    await fsp.mkdir(path.dirname(existingFile), { recursive: true })
+    await fsp.writeFile(existingFile, "valid content", "utf8")
+
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/bad.jar", sha256: "invalid", sizeBytes: 10, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+      }),
+    ).rejects.toThrow()
+
+    expect(fs.existsSync(existingFile)).toBe(true)
   })
 })

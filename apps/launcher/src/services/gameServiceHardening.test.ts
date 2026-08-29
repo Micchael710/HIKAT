@@ -216,8 +216,8 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
 
   it("7. startSync, pauseSync, cancelSync and launchGame call electronAPI correctly", async () => {
     const startSyncMock = vi.fn().mockResolvedValue({ success: true })
-    const pauseSyncMock = vi.fn().mockResolvedValue(true)
-    const cancelSyncMock = vi.fn().mockResolvedValue(true)
+    const pauseSyncMock = vi.fn().mockResolvedValue({ success: true, paused: true })
+    const cancelSyncMock = vi.fn().mockResolvedValue({ success: true })
     const launchGameMock = vi.fn().mockResolvedValue({ success: true, pid: 1234 })
 
     window.electronAPI = {
@@ -230,13 +230,40 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     await gameService.startSync([], "1.0.0")
     expect(startSyncMock).toHaveBeenCalledWith({ clientFiles: [], modpackVersion: "1.0.0" })
 
-    await gameService.pauseSync()
+    const pauseRes = await gameService.pauseSync()
     expect(pauseSyncMock).toHaveBeenCalledTimes(1)
+    expect(pauseRes).toEqual({ success: true, paused: true })
 
-    await gameService.cancelSync()
+    const cancelRes = await gameService.cancelSync()
     expect(cancelSyncMock).toHaveBeenCalledTimes(1)
+    expect(cancelRes).toEqual({ success: true })
 
     await gameService.launchGame({ playerName: "Tester", ramGB: 8 })
     expect(launchGameMock).toHaveBeenCalledWith({ playerName: "Tester", ramGB: 8 })
+  })
+
+  it("8. startSync propagates error thrown by Electron backend without setting installed=true", async () => {
+    window.electronAPI = {
+      startSync: vi.fn().mockRejectedValue(new Error("Invalid payload: clientFiles cannot be empty")),
+    } as any
+
+    await expect(gameService.startSync([], "1.0.0")).rejects.toThrow(/clientFiles cannot be empty/i)
+    expect(gameService.isGameInstalled()).toBe(false)
+  })
+
+  it("9. pauseSync propagates rejection from Electron when in INSTALLING phase", async () => {
+    window.electronAPI = {
+      pauseSync: vi.fn().mockRejectedValue(new Error("Cannot pause synchronization while installation phase is in progress.")),
+    } as any
+
+    await expect(gameService.pauseSync()).rejects.toThrow(/installation phase is in progress/i)
+  })
+
+  it("10. cancelSync propagates rejection from Electron when in INSTALLING phase", async () => {
+    window.electronAPI = {
+      cancelSync: vi.fn().mockRejectedValue(new Error("Cannot cancel synchronization while installation phase is in progress.")),
+    } as any
+
+    await expect(gameService.cancelSync()).rejects.toThrow(/installation phase is in progress/i)
   })
 })

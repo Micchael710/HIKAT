@@ -1,3 +1,10 @@
+export declare function validateSyncPayload(options: {
+  clientFiles: any
+  modpackVersion: any
+  requireNonEmptyFiles?: boolean
+  instanceRoot?: string
+}): void
+
 export declare class GameOperationManager {
   state: string
   activeOperationPromise: Promise<any> | null

@@ -66,6 +66,7 @@
     "verifySuccess": "Game files verified successfully",
     "verifyError": "Could not verify the game. Please try again later.",
     "uninstallSuccess": "Game uninstalled successfully",
+    "uninstallError": "Failed to uninstall the game",
     "noClientFiles": "Game files are not available at this moment.",
     "syncError": "Could not complete the download. Please check your internet connection.",
     "syncSuccess": "Download completed successfully",

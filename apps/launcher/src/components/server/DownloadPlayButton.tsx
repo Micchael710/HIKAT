@@ -51,6 +51,7 @@ export default function DownloadPlayButton({
   })
   const menuRef = useRef<HTMLDivElement>(null)
   const toastTimeoutRef = useRef<any>(null)
+  const [isTransitioning, setIsTransitioning] = useState(false)
   const isDark = theme === "dark"
 
   const showToast = (
@@ -134,49 +135,83 @@ export default function DownloadPlayButton({
   const isExpanded =
     status === "downloading" || status === "paused" || status === "installing"
 
-  const cancel = () => {
-    if (status === "installing") return
-    gameService.cancelSync()
-    setStatus(
-      manifest?.hasUpdate || manifest?.hasExistingInstall
-        ? "update"
-        : manifest?.clientFiles && manifest.clientFiles.length > 0
-          ? "download"
-          : "unavailable",
-    )
-    setProgress(0)
-    setSpeed(0)
-    setIsHovered(false)
+  const cancel = async () => {
+    if (isTransitioning || status === "installing") return
+    setIsTransitioning(true)
+    try {
+      const res: any = await gameService.cancelSync()
+      if (res?.success || res === true) {
+        setStatus(
+          manifest?.hasUpdate || manifest?.hasExistingInstall
+            ? "update"
+            : manifest?.clientFiles && manifest.clientFiles.length > 0
+              ? "download"
+              : "unavailable",
+        )
+        setProgress(0)
+        setSpeed(0)
+        setIsHovered(false)
+      } else {
+        showToast(t("playButton.syncError"), "error")
+      }
+    } catch (err) {
+      console.error("Cancel sync error:", err)
+      showToast(t("playButton.syncError"), "error")
+    } finally {
+      setIsTransitioning(false)
+    }
   }
 
-  const togglePauseResume = () => {
-    if (status === "installing") return
+  const togglePauseResume = async () => {
+    if (isTransitioning || status === "installing") return
+
     if (status === "downloading") {
-      gameService.pauseSync()
-      setStatus("paused")
-    } else if (status === "paused") {
-      if (manifest?.clientFiles) {
-        setStatus("downloading")
-        gameService.startSync(manifest.clientFiles, manifest.version).then((res: any) => {
-          if (res?.paused) {
-            setStatus("paused")
-          } else if (res?.success) {
-            gameService.setGameInstalled(true)
-            setStatus("play")
-            showToast(t("playButton.syncSuccess"), "success")
-          }
-        }).catch((err) => {
-          console.error("Sync resume error:", err)
-          gameService.setGameInstalled(false)
-          setStatus(manifest.hasUpdate ? "update" : "download")
+      setIsTransitioning(true)
+      try {
+        const res: any = await gameService.pauseSync()
+        if (res?.paused || res?.success || res === true) {
+          setStatus("paused")
+        } else {
           showToast(t("playButton.syncError"), "error")
-        })
+        }
+      } catch (err) {
+        console.error("Pause sync error:", err)
+        showToast(t("playButton.syncError"), "error")
+      } finally {
+        setIsTransitioning(false)
+      }
+    } else if (status === "paused") {
+      if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
+        showToast(t("playButton.noClientFiles"), "error")
+        return
+      }
+      setIsTransitioning(true)
+      setStatus("downloading")
+      try {
+        const res: any = await gameService.startSync(
+          manifest.clientFiles,
+          manifest.version,
+        )
+        if (res?.paused) {
+          setStatus("paused")
+        } else if (res?.success) {
+          gameService.setGameInstalled(true)
+          setStatus("play")
+          showToast(t("playButton.syncSuccess"), "success")
+        }
+      } catch (err) {
+        console.error("Sync resume error:", err)
+        gameService.setGameInstalled(false)
+        setStatus(manifest.hasUpdate ? "update" : "download")
+        showToast(t("playButton.syncError"), "error")
+      } finally {
+        setIsTransitioning(false)
       }
     }
   }
 
   const handleClick = async () => {
-    if (status === "unavailable" || status === "installing") {
+    if (isTransitioning || status === "unavailable" || status === "installing") {
       return
     }
     if (status === "download" || status === "update") {
@@ -184,6 +219,7 @@ export default function DownloadPlayButton({
         showToast(t("playButton.noClientFiles"), "error")
         return
       }
+      setIsTransitioning(true)
       setStatus("downloading")
       try {
         const res: any = await gameService.startSync(
@@ -204,6 +240,8 @@ export default function DownloadPlayButton({
         gameService.setGameInstalled(false)
         setStatus(manifest.hasUpdate ? "update" : "download")
         showToast(t("playButton.syncError"), "error")
+      } finally {
+        setIsTransitioning(false)
       }
     } else if (status === "play") {
       const ramGB = Number(localStorage.getItem("hikat_ram_gb")) || 4
@@ -232,11 +270,13 @@ export default function DownloadPlayButton({
 
   const handleVerifyInstallation = async () => {
     setIsMenuOpen(false)
+    if (isTransitioning) return
     if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
       showToast(t("playButton.verifyError"), "error")
       return
     }
     showToast(t("playButton.verifying"), "info")
+    setIsTransitioning(true)
     setStatus("downloading")
     try {
       const res: any = await gameService.startSync(
@@ -262,21 +302,29 @@ export default function DownloadPlayButton({
       gameService.setGameInstalled(false)
       showToast(t("playButton.verifyError"), "error")
       setStatus(manifest?.hasUpdate ? "update" : "download")
+    } finally {
+      setIsTransitioning(false)
     }
   }
 
   const handleUninstallGame = async () => {
     setIsMenuOpen(false)
-    const success = await gameService.uninstallGame()
-    if (success) {
-      setStatus(
-        manifest?.clientFiles && manifest.clientFiles.length > 0
-          ? "download"
-          : "unavailable",
-      )
-      showToast(t("playButton.uninstallSuccess"), "success")
-    } else {
-      showToast(t("playButton.uninstallError") || "Error al desinstalar el juego", "error")
+    if (isTransitioning) return
+    setIsTransitioning(true)
+    try {
+      const success = await gameService.uninstallGame()
+      if (success) {
+        setStatus(
+          manifest?.clientFiles && manifest.clientFiles.length > 0
+            ? "download"
+            : "unavailable",
+        )
+        showToast(t("playButton.uninstallSuccess"), "success")
+      } else {
+        showToast(t("playButton.uninstallError"), "error")
+      }
+    } finally {
+      setIsTransitioning(false)
     }
   }
 

@@ -99,6 +99,7 @@ declare module "../../electron/client-files-sync.cjs" {
 }
 
 declare module "../../electron/game-operation-manager.cjs" {
+  export const validateSyncPayload: any
   export class GameOperationManager {
     state: string
     activeOperationPromise: any

@@ -66,6 +66,7 @@
     "verifySuccess": "Arquivos do jogo verificados com sucesso",
     "verifyError": "Não foi possível verificar o jogo. Tente novamente mais tarde.",
     "uninstallSuccess": "Jogo desinstalado com sucesso",
+    "uninstallError": "Falha ao desinstalar o jogo",
     "noClientFiles": "Os arquivos do jogo não estão disponíveis no momento.",
     "syncError": "Não foi possível concluir o download. Verifique sua conexão com a internet.",
     "syncSuccess": "Download concluído com sucesso",

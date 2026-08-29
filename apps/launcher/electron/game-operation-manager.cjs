@@ -1,3 +1,4 @@
+const path = require("path")
 const {
   generateSyncPlan,
   executeSync,
@@ -7,6 +8,85 @@ const {
   cleanStaging,
   uninstallGame,
 } = require("./client-files-sync.cjs")
+const { resolveSafePath } = require("./path-validator.cjs")
+
+/**
+ * Validates IPC payloads before executing sync or plan checks.
+ * Prevents malicious or corrupted payloads from reaching the sync engine or pruning files.
+ */
+function validateSyncPayload({ clientFiles, modpackVersion, requireNonEmptyFiles = false, instanceRoot }) {
+  if (typeof modpackVersion !== "string" || !modpackVersion.trim() || modpackVersion.trim().length > 256) {
+    throw new Error("Invalid payload: modpackVersion must be a non-empty string under 256 characters.")
+  }
+
+  if (!Array.isArray(clientFiles)) {
+    throw new Error("Invalid payload: clientFiles must be an array.")
+  }
+
+  if (requireNonEmptyFiles && clientFiles.length === 0) {
+    throw new Error("Invalid payload: clientFiles cannot be empty for startSync.")
+  }
+
+  if (clientFiles.length > 50000) {
+    throw new Error("Invalid payload: clientFiles exceeds maximum allowed file count (50000).")
+  }
+
+  const seenPaths = new Set()
+
+  for (let i = 0; i < clientFiles.length; i++) {
+    const file = clientFiles[i]
+    if (!file || typeof file !== "object" || Array.isArray(file)) {
+      throw new Error(`Invalid payload: clientFiles[${i}] must be an object.`)
+    }
+
+    if (typeof file.path !== "string" || !file.path.trim() || file.path.trim().length > 1024) {
+      throw new Error(`Invalid payload: clientFiles[${i}] has invalid path string.`)
+    }
+
+    const trimmedPath = file.path.trim()
+
+    if (
+      path.isAbsolute(trimmedPath) ||
+      trimmedPath.startsWith("/") ||
+      trimmedPath.startsWith("\\") ||
+      /^[a-zA-Z]:/.test(trimmedPath)
+    ) {
+      throw new Error(`Invalid payload: clientFiles[${i}] path cannot be absolute: "${trimmedPath}"`)
+    }
+
+    const segments = trimmedPath.split(/[\\/]/)
+    if (segments.includes("..") || segments.includes(".")) {
+      throw new Error(`Invalid payload: clientFiles[${i}] path cannot contain traversal segments: "${trimmedPath}"`)
+    }
+
+    if (instanceRoot) {
+      resolveSafePath(instanceRoot, trimmedPath)
+    }
+
+    const normalizedPath = trimmedPath.replace(/\\/g, "/").toLowerCase()
+    if (seenPaths.has(normalizedPath)) {
+      throw new Error(`Invalid payload: duplicate logical path found: "${trimmedPath}"`)
+    }
+    seenPaths.add(normalizedPath)
+
+    if (typeof file.sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(file.sha256.trim())) {
+      throw new Error(`Invalid payload: clientFiles[${i}] ("${trimmedPath}") has invalid SHA-256 hash.`)
+    }
+
+    const size = Number(file.sizeBytes)
+    if (!Number.isFinite(size) || !Number.isInteger(size) || size < 0 || size > 100 * 1024 * 1024 * 1024) {
+      throw new Error(`Invalid payload: clientFiles[${i}] ("${trimmedPath}") has invalid sizeBytes: ${file.sizeBytes}`)
+    }
+
+    if (typeof file.downloadUrl !== "string" || !file.downloadUrl.trim() || file.downloadUrl.trim().length > 2048) {
+      throw new Error(`Invalid payload: clientFiles[${i}] ("${trimmedPath}") has invalid downloadUrl.`)
+    }
+
+    if (file.policy !== "MODIFICABLE" && file.policy !== "NO_MODIFICABLE") {
+      throw new Error(`Invalid payload: clientFiles[${i}] ("${trimmedPath}") has invalid policy: "${file.policy}". Must be MODIFICABLE or NO_MODIFICABLE.`)
+    }
+  }
+}
 
 class GameOperationManager {
   constructor() {
@@ -24,6 +104,13 @@ class GameOperationManager {
    * Checks local filesystem and installed manifest, and reconciles any recoverable staging session.
    */
   async checkPlan({ instanceRoot, clientFiles = [], modpackVersion = "1.0.0" }) {
+    validateSyncPayload({
+      clientFiles,
+      modpackVersion,
+      requireNonEmptyFiles: false,
+      instanceRoot,
+    })
+
     const plan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
     const installedManifest = await loadInstalledManifest(instanceRoot)
 
@@ -81,6 +168,14 @@ class GameOperationManager {
     if (this.state !== "IDLE" && this.state !== "PAUSED") {
       throw new Error(`Cannot start sync: Operation already in progress (${this.state})`)
     }
+
+    // Strict validation: empty array or invalid payload will reject before touching sync engine
+    validateSyncPayload({
+      clientFiles,
+      modpackVersion,
+      requireNonEmptyFiles: true,
+      instanceRoot,
+    })
 
     // If an earlier sync promise is still settling (unwinding), wait for it to fully complete
     if (this.activeOperationPromise) {
@@ -255,4 +350,4 @@ class GameOperationManager {
   }
 }
 
-module.exports = { GameOperationManager }
+module.exports = { GameOperationManager, validateSyncPayload }
