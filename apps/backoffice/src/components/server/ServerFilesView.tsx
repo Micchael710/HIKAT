@@ -345,12 +345,31 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
               <div style={{ fontSize: "0.95rem", fontWeight: 700, color: isDark ? "#f3f4f6" : "#1e3a8a" }}>
                 Cambios pendientes en el servidor
               </div>
-              <div style={{ fontSize: "0.82rem", color: isDark ? "#93c5fd" : "#3b82f6", marginTop: 2, display: "flex", gap: 10 }}>
+              <div style={{ fontSize: "0.82rem", color: isDark ? "#93c5fd" : "#3b82f6", marginTop: 2, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <span>+{syncPlan.summary.toInstall} para instalar</span>
                 <span>•</span>
                 <span>↑{syncPlan.summary.toUpdate} para actualizar</span>
                 <span>•</span>
                 <span>−{syncPlan.summary.toRemove} para eliminar</span>
+                <span>•</span>
+                <span
+                  style={{
+                    color: syncPlan.canApply
+                      ? "#22c55e"
+                      : syncPlan.serverStatus === "DISCONNECTED" || syncPlan.serverStatus === "UNKNOWN"
+                      ? "#ef4444"
+                      : "#f59e0b",
+                    fontWeight: 600,
+                  }}
+                >
+                  {syncPlan.canApply
+                    ? "🟢 Servidor apagado y listo"
+                    : syncPlan.serverStatus === "ONLINE" || syncPlan.serverStatus === "STARTING" || syncPlan.serverStatus === "STOPPING"
+                    ? `🟠 ${syncPlan.blockReason || "Apaga el servidor antes de aplicar los cambios"}`
+                    : syncPlan.serverStatus === "OFFLINE"
+                    ? `🟠 ${syncPlan.blockReason || "No se pudieron verificar los archivos del servidor"}`
+                    : `🔴 ${syncPlan.blockReason || "El servidor no está disponible"}`}
+                </span>
               </div>
             </div>
           </div>

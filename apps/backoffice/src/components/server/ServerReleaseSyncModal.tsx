@@ -23,11 +23,11 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
   const [isApplying, setIsApplying] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const isServerOffline = plan.serverStatus === "OFFLINE"
+  const canApply = plan.canApply === true
 
   const handleApply = async () => {
-    if (!isServerOffline) {
-      setError("El servidor debe estar completamente apagado para aplicar cambios de mods.")
+    if (!canApply) {
+      setError(plan.blockReason || "No se pueden aplicar los cambios en el estado actual del servidor.")
       return
     }
 
@@ -172,28 +172,70 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
             </span>
           </div>
 
-          {/* Server Offline Precondition Warning */}
-          {!isServerOffline && (
+          {/* Server Precondition Warning or Ready Notice */}
+          {!canApply ? (
             <div
               data-testid="sync-server-not-offline-warning"
               style={{
                 padding: "12px 16px",
                 borderRadius: "10px",
-                background: "rgba(239, 68, 68, 0.12)",
-                border: "1px solid rgba(239, 68, 68, 0.3)",
-                color: "#fca5a5",
+                background:
+                  plan.serverStatus === "DISCONNECTED" || plan.serverStatus === "UNKNOWN"
+                    ? "rgba(239, 68, 68, 0.12)"
+                    : "rgba(245, 158, 11, 0.12)",
+                border: `1px solid ${
+                  plan.serverStatus === "DISCONNECTED" || plan.serverStatus === "UNKNOWN"
+                    ? "rgba(239, 68, 68, 0.3)"
+                    : "rgba(245, 158, 11, 0.3)"
+                }`,
+                color:
+                  plan.serverStatus === "DISCONNECTED" || plan.serverStatus === "UNKNOWN"
+                    ? "#fca5a5"
+                    : "#fcd34d",
                 fontSize: "13px",
                 display: "flex",
                 alignItems: "center",
                 gap: "10px",
               }}
             >
-              <span style={{ fontSize: "18px" }}>⚠️</span>
+              <span style={{ fontSize: "18px" }}>
+                {plan.serverStatus === "DISCONNECTED" || plan.serverStatus === "UNKNOWN" ? "🔴" : "🟠"}
+              </span>
               <div>
-                <strong>El servidor no está apagado.</strong> Estado actual: <strong>{plan.serverStatus}</strong>.
-                <br />
-                Apaga el servidor antes de aplicar cambios de mods para prevenir bloqueos y daños de datos.
+                <strong>
+                  {plan.blockReason ||
+                    (plan.serverStatus === "DISCONNECTED" || plan.serverStatus === "UNKNOWN"
+                      ? "El servidor no está disponible."
+                      : plan.serverStatus === "OFFLINE"
+                      ? "No se pudieron verificar los archivos del servidor."
+                      : "Apaga el servidor antes de aplicar los cambios.")}
+                </strong>
+                {plan.serverStatus === "ONLINE" || plan.serverStatus === "STARTING" || plan.serverStatus === "STOPPING" ? (
+                  <div style={{ marginTop: "2px", fontSize: "12px", opacity: 0.9 }}>
+                    Estado actual: <strong>{plan.serverStatus}</strong>. Apágalo para prevenir bloqueos y daños de datos.
+                  </div>
+                ) : null}
               </div>
+            </div>
+          ) : (
+            <div
+              data-testid="sync-server-ready-notice"
+              style={{
+                padding: "10px 14px",
+                borderRadius: "8px",
+                background: "rgba(34, 197, 94, 0.12)",
+                border: "1px solid rgba(34, 197, 94, 0.3)",
+                color: "#22c55e",
+                fontSize: "13px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <span>🟢</span>
+              <span>
+                <strong>Servidor apagado y listo.</strong> Puedes aplicar los cambios con seguridad.
+              </span>
             </div>
           )}
 
@@ -353,16 +395,16 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
             type="button"
             data-testid="button-apply-release-sync"
             onClick={handleApply}
-            disabled={isApplying || !isServerOffline}
+            disabled={isApplying || !canApply}
             style={{
               padding: "9px 22px",
               borderRadius: "8px",
               border: "none",
-              background: isApplying || !isServerOffline ? "#4b5563" : "#22c55e",
+              background: isApplying || !canApply ? "#4b5563" : "#22c55e",
               color: "#ffffff",
               fontSize: "13px",
               fontWeight: "700",
-              cursor: isApplying || !isServerOffline ? "not-allowed" : "pointer",
+              cursor: isApplying || !canApply ? "not-allowed" : "pointer",
             }}
           >
             {isApplying ? "Aplicando cambios..." : "Aplicar cambios al servidor"}

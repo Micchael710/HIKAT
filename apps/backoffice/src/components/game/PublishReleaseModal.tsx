@@ -363,6 +363,7 @@ export default function PublishReleaseModal({
 
   return (
     <div
+      data-testid="publish-release-modal"
       style={{
         position: "fixed",
         inset: 0,
@@ -576,8 +577,8 @@ export default function PublishReleaseModal({
                   Esta actualización también incluye cambios que deben aplicarse al servidor.
                 </div>
 
-                {/* Server Status Indicator */}
-                {postPublishState.plan.serverStatus === "OFFLINE" ? (
+                {/* Server Status Indicator using canApply authority */}
+                {postPublishState.plan.canApply ? (
                   <div
                     style={{
                       display: "flex",
@@ -610,7 +611,25 @@ export default function PublishReleaseModal({
                   >
                     <span>🔴</span>
                     <div>
-                      <strong>Servidor no disponible.</strong> La actualización ya fue publicada. Los cambios del servidor quedarán pendientes hasta que vuelva a estar disponible.
+                      <strong>{postPublishState.plan.blockReason || "El servidor no está disponible."}</strong> La actualización ya fue publicada. Los cambios del servidor quedarán pendientes hasta que vuelva a estar disponible.
+                    </div>
+                  </div>
+                ) : postPublishState.plan.serverStatus === "OFFLINE" ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      fontSize: "13px",
+                      color: "#f59e0b",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(245, 158, 11, 0.1)",
+                    }}
+                  >
+                    <span>🟠</span>
+                    <div>
+                      <strong>{postPublishState.plan.blockReason || "No se pudieron verificar los archivos del servidor."}</strong>
                     </div>
                   </div>
                 ) : (
@@ -628,7 +647,7 @@ export default function PublishReleaseModal({
                   >
                     <span>🟠</span>
                     <div>
-                      <strong>El servidor está encendido.</strong> Apágalo antes de aplicar los cambios de la actualización.
+                      <strong>{postPublishState.plan.blockReason || "Apaga el servidor antes de aplicar los cambios."}</strong>
                     </div>
                   </div>
                 )}
@@ -647,6 +666,7 @@ export default function PublishReleaseModal({
             >
               <button
                 type="button"
+                data-testid="button-post-publish-close"
                 onClick={onClose}
                 style={{
                   padding: "9px 20px",
@@ -669,8 +689,9 @@ export default function PublishReleaseModal({
                   onClick={() => {
                     if (onReviewServerChanges && postPublishState.plan) {
                       onReviewServerChanges(postPublishState.plan)
+                    } else {
+                      onClose()
                     }
-                    onClose()
                   }}
                   style={{
                     padding: "9px 22px",
@@ -683,11 +704,9 @@ export default function PublishReleaseModal({
                     cursor: "pointer",
                   }}
                 >
-                  {postPublishState.plan.serverStatus === "OFFLINE"
+                  {postPublishState.plan.canApply
                     ? "Revisar cambios del servidor"
-                    : postPublishState.plan.serverStatus === "DISCONNECTED" || postPublishState.plan.serverStatus === "UNKNOWN"
-                      ? "Ver cambios pendientes"
-                      : "Revisar cambios"}
+                    : "Ver cambios pendientes"}
                 </button>
               )}
             </div>

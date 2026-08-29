@@ -38,6 +38,7 @@ export default function GameView({ theme }: GameViewProps) {
   const [serverPlan, setServerPlan] = useState<ServerReleaseSyncPlan | null>(null)
   const [isServerChangesModalOpen, setIsServerChangesModalOpen] = useState(false)
 
+  const [publishingDraft, setPublishingDraft] = useState<GameRelease | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [isPreparingDraft, setIsPreparingDraft] = useState(false)
@@ -477,20 +478,21 @@ export default function GameView({ theme }: GameViewProps) {
                     <span>•</span>
                     <span
                       style={{
-                        color:
-                          serverPlan.serverStatus === "OFFLINE"
-                            ? "#22c55e"
-                            : serverPlan.serverStatus === "ONLINE"
-                            ? "#f59e0b"
-                            : "#ef4444",
+                        color: serverPlan.canApply
+                          ? "#22c55e"
+                          : serverPlan.serverStatus === "DISCONNECTED" || serverPlan.serverStatus === "UNKNOWN"
+                          ? "#ef4444"
+                          : "#f59e0b",
                         fontWeight: "600",
                       }}
                     >
-                      {serverPlan.serverStatus === "OFFLINE"
+                      {serverPlan.canApply
                         ? "🟢 Servidor apagado y listo"
-                        : serverPlan.serverStatus === "ONLINE"
-                        ? "🟠 Servidor encendido (apágalo para aplicar)"
-                        : "🔴 Servidor no disponible"}
+                        : serverPlan.serverStatus === "ONLINE" || serverPlan.serverStatus === "STARTING" || serverPlan.serverStatus === "STOPPING"
+                        ? `🟠 ${serverPlan.blockReason || "Apaga el servidor antes de aplicar los cambios"}`
+                        : serverPlan.serverStatus === "OFFLINE"
+                        ? `🟠 ${serverPlan.blockReason || "No se pudieron verificar los archivos del servidor"}`
+                        : `🔴 ${serverPlan.blockReason || "El servidor no está disponible"}`}
                     </span>
                   </div>
                 </div>
@@ -629,7 +631,10 @@ export default function GameView({ theme }: GameViewProps) {
 
                     <button
                       type="button"
-                      onClick={() => setIsPublishOpen(true)}
+                      onClick={() => {
+                        setPublishingDraft(draft)
+                        setIsPublishOpen(true)
+                      }}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -751,22 +756,28 @@ export default function GameView({ theme }: GameViewProps) {
       )}
 
       {/* Publish Release Modal */}
-      {isPublishOpen && draft && (
+      {isPublishOpen && (publishingDraft || draft) && (
         <PublishReleaseModal
           theme={theme}
-          draftRelease={draft}
+          draftRelease={publishingDraft || draft!}
           publishedRelease={published}
           changes={overview?.changes}
           readiness={overview?.readiness}
-          onClose={() => setIsPublishOpen(false)}
-          onPublished={(ver, count) => {
-            showToast(`Versión ${ver} publicada correctamente. ${count} archivos disponibles.`, "success")
+          onClose={() => {
+            setIsPublishOpen(false)
+            setPublishingDraft(null)
             fetchOverview()
             fetchServerPlan()
           }}
+          onPublished={(ver, count) => {
+            showToast(`Versión ${ver} publicada correctamente. ${count} archivos disponibles.`, "success")
+          }}
           onReviewServerChanges={(plan) => {
+            setIsPublishOpen(false)
+            setPublishingDraft(null)
             setServerPlan(plan)
             setIsServerChangesModalOpen(true)
+            fetchOverview()
           }}
         />
       )}

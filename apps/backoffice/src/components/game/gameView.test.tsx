@@ -1868,7 +1868,6 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       })
 
       expect(onReviewServerChanges).toHaveBeenCalledWith(mockPlan)
-      expect(onClose).toHaveBeenCalled()
     })
 
     it("21. History View: muestra cover, versión, status, fecha, notas y visor de archivos de solo lectura", async () => {
@@ -2298,11 +2297,22 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(onPublished).not.toHaveBeenCalled()
     })
 
-    it("29. GameView muestra banner de cambios pendientes cuando serverPlan.isPending === true y lo oculta tras aplicar", async () => {
-      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+    it("30. GameView integracion: publicacion de release -> DRAFT desaparece en backend -> modal permanece visible mostrando pantalla de exito y cambia limpiamente a ServerReleaseSyncModal al pulsar Revisar cambios del servidor", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
+
+      // 1. Initial state has a draft release
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
         publishedRelease: mockPublishedRelease,
-        draftRelease: null,
-        pendingChangesCount: 0,
+        draftRelease: mockDraftRelease,
+        pendingChangesCount: 2,
+        changes: mockChanges,
+        readiness: mockReadiness,
+      })
+
+      const publishSpy = vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
+        ...mockDraftRelease,
+        status: "PUBLISHED",
+        version: "1.0.1",
       })
 
       const pendingPlan = {
@@ -2315,52 +2325,210 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 2 },
         serverStatus: "OFFLINE" as const,
         canApply: true,
+        blockReason: null,
       }
 
-      const syncPlanSpy = vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(pendingPlan)
-      const applySyncSpy = vi.spyOn(graphqlClient, "applyServerReleaseSync").mockResolvedValue({
-        success: true,
-        message: "Cambios aplicados correctamente.",
-        syncedCount: 1,
-        status: "APPLIED",
+      vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(pendingPlan)
+
+      render(<GameView theme="dark" />)
+
+      // Click "Revisar y publicar" button in GameView
+      const openPublishBtn = await screen.findByRole("button", { name: /Revisar y publicar/i })
+      await act(async () => {
+        fireEvent.click(openPublishBtn)
+      })
+
+      // Wizard modal is open
+      expect(screen.getByTestId("publish-release-modal")).toBeDefined()
+
+      // Advance wizard
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      // When publish finishes, backend overview will now return draftRelease: null
+      overviewSpy.mockResolvedValue({
+        publishedRelease: { ...mockDraftRelease, status: "PUBLISHED", version: "1.0.1" },
+        draftRelease: null,
+        pendingChangesCount: 0,
+      })
+
+      // Click Publish button
+      const publishBtn = screen.getByRole("button", { name: /Publicar actualización oficial/i })
+      await act(async () => {
+        fireEvent.click(publishBtn)
+      })
+
+      expect(publishSpy).toHaveBeenCalledTimes(1)
+
+      // Post-publish success screen MUST remain visible (NOT unmounted when draft became null)
+      expect(screen.getByTestId("publish-release-modal")).toBeDefined()
+      expect(screen.getAllByText("Actualización publicada").length).toBeGreaterThan(0)
+      expect(screen.getByTestId("post-publish-server-changes-card")).toBeDefined()
+      expect(screen.getAllByText("Cambios pendientes en el servidor").length).toBeGreaterThan(0)
+      expect(screen.getAllByText(/Servidor apagado y listo/i).length).toBeGreaterThan(0)
+
+      // Click "Revisar cambios del servidor"
+      const reviewServerBtn = screen.getByTestId("button-post-publish-review-server")
+      await act(async () => {
+        fireEvent.click(reviewServerBtn)
+      })
+
+      // Publish modal must be closed and ServerReleaseSyncModal must be open (no double overlays)
+      expect(screen.queryByTestId("publish-release-modal")).toBeNull()
+      expect(screen.getByTestId("server-release-sync-modal")).toBeDefined()
+      expect(screen.getByRole("heading", { name: "Aplicar cambios al servidor" })).toBeDefined()
+    })
+
+    it("31. GameView integracion: pulsar Cerrar en pantalla post-publicacion cierra PublishReleaseModal y refresca GameView", async () => {
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
+
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: mockDraftRelease,
+        pendingChangesCount: 2,
+        changes: mockChanges,
+        readiness: mockReadiness,
+      })
+
+      vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
+        ...mockDraftRelease,
+        status: "PUBLISHED",
+        version: "1.0.1",
+      })
+
+      vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+        releaseId: "rel-1",
+        releaseVersion: "1.0.1",
+        isPending: false,
+        items: [],
+        summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 2 },
+        serverStatus: "OFFLINE" as const,
+        canApply: true,
+        blockReason: null,
       })
 
       render(<GameView theme="dark" />)
 
-      // Banner is visible
+      const openPublishBtn = await screen.findByRole("button", { name: /Revisar y publicar/i })
+      await act(async () => {
+        fireEvent.click(openPublishBtn)
+      })
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      overviewSpy.mockResolvedValue({
+        publishedRelease: { ...mockDraftRelease, status: "PUBLISHED", version: "1.0.1" },
+        draftRelease: null,
+        pendingChangesCount: 0,
+      })
+
+      const publishBtn = screen.getByRole("button", { name: /Publicar actualización oficial/i })
+      await act(async () => {
+        fireEvent.click(publishBtn)
+      })
+
+      // Success screen visible
+      expect(screen.getAllByText("Actualización publicada").length).toBeGreaterThan(0)
+
+      // Click "Cerrar"
+      const closeBtn = screen.getByTestId("button-post-publish-close")
+      await act(async () => {
+        fireEvent.click(closeBtn)
+      })
+
+      // Modal is closed
+      expect(screen.queryByTestId("publish-release-modal")).toBeNull()
+      expect(screen.queryByTestId("server-release-sync-modal")).toBeNull()
+
+      // Overview was refreshed to official version
+      expect(screen.getByText("v1.0.1")).toBeDefined()
+    })
+
+    it("32. canApply authority: OFFLINE con canApply=false muestra blockReason en post-publish card y banner (no dice listo)", async () => {
+      const fsBlockedPlan = {
+        releaseId: "rel-1",
+        releaseVersion: "1.0.1",
+        isPending: true,
+        items: [
+          { action: "INSTALL" as const, filename: "mod.jar", targetPath: "mods/mod.jar", sizeBytes: 100, sha256: "h" },
+        ],
+        summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+        serverStatus: "OFFLINE" as const,
+        canApply: false,
+        blockReason: "No se pudieron verificar los archivos del servidor.",
+      }
+
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: null,
+        pendingChangesCount: 0,
+      })
+
+      vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(fsBlockedPlan)
+
+      render(<GameView theme="dark" />)
+
       const banner = await screen.findByTestId("game-pending-server-changes-banner")
       expect(banner).toBeDefined()
-      expect(screen.getByText("Cambios pendientes en el servidor")).toBeDefined()
-      expect(screen.getByText(/1 para instalar/i)).toBeDefined()
-      expect(screen.getByText(/Servidor apagado y listo/i)).toBeDefined()
+      expect(screen.getByText(/No se pudieron verificar los archivos del servidor/i)).toBeDefined()
+      expect(screen.queryByText(/Servidor apagado y listo/i)).toBeNull()
+    })
 
-      // Click "Revisar cambios" on the banner
-      const reviewBtn = screen.getByTestId("button-open-server-changes-from-game")
-      await act(async () => {
-        fireEvent.click(reviewBtn)
+    it("33. canApply authority: ONLINE y DISCONNECTED en GameView banner muestran mensajes amigables", async () => {
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        publishedRelease: mockPublishedRelease,
+        draftRelease: null,
+        pendingChangesCount: 0,
       })
 
-      // ServerReleaseSyncModal is open
-      expect(screen.getByTestId("server-release-sync-modal")).toBeDefined()
+      const onlinePlan = {
+        releaseId: "rel-1",
+        releaseVersion: "1.0.1",
+        isPending: true,
+        items: [],
+        summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+        serverStatus: "ONLINE" as const,
+        canApply: false,
+        blockReason: "Apaga el servidor antes de aplicar cambios de mods.",
+      }
 
-      // Apply changes
-      syncPlanSpy.mockResolvedValueOnce({
-        ...pendingPlan,
-        isPending: false,
-        summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 3 },
-      })
+      const syncSpy = vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(onlinePlan)
 
-      const applyBtn = screen.getByTestId("button-apply-release-sync")
-      await act(async () => {
-        fireEvent.click(applyBtn)
-      })
+      const { unmount } = render(<GameView theme="dark" />)
 
-      expect(applySyncSpy).toHaveBeenCalledWith(true)
+      const bannerOnline = await screen.findByTestId("game-pending-server-changes-banner")
+      expect(bannerOnline).toBeDefined()
+      expect(screen.getByText(/Apaga el servidor antes de aplicar/i)).toBeDefined()
 
-      // Banner is now removed
-      await waitFor(() => {
-        expect(screen.queryByTestId("game-pending-server-changes-banner")).toBeNull()
-      })
+      unmount()
+
+      const disconnectedPlan = {
+        releaseId: "rel-1",
+        releaseVersion: "1.0.1",
+        isPending: true,
+        items: [],
+        summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+        serverStatus: "DISCONNECTED" as const,
+        canApply: false,
+        blockReason: "El servidor no está disponible.",
+      }
+
+      syncSpy.mockResolvedValue(disconnectedPlan)
+
+      render(<GameView theme="dark" />)
+
+      const bannerDisc = await screen.findByTestId("game-pending-server-changes-banner")
+      expect(bannerDisc).toBeDefined()
+      expect(screen.getByText(/El servidor no está disponible/i)).toBeDefined()
     })
   })
 })

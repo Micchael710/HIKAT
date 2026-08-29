@@ -932,24 +932,25 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     expect(screen.getByText("+1 para instalar")).toBeDefined()
   })
 
-  it("Shard 08D Test 3: ServerReleaseSyncModal disables apply button if server is not OFFLINE", async () => {
+  it("Shard 08D Test 3: ServerReleaseSyncModal enables apply button when OFFLINE and canApply=true", async () => {
     const { ServerReleaseSyncModal } = await import("./ServerReleaseSyncModal")
 
-    const runningPlan = {
+    const readyPlan = {
       releaseId: "rel-1",
       releaseVersion: "1.2.0",
       isPending: true,
       items: [],
       summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
-      serverStatus: "ONLINE" as const,
-      canApply: false,
+      serverStatus: "OFFLINE" as const,
+      canApply: true,
+      blockReason: null,
     }
 
     await act(async () => {
       render(
         <ServerReleaseSyncModal
           theme="dark"
-          plan={runningPlan}
+          plan={readyPlan}
           onClose={vi.fn()}
           onSuccess={vi.fn()}
           onToast={onToastMock}
@@ -957,11 +958,101 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
       )
     })
 
+    expect(screen.getByTestId("sync-server-ready-notice")).toBeDefined()
+    expect(screen.getByText(/Servidor apagado y listo/i)).toBeDefined()
+    expect(screen.queryByTestId("sync-server-not-offline-warning")).toBeNull()
+    const applyBtn = screen.getByTestId("button-apply-release-sync") as HTMLButtonElement
+    expect(applyBtn.disabled).toBe(false)
+  })
+
+  it("Shard 08D Test 3b: ServerReleaseSyncModal disables apply button when OFFLINE but canApply=false (filesystem failure)", async () => {
+    const { ServerReleaseSyncModal } = await import("./ServerReleaseSyncModal")
+
+    const fsFailPlan = {
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "OFFLINE" as const,
+      canApply: false,
+      blockReason: "No se pudieron verificar los archivos del servidor.",
+    }
+
+    await act(async () => {
+      render(
+        <ServerReleaseSyncModal
+          theme="dark"
+          plan={fsFailPlan}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          onToast={onToastMock}
+        />,
+      )
+    })
+
+    expect(screen.queryByTestId("sync-server-ready-notice")).toBeNull()
+    expect(screen.queryByText(/Servidor apagado y listo/i)).toBeNull()
     expect(screen.getByTestId("sync-server-not-offline-warning")).toBeDefined()
-    expect(screen.getByText(/Apaga el servidor antes de aplicar cambios de mods/i)).toBeDefined()
+    expect(screen.getByText("No se pudieron verificar los archivos del servidor.")).toBeDefined()
     const applyBtn = screen.getByTestId("button-apply-release-sync") as HTMLButtonElement
     expect(applyBtn.disabled).toBe(true)
-    expect(applyBtn.textContent).toContain("Aplicar cambios al servidor")
+  })
+
+  it("Shard 08D Test 3c: ServerReleaseSyncModal disables apply button when ONLINE or DISCONNECTED", async () => {
+    const { ServerReleaseSyncModal } = await import("./ServerReleaseSyncModal")
+
+    const onlinePlan = {
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "ONLINE" as const,
+      canApply: false,
+      blockReason: "Apaga el servidor antes de aplicar cambios de mods.",
+    }
+
+    const { unmount } = render(
+      <ServerReleaseSyncModal
+        theme="dark"
+        plan={onlinePlan}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        onToast={onToastMock}
+      />,
+    )
+
+    expect(screen.getByTestId("sync-server-not-offline-warning")).toBeDefined()
+    expect(screen.getByText(/Apaga el servidor antes de aplicar/i)).toBeDefined()
+    expect((screen.getByTestId("button-apply-release-sync") as HTMLButtonElement).disabled).toBe(true)
+
+    unmount()
+
+    const disconnectedPlan = {
+      releaseId: "rel-1",
+      releaseVersion: "1.2.0",
+      isPending: true,
+      items: [],
+      summary: { toInstall: 1, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "DISCONNECTED" as const,
+      canApply: false,
+      blockReason: "El servidor no está disponible.",
+    }
+
+    render(
+      <ServerReleaseSyncModal
+        theme="dark"
+        plan={disconnectedPlan}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        onToast={onToastMock}
+      />,
+    )
+
+    expect(screen.getByTestId("sync-server-not-offline-warning")).toBeDefined()
+    expect(screen.getByText("El servidor no está disponible.")).toBeDefined()
+    expect((screen.getByTestId("button-apply-release-sync") as HTMLButtonElement).disabled).toBe(true)
   })
 
   it("Shard 08D Test 4: ServerModSearchModal renders BOTH mod redirect warning and CTA", async () => {
