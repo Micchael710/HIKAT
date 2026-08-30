@@ -56,6 +56,18 @@ async function saveCoreState(instanceRoot, state) {
 }
 
 /**
+ * Normalizes NeoForge version string (e.g. "neoforge-21.1.65" -> "21.1.65", "21.1.65" -> "21.1.65").
+ */
+function normalizeNeoForgeProfileVersion(rawVersion) {
+  if (typeof rawVersion !== "string" || !rawVersion.trim()) {
+    return ""
+  }
+  let v = rawVersion.trim()
+  v = v.replace(/^.*neoforge[d]?-/i, "")
+  return v.trim()
+}
+
+/**
  * Reads install_profile.json directly from a Forge/NeoForge installer jar using yauzl.
  */
 function readInstallProfileFromJar(jarPath) {
@@ -311,7 +323,7 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
   if (
     !candidateProfileId ||
     coreState?.minecraftVersion !== cleanMc ||
-    coreState?.neoForgeVersion !== cleanNf
+    normalizeNeoForgeProfileVersion(coreState?.neoForgeVersion) !== normalizeNeoForgeProfileVersion(cleanNf)
   ) {
     const candidates = getNeoForgeProfileCandidates(cleanMc, cleanNf)
     for (const cand of candidates) {
@@ -353,13 +365,22 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
 
   // 3. Obtain & Verify InstallProfile (Fail closed if missing or corrupt)
   let installProfile = coreState?.installProfile || null
-  if (!installProfile || installProfile.minecraft !== cleanMc || String(installProfile.version) !== cleanNf) {
+  if (
+    !installProfile ||
+    installProfile.minecraft !== cleanMc ||
+    normalizeNeoForgeProfileVersion(installProfile.version) !== normalizeNeoForgeProfileVersion(cleanNf)
+  ) {
     // Attempt reconstruction from cached installer jar
     const installerJar = getNeoForgeInstallerJarPath(instanceRoot, cleanNf)
     if (fs.existsSync(installerJar)) {
       try {
-        installProfile = await readInstallProfileFromJar(installerJar)
-        if (installProfile) {
+        const candidateProfile = await readInstallProfileFromJar(installerJar)
+        if (
+          candidateProfile &&
+          candidateProfile.minecraft === cleanMc &&
+          normalizeNeoForgeProfileVersion(candidateProfile.version) === normalizeNeoForgeProfileVersion(cleanNf)
+        ) {
+          installProfile = candidateProfile
           // Update cached core state with reconstructed install profile
           await saveCoreState(instanceRoot, {
             ...(coreState || {}),
@@ -368,8 +389,14 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
             resolvedVersionId: candidateProfileId,
             installProfile,
           })
+        } else {
+          installProfile = null
         }
-      } catch (_) {}
+      } catch (_) {
+        installProfile = null
+      }
+    } else {
+      installProfile = null
     }
   }
 
@@ -512,7 +539,7 @@ async function estimateCoreDownloadBytes({ instanceRoot, minecraftVersion, neoFo
   const cleanMc = String(minecraftVersion).trim()
   const cleanNf = String(neoForgeVersion).trim()
 
-  // 1. Vanilla package metadata
+  // 1. Fetch / load Mojang version package metadata
   let mojangPackage = null
   const vanillaJsonPath = path.join(instanceRoot, "versions", cleanMc, `${cleanMc}.json`)
   if (fs.existsSync(vanillaJsonPath)) {
@@ -521,10 +548,10 @@ async function estimateCoreDownloadBytes({ instanceRoot, minecraftVersion, neoFo
     } catch (_) {}
   }
 
-  if (!mojangPackage && readiness.needsVanilla) {
+  if (!mojangPackage) {
     try {
       const list = await getVersionList()
-      const versionItem = list.versions.find((v) => v.id === cleanMc)
+      const versionItem = list?.versions?.find((v) => v.id === cleanMc)
       if (versionItem?.url) {
         const res = await fetch(versionItem.url)
         if (res.ok) {
@@ -534,13 +561,66 @@ async function estimateCoreDownloadBytes({ instanceRoot, minecraftVersion, neoFo
     } catch (_) {}
   }
 
-  // Add Vanilla Client JAR size from metadata
-  if (readiness.needsVanilla && mojangPackage?.downloads?.client?.size) {
-    totalBytes += Number(mojangPackage.downloads.client.size)
+  // 1.a Add Vanilla Client JAR if missing
+  const vanillaJarPath = path.join(instanceRoot, "versions", cleanMc, `${cleanMc}.jar`)
+  if (readiness.needsVanilla || !fs.existsSync(vanillaJarPath)) {
+    if (mojangPackage?.downloads?.client?.size) {
+      totalBytes += Number(mojangPackage.downloads.client.size)
+    }
   }
 
-  // 2. NeoForge Installer Jar size from maven HTTP Content-Length header or installProfile
-  if (readiness.needsNeoForge) {
+  // 1.b Add Missing Vanilla Libraries
+  if (mojangPackage?.libraries && Array.isArray(mojangPackage.libraries)) {
+    for (const lib of mojangPackage.libraries) {
+      const artifact = lib.downloads?.artifact
+      if (artifact?.path) {
+        const localPath = path.join(instanceRoot, "libraries", artifact.path)
+        if (!fs.existsSync(localPath)) {
+          if (typeof artifact.size === "number" && artifact.size > 0) {
+            totalBytes += artifact.size
+          }
+        }
+      }
+    }
+  }
+
+  // 1.c Add Missing Assets (read/fetch asset index and check every object on disk)
+  if (mojangPackage?.assetIndex) {
+    const assetIndexMeta = mojangPackage.assetIndex
+    let assetIndexData = null
+    const localIndexFile = path.join(instanceRoot, "assets", "indexes", `${assetIndexMeta.id}.json`)
+
+    if (fs.existsSync(localIndexFile)) {
+      try {
+        assetIndexData = JSON.parse(await fsp.readFile(localIndexFile, "utf8"))
+      } catch (_) {}
+    }
+
+    if (!assetIndexData && assetIndexMeta.url) {
+      try {
+        const assetRes = await fetch(assetIndexMeta.url)
+        if (assetRes.ok) {
+          assetIndexData = await assetRes.json()
+        }
+      } catch (_) {}
+    }
+
+    if (assetIndexData?.objects && typeof assetIndexData.objects === "object") {
+      for (const obj of Object.values(assetIndexData.objects)) {
+        if (obj && obj.hash && typeof obj.size === "number" && obj.size > 0) {
+          const prefix = obj.hash.slice(0, 2)
+          const objPath = path.join(instanceRoot, "assets", "objects", prefix, obj.hash)
+          if (!fs.existsSync(objPath)) {
+            totalBytes += obj.size
+          }
+        }
+      }
+    }
+  }
+
+  // 2. NeoForge Installer Jar size (HEAD request or local check)
+  const installerJar = getNeoForgeInstallerJarPath(instanceRoot, cleanNf)
+  if (readiness.needsNeoForge || !fs.existsSync(installerJar)) {
     try {
       const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${cleanNf}/neoforge-${cleanNf}-installer.jar`
       const headRes = await fetch(installerUrl, { method: "HEAD" })
@@ -549,19 +629,31 @@ async function estimateCoreDownloadBytes({ instanceRoot, minecraftVersion, neoFo
         totalBytes += parseInt(contentLength, 10)
       }
     } catch (_) {}
+  }
 
-    // Add NeoForge install profile libraries if available
-    if (readiness.installProfile?.libraries && Array.isArray(readiness.installProfile.libraries)) {
-      for (const lib of readiness.installProfile.libraries) {
-        const size = lib.downloads?.artifact?.size
-        if (typeof size === "number" && size > 0) {
-          totalBytes += size
+  // 3. NeoForge install profile libraries (if installProfile is cached or extracted)
+  let installProfile = readiness.installProfile
+  if (!installProfile && fs.existsSync(installerJar)) {
+    try {
+      installProfile = await readInstallProfileFromJar(installerJar)
+    } catch (_) {}
+  }
+
+  if (installProfile?.libraries && Array.isArray(installProfile.libraries)) {
+    for (const lib of installProfile.libraries) {
+      const artifact = lib.downloads?.artifact
+      if (artifact?.path) {
+        const localPath = path.join(instanceRoot, "libraries", artifact.path)
+        if (!fs.existsSync(localPath)) {
+          if (typeof artifact.size === "number" && artifact.size > 0) {
+            totalBytes += artifact.size
+          }
         }
       }
     }
   }
 
-  // 3. Missing Libraries exact sizes from metadata
+  // 4. Missing Libraries & Assets from diagnostics (for repair mode when profiles already exist)
   if (readiness.needsLibraries && Array.isArray(readiness.missingLibraries)) {
     for (const issue of readiness.missingLibraries) {
       const size = issue.library?.downloads?.artifact?.size
@@ -571,7 +663,6 @@ async function estimateCoreDownloadBytes({ instanceRoot, minecraftVersion, neoFo
     }
   }
 
-  // 4. Missing Assets exact sizes from metadata
   if (readiness.needsAssets && Array.isArray(readiness.missingAssets)) {
     for (const issue of readiness.missingAssets) {
       const size = issue.asset?.size
@@ -691,14 +782,38 @@ async function installOrRepairMinecraftCore({
       cancelSignal.activeXmclTask = nfTask
     }
 
-    if (typeof onPhaseChange === "function") {
-      onPhaseChange("RUNNING_PROCESSORS")
-    }
-
     resolvedVersionId = await nfTask.startAndWait({
-      onUpdate: (_task, chunkSize) => {
+      onStart: (task) => {
+        const name = String(task.name || "").toLowerCase()
+        const isNetwork =
+          name.includes("download") ||
+          name.includes("fetch") ||
+          Boolean(task.from)
+        const isProcessor =
+          name.includes("processor") ||
+          name.includes("postprocess") ||
+          name.includes("unpack") ||
+          (name.includes("install") && !isNetwork)
+
+        if (isNetwork && typeof onPhaseChange === "function") {
+          onPhaseChange("DOWNLOADING_CORE")
+        } else if (isProcessor && typeof onPhaseChange === "function") {
+          onPhaseChange("RUNNING_PROCESSORS")
+        }
+      },
+      onUpdate: (task, chunkSize) => {
+        const name = String(task.name || "").toLowerCase()
+        const isNetwork =
+          name.includes("download") ||
+          name.includes("fetch") ||
+          Boolean(task.from)
+
+        if (isNetwork && typeof onPhaseChange === "function") {
+          onPhaseChange("DOWNLOADING_CORE")
+        }
+
         if (typeof onTaskBytes === "function" && chunkSize > 0) {
-          onTaskBytes("neoforge", chunkSize)
+          onTaskBytes(task.name || "neoforge", chunkSize)
         }
       },
     })
@@ -811,6 +926,7 @@ module.exports = {
   resolveJavaRuntime,
   validateJavaBinary,
   parseJavaMajorVersion,
+  normalizeNeoForgeProfileVersion,
   readInstallProfileFromJar,
   getNeoForgeInstallerJarPath,
   getNeoForgeProfileCandidates,

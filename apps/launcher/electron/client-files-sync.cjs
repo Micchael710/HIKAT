@@ -593,6 +593,8 @@ async function executeSync({
         currentFile: currentTaskPath,
         filesToDownload: plan.toDownload.length,
         filesToPrune: plan.toPrune.length,
+        downloadedBytes: totalDownloadedBytes,
+        totalBytes: plan.totalDownloadBytes,
       })
     }
   }
