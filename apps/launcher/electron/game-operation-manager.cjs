@@ -11,6 +11,7 @@ const {
 const {
   checkMinecraftCoreReadiness,
   estimateCoreDownloadBytes,
+  buildCoreInstallPlan,
   installOrRepairMinecraftCore,
   resolveJavaRuntime,
   validateJavaBinary,
@@ -120,6 +121,7 @@ class GameOperationManager {
     this.coreEngine = options.coreEngine || {
       checkMinecraftCoreReadiness,
       estimateCoreDownloadBytes,
+      buildCoreInstallPlan,
       installOrRepairMinecraftCore,
     }
     this.javaValidator = options.javaValidator || validateJavaBinary
@@ -159,12 +161,20 @@ class GameOperationManager {
       minecraftVersion,
       neoForgeVersion,
     })
-    const { totalCoreBytes } = await this.coreEngine.estimateCoreDownloadBytes({
-      instanceRoot,
-      minecraftVersion,
-      neoForgeVersion,
-      isPlanning: true,
-    })
+    const corePlan = await (this.coreEngine.buildCoreInstallPlan
+      ? this.coreEngine.buildCoreInstallPlan({
+          instanceRoot,
+          minecraftVersion,
+          neoForgeVersion,
+          mode: "planning",
+        })
+      : this.coreEngine.estimateCoreDownloadBytes({
+          instanceRoot,
+          minecraftVersion,
+          neoForgeVersion,
+          isPlanning: true,
+        }))
+    const totalCoreBytes = corePlan.totalCoreBytes || 0
 
     // Reconcile staging session if present
     let hasPausedSession = false
@@ -249,11 +259,13 @@ class GameOperationManager {
     }
 
     const opId = ++this.operationCounter
+    const activeCoreAbortController = new AbortController()
     const cancelSignal = {
       isCancelled: false,
       isPaused: false,
       id: opId,
       activeXmclTask: null,
+      activeCoreAbortController,
     }
     this.activeCancelSignal = cancelSignal
     this.state = isVerify ? "VERIFYING" : "SYNCING"
@@ -261,25 +273,23 @@ class GameOperationManager {
 
     const runSync = async () => {
       try {
-        // Step 1: Preflight calculations for UnifiedInstallPlan using real metadata
-        const clientPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
-        const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
-          instanceRoot,
-          clientPlan.toDownload,
-        )
-
         const startTime = Date.now()
         let lastReportTime = 0
         let clientTransferredBytes = 0
-        let preflightNeoForgeTransferredBytes = 0
+        let bootstrapNetworkBytes = 0
         let xmclTransferredBytes = 0
-        let maxReportedCompletedBytes = alreadyStagedBytes
-        let totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes)
+        let maxReportedCompletedBytes = 0
+        let planFrozen = false
+        let totalRequiredBytes = 1
+        let initialReusableBytes = 0
+        let clientPlan = null
 
         const reportProgress = (currentTaskPath = "") => {
+          if (!planFrozen) return // Do NOT emit progress until denominator is frozen!
+
           const now = Date.now()
-          const netTransferred = clientTransferredBytes + preflightNeoForgeTransferredBytes + xmclTransferredBytes
-          const currentTotalCompleted = alreadyStagedBytes + netTransferred
+          const networkTransferredThisOp = clientTransferredBytes + bootstrapNetworkBytes + xmclTransferredBytes
+          const currentTotalCompleted = initialReusableBytes + networkTransferredThisOp
           maxReportedCompletedBytes = Math.max(maxReportedCompletedBytes, currentTotalCompleted)
           const boundedCompleted = Math.min(totalRequiredBytes, maxReportedCompletedBytes)
 
@@ -289,7 +299,8 @@ class GameOperationManager {
           lastReportTime = now
 
           const elapsedSec = Math.max(0.1, (now - startTime) / 1000)
-          const speedMBs = netTransferred / 1024 / 1024 / elapsedSec
+          // Speed strictly measures network transferred during this operation / real network time
+          const speedMBs = networkTransferredThisOp / 1024 / 1024 / elapsedSec
           const totalGB = totalRequiredBytes / 1024 / 1024 / 1024
           const downloadedGB = boundedCompleted / 1024 / 1024 / 1024
           const progress = Math.min(100, Math.round((boundedCompleted / totalRequiredBytes) * 100))
@@ -319,8 +330,8 @@ class GameOperationManager {
               speedMBs: Number(Math.max(0, speedMBs).toFixed(2)),
               remainingMinutes,
               currentFile: currentTaskPath,
-              filesToDownload: clientPlan.toDownload.length,
-              filesToPrune: clientPlan.toPrune.length,
+              filesToDownload: clientPlan?.toDownload?.length || 0,
+              filesToPrune: clientPlan?.toPrune?.length || 0,
             })
           }
         }
@@ -338,20 +349,58 @@ class GameOperationManager {
           reportProgress()
         }
 
-        // Execution preflight: discover dependencies and stream bootstrap installer if needed
-        const { totalCoreBytes, preflightDownloadedBytes } = await this.coreEngine.estimateCoreDownloadBytes({
+        // Step 1: Preflight calculations for UnifiedInstallPlan using real metadata
+        clientPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+        const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
           instanceRoot,
-          minecraftVersion,
-          neoForgeVersion,
-          cancelSignal,
-          isPlanning: false,
-          onChunkBytes: (chunkBytes) => {
-            preflightNeoForgeTransferredBytes += chunkBytes
-            reportProgress("neoforge-installer.jar")
-          },
-        })
+          clientPlan.toDownload,
+        )
 
-        totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes + (totalCoreBytes || 0))
+        // Execution preflight: discover dependencies, prepare Planner Cache outside instanceRoot, accumulate bootstrap bytes silently
+        const corePlan = await (this.coreEngine.buildCoreInstallPlan
+          ? this.coreEngine.buildCoreInstallPlan({
+              instanceRoot,
+              minecraftVersion,
+              neoForgeVersion,
+              mode: "execution",
+              cancelSignal,
+              signal: activeCoreAbortController.signal,
+              onChunkBytes: (chunkBytes) => {
+                bootstrapNetworkBytes += chunkBytes
+              },
+            })
+          : this.coreEngine.estimateCoreDownloadBytes({
+              instanceRoot,
+              minecraftVersion,
+              neoForgeVersion,
+              cancelSignal,
+              signal: activeCoreAbortController.signal,
+              isPlanning: false,
+              onChunkBytes: (chunkBytes) => {
+                bootstrapNetworkBytes += chunkBytes
+              },
+            }))
+
+        if (cancelSignal.isPaused) {
+          this.state = "PAUSED"
+          this.internalPhase = "PAUSED"
+          return { success: true, paused: true }
+        }
+
+        if (cancelSignal.isCancelled) {
+          this.state = "IDLE"
+          this.internalPhase = "IDLE"
+          throw new Error("Sync cancelled by user.")
+        }
+
+        // Freeze denominator and reusable bytes BEFORE emitting the first progress event!
+        totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes + (corePlan.totalCoreBytes || 0))
+        initialReusableBytes = alreadyStagedBytes + (corePlan.reusableCoreBytes || 0)
+        maxReportedCompletedBytes = initialReusableBytes + bootstrapNetworkBytes
+        planFrozen = true
+
+        // Emit the very first progress event with frozen plan
+        reportProgress()
 
         // ─────────────────────────────────────────────────────────────
         // Phase 1: Client Files Sync (including JDK-21)
@@ -506,6 +555,9 @@ class GameOperationManager {
 
     if ((this.state === "SYNCING" || this.state === "VERIFYING") && this.activeCancelSignal) {
       this.activeCancelSignal.isPaused = true
+      try {
+        this.activeCancelSignal.activeCoreAbortController?.abort()
+      } catch (_) {}
       if (this.activeCancelSignal.activeXmclTask) {
         try {
           this.activeCancelSignal.activeXmclTask.pause?.()
@@ -551,6 +603,9 @@ class GameOperationManager {
       this.state = "CANCELING"
       if (this.activeCancelSignal) {
         this.activeCancelSignal.isCancelled = true
+        try {
+          this.activeCancelSignal.activeCoreAbortController?.abort()
+        } catch (_) {}
         if (this.activeCancelSignal.activeXmclTask) {
           try {
             this.activeCancelSignal.activeXmclTask.cancel?.()

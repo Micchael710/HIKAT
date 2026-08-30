@@ -10,13 +10,21 @@ import http from "http"
 import {
   checkMinecraftCoreReadiness,
   estimateCoreDownloadBytes,
+  buildCoreInstallPlan,
   installOrRepairMinecraftCore,
+  installNeoForgeFromPreparedInstaller,
   resolveJavaRuntime,
   validateJavaBinary,
   parseJavaMajorVersion,
   normalizeNeoForgeProfileVersion,
   validateFileIntegrity,
   bootstrapNeoForgeInstaller,
+  getPlannerCachePaths,
+  loadPlannerInstallerMetadata,
+  validatePlannerInstaller,
+  ensurePlannerInstaller,
+  promotePlannerInstallerToCanonical,
+  resolveOfficialNeoForgeInstallerSha256,
   readInstallProfileFromJar,
   getNeoForgeInstallerJarPath,
   loadCoreState,
@@ -443,10 +451,10 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       if (typeof url === "string" && url.includes("asset-index.json")) {
         return { ok: true, json: async () => mockAssetIndex, headers: new Headers() } as any
       }
-      if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar.sha256")) {
-        return { ok: false } as any
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
       }
-      if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar")) {
+      if (typeof url === "string" && url.includes("-installer.jar")) {
         const headers = new Headers()
         headers.set("content-length", String(zipBuffer.length))
         return {
@@ -641,6 +649,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
       if (typeof url === "string" && url.includes(".sha256")) {
         return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
       }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
@@ -1093,14 +1109,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     let fetchCount = 0
     const originalFetch = globalThis.fetch
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
-      if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar.sha256")) {
-        return { ok: false } as any
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
       }
-      if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar")) {
+      if (typeof url === "string" && url.includes("-installer.jar")) {
         fetchCount++
         return {
           ok: true,
-          headers: new Headers(),
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
           arrayBuffer: async () => zipBuffer,
           buffer: async () => zipBuffer,
         } as any
@@ -1193,6 +1209,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       if (typeof url === "string" && url.includes(".sha256")) {
         return { ok: true, text: async () => computeSha256(zipBuffer) } as any
       }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
+      }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
           ok: true,
@@ -1267,6 +1291,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
       if (typeof url === "string" && url.includes(".sha256")) {
         return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
       }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
@@ -1355,6 +1387,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       if (typeof url === "string" && url.includes(".sha256")) {
         return { ok: true, text: async () => computeSha256(zipBuffer) } as any
       }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
+      }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
           ok: true,
@@ -1441,6 +1481,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       if (typeof url === "string" && url.includes(".sha256")) {
         return { ok: true, text: async () => computeSha256(zipBuffer) } as any
       }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
+      }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
           ok: true,
@@ -1515,6 +1563,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
       if (typeof url === "string" && url.includes(".sha256")) {
         return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
       }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
@@ -1721,5 +1777,310 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     ).rejects.toThrow(/SHA-256 verification failed/i)
 
     expect(fs.existsSync(installerJar2)).toBe(false)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 31. validatePlannerInstaller & loadPlannerInstallerMetadata
+   * ───────────────────────────────────────────────────────────── */
+  it("31. validatePlannerInstaller validates metadata, size, hash, and internal install_profile.json", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    const { cacheDir, installerJar, metadataJson } = getPlannerCachePaths(instanceRoot, "21.1.65")
+    await fsp.mkdir(cacheDir, { recursive: true })
+
+    // 1. Missing metadata -> invalid
+    const resNoMeta = await validatePlannerInstaller(instanceRoot, "21.1.65", "1.21.1")
+    expect(resNoMeta.valid).toBe(false)
+
+    // 2. Write valid files
+    await fsp.writeFile(installerJar, zipBuffer)
+    const validMeta = {
+      schemaVersion: 1,
+      neoForgeVersion: "21.1.65",
+      sha256: realSha256,
+      sizeBytes: zipBuffer.length,
+      cachedAt: new Date().toISOString(),
+    }
+    await fsp.writeFile(metadataJson, JSON.stringify(validMeta))
+
+    const resValid = await validatePlannerInstaller(instanceRoot, "21.1.65", "1.21.1")
+    expect(resValid.valid).toBe(true)
+    expect(resValid.sizeBytes).toBe(zipBuffer.length)
+    expect(resValid.sha256).toBe(realSha256)
+
+    // 3. Size mismatch -> invalid
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({ ...validMeta, sizeBytes: zipBuffer.length + 50 }),
+    )
+    const resSizeMismatch = await validatePlannerInstaller(instanceRoot, "21.1.65", "1.21.1")
+    expect(resSizeMismatch.valid).toBe(false)
+
+    // 4. SHA-256 mismatch -> invalid
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({ ...validMeta, sha256: "0000000000000000000000000000000000000000000000000000000000000000" }),
+    )
+    const resShaMismatch = await validatePlannerInstaller(instanceRoot, "21.1.65", "1.21.1")
+    expect(resShaMismatch.valid).toBe(false)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 32. resolveOfficialNeoForgeInstallerSha256 Fail-Closed Checksum
+   * ───────────────────────────────────────────────────────────── */
+  it("32. resolveOfficialNeoForgeInstallerSha256 rejects HTTP error and malformed checksums", async () => {
+    // 1. HTTP 404
+    const mockFetch404 = vi.fn().mockResolvedValue({ ok: false, status: 404 })
+    await expect(
+      resolveOfficialNeoForgeInstallerSha256("21.1.65", mockFetch404),
+    ).rejects.toThrow(/Failed to fetch official SHA-256 checksum/i)
+
+    // 2. Malformed body (not 64 hex chars)
+    const mockFetchBadText = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "Not A Valid Checksum",
+    })
+    await expect(
+      resolveOfficialNeoForgeInstallerSha256("21.1.65", mockFetchBadText),
+    ).rejects.toThrow(/Invalid official SHA-256 checksum format/i)
+
+    // 3. Valid body with whitespace
+    const validHash = "a1b2c3d4e5f60000111122223333444455556666777788889999aaaabbbbcccc"
+    const mockFetchGood = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => `  ${validHash}  neoforge-21.1.65-installer.jar\n`,
+    })
+    const resolved = await resolveOfficialNeoForgeInstallerSha256("21.1.65", mockFetchGood)
+    expect(resolved).toBe(validHash)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 33. promotePlannerInstallerToCanonical
+   * ───────────────────────────────────────────────────────────── */
+  it("33. promotePlannerInstallerToCanonical copies atomically from Planner Cache without mutating cache", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    const { cacheDir, installerJar, metadataJson } = getPlannerCachePaths(instanceRoot, "21.1.65")
+    await fsp.mkdir(cacheDir, { recursive: true })
+    await fsp.writeFile(installerJar, zipBuffer)
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({
+        schemaVersion: 1,
+        neoForgeVersion: "21.1.65",
+        sha256: realSha256,
+        sizeBytes: zipBuffer.length,
+        cachedAt: new Date().toISOString(),
+      }),
+    )
+
+    const plannerInstaller = {
+      installerJar,
+      sizeBytes: zipBuffer.length,
+      sha256: realSha256,
+    }
+
+    const canonicalPath = await promotePlannerInstallerToCanonical(
+      instanceRoot,
+      "21.1.65",
+      plannerInstaller,
+    )
+
+    expect(fs.existsSync(canonicalPath)).toBe(true)
+    expect(fs.existsSync(installerJar)).toBe(true) // Planner cache preserved!
+    expect(await validateFileSha256(canonicalPath, realSha256)).toBe(true)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 34. Frozen Progress Denominator & Monotonicity
+   * ───────────────────────────────────────────────────────────── */
+  it("34. startSync freezes progress denominator before first event and never emits progress before freeze", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    const { cacheDir, installerJar, metadataJson } = getPlannerCachePaths(instanceRoot, "21.1.65")
+    await fsp.mkdir(cacheDir, { recursive: true })
+    await fsp.writeFile(installerJar, zipBuffer)
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({
+        schemaVersion: 1,
+        neoForgeVersion: "21.1.65",
+        sha256: realSha256,
+        sizeBytes: zipBuffer.length,
+        cachedAt: new Date().toISOString(),
+      }),
+    )
+
+    const testContent = Buffer.from("mock client binary data 1234567890", "utf8")
+    const task = {
+      path: "mods/sample-mod.jar",
+      sha256: computeSha256(testContent),
+      sizeBytes: testContent.length,
+      policy: "NO_MODIFICABLE",
+      downloadUrl: `${serverBaseUrl}/file/sample-mod.jar`,
+    }
+
+    const mockEngine = {
+      checkMinecraftCoreReadiness: vi.fn()
+        .mockResolvedValueOnce({
+          isCoreInstalled: false,
+          hasExistingInstall: false,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          needsVanilla: false,
+          needsNeoForge: true,
+          issues: [],
+        })
+        .mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          needsVanilla: false,
+          needsNeoForge: false,
+          issues: [],
+        }),
+      buildCoreInstallPlan: vi.fn().mockResolvedValue({
+        totalCoreBytes: 50000,
+        reusableCoreBytes: zipBuffer.length,
+        bootstrapNetworkBytes: 0,
+        readiness: { isCoreInstalled: false },
+        plannerInstaller: { status: "cached-before-operation", sizeBytes: zipBuffer.length },
+      }),
+      installOrRepairMinecraftCore: vi.fn().mockResolvedValue({
+        success: true,
+        resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      }),
+    }
+
+    const manager = new GameOperationManager({
+      coreEngine: mockEngine,
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    await createMockJdk21(instanceRoot)
+
+    const capturedTotalGB: number[] = []
+    const capturedProgress: number[] = []
+
+    const res = await manager.startSync({
+      instanceRoot,
+      clientFiles: [task],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      apiBaseUrl: serverBaseUrl,
+      onProgress: (data: any) => {
+        capturedTotalGB.push(data.totalGB)
+        capturedProgress.push(data.progress)
+      },
+    })
+
+    expect(res.success).toBe(true)
+    expect(capturedTotalGB.length).toBeGreaterThan(0)
+
+    // Denominator must be completely constant across all progress events (frozen)
+    const firstTotalGB = capturedTotalGB[0]
+    for (const total of capturedTotalGB) {
+      expect(total).toBe(firstTotalGB)
+    }
+
+    // Monotonic progress
+    for (let i = 1; i < capturedProgress.length; i++) {
+      expect(capturedProgress[i]).toBeGreaterThanOrEqual(capturedProgress[i - 1])
+    }
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 35. Speed Calculation Excludes Cached/Reusable Bytes
+   * ───────────────────────────────────────────────────────────── */
+  it("35. Progress speedMBs strictly measures live network transferred bytes and excludes pre-cached bytes", async () => {
+    const mockEngine = {
+      checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+        isCoreInstalled: true,
+        hasExistingInstall: true,
+        resolvedVersionId: "1.21.1-neoforge-21.1.65",
+        issues: [],
+      }),
+      buildCoreInstallPlan: vi.fn().mockResolvedValue({
+        totalCoreBytes: 0,
+        reusableCoreBytes: 100000000, // 100 MB cached
+        bootstrapNetworkBytes: 0,
+        readiness: { isCoreInstalled: true },
+        plannerInstaller: { status: "cached-before-operation", sizeBytes: 100000000 },
+      }),
+      installOrRepairMinecraftCore: vi.fn().mockResolvedValue({
+        success: true,
+        resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      }),
+    }
+
+    const manager = new GameOperationManager({
+      coreEngine: mockEngine,
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    await createMockJdk21(instanceRoot)
+
+    let maxObservedSpeed = 0
+
+    await manager.startSync({
+      instanceRoot,
+      clientFiles: [],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      isVerify: true,
+      onProgress: (data: any) => {
+        if (data.speedMBs > maxObservedSpeed) maxObservedSpeed = data.speedMBs
+      },
+    })
+
+    // With 0 network transfer, speedMBs must remain 0 despite 100MB cached
+    expect(maxObservedSpeed).toBe(0)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 36. Pause during bootstrap aborts active controller cleanly
+   * ───────────────────────────────────────────────────────────── */
+  it("36. pauseSync during bootstrap aborts active fetch and transitions to PAUSED cleanly", async () => {
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({ isCoreInstalled: false }),
+        buildCoreInstallPlan: vi.fn().mockImplementation(async ({ cancelSignal }) => {
+          cancelSignal.isPaused = true
+          return {
+            totalCoreBytes: 1000,
+            reusableCoreBytes: 0,
+            bootstrapNetworkBytes: 0,
+            readiness: { isCoreInstalled: false },
+          }
+        }),
+        installOrRepairMinecraftCore: vi.fn(),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    const syncPromise = manager.startSync({
+      instanceRoot,
+      clientFiles: [{
+        path: "mods/mod.jar",
+        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        sizeBytes: 10,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/mod.jar`,
+      }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    const res = await syncPromise
+    expect(res.paused).toBe(true)
+    expect(manager.getState()).toBe("PAUSED")
   })
 })
