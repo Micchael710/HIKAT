@@ -298,80 +298,218 @@ function getNeoForgeInstallerJarPath(instanceRoot, neoForgeVersion) {
 }
 
 /**
- * Obtains and validates the NeoForge installer JAR, downloading it during preflight if not already present on disk.
- * Uses atomic download via temporary file.
- * Extracts and returns install_profile.json.
+ * Resolves current OS key for Minecraft native classifiers matching Mojang rules.
  */
-async function bootstrapNeoForgeInstaller({ instanceRoot, neoForgeVersion, cancelSignal }) {
+function getCurrentPlatformOsKey() {
+  switch (process.platform) {
+    case "win32":
+      return "windows"
+    case "darwin":
+      return "osx"
+    case "linux":
+      return "linux"
+    default:
+      return process.platform
+  }
+}
+
+/**
+ * Resolves official SHA-256 for NeoForge installer jar from maven if available.
+ */
+async function fetchOfficialNeoForgeInstallerSha256(neoForgeVersion, customFetch = globalThis.fetch) {
+  const cleanNf = String(neoForgeVersion).trim()
+  const shaUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${cleanNf}/neoforge-${cleanNf}-installer.jar.sha256`
+  try {
+    const res = await customFetch(shaUrl)
+    if (res.ok) {
+      const text = await res.text()
+      const match = text.trim().match(/^[a-fA-F0-9]{64}/)
+      return match ? match[0].toLowerCase() : text.trim().toLowerCase()
+    }
+  } catch (_) {}
+  return null
+}
+
+/**
+ * Validates local file against expected SHA-256 hex string.
+ */
+async function validateFileSha256(filePath, expectedSha256) {
+  if (!filePath || !fs.existsSync(filePath)) return false
+  if (!expectedSha256 || typeof expectedSha256 !== "string") return true
+  try {
+    const buffer = await fsp.readFile(filePath)
+    const actual = crypto.createHash("sha256").update(buffer).digest("hex").toLowerCase()
+    return actual === expectedSha256.trim().toLowerCase()
+  } catch (_) {
+    return false
+  }
+}
+
+/**
+ * Obtains and validates the NeoForge installer JAR:
+ * - In execution mode (isPlanning = false), streams download to temp file, reporting chunk progress, verifies official SHA-256, and renames atomically to canonical path.
+ * - In planning mode (isPlanning = true), operates read-only (downloads only to ephemeral planner temp dir if needed to extract install_profile.json, and cleans it up).
+ * - Fully abortable via AbortSignal or cancelSignal (cleans partial .tmp files without touching existing valid installers).
+ */
+async function bootstrapNeoForgeInstaller({
+  instanceRoot,
+  neoForgeVersion,
+  onChunkBytes,
+  signal,
+  cancelSignal,
+  isPlanning = false,
+  plannerCacheDir,
+  customFetch = globalThis.fetch,
+}) {
   const cleanNf = String(neoForgeVersion).trim()
   const installerJar = getNeoForgeInstallerJarPath(instanceRoot, cleanNf)
 
-  // 1. Check if valid installer JAR already exists locally
+  // 1. Fetch official SHA-256 checksum from Maven if available
+  const officialSha256 = await fetchOfficialNeoForgeInstallerSha256(cleanNf, customFetch)
+
+  // 2. Check if valid installer JAR already exists locally at canonical location
   if (fs.existsSync(installerJar)) {
-    const profile = await readInstallProfileFromJar(installerJar)
-    if (profile && normalizeNeoForgeProfileVersion(profile.version) === normalizeNeoForgeProfileVersion(cleanNf)) {
-      const stat = await fsp.stat(installerJar).catch(() => null)
-      return {
-        installerJar,
-        installProfile: profile,
-        installerSize: stat?.size || 0,
-        downloadedInPreflight: false,
-        preflightDownloadedBytes: 0,
+    const isValidChecksum = officialSha256 ? await validateFileSha256(installerJar, officialSha256) : true
+    if (isValidChecksum) {
+      const profile = await readInstallProfileFromJar(installerJar)
+      if (profile && normalizeNeoForgeProfileVersion(profile.version) === normalizeNeoForgeProfileVersion(cleanNf)) {
+        const stat = await fsp.stat(installerJar).catch(() => null)
+        return {
+          installerJar,
+          installProfile: profile,
+          installerSize: stat?.size || 0,
+          downloadedInPreflight: false,
+          preflightDownloadedBytes: 0,
+        }
       }
     }
   }
 
-  // 2. Download installer JAR to canonical location if missing or corrupt
-  if (cancelSignal?.isCancelled) {
+  // 3. Check cancellation before network
+  if (signal?.aborted || cancelSignal?.isCancelled || cancelSignal?.isPaused) {
     throw new Error("Preflight cancelled by user.")
   }
 
   const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${cleanNf}/neoforge-${cleanNf}-installer.jar`
-  const res = await fetch(installerUrl)
+  const fetchSignal = signal || (cancelSignal ? undefined : undefined)
+  const res = await customFetch(installerUrl, { signal: fetchSignal })
   if (!res.ok) {
     throw new Error(`Failed to fetch NeoForge installer from "${installerUrl}": HTTP ${res.status} ${res.statusText}`)
   }
 
-  let buffer
-  if (typeof res.arrayBuffer === "function") {
-    buffer = Buffer.from(await res.arrayBuffer())
-  } else if (typeof res.buffer === "function") {
-    buffer = await res.buffer()
-  } else if (typeof res.text === "function") {
-    buffer = Buffer.from(await res.text())
-  } else {
-    buffer = Buffer.alloc(0)
-  }
-  const downloadedBytes = buffer.length
-
-  // Write atomically to canonical path
-  const targetDir = path.dirname(installerJar)
+  // Target directory for temporary file
+  const os = require("os")
+  const targetDir = isPlanning
+    ? (plannerCacheDir || path.join(os.tmpdir(), "hikat-planner"))
+    : path.dirname(installerJar)
   await fsp.mkdir(targetDir, { recursive: true })
   const tempPath = path.join(
     targetDir,
     `installer.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`,
   )
-  await fsp.writeFile(tempPath, buffer)
+
+  let downloadedBytes = 0
+  const sha256Hasher = crypto.createHash("sha256")
+  let writeStream = fs.createWriteStream(tempPath)
+
   try {
-    await fsp.rename(tempPath, installerJar)
-  } catch (_) {
-    if (fs.existsSync(installerJar)) {
-      await fsp.unlink(installerJar)
+    if (res.body && typeof res.body[Symbol.asyncIterator] === "function") {
+      for await (const chunk of res.body) {
+        if (signal?.aborted || cancelSignal?.isCancelled || cancelSignal?.isPaused) {
+          throw new Error("Preflight cancelled by user.")
+        }
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        downloadedBytes += buf.length
+        sha256Hasher.update(buf)
+        await new Promise((resolve, reject) => {
+          if (!writeStream.write(buf)) {
+            writeStream.once("drain", resolve)
+          } else {
+            process.nextTick(resolve)
+          }
+        })
+        if (typeof onChunkBytes === "function") {
+          onChunkBytes(buf.length, downloadedBytes)
+        }
+      }
+    } else {
+      let buffer
+      if (typeof res.arrayBuffer === "function") {
+        buffer = Buffer.from(await res.arrayBuffer())
+      } else if (typeof res.buffer === "function") {
+        buffer = await res.buffer()
+      } else if (typeof res.text === "function") {
+        buffer = Buffer.from(await res.text())
+      } else {
+        buffer = Buffer.alloc(0)
+      }
+      downloadedBytes = buffer.length
+      sha256Hasher.update(buffer)
+      await new Promise((resolve, reject) => {
+        writeStream.write(buffer, (err) => (err ? reject(err) : resolve()))
+      })
+      if (typeof onChunkBytes === "function") {
+        onChunkBytes(downloadedBytes, downloadedBytes)
+      }
     }
-    await fsp.rename(tempPath, installerJar)
-  }
+    await new Promise((resolve) => writeStream.end(resolve))
+    writeStream = null
 
-  const profile = await readInstallProfileFromJar(installerJar)
-  if (!profile) {
-    throw new Error(`Downloaded NeoForge installer at "${installerJar}" is corrupted or missing install_profile.json.`)
-  }
+    // 4. Validate SHA-256 if official checksum is known
+    const actualSha256 = sha256Hasher.digest("hex").toLowerCase()
+    if (officialSha256 && actualSha256 !== officialSha256.toLowerCase()) {
+      throw new Error(
+        `NeoForge installer SHA-256 verification failed (expected ${officialSha256}, got ${actualSha256}). Download rejected.`,
+      )
+    }
 
-  return {
-    installerJar,
-    installProfile: profile,
-    installerSize: downloadedBytes,
-    downloadedInPreflight: true,
-    preflightDownloadedBytes: downloadedBytes,
+    // 5. Read install_profile.json
+    const profile = await readInstallProfileFromJar(tempPath)
+    if (!profile) {
+      throw new Error(`Downloaded NeoForge installer at "${tempPath}" is corrupted or missing install_profile.json.`)
+    }
+
+    if (isPlanning) {
+      // In planning mode: Clean up the temp file and do NOT write to instanceRoot
+      try {
+        await fsp.unlink(tempPath)
+      } catch (_) {}
+      return {
+        installerJar: null,
+        installProfile: profile,
+        installerSize: downloadedBytes,
+        downloadedInPreflight: false,
+        preflightDownloadedBytes: 0,
+      }
+    }
+
+    // In execution mode: Promote temp file atomically to canonical installer location
+    try {
+      await fsp.rename(tempPath, installerJar)
+    } catch (_) {
+      if (fs.existsSync(installerJar)) {
+        await fsp.unlink(installerJar)
+      }
+      await fsp.rename(tempPath, installerJar)
+    }
+
+    return {
+      installerJar,
+      installProfile: profile,
+      installerSize: downloadedBytes,
+      downloadedInPreflight: true,
+      preflightDownloadedBytes: downloadedBytes,
+    }
+  } catch (err) {
+    if (writeStream) {
+      writeStream.destroy()
+    }
+    try {
+      if (fs.existsSync(tempPath)) {
+        await fsp.unlink(tempPath)
+      }
+    } catch (_) {}
+    throw err
   }
 }
 
@@ -630,6 +768,8 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
 /**
  * Calculates estimated bytes to download for missing Core components derived strictly from authoritative metadata.
  * Bootstraps the NeoForge installer during preflight if needed to extract install_profile.json and discover all NeoForge dependencies.
+ * Includes native classifiers matching current platform (and excludes mismatching OS natives).
+ * Includes and deeply validates the asset index file itself (assets/indexes/<id>.json).
  * Deduplicates all required artifacts via canonical relative paths.
  * Validates files deeply (size + SHA-1 hash), not merely existence.
  */
@@ -637,7 +777,10 @@ async function estimateCoreDownloadBytes({
   instanceRoot,
   minecraftVersion,
   neoForgeVersion,
+  onChunkBytes,
   cancelSignal,
+  isPlanning = false,
+  plannerCacheDir,
 }) {
   if (!minecraftVersion || !neoForgeVersion) {
     return { totalCoreBytes: 0, preflightDownloadedBytes: 0, readiness: null }
@@ -664,7 +807,10 @@ async function estimateCoreDownloadBytes({
     const bootstrap = await bootstrapNeoForgeInstaller({
       instanceRoot,
       neoForgeVersion: cleanNf,
+      onChunkBytes,
       cancelSignal,
+      isPlanning,
+      plannerCacheDir,
     })
     installProfile = bootstrap.installProfile
     if (bootstrap.downloadedInPreflight) {
@@ -724,24 +870,79 @@ async function estimateCoreDownloadBytes({
     })
   }
 
-  // 3.b Vanilla Libraries
+  // 3.b Vanilla Libraries & Native Classifiers for current platform
+  const currentOsKey = getCurrentPlatformOsKey()
+
   if (mojangPackage?.libraries && Array.isArray(mojangPackage.libraries)) {
+    try {
+      const resolved = Version.resolveLibraries(mojangPackage.libraries)
+      if (Array.isArray(resolved)) {
+        for (const resLib of resolved) {
+          const download = resLib.download
+          const libPath = download?.path || resLib.path
+          if (libPath) {
+            registerArtifact({
+              relativePath: path.join("libraries", libPath),
+              expectedSize: download?.size,
+              expectedSha1: download?.sha1,
+              role: resLib.isNative ? "vanilla-native" : "vanilla-library",
+            })
+          }
+        }
+      }
+    } catch (_) {}
+
     for (const lib of mojangPackage.libraries) {
       const artifact = lib.downloads?.artifact
       if (artifact?.path) {
-        registerArtifact({
-          relativePath: path.join("libraries", artifact.path),
-          expectedSize: artifact.size,
-          expectedSha1: artifact.sha1,
-          role: "vanilla-library",
-        })
+        let isAllowed = true
+        if (Array.isArray(lib.rules) && lib.rules.length > 0) {
+          isAllowed = false
+          for (const rule of lib.rules) {
+            const osMatch = !rule.os || rule.os.name === currentOsKey
+            if (osMatch) {
+              isAllowed = rule.action === "allow"
+            }
+          }
+        }
+        if (isAllowed) {
+          registerArtifact({
+            relativePath: path.join("libraries", artifact.path),
+            expectedSize: artifact.size,
+            expectedSha1: artifact.sha1,
+            role: "vanilla-library",
+          })
+        }
+      }
+
+      if (lib.natives && typeof lib.natives === "object" && lib.downloads?.classifiers) {
+        const nativeClassifierKey = lib.natives[currentOsKey]
+        if (nativeClassifierKey && lib.downloads.classifiers[nativeClassifierKey]) {
+          const classifierArtifact = lib.downloads.classifiers[nativeClassifierKey]
+          if (classifierArtifact?.path) {
+            registerArtifact({
+              relativePath: path.join("libraries", classifierArtifact.path),
+              expectedSize: classifierArtifact.size,
+              expectedSha1: classifierArtifact.sha1,
+              role: "vanilla-native",
+            })
+          }
+        }
       }
     }
   }
 
-  // 3.c Assets (Index + Objects)
+  // 3.c Assets (Index File + Objects)
   if (mojangPackage?.assetIndex) {
     const assetIndexMeta = mojangPackage.assetIndex
+    // 3.c.1 Register the Asset Index file itself as a canonical artifact!
+    registerArtifact({
+      relativePath: path.join("assets", "indexes", `${assetIndexMeta.id}.json`),
+      expectedSize: assetIndexMeta.size,
+      expectedSha1: assetIndexMeta.sha1,
+      role: "asset-index",
+    })
+
     let assetIndexData = null
     const localIndexFile = path.join(instanceRoot, "assets", "indexes", `${assetIndexMeta.id}.json`)
 
@@ -1142,4 +1343,7 @@ module.exports = {
   getNeoForgeProfileCandidates,
   loadCoreState,
   saveCoreState,
+  fetchOfficialNeoForgeInstallerSha256,
+  validateFileSha256,
+  getCurrentPlatformOsKey,
 }

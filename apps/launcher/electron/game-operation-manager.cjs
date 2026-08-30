@@ -163,6 +163,7 @@ class GameOperationManager {
       instanceRoot,
       minecraftVersion,
       neoForgeVersion,
+      isPlanning: true,
     })
 
     // Reconcile staging session if present
@@ -266,24 +267,19 @@ class GameOperationManager {
           instanceRoot,
           clientPlan.toDownload,
         )
-        const { totalCoreBytes, preflightDownloadedBytes } = await this.coreEngine.estimateCoreDownloadBytes({
-          instanceRoot,
-          minecraftVersion,
-          neoForgeVersion,
-          cancelSignal,
-        })
-
-        const totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes + (totalCoreBytes || 0))
-        let clientTransferredBytes = 0
-        let xmclTransferredBytes = preflightDownloadedBytes || 0
-        let maxReportedCompletedBytes = alreadyStagedBytes + xmclTransferredBytes
 
         const startTime = Date.now()
         let lastReportTime = 0
+        let clientTransferredBytes = 0
+        let preflightNeoForgeTransferredBytes = 0
+        let xmclTransferredBytes = 0
+        let maxReportedCompletedBytes = alreadyStagedBytes
+        let totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes)
 
         const reportProgress = (currentTaskPath = "") => {
           const now = Date.now()
-          const currentTotalCompleted = alreadyStagedBytes + clientTransferredBytes + xmclTransferredBytes
+          const netTransferred = clientTransferredBytes + preflightNeoForgeTransferredBytes + xmclTransferredBytes
+          const currentTotalCompleted = alreadyStagedBytes + netTransferred
           maxReportedCompletedBytes = Math.max(maxReportedCompletedBytes, currentTotalCompleted)
           const boundedCompleted = Math.min(totalRequiredBytes, maxReportedCompletedBytes)
 
@@ -293,7 +289,6 @@ class GameOperationManager {
           lastReportTime = now
 
           const elapsedSec = Math.max(0.1, (now - startTime) / 1000)
-          const netTransferred = clientTransferredBytes + xmclTransferredBytes
           const speedMBs = netTransferred / 1024 / 1024 / elapsedSec
           const totalGB = totalRequiredBytes / 1024 / 1024 / 1024
           const downloadedGB = boundedCompleted / 1024 / 1024 / 1024
@@ -342,6 +337,21 @@ class GameOperationManager {
           }
           reportProgress()
         }
+
+        // Execution preflight: discover dependencies and stream bootstrap installer if needed
+        const { totalCoreBytes, preflightDownloadedBytes } = await this.coreEngine.estimateCoreDownloadBytes({
+          instanceRoot,
+          minecraftVersion,
+          neoForgeVersion,
+          cancelSignal,
+          isPlanning: false,
+          onChunkBytes: (chunkBytes) => {
+            preflightNeoForgeTransferredBytes += chunkBytes
+            reportProgress("neoforge-installer.jar")
+          },
+        })
+
+        totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes + (totalCoreBytes || 0))
 
         // ─────────────────────────────────────────────────────────────
         // Phase 1: Client Files Sync (including JDK-21)
@@ -402,26 +412,35 @@ class GameOperationManager {
         // ─────────────────────────────────────────────────────────────
         // Phase 3: Install & Verify Minecraft Vanilla + NeoForge Core
         // ─────────────────────────────────────────────────────────────
-        handlePhaseChange("DOWNLOADING_CORE")
-        const coreResult = await this.coreEngine.installOrRepairMinecraftCore({
+        const initialCoreReadiness = await this.coreEngine.checkMinecraftCoreReadiness({
           instanceRoot,
           minecraftVersion,
           neoForgeVersion,
-          javaCliPath,
-          onTaskBytes: (_taskName, bytesDelta) => {
-            if (typeof bytesDelta === "number" && bytesDelta > 0) {
-              xmclTransferredBytes += bytesDelta
-              reportProgress()
-            }
-          },
-          onPhaseChange: handlePhaseChange,
-          cancelSignal,
         })
 
-        if (cancelSignal?.isCancelled) {
-          this.state = "IDLE"
-          this.internalPhase = "IDLE"
-          throw new Error("Sync cancelled by user.")
+        let coreResult = null
+        if (!initialCoreReadiness.isCoreInstalled) {
+          handlePhaseChange("DOWNLOADING_CORE")
+          coreResult = await this.coreEngine.installOrRepairMinecraftCore({
+            instanceRoot,
+            minecraftVersion,
+            neoForgeVersion,
+            javaCliPath,
+            onTaskBytes: (_taskName, bytesDelta) => {
+              if (typeof bytesDelta === "number" && bytesDelta > 0) {
+                xmclTransferredBytes += bytesDelta
+                reportProgress()
+              }
+            },
+            onPhaseChange: handlePhaseChange,
+            cancelSignal,
+          })
+
+          if (cancelSignal?.isCancelled) {
+            this.state = "IDLE"
+            this.internalPhase = "IDLE"
+            throw new Error("Sync cancelled by user.")
+          }
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -448,7 +467,11 @@ class GameOperationManager {
         this.internalPhase = "IDLE"
         return {
           success: true,
-          resolvedVersionId: coreResult.resolvedVersionId,
+          resolvedVersionId:
+            coreResult?.resolvedVersionId ||
+            finalCoreReadiness?.resolvedVersionId ||
+            initialCoreReadiness?.resolvedVersionId ||
+            `${minecraftVersion}-neoforge-${neoForgeVersion}`,
         }
       } catch (err) {
         if (this.state !== "CANCELING") {

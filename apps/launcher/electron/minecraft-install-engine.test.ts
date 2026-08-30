@@ -21,6 +21,9 @@ import {
   getNeoForgeInstallerJarPath,
   loadCoreState,
   saveCoreState,
+  fetchOfficialNeoForgeInstallerSha256,
+  validateFileSha256,
+  getCurrentPlatformOsKey,
 } from "./minecraft-install-engine.cjs"
 
 // @ts-expect-error CJS module
@@ -202,6 +205,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       path.join(vanillaDir, `${mcVersion}.json`),
       JSON.stringify({
         id: mcVersion,
+        assets: "17",
         time: "2024-08-08T00:00:00Z",
         releaseTime: "2024-08-08T00:00:00Z",
         type: "release",
@@ -369,9 +373,9 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
   })
 
   /* ─────────────────────────────────────────────────────────────
-   * 3. Fresh Install Complete Size Calculation (Metadata & Installer Bootstrap)
+   * 3. Fresh Install Complete Size Calculation (Metadata, Asset Index & Installer)
    * ───────────────────────────────────────────────────────────── */
-  it("3. Fresh install calculates complete size across client JAR, vanilla libraries, asset objects, installer and NeoForge dependencies", async () => {
+  it("3. Fresh install calculates complete size across client JAR, vanilla libraries, asset index, asset objects, installer and NeoForge dependencies", async () => {
     const mockMojangMeta = {
       id: "1.21.1",
       downloads: {
@@ -390,6 +394,8 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       ],
       assetIndex: {
         id: "17",
+        size: 50000,
+        sha1: "4444444444444444444444444444444444444444",
         url: `${serverBaseUrl}/asset-index.json`,
       },
     }
@@ -437,6 +443,9 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       if (typeof url === "string" && url.includes("asset-index.json")) {
         return { ok: true, json: async () => mockAssetIndex, headers: new Headers() } as any
       }
+      if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar.sha256")) {
+        return { ok: false } as any
+      }
       if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar")) {
         const headers = new Headers()
         headers.set("content-length", String(zipBuffer.length))
@@ -459,8 +468,8 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
 
       expect(readiness.isCoreInstalled).toBe(false)
       expect(preflightDownloadedBytes).toBe(zipBuffer.length)
-      // Total = 25MB (client) + 500KB (vanilla libA) + 100KB (asset) + zipBuffer.length (installer) + 400KB (neoforge depA)
-      const expectedTotal = 25000000 + 500000 + 100000 + zipBuffer.length + 400000
+      // Total = 25MB (client) + 500KB (vanilla libA) + 50KB (asset index file) + 100KB (asset) + zipBuffer.length (installer) + 400KB (neoforge depA)
+      const expectedTotal = 25000000 + 500000 + 50000 + 100000 + zipBuffer.length + 400000
       expect(totalCoreBytes).toBe(expectedTotal)
     } finally {
       globalThis.fetch = originalFetch
@@ -488,11 +497,17 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
   })
 
   it("5. Existing asset with same size but wrong SHA-1 is detected as corrupt and counted for repair", async () => {
+    const assetIndexContent = JSON.stringify({ objects: {} })
+    const assetIndexSha1 = computeSha1(assetIndexContent)
+    const localIndexFile = path.join(instanceRoot, "assets", "indexes", "17.json")
+    await fsp.mkdir(path.dirname(localIndexFile), { recursive: true })
+    await fsp.writeFile(localIndexFile, assetIndexContent)
+
     const mockMojangMeta = {
       id: "1.21.1",
       downloads: { client: { size: 25000000, sha1: "1111111111111111111111111111111111111111" } },
       libraries: [],
-      assetIndex: { id: "17", url: `${serverBaseUrl}/asset-index.json` },
+      assetIndex: { id: "17", size: assetIndexContent.length, sha1: assetIndexSha1, url: `${serverBaseUrl}/asset-index.json` },
     }
 
     const expectedHash = "a1b2c3d4e5f60000000000000000000000000000"
@@ -562,6 +577,12 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     const sharedLibPath = "org/ow2/asm/asm/9.7/asm-9.7.jar"
     const sharedLibSize = 125000
 
+    const assetIndexContent = JSON.stringify({ objects: {} })
+    const assetIndexSha1 = computeSha1(assetIndexContent)
+    const localIndexFile = path.join(instanceRoot, "assets", "indexes", "17.json")
+    await fsp.mkdir(path.dirname(localIndexFile), { recursive: true })
+    await fsp.writeFile(localIndexFile, assetIndexContent)
+
     const mockMojangMeta = {
       id: "1.21.1",
       downloads: { client: { size: 1000000 } },
@@ -576,7 +597,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
           },
         },
       ],
-      assetIndex: { id: "17", url: `${serverBaseUrl}/asset-index.json` },
+      assetIndex: { id: "17", size: assetIndexContent.length, sha1: assetIndexSha1, url: `${serverBaseUrl}/asset-index.json` },
     }
 
     const mockAssetIndex = { objects: {} }
@@ -612,8 +633,15 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       installProfile: mockInstallProfile,
     })
 
+    const vanillaDir = path.join(instanceRoot, "versions", "1.21.1")
+    await fsp.mkdir(vanillaDir, { recursive: true })
+    await fsp.writeFile(path.join(vanillaDir, "1.21.1.json"), JSON.stringify(mockMojangMeta))
+
     const originalFetch = globalThis.fetch
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
           ok: true,
@@ -637,7 +665,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
         neoForgeVersion: "21.1.65",
       })
 
-      // Total = 1,000,000 (client) + 125,000 (shared library ONCE, since installer is already on disk)
+      // Total = 1,000,000 (client) + 125,000 (shared library ONCE, since installer & index are already on disk)
       expect(totalCoreBytes).toBe(1125000)
     } finally {
       globalThis.fetch = originalFetch
@@ -847,25 +875,49 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
   })
 
   /* ─────────────────────────────────────────────────────────────
-   * 13. Restored: Modpack-only update does 0 core downloads
+   * 13. Restored & Hardened: Modpack-only update does 0 core downloads
    * ───────────────────────────────────────────────────────────── */
-  it("13. Modpack-only update does 0 core downloads when core is intact", async () => {
+  it("13. Modpack-only update does 0 core downloads and 0 core reinstall when core is intact", async () => {
     await createMockInstalledCore(instanceRoot, "1.21.1", "21.1.65")
+    await createMockJdk21(instanceRoot)
 
-    const readiness = await checkMinecraftCoreReadiness({
-      instanceRoot,
-      minecraftVersion: "1.21.1",
-      neoForgeVersion: "21.1.65",
+    const sampleContent = "mock client binary data 1234567890"
+    const sampleMod = {
+      path: "mods/new-mod.jar",
+      sha256: computeSha256(sampleContent),
+      sizeBytes: sampleContent.length,
+      policy: "NO_MODIFICABLE",
+      downloadUrl: `${serverBaseUrl}/file/new-mod.jar`,
+    }
+
+    const installSpy = vi.fn()
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness,
+        estimateCoreDownloadBytes,
+        installOrRepairMinecraftCore: installSpy,
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
     })
 
-    expect(readiness.needsVanilla).toBe(false)
-    expect(readiness.needsNeoForge).toBe(false)
+    const res = await manager.startSync({
+      instanceRoot,
+      clientFiles: [sampleMod],
+      modpackVersion: "1.0.1",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      apiBaseUrl: serverBaseUrl,
+    })
+
+    expect(res.success).toBe(true)
+    // When core is already installed and valid, installOrRepairMinecraftCore must NOT be called at all!
+    expect(installSpy).not.toHaveBeenCalled()
   })
 
   /* ─────────────────────────────────────────────────────────────
-   * 14. Restored: Verify on healthy core executes 0 network downloads
+   * 14. Restored & Hardened: Verify on healthy core executes 0 network downloads
    * ───────────────────────────────────────────────────────────── */
-  it("14. Verify on healthy installation executes 0 core downloads and reports VERIFYING", async () => {
+  it("14. Verify on healthy installation executes 0 network downloads and stays strictly in VERIFYING", async () => {
     await createMockInstalledCore(instanceRoot, "1.21.1", "21.1.65")
     await createMockJdk21(instanceRoot)
 
@@ -892,8 +944,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       },
     })
 
-    let capturedPhase = ""
+    const reportedPhases: string[] = []
+    const installSpy = vi.fn()
     const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness,
+        estimateCoreDownloadBytes,
+        installOrRepairMinecraftCore: installSpy,
+      },
       javaValidator: () => ({ valid: true, major: 21 }),
     })
 
@@ -905,12 +963,16 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       neoForgeVersion: "21.1.65",
       isVerify: true,
       onProgress: (d: any) => {
-        capturedPhase = d.phase
+        reportedPhases.push(d.phase)
       },
     })
 
     expect(res.success).toBe(true)
-    expect(capturedPhase).toBe("VERIFYING")
+    expect(installSpy).not.toHaveBeenCalled()
+    expect(reportedPhases.length).toBeGreaterThan(0)
+    for (const phase of reportedPhases) {
+      expect(phase).toBe("VERIFYING")
+    }
   })
 
   /* ─────────────────────────────────────────────────────────────
@@ -1031,6 +1093,9 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     let fetchCount = 0
     const originalFetch = globalThis.fetch
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar.sha256")) {
+        return { ok: false } as any
+      }
       if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar")) {
         fetchCount++
         return {
@@ -1077,6 +1142,12 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     await fsp.mkdir(path.dirname(clientJarPath), { recursive: true })
     await fsp.writeFile(clientJarPath, clientJarContent)
 
+    const assetIndexContent = JSON.stringify({ objects: {} })
+    const assetIndexSha1 = computeSha1(assetIndexContent)
+    const localIndexFile = path.join(instanceRoot, "assets", "indexes", "17.json")
+    await fsp.mkdir(path.dirname(localIndexFile), { recursive: true })
+    await fsp.writeFile(localIndexFile, assetIndexContent)
+
     const mockMojangMeta = {
       id: "1.21.1",
       downloads: { client: { size: 1000, sha1: computeSha1(clientJarContent) } },
@@ -1091,7 +1162,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
           },
         },
       ],
-      assetIndex: { id: "17", url: `${serverBaseUrl}/asset-index.json` },
+      assetIndex: { id: "17", size: assetIndexContent.length, sha1: assetIndexSha1, url: `${serverBaseUrl}/asset-index.json` },
     }
 
     // Write library file with wrong content (wrong sha1)
@@ -1105,6 +1176,10 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     await fsp.mkdir(path.dirname(installerPath), { recursive: true })
     await fsp.writeFile(installerPath, zipBuffer)
 
+    const vanillaDir = path.join(instanceRoot, "versions", "1.21.1")
+    await fsp.mkdir(vanillaDir, { recursive: true })
+    await fsp.writeFile(path.join(vanillaDir, "1.21.1.json"), JSON.stringify(mockMojangMeta))
+
     await saveCoreState(instanceRoot, {
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
@@ -1115,6 +1190,9 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
 
     const originalFetch = globalThis.fetch
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
           ok: true,
@@ -1149,11 +1227,17 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
    * 24. Corrupted Client JAR on Disk is Detected and Counted
    * ───────────────────────────────────────────────────────────── */
   it("24. Corrupted Minecraft client JAR on disk (wrong SHA-1) is counted for repair", async () => {
+    const assetIndexContent = JSON.stringify({ objects: {} })
+    const assetIndexSha1 = computeSha1(assetIndexContent)
+    const localIndexFile = path.join(instanceRoot, "assets", "indexes", "17.json")
+    await fsp.mkdir(path.dirname(localIndexFile), { recursive: true })
+    await fsp.writeFile(localIndexFile, assetIndexContent)
+
     const mockMojangMeta = {
       id: "1.21.1",
       downloads: { client: { size: 25000000, sha1: "1111111111111111111111111111111111111111" } },
       libraries: [],
-      assetIndex: { id: "17", url: `${serverBaseUrl}/asset-index.json` },
+      assetIndex: { id: "17", size: assetIndexContent.length, sha1: assetIndexSha1, url: `${serverBaseUrl}/asset-index.json` },
     }
 
     // Write client jar with wrong sha1
@@ -1167,6 +1251,10 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     await fsp.mkdir(path.dirname(installerPath), { recursive: true })
     await fsp.writeFile(installerPath, zipBuffer)
 
+    const vanillaDir = path.join(instanceRoot, "versions", "1.21.1")
+    await fsp.mkdir(vanillaDir, { recursive: true })
+    await fsp.writeFile(path.join(vanillaDir, "1.21.1.json"), JSON.stringify(mockMojangMeta))
+
     await saveCoreState(instanceRoot, {
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
@@ -1177,6 +1265,9 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
 
     const originalFetch = globalThis.fetch
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
           ok: true,
@@ -1217,18 +1308,23 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     await fsp.mkdir(path.dirname(clientJarPath), { recursive: true })
     await fsp.writeFile(clientJarPath, clientJarContent)
 
-    const mockMojangMeta = {
-      id: "1.21.1",
-      downloads: { client: { size: 1000, sha1: computeSha1(clientJarContent) } },
-      libraries: [],
-      assetIndex: { id: "17", url: `${serverBaseUrl}/asset-index.json` },
-    }
-
     const hash = "b2c3d4e5f6000000000000000000000000000000"
     const mockAssetIndex = {
       objects: {
         "sound/step.ogg": { hash, size: 5000 },
       },
+    }
+    const assetIndexContent = JSON.stringify(mockAssetIndex)
+    const assetIndexSha1 = computeSha1(assetIndexContent)
+    const localIndexFile = path.join(instanceRoot, "assets", "indexes", "17.json")
+    await fsp.mkdir(path.dirname(localIndexFile), { recursive: true })
+    await fsp.writeFile(localIndexFile, assetIndexContent)
+
+    const mockMojangMeta = {
+      id: "1.21.1",
+      downloads: { client: { size: 1000, sha1: computeSha1(clientJarContent) } },
+      libraries: [],
+      assetIndex: { id: "17", size: assetIndexContent.length, sha1: assetIndexSha1, url: `${serverBaseUrl}/asset-index.json` },
     }
 
     // Write file with wrong size (3 bytes instead of 5000)
@@ -1242,6 +1338,10 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     await fsp.mkdir(path.dirname(installerPath), { recursive: true })
     await fsp.writeFile(installerPath, zipBuffer)
 
+    const vanillaDir = path.join(instanceRoot, "versions", "1.21.1")
+    await fsp.mkdir(vanillaDir, { recursive: true })
+    await fsp.writeFile(path.join(vanillaDir, "1.21.1.json"), JSON.stringify(mockMojangMeta))
+
     await saveCoreState(instanceRoot, {
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
@@ -1252,6 +1352,9 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
 
     const originalFetch = globalThis.fetch
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
           ok: true,
@@ -1280,5 +1383,343 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     } finally {
       globalThis.fetch = originalFetch
     }
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 26. Native Classifiers: Platform-Specific Inclusion & Exclusion
+   * ───────────────────────────────────────────────────────────── */
+  it("26. Native classifiers applicable to current platform are included while other OS natives are excluded", async () => {
+    const currentOs = getCurrentPlatformOsKey() // "windows", "linux", or "osx"
+
+    const assetIndexContent = JSON.stringify({ objects: {} })
+    const assetIndexSha1 = computeSha1(assetIndexContent)
+    const localIndexFile = path.join(instanceRoot, "assets", "indexes", "17.json")
+    await fsp.mkdir(path.dirname(localIndexFile), { recursive: true })
+    await fsp.writeFile(localIndexFile, assetIndexContent)
+
+    const mockMojangMeta = {
+      id: "1.21.1",
+      downloads: { client: { size: 100000 } },
+      libraries: [
+        {
+          name: "org.lwjgl:lwjgl-jemalloc:3.3.3",
+          downloads: {
+            artifact: { path: "org/lwjgl/lwjgl-jemalloc/3.3.3/lwjgl-jemalloc-3.3.3.jar", size: 30000 },
+            classifiers: {
+              "natives-windows": { path: "org/lwjgl/lwjgl-jemalloc/3.3.3/lwjgl-jemalloc-3.3.3-natives-windows.jar", size: 40000 },
+              "natives-linux": { path: "org/lwjgl/lwjgl-jemalloc/3.3.3/lwjgl-jemalloc-3.3.3-natives-linux.jar", size: 50000 },
+              "natives-osx": { path: "org/lwjgl/lwjgl-jemalloc/3.3.3/lwjgl-jemalloc-3.3.3-natives-osx.jar", size: 60000 },
+            },
+          },
+          natives: { windows: "natives-windows", linux: "natives-linux", osx: "natives-osx" },
+          rules: [{ action: "allow" }],
+        },
+      ],
+      assetIndex: { id: "17", size: assetIndexContent.length, sha1: assetIndexSha1, url: `${serverBaseUrl}/asset-index.json` },
+    }
+
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const installerPath = getNeoForgeInstallerJarPath(instanceRoot, "21.1.65")
+    await fsp.mkdir(path.dirname(installerPath), { recursive: true })
+    await fsp.writeFile(installerPath, zipBuffer)
+
+    const vanillaDir = path.join(instanceRoot, "versions", "1.21.1")
+    await fsp.mkdir(vanillaDir, { recursive: true })
+    await fsp.writeFile(path.join(vanillaDir, "1.21.1.json"), JSON.stringify(mockMojangMeta))
+
+    await saveCoreState(instanceRoot, {
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      installedAt: new Date().toISOString(),
+      installProfile: mockProfile,
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
+      if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
+        return {
+          ok: true,
+          json: async () => ({ versions: [{ id: "1.21.1", url: `${serverBaseUrl}/mc-version.json` }] }),
+          headers: new Headers(),
+        } as any
+      }
+      if (typeof url === "string" && url.includes("mc-version.json")) {
+        return { ok: true, json: async () => mockMojangMeta, headers: new Headers() } as any
+      }
+      if (typeof url === "string" && url.includes("asset-index.json")) {
+        return { ok: true, json: async () => ({ objects: {} }), headers: new Headers() } as any
+      }
+      return originalFetch(url, init)
+    })
+
+    try {
+      const { totalCoreBytes } = await estimateCoreDownloadBytes({
+        instanceRoot,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+
+      // Client (100k) + main artifact (30k) + native for current OS only (index file is already valid on disk)
+      const expectedNativeSize = currentOs === "windows" ? 40000 : currentOs === "linux" ? 50000 : 60000
+      expect(totalCoreBytes).toBe(100000 + 30000 + expectedNativeSize)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 27. Asset Index Validation: Missing vs Corrupt vs Valid
+   * ───────────────────────────────────────────────────────────── */
+  it("27. Asset index file itself (assets/indexes/<id>.json) is counted when missing or corrupt, and excluded when valid", async () => {
+    const validIndexContent = JSON.stringify({ objects: {} })
+    const validIndexSha1 = computeSha1(validIndexContent)
+    const indexSize = validIndexContent.length
+    const indexFilePath = path.join(instanceRoot, "assets", "indexes", "17.json")
+
+    const mockMojangMeta = {
+      id: "1.21.1",
+      downloads: { client: { size: 1000, sha1: computeSha1(Buffer.alloc(1000)) } },
+      libraries: [],
+      assetIndex: { id: "17", size: indexSize, sha1: validIndexSha1, url: `${serverBaseUrl}/asset-index.json` },
+    }
+
+    // Pre-create client jar
+    const clientJarPath = path.join(instanceRoot, "versions", "1.21.1", "1.21.1.jar")
+    await fsp.mkdir(path.dirname(clientJarPath), { recursive: true })
+    await fsp.writeFile(clientJarPath, Buffer.alloc(1000))
+
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const installerPath = getNeoForgeInstallerJarPath(instanceRoot, "21.1.65")
+    await fsp.mkdir(path.dirname(installerPath), { recursive: true })
+    await fsp.writeFile(installerPath, zipBuffer)
+
+    const vanillaDir = path.join(instanceRoot, "versions", "1.21.1")
+    await fsp.mkdir(vanillaDir, { recursive: true })
+    await fsp.writeFile(path.join(vanillaDir, "1.21.1.json"), JSON.stringify(mockMojangMeta))
+
+    await saveCoreState(instanceRoot, {
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      installedAt: new Date().toISOString(),
+      installProfile: mockProfile,
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
+      if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
+        return {
+          ok: true,
+          json: async () => ({ versions: [{ id: "1.21.1", url: `${serverBaseUrl}/mc-version.json` }] }),
+          headers: new Headers(),
+        } as any
+      }
+      if (typeof url === "string" && url.includes("mc-version.json")) {
+        return { ok: true, json: async () => mockMojangMeta, headers: new Headers() } as any
+      }
+      if (typeof url === "string" && url.includes("asset-index.json")) {
+        return { ok: true, json: async () => ({ objects: {} }), headers: new Headers() } as any
+      }
+      return originalFetch(url, init)
+    })
+
+    try {
+      // 1. Missing index file -> counted
+      if (fs.existsSync(indexFilePath)) await fsp.unlink(indexFilePath)
+      const resMissing = await estimateCoreDownloadBytes({
+        instanceRoot,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+      expect(resMissing.totalCoreBytes).toBe(indexSize)
+
+      // 2. Corrupt index file (wrong hash) -> counted
+      await fsp.mkdir(path.dirname(indexFilePath), { recursive: true })
+      await fsp.writeFile(indexFilePath, "corrupt-json-content")
+      const resCorrupt = await estimateCoreDownloadBytes({
+        instanceRoot,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+      expect(resCorrupt.totalCoreBytes).toBe(indexSize)
+
+      // 3. Valid index file -> 0 bytes
+      await fsp.writeFile(indexFilePath, validIndexContent)
+      const resValid = await estimateCoreDownloadBytes({
+        instanceRoot,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+      expect(resValid.totalCoreBytes).toBe(0)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 28. Bootstrap Streaming Progress & Cancellation
+   * ───────────────────────────────────────────────────────────── */
+  it("28. bootstrapNeoForgeInstaller streams chunk progress and allows aborting cleanly without leaving corrupted destination", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const validSha256 = computeSha256(zipBuffer)
+
+    const chunkProgressEmitted: number[] = []
+    const controller = new AbortController()
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => validSha256 } as any
+      }
+      // Return a simulated stream
+      const { Readable } = require("stream")
+      const stream = new Readable({
+        read() {
+          this.push(zipBuffer.subarray(0, 50))
+          this.push(zipBuffer.subarray(50))
+          this.push(null)
+        },
+      })
+      return {
+        ok: true,
+        body: stream,
+      } as any
+    })
+
+    const res = await bootstrapNeoForgeInstaller({
+      instanceRoot,
+      neoForgeVersion: "21.1.65",
+      onChunkBytes: (chunkSize: number) => {
+        chunkProgressEmitted.push(chunkSize)
+      },
+      customFetch: mockFetch,
+    })
+
+    expect(res.downloadedInPreflight).toBe(true)
+    expect(chunkProgressEmitted.length).toBeGreaterThanOrEqual(1)
+    expect(fs.existsSync(res.installerJar)).toBe(true)
+
+    // Verify cancellation deletes temp file and throws
+    controller.abort()
+    const installerJar2 = getNeoForgeInstallerJarPath(instanceRoot, "21.1.66")
+    if (fs.existsSync(installerJar2)) await fsp.unlink(installerJar2)
+
+    await expect(
+      bootstrapNeoForgeInstaller({
+        instanceRoot,
+        neoForgeVersion: "21.1.66",
+        signal: controller.signal,
+        customFetch: mockFetch,
+      }),
+    ).rejects.toThrow(/Preflight cancelled/i)
+
+    expect(fs.existsSync(installerJar2)).toBe(false)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 29. checkPlan() is Read-Only and Does NOT Mutate Libraries
+   * ───────────────────────────────────────────────────────────── */
+  it("29. checkPlan operates in read-only planning mode and does not write installer to libraries", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => computeSha256(zipBuffer) } as any
+      }
+      if (typeof url === "string" && url.includes("mc-version.json")) {
+        return { ok: true, json: async () => ({ id: "1.21.1", downloads: { client: { size: 100 } }, libraries: [] }) } as any
+      }
+      if (typeof url === "string" && url.includes("asset-index.json")) {
+        return { ok: true, json: async () => ({ objects: {} }) } as any
+      }
+      if (typeof url === "string" && url.includes("neoforge-21.1.65-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers(),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
+      }
+      return originalFetch(url, init)
+    })
+
+    try {
+      const manager = new GameOperationManager({
+        javaValidator: () => ({ valid: true, major: 21 }),
+      })
+
+      const plan = await manager.checkPlan({
+        instanceRoot,
+        clientFiles: [],
+        modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+
+      expect(plan.success).toBe(true)
+      expect(plan.totalDownloadBytes).toBeGreaterThan(0)
+
+      // CRITICAL INVARIANT: checkPlan must NOT write installer to libraries/!
+      const canonicalInstallerJar = getNeoForgeInstallerJarPath(instanceRoot, "21.1.65")
+      expect(fs.existsSync(canonicalInstallerJar)).toBe(false)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 30. Official SHA-256 Checksum Verification for NeoForge Installer
+   * ───────────────────────────────────────────────────────────── */
+  it("30. Installer checksum SHA-256 verification enforces fail-closed on tampered download", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    // 1. Matching SHA-256 succeeds
+    const mockFetchGood = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes(".sha256")) {
+        return { ok: true, text: async () => realSha256 } as any
+      }
+      return { ok: true, arrayBuffer: async () => zipBuffer, buffer: async () => zipBuffer } as any
+    })
+
+    const goodRes = await bootstrapNeoForgeInstaller({
+      instanceRoot,
+      neoForgeVersion: "21.1.65",
+      customFetch: mockFetchGood,
+    })
+    expect(goodRes.installerSize).toBe(zipBuffer.length)
+
+    // 2. Mismatching SHA-256 throws fail-closed error
+    const installerJar2 = getNeoForgeInstallerJarPath(instanceRoot, "21.1.66")
+    if (fs.existsSync(installerJar2)) await fsp.unlink(installerJar2)
+
+    const mockFetchBad = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes(".sha256")) {
+        return { ok: true, text: async () => "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" } as any
+      }
+      return { ok: true, arrayBuffer: async () => zipBuffer, buffer: async () => zipBuffer } as any
+    })
+
+    await expect(
+      bootstrapNeoForgeInstaller({
+        instanceRoot,
+        neoForgeVersion: "21.1.66",
+        customFetch: mockFetchBad,
+      }),
+    ).rejects.toThrow(/SHA-256 verification failed/i)
+
+    expect(fs.existsSync(installerJar2)).toBe(false)
   })
 })
