@@ -1405,6 +1405,59 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
     const draft2After = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft2.id)).get()
     expect(draft2After!.status).toBe("DRAFT")
   })
+
+  it("createGameFileUploadToken supports all 8 categories including GENERAL, CONFIG and DATA_PACK", async () => {
+    await prepareGameDraft(db, adminId)
+
+    const categories = [
+      "MOD",
+      "RESOURCE_PACK",
+      "DATA_PACK",
+      "SHADER_PACK",
+      "KUBEJS",
+      "SCRIPT",
+      "CONFIG",
+      "GENERAL",
+    ] as const
+
+    for (const category of categories) {
+      const ticket = await createGameFileUploadToken(
+        db,
+        {
+          originalFilename: `test-${category.toLowerCase()}.dat`,
+          sizeBytes: 1024,
+          category,
+          logicalPath: category === "GENERAL" ? "server.properties" : undefined,
+        },
+        adminId,
+      )
+
+      expect(ticket).toBeDefined()
+      expect(ticket.uploadUrl).toBe("/game/files/upload")
+      expect(ticket.uploadToken).toBeDefined()
+      expect(ticket.expectedCategory).toBe(category)
+
+      // Verify token in database
+      const rawTokenBytes = new Uint8Array(
+        ticket.uploadToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
+      )
+      const hashBuffer = await crypto.subtle.digest("SHA-256", rawTokenBytes)
+      const tokenHash = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      const tokenInDb = await db
+        .select()
+        .from(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHash))
+        .get()
+
+      expect(tokenInDb).toBeDefined()
+      expect(tokenInDb!.category).toBe(category)
+      expect(tokenInDb!.expectedSizeBytes).toBe(1024)
+      expect(tokenInDb!.createdBy).toBe(adminId)
+    }
+  })
 })
 
 

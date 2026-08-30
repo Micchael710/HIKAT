@@ -781,6 +781,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0017_server_managed_content.sql",
       "0018_operation_lock_lease.sql",
       "0019_release_activation_and_deployment_order.sql",
+      "0020_game_file_upload_tokens_categories.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -2399,6 +2400,118 @@ describe("@hikat/database schema and D1 operations", () => {
 
     expect(result.update_deployment_order).toBe("SERVER_FIRST")
     expect(result.launcher_active_release_id).toBeNull()
+  })
+
+  it("Migration 0020: expands game_file_upload_tokens CHECK constraint to all 8 categories while preserving existing data and constraints", async () => {
+    const sqlite = new DatabaseSync(":memory:")
+    sqlite.exec("PRAGMA foreign_keys = ON;")
+
+    const migrationsDir = join(__dirname, "../migrations")
+    const pre0020Files = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql") && !f.startsWith("0020"))
+      .sort()
+
+    for (const file of pre0020Files) {
+      const sqlContent = readFileSync(join(migrationsDir, file), "utf-8")
+      for (const statement of sqlContent.split("--> statement-breakpoint")) {
+        const trimmed = statement.trim()
+        if (trimmed) sqlite.exec(trimmed)
+      }
+    }
+
+    // 1. Seed user and existing MOD token in pre-0020 DB
+    const now = new Date().toISOString()
+    sqlite.exec(`INSERT INTO users (id, display_name, role, created_at, updated_at) VALUES ('u-admin', 'Admin User', 'ADMIN', '${now}', '${now}');`)
+    sqlite.exec(
+      `INSERT INTO game_file_upload_tokens (id, token_hash, category, original_filename, expected_size_bytes, created_by, expires_at, created_at) ` +
+        `VALUES ('tok-mod-1', 'hash-mod-1', 'MOD', 'mods/test.jar', 1024, 'u-admin', '${now}', '${now}');`,
+    )
+
+    // Verify pre-0020 rejects GENERAL, CONFIG, DATA_PACK
+    expect(() => {
+      sqlite.exec(
+        `INSERT INTO game_file_upload_tokens (id, token_hash, category, original_filename, expected_size_bytes, created_by, expires_at, created_at) ` +
+          `VALUES ('tok-gen-1', 'hash-gen-1', 'GENERAL', 'server.properties', 100, 'u-admin', '${now}', '${now}');`,
+      )
+    }).toThrow(/CHECK constraint failed/i)
+
+    expect(() => {
+      sqlite.exec(
+        `INSERT INTO game_file_upload_tokens (id, token_hash, category, original_filename, expected_size_bytes, created_by, expires_at, created_at) ` +
+          `VALUES ('tok-cfg-1', 'hash-cfg-1', 'CONFIG', 'config/test.json', 100, 'u-admin', '${now}', '${now}');`,
+      )
+    }).toThrow(/CHECK constraint failed/i)
+
+    expect(() => {
+      sqlite.exec(
+        `INSERT INTO game_file_upload_tokens (id, token_hash, category, original_filename, expected_size_bytes, created_by, expires_at, created_at) ` +
+          `VALUES ('tok-dp-1', 'hash-dp-1', 'DATA_PACK', 'datapacks/dp.zip', 100, 'u-admin', '${now}', '${now}');`,
+      )
+    }).toThrow(/CHECK constraint failed/i)
+
+    // 2. Apply migration 0020
+    const mig0020Content = readFileSync(join(migrationsDir, "0020_game_file_upload_tokens_categories.sql"), "utf-8")
+    for (const statement of mig0020Content.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim()
+      if (trimmed) sqlite.exec(trimmed)
+    }
+
+    // 3. Verify pre-existing token was migrated with all fields intact
+    const existingToken: any = sqlite.prepare("SELECT * FROM game_file_upload_tokens WHERE id = 'tok-mod-1'").get()
+    expect(existingToken).toBeDefined()
+    expect(existingToken.id).toBe("tok-mod-1")
+    expect(existingToken.token_hash).toBe("hash-mod-1")
+    expect(existingToken.category).toBe("MOD")
+    expect(existingToken.original_filename).toBe("mods/test.jar")
+    expect(existingToken.expected_size_bytes).toBe(1024)
+    expect(existingToken.created_by).toBe("u-admin")
+
+    // 4. Verify all 8 categories can now be inserted successfully
+    const allowedCategories = [
+      "MOD",
+      "RESOURCE_PACK",
+      "DATA_PACK",
+      "SHADER_PACK",
+      "KUBEJS",
+      "SCRIPT",
+      "CONFIG",
+      "GENERAL",
+    ]
+
+    for (const cat of allowedCategories) {
+      sqlite.exec(
+        `INSERT INTO game_file_upload_tokens (id, token_hash, category, original_filename, expected_size_bytes, created_by, expires_at, created_at) ` +
+          `VALUES ('tok-${cat}', 'hash-${cat}', '${cat}', 'file-${cat}.dat', 500, 'u-admin', '${now}', '${now}');`,
+      )
+      const inserted: any = sqlite.prepare("SELECT * FROM game_file_upload_tokens WHERE id = ?").get(`tok-${cat}`)
+      expect(inserted).toBeDefined()
+      expect(inserted.category).toBe(cat)
+    }
+
+    // 5. Verify invalid category is still rejected
+    expect(() => {
+      sqlite.exec(
+        `INSERT INTO game_file_upload_tokens (id, token_hash, category, original_filename, expected_size_bytes, created_by, expires_at, created_at) ` +
+          `VALUES ('tok-invalid', 'hash-invalid', 'UNKNOWN_CATEGORY', 'file.bin', 500, 'u-admin', '${now}', '${now}');`,
+      )
+    }).toThrow(/CHECK constraint failed/i)
+
+    // 6. Verify duplicate token_hash is rejected by UNIQUE constraint
+    expect(() => {
+      sqlite.exec(
+        `INSERT INTO game_file_upload_tokens (id, token_hash, category, original_filename, expected_size_bytes, created_by, expires_at, created_at) ` +
+          `VALUES ('tok-dup', 'hash-MOD', 'MOD', 'dup.jar', 500, 'u-admin', '${now}', '${now}');`,
+      )
+    }).toThrow(/UNIQUE constraint failed/i)
+
+    // 7. Verify foreign key check passes
+    const fkErrors = sqlite.prepare("PRAGMA foreign_key_check;").all()
+    expect(fkErrors).toEqual([])
+
+    // 8. Verify CASCADE deletion on creator user
+    sqlite.exec("DELETE FROM users WHERE id = 'u-admin';")
+    const remainingTokens = sqlite.prepare("SELECT COUNT(*) as count FROM game_file_upload_tokens").get() as any
+    expect(remainingTokens.count).toBe(0)
   })
 })
 
