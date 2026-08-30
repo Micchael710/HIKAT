@@ -14,12 +14,12 @@ const {
   installOrRepairMinecraftCore,
   resolveJavaRuntime,
   validateJavaBinary,
-  loadCoreState,
 } = require("./minecraft-install-engine.cjs")
 const { resolveSafePath } = require("./path-validator.cjs")
 
 /**
  * Validates IPC payloads before executing sync or plan checks.
+ * Rejects missing versions without silent fallback defaults.
  */
 function validateSyncPayload({
   clientFiles,
@@ -33,12 +33,12 @@ function validateSyncPayload({
     throw new Error("Invalid payload: modpackVersion must be a non-empty string under 256 characters.")
   }
 
-  if (minecraftVersion && (typeof minecraftVersion !== "string" || minecraftVersion.trim().length > 64)) {
-    throw new Error("Invalid payload: minecraftVersion must be a string under 64 characters.")
+  if (typeof minecraftVersion !== "string" || !minecraftVersion.trim() || minecraftVersion.trim().length > 64) {
+    throw new Error("Invalid payload: minecraftVersion must be a non-empty string provided by the Backend.")
   }
 
-  if (neoForgeVersion && (typeof neoForgeVersion !== "string" || neoForgeVersion.trim().length > 64)) {
-    throw new Error("Invalid payload: neoForgeVersion must be a string under 64 characters.")
+  if (typeof neoForgeVersion !== "string" || !neoForgeVersion.trim() || neoForgeVersion.trim().length > 64) {
+    throw new Error("Invalid payload: neoForgeVersion must be a non-empty string provided by the Backend.")
   }
 
   if (!Array.isArray(clientFiles)) {
@@ -112,7 +112,8 @@ function validateSyncPayload({
 
 class GameOperationManager {
   constructor(options = {}) {
-    this.state = "IDLE"
+    this.state = "IDLE" // "IDLE" | "SYNCING" | "PAUSED" | "CANCELING" | "UNINSTALLING"
+    this.internalPhase = "IDLE" // "IDLE" | "DOWNLOADING_CLIENT" | "APPLYING_STAGING" | "DOWNLOADING_CORE" | "RUNNING_PROCESSORS" | "VERIFYING"
     this.activeOperationPromise = null
     this.activeCancelSignal = null
     this.operationCounter = 0
@@ -121,10 +122,15 @@ class GameOperationManager {
       estimateCoreDownloadBytes,
       installOrRepairMinecraftCore,
     }
+    this.javaValidator = options.javaValidator || validateJavaBinary
   }
 
   getState() {
     return this.state
+  }
+
+  getInternalPhase() {
+    return this.internalPhase
   }
 
   /**
@@ -133,9 +139,9 @@ class GameOperationManager {
   async checkPlan({
     instanceRoot,
     clientFiles = [],
-    modpackVersion = "1.0.0",
-    minecraftVersion = "1.21.1",
-    neoForgeVersion = "21.1.65",
+    modpackVersion,
+    minecraftVersion,
+    neoForgeVersion,
   }) {
     validateSyncPayload({
       clientFiles,
@@ -188,7 +194,10 @@ class GameOperationManager {
       Boolean(installedManifest.modpackVersion)
     const isFullyInstalled = isClientSynced && coreReadiness.isCoreInstalled
     const hasExistingInstall = clientPlan.hasExistingInstall || coreReadiness.hasExistingInstall
-    const needsUpdate = clientPlan.toDownload.length > 0 || clientPlan.toPrune.length > 0 || !coreReadiness.isCoreInstalled
+    const needsUpdate =
+      clientPlan.toDownload.length > 0 ||
+      clientPlan.toPrune.length > 0 ||
+      !coreReadiness.isCoreInstalled
 
     return {
       success: true,
@@ -211,9 +220,9 @@ class GameOperationManager {
   async startSync({
     instanceRoot,
     clientFiles = [],
-    modpackVersion = "1.0.0",
-    minecraftVersion = "1.21.1",
-    neoForgeVersion = "21.1.65",
+    modpackVersion,
+    minecraftVersion,
+    neoForgeVersion,
     onProgress,
     onPhaseChange,
     apiBaseUrl,
@@ -228,7 +237,7 @@ class GameOperationManager {
       modpackVersion,
       minecraftVersion,
       neoForgeVersion,
-      requireNonEmptyFiles: true,
+      requireNonEmptyFiles: !isVerify,
       instanceRoot,
     })
 
@@ -239,13 +248,19 @@ class GameOperationManager {
     }
 
     const opId = ++this.operationCounter
-    const cancelSignal = { isCancelled: false, isPaused: false, id: opId }
+    const cancelSignal = {
+      isCancelled: false,
+      isPaused: false,
+      id: opId,
+      activeXmclTask: null,
+    }
     this.activeCancelSignal = cancelSignal
     this.state = isVerify ? "VERIFYING" : "SYNCING"
+    this.internalPhase = isVerify ? "VERIFYING" : "PREPARING"
 
     const runSync = async () => {
       try {
-        // Step 1: Preflight calculations for UnifiedInstallPlan
+        // Step 1: Preflight calculations for UnifiedInstallPlan using real metadata
         const clientPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
         const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
           instanceRoot,
@@ -258,36 +273,41 @@ class GameOperationManager {
         })
 
         const totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes + totalCoreBytes)
-        let totalDownloadedBytes = alreadyStagedBytes
+        let clientTransferredBytes = 0
+        let xmclTransferredBytes = 0
+        let maxReportedCompletedBytes = alreadyStagedBytes
+
         const startTime = Date.now()
         let lastReportTime = 0
-        let currentInternalPhase = "DOWNLOADING_CLIENT"
-
-        const taskProgressMap = new Map()
 
         const reportProgress = (currentTaskPath = "") => {
           const now = Date.now()
-          if (now - lastReportTime < 70 && totalDownloadedBytes < totalRequiredBytes) {
+          const currentTotalCompleted = alreadyStagedBytes + clientTransferredBytes + xmclTransferredBytes
+          maxReportedCompletedBytes = Math.max(maxReportedCompletedBytes, currentTotalCompleted)
+          const boundedCompleted = Math.min(totalRequiredBytes, maxReportedCompletedBytes)
+
+          if (now - lastReportTime < 70 && boundedCompleted < totalRequiredBytes) {
             return
           }
           lastReportTime = now
 
           const elapsedSec = Math.max(0.1, (now - startTime) / 1000)
-          const transferredNetBytes = Math.max(0, totalDownloadedBytes - alreadyStagedBytes)
-          const speedMBs = transferredNetBytes / 1024 / 1024 / elapsedSec
+          const netTransferred = clientTransferredBytes + xmclTransferredBytes
+          const speedMBs = netTransferred / 1024 / 1024 / elapsedSec
           const totalGB = totalRequiredBytes / 1024 / 1024 / 1024
-          const downloadedGB = totalDownloadedBytes / 1024 / 1024 / 1024
-          const progress = Math.min(100, Math.round((totalDownloadedBytes / totalRequiredBytes) * 100))
-          const remainingBytes = Math.max(0, totalRequiredBytes - totalDownloadedBytes)
-          const remainingMinutes = speedMBs > 0 ? Math.ceil(remainingBytes / 1024 / 1024 / speedMBs / 60) : 0
+          const downloadedGB = boundedCompleted / 1024 / 1024 / 1024
+          const progress = Math.min(100, Math.round((boundedCompleted / totalRequiredBytes) * 100))
+          const remainingBytes = Math.max(0, totalRequiredBytes - boundedCompleted)
+          const remainingMinutes =
+            speedMBs > 0 ? Math.ceil(remainingBytes / 1024 / 1024 / speedMBs / 60) : 0
 
           let visibleUiPhase = "DOWNLOADING"
           if (isVerify) {
             visibleUiPhase = "VERIFYING"
           } else if (
-            currentInternalPhase === "APPLYING_STAGING" ||
-            currentInternalPhase === "INSTALLING" ||
-            currentInternalPhase === "RUNNING_PROCESSORS"
+            this.internalPhase === "APPLYING_STAGING" ||
+            this.internalPhase === "INSTALLING" ||
+            this.internalPhase === "RUNNING_PROCESSORS"
           ) {
             visibleUiPhase = "INSTALLING"
           } else if (this.state === "PAUSED") {
@@ -310,7 +330,7 @@ class GameOperationManager {
         }
 
         const handlePhaseChange = (phase) => {
-          currentInternalPhase = phase
+          this.internalPhase = phase
           if (typeof onPhaseChange === "function") {
             const uiPhase = isVerify
               ? "VERIFYING"
@@ -325,35 +345,40 @@ class GameOperationManager {
         // ─────────────────────────────────────────────────────────────
         // Phase 1: Client Files Sync (including JDK-21)
         // ─────────────────────────────────────────────────────────────
-        const clientSyncResult = await executeSync({
-          instanceRoot,
-          clientFiles,
-          modpackVersion,
-          onProgress: (data) => {
-            // Incorporate client file downloads into unified aggregator
-            if (data.currentFile) {
-              reportProgress(data.currentFile)
-            }
-          },
-          onPhaseChange: (phase) => {
-            if (phase === "INSTALLING") {
-              handlePhaseChange("APPLYING_STAGING")
-            } else {
-              handlePhaseChange("DOWNLOADING_CLIENT")
-            }
-          },
-          cancelSignal,
-          apiBaseUrl,
-        })
+        if (clientFiles.length > 0) {
+          handlePhaseChange("DOWNLOADING_CLIENT")
+          const clientSyncResult = await executeSync({
+            instanceRoot,
+            clientFiles,
+            modpackVersion,
+            onProgress: (data) => {
+              if (data.downloadedBytes !== undefined) {
+                clientTransferredBytes = Math.max(0, data.downloadedBytes - alreadyStagedBytes)
+              }
+              reportProgress(data.currentFile || "")
+            },
+            onPhaseChange: (phase) => {
+              if (phase === "INSTALLING") {
+                handlePhaseChange("APPLYING_STAGING")
+              } else {
+                handlePhaseChange("DOWNLOADING_CLIENT")
+              }
+            },
+            cancelSignal,
+            apiBaseUrl,
+          })
 
-        if (clientSyncResult.paused) {
-          this.state = "PAUSED"
-          return { success: true, paused: true }
-        }
+          if (clientSyncResult.paused) {
+            this.state = "PAUSED"
+            this.internalPhase = "PAUSED"
+            return { success: true, paused: true }
+          }
 
-        if (cancelSignal?.isCancelled) {
-          this.state = "IDLE"
-          throw new Error("Sync cancelled by user.")
+          if (cancelSignal?.isCancelled) {
+            this.state = "IDLE"
+            this.internalPhase = "IDLE"
+            throw new Error("Sync cancelled by user.")
+          }
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -361,11 +386,16 @@ class GameOperationManager {
         // ─────────────────────────────────────────────────────────────
         handlePhaseChange("INSTALLING")
         const javaRuntime = resolveJavaRuntime(instanceRoot, { isGui: false })
-        const javaCliPath = javaRuntime.cliJavaPath || javaRuntime.javaPath
+        if (!javaRuntime.javaPath && !javaRuntime.cliJavaPath) {
+          throw new Error(
+            `Java runtime resolution failed: ${javaRuntime.error || "Official Java 21 JDK is not installed in instanceRoot/jdk-21."}`,
+          )
+        }
 
-        const javaValidation = validateJavaBinary(javaCliPath)
+        const javaCliPath = javaRuntime.cliJavaPath || javaRuntime.javaPath
+        const javaValidation = this.javaValidator(javaCliPath, 21)
         if (!javaValidation.valid) {
-          console.warn(`[OperationManager] Java runtime check warning (${javaCliPath}): ${javaValidation.error}`)
+          throw new Error(`Java runtime validation failed: ${javaValidation.error}`)
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -377,12 +407,11 @@ class GameOperationManager {
           minecraftVersion,
           neoForgeVersion,
           javaCliPath,
-          onTaskBytes: (taskId, currentBytes) => {
-            const prev = taskProgressMap.get(taskId) || 0
-            const delta = Math.max(0, currentBytes - prev)
-            taskProgressMap.set(taskId, currentBytes)
-            totalDownloadedBytes = Math.min(totalRequiredBytes, totalDownloadedBytes + delta)
-            reportProgress()
+          onTaskBytes: (_taskName, bytesDelta) => {
+            if (typeof bytesDelta === "number" && bytesDelta > 0) {
+              xmclTransferredBytes += bytesDelta
+              reportProgress()
+            }
           },
           onPhaseChange: handlePhaseChange,
           cancelSignal,
@@ -390,6 +419,7 @@ class GameOperationManager {
 
         if (cancelSignal?.isCancelled) {
           this.state = "IDLE"
+          this.internalPhase = "IDLE"
           throw new Error("Sync cancelled by user.")
         }
 
@@ -405,23 +435,24 @@ class GameOperationManager {
 
         if (!finalCoreReadiness.isCoreInstalled) {
           throw new Error(
-            `Final composite installation verification failed: Core incomplete (${finalCoreReadiness.issues.join(", ")})`,
+            `Final composite installation verification failed: Core incomplete (${(finalCoreReadiness.issues || []).join(", ")})`,
           )
         }
 
-        totalDownloadedBytes = totalRequiredBytes
+        // Final completion report
+        maxReportedCompletedBytes = totalRequiredBytes
         reportProgress("")
 
         this.state = "IDLE"
+        this.internalPhase = "IDLE"
         return {
           success: true,
-          downloadedCount: clientSyncResult.downloadedCount,
-          prunedCount: clientSyncResult.prunedCount,
           resolvedVersionId: coreResult.resolvedVersionId,
         }
       } catch (err) {
         if (this.state !== "CANCELING") {
           this.state = "IDLE"
+          this.internalPhase = "IDLE"
         }
         throw err
       } finally {
@@ -437,7 +468,12 @@ class GameOperationManager {
   }
 
   async pauseSync() {
-    if (this.state === "INSTALLING" || this.state === "APPLYING_STAGING") {
+    if (
+      this.state === "INSTALLING" ||
+      this.internalPhase === "APPLYING_STAGING" ||
+      this.internalPhase === "RUNNING_PROCESSORS" ||
+      this.internalPhase === "INSTALLING"
+    ) {
       throw new Error("Cannot pause synchronization while installation phase is in progress.")
     }
     if (this.state === "CANCELING" || this.state === "UNINSTALLING") {
@@ -446,6 +482,11 @@ class GameOperationManager {
 
     if ((this.state === "SYNCING" || this.state === "VERIFYING") && this.activeCancelSignal) {
       this.activeCancelSignal.isPaused = true
+      if (this.activeCancelSignal.activeXmclTask) {
+        try {
+          this.activeCancelSignal.activeXmclTask.pause?.()
+        } catch (_) {}
+      }
 
       if (this.activeOperationPromise) {
         try {
@@ -454,6 +495,7 @@ class GameOperationManager {
       }
 
       this.state = "PAUSED"
+      this.internalPhase = "PAUSED"
       return { success: true, paused: true }
     }
 
@@ -465,13 +507,19 @@ class GameOperationManager {
   }
 
   async cancelSync(instanceRoot) {
-    if (this.state === "INSTALLING" || this.state === "APPLYING_STAGING") {
+    if (
+      this.state === "INSTALLING" ||
+      this.internalPhase === "APPLYING_STAGING" ||
+      this.internalPhase === "RUNNING_PROCESSORS" ||
+      this.internalPhase === "INSTALLING"
+    ) {
       throw new Error("Cannot cancel synchronization while installation phase is in progress.")
     }
 
     if (this.state === "IDLE" || this.state === "PAUSED") {
       await cleanStaging(instanceRoot)
       this.state = "IDLE"
+      this.internalPhase = "IDLE"
       return { success: true }
     }
 
@@ -479,6 +527,11 @@ class GameOperationManager {
       this.state = "CANCELING"
       if (this.activeCancelSignal) {
         this.activeCancelSignal.isCancelled = true
+        if (this.activeCancelSignal.activeXmclTask) {
+          try {
+            this.activeCancelSignal.activeXmclTask.cancel?.()
+          } catch (_) {}
+        }
       }
 
       if (this.activeOperationPromise) {
@@ -489,6 +542,7 @@ class GameOperationManager {
 
       await cleanStaging(instanceRoot)
       this.state = "IDLE"
+      this.internalPhase = "IDLE"
       return { success: true }
     }
 
@@ -500,6 +554,7 @@ class GameOperationManager {
       }
       await cleanStaging(instanceRoot)
       this.state = "IDLE"
+      this.internalPhase = "IDLE"
       return { success: true }
     }
 
@@ -511,6 +566,9 @@ class GameOperationManager {
       this.state === "SYNCING" ||
       this.state === "VERIFYING" ||
       this.state === "INSTALLING" ||
+      this.internalPhase === "APPLYING_STAGING" ||
+      this.internalPhase === "RUNNING_PROCESSORS" ||
+      this.internalPhase === "INSTALLING" ||
       this.state === "CANCELING" ||
       this.state === "UNINSTALLING"
     ) {
@@ -527,6 +585,9 @@ class GameOperationManager {
       this.state === "SYNCING" ||
       this.state === "VERIFYING" ||
       this.state === "INSTALLING" ||
+      this.internalPhase === "APPLYING_STAGING" ||
+      this.internalPhase === "RUNNING_PROCESSORS" ||
+      this.internalPhase === "INSTALLING" ||
       this.state === "CANCELING"
     ) {
       throw new Error("Cannot uninstall game while synchronization is active.")
@@ -537,6 +598,7 @@ class GameOperationManager {
       return await uninstallGame(instanceRoot, appDataRoot)
     } finally {
       this.state = "IDLE"
+      this.internalPhase = "IDLE"
     }
   }
 }

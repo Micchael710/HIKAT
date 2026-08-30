@@ -63,8 +63,8 @@ export const gameService = {
         const raw = restRes.data as any
         modpack = {
           version: raw.version || "1.0.0",
-          minecraftVersion: raw.minecraftVersion || "1.21.1",
-          neoForgeVersion: raw.neoForgeVersion || "21.1.65",
+          minecraftVersion: raw.minecraftVersion,
+          neoForgeVersion: raw.neoForgeVersion,
           clientFiles: Array.isArray(raw.clientFiles) ? raw.clientFiles : [],
         }
       }
@@ -91,8 +91,8 @@ export const gameService = {
           const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
             clientFiles: modpack.clientFiles,
             modpackVersion: modpack.version,
-            minecraftVersion: modpack.minecraftVersion || "1.21.1",
-            neoForgeVersion: modpack.neoForgeVersion || "21.1.65",
+            minecraftVersion: modpack.minecraftVersion,
+            neoForgeVersion: modpack.neoForgeVersion,
           })
           if (planCheck.success) {
             hasUpdate = planCheck.needsUpdate
@@ -107,8 +107,8 @@ export const gameService = {
 
       return {
         version: modpack.version,
-        minecraftVersion: modpack.minecraftVersion || "1.21.1",
-        neoForgeVersion: modpack.neoForgeVersion || "21.1.65",
+        minecraftVersion: modpack.minecraftVersion,
+        neoForgeVersion: modpack.neoForgeVersion,
         totalSizeGB,
         hasUpdate,
         clientFiles: modpack.clientFiles,
@@ -131,8 +131,8 @@ export const gameService = {
               const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
                 clientFiles: cachedFiles,
                 modpackVersion: parsed.version,
-                minecraftVersion: parsed.minecraftVersion || "1.21.1",
-                neoForgeVersion: parsed.neoForgeVersion || "21.1.65",
+                minecraftVersion: parsed.minecraftVersion,
+                neoForgeVersion: parsed.neoForgeVersion,
               })
               if (planCheck.success && !planCheck.needsUpdate && planCheck.isFullyInstalled) {
                 offlineInstalled = true
@@ -146,8 +146,8 @@ export const gameService = {
 
           return {
             version: parsed.version || "1.0.0",
-            minecraftVersion: parsed.minecraftVersion || "1.21.1",
-            neoForgeVersion: parsed.neoForgeVersion || "21.1.65",
+            minecraftVersion: parsed.minecraftVersion,
+            neoForgeVersion: parsed.neoForgeVersion,
             totalSizeGB: 0,
             hasUpdate: false,
             clientFiles: cachedFiles,

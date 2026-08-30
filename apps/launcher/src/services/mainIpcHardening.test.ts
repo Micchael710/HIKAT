@@ -39,6 +39,11 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     instanceRoot = path.join(appDataRoot, "game files")
     await fsp.mkdir(instanceRoot, { recursive: true })
 
+    const binDir = path.join(instanceRoot, "jdk-21", "bin")
+    await fsp.mkdir(binDir, { recursive: true })
+    const javaExe = path.join(binDir, process.platform === "win32" ? "java.exe" : "java")
+    await fsp.writeFile(javaExe, "mock-java")
+
     manager = new GameOperationManager({
       coreEngine: {
         checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
@@ -53,6 +58,7 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
           resolvedVersionId: "1.21.1-neoforge-21.1.65",
         }),
       },
+      javaValidator: () => ({ valid: true, major: 21 }),
     })
 
     server = http.createServer((req, res) => {
@@ -111,6 +117,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
       instanceRoot,
       clientFiles: [task],
       modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
       apiBaseUrl: serverBaseUrl,
     })
 
@@ -143,6 +151,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
       instanceRoot,
       clientFiles: [task],
       modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
       apiBaseUrl: serverBaseUrl,
     })
 
@@ -154,6 +164,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [task],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
         apiBaseUrl: serverBaseUrl,
       }),
     ).rejects.toThrow(/Operation already in progress/i)
@@ -176,6 +188,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
       instanceRoot,
       clientFiles: [task],
       modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
       apiBaseUrl: serverBaseUrl,
     })
 
@@ -264,6 +278,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
       instanceRoot,
       clientFiles: [task],
       modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
     })
 
     expect(checkRes.success).toBe(true)
@@ -293,6 +309,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: "not-an-array" as any,
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/clientFiles must be an array/i)
   })
@@ -308,6 +326,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/clientFiles cannot be empty for startSync/i)
 
@@ -322,6 +342,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/invalid path string/i)
   })
@@ -332,6 +354,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/../../evil.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/traversal segments/i)
   })
@@ -342,6 +366,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "/etc/passwd", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/cannot be absolute/i)
 
@@ -350,6 +376,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "C:\\Windows\\System32\\cmd.exe", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/cannot be absolute/i)
   })
@@ -360,6 +388,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/m.jar", sha256: "too-short", sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/invalid SHA-256 hash/i)
 
@@ -368,6 +398,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/m.jar", sha256: "z".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/invalid SHA-256 hash/i)
   })
@@ -378,6 +410,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: -5, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/invalid sizeBytes/i)
   })
@@ -388,6 +422,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: NaN, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/invalid sizeBytes/i)
 
@@ -396,6 +432,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: Infinity, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/invalid sizeBytes/i)
   })
@@ -406,6 +444,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "INVALID_POLICY", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/invalid policy/i)
   })
@@ -416,6 +456,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/m.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/invalid downloadUrl/i)
   })
@@ -429,6 +471,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
           { path: "mods/dup.jar", sha256: "b".repeat(64), sizeBytes: 200, policy: "NO_MODIFICABLE", downloadUrl: "/dl2" },
         ],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/duplicate logical path found/i)
   })
@@ -449,6 +493,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/m.jar", sha256: "bad-sha", sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow()
 
@@ -466,6 +512,8 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         instanceRoot,
         clientFiles: [{ path: "mods/bad.jar", sha256: "invalid", sizeBytes: 10, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
         modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow()
 

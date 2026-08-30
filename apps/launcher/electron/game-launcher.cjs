@@ -4,8 +4,8 @@ const { Version, launch: xmclLaunch } = require("@xmcl/core")
 const { setJavaGpuPreference } = require("./gpu-manager.cjs")
 const {
   resolveJavaRuntime,
+  validateJavaBinary,
   checkMinecraftCoreReadiness,
-  loadCoreState,
 } = require("./minecraft-install-engine.cjs")
 
 const DEFAULT_RAM_GB = 4
@@ -44,7 +44,7 @@ class GameLauncher {
   async launch({
     playerName = "Player",
     ramGB = DEFAULT_RAM_GB,
-    minecraftVersion = "1.21.1",
+    minecraftVersion,
     neoForgeVersion,
     dedicatedGpu = true,
     customJavaPath,
@@ -54,11 +54,19 @@ class GameLauncher {
       throw new Error("Game is already running or launching.")
     }
 
+    if (!minecraftVersion || !String(minecraftVersion).trim()) {
+      throw new Error("Cannot launch Minecraft: Missing required minecraftVersion.")
+    }
+
+    if (!neoForgeVersion || !String(neoForgeVersion).trim()) {
+      throw new Error("Cannot launch Minecraft: Missing required neoForgeVersion.")
+    }
+
     this.setStatus("preparing")
 
     try {
-      const cleanMc = String(minecraftVersion || "1.21.1").trim()
-      const cleanNf = String(neoForgeVersion || "").trim()
+      const cleanMc = String(minecraftVersion).trim()
+      const cleanNf = String(neoForgeVersion).trim()
 
       console.log(`[GameLauncher] Initiating launch for MC: ${cleanMc}, NeoForge: ${cleanNf}`)
 
@@ -71,17 +79,31 @@ class GameLauncher {
 
       if (!readiness.isCoreInstalled || !readiness.resolvedVersionId) {
         throw new Error(
-          `Cannot launch Minecraft: Installation is incomplete (${readiness.issues.join(", ")}). Please update or repair the game first.`,
+          `Cannot launch Minecraft: Installation is incomplete (${(readiness.issues || []).join(", ")}). Please update or repair the game first.`,
         )
       }
 
-      // 2. Resolve Java Runtime (GUI javaw.exe)
+      // 2. Resolve & Validate Java Runtime (GUI javaw.exe)
       const javaRuntime = resolveJavaRuntime(this.instanceRoot, {
         isGui: true,
         customPath: customJavaPath,
       })
 
+      if (!javaRuntime.javaPath) {
+        throw new Error(
+          `Cannot launch Minecraft: Java runtime resolution failed (${javaRuntime.error || "Java 21 not found"}).`,
+        )
+      }
+
       const javawPath = javaRuntime.javaPath
+      const javaCliPath = javaRuntime.cliJavaPath || javawPath
+
+      const javaValidation = validateJavaBinary(javaCliPath, 21)
+      if (!javaValidation.valid) {
+        throw new Error(
+          `Cannot launch Minecraft: Java runtime validation failed (${javaValidation.error}).`,
+        )
+      }
 
       // Apply dedicated GPU preference on Windows if enabled
       if (process.platform === "win32" && javawPath && fs.existsSync(javawPath)) {
