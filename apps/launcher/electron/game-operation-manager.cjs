@@ -266,16 +266,17 @@ class GameOperationManager {
           instanceRoot,
           clientPlan.toDownload,
         )
-        const { totalCoreBytes } = await this.coreEngine.estimateCoreDownloadBytes({
+        const { totalCoreBytes, preflightDownloadedBytes } = await this.coreEngine.estimateCoreDownloadBytes({
           instanceRoot,
           minecraftVersion,
           neoForgeVersion,
+          cancelSignal,
         })
 
-        const totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes + totalCoreBytes)
+        const totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes + (totalCoreBytes || 0))
         let clientTransferredBytes = 0
-        let xmclTransferredBytes = 0
-        let maxReportedCompletedBytes = alreadyStagedBytes
+        let xmclTransferredBytes = preflightDownloadedBytes || 0
+        let maxReportedCompletedBytes = alreadyStagedBytes + xmclTransferredBytes
 
         const startTime = Date.now()
         let lastReportTime = 0

@@ -68,6 +68,39 @@ function normalizeNeoForgeProfileVersion(rawVersion) {
 }
 
 /**
+ * Deep integrity verification for local files:
+ * - Checks existence and isFile
+ * - Checks exact byte size (stat.size === expectedSize) if expectedSize > 0
+ * - Checks SHA-1 hash against file content if expectedSha1 is provided
+ */
+async function validateFileIntegrity(filePath, expectedSize, expectedSha1) {
+  if (!filePath || typeof filePath !== "string") return false
+  try {
+    const stat = await fsp.stat(filePath)
+    if (!stat.isFile()) return false
+
+    if (typeof expectedSize === "number" && expectedSize >= 0) {
+      if (stat.size !== expectedSize) {
+        return false
+      }
+    }
+
+    if (expectedSha1 && typeof expectedSha1 === "string" && expectedSha1.trim()) {
+      const cleanExpectedSha1 = expectedSha1.trim().toLowerCase()
+      const buffer = await fsp.readFile(filePath)
+      const actualSha1 = crypto.createHash("sha1").update(buffer).digest("hex").toLowerCase()
+      if (actualSha1 !== cleanExpectedSha1) {
+        return false
+      }
+    }
+
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+/**
  * Reads install_profile.json directly from a Forge/NeoForge installer jar using yauzl.
  */
 function readInstallProfileFromJar(jarPath) {
@@ -262,6 +295,84 @@ function getNeoForgeInstallerJarPath(instanceRoot, neoForgeVersion) {
     cleanNf,
     `neoforge-${cleanNf}-installer.jar`,
   )
+}
+
+/**
+ * Obtains and validates the NeoForge installer JAR, downloading it during preflight if not already present on disk.
+ * Uses atomic download via temporary file.
+ * Extracts and returns install_profile.json.
+ */
+async function bootstrapNeoForgeInstaller({ instanceRoot, neoForgeVersion, cancelSignal }) {
+  const cleanNf = String(neoForgeVersion).trim()
+  const installerJar = getNeoForgeInstallerJarPath(instanceRoot, cleanNf)
+
+  // 1. Check if valid installer JAR already exists locally
+  if (fs.existsSync(installerJar)) {
+    const profile = await readInstallProfileFromJar(installerJar)
+    if (profile && normalizeNeoForgeProfileVersion(profile.version) === normalizeNeoForgeProfileVersion(cleanNf)) {
+      const stat = await fsp.stat(installerJar).catch(() => null)
+      return {
+        installerJar,
+        installProfile: profile,
+        installerSize: stat?.size || 0,
+        downloadedInPreflight: false,
+        preflightDownloadedBytes: 0,
+      }
+    }
+  }
+
+  // 2. Download installer JAR to canonical location if missing or corrupt
+  if (cancelSignal?.isCancelled) {
+    throw new Error("Preflight cancelled by user.")
+  }
+
+  const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${cleanNf}/neoforge-${cleanNf}-installer.jar`
+  const res = await fetch(installerUrl)
+  if (!res.ok) {
+    throw new Error(`Failed to fetch NeoForge installer from "${installerUrl}": HTTP ${res.status} ${res.statusText}`)
+  }
+
+  let buffer
+  if (typeof res.arrayBuffer === "function") {
+    buffer = Buffer.from(await res.arrayBuffer())
+  } else if (typeof res.buffer === "function") {
+    buffer = await res.buffer()
+  } else if (typeof res.text === "function") {
+    buffer = Buffer.from(await res.text())
+  } else {
+    buffer = Buffer.alloc(0)
+  }
+  const downloadedBytes = buffer.length
+
+  // Write atomically to canonical path
+  const targetDir = path.dirname(installerJar)
+  await fsp.mkdir(targetDir, { recursive: true })
+  const tempPath = path.join(
+    targetDir,
+    `installer.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`,
+  )
+  await fsp.writeFile(tempPath, buffer)
+  try {
+    await fsp.rename(tempPath, installerJar)
+  } catch (_) {
+    if (fs.existsSync(installerJar)) {
+      await fsp.unlink(installerJar)
+    }
+    await fsp.rename(tempPath, installerJar)
+  }
+
+  const profile = await readInstallProfileFromJar(installerJar)
+  if (!profile) {
+    throw new Error(`Downloaded NeoForge installer at "${installerJar}" is corrupted or missing install_profile.json.`)
+  }
+
+  return {
+    installerJar,
+    installProfile: profile,
+    installerSize: downloadedBytes,
+    downloadedInPreflight: true,
+    preflightDownloadedBytes: downloadedBytes,
+  }
 }
 
 /**
@@ -518,28 +629,50 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
 
 /**
  * Calculates estimated bytes to download for missing Core components derived strictly from authoritative metadata.
- * NO arbitrary hardcoded constants.
+ * Bootstraps the NeoForge installer during preflight if needed to extract install_profile.json and discover all NeoForge dependencies.
+ * Deduplicates all required artifacts via canonical relative paths.
+ * Validates files deeply (size + SHA-1 hash), not merely existence.
  */
-async function estimateCoreDownloadBytes({ instanceRoot, minecraftVersion, neoForgeVersion }) {
+async function estimateCoreDownloadBytes({
+  instanceRoot,
+  minecraftVersion,
+  neoForgeVersion,
+  cancelSignal,
+}) {
   if (!minecraftVersion || !neoForgeVersion) {
-    return { totalCoreBytes: 0, readiness: null }
+    return { totalCoreBytes: 0, preflightDownloadedBytes: 0, readiness: null }
   }
 
-  const readiness = await checkMinecraftCoreReadiness({
-    instanceRoot,
-    minecraftVersion,
-    neoForgeVersion,
-  })
-
-  if (readiness.isCoreInstalled) {
-    return { totalCoreBytes: 0, readiness }
-  }
-
-  let totalBytes = 0
   const cleanMc = String(minecraftVersion).trim()
   const cleanNf = String(neoForgeVersion).trim()
 
-  // 1. Fetch / load Mojang version package metadata
+  const readiness = await checkMinecraftCoreReadiness({
+    instanceRoot,
+    minecraftVersion: cleanMc,
+    neoForgeVersion: cleanNf,
+  })
+
+  if (readiness.isCoreInstalled) {
+    return { totalCoreBytes: 0, preflightDownloadedBytes: 0, readiness }
+  }
+
+  let preflightDownloadedBytes = 0
+  let installProfile = readiness.installProfile || null
+
+  // 1. If NeoForge is needed and installProfile is not yet known, bootstrap the installer in preflight!
+  if (readiness.needsNeoForge && !installProfile) {
+    const bootstrap = await bootstrapNeoForgeInstaller({
+      instanceRoot,
+      neoForgeVersion: cleanNf,
+      cancelSignal,
+    })
+    installProfile = bootstrap.installProfile
+    if (bootstrap.downloadedInPreflight) {
+      preflightDownloadedBytes += bootstrap.preflightDownloadedBytes
+    }
+  }
+
+  // 2. Fetch / load Mojang version package metadata
   let mojangPackage = null
   const vanillaJsonPath = path.join(instanceRoot, "versions", cleanMc, `${cleanMc}.json`)
   if (fs.existsSync(vanillaJsonPath)) {
@@ -561,30 +694,52 @@ async function estimateCoreDownloadBytes({ instanceRoot, minecraftVersion, neoFo
     } catch (_) {}
   }
 
-  // 1.a Add Vanilla Client JAR if missing
-  const vanillaJarPath = path.join(instanceRoot, "versions", cleanMc, `${cleanMc}.jar`)
-  if (readiness.needsVanilla || !fs.existsSync(vanillaJarPath)) {
-    if (mojangPackage?.downloads?.client?.size) {
-      totalBytes += Number(mojangPackage.downloads.client.size)
-    }
+  // 3. Build Canonical Map of Required Artifacts to prevent double-counting across Mojang, NeoForge, and Diagnostics
+  const canonicalArtifacts = new Map()
+
+  function registerArtifact({ relativePath, expectedSize, expectedSha1, role }) {
+    if (!relativePath || typeof relativePath !== "string") return
+    const normalizedKey = path.normalize(relativePath).replace(/\\/g, "/")
+    if (canonicalArtifacts.has(normalizedKey)) return // Deduplicate!
+
+    canonicalArtifacts.set(normalizedKey, {
+      localPath: path.join(instanceRoot, relativePath),
+      expectedSize: typeof expectedSize === "number" && expectedSize > 0 ? expectedSize : null,
+      expectedSha1:
+        typeof expectedSha1 === "string" && expectedSha1.trim()
+          ? expectedSha1.trim().toLowerCase()
+          : null,
+      role,
+    })
   }
 
-  // 1.b Add Missing Vanilla Libraries
+  // 3.a Minecraft Client JAR
+  const clientDownload = mojangPackage?.downloads?.client
+  if (clientDownload) {
+    registerArtifact({
+      relativePath: path.join("versions", cleanMc, `${cleanMc}.jar`),
+      expectedSize: clientDownload.size,
+      expectedSha1: clientDownload.sha1,
+      role: "client-jar",
+    })
+  }
+
+  // 3.b Vanilla Libraries
   if (mojangPackage?.libraries && Array.isArray(mojangPackage.libraries)) {
     for (const lib of mojangPackage.libraries) {
       const artifact = lib.downloads?.artifact
       if (artifact?.path) {
-        const localPath = path.join(instanceRoot, "libraries", artifact.path)
-        if (!fs.existsSync(localPath)) {
-          if (typeof artifact.size === "number" && artifact.size > 0) {
-            totalBytes += artifact.size
-          }
-        }
+        registerArtifact({
+          relativePath: path.join("libraries", artifact.path),
+          expectedSize: artifact.size,
+          expectedSha1: artifact.sha1,
+          role: "vanilla-library",
+        })
       }
     }
   }
 
-  // 1.c Add Missing Assets (read/fetch asset index and check every object on disk)
+  // 3.c Assets (Index + Objects)
   if (mojangPackage?.assetIndex) {
     const assetIndexMeta = mojangPackage.assetIndex
     let assetIndexData = null
@@ -607,79 +762,132 @@ async function estimateCoreDownloadBytes({ instanceRoot, minecraftVersion, neoFo
 
     if (assetIndexData?.objects && typeof assetIndexData.objects === "object") {
       for (const obj of Object.values(assetIndexData.objects)) {
-        if (obj && obj.hash && typeof obj.size === "number" && obj.size > 0) {
+        if (obj && obj.hash) {
           const prefix = obj.hash.slice(0, 2)
-          const objPath = path.join(instanceRoot, "assets", "objects", prefix, obj.hash)
-          if (!fs.existsSync(objPath)) {
-            totalBytes += obj.size
-          }
+          registerArtifact({
+            relativePath: path.join("assets", "objects", prefix, obj.hash),
+            expectedSize: obj.size,
+            expectedSha1: obj.hash,
+            role: "asset",
+          })
         }
       }
     }
   }
 
-  // 2. NeoForge Installer Jar size (HEAD request or local check)
-  const installerJar = getNeoForgeInstallerJarPath(instanceRoot, cleanNf)
-  if (readiness.needsNeoForge || !fs.existsSync(installerJar)) {
-    try {
-      const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${cleanNf}/neoforge-${cleanNf}-installer.jar`
-      const headRes = await fetch(installerUrl, { method: "HEAD" })
-      const contentLength = headRes.headers.get("content-length")
-      if (contentLength) {
-        totalBytes += parseInt(contentLength, 10)
-      }
-    } catch (_) {}
+  // 3.d NeoForge Installer JAR
+  if (readiness.needsNeoForge) {
+    const installerRelativePath = path.join(
+      "libraries",
+      "net",
+      "neoforged",
+      "neoforge",
+      cleanNf,
+      `neoforge-${cleanNf}-installer.jar`,
+    )
+    let installerSize = preflightDownloadedBytes
+    if (!installerSize) {
+      try {
+        const installerJar = getNeoForgeInstallerJarPath(instanceRoot, cleanNf)
+        if (fs.existsSync(installerJar)) {
+          const stat = await fsp.stat(installerJar).catch(() => null)
+          installerSize = stat?.size || 0
+        }
+        if (!installerSize) {
+          const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${cleanNf}/neoforge-${cleanNf}-installer.jar`
+          const headRes = await fetch(installerUrl, { method: "HEAD" })
+          const cl = headRes.headers.get("content-length")
+          if (cl) installerSize = parseInt(cl, 10)
+        }
+      } catch (_) {}
+    }
+
+    registerArtifact({
+      relativePath: installerRelativePath,
+      expectedSize: installerSize,
+      expectedSha1: null,
+      role: "neoforge-installer",
+    })
   }
 
-  // 3. NeoForge install profile libraries (if installProfile is cached or extracted)
-  let installProfile = readiness.installProfile
-  if (!installProfile && fs.existsSync(installerJar)) {
-    try {
-      installProfile = await readInstallProfileFromJar(installerJar)
-    } catch (_) {}
-  }
-
+  // 3.e NeoForge Install Profile Libraries (all dependencies of NeoForge)
   if (installProfile?.libraries && Array.isArray(installProfile.libraries)) {
     for (const lib of installProfile.libraries) {
       const artifact = lib.downloads?.artifact
       if (artifact?.path) {
-        const localPath = path.join(instanceRoot, "libraries", artifact.path)
-        if (!fs.existsSync(localPath)) {
-          if (typeof artifact.size === "number" && artifact.size > 0) {
-            totalBytes += artifact.size
-          }
-        }
+        registerArtifact({
+          relativePath: path.join("libraries", artifact.path),
+          expectedSize: artifact.size,
+          expectedSha1: artifact.sha1,
+          role: "neoforge-library",
+        })
       }
     }
   }
 
-  // 4. Missing Libraries & Assets from diagnostics (for repair mode when profiles already exist)
+  // 3.f Diagnostics Missing Libraries & Assets (for repair flows)
   if (readiness.needsLibraries && Array.isArray(readiness.missingLibraries)) {
     for (const issue of readiness.missingLibraries) {
-      const size = issue.library?.downloads?.artifact?.size
-      if (typeof size === "number" && size > 0) {
-        totalBytes += size
+      const artifact = issue.library?.downloads?.artifact
+      if (artifact?.path) {
+        registerArtifact({
+          relativePath: path.join("libraries", artifact.path),
+          expectedSize: artifact.size,
+          expectedSha1: artifact.sha1,
+          role: "diagnostics-library",
+        })
       }
     }
   }
 
   if (readiness.needsAssets && Array.isArray(readiness.missingAssets)) {
     for (const issue of readiness.missingAssets) {
-      const size = issue.asset?.size
-      if (typeof size === "number" && size > 0) {
-        totalBytes += size
+      const assetObj = issue.asset
+      if (assetObj?.hash) {
+        const prefix = assetObj.hash.slice(0, 2)
+        registerArtifact({
+          relativePath: path.join("assets", "objects", prefix, assetObj.hash),
+          expectedSize: assetObj.size,
+          expectedSha1: assetObj.hash,
+          role: "diagnostics-asset",
+        })
+      }
+    }
+  }
+
+  // 4. Validate Each Unique Canonical Artifact against Disk (Size + SHA-1)
+  let totalBytes = 0
+
+  for (const artifact of canonicalArtifacts.values()) {
+    // If the installer was already downloaded during this preflight invocation, count its bytes in total
+    if (artifact.role === "neoforge-installer" && preflightDownloadedBytes > 0) {
+      totalBytes += preflightDownloadedBytes
+      continue
+    }
+
+    const isValid = await validateFileIntegrity(
+      artifact.localPath,
+      artifact.expectedSize,
+      artifact.expectedSha1,
+    )
+    if (!isValid) {
+      if (typeof artifact.expectedSize === "number" && artifact.expectedSize > 0) {
+        totalBytes += artifact.expectedSize
       }
     }
   }
 
   return {
     totalCoreBytes: totalBytes,
+    preflightDownloadedBytes,
     readiness,
+    installProfile,
   }
 }
 
 /**
  * Installs or repairs only the missing/corrupted components of Minecraft Vanilla, NeoForge, Libraries and Assets using XMCL.
+ * Reuses installer JAR already downloaded during preflight.
  * Does 0 downloads and 0 installer calls if the component is already valid on disk.
  */
 async function installOrRepairMinecraftCore({
@@ -927,6 +1135,8 @@ module.exports = {
   validateJavaBinary,
   parseJavaMajorVersion,
   normalizeNeoForgeProfileVersion,
+  validateFileIntegrity,
+  bootstrapNeoForgeInstaller,
   readInstallProfileFromJar,
   getNeoForgeInstallerJarPath,
   getNeoForgeProfileCandidates,
