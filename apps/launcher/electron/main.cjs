@@ -575,6 +575,8 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
       instanceRoot,
       clientFiles: payload.clientFiles,
       modpackVersion: payload.modpackVersion,
+      minecraftVersion: payload.minecraftVersion,
+      neoForgeVersion: payload.neoForgeVersion,
     })
   } catch (err) {
     console.error("[Main] Failed to generate sync plan:", err)
@@ -599,11 +601,13 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     instanceRoot,
     clientFiles: payload.clientFiles,
     modpackVersion: payload.modpackVersion,
+    minecraftVersion: payload.minecraftVersion,
+    neoForgeVersion: payload.neoForgeVersion,
     apiBaseUrl: payload.apiBaseUrl,
+    isVerify: Boolean(payload.isVerify),
     onProgress,
     onPhaseChange,
   })
-
 })
 
 ipcMain.handle("game-pause-sync", async () => {
@@ -622,6 +626,7 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
   return await operationManager.launchGame(gameLauncher, {
     playerName: options.playerName || "Player",
     ramGB: options.ramGB || 4,
+    minecraftVersion: options.minecraftVersion,
     neoForgeVersion: options.neoForgeVersion,
     dedicatedGpu: dedicatedGpuEnabled,
     customJavaPath: options.customJavaPath,

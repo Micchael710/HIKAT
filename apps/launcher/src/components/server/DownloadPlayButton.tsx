@@ -129,24 +129,30 @@ export default function DownloadPlayButton({
     }
   }, [])
 
-
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
     const unsubProgress = window.electronAPI?.onDownloadProgress?.((data: any) => {
       setProgress(data.progress)
-      setSpeed(data.speedMBs)
+      setSpeed(data.speedMBs || 0)
       setDownloadedGB(data.downloadedGB)
       if (data.totalGB) setTotalGB(data.totalGB)
       setTimeRemainingMin(data.remainingMinutes)
-      if (data.phase === "INSTALLING") {
-        setStatus("installing")
-      }
+
+      setStatus((prev) => {
+        if (prev === "verifying") return prev
+        if (data.phase === "INSTALLING") return "installing"
+        if (data.phase === "DOWNLOADING" && prev === "installing") return "downloading"
+        return prev
+      })
     })
 
     const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string) => {
-      if (phase === "INSTALLING") {
-        setStatus("installing")
-      }
+      setStatus((prev) => {
+        if (prev === "verifying") return prev
+        if (phase === "INSTALLING") return "installing"
+        if (phase === "DOWNLOADING" && prev === "installing") return "downloading"
+        return prev
+      })
     })
 
     return () => {
@@ -156,7 +162,10 @@ export default function DownloadPlayButton({
   }, [])
 
   const isExpanded =
-    status === "downloading" || status === "paused" || status === "installing"
+    status === "downloading" ||
+    status === "paused" ||
+    status === "installing" ||
+    status === "verifying"
 
   const cancel = async () => {
     if (isTransitioning || status === "installing") return
@@ -181,7 +190,7 @@ export default function DownloadPlayButton({
   }
 
   const togglePauseResume = async () => {
-    if (isTransitioning || status === "installing") return
+    if (isTransitioning || status === "installing" || status === "verifying") return
 
     if (status === "downloading") {
       setIsTransitioning(true)
@@ -209,7 +218,12 @@ export default function DownloadPlayButton({
       setStatus("downloading")
 
       gameService
-        .startSync(manifest.clientFiles, manifest.version)
+        .startSync(
+          manifest.clientFiles,
+          manifest.version,
+          manifest.minecraftVersion,
+          manifest.neoForgeVersion,
+        )
         .then((res: any) => {
           if (res?.paused) {
             setStatus("paused")
@@ -238,7 +252,8 @@ export default function DownloadPlayButton({
       isTransitioning ||
       isStartingSyncRef.current ||
       status === "unavailable" ||
-      status === "installing"
+      status === "installing" ||
+      status === "verifying"
     ) {
       return
     }
@@ -251,7 +266,12 @@ export default function DownloadPlayButton({
       setStatus("downloading")
 
       gameService
-        .startSync(manifest.clientFiles, manifest.version)
+        .startSync(
+          manifest.clientFiles,
+          manifest.version,
+          manifest.minecraftVersion,
+          manifest.neoForgeVersion,
+        )
         .then((res: any) => {
           if (res?.paused) {
             setStatus("paused")
@@ -287,6 +307,7 @@ export default function DownloadPlayButton({
         await gameService.launchGame({
           playerName,
           ramGB,
+          minecraftVersion: manifest?.minecraftVersion,
           neoForgeVersion: manifest?.neoForgeVersion,
         })
         if (onPlay) onPlay()
@@ -299,17 +320,23 @@ export default function DownloadPlayButton({
 
   const handleVerifyInstallation = async () => {
     setIsMenuOpen(false)
-    if (isTransitioning || isStartingSyncRef.current || status === "installing") return
+    if (isTransitioning || isStartingSyncRef.current || status === "installing" || status === "verifying") return
     if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
       showToast(t("playButton.verifyError"), "error")
       return
     }
     showToast(t("playButton.verifying"), "info")
     isStartingSyncRef.current = true
-    setStatus("downloading")
+    setStatus("verifying")
 
     gameService
-      .startSync(manifest.clientFiles, manifest.version)
+      .startSync(
+        manifest.clientFiles,
+        manifest.version,
+        manifest.minecraftVersion,
+        manifest.neoForgeVersion,
+        true,
+      )
       .then(async (res: any) => {
         if (res?.paused) {
           setStatus("paused")
@@ -332,7 +359,6 @@ export default function DownloadPlayButton({
         showToast(t("playButton.verifyError"), "error")
         setStatus(resolveIdleGameButtonState(manifest))
       })
-
       .finally(() => {
         isStartingSyncRef.current = false
       })
@@ -536,10 +562,11 @@ export default function DownloadPlayButton({
     )
   }
 
-  /* ── DOWNLOADING / PAUSED / INSTALLING (Progress card) ── */
+  /* ── DOWNLOADING / PAUSED / INSTALLING / VERIFYING (Progress card) ── */
   const dlGB = downloadedGB > 0 ? downloadedGB : (totalGB * progress) / 100
   const isUpdating = manifest?.hasUpdate
   const isInstalling = status === "installing"
+  const isVerifying = status === "verifying"
 
   return (
     <div
@@ -572,7 +599,7 @@ export default function DownloadPlayButton({
           border: isDark
             ? "2.5px solid rgba(255, 255, 255, 0.12)"
             : "2.5px solid rgba(0, 0, 0, 0.1)",
-          cursor: isInstalling ? "default" : "pointer",
+          cursor: isInstalling || isVerifying ? "default" : "pointer",
           position: "relative",
           overflow: "hidden",
           display: "flex",
@@ -633,11 +660,13 @@ export default function DownloadPlayButton({
                 ? isHovered
                   ? t("playButton.resume")
                   : t("playButton.paused")
-                : isInstalling
-                  ? t("playButton.installing")
-                  : isUpdating
-                    ? t("playButton.updating")
-                    : t("playButton.downloading")}
+                : isVerifying
+                  ? t("playButton.verifyingAction") || "VERIFICANDO"
+                  : isInstalling
+                    ? t("playButton.installing")
+                    : isUpdating
+                      ? t("playButton.updating")
+                      : t("playButton.downloading")}
             </span>
           </div>
 
@@ -653,7 +682,7 @@ export default function DownloadPlayButton({
           </span>
         </div>
 
-        {/* Bottom row: Download details or hover action prompt */}
+        {/* Bottom row: Download details & Speed or hover action prompt */}
         <div
           style={{
             display: "flex",
@@ -696,7 +725,7 @@ export default function DownloadPlayButton({
                 fontSize: 13,
               }}
             >
-              {Math.round(dlGB * 10) / 10} / {totalGB} {t("common.gb")}
+              {Math.round(dlGB * 10) / 10} / {totalGB} {t("common.gb")} · {speed > 0 ? `${speed.toFixed(1)} MB/s` : `-- MB/s`}
             </span>
           )}
 
@@ -717,7 +746,7 @@ export default function DownloadPlayButton({
       <button
         type="button"
         onClick={cancel}
-        disabled={isInstalling}
+        disabled={isInstalling || isVerifying}
         title={t("playButton.cancel")}
         className="dl-cancel-btn"
         style={{
@@ -731,8 +760,8 @@ export default function DownloadPlayButton({
             : "1px solid rgba(0, 0, 0, 0.12)",
           color: isDark ? "rgba(255, 255, 255, 0.45)" : "#556677",
           boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
-          cursor: isInstalling ? "not-allowed" : "pointer",
-          opacity: isInstalling ? 0.35 : 1,
+          cursor: isInstalling || isVerifying ? "not-allowed" : "pointer",
+          opacity: isInstalling || isVerifying ? 0.35 : 1,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

@@ -10,6 +10,7 @@ export type GameButtonState =
   | "downloading"
   | "paused"
   | "installing"
+  | "verifying"
 
 export interface GameManifest {
   version: string
@@ -90,14 +91,13 @@ export const gameService = {
           const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
             clientFiles: modpack.clientFiles,
             modpackVersion: modpack.version,
+            minecraftVersion: modpack.minecraftVersion || "1.21.1",
+            neoForgeVersion: modpack.neoForgeVersion || "21.1.65",
           })
           if (planCheck.success) {
             hasUpdate = planCheck.needsUpdate
             hasExistingInstall = Boolean(planCheck.hasExistingInstall)
-            isInstalled = Boolean(
-              planCheck.isFullyInstalled ||
-                (!planCheck.needsUpdate && modpack.clientFiles.length > 0),
-            )
+            isInstalled = Boolean(planCheck.isFullyInstalled)
             gameService.setGameInstalled(isInstalled)
           }
         } catch (_) {}
@@ -131,6 +131,8 @@ export const gameService = {
               const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
                 clientFiles: cachedFiles,
                 modpackVersion: parsed.version,
+                minecraftVersion: parsed.minecraftVersion || "1.21.1",
+                neoForgeVersion: parsed.neoForgeVersion || "21.1.65",
               })
               if (planCheck.success && !planCheck.needsUpdate && planCheck.isFullyInstalled) {
                 offlineInstalled = true
@@ -197,12 +199,21 @@ export const gameService = {
     }
   },
 
-  async startSync(clientFiles: ClientFile[], modpackVersion: string) {
+  async startSync(
+    clientFiles: ClientFile[],
+    modpackVersion: string,
+    minecraftVersion?: string,
+    neoForgeVersion?: string,
+    isVerify?: boolean,
+  ) {
     if (window.electronAPI?.startSync) {
       return await window.electronAPI.startSync({
         clientFiles,
         modpackVersion,
+        minecraftVersion,
+        neoForgeVersion,
         apiBaseUrl: getApiBaseUrl(),
+        isVerify,
       })
     }
   },
@@ -222,6 +233,7 @@ export const gameService = {
   async launchGame(options: {
     playerName?: string
     ramGB?: number
+    minecraftVersion?: string
     neoForgeVersion?: string
     customJavaPath?: string
     customArgs?: string[]

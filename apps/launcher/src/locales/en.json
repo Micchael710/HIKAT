@@ -81,6 +81,7 @@
     "verifyInstallation": "Verify installation",
     "uninstallGame": "Uninstall game",
     "verifying": "Verifying game files...",
+    "verifyingAction": "VERIFYING",
     "verifySuccess": "Game files verified successfully",
     "verifyError": "Could not verify the game. Please try again later.",
     "uninstallSuccess": "Game uninstalled successfully",

@@ -227,11 +227,14 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
       launchGame: launchGameMock,
     } as any
 
-    await gameService.startSync([], "1.0.0")
+    await gameService.startSync([], "1.0.0", "1.21.1", "21.1.65")
     expect(startSyncMock).toHaveBeenCalledWith({
       clientFiles: [],
       modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
       apiBaseUrl: "http://127.0.0.1:8787",
+      isVerify: undefined,
     })
 
 

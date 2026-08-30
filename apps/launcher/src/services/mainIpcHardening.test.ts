@@ -39,7 +39,21 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     instanceRoot = path.join(appDataRoot, "game files")
     await fsp.mkdir(instanceRoot, { recursive: true })
 
-    manager = new GameOperationManager()
+    manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          issues: [],
+        }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 0 }),
+        installOrRepairMinecraftCore: vi.fn().mockResolvedValue({
+          success: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+        }),
+      },
+    })
 
     server = http.createServer((req, res) => {
       const url = req.url || ""

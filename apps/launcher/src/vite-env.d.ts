@@ -60,14 +60,33 @@ interface ElectronAPI {
   setNotifications?: (enabled: boolean) => void
   openExternal?: (url: string) => void
 
-  checkSyncPlan?: (payload: { clientFiles: ClientFile[]; modpackVersion?: string }) => Promise<SyncPlanCheckResult>
-  startSync?: (payload: { clientFiles: ClientFile[]; modpackVersion?: string; apiBaseUrl?: string }) => Promise<{ success: boolean; downloadedCount: number; prunedCount: number; paused?: boolean }>
+  checkSyncPlan?: (payload: {
+    clientFiles: ClientFile[]
+    modpackVersion?: string
+    minecraftVersion?: string
+    neoForgeVersion?: string
+  }) => Promise<SyncPlanCheckResult>
+  startSync?: (payload: {
+    clientFiles: ClientFile[]
+    modpackVersion?: string
+    minecraftVersion?: string
+    neoForgeVersion?: string
+    apiBaseUrl?: string
+    isVerify?: boolean
+  }) => Promise<{
+    success: boolean
+    downloadedCount: number
+    prunedCount: number
+    paused?: boolean
+    resolvedVersionId?: string
+  }>
   pauseSync?: () => Promise<boolean>
   cancelSync?: () => Promise<boolean>
   uninstallGame?: () => Promise<{ success: boolean }>
   launchGame?: (options: {
     playerName?: string
     ramGB?: number
+    minecraftVersion?: string
     neoForgeVersion?: string
     customJavaPath?: string
     customArgs?: string[]
