@@ -2642,4 +2642,77 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     expect(updatedMeta.schemaVersion).toBe(2)
     expect(updatedMeta.sha256).toBe(realSha256)
   })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 47. Java version emitted strictly on stderr correctly detects Java 21
+   * ───────────────────────────────────────────────────────────── */
+  it("47. validateJavaBinary correctly detects Java 21 when output is emitted strictly on stderr", async () => {
+    const { javaExe } = await createMockJdk21(instanceRoot)
+    const mockSpawn = () => ({
+      stdout: "",
+      stderr: 'openjdk version "21.0.3" 2024-04-16 LTS\nOpenJDK Runtime Environment (build 21.0.3+9-LTS)\nOpenJDK 64-Bit Server VM (build 21.0.3+9-LTS, mixed mode, sharing)',
+    })
+    const validation = validateJavaBinary(javaExe, 21, mockSpawn as any)
+    expect(validation.valid).toBe(true)
+    expect(validation.major).toBe(21)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 48. Java version emitted strictly on stdout correctly detects Java 21
+   * ───────────────────────────────────────────────────────────── */
+  it("48. validateJavaBinary correctly detects Java 21 when output is emitted strictly on stdout", async () => {
+    const { javaExe } = await createMockJdk21(instanceRoot)
+    const mockSpawn = () => ({
+      stdout: 'java version "21.0.1" 2023-10-17 LTS\nJava(TM) SE Runtime Environment (build 21.0.1+12-LTS-29)\nJava HotSpot(TM) 64-Bit Server VM (build 21.0.1+12-LTS-29, mixed mode, sharing)',
+      stderr: "",
+    })
+    const validation = validateJavaBinary(javaExe, 21, mockSpawn as any)
+    expect(validation.valid).toBe(true)
+    expect(validation.major).toBe(21)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 49. Incompatible Java 17 version is rejected
+   * ───────────────────────────────────────────────────────────── */
+  it("49. validateJavaBinary rejects incompatible Java version (e.g. Java 17)", async () => {
+    const { javaExe } = await createMockJdk21(instanceRoot)
+    const mockSpawn = () => ({
+      stdout: "",
+      stderr: 'openjdk version "17.0.8" 2023-07-18 LTS',
+    })
+    const validation = validateJavaBinary(javaExe, 21, mockSpawn as any)
+    expect(validation.valid).toBe(false)
+    expect(validation.major).toBe(17)
+    expect(validation.error).toMatch(/Incompatible Java version.*found Java 17.*expected Java 21/i)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 50. Invalid output or spawn error is rejected fail-closed
+   * ───────────────────────────────────────────────────────────── */
+  it("50. validateJavaBinary rejects invalid unparseable output or execution error (fail-closed)", async () => {
+    const { javaExe } = await createMockJdk21(instanceRoot)
+
+    // Unparseable output
+    const mockSpawnBad = () => ({
+      stdout: "some random string without version",
+      stderr: "unrecognized option: -version",
+    })
+    const badValidation = validateJavaBinary(javaExe, 21, mockSpawnBad as any)
+    expect(badValidation.valid).toBe(false)
+    expect(badValidation.major).toBeNull()
+    expect(badValidation.error).toMatch(/Unable to parse Java version/i)
+
+    // Process error
+    const mockSpawnErr = () => ({
+      error: new Error("spawnSync ENOEXEC"),
+    })
+    const errValidation = validateJavaBinary(javaExe, 21, mockSpawnErr as any)
+    expect(errValidation.valid).toBe(false)
+    expect(errValidation.error).toMatch(/ENOEXEC/i)
+
+    // Non-existent binary path
+    const nonExistentValidation = validateJavaBinary(path.join(instanceRoot, "jdk-21", "bin", "nonexistent.exe"))
+    expect(nonExistentValidation.valid).toBe(false)
+    expect(nonExistentValidation.error).toMatch(/Java binary not found/i)
+  })
 })

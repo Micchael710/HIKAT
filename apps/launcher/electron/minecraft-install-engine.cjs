@@ -2,7 +2,7 @@ const fs = require("fs")
 const fsp = fs.promises
 const path = require("path")
 const crypto = require("crypto")
-const { execFileSync } = require("child_process")
+const { execFileSync, spawnSync } = require("child_process")
 const { MinecraftFolder, Version, diagnose, diagnoseLibraries, diagnoseAssets } = require("@xmcl/core")
 const {
   getVersionList,
@@ -242,7 +242,7 @@ function resolveJavaRuntime(instanceRoot, { isGui = false, customPath } = {}) {
 /**
  * Validates that the Java binary is functional and is exactly the required Java version (Java 21).
  */
-function validateJavaBinary(javaCliPath, requiredMajor = 21, execRunner = execFileSync) {
+function validateJavaBinary(javaCliPath, requiredMajor = 21, execRunner = spawnSync) {
   if (!javaCliPath || !fs.existsSync(javaCliPath)) {
     return {
       valid: false,
@@ -250,40 +250,50 @@ function validateJavaBinary(javaCliPath, requiredMajor = 21, execRunner = execFi
     }
   }
 
+  let result
   try {
-    const stdout = execRunner(javaCliPath, ["-version"], {
+    result = execRunner(javaCliPath, ["-version"], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
       timeout: 5000,
+      windowsHide: true,
     })
-    const major = parseJavaMajorVersion(String(stdout || ""))
-    if (major !== requiredMajor) {
-      return {
-        valid: false,
-        major,
-        error: `Incompatible Java version (found Java ${major}, expected Java ${requiredMajor}).`,
-      }
-    }
-    return { valid: true, major, versionOutput: String(stdout) }
   } catch (err) {
-    // java -version outputs to stderr on most JVMs
-    const stderr = err.stderr || ""
-    const major = parseJavaMajorVersion(String(stderr || err.message || ""))
-    if (major !== null) {
-      if (major !== requiredMajor) {
-        return {
-          valid: false,
-          major,
-          error: `Incompatible Java version (found Java ${major}, expected Java ${requiredMajor}).`,
-        }
-      }
-      return { valid: true, major, versionOutput: String(stderr) }
-    }
     return {
       valid: false,
       error: err.message || "Failed to execute java -version",
     }
   }
+
+  if (!result || result.error) {
+    return {
+      valid: false,
+      error: result?.error?.message || "Failed to execute java -version",
+    }
+  }
+
+  const output =
+    typeof result === "string"
+      ? result
+      : `${result.stdout || ""}\n${result.stderr || ""}`
+  const major = parseJavaMajorVersion(output)
+
+  if (major === null) {
+    return {
+      valid: false,
+      major: null,
+      error: "Unable to parse Java version from binary output.",
+    }
+  }
+
+  if (major !== requiredMajor) {
+    return {
+      valid: false,
+      major,
+      error: `Incompatible Java version (found Java ${major}, expected Java ${requiredMajor}).`,
+    }
+  }
+
+  return { valid: true, major, versionOutput: output }
 }
 
 /**
