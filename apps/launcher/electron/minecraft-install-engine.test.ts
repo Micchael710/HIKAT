@@ -1693,6 +1693,13 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       if (typeof url === "string" && url.includes(".sha256")) {
         return { ok: true, text: async () => computeSha256(zipBuffer) } as any
       }
+      if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
+        return {
+          ok: true,
+          json: async () => ({ versions: [{ id: "1.21.1", url: `${serverBaseUrl}/mc-version.json` }] }),
+          headers: new Headers(),
+        } as any
+      }
       if (typeof url === "string" && url.includes("mc-version.json")) {
         return { ok: true, json: async () => ({ id: "1.21.1", downloads: { client: { size: 100 } }, libraries: [] }) } as any
       }
@@ -1732,7 +1739,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     } finally {
       globalThis.fetch = originalFetch
     }
-  })
+  }, 15000)
 
   /* ─────────────────────────────────────────────────────────────
    * 30. Official SHA-256 Checksum Verification for NeoForge Installer
@@ -2082,5 +2089,386 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     const res = await syncPromise
     expect(res.paused).toBe(true)
     expect(manager.getState()).toBe("PAUSED")
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 37. Canonical installer with matching official SHA-256 is reused
+   * ───────────────────────────────────────────────────────────── */
+  it("37. Canonical installer with matching official SHA-256 is imported to Planner Cache without downloading JAR", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    // Pre-create canonical installer jar in instanceRoot/libraries
+    const canonicalJar = getNeoForgeInstallerJarPath(instanceRoot, "21.1.65")
+    await fsp.mkdir(path.dirname(canonicalJar), { recursive: true })
+    await fsp.writeFile(canonicalJar, zipBuffer)
+
+    let jarDownloadAttempted = false
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes(".sha256")) {
+        return { ok: true, text: async () => `${realSha256} neoforge-21.1.65-installer.jar` } as any
+      }
+      if (url.includes("-installer.jar")) {
+        jarDownloadAttempted = true
+        return { ok: true, arrayBuffer: async () => zipBuffer, buffer: async () => zipBuffer } as any
+      }
+      return { ok: false, status: 404 } as any
+    })
+
+    const result = await ensurePlannerInstaller({
+      instanceRoot,
+      neoForgeVersion: "21.1.65",
+      customFetch: mockFetch,
+    })
+
+    expect(result.wasAlreadyCached).toBe(true)
+    expect(result.downloadedBytes).toBe(0)
+    expect(jarDownloadAttempted).toBe(false)
+    expect(fs.existsSync(result.installerJar)).toBe(true)
+    expect(await validateFileSha256(result.installerJar, realSha256)).toBe(true)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 38. Canonical installer with invalid SHA-256 is ignored and replaced
+   * ───────────────────────────────────────────────────────────── */
+  it("38. Canonical installer with invalid SHA-256 is distrusted and replaced by fresh download", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const validZipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(validZipBuffer)
+
+    // Pre-create corrupted canonical jar
+    const canonicalJar = getNeoForgeInstallerJarPath(instanceRoot, "21.1.65")
+    await fsp.mkdir(path.dirname(canonicalJar), { recursive: true })
+    await fsp.writeFile(canonicalJar, "tampered-corrupted-installer-content")
+
+    let jarDownloaded = false
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes(".sha256")) {
+        return { ok: true, text: async () => realSha256 } as any
+      }
+      if (url.includes("-installer.jar")) {
+        jarDownloaded = true
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(validZipBuffer.length) }),
+          arrayBuffer: async () => validZipBuffer,
+          buffer: async () => validZipBuffer,
+        } as any
+      }
+      return { ok: false, status: 404 } as any
+    })
+
+    const result = await ensurePlannerInstaller({
+      instanceRoot,
+      neoForgeVersion: "21.1.65",
+      customFetch: mockFetch,
+    })
+
+    expect(result.wasAlreadyCached).toBe(false)
+    expect(jarDownloaded).toBe(true)
+    expect(result.downloadedBytes).toBe(validZipBuffer.length)
+    expect(await validateFileSha256(result.installerJar, realSha256)).toBe(true)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 39. NeoForge installer registers expectedSha256 and Mojang registers expectedSha1
+   * ───────────────────────────────────────────────────────────── */
+  it("39. NeoForge installer registers expectedSha256 while Mojang artifacts register expectedSha1", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    const { cacheDir, installerJar, metadataJson } = getPlannerCachePaths(instanceRoot, "21.1.65")
+    await fsp.mkdir(cacheDir, { recursive: true })
+    await fsp.writeFile(installerJar, zipBuffer)
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({
+        schemaVersion: 1,
+        neoForgeVersion: "21.1.65",
+        sha256: realSha256,
+        sizeBytes: zipBuffer.length,
+        cachedAt: new Date().toISOString(),
+      }),
+    )
+
+    const mockMojangMeta = {
+      id: "1.21.1",
+      downloads: { client: { size: 5000, sha1: "1111111111111111111111111111111111111111" } },
+      libraries: [
+        {
+          downloads: {
+            artifact: {
+              path: "com/mojang/lib/1.0/lib-1.0.jar",
+              size: 2000,
+              sha1: "2222222222222222222222222222222222222222",
+            },
+          },
+        },
+      ],
+      assetIndex: { id: "17", size: 100, sha1: "3333333333333333333333333333333333333333", url: `${serverBaseUrl}/asset-index.json` },
+    }
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: any) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => realSha256 } as any
+      }
+      if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
+        return {
+          ok: true,
+          json: async () => ({ versions: [{ id: "1.21.1", url: `${serverBaseUrl}/mc-version.json` }] }),
+          headers: new Headers(),
+        } as any
+      }
+      if (typeof url === "string" && url.includes("mc-version.json")) {
+        return { ok: true, json: async () => mockMojangMeta, headers: new Headers() } as any
+      }
+      if (typeof url === "string" && url.includes("asset-index.json")) {
+        return { ok: true, json: async () => ({ objects: {} }), headers: new Headers() } as any
+      }
+      return originalFetch(url, init)
+    })
+
+    try {
+      const plan = await buildCoreInstallPlan({
+        instanceRoot,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      })
+
+      const installerArtifact = Array.from(plan.artifacts.values()).find((a: any) => a.role === "neoforge-installer")
+      const clientArtifact = Array.from(plan.artifacts.values()).find((a: any) => a.role === "client-jar")
+      const libArtifact = Array.from(plan.artifacts.values()).find((a: any) => a.role === "vanilla-library")
+
+      expect(installerArtifact).toBeDefined()
+      expect(installerArtifact.expectedSha256).toBe(realSha256)
+      expect(installerArtifact.expectedSha1).toBeNull()
+
+      expect(clientArtifact).toBeDefined()
+      expect(clientArtifact.expectedSha1).toBe("1111111111111111111111111111111111111111")
+      expect(clientArtifact.expectedSha256).toBeNull()
+
+      expect(libArtifact).toBeDefined()
+      expect(libArtifact.expectedSha1).toBe("2222222222222222222222222222222222222222")
+      expect(libArtifact.expectedSha256).toBeNull()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 40. Pause aborts simulated fetch and resolves { success: true, paused: true }
+   * ───────────────────────────────────────────────────────────── */
+  it("40. pauseSync aborts active fetch and both startSync and pauseSync resolve paused without error", async () => {
+    let fetchAborted = false
+
+    const mockFetch = vi.fn().mockImplementation(async (_url: string, init?: any) => {
+      return new Promise((resolve, reject) => {
+        if (init?.signal?.aborted) {
+          fetchAborted = true
+          const err = new Error("The operation was aborted")
+          err.name = "AbortError"
+          reject(err)
+          return
+        }
+        init?.signal?.addEventListener("abort", () => {
+          fetchAborted = true
+          const err = new Error("The operation was aborted")
+          err.name = "AbortError"
+          reject(err)
+        })
+      })
+    })
+
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({ isCoreInstalled: false }),
+        buildCoreInstallPlan: vi.fn().mockImplementation(async ({ signal, cancelSignal }) => {
+          return await ensurePlannerInstaller({
+            instanceRoot,
+            neoForgeVersion: "21.1.65",
+            signal,
+            cancelSignal,
+            customFetch: mockFetch,
+          })
+        }),
+        installOrRepairMinecraftCore: vi.fn(),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    const samplePayload = Buffer.from("mock client binary data 1234567890", "utf8")
+    const sampleFiles = [
+      {
+        path: "mods/sample.jar",
+        sha256: computeSha256(samplePayload),
+        sizeBytes: samplePayload.length,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/sample.jar`,
+      },
+    ]
+
+    const syncPromise = manager.startSync({
+      instanceRoot,
+      clientFiles: sampleFiles,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    // Give time to enter fetch
+    await new Promise((r) => setTimeout(r, 20))
+
+    const pauseResult = await manager.pauseSync()
+    const syncResult = await syncPromise
+
+    expect(fetchAborted).toBe(true)
+    expect(pauseResult.success).toBe(true)
+    expect(pauseResult.paused).toBe(true)
+    expect(syncResult.success).toBe(true)
+    expect(syncResult.paused).toBe(true)
+    expect(manager.getState()).toBe("PAUSED")
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 41. Cancel aborts fetch and terminates cleanly with IDLE state
+   * ───────────────────────────────────────────────────────────── */
+  it("41. cancelSync aborts active fetch and terminates cleanly to IDLE state", async () => {
+    let fetchAborted = false
+
+    const mockFetch = vi.fn().mockImplementation(async (_url: string, init?: any) => {
+      return new Promise((resolve, reject) => {
+        if (init?.signal?.aborted) {
+          fetchAborted = true
+          const err = new Error("The operation was aborted")
+          err.name = "AbortError"
+          reject(err)
+          return
+        }
+        init?.signal?.addEventListener("abort", () => {
+          fetchAborted = true
+          const err = new Error("The operation was aborted")
+          err.name = "AbortError"
+          reject(err)
+        })
+      })
+    })
+
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({ isCoreInstalled: false }),
+        buildCoreInstallPlan: vi.fn().mockImplementation(async ({ signal, cancelSignal }) => {
+          return await ensurePlannerInstaller({
+            instanceRoot,
+            neoForgeVersion: "21.1.65",
+            signal,
+            cancelSignal,
+            customFetch: mockFetch,
+          })
+        }),
+        installOrRepairMinecraftCore: vi.fn(),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    const samplePayload = Buffer.from("mock client binary data 1234567890", "utf8")
+    const sampleFiles = [
+      {
+        path: "mods/sample.jar",
+        sha256: computeSha256(samplePayload),
+        sizeBytes: samplePayload.length,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/sample.jar`,
+      },
+    ]
+
+    const syncPromise = manager.startSync({
+      instanceRoot,
+      clientFiles: sampleFiles,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    // Attach rejection expectation immediately to prevent unhandled rejection warning
+    const syncRejection = expect(syncPromise).rejects.toThrow(/cancelled/i)
+
+    // Give time to enter fetch
+    await new Promise((r) => setTimeout(r, 20))
+
+    const cancelResult = await manager.cancelSync(instanceRoot)
+    await syncRejection
+
+    expect(fetchAborted).toBe(true)
+    expect(cancelResult.success).toBe(true)
+    expect(manager.getState()).toBe("IDLE")
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 42. Resume creates a fresh un-aborted AbortController
+   * ───────────────────────────────────────────────────────────── */
+  it("42. Resuming after pause instantiates a fresh un-aborted AbortController", async () => {
+    const receivedSignals: AbortSignal[] = []
+
+    const mockEngine = {
+      checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({ isCoreInstalled: true, hasExistingInstall: true }),
+      buildCoreInstallPlan: vi.fn().mockImplementation(async ({ signal }) => {
+        receivedSignals.push(signal)
+        return {
+          totalCoreBytes: 0,
+          reusableCoreBytes: 100,
+          bootstrapNetworkBytes: 0,
+          readiness: { isCoreInstalled: true },
+        }
+      }),
+      installOrRepairMinecraftCore: vi.fn().mockResolvedValue({ success: true }),
+    }
+
+    const manager = new GameOperationManager({
+      coreEngine: mockEngine,
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    await createMockJdk21(instanceRoot)
+
+    const samplePayload = Buffer.from("mock client binary data 1234567890", "utf8")
+    const sampleFiles = [
+      {
+        path: "mods/sample.jar",
+        sha256: computeSha256(samplePayload),
+        sizeBytes: samplePayload.length,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/sample.jar`,
+      },
+    ]
+
+    // 1st run -> pause
+    const run1 = manager.startSync({
+      instanceRoot,
+      clientFiles: sampleFiles,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+    await manager.pauseSync()
+    await run1
+
+    expect(receivedSignals.length).toBe(1)
+    expect(receivedSignals[0].aborted).toBe(true) // Was aborted by pauseSync
+
+    // 2nd run (Resume) -> should have fresh un-aborted signal
+    const run2 = await manager.startSync({
+      instanceRoot,
+      clientFiles: sampleFiles,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(run2.success).toBe(true)
+    expect(receivedSignals.length).toBe(2)
+    expect(receivedSignals[1].aborted).toBe(false) // Fresh signal!
   })
 })

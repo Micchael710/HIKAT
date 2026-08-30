@@ -76,9 +76,9 @@ function normalizeNeoForgeProfileVersion(rawVersion) {
  * Deep integrity verification for local files:
  * - Checks existence and isFile
  * - Checks exact byte size (stat.size === expectedSize) if expectedSize > 0
- * - Checks hash against file content (SHA-256 if 64 chars, SHA-1 if 40 chars)
+ * - Checks SHA-1 hash against file content if expectedSha1 is provided
  */
-async function validateFileIntegrity(filePath, expectedSize, expectedHash) {
+async function validateFileIntegrity(filePath, expectedSize, expectedSha1) {
   if (!filePath || typeof filePath !== "string") return false
   try {
     const stat = await fsp.stat(filePath)
@@ -90,12 +90,11 @@ async function validateFileIntegrity(filePath, expectedSize, expectedHash) {
       }
     }
 
-    if (expectedHash && typeof expectedHash === "string" && expectedHash.trim()) {
-      const cleanHash = expectedHash.trim().toLowerCase()
-      const algo = cleanHash.length === 64 ? "sha256" : "sha1"
+    if (expectedSha1 && typeof expectedSha1 === "string" && expectedSha1.trim()) {
+      const cleanSha1 = expectedSha1.trim().toLowerCase()
       const buffer = await fsp.readFile(filePath)
-      const actualHash = crypto.createHash(algo).update(buffer).digest("hex").toLowerCase()
-      if (actualHash !== cleanHash) {
+      const actualSha1 = crypto.createHash("sha1").update(buffer).digest("hex").toLowerCase()
+      if (actualSha1 !== cleanSha1) {
         return false
       }
     }
@@ -514,54 +513,56 @@ async function ensurePlannerInstaller({
     }
   }
 
-  // 1.b Check if canonical installer jar already exists in instanceRoot/libraries
+  // 2. Check cancellation before resolving official checksum
+  if (signal?.aborted || cancelSignal?.isCancelled || cancelSignal?.isPaused) {
+    const abortErr = new Error("Preflight cancelled by user.")
+    abortErr.name = "AbortError"
+    throw abortErr
+  }
+
+  // 3. Resolve official SHA-256 FIRST (Fail-closed)
+  const officialSha256 = await resolveOfficialNeoForgeInstallerSha256(cleanNf, customFetch, signal)
+
+  // 4. Check if canonical installer jar already exists in instanceRoot/libraries with matching official SHA-256
   const canonicalJar = getNeoForgeInstallerJarPath(instanceRoot, cleanNf)
   if (fs.existsSync(canonicalJar)) {
     try {
-      const profile = await readInstallProfileFromJar(canonicalJar)
-      if (
-        profile &&
-        normalizeNeoForgeProfileVersion(profile.version) === normalizeNeoForgeProfileVersion(cleanNf) &&
-        (!cleanMc || profile.minecraft === cleanMc)
-      ) {
-        const stat = await fsp.stat(canonicalJar)
-        const buffer = await fsp.readFile(canonicalJar)
-        const sha256 = crypto.createHash("sha256").update(buffer).digest("hex").toLowerCase()
+      const isCanonicalValid = await validateFileSha256(canonicalJar, officialSha256)
+      if (isCanonicalValid) {
+        const profile = await readInstallProfileFromJar(canonicalJar)
+        if (
+          profile &&
+          normalizeNeoForgeProfileVersion(profile.version) === normalizeNeoForgeProfileVersion(cleanNf) &&
+          (!cleanMc || profile.minecraft === cleanMc)
+        ) {
+          const stat = await fsp.stat(canonicalJar)
+          // Copy to Planner Cache to make Planner Cache consistent
+          await fsp.mkdir(cacheDir, { recursive: true })
+          await fsp.copyFile(canonicalJar, installerJar)
+          const metadata = {
+            schemaVersion: 1,
+            neoForgeVersion: cleanNf,
+            sha256: officialSha256,
+            sizeBytes: stat.size,
+            cachedAt: new Date().toISOString(),
+          }
+          await fsp.writeFile(metadataJson, JSON.stringify(metadata, null, 2), "utf8")
 
-        // Copy to Planner Cache to make Planner Cache consistent
-        await fsp.mkdir(cacheDir, { recursive: true })
-        await fsp.copyFile(canonicalJar, installerJar)
-        const metadata = {
-          schemaVersion: 1,
-          neoForgeVersion: cleanNf,
-          sha256,
-          sizeBytes: stat.size,
-          cachedAt: new Date().toISOString(),
-        }
-        await fsp.writeFile(metadataJson, JSON.stringify(metadata, null, 2), "utf8")
-
-        return {
-          installerJar,
-          metadata,
-          installProfile: profile,
-          sizeBytes: stat.size,
-          sha256,
-          wasAlreadyCached: true,
-          downloadedBytes: 0,
+          return {
+            installerJar,
+            metadata,
+            installProfile: profile,
+            sizeBytes: stat.size,
+            sha256: officialSha256,
+            wasAlreadyCached: true,
+            downloadedBytes: 0,
+          }
         }
       }
     } catch (_) {}
   }
 
-  // 2. Check cancellation before download
-  if (signal?.aborted || cancelSignal?.isCancelled || cancelSignal?.isPaused) {
-    throw new Error("Preflight cancelled by user.")
-  }
-
-  // 3. Resolve official SHA-256 (Fail-closed)
-  const officialSha256 = await resolveOfficialNeoForgeInstallerSha256(cleanNf, customFetch, signal)
-
-  // 4. Download installer stream to temporary file in Planner Cache
+  // 5. Download installer stream to temporary file in Planner Cache
   await fsp.mkdir(cacheDir, { recursive: true })
   if (fs.existsSync(tempInstallerJar)) {
     try {
@@ -1144,7 +1145,7 @@ async function buildCoreInstallPlan({
   // 3. Build Canonical Map of Required Artifacts
   const canonicalArtifacts = new Map()
 
-  function registerArtifact({ relativePath, expectedSize, expectedSha1, role }) {
+  function registerArtifact({ relativePath, expectedSize, expectedSha1, expectedSha256, role }) {
     if (!relativePath || typeof relativePath !== "string") return
     const normalizedKey = path.normalize(relativePath).replace(/\\/g, "/")
     if (canonicalArtifacts.has(normalizedKey)) return // Deduplicate!
@@ -1155,6 +1156,10 @@ async function buildCoreInstallPlan({
       expectedSha1:
         typeof expectedSha1 === "string" && expectedSha1.trim()
           ? expectedSha1.trim().toLowerCase()
+          : null,
+      expectedSha256:
+        typeof expectedSha256 === "string" && expectedSha256.trim()
+          ? expectedSha256.trim().toLowerCase()
           : null,
       role,
     })
@@ -1276,7 +1281,7 @@ async function buildCoreInstallPlan({
     }
   }
 
-  // 3.d NeoForge Installer JAR
+  // 3.d NeoForge Installer JAR (Uses expectedSha256)
   if (readiness.needsNeoForge) {
     const installerRelativePath = path.join(
       "libraries",
@@ -1290,7 +1295,7 @@ async function buildCoreInstallPlan({
     registerArtifact({
       relativePath: installerRelativePath,
       expectedSize: plannerInstallerInfo.sizeBytes,
-      expectedSha1: plannerInstallerInfo.sha256,
+      expectedSha256: plannerInstallerInfo.sha256,
       role: "neoforge-installer",
     })
   }
@@ -1340,7 +1345,7 @@ async function buildCoreInstallPlan({
     }
   }
 
-  // 4. Validate Each Unique Canonical Artifact against Disk (Size + SHA-1)
+  // 4. Validate Each Unique Canonical Artifact against Disk (Size + SHA-1 / SHA-256)
   let totalBytes = 0
 
   for (const artifact of canonicalArtifacts.values()) {
@@ -1350,11 +1355,25 @@ async function buildCoreInstallPlan({
       continue
     }
 
-    const isValid = await validateFileIntegrity(
-      artifact.localPath,
-      artifact.expectedSize,
-      artifact.expectedSha1,
-    )
+    let isValid = false
+    if (artifact.expectedSha256) {
+      isValid = await validateFileSha256(artifact.localPath, artifact.expectedSha256)
+      if (isValid && typeof artifact.expectedSize === "number" && artifact.expectedSize > 0) {
+        try {
+          const stat = await fsp.stat(artifact.localPath)
+          isValid = stat.size === artifact.expectedSize
+        } catch (_) {
+          isValid = false
+        }
+      }
+    } else {
+      isValid = await validateFileIntegrity(
+        artifact.localPath,
+        artifact.expectedSize,
+        artifact.expectedSha1,
+      )
+    }
+
     if (!isValid) {
       if (typeof artifact.expectedSize === "number" && artifact.expectedSize > 0) {
         totalBytes += artifact.expectedSize

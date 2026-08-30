@@ -490,6 +490,11 @@ class GameOperationManager {
             this.internalPhase = "IDLE"
             throw new Error("Sync cancelled by user.")
           }
+          if (cancelSignal?.isPaused) {
+            this.state = "PAUSED"
+            this.internalPhase = "PAUSED"
+            return { success: true, paused: true }
+          }
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -523,6 +528,22 @@ class GameOperationManager {
             `${minecraftVersion}-neoforge-${neoForgeVersion}`,
         }
       } catch (err) {
+        const isAbort =
+          err?.name === "AbortError" ||
+          /abort|cancelled|preflight cancelled/i.test(err?.message || "")
+
+        if (cancelSignal.isPaused || (isAbort && this.state === "PAUSED")) {
+          this.state = "PAUSED"
+          this.internalPhase = "PAUSED"
+          return { success: true, paused: true }
+        }
+
+        if (cancelSignal.isCancelled || this.state === "CANCELING") {
+          this.state = "IDLE"
+          this.internalPhase = "IDLE"
+          throw new Error("Sync cancelled by user.")
+        }
+
         if (this.state !== "CANCELING") {
           this.state = "IDLE"
           this.internalPhase = "IDLE"
