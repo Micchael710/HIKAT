@@ -1804,7 +1804,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     // 2. Write valid files
     await fsp.writeFile(installerJar, zipBuffer)
     const validMeta = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       neoForgeVersion: "21.1.65",
       sha256: realSha256,
       sizeBytes: zipBuffer.length,
@@ -1877,7 +1877,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     await fsp.writeFile(
       metadataJson,
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         neoForgeVersion: "21.1.65",
         sha256: realSha256,
         sizeBytes: zipBuffer.length,
@@ -1916,7 +1916,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     await fsp.writeFile(
       metadataJson,
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         neoForgeVersion: "21.1.65",
         sha256: realSha256,
         sizeBytes: zipBuffer.length,
@@ -2185,7 +2185,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     await fsp.writeFile(
       metadataJson,
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         neoForgeVersion: "21.1.65",
         sha256: realSha256,
         sizeBytes: zipBuffer.length,
@@ -2470,5 +2470,176 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     expect(run2.success).toBe(true)
     expect(receivedSignals.length).toBe(2)
     expect(receivedSignals[1].aborted).toBe(false) // Fresh signal!
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 43. Legacy schemaVersion: 1 cache is rejected as invalid
+   * ───────────────────────────────────────────────────────────── */
+  it("43. Cache with schemaVersion: 1 is returned as invalid by validatePlannerInstaller", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    const { cacheDir, installerJar, metadataJson } = getPlannerCachePaths(instanceRoot, "21.1.65")
+    await fsp.mkdir(cacheDir, { recursive: true })
+    await fsp.writeFile(installerJar, zipBuffer)
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({
+        schemaVersion: 1, // Legacy untrusted schema
+        neoForgeVersion: "21.1.65",
+        sha256: realSha256,
+        sizeBytes: zipBuffer.length,
+        cachedAt: new Date().toISOString(),
+      }),
+    )
+
+    const result = await validatePlannerInstaller(instanceRoot, "21.1.65", "1.21.1")
+    expect(result.valid).toBe(false)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 44. Valid schemaVersion: 2 cache is accepted and reused
+   * ───────────────────────────────────────────────────────────── */
+  it("44. Valid cache with schemaVersion: 2 is accepted by validatePlannerInstaller and reused", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    const { cacheDir, installerJar, metadataJson } = getPlannerCachePaths(instanceRoot, "21.1.65")
+    await fsp.mkdir(cacheDir, { recursive: true })
+    await fsp.writeFile(installerJar, zipBuffer)
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({
+        schemaVersion: 2, // Modern trusted schema
+        neoForgeVersion: "21.1.65",
+        sha256: realSha256,
+        sizeBytes: zipBuffer.length,
+        cachedAt: new Date().toISOString(),
+      }),
+    )
+
+    const result = await validatePlannerInstaller(instanceRoot, "21.1.65", "1.21.1")
+    expect(result.valid).toBe(true)
+    expect(result.sha256).toBe(realSha256)
+    expect(result.sizeBytes).toBe(zipBuffer.length)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 45. Valid canonical installer + v1 cache regenerates as v2 after official checksum validation
+   * ───────────────────────────────────────────────────────────── */
+  it("45. Valid canonical installer with legacy v1 cache validates against official checksum and regenerates as schemaVersion: 2", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    // Pre-create legacy v1 cache
+    const { cacheDir, installerJar, metadataJson } = getPlannerCachePaths(instanceRoot, "21.1.65")
+    await fsp.mkdir(cacheDir, { recursive: true })
+    await fsp.writeFile(installerJar, zipBuffer)
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({
+        schemaVersion: 1,
+        neoForgeVersion: "21.1.65",
+        sha256: realSha256,
+        sizeBytes: zipBuffer.length,
+        cachedAt: new Date().toISOString(),
+      }),
+    )
+
+    // Pre-create valid canonical jar in libraries
+    const canonicalJar = getNeoForgeInstallerJarPath(instanceRoot, "21.1.65")
+    await fsp.mkdir(path.dirname(canonicalJar), { recursive: true })
+    await fsp.writeFile(canonicalJar, zipBuffer)
+
+    let jarDownloadAttempted = false
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes(".sha256")) {
+        return { ok: true, text: async () => `${realSha256} neoforge-21.1.65-installer.jar` } as any
+      }
+      if (url.includes("-installer.jar")) {
+        jarDownloadAttempted = true
+        return { ok: true, arrayBuffer: async () => zipBuffer, buffer: async () => zipBuffer } as any
+      }
+      return { ok: false, status: 404 } as any
+    })
+
+    const result = await ensurePlannerInstaller({
+      instanceRoot,
+      neoForgeVersion: "21.1.65",
+      customFetch: mockFetch,
+    })
+
+    expect(result.wasAlreadyCached).toBe(true)
+    expect(result.downloadedBytes).toBe(0)
+    expect(jarDownloadAttempted).toBe(false)
+
+    // Verify metadata was migrated to schemaVersion: 2
+    const updatedMeta = JSON.parse(await fsp.readFile(metadataJson, "utf8"))
+    expect(updatedMeta.schemaVersion).toBe(2)
+    expect(updatedMeta.sha256).toBe(realSha256)
+
+    // Now validatePlannerInstaller accepts it directly
+    const validCheck = await validatePlannerInstaller(instanceRoot, "21.1.65", "1.21.1")
+    expect(validCheck.valid).toBe(true)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 46. Legacy v1 cache is never trusted directly without official trust chain
+   * ───────────────────────────────────────────────────────────── */
+  it("46. Legacy v1 cache is never reused directly and passes through official trust chain and download", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const validZipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(validZipBuffer)
+
+    // Pre-create untrusted v1 cache (e.g. self-computed hash from old code)
+    const { cacheDir, installerJar, metadataJson } = getPlannerCachePaths(instanceRoot, "21.1.65")
+    await fsp.mkdir(cacheDir, { recursive: true })
+    await fsp.writeFile(installerJar, "old-untrusted-installer-payload")
+    await fsp.writeFile(
+      metadataJson,
+      JSON.stringify({
+        schemaVersion: 1,
+        neoForgeVersion: "21.1.65",
+        sha256: "untrusted-hash-from-old-version",
+        sizeBytes: 31,
+        cachedAt: new Date().toISOString(),
+      }),
+    )
+
+    let jarDownloaded = false
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes(".sha256")) {
+        return { ok: true, text: async () => realSha256 } as any
+      }
+      if (url.includes("-installer.jar")) {
+        jarDownloaded = true
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(validZipBuffer.length) }),
+          arrayBuffer: async () => validZipBuffer,
+          buffer: async () => validZipBuffer,
+        } as any
+      }
+      return { ok: false, status: 404 } as any
+    })
+
+    const result = await ensurePlannerInstaller({
+      instanceRoot,
+      neoForgeVersion: "21.1.65",
+      customFetch: mockFetch,
+    })
+
+    // Must NOT reuse the untrusted v1 cache
+    expect(result.wasAlreadyCached).toBe(false)
+    expect(jarDownloaded).toBe(true)
+    expect(result.downloadedBytes).toBe(validZipBuffer.length)
+
+    // Overwritten with valid schemaVersion: 2
+    const updatedMeta = JSON.parse(await fsp.readFile(metadataJson, "utf8"))
+    expect(updatedMeta.schemaVersion).toBe(2)
+    expect(updatedMeta.sha256).toBe(realSha256)
   })
 })

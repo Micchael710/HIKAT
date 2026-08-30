@@ -360,7 +360,7 @@ async function loadPlannerInstallerMetadata(instanceRoot, neoForgeVersion) {
     const parsed = JSON.parse(content)
     if (
       parsed &&
-      parsed.schemaVersion === 1 &&
+      parsed.schemaVersion === 2 &&
       String(parsed.neoForgeVersion).trim() === String(neoForgeVersion).trim() &&
       typeof parsed.sha256 === "string" &&
       /^[a-fA-F0-9]{64}$/.test(parsed.sha256.trim()) &&
@@ -540,7 +540,7 @@ async function ensurePlannerInstaller({
           await fsp.mkdir(cacheDir, { recursive: true })
           await fsp.copyFile(canonicalJar, installerJar)
           const metadata = {
-            schemaVersion: 1,
+            schemaVersion: 2,
             neoForgeVersion: cleanNf,
             sha256: officialSha256,
             sizeBytes: stat.size,
@@ -662,7 +662,7 @@ async function ensurePlannerInstaller({
 
     // 8. Save metadata.json
     const metadata = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       neoForgeVersion: cleanNf,
       sha256: officialSha256,
       sizeBytes: downloadedBytes,
