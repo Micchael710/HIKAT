@@ -12,8 +12,8 @@ const {
   walkForgeInstallerEntries,
   isForgeInstallerEntries,
   unpackForgeInstaller,
-  installByProfileTask,
-  installByProfile,
+  resolveProcessors,
+  postProcess,
   BadForgeInstallerJarError,
 } = require("@xmcl/installer")
 
@@ -62,11 +62,7 @@ async function installNeoForgeFromPreparedInstaller({
 
     const profile =
       installProfile ||
-      (await open(canonicalJarPath, { lazyEntries: true, autoClose: true })
-        .then((z) => readAllEntries(z))
-        .then((all) => getEntriesRecord(all)["install_profile.json"])
-        .then((e) => zip.readEntry(e))
-        .then((b) => JSON.parse(b.toString("utf8"))))
+      JSON.parse((await zip.readEntry(entries.installProfileJson)).toString("utf8"))
 
     let versionId
     if (isForgeInstallerEntries(entries)) {
@@ -74,12 +70,10 @@ async function installNeoForgeFromPreparedInstaller({
         java: javaCliPath,
       })
 
-      const task = installByProfileTask(profile, instanceRoot, {
+      const processors = resolveProcessors("client", profile, mc)
+      await postProcess(processors, mc, {
         java: javaCliPath,
-        side: "client",
       })
-
-      await task.startAndWait()
     } else {
       throw new BadForgeInstallerJarError(canonicalJarPath)
     }

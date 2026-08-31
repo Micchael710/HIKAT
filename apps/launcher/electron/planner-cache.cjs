@@ -213,6 +213,29 @@ async function readInstallProfileFromJar(jarPath) {
 }
 
 /**
+ * Reads version.json from inside an installer JAR.
+ */
+async function readVersionJsonFromJar(jarPath) {
+  const zip = await open(jarPath, { lazyEntries: true, autoClose: false })
+  try {
+    const entries = await readAllEntries(zip)
+    const record = getEntriesRecord(entries)
+    const entry = record["version.json"]
+    if (!entry) {
+      return null
+    }
+    const buf = await readEntry(zip, entry)
+    return JSON.parse(buf.toString("utf8"))
+  } catch (_) {
+    return null
+  } finally {
+    try {
+      zip.close()
+    } catch (_) {}
+  }
+}
+
+/**
  * Downloads and prepares NeoForge installer and cached install_profile.json inside the Planner Cache.
  */
 async function bootstrapNeoForgeInstaller({
@@ -444,6 +467,7 @@ module.exports = {
   fetchOfficialNeoForgeInstallerSha256,
   resolveOfficialNeoForgeInstallerSha256,
   readInstallProfileFromJar,
+  readVersionJsonFromJar,
   bootstrapNeoForgeInstaller,
   ensurePlannerInstaller,
   promotePlannerInstallerToCanonical,

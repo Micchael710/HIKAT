@@ -34,6 +34,7 @@ const {
   fetchOfficialNeoForgeInstallerSha256,
   resolveOfficialNeoForgeInstallerSha256,
   readInstallProfileFromJar,
+  readVersionJsonFromJar,
   bootstrapNeoForgeInstaller,
   ensurePlannerInstaller,
   promotePlannerInstallerToCanonical,
@@ -175,6 +176,7 @@ async function installOrRepairMinecraftCore({
     instanceRoot,
     minecraftVersion: cleanMc,
     neoForgeVersion: cleanNf,
+    installProfile: plan.installProfile,
   })
 
   if (!finalReadiness.isCoreInstalled) {
@@ -224,6 +226,7 @@ module.exports = {
   fetchOfficialNeoForgeInstallerSha256,
   resolveOfficialNeoForgeInstallerSha256,
   readInstallProfileFromJar,
+  readVersionJsonFromJar,
   bootstrapNeoForgeInstaller,
   ensurePlannerInstaller,
   promotePlannerInstallerToCanonical,

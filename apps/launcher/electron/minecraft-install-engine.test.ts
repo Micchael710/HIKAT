@@ -47,8 +47,20 @@ import { saveInstalledManifest, executeSync, generateSyncPlan } from "./client-f
  * Creates a compliant in-memory ZIP buffer containing a single file.
  */
 function createZipWithFile(filename: string, content: string | Buffer): Buffer {
-  const data = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8")
-  const name = Buffer.from(filename, "utf8")
+  return createZipWithFiles({ [filename]: content })
+}
+
+/**
+ * Creates a compliant in-memory ZIP buffer containing multiple files.
+ */
+function createZipWithFiles(files: Record<string, string | Buffer>): Buffer {
+  const fileEntries: Array<{
+    name: Buffer
+    data: Buffer
+    crc: number
+    offset: number
+    header: Buffer
+  }> = []
 
   const crcTable = new Uint32Array(256)
   for (let i = 0; i < 256; i++) {
@@ -56,58 +68,87 @@ function createZipWithFile(filename: string, content: string | Buffer): Buffer {
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
     crcTable[i] = c
   }
-  let crc = 0 ^ -1
-  for (let i = 0; i < data.length; i++) crc = (crc >>> 8) ^ crcTable[(crc ^ data[i]) & 0xff]
-  crc = (crc ^ -1) >>> 0
 
-  const localHeader = Buffer.alloc(30 + name.length)
-  localHeader.writeUInt32LE(0x04034b50, 0)
-  localHeader.writeUInt16LE(20, 4)
-  localHeader.writeUInt16LE(0, 6)
-  localHeader.writeUInt16LE(0, 8)
-  localHeader.writeUInt16LE(0, 10)
-  localHeader.writeUInt16LE(0, 12)
-  localHeader.writeUInt32LE(crc, 14)
-  localHeader.writeUInt32LE(data.length, 18)
-  localHeader.writeUInt32LE(data.length, 22)
-  localHeader.writeUInt16LE(name.length, 26)
-  localHeader.writeUInt16LE(0, 28)
-  name.copy(localHeader, 30)
+  function calcCrc(data: Buffer): number {
+    let crc = 0 ^ -1
+    for (let i = 0; i < data.length; i++) crc = (crc >>> 8) ^ crcTable[(crc ^ data[i]) & 0xff]
+    return (crc ^ -1) >>> 0
+  }
 
-  const centralDir = Buffer.alloc(46 + name.length)
-  centralDir.writeUInt32LE(0x02014b50, 0)
-  centralDir.writeUInt16LE(20, 4)
-  centralDir.writeUInt16LE(20, 6)
-  centralDir.writeUInt16LE(0, 8)
-  centralDir.writeUInt16LE(0, 10)
-  centralDir.writeUInt16LE(0, 12)
-  centralDir.writeUInt16LE(0, 14)
-  centralDir.writeUInt32LE(crc, 16)
-  centralDir.writeUInt32LE(data.length, 20)
-  centralDir.writeUInt32LE(data.length, 24)
-  centralDir.writeUInt16LE(name.length, 28)
-  centralDir.writeUInt16LE(0, 30)
-  centralDir.writeUInt16LE(0, 32)
-  centralDir.writeUInt16LE(0, 34)
-  centralDir.writeUInt16LE(0, 36)
-  centralDir.writeUInt32LE(0, 38)
-  centralDir.writeUInt32LE(0, 42)
-  name.copy(centralDir, 46)
+  let currentOffset = 0
+  const localChunks: Buffer[] = []
 
-  const centralOffset = localHeader.length + data.length
-  const centralSize = centralDir.length
+  for (const [filename, content] of Object.entries(files)) {
+    const name = Buffer.from(filename, "utf8")
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8")
+    const crc = calcCrc(data)
+
+    const localHeader = Buffer.alloc(30 + name.length)
+    localHeader.writeUInt32LE(0x04034b50, 0)
+    localHeader.writeUInt16LE(20, 4)
+    localHeader.writeUInt16LE(0, 6)
+    localHeader.writeUInt16LE(0, 8)
+    localHeader.writeUInt16LE(0, 10)
+    localHeader.writeUInt16LE(0, 12)
+    localHeader.writeUInt32LE(crc, 14)
+    localHeader.writeUInt32LE(data.length, 18)
+    localHeader.writeUInt32LE(data.length, 22)
+    localHeader.writeUInt16LE(name.length, 26)
+    localHeader.writeUInt16LE(0, 28)
+    name.copy(localHeader, 30)
+
+    fileEntries.push({
+      name,
+      data,
+      crc,
+      offset: currentOffset,
+      header: localHeader,
+    })
+
+    localChunks.push(localHeader, data)
+    currentOffset += localHeader.length + data.length
+  }
+
+  const centralOffset = currentOffset
+  const centralChunks: Buffer[] = []
+  let centralSize = 0
+
+  for (const entry of fileEntries) {
+    const centralDir = Buffer.alloc(46 + entry.name.length)
+    centralDir.writeUInt32LE(0x02014b50, 0)
+    centralDir.writeUInt16LE(20, 4)
+    centralDir.writeUInt16LE(20, 6)
+    centralDir.writeUInt16LE(0, 8)
+    centralDir.writeUInt16LE(0, 10)
+    centralDir.writeUInt16LE(0, 12)
+    centralDir.writeUInt16LE(0, 14)
+    centralDir.writeUInt32LE(entry.crc, 16)
+    centralDir.writeUInt32LE(entry.data.length, 20)
+    centralDir.writeUInt32LE(entry.data.length, 24)
+    centralDir.writeUInt16LE(entry.name.length, 28)
+    centralDir.writeUInt16LE(0, 30)
+    centralDir.writeUInt16LE(0, 32)
+    centralDir.writeUInt16LE(0, 34)
+    centralDir.writeUInt16LE(0, 36)
+    centralDir.writeUInt32LE(0, 38)
+    centralDir.writeUInt32LE(entry.offset, 42)
+    entry.name.copy(centralDir, 46)
+
+    centralChunks.push(centralDir)
+    centralSize += centralDir.length
+  }
 
   const endRecord = Buffer.alloc(22)
   endRecord.writeUInt32LE(0x06054b50, 0)
   endRecord.writeUInt16LE(0, 4)
   endRecord.writeUInt16LE(0, 6)
-  endRecord.writeUInt16LE(1, 8)
-  endRecord.writeUInt16LE(1, 10)
+  endRecord.writeUInt16LE(fileEntries.length, 8)
+  endRecord.writeUInt16LE(fileEntries.length, 10)
   endRecord.writeUInt32LE(centralSize, 12)
   endRecord.writeUInt32LE(centralOffset, 16)
   endRecord.writeUInt16LE(0, 20)
 
-  return Buffer.concat([localHeader, data, centralDir, endRecord])
+  return Buffer.concat([...localChunks, ...centralChunks, endRecord])
 }
 
 describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
@@ -118,19 +159,13 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
   let serverBaseUrl = ""
 
   function computeSha256(content: Buffer | string): string {
-    return crypto
-      .createHash("sha256")
-      .update(typeof content === "string" ? Buffer.from(content, "utf8") : content)
-      .digest("hex")
-      .toLowerCase()
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8")
+    return crypto.createHash("sha256").update(data).digest("hex")
   }
 
   function computeSha1(content: Buffer | string): string {
-    return crypto
-      .createHash("sha1")
-      .update(typeof content === "string" ? Buffer.from(content, "utf8") : content)
-      .digest("hex")
-      .toLowerCase()
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8")
+    return crypto.createHash("sha1").update(data).digest("hex")
   }
 
   beforeEach(async () => {
@@ -234,6 +269,21 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       }),
     )
     await fsp.writeFile(path.join(vanillaDir, `${mcVersion}.jar`), vanillaJarContent)
+
+    const libJarPath = path.join(
+      root,
+      "libraries",
+      "net",
+      "neoforged",
+      "neoforge",
+      neoForgeVersion,
+      `neoforge-${neoForgeVersion}-universal.jar`,
+    )
+    await fsp.mkdir(path.dirname(libJarPath), { recursive: true })
+    const libJarContent = "mock-neoforge-universal-jar"
+    const libJarSha1 = computeSha1(libJarContent)
+    await fsp.writeFile(libJarPath, libJarContent)
+
     await fsp.writeFile(
       path.join(nfDir, `${profileId}.json`),
       JSON.stringify({
@@ -243,26 +293,19 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
         type: "release",
         mainClass: "net.neoforged.neoforge.client.ClientModLoader",
         inheritsFrom: mcVersion,
-        libraries: [],
+        libraries: [
+          {
+            name: `net.neoforged:neoforge:${neoForgeVersion}:universal`,
+            downloads: {
+              artifact: {
+                path: `net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}-universal.jar`,
+                size: libJarContent.length,
+                sha1: libJarSha1,
+              },
+            },
+          },
+        ],
       }),
-    )
-
-    const libJarPath = path.join(
-      root,
-      "libraries",
-      "net",
-      "neoforged",
-      "neoforge",
-      neoForgeVersion,
-      `neoforge-${neoForgeVersion}.jar`,
-    )
-    await fsp.mkdir(path.dirname(libJarPath), { recursive: true })
-    const libJarContent = "mock-neoforge-jar"
-    const libJarSha1 = computeSha1(libJarContent)
-    await fsp.writeFile(libJarPath, libJarContent)
-    await fsp.writeFile(
-      path.join(path.dirname(libJarPath), `neoforge-${neoForgeVersion}-client.jar`),
-      "mock-neoforge-client-jar",
     )
 
     const installProfile = {
@@ -279,7 +322,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
           classpath: [],
           args: [],
           outputs: {
-            [`{ROOT}/libraries/net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}.jar`]: libJarSha1,
+            [`{ROOT}/libraries/net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}-universal.jar`]: libJarSha1,
           },
         },
       ],
@@ -880,7 +923,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
   it("12. checkMinecraftCoreReadiness detects missing processor outputs and marks needsNeoForge true", async () => {
     await createMockInstalledCore(instanceRoot, "1.21.1", "21.1.65")
 
-    const clientLib = path.join(instanceRoot, "libraries", "net", "neoforged", "neoforge", "21.1.65", "neoforge-21.1.65.jar")
+    const clientLib = path.join(instanceRoot, "libraries", "net", "neoforged", "neoforge", "21.1.65", "neoforge-21.1.65-universal.jar")
     if (fs.existsSync(clientLib)) {
       await fsp.unlink(clientLib)
     }
@@ -3370,4 +3413,344 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     expect(fs.existsSync(canonicalJar)).toBe(true)
     expect(await validateFileSha256(canonicalJar, zipBuffer.length, realSha256)).toBe(true)
   })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 64. Mandatory Regression 1: NeoForge Readiness accepts non-hardcoded artifacts (-universal.jar)
+   * ───────────────────────────────────────────────────────────── */
+  it("64. NeoForge readiness validates real declared profile libraries without hardcoded names, and fails when declared library is missing", async () => {
+    const mcVersion = "1.21.1"
+    const neoForgeVersion = "21.1.65"
+    const profileId = `${mcVersion}-neoforge-${neoForgeVersion}`
+
+    // Setup Vanilla asset index
+    const assetIndexContent = JSON.stringify({ objects: {} })
+    const assetIndexSha1 = computeSha1(assetIndexContent)
+    const indexesDir = path.join(instanceRoot, "assets", "indexes")
+    await fsp.mkdir(indexesDir, { recursive: true })
+    await fsp.writeFile(path.join(indexesDir, "17.json"), assetIndexContent)
+
+    // Setup Vanilla version and jar
+    const vanillaDir = path.join(instanceRoot, "versions", mcVersion)
+    await fsp.mkdir(vanillaDir, { recursive: true })
+    const vanillaJarContent = "mock-vanilla-jar"
+    const vanillaJarSha1 = computeSha1(vanillaJarContent)
+    await fsp.writeFile(path.join(vanillaDir, `${mcVersion}.jar`), vanillaJarContent)
+    await fsp.writeFile(
+      path.join(vanillaDir, `${mcVersion}.json`),
+      JSON.stringify({
+        id: mcVersion,
+        assets: "17",
+        time: "2024-08-08T00:00:00Z",
+        releaseTime: "2024-08-08T00:00:00Z",
+        type: "release",
+        mainClass: "net.minecraft.client.main.Main",
+        assetIndex: { id: "17", sha1: assetIndexSha1, size: assetIndexContent.length, totalSize: 0, url: `${serverBaseUrl}/asset-index.json` },
+        downloads: { client: { size: vanillaJarContent.length, sha1: vanillaJarSha1 } },
+        libraries: [],
+      }),
+    )
+
+    // Setup NeoForge profile declaring ONLY a universal jar artifact (no neoforge-<version>.jar nor -client.jar)
+    const nfDir = path.join(instanceRoot, "versions", profileId)
+    await fsp.mkdir(nfDir, { recursive: true })
+    const universalRelPath = `net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}-universal.jar`
+    const universalJarContent = "mock-universal-artifact-bytes"
+    const universalJarSha1 = computeSha1(universalJarContent)
+    const universalJarAbsPath = path.join(instanceRoot, "libraries", universalRelPath)
+    await fsp.mkdir(path.dirname(universalJarAbsPath), { recursive: true })
+    await fsp.writeFile(universalJarAbsPath, universalJarContent)
+
+    // Declare in version.json
+    await fsp.writeFile(
+      path.join(nfDir, `${profileId}.json`),
+      JSON.stringify({
+        id: profileId,
+        time: "2024-08-08T00:00:00Z",
+        releaseTime: "2024-08-08T00:00:00Z",
+        type: "release",
+        mainClass: "net.neoforged.neoforge.client.ClientModLoader",
+        inheritsFrom: mcVersion,
+        libraries: [
+          {
+            name: `net.neoforged:neoforge:${neoForgeVersion}:universal`,
+            downloads: {
+              artifact: {
+                path: universalRelPath,
+                size: universalJarContent.length,
+                sha1: universalJarSha1,
+              },
+            },
+          },
+        ],
+      }),
+    )
+
+    // Ensure hardcoded names do NOT exist
+    const legacyJar1 = path.join(instanceRoot, "libraries", "net", "neoforged", "neoforge", neoForgeVersion, `neoforge-${neoForgeVersion}.jar`)
+    const legacyJar2 = path.join(instanceRoot, "libraries", "net", "neoforged", "neoforge", neoForgeVersion, `neoforge-${neoForgeVersion}-client.jar`)
+    expect(fs.existsSync(legacyJar1)).toBe(false)
+    expect(fs.existsSync(legacyJar2)).toBe(false)
+
+    // 1. Check readiness: must succeed authoritatively based on declared library
+    const readiness = await checkMinecraftCoreReadiness({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+    })
+    expect(readiness.isCoreInstalled).toBe(true)
+    expect(readiness.needsNeoForge).toBe(false)
+    expect(readiness.resolvedVersionId).toBe(profileId)
+
+    // 2. If the declared library is removed, readiness must fail
+    await fsp.unlink(universalJarAbsPath)
+    const failedReadiness = await checkMinecraftCoreReadiness({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+    })
+    expect(failedReadiness.isCoreInstalled).toBe(false)
+    expect(failedReadiness.needsNeoForge).toBe(true)
+    expect(failedReadiness.missingLibraries).toContain(universalJarAbsPath)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 65. Mandatory Regression 2: Fresh install without core-state.json validates readiness before saving core-state.json
+   * ───────────────────────────────────────────────────────────── */
+  it("65. Fresh install without core-state.json runs processors, validates final readiness with plan.installProfile, and writes core-state.json", async () => {
+    const { javaCliPath } = await createMockJdk21(appDataRoot)
+    const mcVersion = "1.21.1"
+    const neoForgeVersion = "21.1.65"
+    const profileId = `${mcVersion}-neoforge-${neoForgeVersion}`
+
+    // Setup full installed core on disk
+    await createMockInstalledCore(instanceRoot, mcVersion, neoForgeVersion)
+
+    // Ensure NO core-state.json exists
+    const coreStateFile = path.join(instanceRoot, ".hikat", "core-state.json")
+    if (fs.existsSync(coreStateFile)) await fsp.unlink(coreStateFile)
+    expect(fs.existsSync(coreStateFile)).toBe(false)
+
+    const libJarSha1 = computeSha1("mock-neoforge-universal-jar")
+    const installProfile = {
+      spec: 1,
+      profile: "neoforge",
+      version: neoForgeVersion,
+      minecraft: mcVersion,
+      json: `/versions/${profileId}/${profileId}.json`,
+      path: `net.neoforged:neoforge:${neoForgeVersion}`,
+      processors: [
+        {
+          sides: ["client"],
+          jar: `net.neoforged:neoforge:${neoForgeVersion}`,
+          classpath: [],
+          args: [],
+          outputs: {
+            [`{ROOT}/libraries/net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}-universal.jar`]: libJarSha1,
+          },
+        },
+      ],
+      libraries: [],
+    }
+
+    const preparedPlan = {
+      totalCoreBytes: 0,
+      reusableCoreBytes: 0,
+      bootstrapNetworkBytes: 0,
+      needsNeoForge: false,
+      needsVanilla: false,
+      resolvedVersionId: profileId,
+      installProfile,
+      mojangPackage: { id: mcVersion },
+      artifacts: new Map(),
+      readiness: { isCoreInstalled: false, needsNeoForge: false, resolvedVersionId: profileId },
+    }
+
+    const result = await installOrRepairMinecraftCore({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+      javaCliPath,
+      preparedPlan,
+    })
+
+    expect(result.success).toBe(true)
+    expect(fs.existsSync(coreStateFile)).toBe(true)
+    const savedState = JSON.parse(await fsp.readFile(coreStateFile, "utf8"))
+    expect(savedState.minecraftVersion).toBe(mcVersion)
+    expect(savedState.neoForgeVersion).toBe(neoForgeVersion)
+    expect(savedState.installProfile).toBeDefined()
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 66. Mandatory Regression 3: CorePlan includes install_profile + version.json libraries without duplicates
+   * ───────────────────────────────────────────────────────────── */
+  it("66. CorePlan includes libraries from install_profile.json and embedded version.json without duplicates", async () => {
+    const mcVersion = "1.21.1"
+    const neoForgeVersion = "21.1.65"
+
+    const mockInstallProfile = {
+      spec: 1,
+      profile: "neoforge",
+      version: neoForgeVersion,
+      minecraft: mcVersion,
+      libraries: [
+        {
+          name: "net.neoforged:installertools:1.3.0",
+          downloads: {
+            artifact: {
+              path: "net/neoforged/installertools/1.3.0/installertools-1.3.0.jar",
+              size: 500,
+              sha1: "abc1234567890123456789012345678901234567",
+              url: "https://maven.neoforged.net/releases/net/neoforged/installertools/1.3.0/installertools-1.3.0.jar",
+            },
+          },
+        },
+      ],
+      processors: [
+        {
+          sides: ["client"],
+          jar: "net.neoforged.installertools:cli:1.0.0",
+          classpath: ["net.neoforged:bus:8.0.0"],
+          args: [],
+        },
+      ],
+    }
+
+    const mockEmbeddedVersionJson = {
+      id: `${mcVersion}-neoforge-${neoForgeVersion}`,
+      inheritsFrom: mcVersion,
+      libraries: [
+        {
+          name: `net.neoforged:neoforge:${neoForgeVersion}:universal`,
+          downloads: {
+            artifact: {
+              path: `net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}-universal.jar`,
+              size: 2000,
+              sha1: "def1234567890123456789012345678901234567",
+              url: `https://maven.neoforged.net/releases/net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}-universal.jar`,
+            },
+          },
+        },
+        // Duplicate library with install_profile:
+        {
+          name: "net.neoforged:installertools:1.3.0",
+          downloads: {
+            artifact: {
+              path: "net/neoforged/installertools/1.3.0/installertools-1.3.0.jar",
+              size: 500,
+              sha1: "abc1234567890123456789012345678901234567",
+              url: "https://maven.neoforged.net/releases/net/neoforged/installertools/1.3.0/installertools-1.3.0.jar",
+            },
+          },
+        },
+      ],
+    }
+
+    const zipBuffer = createZipWithFiles({
+      "install_profile.json": JSON.stringify(mockInstallProfile),
+      "version.json": JSON.stringify(mockEmbeddedVersionJson),
+    })
+    const realSha256 = computeSha256(zipBuffer)
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => realSha256 } as any
+      }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
+      }
+      return { ok: false, status: 404 } as any
+    })
+
+    const plan = await buildCoreInstallPlan({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+      customFetch: mockFetch,
+    })
+
+    const artifacts = Array.from(plan.artifacts.values())
+    const relativePaths = artifacts.map((a: any) => a.relativePath.replace(/\\/g, "/"))
+
+    // Check installProfile library is present
+    expect(relativePaths).toContain("libraries/net/neoforged/installertools/1.3.0/installertools-1.3.0.jar")
+
+    // Check embedded version.json library is present
+    expect(relativePaths).toContain(`libraries/net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}-universal.jar`)
+
+    // Check processor jar is present
+    expect(relativePaths).toContain("libraries/net/neoforged/installertools/cli/1.0.0/cli-1.0.0.jar")
+
+    // Check processor classpath library is present
+    expect(relativePaths).toContain("libraries/net/neoforged/bus/8.0.0/bus-8.0.0.jar")
+
+    // Verify zero duplicates: relativePaths Set size equals array length
+    const uniquePaths = new Set(relativePaths)
+    expect(uniquePaths.size).toBe(relativePaths.length)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 67. Mandatory Regression 4: Network boundary - ZERO network during and after INSTALLING phase
+   * ───────────────────────────────────────────────────────────── */
+  it("67. Strict Network Boundary: Any network call during or after INSTALLING phase throws and fails", async () => {
+    const { javaCliPath } = await createMockJdk21(appDataRoot)
+    const mcVersion = "1.21.1"
+    const neoForgeVersion = "21.1.65"
+
+    // Pre-create full installed core so local promotion and readiness pass with zero errors
+    await createMockInstalledCore(instanceRoot, mcVersion, neoForgeVersion)
+
+    let hasEnteredInstalling = false
+    let networkAttemptedAfterInstalling = false
+
+    const guardedFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (hasEnteredInstalling) {
+        networkAttemptedAfterInstalling = true
+        throw new Error(`CRITICAL VIOLATION: Network fetch attempted after entering INSTALLING phase: ${url}`)
+      }
+      return { ok: true, json: async () => ({}) } as any
+    })
+
+    const preparedPlan = {
+      totalCoreBytes: 0,
+      reusableCoreBytes: 0,
+      bootstrapNetworkBytes: 0,
+      needsNeoForge: false,
+      needsVanilla: false,
+      resolvedVersionId: `${mcVersion}-neoforge-${neoForgeVersion}`,
+      installProfile: null,
+      mojangPackage: { id: mcVersion },
+      artifacts: new Map(),
+      readiness: { isCoreInstalled: false, needsNeoForge: false, resolvedVersionId: `${mcVersion}-neoforge-${neoForgeVersion}` },
+    }
+
+    const phasesSeen: string[] = []
+
+    const result = await installOrRepairMinecraftCore({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+      javaCliPath,
+      preparedPlan,
+      onPhaseChange: (phase: string) => {
+        phasesSeen.push(phase)
+        if (phase === "INSTALLING") {
+          hasEnteredInstalling = true
+        }
+      },
+      customFetch: guardedFetch,
+    })
+
+    expect(result.success).toBe(true)
+    expect(hasEnteredInstalling).toBe(true)
+    expect(networkAttemptedAfterInstalling).toBe(false)
+    expect(phasesSeen).toContain("INSTALLING")
+    expect(phasesSeen).toContain("VERIFYING")
+  })
 })
+

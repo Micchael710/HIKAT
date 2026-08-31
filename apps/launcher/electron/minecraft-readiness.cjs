@@ -93,14 +93,19 @@ function getNeoForgeProfileCandidates(minecraftVersion, neoForgeVersion) {
  * Checks local readiness of Minecraft Core and NeoForge installation.
  * Local-only, fast, zero network.
  */
-async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neoForgeVersion }) {
+async function checkMinecraftCoreReadiness({
+  instanceRoot,
+  minecraftVersion,
+  neoForgeVersion,
+  installProfile: explicitInstallProfile,
+}) {
   const cleanMc = (minecraftVersion || "").trim()
   const cleanNf = normalizeNeoForgeProfileVersion(neoForgeVersion || "")
   const needsNeoForgeRequested = Boolean(cleanNf)
   const mc = MinecraftFolder.from(instanceRoot)
 
   const issues = []
-  let installProfile = null
+  let installProfile = explicitInstallProfile || null
 
   // 1. Check Vanilla Version JSON
   const vanillaJsonPath = mc.getVersionJson(cleanMc)
@@ -132,12 +137,15 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
 
   // 3. Check Vanilla Libraries
   const missingLibraries = []
+  const checkedLibraryPaths = new Set()
+
   if (vanillaVersion?.libraries && Array.isArray(vanillaVersion.libraries)) {
     const currentOs = getCurrentPlatformOsKey()
     for (const lib of vanillaVersion.libraries) {
       // Check artifact
       if (lib.downloads?.artifact) {
         const libPath = mc.getLibraryByPath(lib.downloads.artifact.path)
+        checkedLibraryPaths.add(libPath)
         const ok = await validateFileIntegrity(
           libPath,
           lib.downloads.artifact.size,
@@ -153,6 +161,7 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
         if (classifierKey && lib.downloads.classifiers[classifierKey]) {
           const classArtifact = lib.downloads.classifiers[classifierKey]
           const nativePath = mc.getLibraryByPath(classArtifact.path)
+          checkedLibraryPaths.add(nativePath)
           const ok = await validateFileIntegrity(
             nativePath,
             classArtifact.size,
@@ -205,6 +214,7 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
   if (needsNeoForgeRequested) {
     const candidates = getNeoForgeProfileCandidates(cleanMc, cleanNf)
     let foundProfileJson = null
+    let parsedNeoForgeVersion = null
 
     for (const candidate of candidates) {
       const pJson = mc.getVersionJson(candidate)
@@ -214,47 +224,64 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
           if (parsed) {
             foundProfileJson = pJson
             installedNeoForgeVersionId = candidate
+            parsedNeoForgeVersion = parsed
             break
           }
         } catch (_) {}
       }
     }
 
-    if (!foundProfileJson) {
+    if (!foundProfileJson || !parsedNeoForgeVersion) {
       issues.push(`NeoForge version profile missing for ${cleanMc}-neoforge-${cleanNf}`)
-    }
+    } else {
+      // Validate libraries declared by the installed NeoForge profile
+      if (parsedNeoForgeVersion.libraries && Array.isArray(parsedNeoForgeVersion.libraries)) {
+        const resolvedNfLibs = Version.resolveLibraries(parsedNeoForgeVersion.libraries)
+        if (Array.isArray(resolvedNfLibs)) {
+          for (const lib of resolvedNfLibs) {
+            const libRelPath = lib.download?.path || lib.path
+            if (!libRelPath) continue
+            const libPath = mc.getLibraryByPath(libRelPath)
+            if (checkedLibraryPaths.has(libPath)) continue
+            checkedLibraryPaths.add(libPath)
 
-    // Check cached core state or install_profile.json
-    const state = await loadCoreState(instanceRoot)
-    if (state?.installProfile && typeof state.installProfile === "object") {
-      installProfile = state.installProfile
-      const profileNf = normalizeNeoForgeProfileVersion(installProfile.version || "")
-      if (profileNf && profileNf !== cleanNf) {
-        issues.push(`InstallProfile version mismatch: found ${installProfile.version}, expected ${cleanNf}`)
+            const exists = fs.existsSync(libPath)
+            if (!exists) {
+              missingLibraries.push(libPath)
+              issues.push(`NeoForge library missing: ${libPath}`)
+            } else {
+              const expectedSha1 =
+                lib.download?.sha1 ||
+                (Array.isArray(lib.checksums) && lib.checksums.length > 0 ? lib.checksums[0] : "") ||
+                ""
+              const expectedSize =
+                typeof lib.download?.size === "number" && lib.download.size > 0 ? lib.download.size : -1
+              if (expectedSha1 && typeof expectedSha1 === "string" && expectedSha1.trim()) {
+                const ok = await validateFileIntegrity(libPath, expectedSize, expectedSha1)
+                if (!ok) {
+                  missingLibraries.push(libPath)
+                  issues.push(`NeoForge library integrity mismatch: ${libPath}`)
+                }
+              }
+            }
+          }
+        }
       }
     }
 
-    // Check main NeoForge client library JAR in libraries
-    const mainNfJar = path.join(
-      instanceRoot,
-      "libraries",
-      "net",
-      "neoforged",
-      "neoforge",
-      cleanNf,
-      `neoforge-${cleanNf}.jar`,
-    )
-    const clientNfJar = path.join(
-      instanceRoot,
-      "libraries",
-      "net",
-      "neoforged",
-      "neoforge",
-      cleanNf,
-      `neoforge-${cleanNf}-client.jar`,
-    )
-    if (foundProfileJson && !fs.existsSync(mainNfJar) && !fs.existsSync(clientNfJar)) {
-      issues.push(`NeoForge main client library missing in libraries/net/neoforged/neoforge/${cleanNf}`)
+    // Check cached core state or install_profile.json
+    if (!installProfile) {
+      const state = await loadCoreState(instanceRoot)
+      if (state?.installProfile && typeof state.installProfile === "object") {
+        installProfile = state.installProfile
+      }
+    }
+
+    if (installProfile) {
+      const profileNf = normalizeNeoForgeProfileVersion(installProfile.version || "")
+      if (profileNf && cleanNf && profileNf !== cleanNf) {
+        issues.push(`InstallProfile version mismatch: found ${installProfile.version}, expected ${cleanNf}`)
+      }
     }
 
     // Verify NeoForge installer profile processor outputs if available

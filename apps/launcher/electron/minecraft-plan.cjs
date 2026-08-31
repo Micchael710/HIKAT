@@ -2,7 +2,7 @@ const fs = require("fs")
 const fsp = fs.promises
 const path = require("path")
 const crypto = require("crypto")
-const { MinecraftFolder, Version } = require("@xmcl/core")
+const { MinecraftFolder, Version, LibraryInfo } = require("@xmcl/core")
 const { getVersionList } = require("@xmcl/installer")
 
 const {
@@ -16,6 +16,7 @@ const {
   ensurePlannerInstaller,
   canonicalNeoForgeInstallerPath,
   promotePlannerInstallerToCanonical,
+  readVersionJsonFromJar,
 } = require("./planner-cache.cjs")
 const {
   checkMinecraftCoreReadiness,
@@ -83,6 +84,7 @@ async function buildCoreInstallPlan({
   let bootstrapNetworkBytes = 0
   let reusableCoreBytes = 0
   let installProfile = readiness.installProfile || null
+  let embeddedVersionJson = null
   let plannerInstallerInfo = {
     path: null,
     sizeBytes: 0,
@@ -113,6 +115,12 @@ async function buildCoreInstallPlan({
       sizeBytes: plannerResult.installerSizeBytes,
       sha256: plannerResult.installerSha256,
       status,
+    }
+
+    if (plannerResult.installerJarPath && fs.existsSync(plannerResult.installerJarPath)) {
+      try {
+        embeddedVersionJson = await readVersionJsonFromJar(plannerResult.installerJarPath)
+      } catch (_) {}
     }
 
     if (plannerResult.wasCached) {
@@ -318,9 +326,119 @@ async function buildCoreInstallPlan({
           relativePath: path.join("libraries", artifact.path),
           expectedSize: artifact.size,
           expectedSha1: artifact.sha1,
-          downloadUrl: artifact.url || `https://maven.neoforged.net/releases/${artifact.path}`,
+          downloadUrl: artifact.url || (artifact.path.startsWith("net/neoforged") ? `https://maven.neoforged.net/releases/${artifact.path}` : `https://libraries.minecraft.net/${artifact.path}`),
           role: "neoforge-library",
         })
+      } else if (lib.name) {
+        try {
+          const info = LibraryInfo.resolve(lib.name)
+          if (info?.path) {
+            registerArtifact({
+              relativePath: path.join("libraries", info.path),
+              expectedSize: null,
+              expectedSha1: null,
+              downloadUrl: lib.url
+                ? (lib.url.endsWith("/") ? `${lib.url}${info.path}` : `${lib.url}/${info.path}`)
+                : (info.path.startsWith("net/neoforged") ? `https://maven.neoforged.net/releases/${info.path}` : `https://libraries.minecraft.net/${info.path}`),
+              role: "neoforge-library",
+            })
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // 3.f NeoForge Embedded version.json Libraries
+  if (embeddedVersionJson?.libraries && Array.isArray(embeddedVersionJson.libraries)) {
+    for (const lib of embeddedVersionJson.libraries) {
+      let isAllowed = true
+      if (Array.isArray(lib.rules) && lib.rules.length > 0) {
+        isAllowed = false
+        for (const rule of lib.rules) {
+          const osMatch = !rule.os || rule.os.name === currentOsKey
+          if (osMatch) {
+            isAllowed = rule.action === "allow"
+          }
+        }
+      }
+      if (!isAllowed) continue
+
+      const artifact = lib.downloads?.artifact
+      if (artifact?.path) {
+        registerArtifact({
+          relativePath: path.join("libraries", artifact.path),
+          expectedSize: artifact.size,
+          expectedSha1: artifact.sha1,
+          downloadUrl: artifact.url || (artifact.path.startsWith("net/neoforged") ? `https://maven.neoforged.net/releases/${artifact.path}` : `https://libraries.minecraft.net/${artifact.path}`),
+          role: "neoforge-library",
+        })
+      } else if (lib.name) {
+        try {
+          const info = LibraryInfo.resolve(lib.name)
+          if (info?.path) {
+            registerArtifact({
+              relativePath: path.join("libraries", info.path),
+              expectedSize: null,
+              expectedSha1: null,
+              downloadUrl: lib.url
+                ? (lib.url.endsWith("/") ? `${lib.url}${info.path}` : `${lib.url}/${info.path}`)
+                : (info.path.startsWith("net/neoforged") ? `https://maven.neoforged.net/releases/${info.path}` : `https://libraries.minecraft.net/${info.path}`),
+              role: "neoforge-library",
+            })
+          }
+        } catch (_) {}
+      }
+
+      if (lib.natives && typeof lib.natives === "object" && lib.downloads?.classifiers) {
+        const nativeClassifierKey = lib.natives[currentOsKey]
+        if (nativeClassifierKey && lib.downloads.classifiers[nativeClassifierKey]) {
+          const classifierArtifact = lib.downloads.classifiers[nativeClassifierKey]
+          if (classifierArtifact?.path) {
+            registerArtifact({
+              relativePath: path.join("libraries", classifierArtifact.path),
+              expectedSize: classifierArtifact.size,
+              expectedSha1: classifierArtifact.sha1,
+              downloadUrl: classifierArtifact.url,
+              role: "neoforge-native",
+            })
+          }
+        }
+      }
+    }
+  }
+
+  // 3.g NeoForge Processor Jars & Classpath
+  if (installProfile?.processors && Array.isArray(installProfile.processors)) {
+    for (const proc of installProfile.processors) {
+      if (proc.jar) {
+        try {
+          const info = LibraryInfo.resolve(proc.jar)
+          if (info?.path) {
+            registerArtifact({
+              relativePath: path.join("libraries", info.path),
+              expectedSize: null,
+              expectedSha1: null,
+              downloadUrl: `https://maven.neoforged.net/releases/${info.path}`,
+              role: "processor-library",
+            })
+          }
+        } catch (_) {}
+      }
+      if (Array.isArray(proc.classpath)) {
+        for (const cp of proc.classpath) {
+          try {
+            const info = LibraryInfo.resolve(cp)
+            if (info?.path) {
+              registerArtifact({
+                relativePath: path.join("libraries", info.path),
+                expectedSize: null,
+                expectedSha1: null,
+                downloadUrl: `https://maven.neoforged.net/releases/${info.path}`,
+                role: "processor-library",
+              })
+            }
+          } catch (_) {}
+        }
       }
     }
   }
