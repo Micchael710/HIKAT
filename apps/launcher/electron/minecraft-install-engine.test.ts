@@ -5,6 +5,8 @@ import fs from "fs"
 import os from "os"
 import crypto from "crypto"
 import http from "http"
+import child_process from "child_process"
+import { EventEmitter } from "events"
 
 // @ts-expect-error CJS module
 import {
@@ -3752,5 +3754,280 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     expect(phasesSeen).toContain("INSTALLING")
     expect(phasesSeen).toContain("VERIFYING")
   })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 68. Mandatory Integration: NeoForge with needsNeoForge=true, Mojang mappings in CorePlan, ZERO network during INSTALLING
+   * ───────────────────────────────────────────────────────────── */
+  it("68. NeoForge with needsNeoForge=true downloads processor remote resources (Mojang mappings) in CorePlan and executes postProcess with 0 network calls during INSTALLING", async () => {
+    const { javaExe } = await createMockJdk21(appDataRoot)
+    const mcVersion = "1.21.1"
+    const neoForgeVersion = "21.1.65"
+    const profileId = `${mcVersion}-neoforge-${neoForgeVersion}`
+
+    // 1. Prepare Mojang Package with client_mappings
+    const mappingsContent = "mock-official-mojang-mappings-line-1\nmock-official-mojang-mappings-line-2"
+    const mappingsSha1 = computeSha1(mappingsContent)
+    const clientJarContent = "mock-client-jar-binary-data"
+    const clientJarSha1 = computeSha1(clientJarContent)
+    const assetIndexContent = JSON.stringify({ objects: {} })
+    const assetIndexSha1 = computeSha1(assetIndexContent)
+
+    const universalJarContent = "mock-neoforge-universal-library"
+    const universalJarSha1 = computeSha1(universalJarContent)
+    const procCliJarBuffer = createZipWithFiles({
+      "META-INF/MANIFEST.MF": "Manifest-Version: 1.0\r\nMain-Class: net.neoforged.installertools.cli.Main\r\n",
+    })
+    const procCliJarSha1 = computeSha1(procCliJarBuffer)
+
+    const mojangPackage = {
+      id: mcVersion,
+      assets: "17",
+      time: "2024-08-08T00:00:00Z",
+      releaseTime: "2024-08-08T00:00:00Z",
+      type: "release",
+      mainClass: "net.minecraft.client.main.Main",
+      assetIndex: {
+        id: "17",
+        sha1: assetIndexSha1,
+        size: assetIndexContent.length,
+        totalSize: 0,
+        url: `${serverBaseUrl}/asset-index.json`,
+      },
+      downloads: {
+        client: {
+          size: clientJarContent.length,
+          sha1: clientJarSha1,
+          url: `${serverBaseUrl}/client.jar`,
+        },
+        client_mappings: {
+          size: mappingsContent.length,
+          sha1: mappingsSha1,
+          url: `${serverBaseUrl}/client.txt`,
+        },
+      },
+      libraries: [],
+    }
+
+    // 2. Prepare NeoForge Installer containing install_profile.json & version.json
+    const mockInstallProfile = {
+      spec: 1,
+      profile: "neoforge",
+      version: neoForgeVersion,
+      minecraft: mcVersion,
+      data: {
+        MOJMAPS: {
+          client: `[net.minecraft:client:${mcVersion}:mappings@txt]`,
+          server: `[net.minecraft:server:${mcVersion}:mappings@txt]`,
+        },
+      },
+      processors: [
+        {
+          sides: ["client"],
+          jar: "net.neoforged.installertools:cli:1.0.0",
+          classpath: [],
+          args: [
+            "--task", "DOWNLOAD_MOJMAPS",
+            "--version", "{MINECRAFT_VERSION}",
+            "--side", "{SIDE}",
+            "--output", "{MOJMAPS}",
+          ],
+          outputs: {
+            [`{ROOT}/libraries/net/minecraft/client/${mcVersion}/client-${mcVersion}-mappings.txt`]: mappingsSha1,
+          },
+        },
+      ],
+      libraries: [
+        {
+          name: "net.neoforged.installertools:cli:1.0.0",
+          downloads: {
+            artifact: {
+              path: "net/neoforged/installertools/cli/1.0.0/cli-1.0.0.jar",
+              size: procCliJarBuffer.length,
+              sha1: procCliJarSha1,
+              url: `${serverBaseUrl}/cli-1.0.0.jar`,
+            },
+          },
+        },
+      ],
+    }
+
+    const mockEmbeddedVersionJson = {
+      id: profileId,
+      time: "2024-08-08T00:00:00Z",
+      releaseTime: "2024-08-08T00:00:00Z",
+      type: "release",
+      mainClass: "net.neoforged.neoforge.client.ClientModLoader",
+      inheritsFrom: mcVersion,
+      libraries: [
+        {
+          name: `net.neoforged:neoforge:${neoForgeVersion}:universal`,
+          downloads: {
+            artifact: {
+              path: `net/neoforged/neoforge/${neoForgeVersion}/neoforge-${neoForgeVersion}-universal.jar`,
+              size: universalJarContent.length,
+              sha1: universalJarSha1,
+              url: `${serverBaseUrl}/neoforge-${neoForgeVersion}-universal.jar`,
+            },
+          },
+        },
+      ],
+    }
+
+    const installerZipBuffer = createZipWithFiles({
+      "install_profile.json": JSON.stringify(mockInstallProfile),
+      "version.json": JSON.stringify(mockEmbeddedVersionJson),
+    })
+    const installerSha256 = computeSha256(installerZipBuffer)
+
+    // 3. Strict Network Fetcher with Tripwire once INSTALLING begins
+    let hasEnteredInstalling = false
+    let networkAttemptedAfterInstalling = false
+
+    const guardedFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (hasEnteredInstalling) {
+        networkAttemptedAfterInstalling = true
+        throw new Error(`CRITICAL TRIPWIRE VIOLATION: Fetch attempted after INSTALLING: ${url}`)
+      }
+
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => installerSha256 } as any
+      }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(installerZipBuffer.length) }),
+          arrayBuffer: async () => installerZipBuffer,
+          buffer: async () => installerZipBuffer,
+        } as any
+      }
+      if (typeof url === "string" && url.includes("asset-index.json")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => ({ objects: {} }),
+          text: async () => assetIndexContent,
+        } as any
+      }
+      if (typeof url === "string" && url.includes("client.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(clientJarContent.length) }),
+          arrayBuffer: async () => Buffer.from(clientJarContent, "utf8"),
+          buffer: async () => Buffer.from(clientJarContent, "utf8"),
+        } as any
+      }
+      if (typeof url === "string" && url.includes("client.txt")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(mappingsContent.length) }),
+          arrayBuffer: async () => Buffer.from(mappingsContent, "utf8"),
+          buffer: async () => Buffer.from(mappingsContent, "utf8"),
+        } as any
+      }
+      if (typeof url === "string" && url.includes("cli-1.0.0.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(procCliJarBuffer.length) }),
+          arrayBuffer: async () => procCliJarBuffer,
+          buffer: async () => procCliJarBuffer,
+        } as any
+      }
+      if (typeof url === "string" && url.includes("universal.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(universalJarContent.length) }),
+          arrayBuffer: async () => Buffer.from(universalJarContent, "utf8"),
+          buffer: async () => Buffer.from(universalJarContent, "utf8"),
+        } as any
+      }
+
+      return { ok: false, status: 404 } as any
+    })
+
+    // Step A: Build Core Install Plan
+    const plan = await buildCoreInstallPlan({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+      mojangPackage,
+      customFetch: guardedFetch,
+    })
+
+    // Confirm needsNeoForge is TRUE
+    expect(plan.needsNeoForge).toBe(true)
+
+    // Confirm Mojang client mappings are registered in CorePlan
+    const mappingsArtifactKey = "libraries/net/minecraft/client/1.21.1/client-1.21.1-mappings.txt"
+    const mappingsArtifact = plan.artifacts.get(mappingsArtifactKey)
+    expect(mappingsArtifact).toBeDefined()
+    expect(mappingsArtifact.role).toBe("mojang-mappings")
+    expect(mappingsArtifact.expectedSha1).toBe(mappingsSha1)
+
+    // Step B: Download All Core Artifacts during DOWNLOADING phase
+    await downloadAllCoreArtifacts({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+      artifacts: plan.artifacts,
+      customFetch: guardedFetch,
+    })
+
+    // Confirm Mojang mappings file exists on disk BEFORE INSTALLING phase
+    const mappingsDiskPath = path.join(instanceRoot, "libraries", "net", "minecraft", "client", mcVersion, `client-${mcVersion}-mappings.txt`)
+    expect(fs.existsSync(mappingsDiskPath)).toBe(true)
+    expect(await fsp.readFile(mappingsDiskPath, "utf8")).toBe(mappingsContent)
+
+    // Step C: Run installOrRepairMinecraftCore through INSTALLING and VERIFYING
+    const spawnSpy = vi.spyOn(child_process, "spawn").mockImplementation(() => {
+      const emitter = new EventEmitter() as any
+      emitter.stdout = new EventEmitter() as any
+      emitter.stdout.setEncoding = vi.fn()
+      emitter.stderr = new EventEmitter() as any
+      emitter.stderr.setEncoding = vi.fn()
+      emitter.kill = vi.fn()
+      setTimeout(() => {
+        emitter.emit("exit", 0, null)
+        emitter.emit("close", 0, null)
+      }, 5)
+      return emitter
+    })
+
+    const phasesSeen: string[] = []
+    const result = await installOrRepairMinecraftCore({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+      javaCliPath: javaExe,
+      preparedPlan: plan,
+      onPhaseChange: (phase: string) => {
+        phasesSeen.push(phase)
+        if (phase === "INSTALLING") {
+          hasEnteredInstalling = true
+        }
+      },
+      customFetch: guardedFetch,
+    })
+
+    // Assertions
+    expect(result.success).toBe(true)
+    expect(hasEnteredInstalling).toBe(true)
+    expect(networkAttemptedAfterInstalling).toBe(false)
+    expect(spawnSpy).toHaveBeenCalled()
+    expect(phasesSeen).toContain("INSTALLING")
+    expect(phasesSeen).toContain("VERIFYING")
+
+    spawnSpy.mockRestore()
+
+    // Confirm final readiness check passes authoritatively
+    const finalReadiness = await checkMinecraftCoreReadiness({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      neoForgeVersion,
+    })
+    expect(finalReadiness.isCoreInstalled).toBe(true)
+    expect(finalReadiness.needsNeoForge).toBe(false)
+    expect(finalReadiness.resolvedVersionId).toBe(profileId)
+  })
 })
+
 

@@ -34,6 +34,7 @@ async function buildCoreInstallPlan({
   instanceRoot,
   minecraftVersion,
   neoForgeVersion,
+  mojangPackage: inputMojangPackage = null,
   mode = "planning",
   signal,
   cancelSignal,
@@ -129,9 +130,9 @@ async function buildCoreInstallPlan({
   }
 
   // 2. Fetch / load Mojang version package metadata
-  let mojangPackage = null
+  let mojangPackage = inputMojangPackage || null
   const vanillaJsonPath = path.join(instanceRoot, "versions", cleanMc, `${cleanMc}.json`)
-  if (fs.existsSync(vanillaJsonPath)) {
+  if (!mojangPackage && fs.existsSync(vanillaJsonPath)) {
     try {
       mojangPackage = JSON.parse(await fsp.readFile(vanillaJsonPath, "utf8"))
     } catch (_) {}
@@ -184,6 +185,53 @@ async function buildCoreInstallPlan({
       expectedSha1: clientDownload.sha1,
       downloadUrl: clientDownload.url,
       role: "client-jar",
+    })
+  }
+
+  // 3.a.ii Official Mojang Client Mappings (required for NeoForge/Forge processors e.g. DOWNLOAD_MOJMAPS)
+  const clientMappingsDownload = mojangPackage?.downloads?.client_mappings
+  if (clientMappingsDownload) {
+    let clientMappingsRelPath = path.join("libraries", "net", "minecraft", "client", cleanMc, `client-${cleanMc}-mappings.txt`)
+    if (installProfile?.data) {
+      const mojmapsCoord = installProfile.data.MOJMAPS?.client || installProfile.data.MAPPINGS?.client
+      if (typeof mojmapsCoord === "string" && mojmapsCoord.startsWith("[") && mojmapsCoord.endsWith("]")) {
+        try {
+          const info = LibraryInfo.resolve(mojmapsCoord.slice(1, -1))
+          if (info?.path) {
+            clientMappingsRelPath = path.join("libraries", info.path)
+          }
+        } catch (_) {}
+      }
+    }
+    registerArtifact({
+      relativePath: clientMappingsRelPath,
+      expectedSize: clientMappingsDownload.size,
+      expectedSha1: clientMappingsDownload.sha1,
+      downloadUrl: clientMappingsDownload.url,
+      role: "mojang-mappings",
+    })
+  }
+
+  const serverMappingsDownload = mojangPackage?.downloads?.server_mappings
+  if (serverMappingsDownload) {
+    let serverMappingsRelPath = path.join("libraries", "net", "minecraft", "server", cleanMc, `server-${cleanMc}-mappings.txt`)
+    if (installProfile?.data) {
+      const serverMapsCoord = installProfile.data.SERVER_MAPPINGS?.server || installProfile.data.MOJMAPS?.server || installProfile.data.MAPPINGS?.server
+      if (typeof serverMapsCoord === "string" && serverMapsCoord.startsWith("[") && serverMapsCoord.endsWith("]")) {
+        try {
+          const info = LibraryInfo.resolve(serverMapsCoord.slice(1, -1))
+          if (info?.path) {
+            serverMappingsRelPath = path.join("libraries", info.path)
+          }
+        } catch (_) {}
+      }
+    }
+    registerArtifact({
+      relativePath: serverMappingsRelPath,
+      expectedSize: serverMappingsDownload.size,
+      expectedSha1: serverMappingsDownload.sha1,
+      downloadUrl: serverMappingsDownload.url,
+      role: "mojang-mappings",
     })
   }
 
@@ -439,6 +487,69 @@ async function buildCoreInstallPlan({
             }
           } catch (_) {}
         }
+      }
+    }
+  }
+
+  // 3.h NeoForge Processor Data & Remote Resources
+  if (installProfile?.data && typeof installProfile.data === "object") {
+    for (const [key, dataEntry] of Object.entries(installProfile.data)) {
+      if (!dataEntry || typeof dataEntry !== "object") continue
+      const targetVal = dataEntry.client || dataEntry.server
+      if (typeof targetVal === "string" && targetVal.startsWith("[") && targetVal.endsWith("]")) {
+        try {
+          const coord = targetVal.slice(1, -1)
+          const info = LibraryInfo.resolve(coord)
+          if (info?.path) {
+            const relPath = path.join("libraries", info.path)
+            if (
+              (key === "MOJMAPS" || key === "MAPPINGS" || (info.groupId === "net.minecraft" && info.classifier === "mappings")) &&
+              mojangPackage?.downloads?.client_mappings
+            ) {
+              registerArtifact({
+                relativePath: relPath,
+                expectedSize: mojangPackage.downloads.client_mappings.size,
+                expectedSha1: mojangPackage.downloads.client_mappings.sha1,
+                downloadUrl: mojangPackage.downloads.client_mappings.url,
+                role: "mojang-mappings",
+              })
+            } else if (
+              key === "SERVER_MAPPINGS" &&
+              mojangPackage?.downloads?.server_mappings
+            ) {
+              registerArtifact({
+                relativePath: relPath,
+                expectedSize: mojangPackage.downloads.server_mappings.size,
+                expectedSha1: mojangPackage.downloads.server_mappings.sha1,
+                downloadUrl: mojangPackage.downloads.server_mappings.url,
+                role: "mojang-mappings",
+              })
+            } else {
+              let matchedUrl = null
+              let matchedSha1 = null
+              let matchedSize = null
+              if (Array.isArray(installProfile.libraries)) {
+                const found = installProfile.libraries.find((l) => l.name === coord)
+                if (found?.downloads?.artifact) {
+                  matchedUrl = found.downloads.artifact.url
+                  matchedSha1 = found.downloads.artifact.sha1
+                  matchedSize = found.downloads.artifact.size
+                }
+              }
+              registerArtifact({
+                relativePath: relPath,
+                expectedSize: matchedSize,
+                expectedSha1: matchedSha1,
+                downloadUrl:
+                  matchedUrl ||
+                  (info.path.startsWith("net/neoforged")
+                    ? `https://maven.neoforged.net/releases/${info.path}`
+                    : `https://libraries.minecraft.net/${info.path}`),
+                role: "processor-data",
+              })
+            }
+          }
+        } catch (_) {}
       }
     }
   }
