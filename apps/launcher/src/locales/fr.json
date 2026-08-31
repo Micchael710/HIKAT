@@ -66,7 +66,7 @@
     "secureAuth": "Authentification sécurisée"
   },
   "playButton": {
-    "checkingUpdates": "RECHERCHE DE MISES À JOUR...",
+    "checkingUpdates": "RECHERCHE...",
     "launching": "DÉMARRAGE...",
     "running": "EN COURS",
     "download": "TÉLÉCHARGER",
