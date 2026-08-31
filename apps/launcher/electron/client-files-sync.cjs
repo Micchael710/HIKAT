@@ -325,6 +325,13 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
   for (const item of clientFiles) {
     if (!item || !item.path) continue
 
+    // Legacy jdk-21 files are excluded from sync and managed independently under launcher runtime
+    const rawPath = String(item.path || "").trim().replace(/\\/g, "/")
+    if (rawPath === "jdk-21" || rawPath.startsWith("jdk-21/")) {
+      console.warn(`[SyncEngine] Skipping legacy clientFile "${rawPath}": Java 21 runtime is now managed independently in launcher runtime directory.`)
+      continue
+    }
+
     const safeAbsolute = resolveSafePath(instanceRoot, item.path)
     const normalizedRelative = path.relative(instanceRoot, safeAbsolute).replace(/\\/g, "/")
     const policy = item.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
@@ -530,28 +537,21 @@ async function downloadToStaging(task, stagingPath, onChunkBytes, cancelSignal, 
   return { bytes: downloadedBytes, sha256: computedSha256 }
 }
 
+
 /**
- * Executes the complete sync process:
- *  - Phase A: Download (staging, pause/resume/cancel support, SHA-256 validation)
- *  - Phase A -> B Barrier: Re-check cancel / pause before entering install phase
- *  - Phase B: Installation (atomic temp sibling replace, strict prune verification, final post-validation)
+ * Downloads all required client files to the staging directory without mutating instanceRoot.
  */
-async function executeSync({
+async function downloadClientFilesToStaging({
   instanceRoot,
-  clientFiles,
+  clientFiles = [],
   modpackVersion,
   onProgress,
   onPhaseChange,
   cancelSignal,
-  apiBaseUrl = getEffectiveApiBaseUrl(),
+  apiBaseUrl,
 }) {
-  // Generate initial sync plan against local filesystem
   const plan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
   const { filesDir } = getStagingPaths(instanceRoot)
-
-  await fsp.mkdir(filesDir, { recursive: true })
-
-  // Reconcile and recover any already staged, validated files
   const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
     instanceRoot,
     plan.toDownload,
@@ -559,25 +559,24 @@ async function executeSync({
 
   let totalDownloadedBytes = alreadyStagedBytes
   const startTime = Date.now()
-  let lastProgressReportTime = 0
+  let lastReportTime = 0
   let currentPhase = "DOWNLOADING"
 
   const reportProgress = (currentTaskPath = "") => {
     const now = Date.now()
-    if (now - lastProgressReportTime < 80 && totalDownloadedBytes < plan.totalDownloadBytes) {
+    if (now - lastReportTime < 70 && totalDownloadedBytes < plan.totalDownloadBytes) {
       return
     }
-    lastProgressReportTime = now
+    lastReportTime = now
 
-    const elapsedSeconds = Math.max(0.1, (now - startTime) / 1000)
-    const speedMBs = (totalDownloadedBytes - alreadyStagedBytes) / 1024 / 1024 / elapsedSeconds
+    const elapsedSec = Math.max(0.1, (now - startTime) / 1000)
+    const speedMBs = (totalDownloadedBytes - alreadyStagedBytes) / 1024 / 1024 / elapsedSec
     const totalGB = plan.totalDownloadBytes / 1024 / 1024 / 1024
     const downloadedGB = totalDownloadedBytes / 1024 / 1024 / 1024
     const progress =
       plan.totalDownloadBytes > 0
         ? Math.min(100, Math.round((totalDownloadedBytes / plan.totalDownloadBytes) * 100))
         : 100
-
     const remainingBytes = Math.max(0, plan.totalDownloadBytes - totalDownloadedBytes)
     const remainingMinutes =
       speedMBs > 0 ? Math.ceil(remainingBytes / 1024 / 1024 / speedMBs / 60) : 0
@@ -599,9 +598,6 @@ async function executeSync({
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Phase A: Download all required files to staging
-  // ─────────────────────────────────────────────────────────────
   const stagedFiles = []
   const sessionCompletedFiles = {}
 
@@ -620,6 +616,8 @@ async function executeSync({
         })
         return {
           paused: true,
+          plan,
+          stagedFiles,
           downloadedCount: stagedFiles.length,
           totalCount: plan.toDownload.length,
         }
@@ -664,7 +662,6 @@ async function executeSync({
           completedAt: new Date().toISOString(),
         }
 
-        // Persist session progress
         await saveDownloadSession(instanceRoot, {
           modpackVersion,
           status: "DOWNLOADING",
@@ -685,11 +682,12 @@ async function executeSync({
           })
           return {
             paused: true,
+            plan,
+            stagedFiles,
             downloadedCount: stagedFiles.length,
             totalCount: plan.toDownload.length,
           }
         }
-        // Network error: preserve session so far
         await saveDownloadSession(instanceRoot, {
           modpackVersion,
           status: "ERROR",
@@ -706,35 +704,48 @@ async function executeSync({
     throw err
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Barrier: Re-validate Cancel and Pause before entering Phase B
-  // ─────────────────────────────────────────────────────────────
+  return {
+    success: true,
+    plan,
+    stagedFiles,
+    totalDownloadedBytes,
+    alreadyStagedBytes,
+  }
+}
+
+/**
+ * Applies all staged files to instanceRoot atomically, prunes obsolete files, validates manifest, and cleans staging.
+ * Local operation only: ZERO network calls.
+ */
+async function applyStagingToInstance({
+  instanceRoot,
+  clientFiles = [],
+  modpackVersion,
+  stagedFiles = [],
+  plan,
+  onProgress,
+  onPhaseChange,
+  cancelSignal,
+}) {
   if (cancelSignal?.isCancelled) {
     await cleanStaging(instanceRoot)
     throw new Error("Sync cancelled by user.")
   }
-  if (cancelSignal?.isPaused) {
-    await saveDownloadSession(instanceRoot, {
-      modpackVersion,
-      status: "PAUSED",
-      updatedAt: new Date().toISOString(),
-      files: sessionCompletedFiles,
-    })
-    return {
-      paused: true,
-      downloadedCount: stagedFiles.length,
-      totalCount: plan.toDownload.length,
-    }
-  }
 
-  // ─────────────────────────────────────────────────────────────
-  // Phase B: Installation (Atomic Apply via Temp Sibling, Prune, Final Verify)
-  // ─────────────────────────────────────────────────────────────
-  currentPhase = "INSTALLING"
+  const effectivePlan = plan || (await generateSyncPlan(instanceRoot, clientFiles, modpackVersion))
+
   if (typeof onPhaseChange === "function") {
     onPhaseChange("INSTALLING")
   }
-  reportProgress("Applying game files...")
+  if (typeof onProgress === "function") {
+    onProgress({
+      phase: "INSTALLING",
+      currentFile: "Applying game files...",
+      downloadedBytes: effectivePlan.totalDownloadBytes,
+      totalBytes: effectivePlan.totalDownloadBytes,
+      progress: 100,
+    })
+  }
 
   // 1. Pre-application verification: Verify EVERY staged file before touching instance files
   for (const { task, stagingFilePath } of stagedFiles) {
@@ -764,7 +775,6 @@ async function executeSync({
     try {
       await fsp.copyFile(stagingFilePath, tempSibling)
 
-      // Verify size and SHA-256 of temp sibling
       const tempStat = await fsp.stat(tempSibling)
       if (task.sizeBytes > 0 && tempStat.size !== task.sizeBytes) {
         throw new Error(`Temp copy size mismatch for ${task.path}`)
@@ -774,7 +784,6 @@ async function executeSync({
         throw new Error(`Temp copy hash mismatch for ${task.path}`)
       }
 
-      // Safe replace: on Windows, rename can fail if destination exists, so we replace safely
       try {
         await fsp.rename(tempSibling, task.safeAbsolute)
       } catch (_) {
@@ -793,8 +802,8 @@ async function executeSync({
     }
   }
 
-  // 3. Prune obsolete files in strict directories (Fail-hard on error)
-  for (const pruneItem of plan.toPrune) {
+  // 3. Prune obsolete files in strict directories
+  for (const pruneItem of effectivePlan.toPrune) {
     if (fs.existsSync(pruneItem.safeAbsolute)) {
       try {
         await fsp.unlink(pruneItem.safeAbsolute)
@@ -818,6 +827,9 @@ async function executeSync({
   const newManifestFiles = {}
   for (const item of clientFiles) {
     if (!item?.path) continue
+    const rawPath = String(item.path || "").trim().replace(/\\/g, "/")
+    if (rawPath === "jdk-21" || rawPath.startsWith("jdk-21/")) continue
+
     const normalizedRelative = path
       .relative(instanceRoot, resolveSafePath(instanceRoot, item.path))
       .replace(/\\/g, "/")
@@ -837,15 +849,33 @@ async function executeSync({
   // 6. Cleanup staging directory after fully validated installation
   await cleanStaging(instanceRoot)
 
-  // Final 100% progress report
-  reportProgress("")
-
   return {
     success: true,
     downloadedCount: stagedFiles.length,
-    prunedCount: plan.toPrune.length,
-    retainedCount: plan.toRetain.length + plan.toPreserveUser.length,
+    prunedCount: effectivePlan.toPrune.length,
+    retainedCount: effectivePlan.toRetain.length + effectivePlan.toPreserveUser.length,
   }
+}
+
+/**
+ * High-level executeSync composing download and apply phases.
+ */
+async function executeSync(options) {
+  const downloadResult = await downloadClientFilesToStaging(options)
+  if (downloadResult.paused) {
+    return downloadResult
+  }
+
+  return await applyStagingToInstance({
+    instanceRoot: options.instanceRoot,
+    clientFiles: options.clientFiles,
+    modpackVersion: options.modpackVersion,
+    stagedFiles: downloadResult.stagedFiles,
+    plan: downloadResult.plan,
+    onProgress: options.onProgress,
+    onPhaseChange: options.onPhaseChange,
+    cancelSignal: options.cancelSignal,
+  })
 }
 
 /**
@@ -875,6 +905,8 @@ async function uninstallGame(instanceRoot, appDataRoot) {
 
 module.exports = {
   generateSyncPlan,
+  downloadClientFilesToStaging,
+  applyStagingToInstance,
   executeSync,
   loadInstalledManifest,
   saveInstalledManifest,

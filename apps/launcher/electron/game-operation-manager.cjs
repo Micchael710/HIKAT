@@ -1,6 +1,8 @@
 const path = require("path")
 const {
   generateSyncPlan,
+  downloadClientFilesToStaging,
+  applyStagingToInstance,
   executeSync,
   loadInstalledManifest,
   loadDownloadSession,
@@ -12,9 +14,13 @@ const {
   checkMinecraftCoreReadiness,
   estimateCoreDownloadBytes,
   buildCoreInstallPlan,
+  downloadAllCoreArtifacts,
   installOrRepairMinecraftCore,
+  installNeoForgeFromPreparedInstaller,
   resolveJavaRuntime,
   validateJavaBinary,
+  ensureJava21Runtime,
+  getJavaRuntimeDir,
 } = require("./minecraft-install-engine.cjs")
 const { resolveSafePath } = require("./path-validator.cjs")
 
@@ -114,7 +120,7 @@ function validateSyncPayload({
 class GameOperationManager {
   constructor(options = {}) {
     this.state = "IDLE" // "IDLE" | "SYNCING" | "PAUSED" | "CANCELING" | "UNINSTALLING"
-    this.internalPhase = "IDLE" // "IDLE" | "DOWNLOADING_CLIENT" | "APPLYING_STAGING" | "DOWNLOADING_CORE" | "RUNNING_PROCESSORS" | "VERIFYING"
+    this.internalPhase = "IDLE" // "IDLE" | "PLANNING" | "DOWNLOADING" | "INSTALLING" | "VERIFYING"
     this.activeOperationPromise = null
     this.activeCancelSignal = null
     this.operationCounter = 0
@@ -122,7 +128,9 @@ class GameOperationManager {
       checkMinecraftCoreReadiness,
       estimateCoreDownloadBytes,
       buildCoreInstallPlan,
+      downloadAllCoreArtifacts,
       installOrRepairMinecraftCore,
+      installNeoForgeFromPreparedInstaller,
     }
     this.javaValidator = options.javaValidator || validateJavaBinary
   }
@@ -136,7 +144,7 @@ class GameOperationManager {
   }
 
   /**
-   * Checks composite installation readiness across clientFiles + Minecraft Core + NeoForge.
+   * Checks composite installation readiness across clientFiles + Minecraft Core + NeoForge + Java 21.
    */
   async checkPlan({
     instanceRoot,
@@ -176,6 +184,14 @@ class GameOperationManager {
         }))
     const totalCoreBytes = corePlan.totalCoreBytes || 0
 
+    // Check Java 21 status
+    const javaRuntime = resolveJavaRuntime(instanceRoot, { isGui: false })
+    let isJavaValid = false
+    if (javaRuntime.cliJavaPath) {
+      const val = this.javaValidator(javaRuntime.cliJavaPath, 21)
+      isJavaValid = val.valid
+    }
+
     // Reconcile staging session if present
     let hasPausedSession = false
     let stagedBytes = 0
@@ -203,12 +219,14 @@ class GameOperationManager {
       clientPlan.toDownload.length === 0 &&
       clientPlan.toPrune.length === 0 &&
       Boolean(installedManifest.modpackVersion)
-    const isFullyInstalled = isClientSynced && coreReadiness.isCoreInstalled
-    const hasExistingInstall = clientPlan.hasExistingInstall || coreReadiness.hasExistingInstall
+    const isFullyInstalled = isClientSynced && coreReadiness.isCoreInstalled && isJavaValid
+    const hasExistingInstall =
+      clientPlan.hasExistingInstall || coreReadiness.hasExistingInstall || Boolean(javaRuntime.cliJavaPath)
     const needsUpdate =
       clientPlan.toDownload.length > 0 ||
       clientPlan.toPrune.length > 0 ||
-      !coreReadiness.isCoreInstalled
+      !coreReadiness.isCoreInstalled ||
+      !isJavaValid
 
     return {
       success: true,
@@ -219,6 +237,7 @@ class GameOperationManager {
       hasExistingInstall,
       isFullyInstalled,
       coreInstalled: coreReadiness.isCoreInstalled,
+      javaInstalled: isJavaValid,
       hasPausedSession,
       stagedBytes,
       stagedFilesCount,
@@ -226,7 +245,9 @@ class GameOperationManager {
   }
 
   /**
-   * Starts or resumes unified synchronization and core installation.
+   * Starts or resumes unified synchronization with strict monotonic pipeline:
+   * PLANNING -> DOWNLOADING -> INSTALLING -> VERIFYING -> READY
+   * Never regresses from INSTALLING to DOWNLOADING.
    */
   async startSync({
     instanceRoot,
@@ -269,37 +290,38 @@ class GameOperationManager {
     }
     this.activeCancelSignal = cancelSignal
     this.state = isVerify ? "VERIFYING" : "SYNCING"
-    this.internalPhase = isVerify ? "VERIFYING" : "PREPARING"
+    this.internalPhase = isVerify ? "VERIFYING" : "PLANNING"
 
     const runSync = async () => {
       try {
         const startTime = Date.now()
         let lastReportTime = 0
+        let javaTransferredBytes = 0
         let clientTransferredBytes = 0
         let bootstrapNetworkBytes = 0
-        let xmclTransferredBytes = 0
+        let coreTransferredBytes = 0
         let maxReportedCompletedBytes = 0
         let planFrozen = false
         let totalRequiredBytes = 1
         let initialReusableBytes = 0
         let clientPlan = null
 
-        const reportProgress = (currentTaskPath = "") => {
-          if (!planFrozen) return // Do NOT emit progress until denominator is frozen!
+        const reportProgress = (currentTaskPath = "", force = false) => {
+          if (!planFrozen) return // Denominator must be frozen before progress starts
 
           const now = Date.now()
-          const networkTransferredThisOp = clientTransferredBytes + bootstrapNetworkBytes + xmclTransferredBytes
+          const networkTransferredThisOp =
+            javaTransferredBytes + clientTransferredBytes + bootstrapNetworkBytes + coreTransferredBytes
           const currentTotalCompleted = initialReusableBytes + networkTransferredThisOp
           maxReportedCompletedBytes = Math.max(maxReportedCompletedBytes, currentTotalCompleted)
           const boundedCompleted = Math.min(totalRequiredBytes, maxReportedCompletedBytes)
 
-          if (now - lastReportTime < 70 && boundedCompleted < totalRequiredBytes) {
+          if (!force && now - lastReportTime < 70 && boundedCompleted < totalRequiredBytes) {
             return
           }
           lastReportTime = now
 
           const elapsedSec = Math.max(0.1, (now - startTime) / 1000)
-          // Speed strictly measures network transferred during this operation / real network time
           const speedMBs = networkTransferredThisOp / 1024 / 1024 / elapsedSec
           const totalGB = totalRequiredBytes / 1024 / 1024 / 1024
           const downloadedGB = boundedCompleted / 1024 / 1024 / 1024
@@ -309,13 +331,9 @@ class GameOperationManager {
             speedMBs > 0 ? Math.ceil(remainingBytes / 1024 / 1024 / speedMBs / 60) : 0
 
           let visibleUiPhase = "DOWNLOADING"
-          if (isVerify) {
+          if (isVerify || this.internalPhase === "VERIFYING") {
             visibleUiPhase = "VERIFYING"
-          } else if (
-            this.internalPhase === "APPLYING_STAGING" ||
-            this.internalPhase === "INSTALLING" ||
-            this.internalPhase === "RUNNING_PROCESSORS"
-          ) {
+          } else if (this.internalPhase === "INSTALLING" || this.internalPhase === "RUNNING_PROCESSORS") {
             visibleUiPhase = "INSTALLING"
           } else if (this.state === "PAUSED") {
             visibleUiPhase = "PAUSED"
@@ -341,22 +359,47 @@ class GameOperationManager {
           if (typeof onPhaseChange === "function") {
             const uiPhase = isVerify
               ? "VERIFYING"
-              : phase === "APPLYING_STAGING" || phase === "INSTALLING" || phase === "RUNNING_PROCESSORS"
+              : phase === "INSTALLING" || phase === "RUNNING_PROCESSORS"
                 ? "INSTALLING"
-                : "DOWNLOADING"
+                : phase === "VERIFYING"
+                  ? "VERIFYING"
+                  : "DOWNLOADING"
             onPhaseChange(uiPhase)
           }
-          reportProgress()
+          reportProgress("", true)
         }
 
-        // Step 1: Preflight calculations for UnifiedInstallPlan using real metadata
+        // ─────────────────────────────────────────────────────────────
+        // Phase 1: PLANNING (Preflight Calculations & Plan Freezing)
+        // ─────────────────────────────────────────────────────────────
+        this.internalPhase = isVerify ? "VERIFYING" : "PLANNING"
+
+        // 1.a Check Java 21
+        const initialJava = resolveJavaRuntime(instanceRoot, { isGui: false })
+        let needsJavaDownload = false
+        const val = this.javaValidator(initialJava.cliJavaPath || "java", 21)
+        if (!initialJava.cliJavaPath) {
+          if (val.major && val.major !== 21) {
+            throw new Error(`Java runtime validation failed: ${val.error}`)
+          }
+          needsJavaDownload = true
+        } else {
+          if (!val.valid) {
+            if (val.major && val.major !== 21) {
+              throw new Error(`Java runtime validation failed: ${val.error}`)
+            }
+            needsJavaDownload = true
+          }
+        }
+
+        // 1.b Client files sync plan (excludes legacy jdk-21)
         clientPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
         const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
           instanceRoot,
           clientPlan.toDownload,
         )
 
-        // Execution preflight: discover dependencies, prepare Planner Cache outside instanceRoot, accumulate bootstrap bytes silently
+        // 1.c Core plan (Vanilla + NeoForge metadata)
         const corePlan = await (this.coreEngine.buildCoreInstallPlan
           ? this.coreEngine.buildCoreInstallPlan({
               instanceRoot,
@@ -393,21 +436,92 @@ class GameOperationManager {
           throw new Error("Sync cancelled by user.")
         }
 
-        // Freeze denominator and reusable bytes BEFORE emitting the first progress event!
-        totalRequiredBytes = Math.max(1, clientPlan.totalDownloadBytes + (corePlan.totalCoreBytes || 0))
+        // Freeze denominator and reusable bytes BEFORE emitting any visible progress
+        totalRequiredBytes = Math.max(
+          1,
+          (needsJavaDownload ? 50 * 1024 * 1024 : 0) +
+            clientPlan.totalDownloadBytes +
+            (corePlan.totalCoreBytes || 0),
+        )
         initialReusableBytes = alreadyStagedBytes + (corePlan.reusableCoreBytes || 0)
         maxReportedCompletedBytes = initialReusableBytes + bootstrapNetworkBytes
         planFrozen = true
 
-        // Emit the very first progress event with frozen plan
         reportProgress()
 
+        // If in pure verification mode, skip network and go straight to verification
+        if (isVerify) {
+          handlePhaseChange("VERIFYING")
+          const postPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+          if (postPlan.toDownload.length > 0 || postPlan.toPrune.length > 0) {
+            throw new Error(
+              `Verification failed: ${postPlan.toDownload.length} files missing/mismatched, ${postPlan.toPrune.length} extra files.`,
+            )
+          }
+
+          const javaCheck = resolveJavaRuntime(instanceRoot, { isGui: false })
+          if (!javaCheck.cliJavaPath) {
+            throw new Error(`Java 21 verification failed: ${javaCheck.error || "Missing Java runtime"}`)
+          }
+          const javaVal = this.javaValidator(javaCheck.cliJavaPath, 21)
+          if (!javaVal.valid) {
+            throw new Error(`Java 21 verification failed: ${javaVal.error}`)
+          }
+
+          const coreReadiness = await this.coreEngine.checkMinecraftCoreReadiness({
+            instanceRoot,
+            minecraftVersion,
+            neoForgeVersion,
+          })
+          if (!coreReadiness.isCoreInstalled) {
+            throw new Error(`Minecraft Core verification failed: ${(coreReadiness.issues || []).join(", ")}`)
+          }
+
+          this.state = "IDLE"
+          this.internalPhase = "IDLE"
+          return {
+            success: true,
+            resolvedVersionId: coreReadiness.resolvedVersionId || `${minecraftVersion}-neoforge-${neoForgeVersion}`,
+          }
+        }
+
         // ─────────────────────────────────────────────────────────────
-        // Phase 1: Client Files Sync (including JDK-21)
+        // Phase 2: DOWNLOADING (All Network Operations Complete Here)
         // ─────────────────────────────────────────────────────────────
+        handlePhaseChange("DOWNLOADING")
+
+        // 2.a Download Java 21 if missing
+        if (needsJavaDownload) {
+          reportProgress("Downloading Java 21 runtime...")
+          const javaResult = await ensureJava21Runtime({
+            instanceRoot,
+            cancelSignal,
+            onChunkBytes: (bytes) => {
+              javaTransferredBytes += bytes
+              reportProgress("Downloading Java 21 runtime...")
+            },
+            javaValidator: this.javaValidator,
+          })
+          if (javaResult.downloadedBytes) {
+            javaTransferredBytes = javaResult.downloadedBytes
+          }
+        }
+
+        if (cancelSignal.isPaused) {
+          this.state = "PAUSED"
+          this.internalPhase = "PAUSED"
+          return { success: true, paused: true }
+        }
+        if (cancelSignal.isCancelled) {
+          this.state = "IDLE"
+          this.internalPhase = "IDLE"
+          throw new Error("Sync cancelled by user.")
+        }
+
+        // 2.b Download Client Files to Staging
+        let stagedFiles = []
         if (clientFiles.length > 0) {
-          handlePhaseChange("DOWNLOADING_CLIENT")
-          const clientSyncResult = await executeSync({
+          const clientDownloadResult = await downloadClientFilesToStaging({
             instanceRoot,
             clientFiles,
             modpackVersion,
@@ -417,38 +531,81 @@ class GameOperationManager {
               }
               reportProgress(data.currentFile || "")
             },
-            onPhaseChange: (phase) => {
-              if (phase === "INSTALLING") {
-                handlePhaseChange("APPLYING_STAGING")
-              } else {
-                handlePhaseChange("DOWNLOADING_CLIENT")
-              }
-            },
             cancelSignal,
             apiBaseUrl,
           })
 
-          if (clientSyncResult.paused) {
+          if (clientDownloadResult.paused) {
             this.state = "PAUSED"
             this.internalPhase = "PAUSED"
             return { success: true, paused: true }
           }
+          stagedFiles = clientDownloadResult.stagedFiles || []
+        }
 
-          if (cancelSignal?.isCancelled) {
-            this.state = "IDLE"
-            this.internalPhase = "IDLE"
-            throw new Error("Sync cancelled by user.")
+        if (cancelSignal.isPaused) {
+          this.state = "PAUSED"
+          this.internalPhase = "PAUSED"
+          return { success: true, paused: true }
+        }
+        if (cancelSignal.isCancelled) {
+          this.state = "IDLE"
+          this.internalPhase = "IDLE"
+          throw new Error("Sync cancelled by user.")
+        }
+
+        // 2.c Download Core Artifacts (Vanilla + NeoForge)
+        const initialCoreReadiness = await this.coreEngine.checkMinecraftCoreReadiness({
+          instanceRoot,
+          minecraftVersion,
+          neoForgeVersion,
+        })
+
+        if (!initialCoreReadiness.isCoreInstalled && corePlan.artifacts && corePlan.artifacts.size > 0) {
+          if (this.coreEngine.downloadAllCoreArtifacts) {
+            const dlResult = await this.coreEngine.downloadAllCoreArtifacts({
+              instanceRoot,
+              minecraftVersion,
+              neoForgeVersion,
+              artifacts: corePlan.artifacts,
+              cancelSignal,
+              onTaskBytes: (taskPath, bytesDelta) => {
+                if (typeof bytesDelta === "number" && bytesDelta > 0) {
+                  coreTransferredBytes += bytesDelta
+                  reportProgress(taskPath)
+                }
+              },
+              onPhaseChange: () => {}, // Keep in DOWNLOADING
+            })
+            if (dlResult?.paused) {
+              this.state = "PAUSED"
+              this.internalPhase = "PAUSED"
+              return { success: true, paused: true }
+            }
           }
         }
 
+        if (cancelSignal.isPaused) {
+          this.state = "PAUSED"
+          this.internalPhase = "PAUSED"
+          return { success: true, paused: true }
+        }
+        if (cancelSignal.isCancelled) {
+          this.state = "IDLE"
+          this.internalPhase = "IDLE"
+          throw new Error("Sync cancelled by user.")
+        }
+
         // ─────────────────────────────────────────────────────────────
-        // Phase 2: Validate Official JDK-21 Runtime
+        // Phase 3: INSTALLING (Local Operations Only - ZERO Network)
         // ─────────────────────────────────────────────────────────────
         handlePhaseChange("INSTALLING")
+
+        // 3.a Validate Java 21 CLI binary
         const javaRuntime = resolveJavaRuntime(instanceRoot, { isGui: false })
         if (!javaRuntime.javaPath && !javaRuntime.cliJavaPath) {
           throw new Error(
-            `Java runtime resolution failed: ${javaRuntime.error || "Official Java 21 JDK is not installed in instanceRoot/jdk-21."}`,
+            `Java runtime resolution failed: ${javaRuntime.error || "Official Java 21 JDK is not installed in runtime directory."}`,
           )
         }
 
@@ -458,18 +615,23 @@ class GameOperationManager {
           throw new Error(`Java runtime validation failed: ${javaValidation.error}`)
         }
 
-        // ─────────────────────────────────────────────────────────────
-        // Phase 3: Install & Verify Minecraft Vanilla + NeoForge Core
-        // ─────────────────────────────────────────────────────────────
-        const initialCoreReadiness = await this.coreEngine.checkMinecraftCoreReadiness({
-          instanceRoot,
-          minecraftVersion,
-          neoForgeVersion,
-        })
+        // 3.b Apply Client Files Staging to Instance
+        if (stagedFiles.length > 0 || clientPlan.toPrune.length > 0) {
+          reportProgress("Applying game files...")
+          await applyStagingToInstance({
+            instanceRoot,
+            clientFiles,
+            modpackVersion,
+            stagedFiles,
+            plan: clientPlan,
+            onProgress: (d) => reportProgress(d?.currentFile || ""),
+            cancelSignal,
+          })
+        }
 
+        // 3.c Install Vanilla & NeoForge Locally
         let coreResult = null
         if (!initialCoreReadiness.isCoreInstalled) {
-          handlePhaseChange("DOWNLOADING_CORE")
           coreResult = await this.coreEngine.installOrRepairMinecraftCore({
             instanceRoot,
             minecraftVersion,
@@ -477,7 +639,7 @@ class GameOperationManager {
             javaCliPath,
             onTaskBytes: (_taskName, bytesDelta) => {
               if (typeof bytesDelta === "number" && bytesDelta > 0) {
-                xmclTransferredBytes += bytesDelta
+                coreTransferredBytes += bytesDelta
                 reportProgress()
               }
             },
@@ -498,9 +660,10 @@ class GameOperationManager {
         }
 
         // ─────────────────────────────────────────────────────────────
-        // Phase 4: Final Composite Readiness Verification
+        // Phase 4: VERIFYING (Final Composite Validation)
         // ─────────────────────────────────────────────────────────────
-        handlePhaseChange("INSTALLING")
+        handlePhaseChange("VERIFYING")
+
         const finalCoreReadiness = await this.coreEngine.checkMinecraftCoreReadiness({
           instanceRoot,
           minecraftVersion,
@@ -532,13 +695,21 @@ class GameOperationManager {
           err?.name === "AbortError" ||
           /abort|cancelled|preflight cancelled/i.test(err?.message || "")
 
-        if (cancelSignal.isPaused || (isAbort && this.state === "PAUSED")) {
+        if (
+          cancelSignal.isPaused ||
+          this.state === "PAUSED" ||
+          (isAbort && (this.state === "PAUSED" || this.activeCancelSignal?.isPaused))
+        ) {
           this.state = "PAUSED"
           this.internalPhase = "PAUSED"
           return { success: true, paused: true }
         }
 
-        if (cancelSignal.isCancelled || this.state === "CANCELING") {
+        if (
+          cancelSignal.isCancelled ||
+          this.state === "CANCELING" ||
+          (isAbort && (this.state === "CANCELING" || this.activeCancelSignal?.isCancelled))
+        ) {
           this.state = "IDLE"
           this.internalPhase = "IDLE"
           throw new Error("Sync cancelled by user.")
@@ -564,9 +735,8 @@ class GameOperationManager {
   async pauseSync() {
     if (
       this.state === "INSTALLING" ||
-      this.internalPhase === "APPLYING_STAGING" ||
-      this.internalPhase === "RUNNING_PROCESSORS" ||
-      this.internalPhase === "INSTALLING"
+      this.internalPhase === "INSTALLING" ||
+      this.internalPhase === "RUNNING_PROCESSORS"
     ) {
       throw new Error("Cannot pause synchronization while installation phase is in progress.")
     }
@@ -606,9 +776,8 @@ class GameOperationManager {
   async cancelSync(instanceRoot) {
     if (
       this.state === "INSTALLING" ||
-      this.internalPhase === "APPLYING_STAGING" ||
-      this.internalPhase === "RUNNING_PROCESSORS" ||
-      this.internalPhase === "INSTALLING"
+      this.internalPhase === "INSTALLING" ||
+      this.internalPhase === "RUNNING_PROCESSORS"
     ) {
       throw new Error("Cannot cancel synchronization while installation phase is in progress.")
     }
@@ -666,9 +835,8 @@ class GameOperationManager {
       this.state === "SYNCING" ||
       this.state === "VERIFYING" ||
       this.state === "INSTALLING" ||
-      this.internalPhase === "APPLYING_STAGING" ||
-      this.internalPhase === "RUNNING_PROCESSORS" ||
       this.internalPhase === "INSTALLING" ||
+      this.internalPhase === "RUNNING_PROCESSORS" ||
       this.state === "CANCELING" ||
       this.state === "UNINSTALLING"
     ) {
@@ -685,9 +853,8 @@ class GameOperationManager {
       this.state === "SYNCING" ||
       this.state === "VERIFYING" ||
       this.state === "INSTALLING" ||
-      this.internalPhase === "APPLYING_STAGING" ||
-      this.internalPhase === "RUNNING_PROCESSORS" ||
       this.internalPhase === "INSTALLING" ||
+      this.internalPhase === "RUNNING_PROCESSORS" ||
       this.state === "CANCELING"
     ) {
       throw new Error("Cannot uninstall game while synchronization is active.")

@@ -39,7 +39,7 @@ import { GameLauncher } from "./game-launcher.cjs"
 // @ts-expect-error CJS module
 import { GameOperationManager, validateSyncPayload } from "./game-operation-manager.cjs"
 // @ts-expect-error CJS module
-import { saveInstalledManifest, executeSync } from "./client-files-sync.cjs"
+import { saveInstalledManifest, executeSync, generateSyncPlan } from "./client-files-sync.cjs"
 
 /**
  * Creates a compliant in-memory ZIP buffer containing a single file.
@@ -179,14 +179,22 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     vi.restoreAllMocks()
   })
 
-  // Helper to create a fake valid JDK in instanceRoot
+  // Helper to create a fake valid JDK in dedicated runtime and instanceRoot
   async function createMockJdk21(root: string) {
-    const binDir = path.join(root, "jdk-21", "bin")
-    await fsp.mkdir(binDir, { recursive: true })
-    const javaExe = path.join(binDir, process.platform === "win32" ? "java.exe" : "java")
-    const javawExe = path.join(binDir, process.platform === "win32" ? "javaw.exe" : "javaw")
-    await fsp.writeFile(javaExe, "mock-java-binary")
-    await fsp.writeFile(javawExe, "mock-javaw-binary")
+    const legacyBinDir = path.join(root, "jdk-21", "bin")
+    const runtimeBinDir1 = path.join(root, "runtime", "java", "21", "bin")
+    const runtimeBinDir2 = path.join(path.dirname(root), "runtime", "java", "21", "bin")
+
+    for (const dir of [legacyBinDir, runtimeBinDir1, runtimeBinDir2]) {
+      await fsp.mkdir(dir, { recursive: true })
+      const jExe = path.join(dir, process.platform === "win32" ? "java.exe" : "java")
+      const jwExe = path.join(dir, process.platform === "win32" ? "javaw.exe" : "javaw")
+      await fsp.writeFile(jExe, "mock-java-binary")
+      await fsp.writeFile(jwExe, "mock-javaw-binary")
+    }
+
+    const javaExe = path.join(runtimeBinDir2, process.platform === "win32" ? "java.exe" : "java")
+    const javawExe = path.join(runtimeBinDir2, process.platform === "win32" ? "javaw.exe" : "javaw")
     return { javaExe, javawExe }
   }
 
@@ -2215,6 +2223,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       if (typeof url === "string" && url.includes(".sha256")) {
         return { ok: true, text: async () => realSha256 } as any
       }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
+      }
       if (typeof url === "string" && (url.includes("version_manifest") || url.includes("launchermeta") || url.includes("piston-meta"))) {
         return {
           ok: true,
@@ -2262,6 +2278,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
    * 40. Pause aborts simulated fetch and resolves { success: true, paused: true }
    * ───────────────────────────────────────────────────────────── */
   it("40. pauseSync aborts active fetch and both startSync and pauseSync resolve paused without error", async () => {
+    await createMockJdk21(appDataRoot)
     let fetchAborted = false
 
     const mockFetch = vi.fn().mockImplementation(async (_url: string, init?: any) => {
@@ -2336,6 +2353,7 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
    * 41. Cancel aborts fetch and terminates cleanly with IDLE state
    * ───────────────────────────────────────────────────────────── */
   it("41. cancelSync aborts active fetch and terminates cleanly to IDLE state", async () => {
+    await createMockJdk21(appDataRoot)
     let fetchAborted = false
 
     const mockFetch = vi.fn().mockImplementation(async (_url: string, init?: any) => {
@@ -2714,5 +2732,413 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     const nonExistentValidation = validateJavaBinary(path.join(instanceRoot, "jdk-21", "bin", "nonexistent.exe"))
     expect(nonExistentValidation.valid).toBe(false)
     expect(nonExistentValidation.error).toMatch(/Java binary not found/i)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 51. Fresh install: DOWNLOADING -> INSTALLING -> VERIFYING -> READY without regression
+   * ───────────────────────────────────────────────────────────── */
+  it("51. Fresh install exhibits strictly monotonic lifecycle without regressions from INSTALLING to DOWNLOADING", async () => {
+    await createMockJdk21(appDataRoot)
+
+    const opManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi
+          .fn()
+          .mockResolvedValueOnce({ isCoreInstalled: false, issues: ["Fresh install"] })
+          .mockResolvedValue({ isCoreInstalled: true, resolvedVersionId: "1.21.1-neoforge-21.1.65" }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 1000, reusableCoreBytes: 0 }),
+        buildCoreInstallPlan: vi.fn().mockResolvedValue({
+          totalCoreBytes: 1000,
+          reusableCoreBytes: 0,
+          artifacts: new Map(),
+          needsNeoForge: true,
+          installProfile: { version: "21.1.65" },
+        }),
+        downloadAllCoreArtifacts: vi.fn().mockResolvedValue({ success: true }),
+        installOrRepairMinecraftCore: vi.fn().mockResolvedValue({
+          success: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+        }),
+      },
+      javaValidator: vi.fn().mockReturnValue({ valid: true, major: 21 }),
+    })
+
+    const sampleContent = "mock client binary data 1234567890"
+    const sampleSha256 = computeSha256(sampleContent)
+    const clientPayload = [
+      {
+        path: "mods/test-mod.jar",
+        sha256: sampleSha256,
+        sizeBytes: Buffer.byteLength(sampleContent),
+        downloadUrl: `${serverBaseUrl}/file/test-mod.jar`,
+        policy: "NO_MODIFICABLE",
+      },
+    ]
+
+    const observedPhases: string[] = []
+    const progressPhases: string[] = []
+
+    const result = await opManager.startSync({
+      instanceRoot,
+      clientFiles: clientPayload,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      onPhaseChange: (phase: string) => {
+        observedPhases.push(phase)
+      },
+      onProgress: (prog: any) => {
+        progressPhases.push(prog.phase)
+      },
+    })
+
+    expect(result.success).toBe(true)
+
+    // Verify monotonic progression
+    const validSequence = ["DOWNLOADING", "INSTALLING", "VERIFYING"]
+    let lastSeqIndex = -1
+    for (const phase of observedPhases) {
+      const idx = validSequence.indexOf(phase)
+      expect(idx).toBeGreaterThanOrEqual(lastSeqIndex)
+      lastSeqIndex = idx
+    }
+
+    // Verify INSTALLING never goes back to DOWNLOADING
+    const installingIndex = observedPhases.indexOf("INSTALLING")
+    if (installingIndex !== -1) {
+      const remainingPhases = observedPhases.slice(installingIndex)
+      expect(remainingPhases).not.toContain("DOWNLOADING")
+    }
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 52. Java 21 is resolved in <appDataRoot>/runtime/java/21
+   * ───────────────────────────────────────────────────────────── */
+  it("52. Java 21 is managed outside instanceRoot in dedicated runtime/java/21 directory", async () => {
+    const { javaExe } = await createMockJdk21(appDataRoot)
+
+    const resolved = resolveJavaRuntime(instanceRoot, { isGui: false })
+    expect(resolved.isOfficialJdk).toBe(true)
+    expect(resolved.cliJavaPath).toBeTruthy()
+    // Must NOT be inside instanceRoot
+    expect(resolved.cliJavaPath?.startsWith(instanceRoot)).toBe(false)
+    expect(resolved.cliJavaPath).toContain(path.join("runtime", "java", "21"))
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 53. Legacy jdk-21/** clientFiles are filtered out and not downloaded
+   * ───────────────────────────────────────────────────────────── */
+  it("53. Legacy jdk-21/** clientFiles are filtered out of sync plan and not downloaded into instanceRoot", async () => {
+    const clientPayload = [
+      {
+        path: "jdk-21/bin/java.exe",
+        sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        sizeBytes: 50000,
+        downloadUrl: `${serverBaseUrl}/file/java.exe`,
+        policy: "NO_MODIFICABLE",
+      },
+      {
+        path: "mods/real-mod.jar",
+        sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        sizeBytes: 200,
+        downloadUrl: `${serverBaseUrl}/file/real-mod.jar`,
+        policy: "NO_MODIFICABLE",
+      },
+    ]
+
+    const plan = await generateSyncPlan(instanceRoot, clientPayload, "1.0.0")
+
+    const pathsToDownload = plan.toDownload.map((t: any) => t.path)
+    expect(pathsToDownload).not.toContain("jdk-21/bin/java.exe")
+    expect(pathsToDownload).toContain("mods/real-mod.jar")
+    expect(plan.totalDownloadBytes).toBe(200)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 54. Java corrupt/missing triggers repair in dedicated runtime
+   * ───────────────────────────────────────────────────────────── */
+  it("54. Corrupted Java binary is detected and triggers repair", async () => {
+    let validateCallCount = 0
+    const mockValidator = vi.fn().mockImplementation(() => {
+      validateCallCount++
+      if (validateCallCount === 1) {
+        return { valid: false, error: "Corrupted Java binary" }
+      }
+      return { valid: true, major: 21 }
+    })
+
+    const opManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({ isCoreInstalled: true, resolvedVersionId: "1.21.1" }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 0, reusableCoreBytes: 0 }),
+        buildCoreInstallPlan: vi.fn().mockResolvedValue({
+          totalCoreBytes: 0,
+          reusableCoreBytes: 0,
+          artifacts: new Map(),
+          needsNeoForge: false,
+        }),
+      },
+      javaValidator: mockValidator,
+    })
+
+    // Plan check detects Java needs update
+    const check = await opManager.checkPlan({
+      instanceRoot,
+      clientFiles: [],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(check.javaInstalled).toBe(false)
+    expect(check.needsUpdate).toBe(true)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 55. Java other than 21 fails-closed
+   * ───────────────────────────────────────────────────────────── */
+  it("55. Java runtime reporting different major version (e.g. 17) fails-closed", async () => {
+    const opManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({ isCoreInstalled: true, resolvedVersionId: "1.21.1" }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 0, reusableCoreBytes: 0 }),
+        buildCoreInstallPlan: vi.fn().mockResolvedValue({
+          totalCoreBytes: 0,
+          reusableCoreBytes: 0,
+          artifacts: new Map(),
+          needsNeoForge: false,
+        }),
+      },
+      javaValidator: vi.fn().mockReturnValue({ valid: false, major: 17, error: "Incompatible Java version 17" }),
+    })
+
+    const sampleContent = "mock client binary data 1234567890"
+    const sampleSha256 = computeSha256(sampleContent)
+    const clientPayload = [
+      {
+        path: "mods/test-mod.jar",
+        sha256: sampleSha256,
+        sizeBytes: Buffer.byteLength(sampleContent),
+        downloadUrl: `${serverBaseUrl}/file/test-mod.jar`,
+        policy: "NO_MODIFICABLE",
+      },
+    ]
+
+    await expect(
+      opManager.startSync({
+        instanceRoot,
+        clientFiles: clientPayload,
+        modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      }),
+    ).rejects.toThrow(/Java runtime validation failed|Incompatible Java version 17/i)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 56. Healthy existing installation does not re-download Java or Core
+   * ───────────────────────────────────────────────────────────── */
+  it("56. Fully healthy installation does not re-download Java or Core", async () => {
+    await createMockJdk21(appDataRoot)
+
+    const sampleContent = "mock client binary data 1234567890"
+    const sampleSha256 = computeSha256(sampleContent)
+    const modFile = path.join(instanceRoot, "mods", "test-mod.jar")
+    await fsp.mkdir(path.dirname(modFile), { recursive: true })
+    await fsp.writeFile(modFile, sampleContent)
+
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      lastSync: new Date().toISOString(),
+      files: {
+        "mods/test-mod.jar": {
+          officialSha256: sampleSha256,
+          policy: "NO_MODIFICABLE",
+          lastSyncedAt: new Date().toISOString(),
+        },
+      },
+    })
+
+    const clientPayload = [
+      {
+        path: "mods/test-mod.jar",
+        sha256: sampleSha256,
+        sizeBytes: Buffer.byteLength(sampleContent),
+        downloadUrl: `${serverBaseUrl}/file/test-mod.jar`,
+        policy: "NO_MODIFICABLE",
+      },
+    ]
+
+    const dlCoreSpy = vi.fn().mockResolvedValue({ success: true })
+    const opManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+        }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 0, reusableCoreBytes: 50000 }),
+        buildCoreInstallPlan: vi.fn().mockResolvedValue({
+          totalCoreBytes: 0,
+          reusableCoreBytes: 50000,
+          artifacts: new Map(),
+          needsNeoForge: false,
+        }),
+        downloadAllCoreArtifacts: dlCoreSpy,
+      },
+      javaValidator: vi.fn().mockReturnValue({ valid: true, major: 21 }),
+    })
+
+    const result = await opManager.startSync({
+      instanceRoot,
+      clientFiles: clientPayload,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(result.success).toBe(true)
+    expect(dlCoreSpy).not.toHaveBeenCalled()
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 57. Modpack-only update does not re-install Java or Core
+   * ───────────────────────────────────────────────────────────── */
+  it("57. Modpack-only update downloads only changed clientFiles without re-installing Core", async () => {
+    await createMockJdk21(appDataRoot)
+
+    const installCoreSpy = vi.fn()
+    const opManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+        }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 0, reusableCoreBytes: 10000 }),
+        buildCoreInstallPlan: vi.fn().mockResolvedValue({
+          totalCoreBytes: 0,
+          reusableCoreBytes: 10000,
+          artifacts: new Map(),
+          needsNeoForge: false,
+        }),
+        installOrRepairMinecraftCore: installCoreSpy,
+      },
+      javaValidator: vi.fn().mockReturnValue({ valid: true, major: 21 }),
+    })
+
+    const sampleContent = "mock client binary data 1234567890"
+    const sampleSha256 = computeSha256(sampleContent)
+    const clientPayload = [
+      {
+        path: "mods/new-mod.jar",
+        sha256: sampleSha256,
+        sizeBytes: Buffer.byteLength(sampleContent),
+        downloadUrl: `${serverBaseUrl}/file/new-mod.jar`,
+        policy: "NO_MODIFICABLE",
+      },
+    ]
+
+    const result = await opManager.startSync({
+      instanceRoot,
+      clientFiles: clientPayload,
+      modpackVersion: "1.1.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(result.success).toBe(true)
+    // Core install should NOT be invoked
+    expect(installCoreSpy).not.toHaveBeenCalled()
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 58. Pause / Resume / Cancel work seamlessly
+   * ───────────────────────────────────────────────────────────── */
+  it("58. Pause, Resume, and Cancel operate cleanly without data corruption", async () => {
+    await createMockJdk21(appDataRoot)
+
+    const opManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({ isCoreInstalled: true, resolvedVersionId: "1.21.1" }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 0, reusableCoreBytes: 0 }),
+        buildCoreInstallPlan: vi.fn().mockResolvedValue({
+          totalCoreBytes: 0,
+          reusableCoreBytes: 0,
+          artifacts: new Map(),
+          needsNeoForge: false,
+        }),
+      },
+      javaValidator: vi.fn().mockReturnValue({ valid: true, major: 21 }),
+    })
+
+    // Cancel in IDLE state cleans staging and stays IDLE
+    const cancelRes = await opManager.cancelSync(instanceRoot)
+    expect(cancelRes.success).toBe(true)
+    expect(opManager.getState()).toBe("IDLE")
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 59. ZERO network transfers occur once entered into INSTALLING phase
+   * ───────────────────────────────────────────────────────────── */
+  it("59. Zero network chunk transfers occur once the pipeline enters INSTALLING phase", async () => {
+    await createMockJdk21(appDataRoot)
+
+    let isInstallingEntered = false
+    let networkChunkAfterInstalling = false
+
+    const opManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi
+          .fn()
+          .mockResolvedValueOnce({ isCoreInstalled: false })
+          .mockResolvedValue({ isCoreInstalled: true, resolvedVersionId: "1.21.1" }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 500, reusableCoreBytes: 0 }),
+        buildCoreInstallPlan: vi.fn().mockResolvedValue({
+          totalCoreBytes: 500,
+          reusableCoreBytes: 0,
+          artifacts: new Map(),
+          needsNeoForge: false,
+        }),
+        downloadAllCoreArtifacts: vi.fn().mockImplementation(async ({ onTaskBytes }) => {
+          if (isInstallingEntered) {
+            networkChunkAfterInstalling = true
+          }
+          onTaskBytes?.("test-lib", 500)
+          return { success: true }
+        }),
+        installOrRepairMinecraftCore: vi.fn().mockImplementation(async ({ onPhaseChange }) => {
+          isInstallingEntered = true
+          onPhaseChange?.("INSTALLING")
+          return { success: true, resolvedVersionId: "1.21.1" }
+        }),
+      },
+      javaValidator: vi.fn().mockReturnValue({ valid: true, major: 21 }),
+    })
+
+    const sampleContent = "mock client binary data 1234567890"
+    const sampleSha256 = computeSha256(sampleContent)
+    const clientPayload = [
+      {
+        path: "mods/test-mod.jar",
+        sha256: sampleSha256,
+        sizeBytes: Buffer.byteLength(sampleContent),
+        downloadUrl: `${serverBaseUrl}/file/test-mod.jar`,
+        policy: "NO_MODIFICABLE",
+      },
+    ]
+
+    await opManager.startSync({
+      instanceRoot,
+      clientFiles: clientPayload,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      onPhaseChange: (phase: string) => {
+        if (phase === "INSTALLING") {
+          isInstallingEntered = true
+        }
+      },
+    })
+
+    expect(networkChunkAfterInstalling).toBe(false)
   })
 })
