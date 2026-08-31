@@ -268,14 +268,20 @@ export function useLauncherState() {
     [appliedCape, playerCapes],
   )
 
-  // Initial load: fetch global catalog on mount, and player data if authenticated
+  // Initial load: fetch global catalog on mount
   useEffect(() => {
     loadGlobalCatalog()
-    if (authService.getAccessToken()) {
+  }, [loadGlobalCatalog])
+
+  // Automatically refresh player skin when transitioning to home with active session
+  useEffect(() => {
+    if (
+      screen === "home" &&
+      authService.getAccessToken()
+    ) {
       refreshPlayerSkin()
-      refreshPlayerCapes()
     }
-  }, [loadGlobalCatalog, refreshPlayerSkin, refreshPlayerCapes])
+  }, [screen, refreshPlayerSkin])
 
   // Refresh catalogs & player cosmetics on entry to "skins" view
   useEffect(() => {
@@ -485,10 +491,9 @@ export function useLauncherState() {
     setUsername(name)
     setScreen("home")
     setView("home")
-    refreshPlayerSkin()
     refreshPlayerCapes()
     loadGlobalCatalog()
-  }, [refreshPlayerSkin, refreshPlayerCapes, loadGlobalCatalog])
+  }, [refreshPlayerCapes, loadGlobalCatalog])
 
   /**
    * Handle user logout cleanly

@@ -12,12 +12,14 @@ interface NewsCarouselProps {
   canvasWidth?: number
   theme?: ThemeMode
   news?: NewsCardItem[]
+  isActive?: boolean
 }
 
 export default function NewsCarousel({
   canvasLeft,
   theme = "dark",
   news,
+  isActive = true,
 }: NewsCarouselProps) {
   const { t, language } = useTranslation()
   const isDark = theme === "dark"
@@ -66,12 +68,14 @@ export default function NewsCarousel({
   }
 
   useEffect(() => {
+    if (!isActive) return
+
     if (news && news.length > 0) {
       setArticles(news)
     } else {
       fetchNews()
     }
-  }, [news, language])
+  }, [news, language, isActive])
 
   const CARD_W = 490
   const CARD_H = 280

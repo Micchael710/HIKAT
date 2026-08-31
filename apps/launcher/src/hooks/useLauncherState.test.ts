@@ -190,7 +190,21 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     window.localStorage.setItem("hikat_auth_token", "auth-token-123")
     vi.spyOn(authService, "getStoredToken").mockReturnValue("auth-token-123")
     vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-123")
-
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      cb(
+        {
+          user: {
+            id: "u-1",
+            displayName: "Tester",
+            email: "tester@example.com",
+            role: "PLAYER",
+          },
+        },
+        "AUTHENTICATED",
+      )
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
 
     const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
     const fetchMyPlayerSkinSpy = vi.spyOn(skinServiceModule, "fetchMyPlayerSkin")
@@ -210,8 +224,6 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(1)
     expect(fetchMyActiveSkinSpy).toHaveBeenCalledTimes(1)
     expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(1)
-    expect(fetchMyPlayerCapesSpy).toHaveBeenCalledTimes(1)
-    expect(fetchMyActiveCapeSpy).toHaveBeenCalledTimes(1)
 
     // Enter skins section
     await act(async () => {
@@ -223,8 +235,8 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(2)
     expect(fetchMyActiveSkinSpy).toHaveBeenCalledTimes(2)
     expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(2)
-    expect(fetchMyPlayerCapesSpy).toHaveBeenCalledTimes(2)
-    expect(fetchMyActiveCapeSpy).toHaveBeenCalledTimes(2)
+    expect(fetchMyPlayerCapesSpy).toHaveBeenCalledTimes(1)
+    expect(fetchMyActiveCapeSpy).toHaveBeenCalledTimes(1)
 
     unmount()
   })
@@ -413,7 +425,25 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
   })
 
   it("Test 9 — Custom skin persists and remains active/visible when access token refreshes", async () => {
+    window.localStorage.setItem("hikat_auth_token", "refreshed-token")
+    vi.spyOn(authService, "getStoredToken").mockReturnValue("refreshed-token")
     vi.spyOn(authService, "getAccessToken").mockReturnValue("refreshed-token")
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      cb(
+        {
+          user: {
+            id: "u-1",
+            displayName: "Tester",
+            email: "tester@example.com",
+            role: "PLAYER",
+          },
+        },
+        "AUTHENTICATED",
+      )
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+
     vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue({
       id: "pskin-persisted",
       userId: "u-1",
@@ -456,6 +486,55 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     unmount()
   })
+
+  it("Test 11 — Screen transitioning to 'home' with active auth automatically triggers refreshPlayerSkin without entering Skins view", async () => {
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
+
+    const fetchMyPlayerSkinSpy = vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue({
+      id: "pskin-auto",
+      userId: "u-1",
+      imageUrl: "/media/auto_skin.png",
+      createdAt: "2026-08-31T10:00:00Z",
+      updatedAt: "2026-08-31T10:00:00Z",
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    // Initial state is screen: "login" -> fetchMyPlayerSkin not called yet
+    expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(0)
+
+    // User logs in / bootstrap finishes -> authCallback emits AUTHENTICATED
+    await act(async () => {
+      authCallback(
+        {
+          user: {
+            id: "u-1",
+            displayName: "Tester",
+            email: "tester@example.com",
+            role: "PLAYER",
+          },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Automatically fetched player skin upon screen -> "home"!
+    expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(1)
+    expect(result.current.playerSkin?.id).toBe("pskin-auto")
+
+    unmount()
+  })
 })
+
 
 

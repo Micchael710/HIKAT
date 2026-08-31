@@ -11,9 +11,14 @@ import { useTranslation } from "../context/LanguageContext"
 interface HomeViewProps {
   theme?: ThemeMode
   onPlay?: () => void
+  isActive?: boolean
 }
 
-export default function HomeView({ theme = "dark", onPlay }: HomeViewProps) {
+export default function HomeView({
+  theme = "dark",
+  onPlay,
+  isActive = true,
+}: HomeViewProps) {
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
   const CONTENT_LEFT = 184
@@ -177,6 +182,7 @@ export default function HomeView({ theme = "dark", onPlay }: HomeViewProps) {
           canvasLeft={CONTENT_LEFT}
           canvasWidth={CANVAS_W}
           theme={theme}
+          isActive={isActive}
         />
       </div>
 
@@ -194,7 +200,7 @@ export default function HomeView({ theme = "dark", onPlay }: HomeViewProps) {
           paddingBottom: 90,
         }}
       >
-        <ServerStatsGrid theme={theme} />
+        <ServerStatsGrid theme={theme} isActive={isActive} />
         <CommunityHubGrid theme={theme} />
       </div>
     </div>

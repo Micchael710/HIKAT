@@ -161,7 +161,12 @@ export default function App() {
               overflow: "hidden",
             }}
           >
-            {view === "home" && <HomeView theme={theme} />}
+            <div style={{ display: view === "home" ? "block" : "none" }}>
+              <HomeView
+                theme={theme}
+                isActive={view === "home"}
+              />
+            </div>
             {view === "skins" && (
               <SkinsView
                 username={username}

@@ -105,4 +105,67 @@ describe("NewsCarousel Component Lifecycle & Remount Verification (Shard 8F)", (
 
     unmount2()
   })
+
+  it("3. When NewsCarousel stays mounted with isActive toggled (Home -> Skins -> Home), fresh query is triggered on isActive: true", async () => {
+    const newsSpy = vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({
+      items: [
+        {
+          id: "news-test-3",
+          img: "/media/banner-3.png",
+          title: "Noticia Activa",
+          desc: "Desc",
+          content: "Content",
+          accentColor: "#3ec4c0",
+          date: "2026-08-29T14:00:00Z",
+        },
+      ],
+      isCached: false,
+    })
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    // 1. Mount with isActive = true
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <NewsCarousel canvasLeft={0} canvasWidth={1920} theme="dark" isActive={true} />
+        </LanguageProvider>,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(newsSpy).toHaveBeenCalledTimes(1)
+
+    // 2. User goes to Skins -> isActive becomes false (Home stays mounted)
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <NewsCarousel canvasLeft={0} canvasWidth={1920} theme="dark" isActive={false} />
+        </LanguageProvider>,
+      )
+    })
+    expect(newsSpy).toHaveBeenCalledTimes(1)
+
+    // 3. User returns to Home -> isActive becomes true -> fetches news again
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <NewsCarousel canvasLeft={0} canvasWidth={1920} theme="dark" isActive={true} />
+        </LanguageProvider>,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(newsSpy).toHaveBeenCalledTimes(2)
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
 })
+

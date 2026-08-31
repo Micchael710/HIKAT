@@ -6,11 +6,13 @@ import { serverService } from "../../services/serverService"
 interface ServerStatsGridProps {
   theme?: ThemeMode
   stats?: Partial<ServerSpecs>
+  isActive?: boolean
 }
 
 export default function ServerStatsGrid({
   theme = "dark",
   stats,
+  isActive = true,
 }: ServerStatsGridProps) {
   const { t } = useTranslation()
   const isDark = theme === "dark"
@@ -66,7 +68,7 @@ export default function ServerStatsGrid({
   })
 
   useEffect(() => {
-    if (stats) return
+    if (!isActive || stats) return
     let isMounted = true
     serverService
       .getServerStatus()
@@ -91,7 +93,7 @@ export default function ServerStatsGrid({
     return () => {
       isMounted = false
     }
-  }, [stats])
+  }, [stats, isActive])
 
   const serverName = stats?.name ?? "Apparatia"
   const isOnline = serverData.online

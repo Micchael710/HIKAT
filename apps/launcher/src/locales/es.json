@@ -67,6 +67,8 @@
   },
   "playButton": {
     "checkingUpdates": "BUSCANDO ACTUALIZACIONES...",
+    "launching": "INICIANDO...",
+    "running": "EN EJECUCIÓN",
     "download": "DESCARGAR",
     "update": "ACTUALIZAR",
     "play": "JUGAR",

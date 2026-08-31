@@ -67,6 +67,8 @@
   },
   "playButton": {
     "checkingUpdates": "RECHERCHE DE MISES À JOUR...",
+    "launching": "DÉMARRAGE...",
+    "running": "EN COURS",
     "download": "TÉLÉCHARGER",
     "update": "METTRE À JOUR",
     "play": "JOUER",

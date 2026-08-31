@@ -94,6 +94,9 @@ interface ElectronAPI {
   getLaunchStatus?: () => Promise<{ status: string; pid?: number | null; operationState?: string }>
   onDownloadProgress?: (callback: (data: DownloadProgressData) => void) => () => void
   onPhaseChange?: (callback: (phase: string) => void) => () => void
+  onLaunchStatus?: (
+    callback: (status: "idle" | "preparing" | "running") => void
+  ) => () => void
 }
 
 interface Window {

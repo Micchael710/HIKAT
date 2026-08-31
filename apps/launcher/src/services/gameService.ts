@@ -12,6 +12,8 @@ export type GameButtonState =
   | "paused"
   | "installing"
   | "verifying"
+  | "launching"
+  | "running"
 
 export interface GameManifest {
   version: string

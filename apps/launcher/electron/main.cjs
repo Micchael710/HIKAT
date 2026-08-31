@@ -41,6 +41,12 @@ const authStore = new SecureAuthStore(app.getPath("userData"))
 
 let mainWindow = null
 let splashWindow = null
+
+gameLauncher.onStatusChangeCallback = (status) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("game-launch-status", status)
+  }
+}
 let tray = null
 let isQuitRequested = false
 let minimizeToTrayEnabled = settingsStore.get("minimizeToTray")

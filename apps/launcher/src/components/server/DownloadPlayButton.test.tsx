@@ -54,6 +54,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         },
       ],
     })
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockReturnValue(() => {})
   })
 
   afterEach(() => {
@@ -893,6 +894,146 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     expect(idleBtn).not.toBeNull()
     expect(idleBtn.textContent).toContain("ACTUALIZAR")
     expect(idleBtn.textContent).not.toContain("JUGAR")
+  })
+
+  it("Test 14 — Launch status preparing transitions button to INICIANDO... and disabled", async () => {
+    let launchStatusCallback: any
+    window.electronAPI = {
+      ...window.electronAPI,
+      onLaunchStatus: vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      }),
+    } as any
+
+    vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: true,
+      hasUpdate: false,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [],
+    })
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLButtonElement
+    expect(btn.textContent).toContain("JUGAR")
+
+    await act(async () => {
+      launchStatusCallback("preparing")
+    })
+
+    expect(btn.textContent).toContain("INICIANDO...")
+    expect(btn.disabled).toBe(true)
+  })
+
+  it("Test 15 — Launch status running transitions button to EN EJECUCIÓN and disabled", async () => {
+    let launchStatusCallback: any
+    window.electronAPI = {
+      ...window.electronAPI,
+      onLaunchStatus: vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      }),
+    } as any
+
+    vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: true,
+      hasUpdate: false,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [],
+    })
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLButtonElement
+
+    await act(async () => {
+      launchStatusCallback("running")
+    })
+
+    expect(btn.textContent).toContain("EN EJECUCIÓN")
+    expect(btn.disabled).toBe(true)
+
+    // Launch status idle restores JUGAR
+    await act(async () => {
+      launchStatusCallback("idle")
+    })
+
+    expect(btn.textContent).toContain("JUGAR")
+    expect(btn.disabled).toBe(false)
+  })
+
+  it("Test 16 — Release activated during running preserves EN EJECUCIÓN until idle, then shows ACTUALIZAR", async () => {
+    let releaseCallback: any
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+      releaseCallback = cb
+      return () => {}
+    })
+
+    let launchStatusCallback: any
+    window.electronAPI = {
+      ...window.electronAPI,
+      onLaunchStatus: vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      }),
+    } as any
+
+    vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: true,
+      hasUpdate: false,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [],
+    })
+
+    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "1.0.1",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      mandatory: true,
+      clientFiles: [],
+    })
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLButtonElement
+    expect(btn.textContent).toContain("JUGAR")
+
+    // 1. Game transitions to running
+    await act(async () => {
+      launchStatusCallback("running")
+    })
+    expect(btn.textContent).toContain("EN EJECUCIÓN")
+
+    // 2. New release arrives while running -> visually still EN EJECUCIÓN
+    await act(async () => {
+      await releaseCallback?.({
+        type: "RELEASE_ACTIVATED",
+        version: "1.0.1",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        mandatory: true,
+      })
+    })
+    expect(btn.textContent).toContain("EN EJECUCIÓN")
+
+    // 3. Game closes (idle) -> resolves to ACTUALIZAR (UPDATE)
+    await act(async () => {
+      launchStatusCallback("idle")
+    })
+    expect(btn.textContent).toContain("ACTUALIZAR")
   })
 })
 

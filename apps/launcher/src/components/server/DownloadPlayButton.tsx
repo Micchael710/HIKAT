@@ -178,7 +178,9 @@ export default function DownloadPlayButton({
           prevStatus === "downloading" ||
           prevStatus === "paused" ||
           prevStatus === "installing" ||
-          prevStatus === "verifying"
+          prevStatus === "verifying" ||
+          prevStatus === "launching" ||
+          prevStatus === "running"
         ) {
           return prevStatus
         }
@@ -191,6 +193,32 @@ export default function DownloadPlayButton({
       unsubscribe()
     }
   }, [manifest?.version])
+
+  // Listen to game launch lifecycle status from Electron Main
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onLaunchStatus?.((launchStatus: "idle" | "preparing" | "running") => {
+      if (launchStatus === "preparing") {
+        setStatus("launching")
+        return
+      }
+
+      if (launchStatus === "running") {
+        setStatus("running")
+        return
+      }
+
+      if (launchStatus === "idle") {
+        setStatus((prev) => {
+          if (prev === "launching" || prev === "running") {
+            return resolveIdleGameButtonState(manifest)
+          }
+          return prev
+        })
+      }
+    })
+
+    return () => unsubscribe?.()
+  }, [manifest])
 
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
@@ -326,7 +354,9 @@ export default function DownloadPlayButton({
       status === "checking" ||
       status === "unavailable" ||
       status === "installing" ||
-      status === "verifying"
+      status === "verifying" ||
+      status === "launching" ||
+      status === "running"
     ) {
       return
     }
@@ -473,7 +503,13 @@ export default function DownloadPlayButton({
     const isUnavailable = status === "unavailable"
     const isUpdate = status === "update"
     const isPlay = status === "play"
-    const isDisabled = isChecking || isUnavailable
+    const isLaunching = status === "launching"
+    const isRunning = status === "running"
+    const isDisabled =
+      isChecking ||
+      isUnavailable ||
+      isLaunching ||
+      isRunning
 
     return (
       <div
@@ -514,13 +550,17 @@ export default function DownloadPlayButton({
           }}
           onClick={handleClick}
         >
-          {isPlay ? <IconPlay size={34} /> : <IconDownload size={38} />}
+          {isPlay || isLaunching || isRunning ? (
+            <IconPlay size={34} />
+          ) : (
+            <IconDownload size={38} />
+          )}
           <span
             style={{
               color: "white",
               fontFamily: BASE_FONT,
               fontWeight: 800,
-              fontSize: isChecking ? 15 : isUnavailable ? 19 : 23,
+              fontSize: isChecking || isLaunching || isRunning ? 16 : isUnavailable ? 19 : 23,
               letterSpacing: ".06em",
               textShadow: "0 1px 6px rgba(0,0,0,0.35)",
               textTransform: "uppercase",
@@ -529,13 +569,17 @@ export default function DownloadPlayButton({
           >
             {isChecking
               ? t("playButton.checkingUpdates")
-              : isUnavailable
-                ? t("playButton.unavailable")
-                : isUpdate
-                  ? t("playButton.update")
-                  : isPlay
-                    ? t("playButton.play")
-                    : t("playButton.download")}
+              : isLaunching
+                ? t("playButton.launching")
+                : isRunning
+                  ? t("playButton.running")
+                  : isUnavailable
+                    ? t("playButton.unavailable")
+                    : isUpdate
+                      ? t("playButton.update")
+                      : isPlay
+                        ? t("playButton.play")
+                        : t("playButton.download")}
           </span>
         </button>
 
