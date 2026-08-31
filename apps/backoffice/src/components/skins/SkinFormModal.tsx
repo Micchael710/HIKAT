@@ -138,7 +138,7 @@ export default function SkinFormModal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 50,
+        zIndex: 900,
         padding: "16px",
       }}
     >

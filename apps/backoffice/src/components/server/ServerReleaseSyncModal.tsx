@@ -1,7 +1,9 @@
 import React, { useState } from "react"
 import type { ThemeMode, ServerReleaseSyncPlan } from "../../types"
 import { graphqlClient } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import { formatBytesToHuman } from "@hikat/shared"
+import { IconAlertCircle, IconCheck, IconCross } from "../../theme/icons"
 
 interface ServerReleaseSyncModalProps {
   theme: ThemeMode
@@ -19,6 +21,7 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
   onToast,
 }) => {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [createBackup, setCreateBackup] = useState(true)
   const [isApplying, setIsApplying] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -56,12 +59,12 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.8)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
         backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 950,
+        zIndex: 900,
         padding: "24px",
       }}
       onClick={(e) => {
@@ -70,33 +73,33 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
     >
       <div
         style={{
-          backgroundColor: isDark ? "#111827" : "#ffffff",
-          border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.12)" : "#e5e7eb"}`,
-          borderRadius: "16px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
           maxWidth: "750px",
           maxHeight: "85vh",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         {/* Modal Header */}
         <div
           style={{
             padding: "20px 24px",
-            borderBottom: `1px solid ${isDark ? "rgba(255, 255, 255, 0.08)" : "#e5e7eb"}`,
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
           }}
         >
           <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "700", color: isDark ? "#f9fafb" : "#111827" }}>
+            <h2 style={{ margin: 0, fontSize: "1.15rem", fontWeight: "700", color: tokens.textPrimary }}>
               Aplicar cambios al servidor
             </h2>
-            <div style={{ fontSize: "13px", color: isDark ? "#9ca3af" : "#6b7280", marginTop: "2px" }}>
+            <div style={{ fontSize: "13px", color: tokens.textSecondary, marginTop: "2px" }}>
               Versión de la actualización: <strong>v{plan.releaseVersion || "—"}</strong>
             </div>
           </div>
@@ -109,12 +112,15 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
             style={{
               background: "transparent",
               border: "none",
-              color: isDark ? "#9ca3af" : "#6b7280",
-              fontSize: "20px",
+              color: tokens.textMuted,
               cursor: isApplying ? "not-allowed" : "pointer",
+              padding: "4px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            ✕
+            <IconCross size={18} />
           </button>
         </div>
 
@@ -198,9 +204,9 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
                 gap: "10px",
               }}
             >
-              <span style={{ fontSize: "18px" }}>
-                {plan.serverStatus === "DISCONNECTED" || plan.serverStatus === "UNKNOWN" ? "🔴" : "🟠"}
-              </span>
+              <div style={{ display: "flex", alignItems: "center", color: plan.serverStatus === "DISCONNECTED" || plan.serverStatus === "UNKNOWN" ? "#ef4444" : "#f59e0b" }}>
+                <IconAlertCircle size={20} />
+              </div>
               <div>
                 <strong>
                   {plan.blockReason ||
@@ -232,7 +238,7 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
                 gap: "8px",
               }}
             >
-              <span>🟢</span>
+              <IconCheck size={18} style={{ color: "#22c55e" }} />
               <span>
                 <strong>Servidor apagado y listo.</strong> Puedes aplicar los cambios con seguridad.
               </span>
@@ -368,7 +374,7 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
         <div
           style={{
             padding: "16px 24px",
-            borderTop: `1px solid ${isDark ? "rgba(255, 255, 255, 0.08)" : "#e5e7eb"}`,
+            borderTop: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
             justifyContent: "flex-end",
             gap: "12px",
@@ -378,15 +384,7 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
             type="button"
             onClick={onClose}
             disabled={isApplying}
-            style={{
-              padding: "9px 18px",
-              borderRadius: "8px",
-              border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.15)" : "#d1d5db"}`,
-              background: "transparent",
-              color: isDark ? "#e5e7eb" : "#374151",
-              fontSize: "13px",
-              cursor: isApplying ? "not-allowed" : "pointer",
-            }}
+            className="launcher-btn-secondary"
           >
             Cancelar
           </button>
@@ -396,14 +394,9 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
             data-testid="button-apply-release-sync"
             onClick={handleApply}
             disabled={isApplying || !canApply}
+            className="launcher-btn-primary"
             style={{
-              padding: "9px 22px",
-              borderRadius: "8px",
-              border: "none",
-              background: isApplying || !canApply ? "#4b5563" : "#22c55e",
-              color: "#ffffff",
-              fontSize: "13px",
-              fontWeight: "700",
+              opacity: isApplying || !canApply ? 0.5 : 1,
               cursor: isApplying || !canApply ? "not-allowed" : "pointer",
             }}
           >

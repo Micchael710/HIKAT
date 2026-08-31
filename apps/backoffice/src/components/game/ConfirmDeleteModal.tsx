@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import type { ThemeMode } from "../../types"
-import { IconCross, IconTrash, IconSpinner, IconAlertCircle } from "../../theme/icons"
+import { getThemeTokens } from "../../theme/tokens"
+import { IconCross, IconTrash, IconSpinner } from "../../theme/icons"
 
 interface ConfirmDeleteModalProps {
   theme: ThemeMode
@@ -16,6 +17,7 @@ export default function ConfirmDeleteModal({
   onConfirm,
 }: ConfirmDeleteModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -40,12 +42,12 @@ export default function ConfirmDeleteModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.65)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 9999,
+        zIndex: 1000,
         padding: "20px",
         boxSizing: "border-box",
       }}
@@ -57,27 +59,27 @@ export default function ConfirmDeleteModal({
         style={{
           width: "100%",
           maxWidth: "480px",
-          backgroundColor: isDark ? "#0f172a" : "#ffffff",
-          borderRadius: "16px",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          backgroundColor: tokens.bgCard,
+          borderRadius: "18px",
+          border: `1px solid ${tokens.borderSubtle}`,
+          boxShadow: tokens.cardShadowLg,
           overflow: "hidden",
         }}
       >
         <div
           style={{
-            padding: "16px 20px",
-            borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+            padding: "18px 20px",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            backgroundColor: isDark ? "#0b1120" : "#f8fafc",
+            backgroundColor: tokens.bgCardInner,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <IconTrash style={{ width: 20, height: 20, color: "#ef4444" }} />
-            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "600", color: isDark ? "#f8fafc" : "#0f172a" }}>
-              {isSingle ? "Eliminar Elemento" : `Eliminar ${count} Elementos`}
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: tokens.textPrimary }}>
+              {isSingle ? "Eliminar elemento" : `Eliminar ${count} elementos`}
             </h3>
           </div>
           <button
@@ -86,7 +88,7 @@ export default function ConfirmDeleteModal({
             style={{
               background: "transparent",
               border: "none",
-              color: isDark ? "#94a3b8" : "#64748b",
+              color: tokens.textMuted,
               cursor: "pointer",
               padding: "4px",
               display: "flex",
@@ -102,10 +104,10 @@ export default function ConfirmDeleteModal({
               style={{
                 padding: "10px 14px",
                 marginBottom: "16px",
-                backgroundColor: isDark ? "rgba(239, 68, 68, 0.15)" : "#fee2e2",
-                border: "1px solid #ef4444",
-                borderRadius: "8px",
-                color: isDark ? "#fca5a5" : "#991b1b",
+                backgroundColor: "rgba(239, 68, 68, 0.12)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
+                borderRadius: "10px",
+                color: "#ef4444",
                 fontSize: "13px",
               }}
             >
@@ -113,7 +115,7 @@ export default function ConfirmDeleteModal({
             </div>
           )}
 
-          <p style={{ margin: "0 0 16px 0", fontSize: "14px", color: isDark ? "#cbd5e1" : "#334155", lineHeight: "1.5" }}>
+          <p style={{ margin: "0 0 16px 0", fontSize: "14px", color: tokens.textSecondary, lineHeight: "1.5" }}>
             {isSingle ? (
               <>
                 ¿Estás seguro de que deseas eliminar <strong>{paths[0]}</strong>? Si es una carpeta, se eliminarán todos los archivos y subcarpetas que contiene.
@@ -131,13 +133,15 @@ export default function ConfirmDeleteModal({
                 maxHeight: "150px",
                 overflowY: "auto",
                 padding: "10px 14px",
-                backgroundColor: isDark ? "#1e293b" : "#f1f5f9",
-                borderRadius: "8px",
+                backgroundColor: tokens.bgCardInner,
+                borderRadius: "10px",
+                border: `1px solid ${tokens.borderSubtle}`,
                 marginBottom: "20px",
                 fontSize: "12px",
                 fontFamily: "monospace",
-                color: isDark ? "#94a3b8" : "#64748b",
+                color: tokens.textSecondary,
               }}
+              className="custom-scroll"
             >
               {paths.map((p) => (
                 <div key={p} style={{ padding: "2px 0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -151,16 +155,7 @@ export default function ConfirmDeleteModal({
             <button
               type="button"
               onClick={onClose}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "transparent",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                borderRadius: "8px",
-                color: isDark ? "#cbd5e1" : "#475569",
-                fontSize: "13px",
-                fontWeight: "500",
-                cursor: "pointer",
-              }}
+              className="launcher-btn-secondary"
             >
               Cancelar
             </button>
@@ -168,15 +163,8 @@ export default function ConfirmDeleteModal({
               type="button"
               onClick={handleConfirm}
               disabled={isDeleting}
+              className="launcher-btn-danger"
               style={{
-                padding: "8px 20px",
-                backgroundColor: "#ef4444",
-                border: "none",
-                borderRadius: "8px",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: isDeleting ? "not-allowed" : "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "8px",

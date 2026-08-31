@@ -946,7 +946,7 @@ export default function ServerTasksView({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 1000,
+            zIndex: 900,
             padding: 16,
           }}
         >

@@ -5,8 +5,11 @@ import type {
   ModInstallationPlan,
   ModVersionOverrideInput,
   ContentType,
+  ThemeMode,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
+import { getThemeTokens } from "../../../theme/tokens"
+import { IconBox, IconSpinner } from "../../../theme/icons"
 
 interface ModDetailModalProps {
   provider: ModProvider
@@ -14,6 +17,7 @@ interface ModDetailModalProps {
   contentType?: ContentType
   onClose: () => void
   onSuccess: () => void
+  theme?: ThemeMode
 }
 
 export const ModDetailModal: React.FC<ModDetailModalProps> = ({
@@ -22,7 +26,10 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   contentType = "MOD",
   onClose,
   onSuccess,
+  theme = "dark",
 }) => {
+  const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<ModProjectDetail | null>(null)
@@ -155,8 +162,8 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.75)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -169,27 +176,27 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     >
       <div
         style={{
-          backgroundColor: "#161b22",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
-          borderRadius: "14px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
           maxWidth: "680px",
           maxHeight: "90vh",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          boxShadow: "0 20px 40px rgba(0, 0, 0, 0.6)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         {/* Header */}
         <div
           style={{
             padding: "20px 24px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            background: "rgba(255, 255, 255, 0.02)",
+            background: tokens.bgCardInner,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -202,7 +209,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   height: "52px",
                   borderRadius: "10px",
                   objectFit: "cover",
-                  background: "rgba(0, 0, 0, 0.3)",
+                  background: "rgba(0, 0, 0, 0.2)",
                 }}
               />
             ) : (
@@ -211,30 +218,30 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   width: "52px",
                   height: "52px",
                   borderRadius: "10px",
-                  background: "rgba(255, 255, 255, 0.08)",
+                  background: tokens.bgCardInner,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: "24px",
+                  color: tokens.textMuted,
                 }}
               >
-                📦
+                <IconBox size={24} />
               </div>
             )}
 
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "600", color: "#f3f4f6" }}>
+                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "700", color: tokens.textPrimary }}>
                   {detail?.name || "Cargando..."}
                 </h3>
                 <span
                   style={{
                     fontSize: "11px",
-                    fontWeight: "600",
+                    fontWeight: "700",
                     padding: "2px 8px",
-                    borderRadius: "12px",
+                    borderRadius: "6px",
                     background: isModrinth ? "rgba(16, 185, 129, 0.2)" : "rgba(249, 115, 22, 0.2)",
-                    color: isModrinth ? "#34d399" : "#fb923c",
+                    color: isModrinth ? "#10b981" : "#f97316",
                     border: `1px solid ${isModrinth ? "rgba(16, 185, 129, 0.3)" : "rgba(249, 115, 22, 0.3)"}`,
                   }}
                 >
@@ -245,7 +252,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     fontSize: "11px",
                     fontWeight: "600",
                     padding: "2px 8px",
-                    borderRadius: "12px",
+                    borderRadius: "6px",
                     background: "rgba(139, 92, 246, 0.2)",
                     color: "#c084fc",
                     border: "1px solid rgba(139, 92, 246, 0.3)",
@@ -254,8 +261,8 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   {contentType}
                 </span>
               </div>
-              <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "4px" }}>
-                por <span style={{ color: "#e5e7eb" }}>{detail?.author || "..."}</span>
+              <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "4px" }}>
+                por <span style={{ color: tokens.textPrimary, fontWeight: "600" }}>{detail?.author || "..."}</span>
               </div>
             </div>
           </div>
@@ -268,7 +275,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
             style={{
               background: "transparent",
               border: "none",
-              color: "#9ca3af",
+              color: tokens.textMuted,
               fontSize: "20px",
               cursor: "pointer",
               padding: "4px 8px",
@@ -280,20 +287,20 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+        <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }} className="custom-scroll">
           {loading ? (
-            <div style={{ textAlign: "center", padding: "40px 0", color: "#9ca3af" }}>
-              <div style={{ fontSize: "24px", marginBottom: "8px" }}>⏳</div>
-              Cargando información y versiones compatibles...
+            <div style={{ textAlign: "center", padding: "40px 0", color: tokens.textMuted, display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
+              <IconSpinner size={28} />
+              <span>Cargando información y versiones compatibles...</span>
             </div>
           ) : error && !detail ? (
             <div
               style={{
                 padding: "16px",
-                background: "rgba(239, 68, 68, 0.1)",
-                border: "1px solid rgba(239, 68, 68, 0.2)",
-                borderRadius: "8px",
-                color: "#fca5a5",
+                background: "rgba(239, 68, 68, 0.12)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
+                borderRadius: "10px",
+                color: "#ef4444",
                 fontSize: "14px",
               }}
             >

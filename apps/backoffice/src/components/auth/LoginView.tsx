@@ -211,25 +211,15 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
 
           <h2
             style={{
-              margin: "0 0 6px",
+              margin: 0,
               fontSize: 22,
               fontWeight: 800,
               color: isDark ? "#ffffff" : "#111822",
               letterSpacing: "-0.02em",
             }}
           >
-            HiKAT Back Office
+            Back Office
           </h2>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 14,
-              fontWeight: 500,
-              color: isDark ? "rgba(255, 255, 255, 0.5)" : "#657788",
-            }}
-          >
-            Panel de Administración
-          </p>
         </div>
 
         {/* Error alert */}

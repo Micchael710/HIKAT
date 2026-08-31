@@ -24,6 +24,8 @@ import {
   IconAlertCircle,
   IconCheck,
   IconSearch,
+  IconLock,
+  IconArrowDown,
 } from "../../theme/icons"
 import TextFileEditorModal from "./TextFileEditorModal"
 import NewFolderModal from "./NewFolderModal"
@@ -31,6 +33,7 @@ import RenameModal from "./RenameModal"
 import PolicyModal from "./PolicyModal"
 import ConfirmDeleteModal from "./ConfirmDeleteModal"
 import { ModSearchModal } from "./providers/ModSearchModal"
+import { getThemeTokens } from "../../theme/tokens"
 
 interface GameFilesExplorerProps {
   theme: ThemeMode
@@ -106,6 +109,7 @@ export default function GameFilesExplorer({
   onPrepareDraft,
 }: GameFilesExplorerProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
 
   const [currentPath, setCurrentPath] = useState("")
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
@@ -855,7 +859,7 @@ export default function GameFilesExplorer({
           }}
           title="Subir un nivel"
         >
-          <span>⬆️</span>
+          <IconArrowDown size={14} style={{ transform: "rotate(180deg)" }} />
         </button>
 
         <div style={{ height: "16px", width: "1px", backgroundColor: isDark ? "#334155" : "#cbd5e1", margin: "0 4px" }} />
@@ -869,9 +873,13 @@ export default function GameFilesExplorer({
             color: breadcrumbs.length === 0 ? (isDark ? "#60a5fa" : "#2563eb") : (isDark ? "#94a3b8" : "#64748b"),
             padding: "2px 6px",
             borderRadius: "4px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
           }}
         >
-          📁 Raíz
+          <IconFolder size={14} />
+          <span>Raíz</span>
         </span>
 
         {breadcrumbs.map((segment, idx) => (
@@ -1171,12 +1179,12 @@ export default function GameFilesExplorer({
             position: "fixed",
             left: contextMenu.x,
             top: contextMenu.y,
-            backgroundColor: isDark ? "#0f172a" : "#ffffff",
-            border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-            borderRadius: "10px",
-            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3)",
+            backgroundColor: tokens.bgCard,
+            border: `1px solid ${tokens.borderSubtle}`,
+            borderRadius: "12px",
+            boxShadow: tokens.dropdownShadow,
             padding: "6px",
-            zIndex: 10000,
+            zIndex: 100,
             minWidth: "180px",
             display: "flex",
             flexDirection: "column",
@@ -1202,7 +1210,7 @@ export default function GameFilesExplorer({
                 }}
                 style={contextMenuItemStyle(isDark)}
               >
-                <span>↩️</span>
+                <IconRefresh style={{ width: 14, height: 14 }} />
                 <span>Restaurar elemento</span>
               </button>
             ) : (
@@ -1217,7 +1225,7 @@ export default function GameFilesExplorer({
                     style={contextMenuItemStyle(isDark)}
                   >
                     <IconFolder style={{ width: 14, height: 14 }} />
-                    <span>Abrir Carpeta</span>
+                    <span>Abrir carpeta</span>
                   </button>
                 ) : !KNOWN_BINARY_EXTENSIONS.some((ext) => contextMenu.target!.name.toLowerCase().endsWith(ext)) ? (
                   <button
@@ -1231,7 +1239,7 @@ export default function GameFilesExplorer({
                     style={contextMenuItemStyle(isDark)}
                   >
                     <IconFileText style={{ width: 14, height: 14 }} />
-                    <span>{isEditableTextFile(contextMenu.target.name) ? "Editar Archivo" : "Editar Archivo (Texto)"}</span>
+                    <span>{isEditableTextFile(contextMenu.target.name) ? "Editar archivo" : "Editar archivo (texto)"}</span>
                   </button>
                 ) : null}
 
@@ -1245,8 +1253,8 @@ export default function GameFilesExplorer({
                       }}
                       style={contextMenuItemStyle(isDark)}
                     >
-                      <span>🛡️</span>
-                      <span>Cambiar Política...</span>
+                      <IconLock style={{ width: 14, height: 14 }} />
+                      <span>Cambiar política...</span>
                     </button>
 
                     <button
@@ -1269,7 +1277,8 @@ export default function GameFilesExplorer({
                       }}
                       style={contextMenuItemStyle(isDark)}
                     >
-                      <span>📋 Copiar (Ctrl+C)</span>
+                      <IconFile style={{ width: 14, height: 14 }} />
+                      <span>Copiar (Ctrl+C)</span>
                     </button>
 
                     <button
@@ -1280,10 +1289,11 @@ export default function GameFilesExplorer({
                       }}
                       style={contextMenuItemStyle(isDark)}
                     >
-                      <span>✂️ Cortar (Ctrl+X)</span>
+                      <IconEdit style={{ width: 14, height: 14 }} />
+                      <span>Cortar (Ctrl+X)</span>
                     </button>
 
-                    <div style={{ height: "1px", backgroundColor: isDark ? "#1e293b" : "#e2e8f0", margin: "4px 0" }} />
+                    <div style={{ height: "1px", backgroundColor: tokens.borderSubtle, margin: "4px 0" }} />
 
                     <button
                       type="button"
@@ -1312,8 +1322,8 @@ export default function GameFilesExplorer({
                     }}
                     style={contextMenuItemStyle(isDark)}
                   >
-                    <IconFolder style={{ width: 14, height: 14, color: "#3b82f6" }} />
-                    <span>Nueva Carpeta</span>
+                    <IconFolder style={{ width: 14, height: 14, color: "#3ec4c0" }} />
+                    <span>Nueva carpeta</span>
                   </button>
 
                   <button
@@ -1329,7 +1339,7 @@ export default function GameFilesExplorer({
                     style={contextMenuItemStyle(isDark)}
                   >
                     <IconFileText style={{ width: 14, height: 14, color: "#10b981" }} />
-                    <span>Nuevo Archivo</span>
+                    <span>Nuevo archivo</span>
                   </button>
 
                   {clipboard && (
@@ -1341,11 +1351,12 @@ export default function GameFilesExplorer({
                       }}
                       style={contextMenuItemStyle(isDark)}
                     >
-                      <span>📋 Pegar ({clipboard.sources.length})</span>
+                      <IconFile style={{ width: 14, height: 14 }} />
+                      <span>Pegar ({clipboard.sources.length})</span>
                     </button>
                   )}
 
-                  <div style={{ height: "1px", backgroundColor: isDark ? "#1e293b" : "#e2e8f0", margin: "4px 0" }} />
+                  <div style={{ height: "1px", backgroundColor: tokens.borderSubtle, margin: "4px 0" }} />
 
                   <button
                     type="button"
@@ -1356,7 +1367,7 @@ export default function GameFilesExplorer({
                     style={contextMenuItemStyle(isDark)}
                   >
                     <IconUpload style={{ width: 14, height: 14 }} />
-                    <span>Subir Archivos</span>
+                    <span>Subir archivos</span>
                   </button>
 
                   <button
@@ -1457,6 +1468,7 @@ export default function GameFilesExplorer({
 
       {isModSearchOpen && (
         <ModSearchModal
+          theme={theme}
           onClose={() => setIsModSearchOpen(false)}
           onSuccess={async () => {
             onToast("Mods y dependencias instalados exitosamente en el borrador.", "success")

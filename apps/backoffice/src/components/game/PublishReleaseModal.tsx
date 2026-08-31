@@ -14,6 +14,7 @@ import {
 } from "@hikat/shared"
 import { gameApi, serverContentApi, graphqlClient } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
+import { getThemeTokens } from "../../theme/tokens"
 import {
   IconCross,
   IconRocket,
@@ -51,6 +52,7 @@ export default function PublishReleaseModal({
   onReviewServerChanges,
 }: PublishReleaseModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
 
   // Step wizard state
   const [currentStep, setCurrentStep] = useState<Step>(1)
@@ -367,19 +369,22 @@ export default function PublishReleaseModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.7)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
         backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 50,
+        zIndex: 900,
         padding: "16px",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSubmitting) handleCloseModal()
       }}
     >
       <div
         style={{
-          backgroundColor: isDark ? "#1e293b" : "#ffffff",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
           borderRadius: "18px",
           width: "100%",
           maxWidth: "680px",
@@ -387,14 +392,15 @@ export default function PublishReleaseModal({
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         {/* Modal Header & Wizard Step Bar */}
         <div
           style={{
             padding: "20px 24px 16px 24px",
-            borderBottom: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
+            backgroundColor: tokens.bgCardInner,
           }}
         >
           <div
@@ -410,9 +416,9 @@ export default function PublishReleaseModal({
                 style={{
                   width: "36px",
                   height: "36px",
-                  borderRadius: "8px",
-                  backgroundColor: "rgba(34, 197, 94, 0.15)",
-                  color: "#22c55e",
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(62, 196, 192, 0.15)",
+                  color: "#3ec4c0",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -425,7 +431,7 @@ export default function PublishReleaseModal({
                   margin: 0,
                   fontSize: "18px",
                   fontWeight: "700",
-                  color: isDark ? "#f1f5f9" : "#0f172a",
+                  color: tokens.textPrimary,
                 }}
               >
                 {postPublishState ? "Actualización publicada" : "Publicar actualización oficial"}
@@ -438,7 +444,7 @@ export default function PublishReleaseModal({
                 background: "none",
                 border: "none",
                 cursor: isSubmitting ? "not-allowed" : "pointer",
-                color: isDark ? "#94a3b8" : "#64748b",
+                color: tokens.textMuted,
                 display: "flex",
                 padding: "4px",
               }}
@@ -591,7 +597,7 @@ export default function PublishReleaseModal({
                       backgroundColor: "rgba(34, 197, 94, 0.1)",
                     }}
                   >
-                    <span>🟢</span>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#22c55e", display: "inline-block", flexShrink: 0 }} />
                     <div>
                       <strong>Servidor apagado y listo.</strong> Puedes revisar y aplicar los cambios ahora.
                     </div>
@@ -609,7 +615,7 @@ export default function PublishReleaseModal({
                       backgroundColor: "rgba(239, 68, 68, 0.1)",
                     }}
                   >
-                    <span>🔴</span>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#ef4444", display: "inline-block", flexShrink: 0 }} />
                     <div>
                       <strong>{postPublishState.plan.blockReason || "El servidor no está disponible."}</strong> La actualización ya fue publicada. Los cambios del servidor quedarán pendientes hasta que vuelva a estar disponible.
                     </div>
@@ -627,7 +633,7 @@ export default function PublishReleaseModal({
                       backgroundColor: "rgba(245, 158, 11, 0.1)",
                     }}
                   >
-                    <span>🟠</span>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#f59e0b", display: "inline-block", flexShrink: 0 }} />
                     <div>
                       <strong>{postPublishState.plan.blockReason || "No se pudieron verificar los archivos del servidor."}</strong>
                     </div>
@@ -645,7 +651,7 @@ export default function PublishReleaseModal({
                       backgroundColor: "rgba(245, 158, 11, 0.1)",
                     }}
                   >
-                    <span>🟠</span>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#f59e0b", display: "inline-block", flexShrink: 0 }} />
                     <div>
                       <strong>{postPublishState.plan.blockReason || "Apaga el servidor antes de aplicar los cambios."}</strong>
                     </div>
@@ -661,23 +667,14 @@ export default function PublishReleaseModal({
                 justifyContent: "flex-end",
                 gap: "10px",
                 paddingTop: "16px",
-                borderTop: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+                borderTop: `1px solid ${tokens.borderSubtle}`,
               }}
             >
               <button
                 type="button"
                 data-testid="button-post-publish-close"
                 onClick={onClose}
-                style={{
-                  padding: "9px 20px",
-                  borderRadius: "8px",
-                  border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                  backgroundColor: "transparent",
-                  color: isDark ? "#f1f5f9" : "#0f172a",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  cursor: "pointer",
-                }}
+                className="launcher-btn-secondary"
               >
                 Cerrar
               </button>
@@ -693,16 +690,7 @@ export default function PublishReleaseModal({
                       onClose()
                     }
                   }}
-                  style={{
-                    padding: "9px 22px",
-                    borderRadius: "8px",
-                    border: "none",
-                    backgroundColor: "#3b82f6",
-                    color: "#ffffff",
-                    fontSize: "13px",
-                    fontWeight: "700",
-                    cursor: "pointer",
-                  }}
+                  className="launcher-btn-primary"
                 >
                   {postPublishState.plan.canApply
                     ? "Revisar cambios del servidor"

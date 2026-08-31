@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react"
 import type { ThemeMode, UpdateDeploymentOrder } from "../../types"
 import { settingsApi } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import { IconSpinner, IconCheck, IconWarning } from "../../theme/icons"
 import LiveToast from "../common/LiveToast"
 
@@ -10,6 +11,7 @@ interface SettingsViewProps {
 
 export default function SettingsView({ theme }: SettingsViewProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
 
   const [deploymentOrder, setDeploymentOrder] = useState<UpdateDeploymentOrder>("SERVER_FIRST")
   const [isLoading, setIsLoading] = useState(true)
@@ -59,15 +61,26 @@ export default function SettingsView({ theme }: SettingsViewProps) {
   }
 
   return (
-    <div style={{ padding: "28px", maxWidth: "800px", margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        padding: "32px 36px",
+        overflowY: "auto",
+        animation: "viewFadeIn 0.24s ease",
+        fontFamily: "Inter, sans-serif",
+        boxSizing: "border-box",
+      }}
+      className="custom-scroll"
+    >
       {/* Top Header */}
       <div style={{ marginBottom: "28px" }}>
         <h1
           style={{
             margin: "0 0 6px 0",
-            fontSize: "24px",
-            fontWeight: "700",
-            color: isDark ? "#f1f5f9" : "#0f172a",
+            fontSize: "26px",
+            fontWeight: "800",
+            color: tokens.textPrimary,
             letterSpacing: "-0.02em",
           }}
         >
@@ -77,7 +90,8 @@ export default function SettingsView({ theme }: SettingsViewProps) {
           style={{
             margin: 0,
             fontSize: "14px",
-            color: isDark ? "#94a3b8" : "#64748b",
+            fontWeight: "500",
+            color: tokens.textSecondary,
           }}
         >
           Ajustes de despliegue y disponibilidad de versiones para los jugadores y el servidor.
@@ -91,7 +105,7 @@ export default function SettingsView({ theme }: SettingsViewProps) {
             alignItems: "center",
             justifyContent: "center",
             padding: "80px 0",
-            color: isDark ? "#94a3b8" : "#64748b",
+            color: tokens.textMuted,
             gap: "12px",
           }}
         >
@@ -99,14 +113,14 @@ export default function SettingsView({ theme }: SettingsViewProps) {
           <span>Cargando ajustes...</span>
         </div>
       ) : (
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} style={{ maxWidth: "800px" }}>
           {error && (
             <div
               style={{
                 marginBottom: "24px",
                 padding: "12px 16px",
-                borderRadius: "10px",
-                backgroundColor: "rgba(239, 68, 68, 0.1)",
+                borderRadius: "12px",
+                backgroundColor: "rgba(239, 68, 68, 0.12)",
                 border: "1px solid rgba(239, 68, 68, 0.25)",
                 color: "#ef4444",
                 fontSize: "14px",
@@ -119,20 +133,20 @@ export default function SettingsView({ theme }: SettingsViewProps) {
           {/* Section: Deployment Order */}
           <div
             style={{
-              backgroundColor: isDark ? "#1e293b" : "#ffffff",
-              border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-              borderRadius: "14px",
+              backgroundColor: tokens.bgCard,
+              border: `1px solid ${tokens.borderSubtle}`,
+              borderRadius: "18px",
               padding: "24px",
               marginBottom: "24px",
-              boxShadow: isDark ? "0 4px 6px -1px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.05)",
+              boxShadow: tokens.cardShadow,
             }}
           >
             <h2
               style={{
                 margin: "0 0 6px 0",
                 fontSize: "16px",
-                fontWeight: "600",
-                color: isDark ? "#f1f5f9" : "#0f172a",
+                fontWeight: "700",
+                color: tokens.textPrimary,
               }}
             >
               Orden de las actualizaciones
@@ -141,7 +155,7 @@ export default function SettingsView({ theme }: SettingsViewProps) {
               style={{
                 margin: "0 0 20px 0",
                 fontSize: "13px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                color: tokens.textSecondary,
                 lineHeight: "1.5",
               }}
             >
@@ -157,22 +171,18 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                   alignItems: "flex-start",
                   gap: "14px",
                   padding: "16px 18px",
-                  borderRadius: "10px",
+                  borderRadius: "12px",
                   border: `2px solid ${
                     deploymentOrder === "SERVER_FIRST"
-                      ? "#6366f1"
-                      : isDark
-                        ? "#334155"
-                        : "#e2e8f0"
+                      ? "#3ec4c0"
+                      : tokens.borderSubtle
                   }`,
                   backgroundColor:
                     deploymentOrder === "SERVER_FIRST"
                       ? isDark
-                        ? "rgba(99, 102, 241, 0.08)"
-                        : "rgba(99, 102, 241, 0.04)"
-                      : isDark
-                        ? "#0f172a"
-                        : "#f8fafc",
+                        ? "rgba(62, 196, 192, 0.1)"
+                        : "rgba(62, 196, 192, 0.06)"
+                      : tokens.bgCardInner,
                   cursor: "pointer",
                   transition: "all 0.15s ease",
                 }}
@@ -185,7 +195,7 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                   onChange={() => setDeploymentOrder("SERVER_FIRST")}
                   style={{
                     marginTop: "3px",
-                    accentColor: "#6366f1",
+                    accentColor: "#3ec4c0",
                     cursor: "pointer",
                   }}
                 />
@@ -195,8 +205,8 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                       htmlFor="order-server-first"
                       style={{
                         fontSize: "14px",
-                        fontWeight: "600",
-                        color: isDark ? "#f1f5f9" : "#0f172a",
+                        fontWeight: "700",
+                        color: tokens.textPrimary,
                         cursor: "pointer",
                       }}
                     >
@@ -206,7 +216,7 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                       style={{
                         display: "inline-block",
                         fontSize: "11px",
-                        fontWeight: "600",
+                        fontWeight: "700",
                         padding: "2px 8px",
                         borderRadius: "12px",
                         backgroundColor: isDark ? "rgba(16, 185, 129, 0.2)" : "rgba(16, 185, 129, 0.12)",
@@ -221,7 +231,7 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                     style={{
                       margin: 0,
                       fontSize: "13px",
-                      color: isDark ? "#94a3b8" : "#64748b",
+                      color: tokens.textSecondary,
                       lineHeight: "1.4",
                     }}
                   >
@@ -238,22 +248,18 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                   alignItems: "flex-start",
                   gap: "14px",
                   padding: "16px 18px",
-                  borderRadius: "10px",
+                  borderRadius: "12px",
                   border: `2px solid ${
                     deploymentOrder === "PLAYERS_FIRST"
-                      ? "#6366f1"
-                      : isDark
-                        ? "#334155"
-                        : "#e2e8f0"
+                      ? "#3ec4c0"
+                      : tokens.borderSubtle
                   }`,
                   backgroundColor:
                     deploymentOrder === "PLAYERS_FIRST"
                       ? isDark
-                        ? "rgba(99, 102, 241, 0.08)"
-                        : "rgba(99, 102, 241, 0.04)"
-                      : isDark
-                        ? "#0f172a"
-                        : "#f8fafc",
+                        ? "rgba(62, 196, 192, 0.1)"
+                        : "rgba(62, 196, 192, 0.06)"
+                      : tokens.bgCardInner,
                   cursor: "pointer",
                   transition: "all 0.15s ease",
                 }}
@@ -266,7 +272,7 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                   onChange={() => setDeploymentOrder("PLAYERS_FIRST")}
                   style={{
                     marginTop: "3px",
-                    accentColor: "#6366f1",
+                    accentColor: "#3ec4c0",
                     cursor: "pointer",
                   }}
                 />
@@ -276,8 +282,8 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                       htmlFor="order-players-first"
                       style={{
                         fontSize: "14px",
-                        fontWeight: "600",
-                        color: isDark ? "#f1f5f9" : "#0f172a",
+                        fontWeight: "700",
+                        color: tokens.textPrimary,
                         cursor: "pointer",
                       }}
                     >
@@ -288,7 +294,7 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                     style={{
                       margin: 0,
                       fontSize: "13px",
-                      color: isDark ? "#94a3b8" : "#64748b",
+                      color: tokens.textSecondary,
                       lineHeight: "1.4",
                     }}
                   >
@@ -304,8 +310,8 @@ export default function SettingsView({ theme }: SettingsViewProps) {
                 style={{
                   marginTop: "16px",
                   padding: "12px 16px",
-                  borderRadius: "10px",
-                  backgroundColor: isDark ? "rgba(245, 158, 11, 0.1)" : "rgba(245, 158, 11, 0.08)",
+                  borderRadius: "12px",
+                  backgroundColor: isDark ? "rgba(245, 158, 11, 0.12)" : "rgba(245, 158, 11, 0.08)",
                   border: `1px solid ${isDark ? "rgba(245, 158, 11, 0.3)" : "rgba(245, 158, 11, 0.25)"}`,
                   color: isDark ? "#fbbf24" : "#d97706",
                   fontSize: "13px",
@@ -326,20 +332,10 @@ export default function SettingsView({ theme }: SettingsViewProps) {
             <button
               type="submit"
               disabled={isSaving}
+              className="launcher-btn-primary"
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
                 padding: "10px 24px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: "#6366f1",
-                color: "#ffffff",
                 fontSize: "14px",
-                fontWeight: "600",
-                cursor: isSaving ? "not-allowed" : "pointer",
-                opacity: isSaving ? 0.7 : 1,
-                transition: "opacity 0.15s ease",
               }}
             >
               {isSaving ? <IconSpinner size={16} /> : <IconCheck size={16} />}
@@ -353,6 +349,7 @@ export default function SettingsView({ theme }: SettingsViewProps) {
         <LiveToast
           message={toastMessage}
           type="success"
+          theme={theme}
           onClose={() => setToastMessage(null)}
         />
       )}

@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import type { ThemeMode, SyncPolicy } from "../../types"
-import { IconCross, IconSpinner, IconCheck } from "../../theme/icons"
+import { getThemeTokens } from "../../theme/tokens"
+import { IconCross, IconSpinner, IconLock, IconUnlock, IconRefresh, IconEdit } from "../../theme/icons"
 
 interface PolicyModalProps {
   theme: ThemeMode
@@ -22,6 +23,7 @@ export default function PolicyModal({
   onSubmit,
 }: PolicyModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [selectedPolicy, setSelectedPolicy] = useState<SyncPolicy | "INHERIT">(
     currentExplicitPolicy === null ? "INHERIT" : currentExplicitPolicy,
   )
@@ -48,12 +50,12 @@ export default function PolicyModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.65)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 9999,
+        zIndex: 900,
         padding: "20px",
         boxSizing: "border-box",
       }}
@@ -65,27 +67,27 @@ export default function PolicyModal({
         style={{
           width: "100%",
           maxWidth: "520px",
-          backgroundColor: isDark ? "#0f172a" : "#ffffff",
-          borderRadius: "16px",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          backgroundColor: tokens.bgCard,
+          borderRadius: "18px",
+          border: `1px solid ${tokens.borderSubtle}`,
+          boxShadow: tokens.cardShadowLg,
           overflow: "hidden",
         }}
       >
         <div
           style={{
-            padding: "16px 20px",
-            borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+            padding: "18px 20px",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            backgroundColor: isDark ? "#0b1120" : "#f8fafc",
+            backgroundColor: tokens.bgCardInner,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "20px" }}>🛡️</span>
-            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "600", color: isDark ? "#f8fafc" : "#0f172a" }}>
-              Política de Sincronización
+            <IconLock style={{ width: 20, height: 20, color: "#3ec4c0" }} />
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: tokens.textPrimary }}>
+              Política de sincronización
             </h3>
           </div>
           <button
@@ -94,7 +96,7 @@ export default function PolicyModal({
             style={{
               background: "transparent",
               border: "none",
-              color: isDark ? "#94a3b8" : "#64748b",
+              color: tokens.textMuted,
               cursor: "pointer",
               padding: "4px",
               display: "flex",
@@ -110,10 +112,10 @@ export default function PolicyModal({
               style={{
                 padding: "10px 14px",
                 marginBottom: "16px",
-                backgroundColor: isDark ? "rgba(239, 68, 68, 0.15)" : "#fee2e2",
-                border: "1px solid #ef4444",
-                borderRadius: "8px",
-                color: isDark ? "#fca5a5" : "#991b1b",
+                backgroundColor: "rgba(239, 68, 68, 0.12)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
+                borderRadius: "10px",
+                color: "#ef4444",
                 fontSize: "13px",
               }}
             >
@@ -124,17 +126,17 @@ export default function PolicyModal({
           <div
             style={{
               padding: "12px 16px",
-              backgroundColor: isDark ? "#1e293b" : "#f8fafc",
-              border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-              borderRadius: "8px",
+              backgroundColor: tokens.bgCardInner,
+              border: `1px solid ${tokens.borderSubtle}`,
+              borderRadius: "10px",
               marginBottom: "16px",
               fontSize: "13px",
             }}
           >
-            <div style={{ color: isDark ? "#94a3b8" : "#64748b", marginBottom: "4px" }}>
+            <div style={{ color: tokens.textSecondary, marginBottom: "4px" }}>
               {isDirectory ? "Carpeta seleccionada:" : "Archivo seleccionado:"}
             </div>
-            <div style={{ fontWeight: "600", color: isDark ? "#f8fafc" : "#0f172a", fontFamily: "monospace" }}>
+            <div style={{ fontWeight: "600", color: tokens.textPrimary, fontFamily: "monospace" }}>
               {path}
             </div>
           </div>
@@ -147,19 +149,17 @@ export default function PolicyModal({
                 alignItems: "flex-start",
                 gap: "12px",
                 padding: "12px 14px",
-                borderRadius: "10px",
+                borderRadius: "12px",
                 border: `1px solid ${
                   selectedPolicy === "INHERIT"
-                    ? "#3b82f6"
-                    : isDark
-                    ? "#334155"
-                    : "#e2e8f0"
+                    ? "#3ec4c0"
+                    : tokens.borderSubtle
                 }`,
                 backgroundColor:
                   selectedPolicy === "INHERIT"
                     ? isDark
-                      ? "rgba(59, 130, 246, 0.1)"
-                      : "#eff6ff"
+                      ? "rgba(62, 196, 192, 0.1)"
+                      : "rgba(62, 196, 192, 0.06)"
                     : "transparent",
                 cursor: "pointer",
                 transition: "all 0.15s ease",
@@ -171,13 +171,14 @@ export default function PolicyModal({
                 value="INHERIT"
                 checked={selectedPolicy === "INHERIT"}
                 onChange={() => setSelectedPolicy("INHERIT")}
-                style={{ marginTop: "3px" }}
+                style={{ marginTop: "3px", accentColor: "#3ec4c0" }}
               />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: "14px", fontWeight: "600", color: isDark ? "#f8fafc" : "#0f172a" }}>
-                  🔄 Heredar de la carpeta superior (por defecto)
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "14px", fontWeight: "700", color: tokens.textPrimary }}>
+                  <IconRefresh size={15} />
+                  <span>Heredar de la carpeta superior (por defecto)</span>
                 </div>
-                <div style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b", marginTop: "2px" }}>
+                <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
                   Hereda la política de la carpeta padre o del estándar de la raíz ({currentEffectivePolicy === "NO_MODIFICABLE" ? "Protegido" : "Personalizable"}).
                 </div>
               </div>
@@ -190,18 +191,16 @@ export default function PolicyModal({
                 alignItems: "flex-start",
                 gap: "12px",
                 padding: "12px 14px",
-                borderRadius: "10px",
+                borderRadius: "12px",
                 border: `1px solid ${
                   selectedPolicy === "NO_MODIFICABLE"
                     ? "#ef4444"
-                    : isDark
-                    ? "#334155"
-                    : "#e2e8f0"
+                    : tokens.borderSubtle
                 }`,
                 backgroundColor:
                   selectedPolicy === "NO_MODIFICABLE"
                     ? isDark
-                      ? "rgba(239, 68, 68, 0.1)"
+                      ? "rgba(239, 68, 68, 0.12)"
                       : "#fef2f2"
                     : "transparent",
                 cursor: "pointer",
@@ -214,13 +213,14 @@ export default function PolicyModal({
                 value="NO_MODIFICABLE"
                 checked={selectedPolicy === "NO_MODIFICABLE"}
                 onChange={() => setSelectedPolicy("NO_MODIFICABLE")}
-                style={{ marginTop: "3px" }}
+                style={{ marginTop: "3px", accentColor: "#ef4444" }}
               />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: "14px", fontWeight: "600", color: isDark ? "#f87171" : "#dc2626" }}>
-                  🔒 Override: Protegido (NO_MODIFICABLE)
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "14px", fontWeight: "700", color: isDark ? "#f87171" : "#dc2626" }}>
+                  <IconLock size={15} />
+                  <span>Override: Protegido (NO_MODIFICABLE)</span>
                 </div>
-                <div style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b", marginTop: "2px" }}>
+                <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
                   El Launcher sobreescribe y sincroniza obligatoriamente este contenido. El jugador no puede alterarlo.
                 </div>
               </div>
@@ -233,18 +233,16 @@ export default function PolicyModal({
                 alignItems: "flex-start",
                 gap: "12px",
                 padding: "12px 14px",
-                borderRadius: "10px",
+                borderRadius: "12px",
                 border: `1px solid ${
                   selectedPolicy === "MODIFICABLE"
                     ? "#10b981"
-                    : isDark
-                    ? "#334155"
-                    : "#e2e8f0"
+                    : tokens.borderSubtle
                 }`,
                 backgroundColor:
                   selectedPolicy === "MODIFICABLE"
                     ? isDark
-                      ? "rgba(16, 185, 129, 0.1)"
+                      ? "rgba(16, 185, 129, 0.12)"
                       : "#f0fdf4"
                     : "transparent",
                 cursor: "pointer",
@@ -257,13 +255,14 @@ export default function PolicyModal({
                 value="MODIFICABLE"
                 checked={selectedPolicy === "MODIFICABLE"}
                 onChange={() => setSelectedPolicy("MODIFICABLE")}
-                style={{ marginTop: "3px" }}
+                style={{ marginTop: "3px", accentColor: "#10b981" }}
               />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: "14px", fontWeight: "600", color: isDark ? "#34d399" : "#059669" }}>
-                  ✏️ Override: Personalizable (MODIFICABLE)
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "14px", fontWeight: "700", color: isDark ? "#34d399" : "#059669" }}>
+                  <IconUnlock size={15} />
+                  <span>Override: Personalizable (MODIFICABLE)</span>
                 </div>
-                <div style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b", marginTop: "2px" }}>
+                <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
                   Se descarga una sola vez como plantilla inicial. El Launcher preservará las modificaciones locales del jugador.
                 </div>
               </div>
@@ -274,38 +273,22 @@ export default function PolicyModal({
             <button
               type="button"
               onClick={onClose}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "transparent",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                borderRadius: "8px",
-                color: isDark ? "#cbd5e1" : "#475569",
-                fontSize: "13px",
-                fontWeight: "500",
-                cursor: "pointer",
-              }}
+              className="launcher-btn-secondary"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
+              className="launcher-btn-primary"
               style={{
-                padding: "8px 20px",
-                backgroundColor: "#3b82f6",
-                border: "none",
-                borderRadius: "8px",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: isSubmitting ? "not-allowed" : "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "8px",
               }}
             >
               {isSubmitting && <IconSpinner style={{ width: 14, height: 14 }} />}
-              <span>Aplicar Política</span>
+              <span>Aplicar política</span>
             </button>
           </div>
         </form>

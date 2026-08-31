@@ -1,13 +1,17 @@
 import React from "react"
-import type { ModSearchResultItem } from "../../../types"
+import type { ModSearchResultItem, ThemeMode } from "../../../types"
+import { getThemeTokens } from "../../../theme/tokens"
+import { IconBox, IconDownload } from "../../../theme/icons"
 
 interface ModCardProps {
   mod: ModSearchResultItem
   onSelect: (mod: ModSearchResultItem) => void
+  theme?: ThemeMode
 }
 
-export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
+export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect, theme = "dark" }) => {
   const isModrinth = mod.provider === "MODRINTH"
+  const tokens = getThemeTokens(theme)
 
   return (
     <div
@@ -17,23 +21,23 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
         display: "flex",
         flexDirection: "column",
         justifyContent: "space-between",
-        background: "rgba(255, 255, 255, 0.03)",
-        border: "1px solid rgba(255, 255, 255, 0.08)",
-        borderRadius: "12px",
+        background: tokens.bgCard,
+        border: `1px solid ${tokens.borderSubtle}`,
+        borderRadius: "14px",
         padding: "16px",
         cursor: "pointer",
         transition: "all 0.2s ease-in-out",
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
+        boxShadow: tokens.cardShadow,
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = isModrinth ? "rgba(16, 185, 129, 0.5)" : "rgba(249, 115, 22, 0.5)"
         e.currentTarget.style.transform = "translateY(-2px)"
-        e.currentTarget.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.25)"
+        e.currentTarget.style.boxShadow = tokens.cardShadowLg
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)"
+        e.currentTarget.style.borderColor = tokens.borderSubtle
         e.currentTarget.style.transform = "translateY(0)"
-        e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.1)"
+        e.currentTarget.style.boxShadow = tokens.cardShadow
       }}
     >
       <div>
@@ -45,10 +49,10 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
               style={{
                 width: "48px",
                 height: "48px",
-                borderRadius: "8px",
+                borderRadius: "10px",
                 objectFit: "cover",
                 flexShrink: 0,
-                background: "rgba(0, 0, 0, 0.2)",
+                background: "rgba(0, 0, 0, 0.1)",
               }}
             />
           ) : (
@@ -56,17 +60,16 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
               style={{
                 width: "48px",
                 height: "48px",
-                borderRadius: "8px",
-                background: "rgba(255, 255, 255, 0.06)",
+                borderRadius: "10px",
+                background: tokens.bgCardInner,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: "20px",
                 flexShrink: 0,
-                color: "rgba(255, 255, 255, 0.4)",
+                color: tokens.textMuted,
               }}
             >
-              📦
+              <IconBox size={24} />
             </div>
           )}
 
@@ -76,8 +79,8 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
                 style={{
                   margin: 0,
                   fontSize: "15px",
-                  fontWeight: "600",
-                  color: "#f3f4f6",
+                  fontWeight: "700",
+                  color: tokens.textPrimary,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -92,9 +95,9 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
                 data-testid={`badge-provider-${mod.provider.toLowerCase()}`}
                 style={{
                   fontSize: "11px",
-                  fontWeight: "600",
+                  fontWeight: "700",
                   padding: "2px 6px",
-                  borderRadius: "4px",
+                  borderRadius: "6px",
                   background: isModrinth ? "rgba(16, 185, 129, 0.15)" : "rgba(249, 115, 22, 0.15)",
                   color: isModrinth ? "#10b981" : "#f97316",
                   border: `1px solid ${isModrinth ? "rgba(16, 185, 129, 0.3)" : "rgba(249, 115, 22, 0.3)"}`,
@@ -108,8 +111,8 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
                   style={{
                     fontSize: "10px",
                     fontWeight: "600",
-                    padding: "2px 5px",
-                    borderRadius: "4px",
+                    padding: "2px 6px",
+                    borderRadius: "6px",
                     background: "rgba(59, 130, 246, 0.15)",
                     color: "#60a5fa",
                     border: "1px solid rgba(59, 130, 246, 0.3)",
@@ -130,8 +133,8 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
                   style={{
                     fontSize: "10px",
                     fontWeight: "600",
-                    padding: "2px 5px",
-                    borderRadius: "4px",
+                    padding: "2px 6px",
+                    borderRadius: "6px",
                     background: "rgba(168, 85, 247, 0.15)",
                     color: "#c084fc",
                     border: "1px solid rgba(168, 85, 247, 0.3)",
@@ -142,8 +145,8 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
               )}
             </div>
 
-            <div style={{ fontSize: "12px", color: "#9ca3af" }}>
-              por <span style={{ color: "#d1d5db", fontWeight: "500" }}>{mod.author}</span>
+            <div style={{ fontSize: "12px", color: tokens.textSecondary }}>
+              por <span style={{ color: tokens.textPrimary, fontWeight: "600" }}>{mod.author}</span>
             </div>
           </div>
         </div>
@@ -152,7 +155,7 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
           style={{
             margin: "0 0 14px 0",
             fontSize: "13px",
-            color: "#9ca3af",
+            color: tokens.textSecondary,
             lineHeight: "1.4",
             display: "-webkit-box",
             WebkitLineClamp: 2,
@@ -173,30 +176,32 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect }) => {
           alignItems: "center",
           justifyContent: "space-between",
           paddingTop: "10px",
-          borderTop: "1px solid rgba(255, 255, 255, 0.05)",
+          borderTop: `1px solid ${tokens.borderSubtle}`,
           fontSize: "12px",
-          color: "#9ca3af",
+          color: tokens.textSecondary,
         }}
       >
         <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-          <span>⬇️</span>
-          {mod.downloads > 1000000
-            ? `${(mod.downloads / 1000000).toFixed(1)}M`
-            : mod.downloads > 1000
-            ? `${(mod.downloads / 1000).toFixed(0)}k`
-            : mod.downloads}
+          <IconDownload size={14} style={{ color: tokens.textMuted }} />
+          <span>
+            {mod.downloads > 1000000
+              ? `${(mod.downloads / 1000000).toFixed(1)}M`
+              : mod.downloads > 1000
+              ? `${(mod.downloads / 1000).toFixed(0)}k`
+              : mod.downloads}
+          </span>
         </span>
 
         <button
           type="button"
           style={{
-            background: "rgba(255, 255, 255, 0.06)",
-            border: "1px solid rgba(255, 255, 255, 0.12)",
-            color: "#e5e7eb",
-            borderRadius: "6px",
+            background: tokens.bgPill,
+            border: `1px solid ${tokens.borderSubtle}`,
+            color: tokens.textPrimary,
+            borderRadius: "8px",
             padding: "4px 10px",
             fontSize: "12px",
-            fontWeight: "500",
+            fontWeight: "600",
             cursor: "pointer",
             transition: "all 0.15s ease",
           }}

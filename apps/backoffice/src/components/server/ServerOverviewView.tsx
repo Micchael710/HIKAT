@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react"
 import type { ThemeMode, ServerResources, ServerPowerAction, ConsoleLogEntry, ServerReleaseSyncPlan } from "../../types"
 import { serverApi, serverContentApi } from "../../services/graphqlClient"
 import { consoleService } from "../../services/consoleService"
+import { getThemeTokens } from "../../theme/tokens"
 import { formatBytesToHuman, formatUptime } from "@hikat/shared"
 import ServerStatusBadge from "./ServerStatusBadge"
 import ServerResourceCard from "./ServerResourceCard"
@@ -38,11 +39,12 @@ const SUB_TABS: Array<{ id: ServerSubTab; label: string; icon: React.ReactNode }
   { id: "console", label: "Consola", icon: <IconTerminal size={18} /> },
   { id: "files", label: "Archivos", icon: <IconFolder size={18} /> },
   { id: "backups", label: "Backups", icon: <IconArchive size={18} /> },
-  { id: "tasks", label: "Tasks", icon: <IconCalendar size={18} /> },
+  { id: "tasks", label: "Tareas", icon: <IconCalendar size={18} /> },
 ]
 
 export default function ServerOverviewView({ theme, onNavigate }: ServerOverviewViewProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [activeTab, setActiveTab] = useState<ServerSubTab>("general")
   const [infraState, setInfraState] = useState<"CHECKING" | "CONNECTED" | "DISCONNECTED">("CHECKING")
   const [resources, setResources] = useState<ServerResources | null>(null)
@@ -56,7 +58,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
   // Live Console Preview State for General tab
   const [liveLogs, setLiveLogs] = useState<ConsoleLogEntry[]>([])
   const [isConsoleConnected, setIsConsoleConnected] = useState(false)
-  const liveConsoleEndRef = useRef<HTMLDivElement>(null)
+  const liveLogsContainerRef = useRef<HTMLDivElement>(null)
 
   const isMountedRef = useRef(true)
   const isFetchingRef = useRef(false)
@@ -179,10 +181,10 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
     }
   }, [activeTab])
 
-  // Auto-scroll live console preview
+  // Auto-scroll live console preview safely inside local container
   useEffect(() => {
-    if (activeTab === "general" && liveConsoleEndRef.current) {
-      liveConsoleEndRef.current.scrollIntoView({ behavior: "smooth" })
+    if (activeTab === "general" && liveLogsContainerRef.current) {
+      liveLogsContainerRef.current.scrollTop = liveLogsContainerRef.current.scrollHeight
     }
   }, [liveLogs, activeTab])
 
@@ -249,9 +251,10 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
         display: "flex",
         flexDirection: "column",
         gap: 24,
-        paddingBottom: 40,
-        maxWidth: 1200,
-        margin: "0 auto",
+        padding: "32px 36px",
+        width: "100%",
+        boxSizing: "border-box",
+        animation: "viewFadeIn 0.24s ease",
       }}
     >
       {/* Toast Notification */}
@@ -259,6 +262,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
         <LiveToast
           message={toastMessage}
           type={toastType}
+          theme={theme}
           onClose={() => setToastMessage(null)}
         />
       )}
@@ -271,9 +275,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
           alignItems: "center",
           flexWrap: "wrap",
           gap: 16,
-          borderBottom: `1px solid ${
-            isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)"
-          }`,
+          borderBottom: `1px solid ${tokens.borderSubtle}`,
           paddingBottom: 16,
         }}
       >
@@ -282,9 +284,9 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
             <h1
               style={{
                 margin: 0,
-                fontSize: "1.65rem",
+                fontSize: "1.75rem",
                 fontWeight: 800,
-                color: isDark ? "#ffffff" : "#0f172a",
+                color: tokens.textPrimary,
                 letterSpacing: "-0.02em",
               }}
             >
@@ -358,14 +360,11 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
           style={{
             display: "flex",
             alignItems: "center",
-            flexWrap: "wrap",
-            gap: 4,
-            padding: 4,
-            borderRadius: 14,
-            background: isDark ? "rgba(19, 28, 35, 0.85)" : "#e2e8f0",
-            border: `1px solid ${
-              isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)"
-            }`,
+            gap: "8px",
+            backgroundColor: tokens.bgCardInner,
+            padding: "4px",
+            borderRadius: "14px",
+            border: `1px solid ${tokens.borderSubtle}`,
           }}
         >
           {SUB_TABS.map((tab) => {
@@ -376,31 +375,18 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 style={{
-                  display: "inline-flex",
+                  display: "flex",
                   alignItems: "center",
-                  gap: 6,
-                  padding: "8px 14px",
-                  borderRadius: 10,
+                  gap: "8px",
+                  padding: "8px 16px",
+                  borderRadius: "10px",
                   border: "none",
-                  background: isActive
-                    ? isDark
-                      ? "rgba(62, 196, 192, 0.2)"
-                      : "#ffffff"
-                    : "transparent",
-                  color: isActive
-                    ? isDark
-                      ? "#3ec4c0"
-                      : "#0c6e6b"
-                    : isDark
-                    ? "rgba(255, 255, 255, 0.6)"
-                    : "rgba(0, 0, 0, 0.6)",
-                  fontSize: "0.85rem",
-                  fontWeight: 600,
+                  backgroundColor: isActive ? tokens.bgCard : "transparent",
+                  color: isActive ? tokens.textPrimary : tokens.textSecondary,
+                  boxShadow: isActive ? tokens.cardShadow : "none",
+                  fontSize: "13px",
+                  fontWeight: isActive ? "700" : "500",
                   cursor: "pointer",
-                  boxShadow:
-                    isActive && !isDark
-                      ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                      : "none",
                   transition: "all 0.15s ease",
                 }}
               >
@@ -612,12 +598,12 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                           }}
                         >
                           {syncPlan.canApply
-                            ? "🟢 Servidor apagado y listo para aplicar los cambios."
+                            ? "Servidor apagado y listo para aplicar los cambios."
                             : syncPlan.serverStatus === "ONLINE" || syncPlan.serverStatus === "STARTING" || syncPlan.serverStatus === "STOPPING"
-                            ? `🟠 ${syncPlan.blockReason || "Apaga el servidor para aplicar los cambios."}`
+                            ? `${syncPlan.blockReason || "Apaga el servidor para aplicar los cambios."}`
                             : syncPlan.serverStatus === "OFFLINE"
-                            ? `🟠 ${syncPlan.blockReason || "No se pudieron verificar los archivos del servidor."}`
-                            : `🔴 ${syncPlan.blockReason || "El servidor no está disponible en este momento."}`}
+                            ? `${syncPlan.blockReason || "No se pudieron verificar los archivos del servidor."}`
+                            : `${syncPlan.blockReason || "El servidor no está disponible en este momento."}`}
                         </span>
                       </div>
                     </div>
@@ -627,19 +613,12 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                     type="button"
                     data-testid="button-overview-review-pending-changes"
                     onClick={() => setActiveTab("files")}
+                    className="launcher-btn-primary"
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
                       gap: 8,
-                      padding: "8px 18px",
-                      borderRadius: 10,
-                      border: "none",
-                      background: "#3b82f6",
-                      color: "#ffffff",
-                      fontWeight: 700,
-                      fontSize: "0.85rem",
-                      cursor: "pointer",
-                      boxShadow: "0 2px 6px rgba(59, 130, 246, 0.3)",
+                      fontSize: "13px",
                     }}
                   >
                     <span>Revisar cambios</span>
@@ -691,16 +670,12 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                 style={{
                   padding: "20px 24px",
                   borderRadius: 18,
-                  background: isDark ? "rgba(19, 28, 35, 0.85)" : "#ffffff",
-                  border: `1px solid ${
-                    isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)"
-                  }`,
+                  background: tokens.bgCard,
+                  border: `1px solid ${tokens.borderSubtle}`,
                   display: "flex",
                   flexDirection: "column",
                   gap: 14,
-                  boxShadow: isDark
-                    ? "0 4px 16px rgba(0,0,0,0.15)"
-                    : "0 2px 8px rgba(0,0,0,0.03)",
+                  boxShadow: tokens.cardShadow,
                 }}
               >
                 <div
@@ -719,7 +694,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                         margin: 0,
                         fontSize: "1.1rem",
                         fontWeight: 700,
-                        color: isDark ? "#ffffff" : "#0f172a",
+                        color: tokens.textPrimary,
                       }}
                     >
                       Consola en vivo
@@ -732,7 +707,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                         fontSize: "0.75rem",
                         color: isConsoleConnected
                           ? isDark ? "#4ade80" : "#16a34a"
-                          : isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.4)",
+                          : tokens.textMuted,
                         fontWeight: 600,
                       }}
                     >
@@ -751,18 +726,10 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                   <button
                     type="button"
                     onClick={() => setActiveTab("console")}
+                    className="launcher-btn-secondary"
                     style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
+                      fontSize: "12px",
                       padding: "6px 12px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: isDark ? "rgba(62, 196, 192, 0.15)" : "#e6fffa",
-                      color: isDark ? "#3ec4c0" : "#0c6e6b",
-                      fontSize: "0.825rem",
-                      fontWeight: 700,
-                      cursor: "pointer",
                     }}
                   >
                     <span>Abrir consola →</span>
@@ -771,6 +738,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
 
                 {/* Console Log Preview Window */}
                 <div
+                  ref={liveLogsContainerRef}
                   style={{
                     padding: "14px 16px",
                     borderRadius: 12,
@@ -787,6 +755,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                     display: "flex",
                     flexDirection: "column",
                   }}
+                  className="custom-scroll"
                 >
                   {liveLogs.length === 0 ? (
                     <div
@@ -817,7 +786,6 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                       </div>
                     ))
                   )}
-                  <div ref={liveConsoleEndRef} />
                 </div>
               </div>
             </>

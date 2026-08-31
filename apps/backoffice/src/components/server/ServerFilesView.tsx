@@ -363,12 +363,12 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
                   }}
                 >
                   {syncPlan.canApply
-                    ? "🟢 Servidor apagado y listo"
+                    ? "Servidor apagado y listo"
                     : syncPlan.serverStatus === "ONLINE" || syncPlan.serverStatus === "STARTING" || syncPlan.serverStatus === "STOPPING"
-                    ? `🟠 ${syncPlan.blockReason || "Apaga el servidor antes de aplicar los cambios"}`
+                    ? `${syncPlan.blockReason || "Apaga el servidor antes de aplicar los cambios"}`
                     : syncPlan.serverStatus === "OFFLINE"
-                    ? `🟠 ${syncPlan.blockReason || "No se pudieron verificar los archivos del servidor"}`
-                    : `🔴 ${syncPlan.blockReason || "El servidor no está disponible"}`}
+                    ? `${syncPlan.blockReason || "No se pudieron verificar los archivos del servidor"}`
+                    : `${syncPlan.blockReason || "El servidor no está disponible"}`}
                 </span>
               </div>
             </div>
@@ -823,7 +823,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 9999,
+            zIndex: 900,
             padding: 16,
           }}
         >
@@ -940,7 +940,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 9999,
+            zIndex: 900,
             padding: 16,
           }}
         >
@@ -1056,7 +1056,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 9999,
+            zIndex: 900,
             padding: 16,
           }}
         >
@@ -1144,7 +1144,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 9999,
+            zIndex: 900,
             padding: 24,
           }}
         >
@@ -1271,7 +1271,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 9999,
+            zIndex: 900,
             padding: 16,
           }}
         >
@@ -1290,7 +1290,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ color: "#f59e0b", fontSize: "28px" }}>ℹ️</div>
+              <IconAlertCircle size={28} style={{ color: "#f59e0b" }} />
               <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: isDark ? "#ffffff" : "#0f172a" }}>
                 Archivo de la versión del juego
               </h3>
@@ -1305,15 +1305,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
               <button
                 type="button"
                 onClick={() => setBlockedDeleteTarget(null)}
-                style={{
-                  padding: "10px 18px",
-                  borderRadius: 10,
-                  border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#cbd5e1"}`,
-                  background: "transparent",
-                  color: isDark ? "#ffffff" : "#334155",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                }}
+                className="launcher-btn-secondary"
               >
                 Entendido
               </button>
@@ -1326,15 +1318,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
                     setBlockedDeleteTarget(null)
                     onNavigateToGame()
                   }}
-                  style={{
-                    padding: "10px 18px",
-                    borderRadius: 10,
-                    border: "none",
-                    background: "#3b82f6",
-                    color: "#ffffff",
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
+                  className="launcher-btn-primary"
                 >
                   Ir a Actualizaciones →
                 </button>
@@ -1347,6 +1331,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
       {/* Shard 08D Modals */}
       {isSearchModalOpen && (
         <ServerModSearchModal
+          theme={theme}
           onClose={() => setIsSearchModalOpen(false)}
           onSuccess={() => {
             onToast("Contenido añadido al servidor con éxito.", "success")

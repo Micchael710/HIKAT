@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react"
 import type { ThemeMode, SyncPolicy } from "../../types"
 import { gameApi } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import { MAX_GAME_TEXT_FILE_SIZE_BYTES, validateJsonContent } from "@hikat/shared"
 import {
   IconCross,
@@ -8,6 +9,7 @@ import {
   IconCheck,
   IconAlertCircle,
   IconSave,
+  IconFileText,
 } from "../../theme/icons"
 
 interface TextFileEditorModalProps {
@@ -34,6 +36,7 @@ export default function TextFileEditorModal({
   onToast,
 }: TextFileEditorModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [logicalPath, setLogicalPath] = useState(initialLogicalPath)
   const [content, setContent] = useState(initialContent)
   const [originalContent, setOriginalContent] = useState(initialContent)
@@ -98,16 +101,12 @@ export default function TextFileEditorModal({
 
   const handleSave = useCallback(async () => {
     if (readOnly || isSaving) return
-    if (!logicalPath.trim()) {
-      onToast("La ruta del archivo no puede estar vacía.", "error")
-      return
-    }
     if (isOverSize) {
       onToast("El archivo excede el tamaño máximo permitido (1 MB).", "error")
       return
     }
     if (isJson && !jsonValidation.valid) {
-      onToast(`Error de sintaxis JSON: ${jsonValidation.error}`, "error")
+      onToast("El contenido no es un JSON válido.", "error")
       return
     }
 
@@ -119,24 +118,26 @@ export default function TextFileEditorModal({
         explicitPolicy,
       })
       setOriginalContent(content)
-      onToast("Archivo guardado correctamente.", "success")
+      onToast(`Archivo ${isNew ? "creado" : "guardado"} exitosamente.`, "success")
       onSaveSuccess(saved)
     } catch (err: unknown) {
       onToast(err instanceof Error ? err.message : "Error al guardar el archivo.", "error")
     } finally {
       setIsSaving(false)
     }
-  }, [readOnly, isSaving, logicalPath, isOverSize, isJson, jsonValidation, content, explicitPolicy, onToast, onSaveSuccess])
+  }, [readOnly, isSaving, isOverSize, isJson, jsonValidation, isNew, fileId, logicalPath, content, explicitPolicy, onToast, onSaveSuccess])
 
-  // Ctrl+S / Cmd+S shortcut
+  // Keyboard shortcut Ctrl+S / Cmd+S
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault()
         handleSave()
-      } else if (e.key === "Escape") {
+      }
+      if (e.key === "Escape") {
+        e.preventDefault()
         if (hasUnsavedChanges) {
-          if (confirm("Tienes cambios sin guardar. ¿Deseas cerrar el editor?")) {
+          if (confirm("Tienes cambios sin guardar. ¿Deseas descartarlos y salir?")) {
             onClose()
           }
         } else {
@@ -163,12 +164,12 @@ export default function TextFileEditorModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.75)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
         backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 9999,
+        zIndex: 900,
         padding: "20px",
         boxSizing: "border-box",
       }}
@@ -181,10 +182,10 @@ export default function TextFileEditorModal({
           width: "100%",
           maxWidth: "1100px",
           height: "85vh",
-          backgroundColor: isDark ? "#0f172a" : "#ffffff",
-          borderRadius: "16px",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          backgroundColor: tokens.bgCard,
+          borderRadius: "18px",
+          border: `1px solid ${tokens.borderSubtle}`,
+          boxShadow: tokens.cardShadowLg,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -194,33 +195,28 @@ export default function TextFileEditorModal({
         <div
           style={{
             padding: "16px 20px",
-            borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             gap: "16px",
-            backgroundColor: isDark ? "#0b1120" : "#f8fafc",
+            backgroundColor: tokens.bgCardInner,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: "20px" }}>📄</span>
+            <IconFileText style={{ width: 20, height: 20, color: "#10b981", flexShrink: 0 }} />
             {isNew ? (
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
-                <span style={{ fontSize: "14px", color: isDark ? "#94a3b8" : "#64748b" }}>Ruta:</span>
+                <span style={{ fontSize: "14px", color: tokens.textSecondary }}>Ruta:</span>
                 <input
                   type="text"
                   value={logicalPath}
                   onChange={(e) => setLogicalPath(e.target.value)}
                   placeholder="config/nuevo_archivo.txt"
+                  className="launcher-input"
                   style={{
                     flex: 1,
                     maxWidth: "400px",
-                    padding: "6px 12px",
-                    backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                    border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                    borderRadius: "6px",
-                    color: isDark ? "#f8fafc" : "#0f172a",
-                    fontSize: "14px",
                     fontFamily: "monospace",
                   }}
                 />
@@ -230,8 +226,8 @@ export default function TextFileEditorModal({
                 <div
                   style={{
                     fontSize: "15px",
-                    fontWeight: "600",
-                    color: isDark ? "#f8fafc" : "#0f172a",
+                    fontWeight: "700",
+                    color: tokens.textPrimary,
                     fontFamily: "monospace",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
@@ -240,7 +236,7 @@ export default function TextFileEditorModal({
                 >
                   {logicalPath}
                 </div>
-                <div style={{ fontSize: "12px", color: isDark ? "#64748b" : "#94a3b8" }}>
+                <div style={{ fontSize: "12px", color: tokens.textSecondary }}>
                   {readOnly ? "Modo solo lectura" : "Editor de texto en vivo (Ctrl+S para guardar)"}
                 </div>
               </div>
@@ -291,19 +287,13 @@ export default function TextFileEditorModal({
                 type="button"
                 onClick={handleSave}
                 disabled={isSaving || isOverSize || (isJson && !jsonValidation.valid)}
+                className={hasUnsavedChanges ? "launcher-btn-primary" : "launcher-btn-secondary"}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "8px",
-                  padding: "8px 16px",
-                  backgroundColor: hasUnsavedChanges ? "#3b82f6" : isDark ? "#1e293b" : "#e2e8f0",
-                  color: hasUnsavedChanges ? "#ffffff" : isDark ? "#94a3b8" : "#475569",
-                  border: "none",
-                  borderRadius: "8px",
                   fontSize: "13px",
-                  fontWeight: "600",
-                  cursor: isSaving || isOverSize || (isJson && !jsonValidation.valid) ? "not-allowed" : "pointer",
-                  transition: "all 0.15s ease",
+                  padding: "8px 16px",
                 }}
               >
                 {isSaving ? <IconSpinner style={{ width: 14, height: 14 }} /> : <IconSave style={{ width: 14, height: 14 }} />}
@@ -317,7 +307,7 @@ export default function TextFileEditorModal({
               style={{
                 background: "transparent",
                 border: "none",
-                color: isDark ? "#94a3b8" : "#64748b",
+                color: tokens.textMuted,
                 cursor: "pointer",
                 padding: "8px",
                 borderRadius: "8px",
@@ -422,13 +412,13 @@ export default function TextFileEditorModal({
         <div
           style={{
             padding: "10px 20px",
-            borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
-            backgroundColor: isDark ? "#0b1120" : "#f8fafc",
+            borderTop: `1px solid ${tokens.borderSubtle}`,
+            backgroundColor: tokens.bgCardInner,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             fontSize: "12px",
-            color: isDark ? "#64748b" : "#64748b",
+            color: tokens.textSecondary,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>

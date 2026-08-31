@@ -3,6 +3,7 @@ import type { ThemeMode, AdminGameFile, GameFileCategory } from "../../types"
 import { sanitizeGameFileName } from "@hikat/shared"
 import { gameApi } from "../../services/graphqlClient"
 import { uploadGameFileDirect } from "../../services/gameFileUploadService"
+import { getThemeTokens } from "../../theme/tokens"
 import { IconCross, IconUpload, IconSpinner, IconBox } from "../../theme/icons"
 import BackofficeSelect, { SelectOption } from "../common/BackofficeSelect"
 
@@ -28,6 +29,7 @@ export default function AddGameFileModal({
   onSaved,
 }: AddGameFileModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const isReplace = !!targetFile
 
   const [name, setName] = useState(targetFile?.name || "")
@@ -100,13 +102,10 @@ export default function AddGameFileModal({
           tokenHash,
         })
       } else {
-        if (!tokenHash) {
-          throw new Error("No se pudo completar la subida del archivo.")
-        }
         await gameApi.addGameFile({
           name: name.trim(),
           category,
-          tokenHash,
+          tokenHash: tokenHash!,
         })
       }
 
@@ -124,24 +123,27 @@ export default function AddGameFileModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.65)",
-        backdropFilter: "blur(5px)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 50,
+        zIndex: 900,
         padding: "16px",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
       }}
     >
       <div
         style={{
-          backgroundColor: isDark ? "#1e293b" : "#ffffff",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          borderRadius: "16px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
           maxWidth: "520px",
           overflow: "hidden",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         {/* Modal Header */}
@@ -150,8 +152,9 @@ export default function AddGameFileModal({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "20px 24px",
-            borderBottom: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+            padding: "18px 24px",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
+            backgroundColor: tokens.bgCardInner,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -159,9 +162,9 @@ export default function AddGameFileModal({
               style={{
                 width: "36px",
                 height: "36px",
-                borderRadius: "8px",
-                backgroundColor: isDark ? "rgba(99, 102, 241, 0.15)" : "#eef2ff",
-                color: "#6366f1",
+                borderRadius: "10px",
+                backgroundColor: "rgba(62, 196, 192, 0.15)",
+                color: "#3ec4c0",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -173,8 +176,8 @@ export default function AddGameFileModal({
               style={{
                 margin: 0,
                 fontSize: "18px",
-                fontWeight: "600",
-                color: isDark ? "#f1f5f9" : "#0f172a",
+                fontWeight: "700",
+                color: tokens.textPrimary,
               }}
             >
               {isReplace ? "Actualizar archivo" : "Añadir mod o archivo"}
@@ -186,7 +189,7 @@ export default function AddGameFileModal({
               background: "none",
               border: "none",
               cursor: "pointer",
-              color: isDark ? "#94a3b8" : "#64748b",
+              color: tokens.textMuted,
               display: "flex",
               padding: "4px",
             }}
@@ -202,8 +205,9 @@ export default function AddGameFileModal({
               style={{
                 marginBottom: "20px",
                 padding: "10px 14px",
-                borderRadius: "8px",
-                backgroundColor: "rgba(239, 68, 68, 0.15)",
+                borderRadius: "10px",
+                backgroundColor: "rgba(239, 68, 68, 0.12)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
                 color: "#ef4444",
                 fontSize: "13px",
               }}
@@ -219,7 +223,7 @@ export default function AddGameFileModal({
                 display: "block",
                 fontSize: "13px",
                 fontWeight: "600",
-                color: isDark ? "#cbd5e1" : "#334155",
+                color: tokens.textSecondary,
                 marginBottom: "8px",
               }}
             >
@@ -235,20 +239,20 @@ export default function AddGameFileModal({
             <div
               onClick={() => fileInputRef.current?.click()}
               style={{
-                border: `2px dashed ${selectedFile ? "#6366f1" : isDark ? "#475569" : "#cbd5e1"}`,
-                borderRadius: "10px",
+                border: `2px dashed ${selectedFile ? "#3ec4c0" : tokens.borderSubtle}`,
+                borderRadius: "12px",
                 padding: "24px 16px",
                 textAlign: "center",
                 cursor: "pointer",
                 backgroundColor: selectedFile
-                  ? (isDark ? "rgba(99, 102, 241, 0.1)" : "#f5f3ff")
-                  : (isDark ? "#0f172a" : "#f8fafc"),
+                  ? (isDark ? "rgba(62, 196, 192, 0.08)" : "#f0fdfa")
+                  : tokens.bgCardInner,
                 transition: "all 0.15s ease",
               }}
             >
               <div
                 style={{
-                  color: selectedFile ? "#6366f1" : isDark ? "#64748b" : "#94a3b8",
+                  color: selectedFile ? "#3ec4c0" : tokens.textMuted,
                   margin: "0 auto 8px auto",
                   display: "flex",
                   justifyContent: "center",
@@ -261,7 +265,7 @@ export default function AddGameFileModal({
                 style={{
                   fontSize: "13px",
                   fontWeight: "600",
-                  color: isDark ? "#f1f5f9" : "#0f172a",
+                  color: tokens.textPrimary,
                 }}
               >
                 {selectedFile
@@ -270,10 +274,10 @@ export default function AddGameFileModal({
                     ? "Haz clic para seleccionar nuevo archivo .jar"
                     : "Haz clic para seleccionar archivo"}
               </div>
-              <div style={{ fontSize: "12px", color: isDark ? "#64748b" : "#94a3b8", marginTop: "4px" }}>
+              <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "4px" }}>
                 {selectedFile
                   ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`
-                  : "Formatos permitidos: .jar, .zip"}
+                  : "Formatos permitidos: .jar, .zip, .json, .js"}
               </div>
             </div>
           </div>
@@ -285,7 +289,7 @@ export default function AddGameFileModal({
                 display: "block",
                 fontSize: "13px",
                 fontWeight: "600",
-                color: isDark ? "#cbd5e1" : "#334155",
+                color: tokens.textSecondary,
                 marginBottom: "6px",
               }}
             >
@@ -296,14 +300,9 @@ export default function AddGameFileModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Ej. JourneyMap, Sodium, Shaders Complementary..."
+              className="launcher-input"
               style={{
                 width: "100%",
-                padding: "10px 14px",
-                borderRadius: "8px",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                color: isDark ? "#f1f5f9" : "#0f172a",
-                fontSize: "14px",
                 boxSizing: "border-box",
               }}
             />
@@ -316,7 +315,7 @@ export default function AddGameFileModal({
                 display: "block",
                 fontSize: "13px",
                 fontWeight: "600",
-                color: isDark ? "#cbd5e1" : "#334155",
+                color: tokens.textSecondary,
                 marginBottom: "6px",
               }}
             >
@@ -337,41 +336,24 @@ export default function AddGameFileModal({
               justifyContent: "flex-end",
               gap: "10px",
               paddingTop: "16px",
-              borderTop: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+              borderTop: `1px solid ${tokens.borderSubtle}`,
             }}
           >
             <button
               type="button"
               onClick={onClose}
-              style={{
-                padding: "9px 16px",
-                borderRadius: "8px",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                backgroundColor: "transparent",
-                color: isDark ? "#94a3b8" : "#64748b",
-                fontSize: "13px",
-                fontWeight: "500",
-                cursor: "pointer",
-              }}
+              className="launcher-btn-secondary"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
+              className="launcher-btn-primary"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "8px",
-                padding: "9px 20px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: "#6366f1",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: isSubmitting ? "not-allowed" : "pointer",
-                opacity: isSubmitting ? 0.7 : 1,
               }}
             >
               {isSubmitting && <IconSpinner size={16} />}

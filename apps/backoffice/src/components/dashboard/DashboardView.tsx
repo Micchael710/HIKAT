@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react"
 import type { ThemeMode, AdminDashboardSummary, BackofficeSection } from "../../types"
 import { dashboardApi } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import {
   IconDashboard,
   IconServer,
@@ -9,6 +10,7 @@ import {
   IconGamepad,
   IconSpinner,
   IconPlus,
+  IconSettings,
 } from "../../theme/icons"
 import LiveToast from "../common/LiveToast"
 
@@ -28,6 +30,7 @@ const SERVER_STATUS_CONFIG: Record<string, { label: string; bg: string; color: s
 
 export default function DashboardView({ theme, onNavigate }: DashboardViewProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [data, setData] = useState<AdminDashboardSummary | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -54,15 +57,25 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
   const serverStatus = data?.server?.status ? (SERVER_STATUS_CONFIG[data.server.status] || SERVER_STATUS_CONFIG.UNKNOWN) : SERVER_STATUS_CONFIG.UNKNOWN
 
   return (
-    <div style={{ padding: "28px", maxWidth: "1280px", margin: "0 auto" }}>
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        padding: "32px 36px",
+        overflowY: "auto",
+        animation: "viewFadeIn 0.24s ease",
+        fontFamily: "Inter, sans-serif",
+      }}
+      className="custom-scroll"
+    >
       {/* Header */}
       <div style={{ marginBottom: "28px" }}>
         <h1
           style={{
             margin: "0 0 6px 0",
-            fontSize: "24px",
-            fontWeight: "700",
-            color: isDark ? "#f1f5f9" : "#0f172a",
+            fontSize: "26px",
+            fontWeight: "800",
+            color: tokens.textPrimary,
             letterSpacing: "-0.02em",
           }}
         >
@@ -72,7 +85,8 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
           style={{
             margin: 0,
             fontSize: "14px",
-            color: isDark ? "#94a3b8" : "#64748b",
+            fontWeight: "500",
+            color: tokens.textSecondary,
           }}
         >
           Estado general y métricas clave de HiKAT.
@@ -86,7 +100,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
             alignItems: "center",
             justifyContent: "center",
             padding: "80px 0",
-            color: isDark ? "#94a3b8" : "#64748b",
+            color: tokens.textMuted,
             gap: "12px",
           }}
         >
@@ -107,26 +121,26 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
             {/* Card 1: Servidor */}
             <div
               style={{
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                borderRadius: "14px",
-                padding: "22px",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                padding: "24px",
                 display: "flex",
                 flexDirection: "column",
                 justifyContent: "space-between",
-                boxShadow: isDark ? "0 4px 6px -1px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.05)",
+                boxShadow: tokens.cardShadow,
               }}
             >
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <span style={{ fontSize: "14px", fontWeight: "600", color: isDark ? "#94a3b8" : "#64748b" }}>
+                  <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
                     Servidor Minecraft
                   </span>
                   <div
                     style={{
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "10px",
+                      width: "38px",
+                      height: "38px",
+                      borderRadius: "12px",
                       backgroundColor: isDark ? "rgba(99, 102, 241, 0.15)" : "#eef2ff",
                       color: "#6366f1",
                       display: "flex",
@@ -144,7 +158,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                       display: "inline-flex",
                       alignItems: "center",
                       gap: "6px",
-                      padding: "4px 10px",
+                      padding: "4px 12px",
                       borderRadius: "20px",
                       fontSize: "13px",
                       fontWeight: "600",
@@ -160,17 +174,14 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
 
               <button
                 onClick={() => onNavigate("server")}
+                className="launcher-btn-secondary"
                 style={{
                   marginTop: "16px",
                   padding: "8px 14px",
-                  borderRadius: "8px",
-                  border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                  backgroundColor: "transparent",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                   fontSize: "13px",
-                  fontWeight: "500",
-                  cursor: "pointer",
+                  fontWeight: "600",
                   textAlign: "center",
+                  justifyContent: "center",
                 }}
               >
                 Administrar servidor →
@@ -180,26 +191,26 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
             {/* Card 2: Noticias */}
             <div
               style={{
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                borderRadius: "14px",
-                padding: "22px",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                padding: "24px",
                 display: "flex",
                 flexDirection: "column",
                 justifyContent: "space-between",
-                boxShadow: isDark ? "0 4px 6px -1px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.05)",
+                boxShadow: tokens.cardShadow,
               }}
             >
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <span style={{ fontSize: "14px", fontWeight: "600", color: isDark ? "#94a3b8" : "#64748b" }}>
+                  <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
                     Noticias y Anuncios
                   </span>
                   <div
                     style={{
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "10px",
+                      width: "38px",
+                      height: "38px",
+                      borderRadius: "12px",
                       backgroundColor: isDark ? "rgba(62, 196, 192, 0.15)" : "#e6fffa",
                       color: "#3ec4c0",
                       display: "flex",
@@ -211,27 +222,24 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                   </div>
                 </div>
 
-                <div style={{ fontSize: "28px", fontWeight: "700", color: isDark ? "#f1f5f9" : "#0f172a", marginBottom: "4px" }}>
+                <div style={{ fontSize: "28px", fontWeight: "800", color: tokens.textPrimary, marginBottom: "4px" }}>
                   {data?.news?.publishedCount || 0}
                 </div>
-                <div style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                <div style={{ fontSize: "12px", color: tokens.textSecondary }}>
                   Publicadas ({data?.news?.draftCount || 0} en borrador)
                 </div>
               </div>
 
               <button
                 onClick={() => onNavigate("news")}
+                className="launcher-btn-secondary"
                 style={{
                   marginTop: "16px",
                   padding: "8px 14px",
-                  borderRadius: "8px",
-                  border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                  backgroundColor: "transparent",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                   fontSize: "13px",
-                  fontWeight: "500",
-                  cursor: "pointer",
+                  fontWeight: "600",
                   textAlign: "center",
+                  justifyContent: "center",
                 }}
               >
                 Ver noticias →
@@ -241,26 +249,26 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
             {/* Card 3: Skins */}
             <div
               style={{
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                borderRadius: "14px",
-                padding: "22px",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                padding: "24px",
                 display: "flex",
                 flexDirection: "column",
                 justifyContent: "space-between",
-                boxShadow: isDark ? "0 4px 6px -1px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.05)",
+                boxShadow: tokens.cardShadow,
               }}
             >
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <span style={{ fontSize: "14px", fontWeight: "600", color: isDark ? "#94a3b8" : "#64748b" }}>
+                  <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
                     Catálogo de Skins
                   </span>
                   <div
                     style={{
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "10px",
+                      width: "38px",
+                      height: "38px",
+                      borderRadius: "12px",
                       backgroundColor: isDark ? "rgba(244, 63, 94, 0.15)" : "#fff1f2",
                       color: "#f43f5e",
                       display: "flex",
@@ -272,27 +280,24 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                   </div>
                 </div>
 
-                <div style={{ fontSize: "28px", fontWeight: "700", color: isDark ? "#f1f5f9" : "#0f172a", marginBottom: "4px" }}>
+                <div style={{ fontSize: "28px", fontWeight: "800", color: tokens.textPrimary, marginBottom: "4px" }}>
                   {data?.skins?.availableCount || 0}
                 </div>
-                <div style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                <div style={{ fontSize: "12px", color: tokens.textSecondary }}>
                   Disponibles en el catálogo ({data?.skins?.totalCount || 0} total)
                 </div>
               </div>
 
               <button
                 onClick={() => onNavigate("skins")}
+                className="launcher-btn-secondary"
                 style={{
                   marginTop: "16px",
                   padding: "8px 14px",
-                  borderRadius: "8px",
-                  border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                  backgroundColor: "transparent",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                   fontSize: "13px",
-                  fontWeight: "500",
-                  cursor: "pointer",
+                  fontWeight: "600",
                   textAlign: "center",
+                  justifyContent: "center",
                 }}
               >
                 Ver skins →
@@ -302,26 +307,26 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
             {/* Card 4: Juego / Actualizaciones */}
             <div
               style={{
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                borderRadius: "14px",
-                padding: "22px",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                padding: "24px",
                 display: "flex",
                 flexDirection: "column",
                 justifyContent: "space-between",
-                boxShadow: isDark ? "0 4px 6px -1px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.05)",
+                boxShadow: tokens.cardShadow,
               }}
             >
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <span style={{ fontSize: "14px", fontWeight: "600", color: isDark ? "#94a3b8" : "#64748b" }}>
+                  <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
                     Versión del Juego
                   </span>
                   <div
                     style={{
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "10px",
+                      width: "38px",
+                      height: "38px",
+                      borderRadius: "12px",
                       backgroundColor: isDark ? "rgba(168, 85, 247, 0.15)" : "#f5f3ff",
                       color: "#a855f7",
                       display: "flex",
@@ -333,27 +338,24 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                   </div>
                 </div>
 
-                <div style={{ fontSize: "24px", fontWeight: "700", color: isDark ? "#f1f5f9" : "#0f172a", marginBottom: "4px" }}>
+                <div style={{ fontSize: "24px", fontWeight: "800", color: tokens.textPrimary, marginBottom: "4px" }}>
                   {data?.game?.publishedVersion ? `v${data.game.publishedVersion}` : "Sin publicar"}
                 </div>
-                <div style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                <div style={{ fontSize: "12px", color: tokens.textSecondary }}>
                   {data?.game?.pendingChangesCount ? `${data.game.pendingChangesCount} cambios en borrador` : "Al día con el cliente"}
                 </div>
               </div>
 
               <button
                 onClick={() => onNavigate("game")}
+                className="launcher-btn-secondary"
                 style={{
                   marginTop: "16px",
                   padding: "8px 14px",
-                  borderRadius: "8px",
-                  border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                  backgroundColor: "transparent",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                   fontSize: "13px",
-                  fontWeight: "500",
-                  cursor: "pointer",
+                  fontWeight: "600",
                   textAlign: "center",
+                  justifyContent: "center",
                 }}
               >
                 Gestionar juego y mods →
@@ -364,19 +366,19 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
           {/* Quick Actions Panel */}
           <div
             style={{
-              backgroundColor: isDark ? "#1e293b" : "#ffffff",
-              border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-              borderRadius: "14px",
+              backgroundColor: tokens.bgCard,
+              border: `1px solid ${tokens.borderSubtle}`,
+              borderRadius: "18px",
               padding: "24px",
-              boxShadow: isDark ? "0 4px 6px -1px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.05)",
+              boxShadow: tokens.cardShadow,
             }}
           >
             <h2
               style={{
                 margin: "0 0 16px 0",
                 fontSize: "16px",
-                fontWeight: "600",
-                color: isDark ? "#f1f5f9" : "#0f172a",
+                fontWeight: "700",
+                color: tokens.textPrimary,
               }}
             >
               Accesos rápidos
@@ -384,18 +386,11 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
               <button
                 onClick={() => onNavigate("news")}
+                className="launcher-btn-secondary"
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
                   padding: "10px 16px",
-                  borderRadius: "8px",
-                  backgroundColor: isDark ? "#334155" : "#f1f5f9",
-                  border: "none",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                   fontSize: "14px",
-                  fontWeight: "500",
-                  cursor: "pointer",
+                  fontWeight: "600",
                 }}
               >
                 <IconPlus size={16} />
@@ -404,18 +399,11 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
 
               <button
                 onClick={() => onNavigate("skins")}
+                className="launcher-btn-secondary"
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
                   padding: "10px 16px",
-                  borderRadius: "8px",
-                  backgroundColor: isDark ? "#334155" : "#f1f5f9",
-                  border: "none",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                   fontSize: "14px",
-                  fontWeight: "500",
-                  cursor: "pointer",
+                  fontWeight: "600",
                 }}
               >
                 <IconPlus size={16} />
@@ -424,18 +412,11 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
 
               <button
                 onClick={() => onNavigate("game")}
+                className="launcher-btn-secondary"
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
                   padding: "10px 16px",
-                  borderRadius: "8px",
-                  backgroundColor: isDark ? "#334155" : "#f1f5f9",
-                  border: "none",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                   fontSize: "14px",
-                  fontWeight: "500",
-                  cursor: "pointer",
+                  fontWeight: "600",
                 }}
               >
                 <IconGamepad size={16} />
@@ -444,20 +425,14 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
 
               <button
                 onClick={() => onNavigate("settings")}
+                className="launcher-btn-secondary"
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
                   padding: "10px 16px",
-                  borderRadius: "8px",
-                  backgroundColor: isDark ? "#334155" : "#f1f5f9",
-                  border: "none",
-                  color: isDark ? "#f1f5f9" : "#1e293b",
                   fontSize: "14px",
-                  fontWeight: "500",
-                  cursor: "pointer",
+                  fontWeight: "600",
                 }}
               >
+                <IconSettings size={16} />
                 Ajustes Generales
               </button>
             </div>
@@ -469,6 +444,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
         <LiveToast
           message={toastMessage}
           type="error"
+          theme={theme}
           onClose={() => setToastMessage(null)}
         />
       )}

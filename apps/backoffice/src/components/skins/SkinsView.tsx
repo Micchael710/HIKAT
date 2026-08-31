@@ -7,6 +7,7 @@ import type {
   AdminPlayerCape,
 } from "../../types"
 import { skinsApi, capesApi } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import {
   IconPlus,
   IconEdit,
@@ -161,15 +162,20 @@ export default function SkinsView({ theme }: SkinsViewProps) {
     playerCapeSearchQuery,
   ])
 
+  const tokens = getThemeTokens(theme)
+
   return (
     <div
       style={{
-        padding: "28px",
-        maxWidth: "1280px",
-        margin: "0 auto",
         width: "100%",
+        height: "100%",
+        padding: "32px 36px",
+        overflowY: "auto",
+        animation: "viewFadeIn 0.24s ease",
+        fontFamily: "Inter, sans-serif",
         boxSizing: "border-box",
       }}
+      className="custom-scroll"
     >
       {/* Top Header */}
       <div
@@ -187,9 +193,9 @@ export default function SkinsView({ theme }: SkinsViewProps) {
           <h1
             style={{
               margin: "0 0 6px 0",
-              fontSize: "24px",
-              fontWeight: "700",
-              color: isDark ? "#f1f5f9" : "#0f172a",
+              fontSize: "26px",
+              fontWeight: "800",
+              color: tokens.textPrimary,
               letterSpacing: "-0.02em",
             }}
           >
@@ -199,7 +205,8 @@ export default function SkinsView({ theme }: SkinsViewProps) {
             style={{
               margin: 0,
               fontSize: "14px",
-              color: isDark ? "#94a3b8" : "#64748b",
+              fontWeight: "500",
+              color: tokens.textSecondary,
             }}
           >
             {activeTab === "skins_global"
@@ -218,9 +225,10 @@ export default function SkinsView({ theme }: SkinsViewProps) {
             display: "flex",
             alignItems: "center",
             gap: "6px",
-            backgroundColor: isDark ? "#1e293b" : "#e2e8f0",
+            backgroundColor: tokens.bgPill,
             padding: "4px",
-            borderRadius: "10px",
+            borderRadius: "12px",
+            border: `1px solid ${tokens.borderSubtle}`,
             flexWrap: "wrap",
           }}
         >
@@ -238,13 +246,13 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                 style={{
                   padding: "7px 14px",
                   borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: isSel ? (isDark ? "#334155" : "#ffffff") : "transparent",
-                  color: isSel ? (isDark ? "#f1f5f9" : "#0f172a") : isDark ? "#94a3b8" : "#64748b",
+                  border: isSel ? `1px solid ${tokens.borderMedium}` : "1px solid transparent",
+                  backgroundColor: isSel ? tokens.bgPillActive : "transparent",
+                  color: isSel ? tokens.textPrimary : tokens.textSecondary,
                   fontSize: "13px",
-                  fontWeight: "600",
+                  fontWeight: isSel ? "700" : "500",
                   cursor: "pointer",
-                  boxShadow: isSel ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                  boxShadow: isSel ? tokens.cardShadow : "none",
                   transition: "all 0.15s ease",
                 }}
               >

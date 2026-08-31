@@ -2551,6 +2551,81 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(bannerDisc).toBeDefined()
       expect(screen.getByText(/El servidor no está disponible/i)).toBeDefined()
     })
+
+    it("34. Silent refresh keeps GameFilesExplorer mounted and preserves currentPath", async () => {
+      const initialOverview: import("../../types").AdminGameOverview = {
+        publishedRelease: null,
+        draftRelease: {
+          id: "rel-draft",
+          version: "1.5.0-draft",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          status: "DRAFT",
+          notes: null,
+          publishedAt: null,
+          files: [
+            {
+              id: "dir-config",
+              name: "config",
+              logicalPath: "config",
+              category: "CONFIG",
+              sha256: "",
+              sizeBytes: 0,
+              policy: "MODIFICABLE",
+              explicitPolicy: null,
+              effectivePolicy: "MODIFICABLE",
+              isInherited: false,
+              isDirectory: true,
+              createdAt: new Date().toISOString(),
+            },
+            {
+              id: "file-cfg",
+              name: "server.toml",
+              logicalPath: "config/server.toml",
+              category: "CONFIG",
+              sha256: "aabb1122",
+              sizeBytes: 256,
+              policy: "MODIFICABLE",
+              explicitPolicy: null,
+              effectivePolicy: "MODIFICABLE",
+              isInherited: true,
+              isDirectory: false,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        pendingChangesCount: 0,
+      }
+
+      const getOverviewSpy = vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue(initialOverview)
+
+      render(<GameView theme="dark" />)
+
+      // Wait for initial load
+      await screen.findByText("config")
+
+      // Navigate into "config" folder
+      const folderItem = screen.getByText("config")
+      fireEvent.doubleClick(folderItem)
+
+      // Now inside "config", "server.toml" should be visible
+      expect(await screen.findByText("server.toml")).toBeDefined()
+
+      // When overview is refetched silently with updated data
+      const updatedOverview = JSON.parse(JSON.stringify(initialOverview))
+      getOverviewSpy.mockResolvedValueOnce(updatedOverview)
+
+      // Trigger a silent refresh via gameApi
+      await act(async () => {
+        const refreshBtn = screen.getByTitle(/Recargar archivos/i)
+        fireEvent.click(refreshBtn)
+      })
+
+      // The user remains in "config" and still sees "server.toml"
+      expect(screen.getByText("server.toml")).toBeDefined()
+    })
   })
 })
 

@@ -500,7 +500,7 @@ export default function ServerBackupsView({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 9999,
+            zIndex: 900,
             padding: 16,
           }}
         >
@@ -624,7 +624,7 @@ export default function ServerBackupsView({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 9999,
+            zIndex: 900,
             padding: 16,
           }}
         >
@@ -731,7 +731,7 @@ export default function ServerBackupsView({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 9999,
+            zIndex: 900,
             padding: 16,
           }}
         >

@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import type { ThemeMode, AdminGameFile } from "../../types"
 import { gameApi } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import { IconTrash, IconSpinner } from "../../theme/icons"
 
 interface DeleteGameFileModalProps {
@@ -17,6 +18,7 @@ export default function DeleteGameFileModal({
   onDeleted,
 }: DeleteGameFileModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -38,24 +40,27 @@ export default function DeleteGameFileModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.6)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 50,
+        zIndex: 900,
         padding: "16px",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
       }}
     >
       <div
         style={{
-          backgroundColor: isDark ? "#1e293b" : "#ffffff",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          borderRadius: "16px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
           maxWidth: "420px",
           padding: "24px",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
@@ -79,8 +84,8 @@ export default function DeleteGameFileModal({
               style={{
                 margin: 0,
                 fontSize: "16px",
-                fontWeight: "600",
-                color: isDark ? "#f1f5f9" : "#0f172a",
+                fontWeight: "700",
+                color: tokens.textPrimary,
               }}
             >
               Quitar archivo
@@ -89,7 +94,7 @@ export default function DeleteGameFileModal({
               style={{
                 margin: "2px 0 0 0",
                 fontSize: "13px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                color: tokens.textSecondary,
               }}
             >
               Se quitará de la próxima actualización.
@@ -101,7 +106,7 @@ export default function DeleteGameFileModal({
           style={{
             margin: "0 0 20px 0",
             fontSize: "14px",
-            color: isDark ? "#cbd5e1" : "#334155",
+            color: tokens.textSecondary,
             lineHeight: "1.5",
           }}
         >
@@ -113,8 +118,9 @@ export default function DeleteGameFileModal({
             style={{
               marginBottom: "16px",
               padding: "10px 14px",
-              borderRadius: "8px",
-              backgroundColor: "rgba(239, 68, 68, 0.15)",
+              borderRadius: "10px",
+              backgroundColor: "rgba(239, 68, 68, 0.12)",
+              border: "1px solid rgba(239, 68, 68, 0.25)",
               color: "#ef4444",
               fontSize: "13px",
             }}
@@ -127,16 +133,7 @@ export default function DeleteGameFileModal({
           <button
             type="button"
             onClick={onClose}
-            style={{
-              padding: "9px 16px",
-              borderRadius: "8px",
-              border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-              backgroundColor: "transparent",
-              color: isDark ? "#94a3b8" : "#64748b",
-              fontSize: "13px",
-              fontWeight: "500",
-              cursor: "pointer",
-            }}
+            className="launcher-btn-secondary"
           >
             Cancelar
           </button>
@@ -144,19 +141,11 @@ export default function DeleteGameFileModal({
             type="button"
             onClick={handleDelete}
             disabled={isDeleting}
+            className="launcher-btn-danger"
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
-              padding: "9px 18px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: "#ef4444",
-              color: "#ffffff",
-              fontSize: "13px",
-              fontWeight: "600",
-              cursor: isDeleting ? "not-allowed" : "pointer",
-              opacity: isDeleting ? 0.7 : 1,
             }}
           >
             {isDeleting && <IconSpinner size={16} />}

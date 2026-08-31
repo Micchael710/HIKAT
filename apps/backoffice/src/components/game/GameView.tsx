@@ -7,6 +7,7 @@ import type {
   ServerReleaseSyncPlan,
 } from "../../types"
 import { gameApi, serverContentApi } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import {
   IconRocket,
   IconTrash,
@@ -16,6 +17,7 @@ import {
   IconEdit,
   IconHistory,
   IconAlertCircle,
+  IconFolder,
 } from "../../theme/icons"
 import GameFilesExplorer from "./GameFilesExplorer"
 import PublishReleaseModal from "./PublishReleaseModal"
@@ -28,6 +30,7 @@ interface GameViewProps {
 
 export default function GameView({ theme }: GameViewProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
 
   const [activeTab, setActiveTab] = useState<"current" | "history">("current")
   const [overview, setOverview] = useState<AdminGameOverview | null>(null)
@@ -61,8 +64,8 @@ export default function GameView({ theme }: GameViewProps) {
     }
   }, [])
 
-  const fetchOverview = useCallback(async () => {
-    setIsLoading(true)
+  const fetchOverview = useCallback(async (showLoading: boolean = true) => {
+    if (showLoading) setIsLoading(true)
     setError(null)
     try {
       const data = await gameApi.getAdminGameOverview()
@@ -70,9 +73,11 @@ export default function GameView({ theme }: GameViewProps) {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "No se pudo cargar la información de versiones.")
     } finally {
-      setIsLoading(false)
+      if (showLoading) setIsLoading(false)
     }
   }, [])
+
+  const refreshSilently = useCallback(() => fetchOverview(false), [fetchOverview])
 
   const fetchHistory = useCallback(async () => {
     setIsHistoryLoading(true)
@@ -139,7 +144,18 @@ export default function GameView({ theme }: GameViewProps) {
   const readiness = overview?.readiness
 
   return (
-    <div style={{ padding: "28px", maxWidth: "1380px", margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        padding: "32px 36px",
+        overflowY: "auto",
+        animation: "viewFadeIn 0.24s ease",
+        fontFamily: "Inter, sans-serif",
+        boxSizing: "border-box",
+      }}
+      className="custom-scroll"
+    >
       {/* Top Header */}
       <div
         style={{
@@ -155,9 +171,9 @@ export default function GameView({ theme }: GameViewProps) {
           <h1
             style={{
               margin: "0 0 6px 0",
-              fontSize: "24px",
-              fontWeight: "700",
-              color: isDark ? "#f1f5f9" : "#0f172a",
+              fontSize: "26px",
+              fontWeight: "800",
+              color: tokens.textPrimary,
               letterSpacing: "-0.02em",
             }}
           >
@@ -167,7 +183,8 @@ export default function GameView({ theme }: GameViewProps) {
             style={{
               margin: 0,
               fontSize: "14px",
-              color: isDark ? "#94a3b8" : "#64748b",
+              fontWeight: "500",
+              color: tokens.textSecondary,
             }}
           >
             Administra los archivos, carpetas, mods y configuraciones que sincroniza el HiKAT Launcher.
@@ -179,27 +196,32 @@ export default function GameView({ theme }: GameViewProps) {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "8px",
-            backgroundColor: isDark ? "#1e293b" : "#e2e8f0",
+            gap: "6px",
+            backgroundColor: tokens.bgPill,
             padding: "4px",
-            borderRadius: "10px",
+            borderRadius: "12px",
+            border: `1px solid ${tokens.borderSubtle}`,
           }}
         >
           <button
             onClick={() => setActiveTab("current")}
             style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
               padding: "7px 14px",
               borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeTab === "current" ? (isDark ? "#334155" : "#ffffff") : "transparent",
-              color: activeTab === "current" ? (isDark ? "#f1f5f9" : "#0f172a") : (isDark ? "#94a3b8" : "#64748b"),
+              border: activeTab === "current" ? `1px solid ${tokens.borderMedium}` : "1px solid transparent",
+              backgroundColor: activeTab === "current" ? tokens.bgPillActive : "transparent",
+              color: activeTab === "current" ? tokens.textPrimary : tokens.textSecondary,
               fontSize: "13px",
-              fontWeight: "600",
+              fontWeight: activeTab === "current" ? "700" : "500",
               cursor: "pointer",
-              boxShadow: activeTab === "current" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              boxShadow: activeTab === "current" ? tokens.cardShadow : "none",
             }}
           >
-            📁 Explorador de Archivos
+            <IconFolder size={14} />
+            <span>Explorador de archivos</span>
           </button>
           <button
             onClick={() => setActiveTab("history")}
@@ -209,17 +231,17 @@ export default function GameView({ theme }: GameViewProps) {
               gap: "6px",
               padding: "7px 14px",
               borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeTab === "history" ? (isDark ? "#334155" : "#ffffff") : "transparent",
-              color: activeTab === "history" ? (isDark ? "#f1f5f9" : "#0f172a") : (isDark ? "#94a3b8" : "#64748b"),
+              border: activeTab === "history" ? `1px solid ${tokens.borderMedium}` : "1px solid transparent",
+              backgroundColor: activeTab === "history" ? tokens.bgPillActive : "transparent",
+              color: activeTab === "history" ? tokens.textPrimary : tokens.textSecondary,
               fontSize: "13px",
-              fontWeight: "600",
+              fontWeight: activeTab === "history" ? "700" : "500",
               cursor: "pointer",
-              boxShadow: activeTab === "history" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              boxShadow: activeTab === "history" ? tokens.cardShadow : "none",
             }}
           >
             <IconHistory style={{ width: 14, height: 14 }} />
-            Historial de versiones
+            <span>Historial de versiones</span>
           </button>
         </div>
       </div>
@@ -748,7 +770,7 @@ export default function GameView({ theme }: GameViewProps) {
             theme={theme}
             files={files}
             isDraft={hasDraft}
-            onRefresh={fetchOverview}
+            onRefresh={refreshSilently}
             onToast={showToast}
             onPrepareDraft={handlePrepareDraft}
           />
@@ -766,7 +788,7 @@ export default function GameView({ theme }: GameViewProps) {
           onClose={() => {
             setIsPublishOpen(false)
             setPublishingDraft(null)
-            fetchOverview()
+            fetchOverview(false)
             fetchServerPlan()
           }}
           onPublished={(ver, count) => {
@@ -777,7 +799,7 @@ export default function GameView({ theme }: GameViewProps) {
             setPublishingDraft(null)
             setServerPlan(plan)
             setIsServerChangesModalOpen(true)
-            fetchOverview()
+            fetchOverview(false)
           }}
         />
       )}
@@ -790,7 +812,7 @@ export default function GameView({ theme }: GameViewProps) {
           onClose={() => setIsServerChangesModalOpen(false)}
           onSuccess={() => {
             fetchServerPlan()
-            fetchOverview()
+            fetchOverview(false)
           }}
           onToast={showToast}
         />
@@ -800,6 +822,7 @@ export default function GameView({ theme }: GameViewProps) {
         <LiveToast
           message={toast.message}
           type={toast.type}
+          theme={theme}
           onClose={() => setToast(null)}
         />
       )}

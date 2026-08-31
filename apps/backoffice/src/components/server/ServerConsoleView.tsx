@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react"
 import type { ThemeMode, ConsoleLogEntry, ServerStatus } from "../../types"
 import { consoleService } from "../../services/consoleService"
+import { getThemeTokens } from "../../theme/tokens"
 import {
   IconSend,
   IconArrowDown,
@@ -20,6 +21,7 @@ export default function ServerConsoleView({
   theme,
 }: ServerConsoleViewProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [logs, setLogs] = useState<ConsoleLogEntry[]>(() =>
     consoleService.getRecentLogs(200),
   )
@@ -81,7 +83,6 @@ export default function ServerConsoleView({
     }
   }
 
-
   const handleSendCommand = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     const trimmed = command.trim()
@@ -101,15 +102,12 @@ export default function ServerConsoleView({
       setHistory((prev) => [...prev, trimmed])
       setHistoryIndex(-1)
       setCommand("")
-      setIsScrolledUp(false)
-      scrollToBottom()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Error al enviar comando"
+      const msg = err instanceof Error ? err.message : "Error al enviar el comando."
       setToastMessage(msg)
       setToastType("error")
     } finally {
       setIsSending(false)
-      inputRef.current?.focus()
     }
   }
 
@@ -117,19 +115,19 @@ export default function ServerConsoleView({
     if (e.key === "ArrowUp") {
       e.preventDefault()
       if (history.length === 0) return
-      const nextIdx = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1)
-      setHistoryIndex(nextIdx)
-      setCommand(history[nextIdx] || "")
+      const nextIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1)
+      setHistoryIndex(nextIndex)
+      setCommand(history[nextIndex])
     } else if (e.key === "ArrowDown") {
       e.preventDefault()
-      if (history.length === 0 || historyIndex === -1) return
-      const nextIdx = historyIndex + 1
-      if (nextIdx >= history.length) {
+      if (historyIndex === -1) return
+      const nextIndex = historyIndex + 1
+      if (nextIndex >= history.length) {
         setHistoryIndex(-1)
         setCommand("")
       } else {
-        setHistoryIndex(nextIdx)
-        setCommand(history[nextIdx] || "")
+        setHistoryIndex(nextIndex)
+        setCommand(history[nextIndex])
       }
     }
   }
@@ -139,7 +137,8 @@ export default function ServerConsoleView({
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "100%",
+        height: "calc(100vh - 270px)",
+        minHeight: "520px",
         gap: 12,
         position: "relative",
       }}
@@ -151,7 +150,6 @@ export default function ServerConsoleView({
         theme={theme}
         onClose={() => setToastMessage(null)}
       />
-
 
       {/* Terminal Toolbar */}
       <div
@@ -167,9 +165,9 @@ export default function ServerConsoleView({
             display: "flex",
             alignItems: "center",
             gap: 8,
-            color: isDark ? "rgba(255, 255, 255, 0.7)" : "rgba(0, 0, 0, 0.7)",
-            fontSize: "0.9rem",
-            fontWeight: 600,
+            color: tokens.textPrimary,
+            fontSize: "0.95rem",
+            fontWeight: 700,
           }}
         >
           <IconTerminal size={18} />
@@ -180,18 +178,13 @@ export default function ServerConsoleView({
           type="button"
           onClick={() => setLogs([])}
           title="Limpiar registro de consola"
+          className="launcher-btn-secondary"
           style={{
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
+            fontSize: "12px",
             padding: "6px 12px",
-            borderRadius: 8,
-            background: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.05)",
-            border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)"}`,
-            color: isDark ? "rgba(255, 255, 255, 0.65)" : "rgba(0, 0, 0, 0.65)",
-            fontSize: "0.8rem",
-            fontWeight: 500,
-            cursor: "pointer",
           }}
         >
           <IconTrash size={14} />
@@ -203,11 +196,10 @@ export default function ServerConsoleView({
       <div
         style={{
           flex: 1,
-          minHeight: 240,
           borderRadius: 16,
-          background: "#0a0e14",
-          border: "1px solid rgba(62, 196, 192, 0.18)",
-          boxShadow: "inset 0 2px 10px rgba(0, 0, 0, 0.5), 0 4px 20px rgba(0, 0, 0, 0.3)",
+          background: isDark ? "#0b1116" : "#0f172a",
+          border: `1px solid ${isDark ? "rgba(62, 196, 192, 0.2)" : "rgba(0, 0, 0, 0.2)"}`,
+          boxShadow: tokens.cardShadow,
           padding: "16px 20px",
           overflowY: "auto",
           fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
@@ -217,6 +209,7 @@ export default function ServerConsoleView({
           position: "relative",
           userSelect: "text",
         }}
+        className="custom-scroll"
         ref={terminalRef}
         onScroll={handleScroll}
       >
@@ -342,54 +335,27 @@ export default function ServerConsoleView({
                 ? "El servidor está apagado. Inicia el servidor para enviar comandos."
                 : "Escribe un comando... (ej. say Hola HiKAT)"
             }
+            className="launcher-input"
             style={{
               width: "100%",
-              padding: "14px 16px 14px 34px",
-              borderRadius: 14,
-              background: isDark ? "rgba(13, 20, 26, 0.85)" : "#ffffff",
-              border: `1.5px solid ${
-                isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.12)"
-              }`,
-              color: isDark ? "#ffffff" : "#0f172a",
+              padding: "12px 16px 12px 34px",
               fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-              fontSize: "0.9rem",
-              outline: "none",
-              transition: "border-color 0.15s ease",
+              boxSizing: "border-box",
             }}
-            onFocus={(e) =>
-              (e.currentTarget.style.borderColor = "rgba(62, 196, 192, 0.65)")
-            }
-            onBlur={(e) =>
-              (e.currentTarget.style.borderColor = isDark
-                ? "rgba(255, 255, 255, 0.12)"
-                : "rgba(0, 0, 0, 0.12)")
-            }
           />
         </div>
 
         <button
           type="submit"
           disabled={!command.trim() || isSending || isServerOffline}
+          className="launcher-btn-primary"
           style={{
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
             gap: 8,
-            padding: "14px 24px",
-            borderRadius: 14,
-            background: "linear-gradient(135deg, #3ec4c0 0%, #2ba5a1 100%)",
-            color: "#0a0e14",
-            fontSize: "0.925rem",
-            fontWeight: 700,
-            border: "none",
-            cursor:
-              !command.trim() || isSending || isServerOffline
-                ? "not-allowed"
-                : "pointer",
-            opacity:
-              !command.trim() || isSending || isServerOffline ? 0.5 : 1,
-            boxShadow: "0 4px 16px rgba(62, 196, 192, 0.25)",
-            transition: "all 0.15s ease",
+            padding: "12px 22px",
+            fontSize: "14px",
           }}
         >
           {isSending ? <IconSpinner size={18} /> : <IconSend size={18} />}

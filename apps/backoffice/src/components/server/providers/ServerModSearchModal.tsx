@@ -6,11 +6,24 @@ import type {
   ContentType,
   ModProjectDetail,
   ServerContentInstallationPlan,
+  ThemeMode,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
+import { getThemeTokens } from "../../../theme/tokens"
 import { formatBytesToHuman } from "@hikat/shared"
+import {
+  IconSearch,
+  IconBox,
+  IconSpinner,
+  IconAlertCircle,
+  IconCheck,
+  IconCross,
+  IconDownload,
+  IconTrash,
+} from "../../../theme/icons"
 
 interface ServerModSearchModalProps {
+  theme?: ThemeMode
   onClose: () => void
   onSuccess: () => void
   onNavigateToGame?: () => void
@@ -19,10 +32,13 @@ interface ServerModSearchModalProps {
 const PAGE_SIZE = 20
 
 export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
+  theme = "dark",
   onClose,
   onSuccess,
   onNavigateToGame,
 }) => {
+  const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [query, setQuery] = useState("")
   const [selectedContentType, setSelectedContentType] = useState<ContentType>("MOD")
   const [selectedProviderTab, setSelectedProviderTab] = useState<ModProvider | "ALL">("ALL")
@@ -247,7 +263,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.8)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
         backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
@@ -261,37 +277,36 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     >
       <div
         style={{
-          backgroundColor: "#111827",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
-          borderRadius: "16px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
           maxWidth: "1050px",
           height: "85vh",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         {/* Top Header */}
         <div
           style={{
             padding: "20px 24px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
             flexDirection: "column",
             gap: "14px",
-            background: "rgba(255, 255, 255, 0.02)",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "700", color: "#f9fafb" }}>
-                Añadir Contenido al Servidor
+              <h2 style={{ margin: 0, fontSize: "1.2rem", fontWeight: "700", color: tokens.textPrimary }}>
+                Añadir contenido al servidor
               </h2>
               <div
                 data-testid="server-compatible-env-indicator"
-                style={{ fontSize: "13px", color: "#9ca3af", marginTop: "2px" }}
+                style={{ fontSize: "13px", color: tokens.textSecondary, marginTop: "2px" }}
               >
                 Entorno de ejecución:{" "}
                 <span style={{ color: "#34d399", fontWeight: "600" }}>
@@ -318,14 +333,15 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
               style={{
                 background: "transparent",
                 border: "none",
-                color: "#9ca3af",
-                fontSize: "24px",
+                color: tokens.textMuted,
                 cursor: "pointer",
-                padding: "4px 8px",
-                borderRadius: "6px",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
             >
-              ✕
+              <IconCross size={18} />
             </button>
           </div>
 
@@ -334,13 +350,13 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
             style={{
               display: "flex",
               gap: "8px",
-              borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+              borderBottom: `1px solid ${tokens.borderSubtle}`,
               paddingBottom: "8px",
               flexWrap: "wrap",
             }}
           >
             {[
-              { type: "MOD" as ContentType, label: "Mods de Servidor (Solo Server)", testId: "server-tab-content-mod" },
+              { type: "MOD" as ContentType, label: "Mods de servidor (Solo Server)", testId: "server-tab-content-mod" },
               { type: "DATA_PACK" as ContentType, label: "Data Packs", testId: "server-tab-content-datapack" },
             ].map((tab) => {
               const isSelected = selectedContentType === tab.type
@@ -355,12 +371,12 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                   }}
                   style={{
                     padding: "6px 14px",
-                    background: isSelected ? "rgba(59, 130, 246, 0.2)" : "rgba(255, 255, 255, 0.04)",
-                    color: isSelected ? "#60a5fa" : "#9ca3af",
-                    border: `1px solid ${isSelected ? "rgba(59, 130, 246, 0.4)" : "rgba(255, 255, 255, 0.08)"}`,
+                    background: isSelected ? (isDark ? "rgba(62, 196, 192, 0.15)" : "#e6fffa") : "transparent",
+                    color: isSelected ? (isDark ? "#3ec4c0" : "#0c6e6b") : tokens.textSecondary,
+                    border: `1px solid ${isSelected ? (isDark ? "rgba(62, 196, 192, 0.4)" : "#b2f5ea") : tokens.borderSubtle}`,
                     borderRadius: "8px",
                     fontSize: "13px",
-                    fontWeight: isSelected ? "600" : "500",
+                    fontWeight: isSelected ? "700" : "500",
                     cursor: "pointer",
                     transition: "all 0.15s ease",
                   }}
@@ -380,15 +396,11 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                 value={query}
                 onChange={handleQueryChange}
                 placeholder={`Buscar ${selectedContentType === "MOD" ? "mods de servidor" : "data packs"} en Modrinth y CurseForge...`}
+                className="launcher-input"
                 style={{
                   width: "100%",
                   padding: "10px 16px 10px 38px",
-                  background: "rgba(0, 0, 0, 0.4)",
-                  border: "1px solid rgba(255, 255, 255, 0.12)",
-                  borderRadius: "10px",
-                  color: "#f3f4f6",
-                  fontSize: "14px",
-                  outline: "none",
+                  fontSize: "13px",
                   boxSizing: "border-box",
                 }}
               />
@@ -398,11 +410,12 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                   left: "14px",
                   top: "50%",
                   transform: "translateY(-50%)",
-                  color: "#6b7280",
-                  fontSize: "14px",
+                  color: tokens.textMuted,
+                  display: "flex",
+                  alignItems: "center",
                 }}
               >
-                🔍
+                <IconSearch size={16} />
               </span>
             </div>
 
@@ -480,9 +493,13 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                 borderRadius: "8px",
                 color: "#fde047",
                 fontSize: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
               }}
             >
-              ⚠️ Mostrando resultados de proveedores disponibles.
+              <IconAlertCircle size={16} style={{ color: "#fde047" }} />
+              <span>Mostrando resultados de proveedores disponibles.</span>
             </div>
           )}
         </div>
@@ -495,13 +512,14 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
               flex: selectedMod ? "0 0 50%" : "1 1 100%",
               overflowY: "auto",
               padding: "20px 24px",
-              borderRight: selectedMod ? "1px solid rgba(255, 255, 255, 0.08)" : "none",
+              borderRight: selectedMod ? `1px solid ${tokens.borderSubtle}` : "none",
             }}
+            className="custom-scroll"
           >
             {loading ? (
-              <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af" }}>
-                <div style={{ fontSize: "28px", marginBottom: "12px" }}>⏳</div>
-                Buscando contenido de servidor compatible...
+              <div style={{ textAlign: "center", padding: "60px 0", color: tokens.textSecondary, display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
+                <IconSpinner size={28} />
+                <span>Buscando contenido de servidor compatible...</span>
               </div>
             ) : error ? (
               <div
@@ -518,9 +536,9 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                 {error}
               </div>
             ) : results.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "60px 0", color: "#6b7280" }}>
-                <div style={{ fontSize: "36px", marginBottom: "12px" }}>🔍</div>
-                <div style={{ fontSize: "16px", color: "#9ca3af", marginBottom: "4px" }}>
+              <div style={{ textAlign: "center", padding: "60px 0", color: tokens.textMuted, display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+                <IconSearch size={32} />
+                <div style={{ fontSize: "16px", color: tokens.textSecondary, marginBottom: "4px" }}>
                   No se encontraron resultados de servidor
                 </div>
                 <div style={{ fontSize: "13px" }}>
@@ -551,8 +569,8 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                         style={{
                           padding: "14px",
                           borderRadius: "12px",
-                          background: isSelected ? "rgba(59, 130, 246, 0.15)" : "rgba(255, 255, 255, 0.03)",
-                          border: `1px solid ${isSelected ? "rgba(59, 130, 246, 0.4)" : "rgba(255, 255, 255, 0.08)"}`,
+                          background: isSelected ? (isDark ? "rgba(62, 196, 192, 0.12)" : "#e6fffa") : tokens.bgCardInner,
+                          border: `1px solid ${isSelected ? (isDark ? "rgba(62, 196, 192, 0.4)" : "#b2f5ea") : tokens.borderSubtle}`,
                           cursor: "pointer",
                           display: "flex",
                           gap: "12px",
@@ -571,14 +589,14 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                               width: "44px",
                               height: "44px",
                               borderRadius: "8px",
-                              background: "rgba(255,255,255,0.06)",
+                              background: isDark ? "rgba(255,255,255,0.06)" : "#e2e8f0",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              fontSize: "20px",
+                              color: tokens.textSecondary,
                             }}
                           >
-                            📦
+                            <IconBox size={22} />
                           </div>
                         )}
 
@@ -710,7 +728,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                       }}
                     >
                       <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-                        <span style={{ fontSize: "20px" }}>ℹ️</span>
+                        <IconAlertCircle size={20} style={{ color: "#fbbf24", flexShrink: 0, marginTop: 2 }} />
                         <div>
                           <strong style={{ display: "block", marginBottom: "4px", color: "#fbbf24" }}>
                             Este mod afecta tanto al cliente como al servidor.
@@ -727,16 +745,11 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                             onClose()
                             onNavigateToGame()
                           }}
+                          className="launcher-btn-primary"
                           style={{
                             alignSelf: "flex-start",
-                            padding: "8px 16px",
-                            background: "#f59e0b",
-                            color: "#000000",
-                            border: "none",
-                            borderRadius: "8px",
-                            fontWeight: "700",
-                            fontSize: "13px",
-                            cursor: "pointer",
+                            fontSize: "12px",
+                            padding: "6px 14px",
                           }}
                         >
                           Añadir desde Actualizaciones →
@@ -747,7 +760,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                     <>
                       {/* Version selector */}
                       <div>
-                        <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#e5e7eb", marginBottom: "6px" }}>
+                        <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: tokens.textPrimary, marginBottom: "6px" }}>
                           Versión compatible para servidor:
                         </label>
                         {modDetail.compatibleVersions && modDetail.compatibleVersions.length > 0 ? (
@@ -755,15 +768,12 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                             data-testid="select-server-version"
                             value={selectedVersionId}
                             onChange={(e) => handleVersionChange(e.target.value)}
+                            className="launcher-input"
                             style={{
                               width: "100%",
                               padding: "10px 14px",
-                              background: "#1f2937",
-                              border: "1px solid rgba(255, 255, 255, 0.15)",
-                              borderRadius: "8px",
-                              color: "#f3f4f6",
                               fontSize: "13px",
-                              outline: "none",
+                              boxSizing: "border-box",
                             }}
                           >
                             {modDetail.compatibleVersions.map((ver) => (
@@ -781,19 +791,20 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
 
                       {/* Plan preview */}
                       {resolvingPlan ? (
-                        <div style={{ color: "#9ca3af", fontSize: "13px", textAlign: "center", padding: "20px 0" }}>
-                          Calculando dependencias y destino físico...
+                        <div style={{ color: tokens.textSecondary, fontSize: "13px", textAlign: "center", padding: "20px 0", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                          <IconSpinner size={16} />
+                          <span>Calculando dependencias y destino físico...</span>
                         </div>
                       ) : plan ? (
                         <div
                           style={{
                             padding: "14px",
                             borderRadius: "10px",
-                            background: "rgba(255, 255, 255, 0.04)",
-                            border: "1px solid rgba(255, 255, 255, 0.08)",
+                            background: tokens.bgCardInner,
+                            border: `1px solid ${tokens.borderSubtle}`,
                           }}
                         >
-                          <div style={{ fontSize: "13px", fontWeight: "700", color: "#e5e7eb", marginBottom: "10px" }}>
+                          <div style={{ fontSize: "13px", fontWeight: "700", color: tokens.textPrimary, marginBottom: "10px" }}>
                             Archivos a instalar en el servidor:
                           </div>
 
@@ -806,13 +817,13 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                                 justifyContent: "space-between",
                                 fontSize: "12px",
                                 padding: "6px 0",
-                                borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
+                                borderBottom: `1px solid ${tokens.borderSubtle}`,
                               }}
                             >
                               <div>
-                                <span style={{ color: "#f9fafb", fontWeight: "600" }}>{pi.projectName}</span>{" "}
-                                <span style={{ color: "#9ca3af" }}>({pi.versionNumber})</span>
-                                <div style={{ color: "#60a5fa", fontSize: "11px", fontFamily: "monospace" }}>
+                                <span style={{ color: tokens.textPrimary, fontWeight: "600" }}>{pi.projectName}</span>{" "}
+                                <span style={{ color: tokens.textSecondary }}>({pi.versionNumber})</span>
+                                <div style={{ color: "#3ec4c0", fontSize: "11px", fontFamily: "monospace" }}>
                                   /{pi.targetPath}
                                 </div>
                               </div>
@@ -821,8 +832,8 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                                   fontSize: "11px",
                                   padding: "2px 6px",
                                   borderRadius: "4px",
-                                  background: pi.action === "INSTALL" ? "rgba(34, 197, 94, 0.2)" : "rgba(59, 130, 246, 0.2)",
-                                  color: pi.action === "INSTALL" ? "#4ade80" : "#60a5fa",
+                                  background: pi.action === "INSTALL" ? "rgba(34, 197, 94, 0.2)" : "rgba(62, 196, 192, 0.2)",
+                                  color: pi.action === "INSTALL" ? "#4ade80" : "#3ec4c0",
                                   fontWeight: "600",
                                 }}
                               >
@@ -859,15 +870,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                         <button
                           type="button"
                           onClick={() => setSelectedMod(null)}
-                          style={{
-                            padding: "8px 16px",
-                            borderRadius: "8px",
-                            border: "1px solid rgba(255, 255, 255, 0.15)",
-                            background: "transparent",
-                            color: "#e5e7eb",
-                            fontSize: "13px",
-                            cursor: "pointer",
-                          }}
+                          className="launcher-btn-secondary"
                         >
                           Cancelar
                         </button>
@@ -876,16 +879,11 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                           type="button"
                           data-testid="button-install-server-content"
                           onClick={handleInstall}
-                          disabled={installing || !plan?.isValid || plan?.conflicts?.length > 0}
+                          disabled={installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0}
+                          className="launcher-btn-primary"
                           style={{
-                            padding: "8px 20px",
-                            borderRadius: "8px",
-                            border: "none",
-                            background: installing || !plan?.isValid ? "#4b5563" : "#3b82f6",
-                            color: "#ffffff",
-                            fontSize: "13px",
-                            fontWeight: "700",
-                            cursor: installing || !plan?.isValid ? "not-allowed" : "pointer",
+                            opacity: installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0 ? 0.5 : 1,
+                            cursor: installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0 ? "not-allowed" : "pointer",
                           }}
                         >
                           {installing ? "Instalando en servidor..." : "Instalar en servidor"}

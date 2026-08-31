@@ -415,9 +415,9 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     expect(screen.getByText(/Copias de seguridad/i)).toBeDefined()
     expect(screen.getByText("Crear copia ahora")).toBeDefined()
 
-    // 4. Click "Tasks"
+    // 4. Click "Tareas"
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Tasks/i }))
+      fireEvent.click(screen.getByRole("button", { name: /Tareas/i }))
     })
     expect(screen.getByText(/Tasks Programadas/i)).toBeDefined()
     expect(screen.getByText("Nueva Task")).toBeDefined()
@@ -441,7 +441,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     expect(screen.getByRole("button", { name: "Consola" })).toBeDefined()
     expect(screen.getByRole("button", { name: "Archivos" })).toBeDefined()
     expect(screen.getByRole("button", { name: "Backups" })).toBeDefined()
-    expect(screen.getByRole("button", { name: "Tasks" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Tareas" })).toBeDefined()
   })
 
   it("Shard 07D Test 1: Infra transitions to DISCONNECTED if polling fails after prior success and disables power actions", async () => {
@@ -1414,6 +1414,29 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
     const banner = await screen.findByTestId("server-overview-pending-changes-banner")
     expect(banner).toBeDefined()
     expect(screen.getByText(/El servidor no está disponible en este momento/i)).toBeDefined()
+  })
+
+  it("9. Live console preview receives incoming log entries without crashing", async () => {
+    vi.spyOn(serverApi, "getServerStatus").mockResolvedValue(mockServerResources)
+
+    render(<ServerOverviewView theme="dark" />)
+
+    await screen.findByText("Consola en vivo")
+
+    // Simulate incoming console log via consoleService
+    const { consoleService } = await import("../../services/consoleService")
+    await act(async () => {
+      ;(consoleService as any).logListeners?.forEach((l: any) =>
+        l({
+          id: "log-test-1",
+          line: "Server started listening on port 25565",
+          timestamp: new Date().toISOString(),
+          type: "stdout",
+        }),
+      )
+    })
+
+    expect(screen.getByText(/Server started listening on port 25565/i)).toBeDefined()
   })
 })
 

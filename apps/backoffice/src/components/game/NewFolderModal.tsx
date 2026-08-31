@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import type { ThemeMode } from "../../types"
+import { getThemeTokens } from "../../theme/tokens"
 import { IconCross, IconFolder, IconSpinner } from "../../theme/icons"
 
 interface NewFolderModalProps {
@@ -16,6 +17,7 @@ export default function NewFolderModal({
   onSubmit,
 }: NewFolderModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [folderName, setFolderName] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -51,12 +53,12 @@ export default function NewFolderModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.65)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.78)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 9999,
+        zIndex: 900,
         padding: "20px",
         boxSizing: "border-box",
       }}
@@ -68,27 +70,27 @@ export default function NewFolderModal({
         style={{
           width: "100%",
           maxWidth: "460px",
-          backgroundColor: isDark ? "#0f172a" : "#ffffff",
-          borderRadius: "16px",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          backgroundColor: tokens.bgCard,
+          borderRadius: "18px",
+          border: `1px solid ${tokens.borderSubtle}`,
+          boxShadow: tokens.cardShadowLg,
           overflow: "hidden",
         }}
       >
         <div
           style={{
-            padding: "16px 20px",
-            borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+            padding: "18px 20px",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            backgroundColor: isDark ? "#0b1120" : "#f8fafc",
+            backgroundColor: tokens.bgCardInner,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <IconFolder style={{ width: 20, height: 20, color: "#3b82f6" }} />
-            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "600", color: isDark ? "#f8fafc" : "#0f172a" }}>
-              Nueva Carpeta
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: tokens.textPrimary }}>
+              Nueva carpeta
             </h3>
           </div>
           <button
@@ -97,7 +99,7 @@ export default function NewFolderModal({
             style={{
               background: "transparent",
               border: "none",
-              color: isDark ? "#94a3b8" : "#64748b",
+              color: tokens.textMuted,
               cursor: "pointer",
               padding: "4px",
               display: "flex",
@@ -113,10 +115,10 @@ export default function NewFolderModal({
               style={{
                 padding: "10px 14px",
                 marginBottom: "16px",
-                backgroundColor: isDark ? "rgba(239, 68, 68, 0.15)" : "#fee2e2",
-                border: "1px solid #ef4444",
-                borderRadius: "8px",
-                color: isDark ? "#fca5a5" : "#991b1b",
+                backgroundColor: "rgba(239, 68, 68, 0.12)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
+                borderRadius: "10px",
+                color: "#ef4444",
                 fontSize: "13px",
               }}
             >
@@ -130,8 +132,8 @@ export default function NewFolderModal({
                 display: "block",
                 marginBottom: "6px",
                 fontSize: "13px",
-                fontWeight: "500",
-                color: isDark ? "#cbd5e1" : "#334155",
+                fontWeight: "600",
+                color: tokens.textSecondary,
               }}
             >
               Nombre de la carpeta
@@ -142,16 +144,10 @@ export default function NewFolderModal({
               value={folderName}
               onChange={(e) => setFolderName(e.target.value)}
               placeholder="ejemplo: custom_config"
+              className="launcher-input"
               style={{
                 width: "100%",
-                padding: "10px 14px",
-                backgroundColor: isDark ? "#1e293b" : "#f8fafc",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                borderRadius: "8px",
-                color: isDark ? "#f8fafc" : "#0f172a",
-                fontSize: "14px",
                 boxSizing: "border-box",
-                outline: "none",
               }}
             />
           </div>
@@ -159,11 +155,12 @@ export default function NewFolderModal({
           <div
             style={{
               padding: "10px 14px",
-              backgroundColor: isDark ? "#1e293b" : "#f1f5f9",
-              borderRadius: "8px",
+              backgroundColor: tokens.bgCardInner,
+              border: `1px solid ${tokens.borderSubtle}`,
+              borderRadius: "10px",
               marginBottom: "20px",
               fontSize: "12px",
-              color: isDark ? "#94a3b8" : "#64748b",
+              color: tokens.textSecondary,
               fontFamily: "monospace",
               wordBreak: "break-all",
             }}
@@ -175,38 +172,22 @@ export default function NewFolderModal({
             <button
               type="button"
               onClick={onClose}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "transparent",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                borderRadius: "8px",
-                color: isDark ? "#cbd5e1" : "#475569",
-                fontSize: "13px",
-                fontWeight: "500",
-                cursor: "pointer",
-              }}
+              className="launcher-btn-secondary"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isSubmitting || !folderName.trim()}
+              className="launcher-btn-primary"
               style={{
-                padding: "8px 20px",
-                backgroundColor: "#3b82f6",
-                border: "none",
-                borderRadius: "8px",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: isSubmitting || !folderName.trim() ? "not-allowed" : "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "8px",
               }}
             >
               {isSubmitting && <IconSpinner style={{ width: 14, height: 14 }} />}
-              <span>Crear Carpeta</span>
+              <span>Crear carpeta</span>
             </button>
           </div>
         </form>
