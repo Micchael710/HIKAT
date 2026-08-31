@@ -169,6 +169,7 @@ export default function DownloadPlayButton({
         localStorage.setItem("hikat_game_manifest", JSON.stringify(newModpack))
       } catch (_) {}
 
+      latestManifestVersionRef.current = newManifest.version
       setManifest(newManifest)
       if (newManifest.totalSizeGB) setTotalGB(newManifest.totalSizeGB)
 
