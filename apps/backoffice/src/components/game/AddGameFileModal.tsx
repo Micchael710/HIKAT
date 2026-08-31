@@ -41,9 +41,15 @@ export default function AddGameFileModal({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      setSelectedFile(file)
+    if (!file) return
+
+    setSelectedFile(file)
+
+    if (!name || isReplace) {
       const clean = sanitizeGameFileName(file.name)
+        .replace(/\.(jar|zip|json|js)$/i, "")
+        .replace(/[-_]/g, " ")
+
       setName(clean)
     }
   }
