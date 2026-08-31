@@ -812,5 +812,88 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     expect(container.querySelector(".dl-progress-card")).not.toBeNull()
     expect(card.textContent).toContain("DESCARGANDO")
   })
+
+  it("Test 13 — Installing 1.0.1 when 1.0.2 arrives ends in ACTUALIZAR (UPDATE), not JUGAR (PLAY)", async () => {
+    let releaseCallback: any
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+      releaseCallback = cb
+      return () => {}
+    })
+
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.1",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: false,
+      hasExistingInstall: false,
+      totalSizeGB: 10,
+      clientFiles: [
+        {
+          path: "mods/mod-101.jar",
+          sha256: "a".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/mod101",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    let resolveSync: any
+    vi.spyOn(gameService, "startSync").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSync = resolve
+        }),
+    )
+
+    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "1.0.2",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      mandatory: true,
+      clientFiles: [
+        {
+          path: "mods/mod-102.jar",
+          sha256: "b".repeat(64),
+          sizeBytes: 120,
+          downloadUrl: "/dl/mod102",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    const { container } = await mountButton()
+
+    // 1. Click download to start installing 1.0.1
+    await act(async () => {
+      (container.querySelector("button") as HTMLElement).click()
+    })
+
+    expect(container.querySelector(".dl-progress-card")).not.toBeNull()
+
+    // 2. While downloading, 1.0.2 update is activated on backend and broadcasted
+    await act(async () => {
+      await releaseCallback?.({
+        type: "RELEASE_ACTIVATED",
+        version: "1.0.2",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        mandatory: true,
+      })
+    })
+
+    // 3. Complete sync for 1.0.1
+    await act(async () => {
+      resolveSync({ success: true })
+    })
+
+    // 4. Progress card disappears and button transitions to ACTUALIZAR (UPDATE), NOT JUGAR
+    const idleBtn = container.querySelector("button") as HTMLElement
+    expect(idleBtn).not.toBeNull()
+    expect(idleBtn.textContent).toContain("ACTUALIZAR")
+    expect(idleBtn.textContent).not.toContain("JUGAR")
+  })
 })
+
 

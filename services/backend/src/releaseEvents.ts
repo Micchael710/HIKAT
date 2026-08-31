@@ -9,6 +9,8 @@ export class ReleaseEventsDurableObject {
     if (url.pathname === "/broadcast" && request.method === "POST") {
       const message = await request.text()
 
+      await this.ctx.storage.put("latestReleaseEvent", message)
+
       for (const ws of this.ctx.getWebSockets()) {
         try {
           ws.send(message)
@@ -26,6 +28,13 @@ export class ReleaseEventsDurableObject {
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
 
     this.ctx.acceptWebSocket(server)
+
+    const latest = await this.ctx.storage.get<string>("latestReleaseEvent")
+    if (latest) {
+      try {
+        server.send(latest)
+      } catch {}
+    }
 
     return new Response(null, {
       status: 101,

@@ -49,10 +49,20 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
     expect(mockCtx.acceptWebSocket).not.toHaveBeenCalled()
   })
 
-  it("accepts websocket connection via Hibernation API (acceptWebSocket) and returns 101", async () => {
+  it("accepts websocket connection via Hibernation API, checks storage for catch-up event, and returns 101", async () => {
+    const storageMap = new Map<string, any>()
+    storageMap.set(
+      "latestReleaseEvent",
+      JSON.stringify({ type: "RELEASE_ACTIVATED", version: "1.2.0" }),
+    )
+
     const mockCtx: any = {
       acceptWebSocket: vi.fn(),
       getWebSockets: vi.fn(() => []),
+      storage: {
+        get: vi.fn(async (k: string) => storageMap.get(k)),
+        put: vi.fn(async (k: string, v: any) => storageMap.set(k, v)),
+      },
     }
     const doInstance = new ReleaseEventsDurableObject(mockCtx)
 
@@ -64,9 +74,10 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
     expect(response.status).toBe(101)
     expect(response.webSocket).toBeDefined()
     expect(mockCtx.acceptWebSocket).toHaveBeenCalledTimes(1)
+    expect(mockCtx.storage.get).toHaveBeenCalledWith("latestReleaseEvent")
   })
 
-  it("handles /broadcast POST and sends message to all active hibernation WebSockets", async () => {
+  it("handles /broadcast POST, persists latestReleaseEvent to storage, and sends message to active WebSockets", async () => {
     const ws1 = { send: vi.fn() }
     const ws2 = { send: vi.fn() }
     const ws3 = {
@@ -75,9 +86,14 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
       }),
     }
 
+    const storageMap = new Map<string, any>()
     const mockCtx: any = {
       acceptWebSocket: vi.fn(),
       getWebSockets: vi.fn(() => [ws1, ws2, ws3]),
+      storage: {
+        get: vi.fn(async (k: string) => storageMap.get(k)),
+        put: vi.fn(async (k: string, v: any) => storageMap.set(k, v)),
+      },
     }
     const doInstance = new ReleaseEventsDurableObject(mockCtx)
 
@@ -96,6 +112,8 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
 
     const response = await doInstance.fetch(request)
     expect(response.status).toBe(204)
+    expect(mockCtx.storage.put).toHaveBeenCalledWith("latestReleaseEvent", payload)
+    expect(storageMap.get("latestReleaseEvent")).toBe(payload)
     expect(ws1.send).toHaveBeenCalledWith(payload)
     expect(ws2.send).toHaveBeenCalledWith(payload)
     expect(ws3.send).toHaveBeenCalledWith(payload)

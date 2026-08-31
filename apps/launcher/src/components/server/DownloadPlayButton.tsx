@@ -82,8 +82,13 @@ export default function DownloadPlayButton({
   const menuRef = useRef<HTMLDivElement>(null)
   const toastTimeoutRef = useRef<any>(null)
   const isStartingSyncRef = useRef(false)
+  const latestManifestVersionRef = useRef<string | null>(null)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const isDark = theme === "dark"
+
+  useEffect(() => {
+    latestManifestVersionRef.current = manifest?.version ?? null
+  }, [manifest?.version])
 
   const showToast = (
     msg: string,
@@ -136,7 +141,7 @@ export default function DownloadPlayButton({
       }
 
       const newModpack = await gameService.getPublishedModpack()
-      if (!newModpack) return
+      if (!newModpack || newModpack.version === manifest.version) return
 
       const totalBytes = (newModpack.clientFiles || []).reduce(
         (sum, file) => sum + (Number(file.sizeBytes) || 0),
@@ -274,6 +279,8 @@ export default function DownloadPlayButton({
       isStartingSyncRef.current = true
       setStatus("downloading")
 
+      const syncingVersion = manifest.version
+
       gameService
         .startSync(
           manifest.clientFiles,
@@ -288,7 +295,14 @@ export default function DownloadPlayButton({
           }
           if (res?.success) {
             gameService.setGameInstalled(true)
-            setStatus("play")
+            if (
+              latestManifestVersionRef.current &&
+              latestManifestVersionRef.current !== syncingVersion
+            ) {
+              setStatus("update")
+            } else {
+              setStatus("play")
+            }
             showToast(t("playButton.syncSuccess"), "success")
           }
         })
@@ -323,6 +337,8 @@ export default function DownloadPlayButton({
       isStartingSyncRef.current = true
       setStatus("downloading")
 
+      const syncingVersion = manifest.version
+
       gameService
         .startSync(
           manifest.clientFiles,
@@ -337,7 +353,14 @@ export default function DownloadPlayButton({
           }
           if (res?.success) {
             gameService.setGameInstalled(true)
-            setStatus("play")
+            if (
+              latestManifestVersionRef.current &&
+              latestManifestVersionRef.current !== syncingVersion
+            ) {
+              setStatus("update")
+            } else {
+              setStatus("play")
+            }
             showToast(t("playButton.syncSuccess"), "success")
           }
         })
