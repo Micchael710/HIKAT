@@ -289,7 +289,7 @@ async function buildCoreInstallPlan({
     }
   }
 
-  // 3.d NeoForge Installer JAR (Uses expectedSha256)
+  // 3.d NeoForge Installer JAR (Uses expectedSha256 and promoted from Planner Cache)
   if (readiness.needsNeoForge) {
     const installerRelativePath = path.join(
       "libraries",
@@ -304,7 +304,7 @@ async function buildCoreInstallPlan({
       relativePath: installerRelativePath,
       expectedSize: plannerInstallerInfo.sizeBytes,
       expectedSha256: plannerInstallerInfo.sha256,
-      downloadUrl: `https://maven.neoforged.net/releases/net/neoforged/neoforge/${cleanNf}/neoforge-${cleanNf}-installer.jar`,
+      downloadUrl: null, // Planner Cache is the sole download authority; promoted locally
       role: "neoforge-installer",
     })
   }
@@ -469,6 +469,11 @@ async function downloadAllCoreArtifacts({
     }
 
     if (isValid) {
+      continue
+    }
+
+    if (artifact.role === "neoforge-installer") {
+      await promotePlannerInstallerToCanonical(instanceRoot, neoForgeVersion)
       continue
     }
 

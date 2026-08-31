@@ -637,6 +637,7 @@ class GameOperationManager {
             minecraftVersion,
             neoForgeVersion,
             javaCliPath,
+            preparedPlan: corePlan,
             onTaskBytes: (_taskName, bytesDelta) => {
               if (typeof bytesDelta === "number" && bytesDelta > 0) {
                 coreTransferredBytes += bytesDelta

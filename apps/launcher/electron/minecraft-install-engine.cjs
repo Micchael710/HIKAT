@@ -68,6 +68,7 @@ async function installOrRepairMinecraftCore({
   minecraftVersion,
   neoForgeVersion,
   javaCliPath,
+  preparedPlan,
   onTaskBytes,
   onPhaseChange,
   cancelSignal,
@@ -80,54 +81,58 @@ async function installOrRepairMinecraftCore({
   const cleanMc = String(minecraftVersion).trim()
   const cleanNf = String(neoForgeVersion).trim()
 
-  // 1. Initial local readiness check
-  const initialReadiness = await checkMinecraftCoreReadiness({
-    instanceRoot,
-    minecraftVersion: cleanMc,
-    neoForgeVersion: cleanNf,
-  })
+  let plan = preparedPlan
 
-  if (initialReadiness.isCoreInstalled) {
-    return {
-      success: true,
-      resolvedVersionId: initialReadiness.resolvedVersionId,
-      installedVanilla: false,
-      installedNeoForge: false,
-    }
-  }
-
-  // 2. Build Core Plan
-  const plan = await buildCoreInstallPlan({
-    instanceRoot,
-    minecraftVersion: cleanMc,
-    neoForgeVersion: cleanNf,
-    mode: "execution",
-    cancelSignal,
-    customFetch,
-  })
-
-  if (cancelSignal?.isCancelled) {
-    throw new Error("Installation cancelled by user.")
-  }
-  if (cancelSignal?.isPaused) {
-    return { paused: true }
-  }
-
-  // 3. Network phase: Download all required Core artifacts
-  if (plan.artifacts && plan.artifacts.size > 0) {
-    const downloadResult = await downloadAllCoreArtifacts({
+  // If preparedPlan was not passed (e.g. standalone call), check readiness, build and download plan
+  if (!plan) {
+    // 1. Initial local readiness check
+    const initialReadiness = await checkMinecraftCoreReadiness({
       instanceRoot,
       minecraftVersion: cleanMc,
       neoForgeVersion: cleanNf,
-      artifacts: plan.artifacts,
+    })
+
+    if (initialReadiness.isCoreInstalled) {
+      return {
+        success: true,
+        resolvedVersionId: initialReadiness.resolvedVersionId,
+        installedVanilla: false,
+        installedNeoForge: false,
+      }
+    }
+
+    plan = await buildCoreInstallPlan({
+      instanceRoot,
+      minecraftVersion: cleanMc,
+      neoForgeVersion: cleanNf,
+      mode: "execution",
       cancelSignal,
-      onTaskBytes,
-      onPhaseChange,
       customFetch,
     })
 
-    if (downloadResult?.paused) {
+    if (cancelSignal?.isCancelled) {
+      throw new Error("Installation cancelled by user.")
+    }
+    if (cancelSignal?.isPaused) {
       return { paused: true }
+    }
+
+    // Network phase: Download all required Core artifacts
+    if (plan.artifacts && plan.artifacts.size > 0) {
+      const downloadResult = await downloadAllCoreArtifacts({
+        instanceRoot,
+        minecraftVersion: cleanMc,
+        neoForgeVersion: cleanNf,
+        artifacts: plan.artifacts,
+        cancelSignal,
+        onTaskBytes,
+        onPhaseChange,
+        customFetch,
+      })
+
+      if (downloadResult?.paused) {
+        return { paused: true }
+      }
     }
   }
 

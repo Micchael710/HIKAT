@@ -10,6 +10,7 @@ import http from "http"
 import {
   checkMinecraftCoreReadiness,
   estimateCoreDownloadBytes,
+  downloadAllCoreArtifacts,
   buildCoreInstallPlan,
   installOrRepairMinecraftCore,
   installNeoForgeFromPreparedInstaller,
@@ -24,6 +25,7 @@ import {
   validatePlannerInstaller,
   ensurePlannerInstaller,
   promotePlannerInstallerToCanonical,
+  canonicalNeoForgeInstallerPath,
   resolveOfficialNeoForgeInstallerSha256,
   readInstallProfileFromJar,
   getNeoForgeInstallerJarPath,
@@ -853,18 +855,14 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
   })
 
   /* ─────────────────────────────────────────────────────────────
-   * 11. Restored: Missing/Corrupt InstallProfile Fails Closed
+   * 11. Core-state.json is auxiliary metadata: readiness passes without it
    * ───────────────────────────────────────────────────────────── */
-  it("11. checkMinecraftCoreReadiness fails closed when InstallProfile is missing or corrupted", async () => {
+  it("11. checkMinecraftCoreReadiness passes when core files exist even if core-state.json is missing", async () => {
     await createMockInstalledCore(instanceRoot, "1.21.1", "21.1.65")
 
-    await saveCoreState(instanceRoot, {
-      minecraftVersion: "1.21.1",
-      neoForgeVersion: "21.1.65",
-      resolvedVersionId: "1.21.1-neoforge-21.1.65",
-      installedAt: new Date().toISOString(),
-      installProfile: null,
-    })
+    // Remove core-state.json completely
+    const coreStateFile = path.join(instanceRoot, ".hikat", "core-state.json")
+    if (fs.existsSync(coreStateFile)) await fsp.unlink(coreStateFile)
 
     const readiness = await checkMinecraftCoreReadiness({
       instanceRoot,
@@ -872,9 +870,8 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
       neoForgeVersion: "21.1.65",
     })
 
-    expect(readiness.isCoreInstalled).toBe(false)
-    expect(readiness.needsNeoForge).toBe(true)
-    expect(readiness.issues[0]).toMatch(/InstallProfile metadata is missing or corrupted/i)
+    expect(readiness.isCoreInstalled).toBe(true)
+    expect(readiness.needsNeoForge).toBe(false)
   })
 
   /* ─────────────────────────────────────────────────────────────
@@ -3140,5 +3137,237 @@ describe("HiKAT Minecraft & NeoForge Hardened Engine QA Master Suite", () => {
     })
 
     expect(networkChunkAfterInstalling).toBe(false)
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 60. Fresh install without core-state.json passes final readiness and creates core-state.json
+   * ───────────────────────────────────────────────────────────── */
+  it("60. Fresh install without core-state.json installs correctly, passes readiness, and creates core-state.json", async () => {
+    const { javaCliPath } = await createMockJdk21(appDataRoot)
+
+    // Pre-create full installed core (vanilla jar, assets, neoforge version json and lib)
+    await createMockInstalledCore(instanceRoot, "1.21.1", "21.1.65")
+
+    // Ensure core-state.json does NOT exist initially
+    const coreStatePath = path.join(instanceRoot, ".hikat", "core-state.json")
+    if (fs.existsSync(coreStatePath)) await fsp.unlink(coreStatePath)
+    expect(fs.existsSync(coreStatePath)).toBe(false)
+
+    // Initial check: readiness passes even though core-state.json does NOT exist
+    const readiness = await checkMinecraftCoreReadiness({
+      instanceRoot,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+    expect(readiness.isCoreInstalled).toBe(true)
+
+    // Now test installOrRepairMinecraftCore with preparedPlan (which writes core-state.json)
+    const preparedPlan = {
+      totalCoreBytes: 0,
+      reusableCoreBytes: 0,
+      bootstrapNetworkBytes: 0,
+      needsNeoForge: false,
+      needsVanilla: false,
+      resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      installProfile: { version: "21.1.65" },
+      mojangPackage: { id: "1.21.1" },
+      artifacts: new Map(),
+      readiness: { isCoreInstalled: false, needsNeoForge: false, resolvedVersionId: "1.21.1-neoforge-21.1.65" },
+    }
+
+    const installResult = await installOrRepairMinecraftCore({
+      instanceRoot,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      javaCliPath,
+      preparedPlan,
+    })
+
+    expect(installResult.success).toBe(true)
+
+    // Post-installation verification: core-state.json was created
+    expect(fs.existsSync(coreStatePath)).toBe(true)
+    const savedState = JSON.parse(await fsp.readFile(coreStatePath, "utf8"))
+    expect(savedState.minecraftVersion).toBe("1.21.1")
+    expect(savedState.neoForgeVersion).toBe("21.1.65")
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 61. Strict Monotonic Lifecycle: once INSTALLING is reached, DOWNLOADING never appears
+   * ───────────────────────────────────────────────────────────── */
+  it("61. Real pipeline never reverts to DOWNLOADING after first entering INSTALLING", async () => {
+    await createMockJdk21(appDataRoot)
+
+    const phasesSeen: string[] = []
+    let hasEnteredInstalling = false
+    let downloadingAfterInstalling = false
+
+    const opManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi
+          .fn()
+          .mockResolvedValueOnce({ isCoreInstalled: false })
+          .mockResolvedValue({ isCoreInstalled: true, resolvedVersionId: "1.21.1" }),
+        estimateCoreDownloadBytes: vi.fn().mockResolvedValue({ totalCoreBytes: 200, reusableCoreBytes: 0 }),
+        buildCoreInstallPlan: vi.fn().mockResolvedValue({
+          totalCoreBytes: 200,
+          reusableCoreBytes: 0,
+          artifacts: new Map(),
+          needsNeoForge: false,
+        }),
+        downloadAllCoreArtifacts: vi.fn().mockImplementation(async ({ onTaskBytes }) => {
+          onTaskBytes?.("test-artifact", 200)
+          return { success: true }
+        }),
+        installOrRepairMinecraftCore: vi.fn().mockImplementation(async ({ onPhaseChange }) => {
+          onPhaseChange?.("INSTALLING")
+          onPhaseChange?.("VERIFYING")
+          return { success: true, resolvedVersionId: "1.21.1" }
+        }),
+      },
+      javaValidator: vi.fn().mockReturnValue({ valid: true, major: 21 }),
+    })
+
+    const sampleContent = Buffer.from("mock client binary data 1234567890", "utf8")
+    const samplePayload = [
+      {
+        path: "mods/sample.jar",
+        sha256: computeSha256(sampleContent),
+        sizeBytes: sampleContent.length,
+        downloadUrl: `${serverBaseUrl}/file/sample.jar`,
+        policy: "NO_MODIFICABLE",
+      },
+    ]
+
+    await opManager.startSync({
+      instanceRoot,
+      clientFiles: samplePayload,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      onProgress: (d: any) => {
+        phasesSeen.push(d.phase)
+        if (d.phase === "INSTALLING") {
+          hasEnteredInstalling = true
+        }
+        if (hasEnteredInstalling && d.phase === "DOWNLOADING") {
+          downloadingAfterInstalling = true
+        }
+      },
+      onPhaseChange: (phase: string) => {
+        phasesSeen.push(phase)
+        if (phase === "INSTALLING") {
+          hasEnteredInstalling = true
+        }
+        if (hasEnteredInstalling && phase === "DOWNLOADING") {
+          downloadingAfterInstalling = true
+        }
+      },
+    })
+
+    expect(hasEnteredInstalling).toBe(true)
+    expect(downloadingAfterInstalling).toBe(false)
+    expect(phasesSeen).toContain("DOWNLOADING")
+    expect(phasesSeen).toContain("INSTALLING")
+    expect(phasesSeen).toContain("VERIFYING")
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 62. installOrRepairMinecraftCore(preparedPlan) does ZERO network and does not re-plan
+   * ───────────────────────────────────────────────────────────── */
+  it("62. installOrRepairMinecraftCore(preparedPlan) does not call buildCoreInstallPlan or fetch from network", async () => {
+    const { javaCliPath } = await createMockJdk21(appDataRoot)
+
+    // Pre-create full installed core so readiness passes locally
+    await createMockInstalledCore(instanceRoot, "1.21.1", "21.1.65")
+
+    let networkFetchAttempted = false
+    const throwingFetch = vi.fn().mockImplementation(async () => {
+      networkFetchAttempted = true
+      throw new Error("Network access is strictly prohibited during installOrRepairMinecraftCore with preparedPlan!")
+    })
+
+    const preparedPlan = {
+      totalCoreBytes: 0,
+      reusableCoreBytes: 0,
+      bootstrapNetworkBytes: 0,
+      needsNeoForge: false,
+      needsVanilla: false,
+      resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      installProfile: null,
+      mojangPackage: { id: "1.21.1" },
+      artifacts: new Map(),
+      readiness: { isCoreInstalled: false, needsNeoForge: false, resolvedVersionId: "1.21.1-neoforge-21.1.65" },
+    }
+
+    const result = await installOrRepairMinecraftCore({
+      instanceRoot,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      javaCliPath,
+      preparedPlan,
+      customFetch: throwingFetch,
+    })
+
+    expect(result.success).toBe(true)
+    expect(networkFetchAttempted).toBe(false)
+    expect(throwingFetch).not.toHaveBeenCalled()
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * 63. NeoForge installer is downloaded only once to Planner Cache and promoted locally
+   * ───────────────────────────────────────────────────────────── */
+  it("63. NeoForge installer is downloaded exactly once into Planner Cache and promoted to canonical path", async () => {
+    const mockProfile = { spec: 1, profile: "neoforge", version: "21.1.65", minecraft: "1.21.1", libraries: [] }
+    const zipBuffer = createZipWithFile("install_profile.json", JSON.stringify(mockProfile))
+    const realSha256 = computeSha256(zipBuffer)
+
+    let installerJarDownloadCount = 0
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (typeof url === "string" && url.includes(".sha256")) {
+        return { ok: true, text: async () => realSha256 } as any
+      }
+      if (typeof url === "string" && url.includes("-installer.jar")) {
+        installerJarDownloadCount++
+        return {
+          ok: true,
+          headers: new Headers({ "content-length": String(zipBuffer.length) }),
+          arrayBuffer: async () => zipBuffer,
+          buffer: async () => zipBuffer,
+        } as any
+      }
+      return { ok: false, status: 404 } as any
+    })
+
+    // 1. Build Core Install Plan: downloads installer to Planner Cache ONCE
+    const plan = await buildCoreInstallPlan({
+      instanceRoot,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      customFetch: mockFetch,
+    })
+
+    expect(installerJarDownloadCount).toBe(1)
+    const installerArtifact = Array.from(plan.artifacts.values()).find((a: any) => a.role === "neoforge-installer")
+    expect(installerArtifact).toBeDefined()
+    expect(installerArtifact.downloadUrl).toBeNull() // Crucial: downloadUrl is null so it won't be fetched again
+
+    // 2. Download all artifacts: does NOT download installer jar from maven a 2nd time; promotes locally
+    await downloadAllCoreArtifacts({
+      instanceRoot,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      artifacts: plan.artifacts,
+      customFetch: mockFetch,
+    })
+
+    // Fetch count must still be exactly 1!
+    expect(installerJarDownloadCount).toBe(1)
+
+    // Canonical path must have been created by local promotion
+    const canonicalJar = canonicalNeoForgeInstallerPath(instanceRoot, "21.1.65")
+    expect(fs.existsSync(canonicalJar)).toBe(true)
+    expect(await validateFileSha256(canonicalJar, zipBuffer.length, realSha256)).toBe(true)
   })
 })

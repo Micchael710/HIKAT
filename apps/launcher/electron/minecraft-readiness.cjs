@@ -229,11 +229,32 @@ async function checkMinecraftCoreReadiness({ instanceRoot, minecraftVersion, neo
     if (state?.installProfile && typeof state.installProfile === "object") {
       installProfile = state.installProfile
       const profileNf = normalizeNeoForgeProfileVersion(installProfile.version || "")
-      if (profileNf !== cleanNf) {
+      if (profileNf && profileNf !== cleanNf) {
         issues.push(`InstallProfile version mismatch: found ${installProfile.version}, expected ${cleanNf}`)
       }
-    } else {
-      issues.push("InstallProfile metadata is missing or corrupted")
+    }
+
+    // Check main NeoForge client library JAR in libraries
+    const mainNfJar = path.join(
+      instanceRoot,
+      "libraries",
+      "net",
+      "neoforged",
+      "neoforge",
+      cleanNf,
+      `neoforge-${cleanNf}.jar`,
+    )
+    const clientNfJar = path.join(
+      instanceRoot,
+      "libraries",
+      "net",
+      "neoforged",
+      "neoforge",
+      cleanNf,
+      `neoforge-${cleanNf}-client.jar`,
+    )
+    if (foundProfileJson && !fs.existsSync(mainNfJar) && !fs.existsSync(clientNfJar)) {
+      issues.push(`NeoForge main client library missing in libraries/net/neoforged/neoforge/${cleanNf}`)
     }
 
     // Verify NeoForge installer profile processor outputs if available
