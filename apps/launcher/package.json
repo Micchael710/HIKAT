@@ -14,12 +14,13 @@
     "test": "vitest run",
     "electron": "electron .",
     "desktop": "electron .",
-    "format": "oxfmt src"
+    "format": "oxfmt src",
+    "postinstall": "node -e \"const fs=require('fs');try{const p=require.resolve('@xmcl/core/package.json');const d=require('path').dirname(p);fs.writeFileSync(require('path').join(d,'utils.js'),'const core=require(\\\"./dist/index.js\\\");function isNotNull(v){return v!==null&&v!==undefined;}function exists(f){return require(\\\"fs/promises\\\").access(f).then(()=>true,()=>false);}module.exports={...core,isNotNull,exists};');}catch(_){}\""
   },
   "dependencies": {
     "@hikat/shared": "workspace:*",
-    "@xmcl/core": "2.15.1",
-    "@xmcl/installer": "6.1.2",
+    "@xmcl/core": "2.16.1",
+    "@xmcl/installer": "6.3.2",
     "axios": "^1.19.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -2,11 +2,8 @@ const path = require("path")
 const fs = require("fs")
 const { Version, launch: xmclLaunch } = require("@xmcl/core")
 const { setJavaGpuPreference } = require("./gpu-manager.cjs")
-const {
-  resolveJavaRuntime,
-  validateJavaBinary,
-  checkMinecraftCoreReadiness,
-} = require("./minecraft-install-engine.cjs")
+const { resolveJavaRuntime, validateJavaBinary } = require("./java-runtime.cjs")
+const { checkCore } = require("./minecraft-core.cjs")
 
 const DEFAULT_RAM_GB = 4
 
@@ -19,7 +16,9 @@ class GameLauncher {
     this.onStatusChangeCallback = null
     this.xmclLauncher = options.xmclLauncher || xmclLaunch
     this.versionParser = options.versionParser || Version.parse
-    this.readinessChecker = options.readinessChecker || checkMinecraftCoreReadiness
+    this.readinessChecker = options.readinessChecker || checkCore
+    this.javaResolver = options.javaResolver || resolveJavaRuntime
+    this.javaValidator = options.javaValidator || validateJavaBinary
   }
 
   setStatus(status) {
@@ -77,14 +76,14 @@ class GameLauncher {
         neoForgeVersion: cleanNf,
       })
 
-      if (!readiness.isCoreInstalled || !readiness.resolvedVersionId) {
+      if (!readiness.installed || !readiness.resolvedVersionId) {
         throw new Error(
-          `Cannot launch Minecraft: Installation is incomplete (${(readiness.issues || []).join(", ")}). Please update or repair the game first.`,
+          "Cannot launch Minecraft: Installation is incomplete. Please update or repair the game first.",
         )
       }
 
       // 2. Resolve & Validate Java Runtime (GUI javaw.exe)
-      const javaRuntime = resolveJavaRuntime(this.instanceRoot, {
+      const javaRuntime = this.javaResolver(this.instanceRoot, {
         isGui: true,
         customPath: customJavaPath,
       })
@@ -98,7 +97,7 @@ class GameLauncher {
       const javawPath = javaRuntime.javaPath
       const javaCliPath = javaRuntime.cliJavaPath || javawPath
 
-      const javaValidation = validateJavaBinary(javaCliPath, 21)
+      const javaValidation = this.javaValidator(javaCliPath)
       if (!javaValidation.valid) {
         throw new Error(
           `Cannot launch Minecraft: Java runtime validation failed (${javaValidation.error}).`,

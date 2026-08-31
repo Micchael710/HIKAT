@@ -1,96 +1,78 @@
 const fs = require("fs")
-const fsp = fs.promises
+const fsp = require("fs/promises")
 const path = require("path")
-const { spawnSync } = require("child_process")
-const { fetchJavaRuntimeManifest, installJavaRuntimeTask } = require("@xmcl/installer")
+const child_process = require("child_process")
+const axios = require("axios")
+const { getPlatform } = require("@xmcl/core")
+const {
+  DEFAULT_RUNTIME_ALL_URL,
+  createJavaRuntimeInstallWorkflow,
+  createNodeInstallRuntime,
+  executeInstallWorkflow,
+} = require("@xmcl/installer")
 
-/**
- * Resolves the canonical dedicated Java 21 runtime directory under appDataRoot.
- */
-function getJavaRuntimeDir(root) {
-  if (!root || typeof root !== "string") {
-    return path.join(process.cwd(), "runtime", "java", "21")
+function getJavaRuntimeDir(appDataRoot) {
+  if (!appDataRoot) return null
+  if (path.basename(appDataRoot).toLowerCase() === "game files") {
+    return path.join(path.dirname(appDataRoot), "runtime", "java", "21")
   }
-  const normalized = path.normalize(root)
-  // If passed instanceRoot (e.g. ".../HiKAT/game files"), resolve appDataRoot parent
-  if (path.basename(normalized).toLowerCase() === "game files") {
-    return path.join(path.dirname(normalized), "runtime", "java", "21")
-  }
-  // If passed appDataRoot directly (e.g. ".../HiKAT")
-  if (path.basename(normalized).toLowerCase() === "hikat" || !normalized.includes("runtime")) {
-    return path.join(normalized, "runtime", "java", "21")
-  }
-  return normalized
+  return path.join(appDataRoot, "runtime", "java", "21")
 }
 
-/**
- * Parses major Java version number from `java -version` stdout/stderr output.
- */
 function parseJavaMajorVersion(output) {
-  if (!output || typeof output !== "string") {
-    return null
+  if (!output || typeof output !== "string") return null
+  const match = output.match(/version\s+"(\d+)(?:\.([0-9_]+))?.*"/i)
+  if (!match) return null
+  const firstNum = parseInt(match[1], 10)
+  if (firstNum === 1 && match[2]) {
+    return parseInt(match[2].split("_")[0], 10)
   }
-  const lines = output.split(/\r?\n/)
-  for (const line of lines) {
-    const versionMatch = line.match(/(?:java|openjdk)\s+version\s+"([^"]+)"/i)
-    if (versionMatch) {
-      const verStr = versionMatch[1]
-      if (verStr.startsWith("1.")) {
-        const parts = verStr.split(".")
-        return parseInt(parts[1], 10) || null
-      }
-      const parts = verStr.split(/[._-]/)
-      return parseInt(parts[0], 10) || null
-    }
-  }
-
-  // Fallback pattern
-  const directMatch = output.match(/(?:version\s+)?(\d+)(?:\.\d+)+/i)
-  if (directMatch) {
-    const major = parseInt(directMatch[1], 10)
-    if (major === 1) {
-      const legacyMatch = output.match(/1\.(\d+)/)
-      return legacyMatch ? parseInt(legacyMatch[1], 10) : 1
-    }
-    return major || null
-  }
-
-  return null
+  return firstNum
 }
 
-/**
- * Resolves the path to the official or configured Java 21 runtime.
- * Prioritizes:
- * 1. Explicit custom path
- * 2. Dedicated <appDataRoot>/runtime/java/21/bin
- * 3. Legacy instanceRoot/jdk-21/bin (fallback check)
- */
-function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
-  const exeName = process.platform === "win32" ? (isGui ? "javaw.exe" : "java.exe") : isGui ? "javaw" : "java"
-  const cliExeName = process.platform === "win32" ? "java.exe" : "java"
+function validateJavaBinary(executablePath) {
+  if (!executablePath || typeof executablePath !== "string") {
+    return { valid: false, majorVersion: null, output: "", error: "No executable path provided" }
+  }
+  if (!fs.existsSync(executablePath)) {
+    return { valid: false, majorVersion: null, output: "", error: "File does not exist" }
+  }
 
-  // 1. Explicit Custom Path
+  try {
+    const res = child_process.spawnSync(executablePath, ["-version"], {
+      encoding: "utf8",
+      timeout: 10000,
+      windowsHide: true,
+    })
+    const output = (res.stderr || "") + "\n" + (res.stdout || "")
+    const major = parseJavaMajorVersion(output)
+    const valid = res.status === 0 && major === 21
+    return {
+      valid,
+      majorVersion: major,
+      output: output.trim(),
+      error: valid ? null : `Expected Java 21, found version ${major ?? "unknown"}`,
+    }
+  } catch (err) {
+    return { valid: false, majorVersion: null, output: "", error: err.message }
+  }
+}
+
+function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
+  const isWin = process.platform === "win32"
+  const exeName = isGui && isWin ? "javaw.exe" : isWin ? "java.exe" : "java"
+  const cliExeName = isWin ? "java.exe" : "java"
+
   if (customPath && typeof customPath === "string") {
     if (fs.existsSync(customPath)) {
-      return {
-        javaPath: customPath,
-        cliJavaPath: customPath,
-        isOfficialJdk: false,
-      }
+      return { javaPath: customPath, cliJavaPath: customPath, isOfficialJdk: false }
     }
-    return {
-      javaPath: null,
-      cliJavaPath: null,
-      isOfficialJdk: false,
-      error: `Custom Java executable not found: ${customPath}`,
-    }
+    return { javaPath: null, cliJavaPath: null, isOfficialJdk: false, error: `Custom Java executable not found: ${customPath}` }
   }
 
-  // 2. Official HiKAT Java 21 runtime under <appDataRoot>/runtime/java/21
   const searchRoots = []
   if (root && typeof root === "string") {
-    const canonRuntime = getJavaRuntimeDir(root)
-    searchRoots.push(canonRuntime)
+    searchRoots.push(getJavaRuntimeDir(root))
     searchRoots.push(path.join(root, "runtime", "java", "21"))
     if (path.basename(root).toLowerCase() === "game files") {
       searchRoots.push(path.join(path.dirname(root), "runtime", "java", "21"))
@@ -101,8 +83,6 @@ function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
 
   for (const candidateDir of searchRoots) {
     if (!candidateDir) continue
-
-    // Standard bin layout
     const binDir = path.join(candidateDir, "bin")
     const officialBin = path.join(binDir, exeName)
     const officialCliBin = path.join(binDir, cliExeName)
@@ -114,8 +94,6 @@ function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
         runtimeDir: candidateDir,
       }
     }
-
-    // Direct candidate dir (e.g. if root is already bin)
     const directBin = path.join(candidateDir, exeName)
     const directCliBin = path.join(candidateDir, cliExeName)
     if (fs.existsSync(directBin) && fs.existsSync(directCliBin)) {
@@ -126,179 +104,97 @@ function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
         runtimeDir: candidateDir,
       }
     }
-
-    // macOS bundle layout (jre.bundle/Contents/Home/bin)
-    const macBinDir = path.join(candidateDir, "jre.bundle", "Contents", "Home", "bin")
-    const macOfficialBin = path.join(macBinDir, exeName)
-    const macOfficialCliBin = path.join(macBinDir, cliExeName)
-    if (fs.existsSync(macOfficialBin) && fs.existsSync(macOfficialCliBin)) {
-      return {
-        javaPath: macOfficialBin,
-        cliJavaPath: macOfficialCliBin,
-        isOfficialJdk: true,
-        runtimeDir: candidateDir,
-      }
-    }
   }
 
-  const primaryTarget = root ? getJavaRuntimeDir(root) : "<appDataRoot>/runtime/java/21"
   return {
     javaPath: null,
     cliJavaPath: null,
     isOfficialJdk: false,
-    error: `Official Java 21 runtime not found at ${path.join(primaryTarget, "bin")}`,
+    error: "Official HiKAT Java 21 runtime not found.",
   }
 }
 
-/**
- * Validates that the Java binary is functional and is strictly the required Java version (Java 21).
- */
-function validateJavaBinary(javaCliPath, requiredMajor = 21, execRunner = spawnSync) {
-  if (!javaCliPath || !fs.existsSync(javaCliPath)) {
-    return {
-      valid: false,
-      error: `Java binary not found: ${javaCliPath || "null"}`,
+async function downloadInstallFiles(files, signal) {
+  for (const file of files) {
+    if (file.trustExistingSize && fs.existsSync(file.path)) {
+      const st = await fsp.stat(file.path).catch(() => null)
+      if (st && file.size && st.size === file.size) continue
     }
-  }
-
-  try {
-    const result = execRunner(javaCliPath, ["-version"], {
-      encoding: "utf8",
-      timeout: 5000,
-      windowsHide: true,
-    })
-
-    if (result && result.error) {
-      return {
-        valid: false,
-        error: `Java execution failed: ${result.error.message}`,
+    await fsp.mkdir(path.dirname(file.path), { recursive: true })
+    let lastError = null
+    for (const url of file.urls) {
+      try {
+        const res = await axios.get(url, { responseType: "arraybuffer", signal, timeout: 60000 })
+        await fsp.writeFile(file.path, Buffer.from(res.data))
+        lastError = null
+        break
+      } catch (err) {
+        lastError = err
+        if (signal?.aborted) throw err
       }
     }
-
-    const output = typeof result === "string" ? result : `${result?.stdout || ""}\n${result?.stderr || ""}`
-    const major = parseJavaMajorVersion(output)
-
-    if (major === null) {
-      return {
-        valid: false,
-        major: null,
-        error: `Unable to parse Java version from output: "${output.trim()}"`,
-      }
-    }
-
-    if (major !== requiredMajor) {
-      return {
-        valid: false,
-        major,
-        error: `Incompatible Java version: found Java ${major}, expected Java ${requiredMajor}. Required exactly Java ${requiredMajor}.`,
-      }
-    }
-
-    return {
-      valid: true,
-      major,
-      output: output.trim(),
-    }
-  } catch (err) {
-    return {
-      valid: false,
-      error: `Java validation exception: ${err.message}`,
-    }
+    if (lastError) throw lastError
   }
 }
 
-/**
- * Ensures Java 21 runtime is installed, healthy, and verified under <appDataRoot>/runtime/java/21.
- * If absent or corrupt, automatically downloads and installs Mojang official Java 21 (java-runtime-delta).
- */
-async function ensureJava21Runtime({
-  appDataRoot,
-  instanceRoot,
-  cancelSignal,
-  onChunkBytes,
-  customFetch,
-  javaValidator = validateJavaBinary,
-} = {}) {
-  const root = appDataRoot || (instanceRoot ? path.dirname(instanceRoot) : process.cwd())
-  const javaDir = getJavaRuntimeDir(root)
-
-  // 1. Check if healthy Java 21 already exists
-  const existing = resolveJavaRuntime(root, { isGui: false })
-  if (existing.cliJavaPath && fs.existsSync(existing.cliJavaPath)) {
-    const val = javaValidator(existing.cliJavaPath, 21)
-    if (val.valid) {
-      return {
-        javaPath: existing.javaPath,
-        cliJavaPath: existing.cliJavaPath,
-        wasAlreadyInstalled: true,
-        downloadedBytes: 0,
-      }
-    }
+async function ensureJavaRuntime({ appDataRoot, signal, onProgress, component = "java-runtime-delta" } = {}) {
+  const existing = resolveJavaRuntime(appDataRoot, { isGui: false })
+  if (existing.cliJavaPath) {
+    const check = validateJavaBinary(existing.cliJavaPath)
+    if (check.valid) return existing
   }
 
-  // 2. Java 21 is missing or corrupt -> download from Mojang official runtime manifest
-  await fsp.mkdir(javaDir, { recursive: true })
+  const destination = getJavaRuntimeDir(appDataRoot)
+  if (!destination) throw new Error("Invalid appDataRoot for Java installation")
 
-  try {
-    const manifest = await fetchJavaRuntimeManifest({
-      target: "java-runtime-delta",
-    })
+  // Fetch official Mojang runtime index
+  const res = await axios.get(DEFAULT_RUNTIME_ALL_URL, { signal })
+  const allData = res.data
+  const platform = getPlatform()
+  const platformKey =
+    platform.name === "windows"
+      ? platform.arch === "x64" ? "windows-x64" : "windows-x86"
+      : platform.name === "osx"
+        ? platform.arch === "arm64" ? "mac-os-arm64" : "mac-os"
+        : platform.arch === "x64" ? "linux" : "linux-i386"
 
-    if (!manifest || !manifest.files) {
-      throw new Error("Received invalid Java runtime manifest from Mojang.")
-    }
+  const platformTargets = allData[platformKey] || allData["windows-x64"]
+  if (!platformTargets) throw new Error(`Unsupported platform for Java 21 runtime: ${platformKey}`)
 
-    const task = installJavaRuntimeTask({
-      destination: javaDir,
-      manifest,
-    })
+  const targetList =
+    platformTargets[component] ||
+    platformTargets["java-runtime-delta"] ||
+    platformTargets["java-runtime-gamma"] ||
+    platformTargets["java-runtime-alpha"]
 
-    if (typeof onChunkBytes === "function") {
-      // Approximate byte tracking for task execution
-      onChunkBytes(manifest.version?.name ? 50000000 : 0)
-    }
+  const target = Array.isArray(targetList) ? targetList[0] : targetList
+  if (!target) throw new Error(`No Java runtime target found for component: ${component}`)
 
-    await task.startAndWait()
-  } catch (err) {
-    // If official download fails and custom mock is present in test, allow fallback verification
-    const fallback = resolveJavaRuntime(root, { isGui: false })
-    if (fallback.cliJavaPath && fs.existsSync(fallback.cliJavaPath)) {
-      const val = javaValidator(fallback.cliJavaPath, 21)
-      if (val.valid) {
-        return {
-          javaPath: fallback.javaPath,
-          cliJavaPath: fallback.cliJavaPath,
-          wasAlreadyInstalled: false,
-          downloadedBytes: 0,
-        }
-      }
-    }
-    throw new Error(`Failed to download and install official Java 21 runtime: ${err.message}`)
+  await fsp.mkdir(destination, { recursive: true })
+  const workflow = createJavaRuntimeInstallWorkflow({ target, destination })
+  const runtime = createNodeInstallRuntime({
+    signal,
+    download: (files) => downloadInstallFiles(files, signal),
+  })
+  await executeInstallWorkflow(workflow, runtime, { signal })
+
+  const installed = resolveJavaRuntime(appDataRoot, { isGui: false })
+  if (!installed.cliJavaPath) {
+    throw new Error("Java 21 installation completed but binary was not found.")
   }
 
-  // 3. Post-install validation
-  const installed = resolveJavaRuntime(root, { isGui: false })
-  if (!installed.cliJavaPath || !fs.existsSync(installed.cliJavaPath)) {
-    throw new Error(`Java 21 installed files missing at ${javaDir}`)
+  const finalCheck = validateJavaBinary(installed.cliJavaPath)
+  if (!finalCheck.valid) {
+    throw new Error(`Installed Java binary failed validation: ${finalCheck.error}`)
   }
 
-  const check = javaValidator(installed.cliJavaPath, 21)
-  if (!check.valid) {
-    throw new Error(`Installed Java runtime failed validation: ${check.error}`)
-  }
-
-  return {
-    javaPath: installed.javaPath,
-    cliJavaPath: installed.cliJavaPath,
-    wasAlreadyInstalled: false,
-    downloadedBytes: 0,
-  }
+  return installed
 }
 
 module.exports = {
   getJavaRuntimeDir,
   parseJavaMajorVersion,
-  resolveJavaRuntime,
   validateJavaBinary,
-  ensureJava21Runtime,
+  resolveJavaRuntime,
+  ensureJavaRuntime,
 }
