@@ -41,6 +41,53 @@ function asBatchTuple(statements: BatchStatement[]): BatchStatements {
 }
 
 /**
+ * Safely deletes multiple R2 objects in batches if and only if NO record in game_release_files references them.
+ * Published and shared objects are preserved across releases, while orphaned objects are removed in bulk.
+ */
+export async function deleteR2ObjectsIfUnreferenced(
+  env: Env,
+  db: Database,
+  objectKeys: string[],
+): Promise<void> {
+  if (!objectKeys || objectKeys.length === 0 || !env.ASSETS) return
+
+  const uniqueKeys = Array.from(new Set(objectKeys.filter((k): k is string => Boolean(k))))
+  if (uniqueKeys.length === 0) return
+
+  try {
+    const stillReferencedKeys = new Set<string>()
+    const CHUNK_SIZE = 80
+
+    for (let i = 0; i < uniqueKeys.length; i += CHUNK_SIZE) {
+      const keyChunk = uniqueKeys.slice(i, i + CHUNK_SIZE)
+      const referencedRows = await db
+        .select({ objectKey: schema.gameReleaseFiles.objectKey })
+        .from(schema.gameReleaseFiles)
+        .where(inArray(schema.gameReleaseFiles.objectKey, keyChunk))
+        .all()
+
+      for (const row of referencedRows) {
+        if (row.objectKey) {
+          stillReferencedKeys.add(row.objectKey)
+        }
+      }
+    }
+
+    const orphanKeys = uniqueKeys.filter((k) => !stillReferencedKeys.has(k))
+
+    if (orphanKeys.length > 0) {
+      const R2_CHUNK_SIZE = 500
+      for (let i = 0; i < orphanKeys.length; i += R2_CHUNK_SIZE) {
+        const r2Batch = orphanKeys.slice(i, i + R2_CHUNK_SIZE)
+        await env.ASSETS.delete(r2Batch)
+      }
+    }
+  } catch {
+    // Ignore cleanup errors fail-safe
+  }
+}
+
+/**
  * Safely deletes an R2 object if and only if NO record in game_release_files references it.
  * This guarantees published and shared objects are never accidentally removed,
  * while draft-exclusive orphans and unassociated uploads are cleanly purged.
@@ -51,19 +98,39 @@ export async function deleteR2ObjectIfUnreferenced(
   objectKey: string,
 ): Promise<void> {
   if (!objectKey || !env.ASSETS) return
-  try {
-    const refs = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(schema.gameReleaseFiles)
-      .where(eq(schema.gameReleaseFiles.objectKey, objectKey))
-      .get()
+  await deleteR2ObjectsIfUnreferenced(env, db, [objectKey])
+}
 
-    if (!refs || Number(refs.count) === 0) {
-      await env.ASSETS.delete(objectKey)
+/**
+ * Sanitizes and normalizes an array of game paths, removing duplicates and redundant subpaths.
+ * For example, if both "jdk-21" and "jdk-21/bin" are requested, only "jdk-21" is retained.
+ */
+export function normalizeDeletePaths(rawPaths: string[]): string[] {
+  if (!rawPaths || rawPaths.length === 0) return []
+
+  const cleanPaths = Array.from(
+    new Set(
+      rawPaths
+        .filter((p) => typeof p === "string" && p.trim().length > 0)
+        .map((p) => sanitizeGamePath(p))
+        .filter((p) => p.length > 0),
+    ),
+  )
+
+  // Sort by length ascending so shorter parent paths come first
+  cleanPaths.sort((a, b) => a.length - b.length)
+
+  const normalizedRoots: string[] = []
+  for (const p of cleanPaths) {
+    const isSubsumed = normalizedRoots.some(
+      (root) => p === root || p.startsWith(`${root}/`),
+    )
+    if (!isSubsumed) {
+      normalizedRoots.push(p)
     }
-  } catch {
-    // Ignore cleanup errors
   }
+
+  return normalizedRoots
 }
 
 /**
@@ -1267,6 +1334,9 @@ export async function deleteGamePaths(
   userId: string,
   env?: Env,
 ): Promise<boolean> {
+  const normalizedPaths = normalizeDeletePaths(paths)
+  if (normalizedPaths.length === 0) return true
+
   // Ensure active draft
   const draft = await db
     .select()
@@ -1287,33 +1357,50 @@ export async function deleteGamePaths(
     .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
     .all()
 
-  const filesToDelete: schema.GameReleaseFile[] = []
+  const filesToDeleteMap = new Map<string, schema.GameReleaseFile>()
 
-  for (const path of paths) {
-    const cleanPath = sanitizeGamePath(path)
+  for (const rootPath of normalizedPaths) {
     for (const f of draftFiles) {
-      if (f.logicalPath === cleanPath || f.logicalPath.startsWith(`${cleanPath}/`)) {
-        filesToDelete.push(f)
+      if (f.logicalPath === rootPath || f.logicalPath.startsWith(`${rootPath}/`)) {
+        filesToDeleteMap.set(f.id, f)
       }
     }
   }
+
+  const filesToDelete = Array.from(filesToDeleteMap.values())
 
   if (filesToDelete.length === 0) {
     return true
   }
 
-  const idsToDelete = filesToDelete.map((f) => f.id)
-  await db
-    .delete(schema.gameReleaseFiles)
-    .where(inArray(schema.gameReleaseFiles.id, idsToDelete))
+  // 4. Collect candidate unique objectKeys before deletion (ignoring directories / nulls)
+  const candidateObjectKeys = Array.from(
+    new Set(
+      filesToDelete
+        .map((f) => f.objectKey)
+        .filter((k): k is string => Boolean(k)),
+    ),
+  )
 
-  // Clean up R2 objects if unreferenced across all releases
-  if (env?.ASSETS) {
-    for (const f of filesToDelete) {
-      if (f.objectKey) {
-        await deleteR2ObjectIfUnreferenced(env, db, f.objectKey)
-      }
-    }
+  // 3. Delete records from D1 in safe chunks (<= 80 IDs per statement) restricted to the active draft
+  const idsToDelete = filesToDelete.map((f) => f.id)
+  const D1_CHUNK_SIZE = 80
+
+  for (let i = 0; i < idsToDelete.length; i += D1_CHUNK_SIZE) {
+    const idChunk = idsToDelete.slice(i, i + D1_CHUNK_SIZE)
+    await db
+      .delete(schema.gameReleaseFiles)
+      .where(
+        and(
+          eq(schema.gameReleaseFiles.releaseId, draft.id),
+          inArray(schema.gameReleaseFiles.id, idChunk),
+        ),
+      )
+  }
+
+  // 5 & 6. Batch determine unreferenced objectKeys and delete from R2 in bulk
+  if (env?.ASSETS && candidateObjectKeys.length > 0) {
+    await deleteR2ObjectsIfUnreferenced(env, db, candidateObjectKeys)
   }
 
   return true

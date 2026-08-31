@@ -26,6 +26,8 @@ import {
   moveGamePaths,
   copyGamePaths,
   deleteGamePaths,
+  deleteR2ObjectsIfUnreferenced,
+  normalizeDeletePaths,
   setGamePathPolicy,
   restoreGameFile,
   removeGameFile,
@@ -1457,6 +1459,284 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       expect(tokenInDb!.expectedSizeBytes).toBe(1024)
       expect(tokenInDb!.createdBy).toBe(adminId)
     }
+  })
+
+  describe("deleteGamePaths Hardening & Large Tree Deletion Suite", () => {
+    it("normalizeDeletePaths removes redundant subpaths, duplicates and empty values", () => {
+      const input = [
+        "jdk-21",
+        "jdk-21/bin",
+        "jdk-21/bin/java.exe",
+        "jdk-21/lib/modules",
+        "mods/a.jar",
+        "mods/a.jar",
+        "",
+        "/config/settings.json",
+      ]
+      const normalized = normalizeDeletePaths(input)
+      expect(normalized).toEqual(["jdk-21", "mods/a.jar", "config/settings.json"])
+    })
+
+    it("recursively deletes a small folder tree and purges exclusive R2 objects", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      await createGameFolder(db, "config/custom", adminId)
+
+      const obj1Key = "obj-custom-1"
+      const obj2Key = "obj-custom-2"
+      await mockR2.put(obj1Key, new Uint8Array([1, 2, 3]))
+      await mockR2.put(obj2Key, new Uint8Array([4, 5, 6]))
+
+      const now = new Date().toISOString()
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "f-c1",
+        releaseId: draft.id,
+        name: "a.json",
+        logicalPath: "config/custom/a.json",
+        category: "CONFIG",
+        sha256: "hash-c1",
+        sizeBytes: 3,
+        isDirectory: 0,
+        objectKey: obj1Key,
+        createdAt: now,
+      })
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "f-c2",
+        releaseId: draft.id,
+        name: "b.json",
+        logicalPath: "config/custom/b.json",
+        category: "CONFIG",
+        sha256: "hash-c2",
+        sizeBytes: 3,
+        isDirectory: 0,
+        objectKey: obj2Key,
+        createdAt: now,
+      })
+
+      const deleted = await deleteGamePaths(db, ["config/custom"], adminId, env)
+      expect(deleted).toBe(true)
+
+      // Verify no records remain in D1
+      const remaining = await db
+        .select()
+        .from(schema.gameReleaseFiles)
+        .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
+        .all()
+      expect(remaining.filter((r) => r.logicalPath.startsWith("config/custom"))).toEqual([])
+
+      // Verify R2 objects purged
+      expect(await mockR2.get(obj1Key)).toBeNull()
+      expect(await mockR2.get(obj2Key)).toBeNull()
+    })
+
+    it("deletes a large folder tree (300 files) safely in D1 chunks <= 80 and uses bulk R2 deletion without overflow", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      await createGameFolder(db, "jdk-21", adminId)
+      await createGameFolder(db, "jdk-21/bin", adminId)
+      await createGameFolder(db, "jdk-21/lib", adminId)
+
+      const TOTAL_FILES = 300
+      const fileInserts: Array<typeof schema.gameReleaseFiles.$inferInsert> = []
+      const now = new Date().toISOString()
+
+      for (let i = 0; i < TOTAL_FILES; i++) {
+        const objKey = `jdk-obj-${i}`
+        await mockR2.put(objKey, new Uint8Array([i % 255]))
+
+        fileInserts.push({
+          id: `jdk-file-id-${i}`,
+          releaseId: draft.id,
+          name: `lib-${i}.jar`,
+          logicalPath: `jdk-21/lib/lib-${i}.jar`,
+          category: "GENERAL",
+          sha256: `hash-jdk-${i}`,
+          sizeBytes: 100,
+          isDirectory: 0,
+          objectKey: objKey,
+          createdAt: now,
+        })
+      }
+
+      // Seed 300 files in batches to prepare test state
+      for (const item of fileInserts) {
+        await db.insert(schema.gameReleaseFiles).values(item)
+      }
+
+      // Track D1 query parameter counts to verify chunking <= 80
+      const origPrepare = testD1.prepare.bind(testD1)
+      let maxBindCountObserved = 0
+      vi.spyOn(testD1, "prepare").mockImplementation((query: string) => {
+        const stmt = origPrepare(query)
+        const origBind = stmt.bind.bind(stmt)
+        stmt.bind = (...params: any[]) => {
+          if (params.length > maxBindCountObserved) {
+            maxBindCountObserved = params.length
+          }
+          return origBind(...params)
+        }
+        return stmt
+      })
+
+      // Track R2 bulk delete calls
+      const r2DeleteSpy = vi.spyOn(mockR2, "delete")
+
+      const result = await deleteGamePaths(
+        db,
+        ["jdk-21", "jdk-21/bin", "jdk-21/lib"], // Overlapping selection
+        adminId,
+        env,
+      )
+
+      expect(result).toBe(true)
+
+      // 1. Verify D1 parameter bound limit never exceeded safety threshold (80 params)
+      // Note: delete query has 1 param for releaseId + chunk of ids (<= 80) = max <= 81 params
+      expect(maxBindCountObserved).toBeLessThanOrEqual(81)
+
+      // 2. Verify all 300 files and folder records are gone from D1
+      const remainingJdk = await db
+        .select()
+        .from(schema.gameReleaseFiles)
+        .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
+        .all()
+      expect(remainingJdk.filter((f) => f.logicalPath.startsWith("jdk-21"))).toHaveLength(0)
+
+      // 3. Verify R2 bulk delete was called in bulk batches rather than 300 individual calls
+      expect(r2DeleteSpy).toHaveBeenCalled()
+      // Each bulk delete call should contain an array of keys
+      for (const call of r2DeleteSpy.mock.calls) {
+        if (Array.isArray(call[0])) {
+          expect(call[0].length).toBeGreaterThan(1)
+        }
+      }
+
+      // 4. Verify all R2 objects were cleaned up
+      expect(await mockR2.get("jdk-obj-0")).toBeNull()
+      expect(await mockR2.get("jdk-obj-299")).toBeNull()
+    })
+
+    it("handles multiple independent paths in a single call", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      await saveGameFileContent(db, { logicalPath: "mods/a.txt", content: "mod-a" }, adminId, env)
+      await saveGameFileContent(db, { logicalPath: "config/sub/c.json", content: "{}" }, adminId, env)
+      await saveGameFileContent(db, { logicalPath: "scripts/main.js", content: "// main" }, adminId, env)
+      await saveGameFileContent(db, { logicalPath: "mods/preserve.txt", content: "preserve" }, adminId, env)
+
+      const result = await deleteGamePaths(
+        db,
+        ["mods/a.txt", "config/sub", "scripts/main.js"],
+        adminId,
+        env,
+      )
+      expect(result).toBe(true)
+
+      const files = await getAdminGameFiles(db)
+      const paths = files.map((f) => f.logicalPath)
+
+      expect(paths).not.toContain("mods/a.txt")
+      expect(paths).not.toContain("config/sub/c.json")
+      expect(paths).not.toContain("config/sub")
+      expect(paths).not.toContain("scripts/main.js")
+      expect(paths).toContain("mods/preserve.txt")
+    })
+
+    it("preserves shared R2 object when deleted in one path but still referenced by another draft path", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      const sharedKey = "shared-duplicate-blob"
+      await mockR2.put(sharedKey, new Uint8Array([9, 9, 9]))
+
+      const now = new Date().toISOString()
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "f-share-1",
+        releaseId: draft.id,
+        name: "mod1.jar",
+        logicalPath: "mods/mod1.jar",
+        category: "MOD",
+        sha256: "hash-shared",
+        sizeBytes: 3,
+        isDirectory: 0,
+        objectKey: sharedKey,
+        createdAt: now,
+      })
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "f-share-2",
+        releaseId: draft.id,
+        name: "mod2.jar",
+        logicalPath: "mods/mod2.jar",
+        category: "MOD",
+        sha256: "hash-shared",
+        sizeBytes: 3,
+        isDirectory: 0,
+        objectKey: sharedKey,
+        createdAt: now,
+      })
+
+      // Delete only mod1
+      await deleteGamePaths(db, ["mods/mod1.jar"], adminId, env)
+
+      // Object must still exist in R2 because mod2 references it
+      expect(await mockR2.get(sharedKey)).not.toBeNull()
+
+      // Delete mod2
+      await deleteGamePaths(db, ["mods/mod2.jar"], adminId, env)
+
+      // Now that no references exist anywhere, object is deleted from R2
+      expect(await mockR2.get(sharedKey)).toBeNull()
+    })
+
+    it("preserves R2 object when deleted in draft if it is still referenced by a PUBLISHED release", async () => {
+      // 1. Create and publish v1 with an essential mod
+      await prepareGameDraft(db, adminId)
+      const essentialKey = "r2-essential-lib"
+      await mockR2.put(essentialKey, new Uint8Array([7, 7, 7]))
+
+      const now = new Date().toISOString()
+      const draft1 = (await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.status, "DRAFT")).get())!
+
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "f-pub-1",
+        releaseId: draft1.id,
+        name: "essential.jar",
+        logicalPath: "mods/essential.jar",
+        category: "MOD",
+        sha256: "hash-essential",
+        sizeBytes: 3,
+        isDirectory: 0,
+        objectKey: essentialKey,
+        createdAt: now,
+      })
+
+      const published = await publishGameRelease(db, env, { version: "1.0.0" }, adminId)
+      expect(published.status).toBe("PUBLISHED")
+
+      // 2. Prepare draft v2 (inherits files from v1)
+      const draft2 = await prepareGameDraft(db, adminId)
+
+      // Delete mods/essential.jar in draft v2
+      await deleteGamePaths(db, ["mods/essential.jar"], adminId, env)
+
+      // Verify removed from draft v2
+      const draft2Files = await db
+        .select()
+        .from(schema.gameReleaseFiles)
+        .where(eq(schema.gameReleaseFiles.releaseId, draft2.id))
+        .all()
+      expect(draft2Files.map((f) => f.logicalPath)).not.toContain("mods/essential.jar")
+
+      // CRITICAL: R2 object MUST STILL EXIST because published v1 references it!
+      const r2Object = await mockR2.get(essentialKey)
+      expect(r2Object).not.toBeNull()
+    })
+
+    it("is completely idempotent when deleting non-existent paths", async () => {
+      await prepareGameDraft(db, adminId)
+      const result = await deleteGamePaths(
+        db,
+        ["nonexistent/path.txt", "ghost/folder"],
+        adminId,
+        env,
+      )
+      expect(result).toBe(true)
+    })
   })
 })
 

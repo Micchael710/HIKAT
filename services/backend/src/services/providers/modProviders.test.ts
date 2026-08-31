@@ -43,8 +43,11 @@ function createTestR2() {
       store.set(key, { body, metadata: options })
       return { key, size: body.byteLength }
     }),
-    delete: vi.fn(async (key: string) => {
-      store.delete(key)
+    delete: vi.fn(async (keys: string | string[]) => {
+      const list = Array.isArray(keys) ? keys : [keys]
+      for (const k of list) {
+        store.delete(k)
+      }
     }),
     head: vi.fn(async (key: string) => {
       const item = store.get(key)
