@@ -11,11 +11,11 @@ const {
   resolveAssetObjectInstallFiles,
   resolveNeoForgedInstallerFile,
   createModernForgeInstallWorkflow,
-  createDefaultNodeInstallRuntime,
   executeInstallManifest,
   executeInstallWorkflow,
   diagnoseInstallation,
 } = require("@xmcl/installer")
+const { createHiKatInstallRuntime } = require("./xmcl-install-runtime.cjs")
 
 const CORE_STATE_REL_PATH = path.join(".hikat", "core-state.json")
 
@@ -98,7 +98,7 @@ async function installCore({
   if (!cleanMc) throw new Error("minecraftVersion is required for installCore")
 
   const folder = MinecraftFolder.from(instanceRoot)
-  const runtime = createDefaultNodeInstallRuntime({ signal })
+  const runtime = createHiKatInstallRuntime({ signal })
 
   // 1. Fetch official version metadata
   const versionList = await getVersionList({ signal })

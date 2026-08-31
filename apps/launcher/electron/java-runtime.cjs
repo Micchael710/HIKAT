@@ -7,9 +7,9 @@ const { getPlatform } = require("@xmcl/core")
 const {
   DEFAULT_RUNTIME_ALL_URL,
   createJavaRuntimeInstallWorkflow,
-  createDefaultNodeInstallRuntime,
   executeInstallWorkflow,
 } = require("@xmcl/installer")
+const { createHiKatInstallRuntime } = require("./xmcl-install-runtime.cjs")
 
 function getJavaRuntimeDir(appDataRoot) {
   if (!appDataRoot) return null
@@ -149,7 +149,7 @@ async function ensureJavaRuntime({ appDataRoot, signal, onProgress, component = 
 
   await fsp.mkdir(destination, { recursive: true })
   const workflow = createJavaRuntimeInstallWorkflow({ target, destination })
-  const runtime = createDefaultNodeInstallRuntime({ signal })
+  const runtime = createHiKatInstallRuntime({ signal })
   await executeInstallWorkflow(workflow, runtime, { signal })
 
   const installed = resolveJavaRuntime(appDataRoot, { isGui: false })
