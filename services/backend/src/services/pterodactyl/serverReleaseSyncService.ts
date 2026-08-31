@@ -12,6 +12,7 @@ import type {
   ServerReleaseSyncStatusEnumGql,
 } from "@hikat/graphql"
 import type { Env } from "../../types"
+import { broadcastReleaseActivated } from "../../releaseEvents"
 import type { IPterodactylClient } from "./types"
 import {
   createPterodactylClient,
@@ -721,6 +722,15 @@ export async function applyServerReleaseSync(
         })
         .where(eq(schema.projectSettings.id, "main")),
     ])
+
+    await broadcastReleaseActivated(env, {
+      version: published.version,
+      minecraftVersion: published.minecraftVersion,
+      neoForgeVersion: published.neoForgeVersion,
+      mandatory: true,
+    }).catch((err) => {
+      console.warn("[ReleaseEvents] Broadcast failed:", err)
+    })
 
     return {
       success: true,

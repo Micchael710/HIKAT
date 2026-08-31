@@ -17,5 +17,19 @@
       "binding": "ASSETS",
       "bucket_name": "hikat-r2"
     }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELEASE_EVENTS",
+        "class_name": "ReleaseEventsDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "release-events-v1",
+      "new_sqlite_classes": ["ReleaseEventsDurableObject"]
+    }
   ]
 }

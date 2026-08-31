@@ -66,6 +66,7 @@
     "secureAuth": "Autenticación segura"
   },
   "playButton": {
+    "checkingUpdates": "BUSCANDO ACTUALIZACIONES...",
     "download": "DESCARGAR",
     "update": "ACTUALIZAR",
     "play": "JUGAR",

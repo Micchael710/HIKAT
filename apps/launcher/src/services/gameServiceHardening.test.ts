@@ -340,5 +340,102 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     expect(activatedManifest?.version).toBe("1.1.0")
     expect(activatedManifest?.clientFiles[0]?.path).toBe("mods/active-v11.jar")
   })
+
+  it("12. getPublishedModpack executes GET_PUBLISHED_MODPACK_QUERY without touching filesystem or XMCL", async () => {
+    const gqlSpy = vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.2.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          mandatory: true,
+          clientFiles: [],
+        },
+      },
+    })
+
+    const checkSyncSpy = vi.fn()
+    window.electronAPI = { checkSyncPlan: checkSyncSpy } as any
+
+    const modpack = await gameService.getPublishedModpack()
+    expect(modpack).toEqual({
+      version: "1.2.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      mandatory: true,
+      clientFiles: [],
+    })
+    expect(gqlSpy).toHaveBeenCalledTimes(1)
+    expect(checkSyncSpy).not.toHaveBeenCalled()
+  })
+
+  it("13. subscribeReleaseEvents connects to WebSocket, filters RELEASE_ACTIVATED, and cleans up cleanly", async () => {
+    let mockWsInstance: any = null
+    const originalWebSocket = globalThis.WebSocket
+
+    const createMockWebSocket = (url: string) => {
+      const ws = {
+        url,
+        onopen: null as (() => void) | null,
+        onmessage: null as ((event: any) => void) | null,
+        onclose: null as (() => void) | null,
+        onerror: null as (() => void) | null,
+        close: vi.fn(() => {
+          ws.onclose?.()
+        }),
+      }
+      mockWsInstance = ws
+      return ws
+    }
+
+    globalThis.WebSocket = vi.fn().mockImplementation(createMockWebSocket) as any
+
+    try {
+      const receivedEvents: any[] = []
+      const cleanup = gameService.subscribeReleaseEvents((event) => {
+        receivedEvents.push(event)
+      })
+
+      expect(mockWsInstance).not.toBeNull()
+      expect(mockWsInstance.url).toBe("ws://127.0.0.1:8787/launcher/release-events")
+
+      // Fire non-matching message -> ignored
+      mockWsInstance.onmessage?.({
+        data: JSON.stringify({ type: "SOME_OTHER_EVENT", data: {} }),
+      })
+      expect(receivedEvents).toHaveLength(0)
+
+      // Fire invalid JSON -> ignored safely
+      mockWsInstance.onmessage?.({ data: "not-json" })
+      expect(receivedEvents).toHaveLength(0)
+
+      // Fire RELEASE_ACTIVATED -> callback invoked
+      mockWsInstance.onmessage?.({
+        data: JSON.stringify({
+          type: "RELEASE_ACTIVATED",
+          version: "2.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          mandatory: true,
+        }),
+      })
+
+      expect(receivedEvents).toHaveLength(1)
+      expect(receivedEvents[0]).toEqual({
+        type: "RELEASE_ACTIVATED",
+        version: "2.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        mandatory: true,
+      })
+
+      cleanup()
+      expect(mockWsInstance.close).toHaveBeenCalled()
+    } finally {
+      globalThis.WebSocket = originalWebSocket
+    }
+  })
 })
+
 

@@ -3,6 +3,7 @@ import { getApiBaseUrl } from "../config/api"
 import type { PublishedModpack, ClientFile, SyncPlanCheckResult } from "../vite-env"
 
 export type GameButtonState =
+  | "checking"
   | "unavailable"
   | "download"
   | "update"
@@ -21,6 +22,90 @@ export interface GameManifest {
   clientFiles: ClientFile[]
   installed: boolean
   hasExistingInstall?: boolean
+}
+
+export interface ReleaseActivatedEvent {
+  type: "RELEASE_ACTIVATED"
+  version: string
+  minecraftVersion: string
+  neoForgeVersion: string
+  mandatory?: boolean
+}
+
+export function subscribeReleaseEvents(
+  callback: (event: ReleaseActivatedEvent) => void,
+): () => void {
+  let isClosed = false
+  let socket: WebSocket | null = null
+  let reconnectTimer: any = null
+  let backoffMs = 5000
+
+  const connect = () => {
+    if (isClosed) return
+
+    const wsUrl =
+      getApiBaseUrl()
+        .replace(/^http:/, "ws:")
+        .replace(/^https:/, "wss:")
+        .replace(/\/$/, "") +
+      "/launcher/release-events"
+
+    try {
+      socket = new WebSocket(wsUrl)
+
+      socket.onopen = () => {
+        backoffMs = 5000
+      }
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data && data.type === "RELEASE_ACTIVATED") {
+            callback(data as ReleaseActivatedEvent)
+          }
+        } catch (_) {}
+      }
+
+      socket.onclose = () => {
+        if (!isClosed) {
+          scheduleReconnect()
+        }
+      }
+
+      socket.onerror = () => {
+        try {
+          socket?.close()
+        } catch (_) {}
+      }
+    } catch (_) {
+      scheduleReconnect()
+    }
+  }
+
+  const scheduleReconnect = () => {
+    if (isClosed || reconnectTimer) return
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      connect()
+    }, backoffMs)
+    backoffMs = Math.min(backoffMs * 2, 60000)
+  }
+
+  connect()
+
+  return () => {
+    isClosed = true
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (socket) {
+      try {
+        socket.close()
+      } catch (_) {}
+      socket = null
+    }
+  }
 }
 
 export const GET_PUBLISHED_MODPACK_QUERY = `
@@ -42,6 +127,23 @@ export const GET_PUBLISHED_MODPACK_QUERY = `
 `
 
 export const gameService = {
+  /**
+   * Fast query to get the current published modpack without disk verification or XMCL checks.
+   */
+  async getPublishedModpack(): Promise<PublishedModpack | null> {
+    const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack }>(
+      GET_PUBLISHED_MODPACK_QUERY,
+    )
+
+    if (gqlRes.success && gqlRes.data?.publishedModpack) {
+      return gqlRes.data.publishedModpack
+    }
+
+    return null
+  },
+
+  subscribeReleaseEvents,
+
   /**
    * Check published modpack state from GraphQL Backend, with fallback to cached/REST manifest.
    * Filesystem verification is the single source of truth when running in Electron.

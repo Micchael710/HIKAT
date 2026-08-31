@@ -28,6 +28,7 @@ import {
   deleteMedia,
 } from "../mediaService"
 import { ensureSettingsRecord } from "../settingsService"
+import { broadcastReleaseActivated } from "../../releaseEvents"
 import type { Env } from "../../types"
 
 
@@ -1025,6 +1026,17 @@ export async function publishGameRelease(
       "El borrador ya fue publicado o procesado por otra solicitud.",
       "CONFLICT",
     )
+  }
+
+  if (shouldActivate) {
+    await broadcastReleaseActivated(env, {
+      version: published.version,
+      minecraftVersion: published.minecraftVersion,
+      neoForgeVersion: published.neoForgeVersion,
+      mandatory: true,
+    }).catch((err) => {
+      console.warn("[ReleaseEvents] Broadcast failed:", err)
+    })
   }
 
   return formatGameRelease(published, draftFiles, undefined, targetCoverMedia, env, request)

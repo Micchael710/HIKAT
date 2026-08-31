@@ -17,6 +17,7 @@ export interface Env {
   CURSEFORGE_API_KEY?: string
   CURSEFORGE_API_BASE_URL?: string
   MODRINTH_API_BASE_URL?: string
+  RELEASE_EVENTS?: DurableObjectNamespace
 }
 
 

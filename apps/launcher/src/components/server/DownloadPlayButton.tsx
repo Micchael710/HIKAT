@@ -62,10 +62,7 @@ export default function DownloadPlayButton({
   onPlay,
 }: DownloadPlayButtonProps) {
   const { t } = useTranslation()
-  const [status, setStatus] = useState<GameButtonState>(() => {
-    if (gameService.isGameInstalled()) return "play"
-    return "unavailable"
-  })
+  const [status, setStatus] = useState<GameButtonState>("checking")
 
   const [manifest, setManifest] = useState<GameManifest | null>(null)
   const [progress, setProgress] = useState(0)
@@ -128,6 +125,66 @@ export default function DownloadPlayButton({
       isMounted = false
     }
   }, [])
+
+  // Real-time WebSocket subscription for release activation events
+  useEffect(() => {
+    if (!manifest) return
+
+    const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
+      if (event.version === manifest.version) {
+        return
+      }
+
+      const newModpack = await gameService.getPublishedModpack()
+      if (!newModpack) return
+
+      const totalBytes = (newModpack.clientFiles || []).reduce(
+        (sum, file) => sum + (Number(file.sizeBytes) || 0),
+        0,
+      )
+      const totalSizeGB = Number((totalBytes / 1024 / 1024 / 1024).toFixed(2))
+
+      const hasPrevInstall =
+        Boolean(manifest.hasExistingInstall) ||
+        Boolean(manifest.installed) ||
+        gameService.isGameInstalled()
+
+      const newManifest: GameManifest = {
+        version: newModpack.version,
+        minecraftVersion: newModpack.minecraftVersion,
+        neoForgeVersion: newModpack.neoForgeVersion,
+        totalSizeGB,
+        hasUpdate: hasPrevInstall,
+        clientFiles: newModpack.clientFiles,
+        installed: false,
+        hasExistingInstall: hasPrevInstall,
+      }
+
+      try {
+        localStorage.setItem("hikat_game_manifest", JSON.stringify(newModpack))
+      } catch (_) {}
+
+      setManifest(newManifest)
+      if (newManifest.totalSizeGB) setTotalGB(newManifest.totalSizeGB)
+
+      setStatus((prevStatus) => {
+        if (
+          prevStatus === "downloading" ||
+          prevStatus === "paused" ||
+          prevStatus === "installing" ||
+          prevStatus === "verifying"
+        ) {
+          return prevStatus
+        }
+
+        return hasPrevInstall ? "update" : "download"
+      })
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [manifest?.version])
 
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
@@ -251,6 +308,7 @@ export default function DownloadPlayButton({
     if (
       isTransitioning ||
       isStartingSyncRef.current ||
+      status === "checking" ||
       status === "unavailable" ||
       status === "installing" ||
       status === "verifying"
@@ -385,11 +443,13 @@ export default function DownloadPlayButton({
     }
   }
 
-  /* ── IDLE / UNAVAILABLE / DOWNLOAD / UPDATE / PLAY ── */
+  /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / PLAY ── */
   if (!isExpanded) {
+    const isChecking = status === "checking"
     const isUnavailable = status === "unavailable"
     const isUpdate = status === "update"
     const isPlay = status === "play"
+    const isDisabled = isChecking || isUnavailable
 
     return (
       <div
@@ -404,23 +464,23 @@ export default function DownloadPlayButton({
       >
         <button
           type="button"
-          disabled={isUnavailable}
-          className={isUnavailable ? "" : "dl-idle-btn"}
+          disabled={isDisabled}
+          className={isDisabled ? "" : "dl-idle-btn"}
           style={{
             width: 272,
             height: 76,
             borderRadius: 24,
-            background: isUnavailable
+            background: isDisabled
               ? isDark
                 ? "linear-gradient(135deg, rgba(239, 196, 54, 0.22), rgba(255, 230, 146, 0.22))"
                 : "linear-gradient(135deg, rgba(239, 196, 54, 0.35), rgba(255, 230, 146, 0.35))"
               : "linear-gradient(135deg, #efc436, #ffe692)",
-            boxShadow: isUnavailable
+            boxShadow: isDisabled
               ? "none"
               : "0 0 28px -6px rgba(245, 208, 86, 0.45)",
             border: "none",
-            cursor: isUnavailable ? "not-allowed" : "pointer",
-            opacity: isUnavailable ? 0.65 : 1,
+            cursor: isDisabled ? "not-allowed" : "pointer",
+            opacity: isDisabled ? 0.65 : 1,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -436,19 +496,22 @@ export default function DownloadPlayButton({
               color: "white",
               fontFamily: BASE_FONT,
               fontWeight: 800,
-              fontSize: isUnavailable ? 19 : 23,
+              fontSize: isChecking ? 15 : isUnavailable ? 19 : 23,
               letterSpacing: ".06em",
               textShadow: "0 1px 6px rgba(0,0,0,0.35)",
               textTransform: "uppercase",
+              whiteSpace: "nowrap",
             }}
           >
-            {isUnavailable
-              ? t("playButton.unavailable")
-              : isUpdate
-                ? t("playButton.update")
-                : isPlay
-                  ? t("playButton.play")
-                  : t("playButton.download")}
+            {isChecking
+              ? t("playButton.checkingUpdates")
+              : isUnavailable
+                ? t("playButton.unavailable")
+                : isUpdate
+                  ? t("playButton.update")
+                  : isPlay
+                    ? t("playButton.play")
+                    : t("playButton.download")}
           </span>
         </button>
 

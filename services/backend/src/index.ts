@@ -72,6 +72,8 @@ export * from "./media/transport"
 
 export * from "./resolvers"
 
+export * from "./releaseEvents"
+
 const KNOWN_SAFE_CODES = [
   "UNAUTHENTICATED",
 
@@ -274,6 +276,16 @@ export default {
 
         headers: { "Content-Type": "application/json", ...corsHeaders },
       })
+    }
+
+    // Launcher Realtime Release Activation Events WebSocket Route
+    if (url.pathname === "/launcher/release-events") {
+      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("WebSocket required", { status: 426 })
+      }
+
+      const id = env.RELEASE_EVENTS!.idFromName("global")
+      return env.RELEASE_EVENTS!.get(id).fetch(request)
     }
 
     // GraphQL Endpoint

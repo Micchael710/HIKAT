@@ -602,4 +602,215 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
     expect(startSyncResumeSpy).toHaveBeenCalledTimes(1)
   })
+
+  /* ─────────────────────────────────────────────────────────────
+   * Realtime WebSocket & Initial "checking" State Tests
+   * ───────────────────────────────────────────────────────────── */
+
+  it("Test 9 — Initial render is ALWAYS checking state with BUSCANDO ACTUALIZACIONES and disabled", async () => {
+    let resolveCheck: any
+    vi.spyOn(gameService, "checkGameManifest").mockImplementation(
+      () => new Promise((resolve) => {
+        resolveCheck = resolve
+      }),
+    )
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton left={0} top={0} theme="dark" />
+        </LanguageProvider>,
+      )
+    })
+
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn).not.toBeNull()
+    expect(btn.hasAttribute("disabled")).toBe(true)
+    expect(btn.textContent).toContain("BUSCANDO ACTUALIZACIONES...")
+    expect(btn.textContent).not.toContain("NO DISPONIBLE")
+    expect(btn.textContent).not.toContain("JUGAR")
+
+    // Once checkGameManifest resolves, transitions to resolved state
+    await act(async () => {
+      resolveCheck({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 10,
+        clientFiles: [],
+      })
+    })
+
+    expect(btn.textContent).toContain("JUGAR")
+    expect(btn.hasAttribute("disabled")).toBe(false)
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  it("Test 10 — Realtime RELEASE_ACTIVATED event triggers getPublishedModpack and switches to ACTUALIZAR (UPDATE) when installed", async () => {
+    let releaseCallback: any
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+      releaseCallback = cb
+      return () => {}
+    })
+
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: true,
+      hasUpdate: false,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [],
+    })
+
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "1.1.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      mandatory: true,
+      clientFiles: [
+        {
+          path: "mods/new.jar",
+          sha256: "e".repeat(64),
+          sizeBytes: 300,
+          downloadUrl: "/dl/new",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn.textContent).toContain("JUGAR")
+
+    // Backend activates version 1.1.0 and broadcasts event
+    await act(async () => {
+      await releaseCallback?.({
+        type: "RELEASE_ACTIVATED",
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        mandatory: true,
+      })
+    })
+
+    expect(getPublishedSpy).toHaveBeenCalledTimes(1)
+    // Does NOT call window.electronAPI.checkSyncPlan on WS event
+    expect(btn.textContent).toContain("ACTUALIZAR")
+    expect(btn.textContent).not.toContain("JUGAR")
+  })
+
+  it("Test 11 — Realtime RELEASE_ACTIVATED with matching version does NOT trigger getPublishedModpack", async () => {
+    let releaseCallback: any
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+      releaseCallback = cb
+      return () => {}
+    })
+
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: true,
+      hasUpdate: false,
+      hasExistingInstall: true,
+      totalSizeGB: 10,
+      clientFiles: [],
+    })
+
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack")
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn.textContent).toContain("JUGAR")
+
+    // Event with identical version
+    await act(async () => {
+      await releaseCallback?.({
+        type: "RELEASE_ACTIVATED",
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        mandatory: true,
+      })
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    expect(btn.textContent).toContain("JUGAR")
+  })
+
+  it("Test 12 — Realtime RELEASE_ACTIVATED does NOT interrupt in-progress download/pause/install", async () => {
+    let releaseCallback: any
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+      releaseCallback = cb
+      return () => {}
+    })
+
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      installed: false,
+      hasUpdate: false,
+      hasExistingInstall: false,
+      totalSizeGB: 10,
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: "a".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/mod",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "2.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      mandatory: true,
+      clientFiles: [],
+    })
+
+    const { container } = await mountButton()
+
+    // Start download
+    await act(async () => {
+      (container.querySelector("button") as HTMLElement).click()
+    })
+
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    expect(card.textContent).toContain("DESCARGANDO")
+
+    // Receive WS event while downloading
+    await act(async () => {
+      await releaseCallback?.({
+        type: "RELEASE_ACTIVATED",
+        version: "2.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        mandatory: true,
+      })
+    })
+
+    // Still in downloading card, not reset
+    expect(container.querySelector(".dl-progress-card")).not.toBeNull()
+    expect(card.textContent).toContain("DESCARGANDO")
+  })
 })
+
