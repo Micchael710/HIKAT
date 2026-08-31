@@ -476,8 +476,8 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(healthy.needsUpdate).toBe(false)
     expect(healthy.isFullyInstalled).toBe(true)
     expect(healthy.hasExistingInstall).toBe(true)
-    expect(healthy.filesToDownload).toEqual([])
-    expect(healthy.filesToPrune).toEqual([])
+    expect(healthy.filesToDownload).toBe(0)
+    expect(healthy.filesToPrune).toBe(0)
     expect(healthy.totalDownloadBytes).toBe(0)
 
     // Unhealthy check (e.g. core not installed)

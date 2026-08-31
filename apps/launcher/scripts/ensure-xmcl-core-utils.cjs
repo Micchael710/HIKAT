@@ -26,29 +26,3 @@ const loaded = require("@xmcl/core/utils")
 if (typeof loaded.isNotNull !== "function" || typeof loaded.exists !== "function") {
   throw new Error("[ensure-xmcl-core-utils] Failed to load @xmcl/core/utils shim")
 }
-
-try {
-  const ftPkgPath = require.resolve("@xmcl/file-transfer/package.json", {
-    paths: [require.resolve("@xmcl/installer/package.json")],
-  })
-  const ftDistPath = path.join(path.dirname(ftPkgPath), "dist", "index.js")
-  if (fs.existsSync(ftDistPath)) {
-    const ftDist = fs.readFileSync(ftDistPath, "utf8")
-    if (!ftDist.includes("ConcurrencyDispatcher")) {
-      const shimFt = `
-class ConcurrencyDispatcher { constructor(d, m) { this.dispatcher = d; this.maxConcurrency = m; } }
-async function downloadMultiple(opts) {
-  const results = [];
-  for (const opt of opts.options) {
-    try { await download({ ...opt, signal: opts.signal, tracker: opts.tracker }); results.push({ status: "fulfilled" }); }
-    catch (err) { results.push({ status: "rejected", reason: err }); }
-  }
-  return results;
-}
-module.exports.ConcurrencyDispatcher = ConcurrencyDispatcher;
-module.exports.downloadMultiple = downloadMultiple;
-`
-      fs.appendFileSync(ftDistPath, shimFt, "utf8")
-    }
-  }
-} catch (_) {}

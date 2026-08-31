@@ -156,8 +156,8 @@ class GameOperationManager {
 
     return {
       success: true,
-      filesToDownload: clientPlan.toDownload,
-      filesToPrune: clientPlan.toPrune,
+      filesToDownload: clientPlan.toDownload.length,
+      filesToPrune: clientPlan.toPrune.length,
       totalDownloadBytes: clientPlan.totalDownloadBytes,
       needsUpdate,
       hasExistingInstall,
