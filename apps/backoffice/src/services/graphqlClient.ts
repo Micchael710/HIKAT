@@ -17,6 +17,12 @@ import type {
 } from "../types"
 
 import type { NewsType, NewsStatus } from "@hikat/shared"
+import type {
+  GameFileUploadPayloadGql,
+  GameFileUploadCompletePayloadGql,
+  CreateGameFileUploadInputGql,
+  CompleteGameFileUploadInputGql,
+} from "@hikat/graphql"
 
 import { authService } from "./authService"
 
@@ -1495,65 +1501,44 @@ export const gameApi = {
     return data.discardGameDraft
   },
 
-  async createGameFileUpload(input: {
-    category?: string
-    originalFilename: string
-    sizeBytes: number
-    logicalPath?: string
-  }): Promise<{
-    uploadUrl: string
-    uploadToken: string
-    maxSizeBytes: number
-    expectedCategory: string
-  }> {
+  async createGameFileUpload(
+    input: CreateGameFileUploadInputGql,
+  ): Promise<GameFileUploadPayloadGql> {
     const mutation = /* GraphQL */ `
       mutation CreateGameFileUpload($input: CreateGameFileUploadInput!) {
         createGameFileUpload(input: $input) {
-          uploadUrl
           uploadToken
+          expiresAt
           maxSizeBytes
           expectedCategory
+          objectKey
+          bucket
+          endpoint
+          credentials {
+            accessKeyId
+            secretAccessKey
+            sessionToken
+          }
         }
       }
     `
-    const data = await executeGraphQL<{ createGameFileUpload: any }>(mutation, { input })
+    const data = await executeGraphQL<{ createGameFileUpload: GameFileUploadPayloadGql }>(mutation, { input })
     return data.createGameFileUpload
   },
 
-  async uploadGameBinary(
-    file: File,
-    uploadUrl: string,
-    uploadToken: string,
-  ): Promise<{ tokenHash: string; originalFilename?: string; sizeBytes?: number }> {
-    const tokenOutcome = await authService.getValidAccessTokenOutcome()
-    if (tokenOutcome.kind !== "READY") {
-      if (tokenOutcome.kind === "TRANSIENT_FAILURE") {
-        throw new Error(tokenOutcome.error || "Error temporal al renovar sesión con el servidor.")
+  async completeGameFileUpload(
+    input: CompleteGameFileUploadInputGql,
+  ): Promise<GameFileUploadCompletePayloadGql> {
+    const mutation = /* GraphQL */ `
+      mutation CompleteGameFileUpload($input: CompleteGameFileUploadInput!) {
+        completeGameFileUpload(input: $input) {
+          tokenHash
+          sizeBytes
+        }
       }
-      throw new Error("No hay una sesión activa para subir el archivo de juego.")
-    }
-
-    const targetUrl = uploadUrl.startsWith("http") ? uploadUrl : `${BACKEND_URL}${uploadUrl}`
-
-    const res = await fetch(targetUrl, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${tokenOutcome.accessToken}`,
-        "X-Upload-Token": uploadToken,
-      },
-      body: file,
-    })
-
-    if (!res.ok) {
-      let errMessage = "Error al subir el archivo de juego."
-      try {
-        const json = await res.json()
-        if (json.error) errMessage = json.error
-      } catch {}
-      throw new Error(errMessage)
-    }
-
-    return res.json()
+    `
+    const data = await executeGraphQL<{ completeGameFileUpload: GameFileUploadCompletePayloadGql }>(mutation, { input })
+    return data.completeGameFileUpload
   },
 
   async addGameFile(input: {

@@ -30,7 +30,6 @@ import {
 import { handleConsoleWebSocket } from "./services/pterodactyl/consoleTransport"
 
 import {
-  handleGameFileUpload,
   handleGameFileDownload,
 } from "./services/game/gameStorageService"
 
@@ -241,22 +240,6 @@ export default {
         headers,
 
         webSocket: wsResponse.webSocket,
-      })
-    }
-
-    // Binary Game File Upload Route: PUT /game/files/upload (Shard 06.5)
-
-    if (url.pathname === "/game/files/upload") {
-      if (request.method === "PUT") {
-        return handleGameFileUpload(request, env, db, context)
-      }
-
-      const corsHeaders = getCorsHeaders(request, env)
-
-      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
-        status: 405,
-
-        headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 

@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react"
 import type { ThemeMode, AdminGameFile, GameFileCategory } from "../../types"
 import { sanitizeGameFileName } from "@hikat/shared"
 import { gameApi } from "../../services/graphqlClient"
+import { uploadGameFileDirect } from "../../services/gameFileUploadService"
 import { IconCross, IconUpload, IconSpinner, IconBox } from "../../theme/icons"
 import BackofficeSelect, { SelectOption } from "../common/BackofficeSelect"
 
@@ -40,13 +41,9 @@ export default function AddGameFileModal({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file) return
-
-    setSelectedFile(file)
-    if (!name || isReplace) {
+    if (file) {
+      setSelectedFile(file)
       const clean = sanitizeGameFileName(file.name)
-        .replace(/\.(jar|zip|json|js)$/i, "")
-        .replace(/[-_]/g, " ")
       setName(clean)
     }
   }
@@ -77,13 +74,17 @@ export default function AddGameFileModal({
           sizeBytes: selectedFile.size,
         })
 
-        // 2. Upload binary to R2
-        const uploaded = await gameApi.uploadGameBinary(
-          selectedFile,
-          ticket.uploadUrl,
-          ticket.uploadToken,
-        )
-        tokenHash = uploaded.tokenHash
+        // 2. Direct multipart upload to R2
+        const uploaded = await uploadGameFileDirect(selectedFile, ticket)
+
+        // 3. Confirm upload on backend
+        const completed = await gameApi.completeGameFileUpload({
+          uploadToken: ticket.uploadToken,
+          sha256: uploaded.sha256,
+          sizeBytes: uploaded.sizeBytes,
+        })
+
+        tokenHash = completed.tokenHash
       }
 
       if (isReplace && targetFile) {
@@ -266,7 +267,7 @@ export default function AddGameFileModal({
               <div style={{ fontSize: "12px", color: isDark ? "#64748b" : "#94a3b8", marginTop: "4px" }}>
                 {selectedFile
                   ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`
-                  : "Formatos permitidos: .jar, .zip (hasta 100 MB)"}
+                  : "Formatos permitidos: .jar, .zip"}
               </div>
             </div>
           </div>

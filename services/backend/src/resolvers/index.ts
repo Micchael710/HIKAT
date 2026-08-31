@@ -41,6 +41,8 @@ import type {
   GameReleaseGql,
   GameFileUploadPayloadGql,
   CreateGameFileUploadInputGql,
+  CompleteGameFileUploadInputGql,
+  GameFileUploadCompletePayloadGql,
   AddGameFileInputGql,
   UpdateGameFileInputGql,
   SaveGameFileContentInputGql,
@@ -215,6 +217,7 @@ import {
 import {
   getAdminGameFiles,
   createGameFileUploadToken,
+  completeGameFileUploadToken,
   addGameFile,
   updateGameFile,
   removeGameFile,
@@ -1614,7 +1617,19 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return createGameFileUploadToken(context.db, args.input, identity.userId)
+      return createGameFileUploadToken(context.db, args.input, identity.userId, context.env)
+    },
+
+    completeGameFileUpload: async (
+      _parent: unknown,
+      args: { input: CompleteGameFileUploadInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<GameFileUploadCompletePayloadGql> => {
+      requireAdmin(context)
+      if (!context.db || !context.env.ASSETS) {
+        throw createGraphQLError("Database or storage unavailable", "INTERNAL_ERROR")
+      }
+      return completeGameFileUploadToken(context.db, args.input, context.env)
     },
 
     addGameFile: async (

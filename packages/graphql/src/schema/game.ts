@@ -127,7 +127,7 @@ export const gameTypeDefs = /* GraphQL */ `
   type ClientFile {
     path: String!
     sha256: String!
-    sizeBytes: Int!
+    sizeBytes: Float!
     downloadUrl: String!
     policy: SyncPolicy!
   }
@@ -152,7 +152,7 @@ export const gameTypeDefs = /* GraphQL */ `
     logicalPath: String!
     category: GameFileCategory!
     sha256: String!
-    sizeBytes: Int!
+    sizeBytes: Float!
     policy: SyncPolicy!
     explicitPolicy: SyncPolicy
     effectivePolicy: SyncPolicy!
@@ -198,14 +198,43 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
+  Temporary R2 credentials scoped strictly to a single object key
+  """
+  type R2TemporaryCredentials {
+    accessKeyId: String!
+    secretAccessKey: String!
+    sessionToken: String!
+  }
+
+  """
   Payload returned when requesting a game file upload ticket
   """
   type GameFileUploadPayload {
-    uploadUrl: String!
     uploadToken: String!
     expiresAt: DateTime!
-    maxSizeBytes: Int!
+    maxSizeBytes: Float!
     expectedCategory: GameFileCategory!
+    objectKey: String!
+    bucket: String!
+    endpoint: String!
+    credentials: R2TemporaryCredentials!
+  }
+
+  """
+  Input payload to finalize and verify a direct R2 multipart upload
+  """
+  input CompleteGameFileUploadInput {
+    uploadToken: String!
+    sha256: String!
+    sizeBytes: Float!
+  }
+
+  """
+  Payload returned when completing a direct game file upload
+  """
+  type GameFileUploadCompletePayload {
+    tokenHash: String!
+    sizeBytes: Float!
   }
 
   """
@@ -343,7 +372,7 @@ export const gameTypeDefs = /* GraphQL */ `
   input CreateGameFileUploadInput {
     category: GameFileCategory
     originalFilename: String!
-    sizeBytes: Int!
+    sizeBytes: Float!
     logicalPath: String
   }
 
@@ -481,6 +510,11 @@ export const gameTypeDefs = /* GraphQL */ `
     Request a single-use token to upload a game file binary - requires ADMIN role
     """
     createGameFileUpload(input: CreateGameFileUploadInput!): GameFileUploadPayload!
+
+    """
+    Finalize and verify a direct R2 multipart upload - requires ADMIN role
+    """
+    completeGameFileUpload(input: CompleteGameFileUploadInput!): GameFileUploadCompletePayload!
 
     """
     Add an uploaded game file to the active draft - requires ADMIN role

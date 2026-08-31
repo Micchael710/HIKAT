@@ -523,7 +523,30 @@ describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
     expect(UpdateDeploymentOrder.SERVER_FIRST).toBe("SERVER_FIRST")
     expect(UpdateDeploymentOrder.PLAYERS_FIRST).toBe("PLAYERS_FIRST")
   })
+
+  it("validates game file headers and MAX_GAME_FILE_SIZE_BYTES", async () => {
+    const { validateGameFileHeader, MAX_GAME_FILE_SIZE_BYTES } = await import("./index")
+    expect(MAX_GAME_FILE_SIZE_BYTES).toBe(5 * 1024 ** 4 - 5 * 1024 ** 3)
+
+    // Valid ZIP header (50 4B 03 04)
+    const validZipHeader = new Uint8Array([0x50, 0x4b, 0x03, 0x04])
+    expect(validateGameFileHeader(validZipHeader, "mod.jar", "MOD").valid).toBe(true)
+    expect(validateGameFileHeader(validZipHeader, "pack.zip", "RESOURCE_PACK").valid).toBe(true)
+
+    // Invalid header for ZIP category
+    const invalidHeader = new Uint8Array([0x00, 0x00, 0x00, 0x00])
+    const invalidRes = validateGameFileHeader(invalidHeader, "mod.jar", "MOD")
+    expect(invalidRes.valid).toBe(false)
+    expect(invalidRes.error).toContain("no es un archivo .jar o .zip válido")
+
+    // Too short header
+    expect(validateGameFileHeader(new Uint8Array([0x50]), "mod.jar", "MOD").valid).toBe(false)
+
+    // Non-ZIP category (e.g. CONFIG) allows arbitrary header
+    expect(validateGameFileHeader(invalidHeader, "config.json", "CONFIG").valid).toBe(true)
+  })
 })
+
 
 
 

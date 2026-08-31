@@ -491,7 +491,7 @@ export const ALLOWED_SYNC_POLICIES = [
 ] as const
 export type SyncPolicy = typeof ALLOWED_SYNC_POLICIES[number]
 
-export const MAX_GAME_FILE_SIZE_BYTES = 100 * 1024 * 1024 // 100 MB
+export const MAX_GAME_FILE_SIZE_BYTES = 5 * 1024 ** 4 - 5 * 1024 ** 3 // Practical Cloudflare R2 multipart limit (~4.99 TiB)
 export const MAX_GAME_TEXT_FILE_SIZE_BYTES = 1024 * 1024 // 1 MB
 
 export const GAME_CATEGORY_DIRECTORIES: Record<GameFileCategory, string> = {
@@ -1044,6 +1044,82 @@ export function validateGameTreeInvariants(
 
 
 /**
+ * Validates a game binary file header bytes against category requirements.
+ * For JAR, RESOURCE_PACK, SHADER_PACK, and DATA_PACK, enforces standard ZIP/JAR header magic bytes (50 4B 03 04).
+ * For CONFIG, GENERAL, SCRIPT, KUBEJS, allows any format.
+ */
+export function validateGameFileHeader(
+  bytes: ArrayBuffer | Uint8Array,
+  filename: string,
+  category: GameFileCategory,
+): { valid: boolean; error?: string } {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  const cleanName = sanitizeGameFileName(filename).toLowerCase()
+
+  if (category === "MOD") {
+    if (!cleanName.endsWith(".jar")) {
+      return {
+        valid: false,
+        error: "Un mod debe tener extensión .jar.",
+      }
+    }
+    // Verify ZIP / JAR Magic Bytes (50 4B 03 04)
+    if (
+      u8.length < 4 ||
+      u8[0] !== 0x50 ||
+      u8[1] !== 0x4b ||
+      u8[2] !== 0x03 ||
+      u8[3] !== 0x04
+    ) {
+      return {
+        valid: false,
+        error: "El archivo no es un archivo .jar o .zip válido.",
+      }
+    }
+  } else if (category === "DATA_PACK") {
+    if (!cleanName.endsWith(".zip")) {
+      return {
+        valid: false,
+        error: "Un data pack debe tener extensión .zip.",
+      }
+    }
+    if (
+      u8.length < 4 ||
+      u8[0] !== 0x50 ||
+      u8[1] !== 0x4b ||
+      u8[2] !== 0x03 ||
+      u8[3] !== 0x04
+    ) {
+      return {
+        valid: false,
+        error: "El archivo no es un data pack .zip válido.",
+      }
+    }
+  } else if (category === "RESOURCE_PACK" || category === "SHADER_PACK") {
+    if (!cleanName.endsWith(".zip")) {
+      return {
+        valid: false,
+        error: "El paquete debe tener extensión .zip.",
+      }
+    }
+    if (
+      u8.length < 4 ||
+      u8[0] !== 0x50 ||
+      u8[1] !== 0x4b ||
+      u8[2] !== 0x03 ||
+      u8[3] !== 0x04
+    ) {
+      return {
+        valid: false,
+        error: "El archivo no es un archivo .zip válido.",
+      }
+    }
+  }
+
+  return { valid: true }
+}
+
+/**
  * Validates a game binary file buffer against category requirements.
  * For JAR, RESOURCE_PACK, and SHADER_PACK, enforces standard ZIP/JAR header magic bytes (50 4B 03 04).
  * For CONFIG, GENERAL, SCRIPT, KUBEJS, allows any safe buffer up to MAX_GAME_FILE_SIZE_BYTES.
@@ -1060,73 +1136,11 @@ export function validateGameFileBuffer(
   if (bytes.length > MAX_GAME_FILE_SIZE_BYTES) {
     return {
       valid: false,
-      error: "El archivo supera el tamaño máximo permitido (100 MB).",
+      error: "El archivo supera el tamaño máximo permitido.",
     }
   }
 
-  const cleanName = sanitizeGameFileName(filename).toLowerCase()
-
-  if (category === "MOD") {
-    if (!cleanName.endsWith(".jar")) {
-      return {
-        valid: false,
-        error: "Un mod debe tener extensión .jar.",
-      }
-    }
-    // Verify ZIP / JAR Magic Bytes (50 4B 03 04)
-    if (
-      bytes.length < 4 ||
-      bytes[0] !== 0x50 ||
-      bytes[1] !== 0x4b ||
-      bytes[2] !== 0x03 ||
-      bytes[3] !== 0x04
-    ) {
-      return {
-        valid: false,
-        error: "El archivo no es un archivo .jar o .zip válido.",
-      }
-    }
-  } else if (category === "DATA_PACK") {
-    if (!cleanName.endsWith(".zip")) {
-      return {
-        valid: false,
-        error: "Un data pack debe tener extensión .zip.",
-      }
-    }
-    if (
-      bytes.length < 4 ||
-      bytes[0] !== 0x50 ||
-      bytes[1] !== 0x4b ||
-      bytes[2] !== 0x03 ||
-      bytes[3] !== 0x04
-    ) {
-      return {
-        valid: false,
-        error: "El archivo no es un data pack .zip válido.",
-      }
-    }
-  } else if (category === "RESOURCE_PACK" || category === "SHADER_PACK") {
-    if (!cleanName.endsWith(".zip")) {
-      return {
-        valid: false,
-        error: "El paquete debe tener extensión .zip.",
-      }
-    }
-    if (
-      bytes.length < 4 ||
-      bytes[0] !== 0x50 ||
-      bytes[1] !== 0x4b ||
-      bytes[2] !== 0x03 ||
-      bytes[3] !== 0x04
-    ) {
-      return {
-        valid: false,
-        error: "El archivo no es un archivo .zip válido.",
-      }
-    }
-  }
-
-  return { valid: true }
+  return validateGameFileHeader(bytes, filename, category)
 }
 
 /**

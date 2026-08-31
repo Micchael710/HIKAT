@@ -480,76 +480,13 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
   })
 })
 
-describe("Back Office Game Binary Upload Suite", () => {
+describe("Back Office Game Upload GraphQL Client Suite", () => {
   beforeEach(() => {
     authService.clearSession()
     vi.restoreAllMocks()
   })
 
-  it("1. NO_SESSION: uploadGameBinary rejects and calls fetch PUT exactly 0 times", async () => {
-    authService.clearSession()
-
-    let putFetchCount = 0
-    vi.spyOn(global, "fetch").mockImplementation(async (_url: any, opts: any) => {
-      if (opts?.method === "PUT") {
-        putFetchCount++
-      }
-      return { ok: true, status: 200, json: async () => ({}) } as Response
-    })
-
-    const testFile = new File(["mods-bytes"], "sodium.jar", { type: "application/java-archive" })
-
-    await expect(
-      gameApi.uploadGameBinary(testFile, "/game/upload/binary", "ticket-tok-123"),
-    ).rejects.toThrow("No hay una sesión activa para subir el archivo de juego.")
-
-    expect(putFetchCount).toBe(0)
-  })
-
-  it("2. hard-expired access token + refresh TRANSIENT_FAILURE: calls fetch PUT exactly 0 times, /auth/refresh exactly 1 time, and preserves session", async () => {
-    const expiredHeader = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
-    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 300 }))
-    const expiredJwt = `${expiredHeader}.${expiredPayload}.sig`
-
-    authService.setSession(expiredJwt, "offline-ref-game", {
-      id: "admin-1",
-      email: "admin@hikat.org",
-      role: "ADMIN",
-    })
-
-    let refreshCalled = 0
-    let putCalled = 0
-
-    vi.spyOn(global, "fetch").mockImplementation(async (url: any, opts: any) => {
-      const urlStr = String(url)
-      if (urlStr.includes("/auth/refresh")) {
-        refreshCalled++
-        throw new TypeError("Network offline during game upload refresh")
-      }
-      if (opts?.method === "PUT") {
-        putCalled++
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ tokenHash: "hash123" }),
-        } as Response
-      }
-      return { ok: true, status: 200, json: async () => ({}) } as Response
-    })
-
-    const testFile = new File(["bytes"], "iris.jar", { type: "application/java-archive" })
-
-    await expect(
-      gameApi.uploadGameBinary(testFile, "/game/upload/binary", "ticket-tok-123"),
-    ).rejects.toThrow("Network offline during game upload refresh")
-
-    expect(putCalled).toBe(0)
-    expect(refreshCalled).toBe(1)
-    expect(authService.getStatus()).toBe("AUTHENTICATED")
-    expect(authService.getRefreshToken()).toBe("offline-ref-game")
-  })
-
-  it("3. READY: calls fetch PUT exactly 1 time with valid Authorization Bearer header", async () => {
+  it("1. createGameFileUpload requests ticket and temporary credentials", async () => {
     const validJwt = createMockAdminJwt(600)
     authService.setSession(validJwt, "ref-tok", {
       id: "admin-1",
@@ -557,54 +494,74 @@ describe("Back Office Game Binary Upload Suite", () => {
       role: "ADMIN",
     })
 
-    let putCalled = 0
-    let capturedAuth: string | undefined
-    let capturedUploadToken: string | undefined
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          createGameFileUpload: {
+            uploadToken: "tok-123",
+            expiresAt: "2026-09-01T00:00:00Z",
+            maxSizeBytes: 5000000000,
+            expectedCategory: "MOD",
+            objectKey: "game-files/uuid-1",
+            bucket: "hikat-r2",
+            endpoint: "https://account.r2.cloudflarestorage.com",
+            credentials: {
+              accessKeyId: "temp-key",
+              secretAccessKey: "temp-secret",
+              sessionToken: "temp-session",
+            },
+          },
+        },
+      }),
+    } as Response)
 
-    vi.spyOn(global, "fetch").mockImplementation(async (_url: any, opts: any) => {
-      if (opts?.method === "PUT") {
-        putCalled++
-        capturedAuth = opts?.headers?.Authorization
-        capturedUploadToken = opts?.headers?.["X-Upload-Token"]
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ tokenHash: "sha256-hash-game", originalFilename: "sodium.jar", sizeBytes: 1024 }),
-        } as Response
-      }
-      return { ok: true, status: 200, json: async () => ({}) } as Response
+    const res = await gameApi.createGameFileUpload({
+      originalFilename: "sodium.jar",
+      sizeBytes: 4294967296,
+      category: "MOD",
     })
 
-    const testFile = new File(["jar-bytes"], "sodium.jar", { type: "application/java-archive" })
-    const res = await gameApi.uploadGameBinary(testFile, "/game/upload/binary", "ticket-tok-456")
-
-    expect(res.tokenHash).toBe("sha256-hash-game")
-    expect(putCalled).toBe(1)
-    expect(capturedAuth).toBe(`Bearer ${validJwt}`)
-    expect(capturedUploadToken).toBe("ticket-tok-456")
+    expect(res.uploadToken).toBe("tok-123")
+    expect(res.objectKey).toBe("game-files/uuid-1")
+    expect(res.credentials.accessKeyId).toBe("temp-key")
   })
 
-  it("4. Explicitly verifies that Authorization header is never 'Bearer null' or 'Bearer undefined'", async () => {
-    authService.clearSession()
-
-    const capturedAuthHeaders: (string | undefined)[] = []
-
-    vi.spyOn(global, "fetch").mockImplementation(async (_url: any, opts: any) => {
-      capturedAuthHeaders.push(opts?.headers?.Authorization)
-      return { ok: true, status: 200, json: async () => ({}) } as Response
+  it("2. completeGameFileUpload executes GraphQL mutation and returns tokenHash", async () => {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "ref-tok", {
+      id: "admin-1",
+      email: "admin@hikat.org",
+      role: "ADMIN",
     })
 
-    const testFile = new File(["bytes"], "config.json", { type: "application/json" })
+    let capturedBody: any
+    vi.spyOn(global, "fetch").mockImplementationOnce(async (_url, opts) => {
+      capturedBody = JSON.parse(opts?.body as string)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            completeGameFileUpload: {
+              tokenHash: "sha256-completed-hash",
+              sizeBytes: 4294967296,
+            },
+          },
+        }),
+      } as Response
+    })
 
-    await expect(
-      gameApi.uploadGameBinary(testFile, "/game/upload/binary", "ticket-tok-789"),
-    ).rejects.toThrow()
+    const res = await gameApi.completeGameFileUpload({
+      uploadToken: "tok-123",
+      sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      sizeBytes: 4294967296,
+    })
 
-    expect(capturedAuthHeaders).toHaveLength(0)
-    for (const h of capturedAuthHeaders) {
-      expect(h).not.toBe("Bearer null")
-      expect(h).not.toBe("Bearer undefined")
-    }
+    expect(res.tokenHash).toBe("sha256-completed-hash")
+    expect(res.sizeBytes).toBe(4294967296)
+    expect(capturedBody.query).toContain("completeGameFileUpload")
   })
 })
 

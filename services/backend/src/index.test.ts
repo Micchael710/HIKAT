@@ -5608,10 +5608,37 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       PTERODACTYL_SERVER_ID: "srv_test_uuid",
 
       ENVIRONMENT: "test",
+
+      CLOUDFLARE_ACCOUNT_ID: "cf-test-acc",
+
+      R2_PARENT_ACCESS_KEY_ID: "parent-key",
+
+      R2_PARENT_API_TOKEN: "parent-token",
+
+      R2_BUCKET_NAME: "hikat-r2",
     })
 
     beforeEach(async () => {
       mockR2 = createTestR2Bucket()
+
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
+        const urlStr = String(url)
+        if (urlStr.includes("/r2/temp-access-credentials")) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              errors: [],
+              result: {
+                accessKeyId: "temp-r2-key",
+                secretAccessKey: "temp-r2-secret",
+                sessionToken: "temp-r2-session",
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          )
+        }
+        return new Response("Not Found", { status: 404 })
+      })
 
       // Create Admin User & Session
 
@@ -5919,10 +5946,17 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       const uploadTokenMutation = `
         mutation CreateUpload($input: CreateGameFileUploadInput!) {
           createGameFileUpload(input: $input) {
-            uploadUrl
             uploadToken
             maxSizeBytes
             expectedCategory
+            objectKey
+            bucket
+            endpoint
+            credentials {
+              accessKeyId
+              secretAccessKey
+              sessionToken
+            }
           }
         }
       `
@@ -5955,39 +5989,57 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const tokenData = (await tokenRes.json()) as any
 
-      const uploadToken = tokenData.data.createGameFileUpload.uploadToken
+      expect(tokenData.errors).toBeUndefined()
 
-      expect(uploadToken).toBeDefined()
+      const uploadPayload = tokenData.data.createGameFileUpload
 
-      // 3. Upload valid ZIP/JAR binary via PUT /game/files/upload
+      expect(uploadPayload.uploadToken).toBeDefined()
+
+      expect(uploadPayload.objectKey).toBeDefined()
+
+      // 3. Direct R2 upload + completeGameFileUpload mutation
 
       const jarBuffer = new Uint8Array([
         0x50, 0x4b, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04,
+        ...new Array(1016).fill(0x00),
       ])
 
-      const uploadHttpReq = new Request("http://localhost/game/files/upload", {
-        method: "PUT",
+      await mockR2.put(uploadPayload.objectKey, jarBuffer)
 
+      const shaBuffer = await crypto.subtle.digest("SHA-256", jarBuffer)
+      const sha256 = Array.from(new Uint8Array(shaBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      const completeReq = new Request("http://localhost/graphql", {
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Authorization: `Bearer ${coreAdminToken}`,
-
-          "X-Upload-Token": uploadToken,
         },
-
-        body: jarBuffer,
+        body: JSON.stringify({
+          query: `mutation CompleteUpload($input: CompleteGameFileUploadInput!) {
+            completeGameFileUpload(input: $input) {
+              tokenHash
+              sizeBytes
+            }
+          }`,
+          variables: {
+            input: {
+              uploadToken: uploadPayload.uploadToken,
+              sha256,
+              sizeBytes: jarBuffer.byteLength,
+            },
+          },
+        }),
       })
 
-      const uploadHttpRes = await worker.fetch(uploadHttpReq, createCoreEnv())
+      const completeRes = await worker.fetch(completeReq, createCoreEnv())
+      const completeData = (await completeRes.json()) as any
+      expect(completeData.errors).toBeUndefined()
 
-      expect(uploadHttpRes.status).toBe(200)
-
-      const uploadedInfo = (await uploadHttpRes.json()) as any
-
+      const uploadedInfo = completeData.data.completeGameFileUpload
       expect(uploadedInfo.tokenHash).toBeDefined()
-
-      expect(uploadedInfo.originalFilename).toBe("journeymap-1.21.1-6.0.0.jar")
-
-      expect(uploadedInfo.objectKey).toBeUndefined()
 
       // 4. Attach uploaded file to draft via addGameFile mutation
 
@@ -6274,7 +6326,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         },
 
         body: JSON.stringify({
-          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "sodium-1.21.1.jar", sizeBytes: 50 }) { uploadUrl uploadToken } }`,
+          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "sodium-1.21.1.jar", sizeBytes: 50 }) { uploadToken objectKey } }`,
         }),
       })
 
@@ -6282,7 +6334,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const ticketData = (await ticketRes.json()) as any
 
-      const { uploadUrl, uploadToken } = ticketData.data.createGameFileUpload
+      const { uploadToken, objectKey } = ticketData.data.createGameFileUpload
 
       const binaryPayload = new Uint8Array([
         0x50,
@@ -6292,20 +6344,39 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         ...new Array(46).fill(0x00),
       ])
 
-      const uploadReq = new Request(`http://localhost${uploadUrl}`, {
-        method: "PUT",
+      await mockR2.put(objectKey, binaryPayload)
 
+      const shaBuffer = await crypto.subtle.digest("SHA-256", binaryPayload)
+      const sha256 = Array.from(new Uint8Array(shaBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      const completeReq = new Request("http://localhost/graphql", {
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Authorization: `Bearer ${coreAdminToken}`,
-          "X-Upload-Token": uploadToken,
         },
-
-        body: binaryPayload,
+        body: JSON.stringify({
+          query: `mutation CompleteUpload($input: CompleteGameFileUploadInput!) {
+            completeGameFileUpload(input: $input) {
+              tokenHash
+              sizeBytes
+            }
+          }`,
+          variables: {
+            input: {
+              uploadToken,
+              sha256,
+              sizeBytes: 50,
+            },
+          },
+        }),
       })
 
-      const uploadRes = await worker.fetch(uploadReq, testEnv)
-
-      const uploadedInfo = (await uploadRes.json()) as any
+      const completeRes = await worker.fetch(completeReq, testEnv)
+      const completeData = (await completeRes.json()) as any
+      const uploadedInfo = completeData.data.completeGameFileUpload
 
       // Add to draft and publish 1.4.2
 
@@ -6491,7 +6562,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         },
 
         body: JSON.stringify({
-          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-a.jar", sizeBytes: 100 }) { uploadUrl uploadToken } }`,
+          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-a.jar", sizeBytes: 100 }) { uploadToken objectKey } }`,
         }),
       })
 
@@ -6499,7 +6570,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       const ticketData = (await ticketRes.json()) as any
 
-      const { uploadUrl, uploadToken } = ticketData.data.createGameFileUpload
+      const { uploadToken, objectKey } = ticketData.data.createGameFileUpload
 
       const binaryA = new Uint8Array([
         0x50,
@@ -6509,34 +6580,42 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         ...new Array(96).fill(0x00),
       ])
 
-      const uploadReq = new Request(`http://localhost${uploadUrl}`, {
-        method: "PUT",
+      await mockR2.put(objectKey, binaryA)
 
+      const shaBuffer = await crypto.subtle.digest("SHA-256", binaryA)
+      const sha256 = Array.from(new Uint8Array(shaBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      const completeReq = new Request("http://localhost/graphql", {
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Authorization: `Bearer ${coreAdminToken}`,
-          "X-Upload-Token": uploadToken,
         },
-
-        body: binaryA,
+        body: JSON.stringify({
+          query: `mutation CompleteUpload($input: CompleteGameFileUploadInput!) {
+            completeGameFileUpload(input: $input) {
+              tokenHash
+              sizeBytes
+            }
+          }`,
+          variables: {
+            input: {
+              uploadToken,
+              sha256,
+              sizeBytes: 100,
+            },
+          },
+        }),
       })
 
-      const uploadRes = await worker.fetch(uploadReq, testEnv)
-
-      expect(uploadRes.status).toBe(200)
-
-      const uploadJson = (await uploadRes.json()) as any
-
-      // Assert that internal storage details are NOT exposed
+      const completeRes = await worker.fetch(completeReq, testEnv)
+      const completeData = (await completeRes.json()) as any
+      const uploadJson = completeData.data.completeGameFileUpload
 
       expect(uploadJson.tokenHash).toBeDefined()
-
-      expect(uploadJson.originalFilename).toBe("mod-a.jar")
-
-      expect(uploadJson.category).toBe("MOD")
-
       expect(uploadJson.sizeBytes).toBe(100)
-
-      expect(uploadJson.objectKey).toBeUndefined()
 
       expect(uploadJson.sha256).toBeUndefined()
 
@@ -6669,37 +6748,57 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         },
 
         body: JSON.stringify({
-          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-b.jar", sizeBytes: 80 }) { uploadUrl uploadToken } }`,
+          query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-b.jar", sizeBytes: 80 }) { uploadToken objectKey } }`,
         }),
       })
 
       const ticketBRes = await worker.fetch(ticketBReq, testEnv)
 
-      const { uploadUrl: uB, uploadToken: tB } =
+      const { uploadToken: tB, objectKey: objB } =
         ((await ticketBRes.json()) as any).data.createGameFileUpload
 
-      const uploadBRes = await worker.fetch(
-        new Request(`http://localhost${uB}`, {
-          method: "PUT",
+      const binaryB = new Uint8Array([
+        0x50,
+        0x4b,
+        0x03,
+        0x04,
+        ...new Array(76).fill(0x00),
+      ])
 
+      await mockR2.put(objB, binaryB)
+
+      const shaBufferB = await crypto.subtle.digest("SHA-256", binaryB)
+      const sha256B = Array.from(new Uint8Array(shaBufferB))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      const completeBRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
           headers: {
+            "Content-Type": "application/json",
             Authorization: `Bearer ${coreAdminToken}`,
-            "X-Upload-Token": tB,
           },
-
-          body: new Uint8Array([
-            0x50,
-            0x4b,
-            0x03,
-            0x04,
-            ...new Array(76).fill(0x00),
-          ]),
+          body: JSON.stringify({
+            query: `mutation CompleteUpload($input: CompleteGameFileUploadInput!) {
+              completeGameFileUpload(input: $input) {
+                tokenHash
+                sizeBytes
+              }
+            }`,
+            variables: {
+              input: {
+                uploadToken: tB,
+                sha256: sha256B,
+                sizeBytes: 80,
+              },
+            },
+          }),
         }),
-
         testEnv,
       )
 
-      const tokenHashB = ((await uploadBRes.json()) as any).tokenHash
+      const tokenHashB = ((await completeBRes.json()) as any).data.completeGameFileUpload.tokenHash
 
       await worker.fetch(
         new Request("http://localhost/graphql", {
@@ -7012,38 +7111,58 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           },
 
           body: JSON.stringify({
-            query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-1.jar", sizeBytes: 120 }) { uploadUrl uploadToken } }`,
+            query: `mutation { createGameFileUpload(input: { category: MOD, originalFilename: "mod-1.jar", sizeBytes: 120 }) { uploadToken objectKey } }`,
           }),
         }),
 
         testEnv,
       )
 
-      const { uploadUrl, uploadToken } = ((await ticketRes.json()) as any).data
+      const { uploadToken, objectKey } = ((await ticketRes.json()) as any).data
         .createGameFileUpload
 
-      const uploadRes = await worker.fetch(
-        new Request(`http://localhost${uploadUrl}`, {
-          method: "PUT",
+      const binaryPayload = new Uint8Array([
+        0x50,
+        0x4b,
+        0x03,
+        0x04,
+        ...new Array(116).fill(0x00),
+      ])
 
+      await mockR2.put(objectKey, binaryPayload)
+
+      const shaBuffer = await crypto.subtle.digest("SHA-256", binaryPayload)
+      const sha256 = Array.from(new Uint8Array(shaBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      const completeRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
           headers: {
+            "Content-Type": "application/json",
             Authorization: `Bearer ${coreAdminToken}`,
-            "X-Upload-Token": uploadToken,
           },
-
-          body: new Uint8Array([
-            0x50,
-            0x4b,
-            0x03,
-            0x04,
-            ...new Array(116).fill(0x00),
-          ]),
+          body: JSON.stringify({
+            query: `mutation CompleteUpload($input: CompleteGameFileUploadInput!) {
+              completeGameFileUpload(input: $input) {
+                tokenHash
+                sizeBytes
+              }
+            }`,
+            variables: {
+              input: {
+                uploadToken,
+                sha256,
+                sizeBytes: 120,
+              },
+            },
+          }),
         }),
-
         testEnv,
       )
 
-      const { tokenHash } = (await uploadRes.json()) as any
+      const { tokenHash } = ((await completeRes.json()) as any).data.completeGameFileUpload
 
       // Add to draft and publish v1.0.0
 
@@ -9207,7 +9326,168 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(sharedMediaInDb).toBeDefined()
     })
   })
+
+  describe("Game Files Direct R2 Multipart Upload Suite (GraphQL & Routing)", () => {
+    it("PUT /game/files/upload is removed and returns 404", async () => {
+      const mockR2 = createTestR2Bucket()
+      const testEnv: Env = {
+        DB: testD1 as unknown as D1Database,
+        ASSETS: mockR2 as unknown as R2Bucket,
+        ENVIRONMENT: "test",
+        AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+        AUTH_ISSUER: DEFAULT_AUTH_ISSUER,
+      }
+
+      const res = await worker.fetch(
+        new Request("http://localhost/game/files/upload", {
+          method: "PUT",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: new Uint8Array([1, 2, 3]),
+        }),
+        testEnv,
+      )
+
+      expect(res.status).toBe(404)
+    })
+
+    it("executes createGameFileUpload and completeGameFileUpload via GraphQL Yoga end-to-end", async () => {
+      const mockR2 = createTestR2Bucket()
+      const testEnv: Env = {
+        DB: testD1 as unknown as D1Database,
+        ASSETS: mockR2 as unknown as R2Bucket,
+        ENVIRONMENT: "test",
+        AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
+        AUTH_ISSUER: DEFAULT_AUTH_ISSUER,
+        CLOUDFLARE_ACCOUNT_ID: "cf-test-acc",
+        R2_PARENT_ACCESS_KEY_ID: "parent-key",
+        R2_PARENT_API_TOKEN: "parent-token",
+        R2_BUCKET_NAME: "hikat-r2",
+      }
+
+      const adminUser = await db.insert(users).values({
+        id: "admin-game-upload-" + crypto.randomUUID(),
+        displayName: "Admin Game Uploader",
+        role: "ADMIN",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).returning().get()
+
+      const adminSession = await db.insert(sessions).values({
+        id: "sess-game-" + crypto.randomUUID(),
+        userId: adminUser.id,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      }).returning().get()
+
+      const adminToken = await createTestAccessToken({
+        userId: adminUser.id,
+        sessionId: adminSession.id,
+        role: "ADMIN",
+        key: privateKey,
+        kid: keyId,
+      })
+
+      vi.spyOn(globalThis, "fetch").mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            errors: [],
+            result: {
+              accessKeyId: "temp-r2-key",
+              secretAccessKey: "temp-r2-secret",
+              sessionToken: "temp-r2-session",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      })
+
+      // 1. Create upload ticket via GraphQL
+      const createRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation CreateGameUpload($input: CreateGameFileUploadInput!) {
+              createGameFileUpload(input: $input) {
+                uploadToken
+                objectKey
+                bucket
+                endpoint
+                credentials {
+                  accessKeyId
+                  secretAccessKey
+                  sessionToken
+                }
+              }
+            }`,
+            variables: {
+              input: {
+                originalFilename: "example-mod.jar",
+                sizeBytes: 1024,
+                category: "MOD",
+              },
+            },
+          }),
+        }),
+        testEnv,
+      )
+
+      const createJson = (await createRes.json()) as any
+      expect(createJson.errors).toBeUndefined()
+      const payload = createJson.data.createGameFileUpload
+      expect(payload.uploadToken).toBeDefined()
+      expect(payload.objectKey).toMatch(/^game-files\//)
+      expect(payload.credentials.accessKeyId).toBe("temp-r2-key")
+
+      // 2. Direct upload to R2
+      const jarBytes = new Uint8Array(1024)
+      jarBytes.set([0x50, 0x4b, 0x03, 0x04], 0)
+      await mockR2.put(payload.objectKey, jarBytes)
+
+      const shaBuffer = await crypto.subtle.digest("SHA-256", jarBytes)
+      const sha256 = Array.from(new Uint8Array(shaBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      // 3. Complete upload via GraphQL
+      const completeRes = await worker.fetch(
+        new Request("http://localhost/graphql", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            query: `mutation CompleteGameUpload($input: CompleteGameFileUploadInput!) {
+              completeGameFileUpload(input: $input) {
+                tokenHash
+                sizeBytes
+              }
+            }`,
+            variables: {
+              input: {
+                uploadToken: payload.uploadToken,
+                sha256,
+                sizeBytes: 1024,
+              },
+            },
+          }),
+        }),
+        testEnv,
+      )
+
+      const completeJson = (await completeRes.json()) as any
+      expect(completeJson.errors).toBeUndefined()
+      expect(completeJson.data.completeGameFileUpload.tokenHash).toMatch(/^[a-f0-9]{64}$/)
+      expect(completeJson.data.completeGameFileUpload.sizeBytes).toBe(1024)
+    })
+  })
 })
+
 
 
 

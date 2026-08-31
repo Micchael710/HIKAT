@@ -641,12 +641,32 @@ export interface AdminGameOverviewGql {
   draftFingerprint?: string | null
 }
 
+export interface R2TemporaryCredentialsGql {
+  accessKeyId: string
+  secretAccessKey: string
+  sessionToken: string
+}
+
 export interface GameFileUploadPayloadGql {
-  uploadUrl: string
   uploadToken: string
   expiresAt: string
   maxSizeBytes: number
   expectedCategory: GameFileCategoryGql
+  objectKey: string
+  bucket: string
+  endpoint: string
+  credentials: R2TemporaryCredentialsGql
+}
+
+export interface CompleteGameFileUploadInputGql {
+  uploadToken: string
+  sha256: string
+  sizeBytes: number
+}
+
+export interface GameFileUploadCompletePayloadGql {
+  tokenHash: string
+  sizeBytes: number
 }
 
 export interface CreateGameFileUploadInputGql {

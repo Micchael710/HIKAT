@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import type { ThemeMode, AdminGameFile, SyncPolicy } from "../../types"
 import { gameApi } from "../../services/graphqlClient"
+import { uploadGameFileDirect } from "../../services/gameFileUploadService"
 import {
   formatBytesToHuman,
   isEditableTextFile,
@@ -546,19 +547,22 @@ export default function GameFilesExplorer({
           sizeBytes: file.size,
         })
 
-        // 2. Upload binary payload
-        const uploaded = await gameApi.uploadGameBinary(
-          file,
-          ticket.uploadUrl,
-          ticket.uploadToken,
-        )
+        // 2. Upload directly to R2 via S3 multipart + incremental SHA-256
+        const uploaded = await uploadGameFileDirect(file, ticket)
 
-        // 3. Add game file to active draft
+        // 3. Confirm upload on backend
+        const completed = await gameApi.completeGameFileUpload({
+          uploadToken: ticket.uploadToken,
+          sha256: uploaded.sha256,
+          sizeBytes: uploaded.sizeBytes,
+        })
+
+        // 4. Add game file to active draft
         await gameApi.addGameFile({
           name: file.name,
           category,
           logicalPath: targetLogicalPath,
-          tokenHash: uploaded.tokenHash,
+          tokenHash: completed.tokenHash,
         })
       }
 

@@ -8,6 +8,7 @@ import TextFileEditorModal from "./TextFileEditorModal"
 import PublishReleaseModal from "./PublishReleaseModal"
 import { gameApi, serverApi, serverContentApi, graphqlClient } from "../../services/graphqlClient"
 import * as mediaUploadService from "../../services/mediaUploadService"
+import * as gameFileUploadService from "../../services/gameFileUploadService"
 import { ModSearchModal } from "./providers/ModSearchModal"
 
 describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
@@ -362,13 +363,22 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     const onRefresh = vi.fn()
 
     const createUploadSpy = vi.spyOn(gameApi, "createGameFileUpload").mockResolvedValue({
-      uploadUrl: "/game/upload",
       uploadToken: "tok-1",
+      expiresAt: new Date().toISOString(),
       maxSizeBytes: 1000000,
       expectedCategory: "MOD",
+      objectKey: "game-files/1",
+      bucket: "hikat-r2",
+      endpoint: "https://r2.test",
+      credentials: { accessKeyId: "k", secretAccessKey: "s", sessionToken: "t" },
     })
-    const uploadBinarySpy = vi.spyOn(gameApi, "uploadGameBinary").mockResolvedValue({
+    const uploadDirectSpy = vi.spyOn(gameFileUploadService, "uploadGameFileDirect").mockResolvedValue({
+      sha256: "test-sha",
+      sizeBytes: 10,
+    })
+    const completeUploadSpy = vi.spyOn(gameApi, "completeGameFileUpload").mockResolvedValue({
       tokenHash: "hash-tok",
+      sizeBytes: 10,
     })
     const addFileSpy = vi.spyOn(gameApi, "addGameFile").mockResolvedValue({
       id: "f-new",
@@ -420,6 +430,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(createUploadSpy).toHaveBeenCalledWith(
       expect.objectContaining({ logicalPath: "config/a.toml", originalFilename: "a.toml" }),
     )
+    expect(uploadDirectSpy).toHaveBeenCalledTimes(2)
+    expect(completeUploadSpy).toHaveBeenCalledTimes(2)
     expect(addFileSpy).toHaveBeenCalledWith(
       expect.objectContaining({ logicalPath: "mods/a.jar", name: "a.jar" }),
     )
@@ -434,13 +446,22 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     const onRefresh = vi.fn()
 
     vi.spyOn(gameApi, "createGameFileUpload").mockResolvedValue({
-      uploadUrl: "/game/upload",
       uploadToken: "tok-2",
+      expiresAt: new Date().toISOString(),
       maxSizeBytes: 1000000,
       expectedCategory: "MOD",
+      objectKey: "game-files/2",
+      bucket: "hikat-r2",
+      endpoint: "https://r2.test",
+      credentials: { accessKeyId: "k", secretAccessKey: "s", sessionToken: "t" },
     })
-    vi.spyOn(gameApi, "uploadGameBinary").mockResolvedValue({
+    vi.spyOn(gameFileUploadService, "uploadGameFileDirect").mockResolvedValue({
+      sha256: "test-sha",
+      sizeBytes: 10,
+    })
+    vi.spyOn(gameApi, "completeGameFileUpload").mockResolvedValue({
       tokenHash: "hash-tok",
+      sizeBytes: 10,
     })
     const addFileSpy = vi.spyOn(gameApi, "addGameFile").mockResolvedValue({
       id: "f-drag",

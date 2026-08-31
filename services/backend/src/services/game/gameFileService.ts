@@ -9,6 +9,8 @@ import type {
   UpdateGameFileInputGql,
   SaveGameFileContentInputGql,
   GameFileUploadPayloadGql,
+  CompleteGameFileUploadInputGql,
+  GameFileUploadCompletePayloadGql,
   SyncPolicyGql,
 } from "@hikat/graphql"
 import {
@@ -20,6 +22,7 @@ import {
   isUtf8TextBuffer,
   validateJsonContent,
   validateGameTreeInvariants,
+  validateGameFileHeader,
   KNOWN_BINARY_EXTENSIONS,
   type GameFileCategory,
 } from "@hikat/shared"
@@ -202,17 +205,38 @@ export async function createGameFileUploadToken(
   db: Database,
   input: CreateGameFileUploadInputGql,
   userId: string,
+  env?: Env,
 ): Promise<GameFileUploadPayloadGql> {
   const safeFilename = sanitizeGameFileName(input.originalFilename)
   const category = (input.category || inferGameCategory(input.logicalPath || safeFilename)) as GameFileCategory
 
-  if (input.sizeBytes <= 0 || input.sizeBytes > MAX_GAME_FILE_SIZE_BYTES) {
+  if (input.sizeBytes <= 0) {
     throw createGraphQLError(
-      "El tamaño del archivo excede el límite permitido (100 MB).",
+      "El tamaño del archivo debe ser mayor a 0 bytes.",
       "VALIDATION_ERROR",
     )
   }
 
+  if (input.sizeBytes > MAX_GAME_FILE_SIZE_BYTES) {
+    throw createGraphQLError(
+      "El tamaño del archivo excede el límite permitido.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const accountId = env?.CLOUDFLARE_ACCOUNT_ID
+  const parentAccessKeyId = env?.R2_PARENT_ACCESS_KEY_ID
+  const parentApiToken = env?.R2_PARENT_API_TOKEN
+  const bucketName = env?.R2_BUCKET_NAME || "hikat-r2"
+
+  if (!accountId || !parentAccessKeyId || !parentApiToken) {
+    throw createGraphQLError(
+      "Configuración o credenciales temporales R2 no disponibles.",
+      "INTERNAL_ERROR",
+    )
+  }
+
+  const objectKey = `game-files/${crypto.randomUUID()}`
   const tokenId = crypto.randomUUID()
   const rawTokenBytes = new Uint8Array(32)
   crypto.getRandomValues(rawTokenBytes)
@@ -225,7 +249,54 @@ export async function createGameFileUploadToken(
     .join("")
 
   const now = new Date()
-  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString() // 15 min TTL
+  const UPLOAD_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours TTL
+  const expiresAt = new Date(now.getTime() + UPLOAD_TTL_MS).toISOString()
+
+  let accessKeyId: string
+  let secretAccessKey: string
+  let sessionToken: string
+
+  try {
+    const cfRes = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/temp-access-credentials`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${parentApiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket: bucketName,
+          parentAccessKeyId,
+          permission: "object-read-write",
+          ttlSeconds: 21600,
+          objects: [objectKey],
+        }),
+      },
+    )
+
+    if (!cfRes.ok) {
+      throw new Error(`Cloudflare API responded with status ${cfRes.status}`)
+    }
+
+    const cfData = (await cfRes.json()) as any
+    if (!cfData || !cfData.success || !cfData.result) {
+      throw new Error(cfData?.errors?.[0]?.message || "Respuesta inválida de Cloudflare R2")
+    }
+
+    accessKeyId = cfData.result.accessKeyId || cfData.result.access_key_id
+    secretAccessKey = cfData.result.secretAccessKey || cfData.result.secret_access_key
+    sessionToken = cfData.result.sessionToken || cfData.result.session_token
+
+    if (!accessKeyId || !secretAccessKey || !sessionToken) {
+      throw new Error("Credenciales temporales incompletas de Cloudflare R2")
+    }
+  } catch (err: unknown) {
+    throw createGraphQLError(
+      err instanceof Error ? err.message : "Error al solicitar credenciales temporales R2.",
+      "INTERNAL_ERROR",
+    )
+  }
 
   await db.insert(schema.gameFileUploadTokens).values({
     id: tokenId,
@@ -233,17 +304,154 @@ export async function createGameFileUploadToken(
     category,
     originalFilename: input.logicalPath ? sanitizeGamePath(input.logicalPath) : safeFilename,
     expectedSizeBytes: input.sizeBytes,
+    objectKey,
     createdBy: userId,
     expiresAt,
     createdAt: now.toISOString(),
   })
 
+  // Best-effort cleanup of expired tokens
+  if (env?.ASSETS) {
+    try {
+      const expiredTokens = await db
+        .select({
+          id: schema.gameFileUploadTokens.id,
+          objectKey: schema.gameFileUploadTokens.objectKey,
+        })
+        .from(schema.gameFileUploadTokens)
+        .where(
+          and(
+            sql`${schema.gameFileUploadTokens.expiresAt} < ${now.toISOString()}`,
+            sql`${schema.gameFileUploadTokens.objectKey} IS NOT NULL`,
+          ),
+        )
+        .limit(10)
+        .all()
+
+      for (const expToken of expiredTokens) {
+        if (!expToken.objectKey) continue
+        await deleteR2ObjectIfUnreferenced(env, db, expToken.objectKey)
+        const headObj = await env.ASSETS.head(expToken.objectKey)
+        if (!headObj) {
+          await db
+            .delete(schema.gameFileUploadTokens)
+            .where(eq(schema.gameFileUploadTokens.id, expToken.id))
+        }
+      }
+    } catch {
+      // Best-effort cleanup fail-safe
+    }
+  }
+
   return {
-    uploadUrl: "/game/files/upload",
     uploadToken: tokenHex,
     expiresAt,
     maxSizeBytes: MAX_GAME_FILE_SIZE_BYTES,
     expectedCategory: category as any,
+    objectKey,
+    bucket: bucketName,
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+      sessionToken,
+    },
+  }
+}
+
+export async function completeGameFileUploadToken(
+  db: Database,
+  input: CompleteGameFileUploadInputGql,
+  env: Env,
+): Promise<GameFileUploadCompletePayloadGql> {
+  if (!env.ASSETS) {
+    throw createGraphQLError("Almacenamiento de archivos no disponible.", "INTERNAL_ERROR")
+  }
+
+  const rawToken = input.uploadToken?.trim()
+  if (!rawToken) {
+    throw createGraphQLError("Token de subida requerido.", "VALIDATION_ERROR")
+  }
+
+  const tokenBytes = new Uint8Array(
+    rawToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
+  )
+  const hashBuffer = await crypto.subtle.digest("SHA-256", tokenBytes)
+  const tokenHash = Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+
+  const tokenRecord = await db
+    .select()
+    .from(schema.gameFileUploadTokens)
+    .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHash))
+    .get()
+
+  if (!tokenRecord || !tokenRecord.objectKey) {
+    throw createGraphQLError("Token de subida no válido o desconocido.", "VALIDATION_ERROR")
+  }
+
+  if (new Date(tokenRecord.expiresAt) < new Date()) {
+    throw createGraphQLError("El token de subida ha expirado.", "VALIDATION_ERROR")
+  }
+
+  const rawSha256 = String(input.sha256 || "").trim()
+  if (!/^[a-f0-9]{64}$/.test(rawSha256)) {
+    throw createGraphQLError("Formato de hash SHA-256 no válido.", "VALIDATION_ERROR")
+  }
+  const sha256 = rawSha256
+
+  if (input.sizeBytes !== tokenRecord.expectedSizeBytes) {
+    throw createGraphQLError("El tamaño del archivo no coincide con el tamaño esperado.", "VALIDATION_ERROR")
+  }
+
+  const objHead = await env.ASSETS.head(tokenRecord.objectKey)
+  if (!objHead) {
+    throw createGraphQLError("El objeto no se encontró en el almacenamiento R2.", "VALIDATION_ERROR")
+  }
+
+  if (objHead.size !== tokenRecord.expectedSizeBytes || objHead.size !== input.sizeBytes) {
+    throw createGraphQLError("El tamaño del objeto en almacenamiento no coincide con el esperado.", "VALIDATION_ERROR")
+  }
+
+  const category = tokenRecord.category as GameFileCategory
+  if (category === "MOD" || category === "DATA_PACK" || category === "RESOURCE_PACK" || category === "SHADER_PACK") {
+    const headerObj = await env.ASSETS.get(tokenRecord.objectKey, {
+      range: { offset: 0, length: 4 },
+    })
+    if (!headerObj || !headerObj.body) {
+      throw createGraphQLError("No se pudo verificar la cabecera del archivo en almacenamiento.", "INTERNAL_ERROR")
+    }
+    const headerBytes = new Uint8Array(await headerObj.arrayBuffer())
+    const validation = validateGameFileHeader(headerBytes, tokenRecord.originalFilename, category)
+    if (!validation.valid) {
+      throw createGraphQLError(validation.error || "Formato de archivo inválido.", "VALIDATION_ERROR")
+    }
+  }
+
+  const updated = await db
+    .update(schema.gameFileUploadTokens)
+    .set({
+      usedAt: new Date().toISOString(),
+      sha256,
+      uploadedSizeBytes: input.sizeBytes,
+    })
+    .where(
+      and(
+        eq(schema.gameFileUploadTokens.id, tokenRecord.id),
+        sql`${schema.gameFileUploadTokens.usedAt} IS NULL`,
+      ),
+    )
+    .returning()
+    .get()
+
+  if (!updated) {
+    throw createGraphQLError("El token de subida ya fue utilizado por otra operación.", "CONFLICT")
+  }
+
+  return {
+    tokenHash,
+    sizeBytes: input.sizeBytes,
   }
 }
 

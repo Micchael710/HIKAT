@@ -87,15 +87,22 @@ export function createTestR2Bucket(): R2Bucket & { _storage: Map<string, StoredR
       } as unknown as R2Object
     },
 
-    async get(key: string): Promise<R2ObjectBody | null> {
+    async get(key: string, options?: { range?: { offset?: number; length?: number } }): Promise<R2ObjectBody | null> {
       const stored = storage.get(key)
       if (!stored) {
         return null
       }
 
+      let dataSlice = stored.data
+      if (options?.range) {
+        const offset = options.range.offset ?? 0
+        const length = options.range.length ?? (stored.data.byteLength - offset)
+        dataSlice = stored.data.slice(offset, offset + length)
+      }
+
       const bodyStream = new ReadableStream({
         start(controller) {
-          controller.enqueue(stored.data)
+          controller.enqueue(dataSlice)
           controller.close()
         },
       })
@@ -112,19 +119,19 @@ export function createTestR2Bucket(): R2Bucket & { _storage: Map<string, StoredR
         body: bodyStream,
         bodyUsed: false,
         async arrayBuffer() {
-          return stored.data.buffer.slice(
-            stored.data.byteOffset,
-            stored.data.byteOffset + stored.data.byteLength,
+          return dataSlice.buffer.slice(
+            dataSlice.byteOffset,
+            dataSlice.byteOffset + dataSlice.byteLength,
           ) as ArrayBuffer
         },
         async text() {
-          return new TextDecoder().decode(stored.data)
+          return new TextDecoder().decode(dataSlice)
         },
         async json() {
-          return JSON.parse(new TextDecoder().decode(stored.data))
+          return JSON.parse(new TextDecoder().decode(dataSlice))
         },
         async blob() {
-          return new Blob([stored.data as any])
+          return new Blob([dataSlice as any])
         },
         writeHttpMetadata: (headers: Headers) => {
           if (stored.httpMetadata?.contentType) {
