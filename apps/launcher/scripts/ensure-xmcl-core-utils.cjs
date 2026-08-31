@@ -1,0 +1,54 @@
+const fs = require("fs")
+const path = require("path")
+
+const pkgPath = require.resolve("@xmcl/core/package.json")
+const pkg = require(pkgPath)
+if (pkg.version !== "2.16.1") process.exit(0)
+
+const utilsJsPath = path.join(path.dirname(pkgPath), "utils.js")
+const shimContent = `"use strict";
+const fs = require("fs"), fsp = require("fs/promises"), crypto = require("crypto");
+const isNotNull = (v) => v !== null && v !== undefined;
+const exists = (t) => fsp.access(t).then(() => true, () => false);
+const checksum = (t, a) => new Promise((res, rej) => {
+  const h = crypto.createHash(a), s = fs.createReadStream(t);
+  s.on("data", (d) => h.update(d)).on("end", () => res(h.digest("hex"))).on("error", rej);
+});
+const validateSha1 = async (t, h, strict = true) => {
+  if (!h && !strict) return true;
+  try { return (await checksum(t, "sha1")).toLowerCase() === (h || "").toLowerCase(); } catch (_) { return false; }
+};
+module.exports = { isNotNull, exists, checksum, validateSha1 };
+`
+fs.writeFileSync(utilsJsPath, shimContent, "utf8")
+require.resolve("@xmcl/core/utils")
+const loaded = require("@xmcl/core/utils")
+if (typeof loaded.isNotNull !== "function" || typeof loaded.exists !== "function") {
+  throw new Error("[ensure-xmcl-core-utils] Failed to load @xmcl/core/utils shim")
+}
+
+try {
+  const ftPkgPath = require.resolve("@xmcl/file-transfer/package.json", {
+    paths: [require.resolve("@xmcl/installer/package.json")],
+  })
+  const ftDistPath = path.join(path.dirname(ftPkgPath), "dist", "index.js")
+  if (fs.existsSync(ftDistPath)) {
+    const ftDist = fs.readFileSync(ftDistPath, "utf8")
+    if (!ftDist.includes("ConcurrencyDispatcher")) {
+      const shimFt = `
+class ConcurrencyDispatcher { constructor(d, m) { this.dispatcher = d; this.maxConcurrency = m; } }
+async function downloadMultiple(opts) {
+  const results = [];
+  for (const opt of opts.options) {
+    try { await download({ ...opt, signal: opts.signal, tracker: opts.tracker }); results.push({ status: "fulfilled" }); }
+    catch (err) { results.push({ status: "rejected", reason: err }); }
+  }
+  return results;
+}
+module.exports.ConcurrencyDispatcher = ConcurrencyDispatcher;
+module.exports.downloadMultiple = downloadMultiple;
+`
+      fs.appendFileSync(ftDistPath, shimFt, "utf8")
+    }
+  }
+} catch (_) {}

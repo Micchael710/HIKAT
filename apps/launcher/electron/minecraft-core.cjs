@@ -1,7 +1,6 @@
 const fs = require("fs")
 const fsp = require("fs/promises")
 const path = require("path")
-const axios = require("axios")
 const { MinecraftFolder, Version } = require("@xmcl/core")
 const {
   getVersionList,
@@ -12,7 +11,7 @@ const {
   resolveAssetObjectInstallFiles,
   resolveNeoForgedInstallerFile,
   createModernForgeInstallWorkflow,
-  createNodeInstallRuntime,
+  createDefaultNodeInstallRuntime,
   executeInstallManifest,
   executeInstallWorkflow,
   diagnoseInstallation,
@@ -43,36 +42,6 @@ async function saveCoreState(instanceRoot, state) {
   await fsp.writeFile(filePath, JSON.stringify(state, null, 2), "utf8")
 }
 
-async function downloadInstallFiles(files, signal) {
-  for (const file of files) {
-    if (file.trustExistingSize && fs.existsSync(file.path)) {
-      const st = await fsp.stat(file.path).catch(() => null)
-      if (st && file.size && st.size === file.size) continue
-    }
-    await fsp.mkdir(path.dirname(file.path), { recursive: true })
-    let lastError = null
-    for (const url of file.urls) {
-      try {
-        const res = await axios.get(url, { responseType: "arraybuffer", signal, timeout: 60000 })
-        await fsp.writeFile(file.path, Buffer.from(res.data))
-        lastError = null
-        break
-      } catch (err) {
-        lastError = err
-        if (signal?.aborted) throw err
-      }
-    }
-    if (lastError) throw lastError
-  }
-}
-
-function createInstallRuntime(options = {}) {
-  return createNodeInstallRuntime({
-    ...options,
-    download: options.download ?? ((files) => downloadInstallFiles(files, options.signal)),
-  })
-}
-
 /**
  * Check if the core Minecraft + NeoForge installation is healthy locally.
  * Strictly local and offline.
@@ -101,16 +70,9 @@ async function checkCore({ instanceRoot, minecraftVersion, neoForgeVersion }) {
   }
 
   try {
-    const issues = await diagnoseInstallation(resolvedVersion)
-    if (issues) {
-      const hasFatalIssue =
-        Boolean(issues.jar) ||
-        Boolean(issues.versionJsonMissing) ||
-        (Array.isArray(issues.libraries) && issues.libraries.length > 0) ||
-        (Array.isArray(issues.assets) && issues.assets.length > 0)
-      if (hasFatalIssue) {
-        return { installed: false, resolvedVersionId: state.resolvedVersionId }
-      }
+    const issue = await diagnoseInstallation(resolvedVersion)
+    if (issue) {
+      return { installed: false, resolvedVersionId: state.resolvedVersionId }
     }
   } catch (_) {
     return { installed: false, resolvedVersionId: state.resolvedVersionId }
@@ -136,7 +98,7 @@ async function installCore({
   if (!cleanMc) throw new Error("minecraftVersion is required for installCore")
 
   const folder = MinecraftFolder.from(instanceRoot)
-  const runtime = createInstallRuntime({ signal })
+  const runtime = createDefaultNodeInstallRuntime({ signal })
 
   // 1. Fetch official version metadata
   const versionList = await getVersionList({ signal })
@@ -163,10 +125,12 @@ async function installCore({
   const clientJarFile = resolveMinecraftJarInstallFile(vanillaVersion, { side: "client", signal })
   const libraryFiles = resolveLibraryInstallFiles(vanillaVersion.libraries, folder, { signal })
   const assetMetaManifest = resolveAssetMetadataInstallManifest(vanillaVersion, folder, {
+    useHashForAssetsIndex: true,
     abortSignal: signal,
   })
   await executeInstallManifest(assetMetaManifest, runtime, { signal })
   const assetFiles = await resolveAssetObjectInstallFiles(vanillaVersion, folder, {
+    useHashForAssetsIndex: true,
     abortSignal: signal,
   })
 
@@ -215,18 +179,11 @@ async function installCore({
       (result && typeof result === "object" ? result.version : result) || targetProfileId
   }
 
-  // 6. Diagnose installed version to confirm integrity
+  // 6. Diagnose installed version to confirm integrity (XMCL is sole authority)
   const resolvedVersion = await Version.parse(folder, finalVersionId)
-  const issues = await diagnoseInstallation(resolvedVersion)
-  if (issues) {
-    const hasFatalIssue =
-      Boolean(issues.jar) ||
-      Boolean(issues.versionJsonMissing) ||
-      (Array.isArray(issues.libraries) && issues.libraries.length > 0) ||
-      (Array.isArray(issues.assets) && issues.assets.length > 0)
-    if (hasFatalIssue) {
-      throw new Error(`Core installation integrity check failed: ${JSON.stringify(issues)}`)
-    }
+  const issue = await diagnoseInstallation(resolvedVersion)
+  if (issue) {
+    throw new Error(`Core installation integrity check failed: ${JSON.stringify(issue)}`)
   }
 
   // 7. Persist authoritative core state
@@ -257,5 +214,4 @@ module.exports = {
   repairCore,
   loadCoreState,
   saveCoreState,
-  createInstallRuntime,
 }

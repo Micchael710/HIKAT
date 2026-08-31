@@ -7,7 +7,7 @@ const { getPlatform } = require("@xmcl/core")
 const {
   DEFAULT_RUNTIME_ALL_URL,
   createJavaRuntimeInstallWorkflow,
-  createNodeInstallRuntime,
+  createDefaultNodeInstallRuntime,
   executeInstallWorkflow,
 } = require("@xmcl/installer")
 
@@ -114,29 +114,6 @@ function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
   }
 }
 
-async function downloadInstallFiles(files, signal) {
-  for (const file of files) {
-    if (file.trustExistingSize && fs.existsSync(file.path)) {
-      const st = await fsp.stat(file.path).catch(() => null)
-      if (st && file.size && st.size === file.size) continue
-    }
-    await fsp.mkdir(path.dirname(file.path), { recursive: true })
-    let lastError = null
-    for (const url of file.urls) {
-      try {
-        const res = await axios.get(url, { responseType: "arraybuffer", signal, timeout: 60000 })
-        await fsp.writeFile(file.path, Buffer.from(res.data))
-        lastError = null
-        break
-      } catch (err) {
-        lastError = err
-        if (signal?.aborted) throw err
-      }
-    }
-    if (lastError) throw lastError
-  }
-}
-
 async function ensureJavaRuntime({ appDataRoot, signal, onProgress, component = "java-runtime-delta" } = {}) {
   const existing = resolveJavaRuntime(appDataRoot, { isGui: false })
   if (existing.cliJavaPath) {
@@ -172,10 +149,7 @@ async function ensureJavaRuntime({ appDataRoot, signal, onProgress, component = 
 
   await fsp.mkdir(destination, { recursive: true })
   const workflow = createJavaRuntimeInstallWorkflow({ target, destination })
-  const runtime = createNodeInstallRuntime({
-    signal,
-    download: (files) => downloadInstallFiles(files, signal),
-  })
+  const runtime = createDefaultNodeInstallRuntime({ signal })
   await executeInstallWorkflow(workflow, runtime, { signal })
 
   const installed = resolveJavaRuntime(appDataRoot, { isGui: false })

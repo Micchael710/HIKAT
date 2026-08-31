@@ -3,7 +3,7 @@ const {
   generateSyncPlan,
   downloadClientFilesToStaging,
   applyStagingToInstance,
-  saveInstalledManifest,
+  loadInstalledManifest,
   loadDownloadSession,
   reconcileStagingFiles,
   cleanStaging,
@@ -20,9 +20,15 @@ function validateSyncPayload(payload = {}, isStartSync = true) {
     throw new Error("Invalid payload: instanceRoot is required.")
   }
 
-  if (payload.modpackVersion !== undefined) {
-    if (typeof payload.modpackVersion !== "string" || !payload.modpackVersion.trim()) {
+  if (isStartSync) {
+    if (!payload.modpackVersion || typeof payload.modpackVersion !== "string" || !payload.modpackVersion.trim()) {
       throw new Error("Invalid payload: modpackVersion must be a non-empty string.")
+    }
+    if (!payload.minecraftVersion || typeof payload.minecraftVersion !== "string" || !payload.minecraftVersion.trim()) {
+      throw new Error("Invalid payload: minecraftVersion must be a non-empty string.")
+    }
+    if (!payload.neoForgeVersion || typeof payload.neoForgeVersion !== "string" || !payload.neoForgeVersion.trim()) {
+      throw new Error("Invalid payload: neoForgeVersion must be a non-empty string.")
     }
   }
 
@@ -54,25 +60,17 @@ function validateSyncPayload(payload = {}, isStartSync = true) {
       }
       seenPaths.add(norm)
 
-      if (file.sha256 !== undefined) {
-        if (typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(file.sha256)) {
-          throw new Error(`Invalid file entry: invalid SHA-256 hash for "${file.path}".`)
-        }
+      if (file.sha256 === undefined || typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(file.sha256)) {
+        throw new Error(`Invalid file entry: invalid SHA-256 hash for "${file.path}".`)
       }
-      if (file.sizeBytes !== undefined) {
-        if (typeof file.sizeBytes !== "number" || file.sizeBytes < 0 || !Number.isFinite(file.sizeBytes)) {
-          throw new Error(`Invalid file entry: invalid sizeBytes for "${file.path}".`)
-        }
+      if (file.sizeBytes === undefined || typeof file.sizeBytes !== "number" || file.sizeBytes < 0 || !Number.isFinite(file.sizeBytes)) {
+        throw new Error(`Invalid file entry: invalid sizeBytes for "${file.path}".`)
       }
-      if (file.policy !== undefined) {
-        if (file.policy !== "MODIFICABLE" && file.policy !== "NO_MODIFICABLE") {
-          throw new Error(`Invalid file entry: invalid policy "${file.policy}".`)
-        }
+      if (!file.policy || (file.policy !== "MODIFICABLE" && file.policy !== "NO_MODIFICABLE")) {
+        throw new Error(`Invalid file entry: invalid policy "${file.policy}".`)
       }
-      if (file.downloadUrl !== undefined) {
-        if (typeof file.downloadUrl !== "string" || !file.downloadUrl.trim()) {
-          throw new Error("Invalid download URL: invalid downloadUrl.")
-        }
+      if (!file.downloadUrl || typeof file.downloadUrl !== "string" || !file.downloadUrl.trim()) {
+        throw new Error("Invalid download URL: invalid downloadUrl.")
       }
     }
   }
@@ -118,12 +116,29 @@ class GameOperationManager {
       neoForgeVersion,
     } = payload
 
-    const syncPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
-    const coreCheck = await this.coreChecker({
+    const clientPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+    const installedManifest = await loadInstalledManifest(instanceRoot)
+    const core = await this.coreChecker({
       instanceRoot,
       minecraftVersion,
       neoForgeVersion,
     })
+
+    const java = this.javaResolver(instanceRoot, { isGui: false })
+    const javaValid = java.cliJavaPath ? Boolean(this.javaValidator(java.cliJavaPath).valid) : false
+
+    const releaseMatches = installedManifest.modpackVersion === modpackVersion
+    const clientSynced =
+      clientPlan.toDownload.length === 0 &&
+      clientPlan.toPrune.length === 0 &&
+      releaseMatches
+
+    const isFullyInstalled = clientSynced && Boolean(core.installed) && javaValid
+    const needsUpdate = !isFullyInstalled
+    const hasExistingInstall =
+      Boolean(installedManifest.modpackVersion) ||
+      Boolean(clientPlan.hasExistingInstall) ||
+      Boolean(core.resolvedVersionId)
 
     let hasPausedSession = false
     let stagedBytes = 0
@@ -132,22 +147,30 @@ class GameOperationManager {
     const session = await loadDownloadSession(instanceRoot)
     if (session && session.status === "PAUSED") {
       hasPausedSession = true
-      const reconciled = await reconcileStagingFiles(instanceRoot, syncPlan.toDownload)
+      const reconciled = await reconcileStagingFiles(instanceRoot, clientPlan.toDownload)
       stagedBytes = reconciled.alreadyStagedBytes
-      stagedFilesCount = (session.files ? Object.keys(session.files).length : 0) || Object.keys(reconciled.validStagedMap).length
+      stagedFilesCount =
+        (session.files ? Object.keys(session.files).length : 0) ||
+        Object.keys(reconciled.validStagedMap).length
     }
 
     return {
       success: true,
+      filesToDownload: clientPlan.toDownload,
+      filesToPrune: clientPlan.toPrune,
+      totalDownloadBytes: clientPlan.totalDownloadBytes,
+      needsUpdate,
+      hasExistingInstall,
+      isFullyInstalled,
       hasPausedSession,
       stagedBytes,
       stagedFilesCount,
       plan: {
-        toDownload: syncPlan.toDownload,
-        toPrune: syncPlan.toPrune,
-        totalDownloadBytes: syncPlan.totalDownloadBytes,
-        isCoreInstalled: coreCheck.installed,
-        coreResolvedVersionId: coreCheck.resolvedVersionId || null,
+        toDownload: clientPlan.toDownload,
+        toPrune: clientPlan.toPrune,
+        totalDownloadBytes: clientPlan.totalDownloadBytes,
+        isCoreInstalled: core.installed,
+        coreResolvedVersionId: core.resolvedVersionId || null,
       },
     }
   }
@@ -194,6 +217,7 @@ class GameOperationManager {
       try {
         // 1. Sync HiKAT client files (mods, configs, etc.)
         const syncPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+        const installedManifest = await loadInstalledManifest(instanceRoot)
 
         let downloadResult = null
         if (syncPlan.toDownload.length > 0 || isVerify) {
@@ -219,8 +243,13 @@ class GameOperationManager {
           throw new Error("Operation was cancelled.")
         }
 
-        // Apply staged files to instanceRoot
-        if (syncPlan.toDownload.length > 0) {
+        // Apply staged/pruned files to instanceRoot when needed
+        const needsClientApply =
+          syncPlan.toDownload.length > 0 ||
+          syncPlan.toPrune.length > 0 ||
+          installedManifest.modpackVersion !== modpackVersion
+
+        if (needsClientApply) {
           if (!isVerify) {
             this.state = "INSTALLING"
             if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
@@ -234,7 +263,6 @@ class GameOperationManager {
             onProgress,
             cancelSignal,
           })
-          await saveInstalledManifest(instanceRoot, clientFiles, modpackVersion)
         }
 
         if (cancelSignal.isPaused) {
@@ -288,7 +316,7 @@ class GameOperationManager {
           }
 
           if (isVerify && coreStatus.installed) {
-            // Core already healthy
+            // Core is already healthy
           } else {
             await this.coreInstaller({
               instanceRoot,
@@ -348,6 +376,10 @@ class GameOperationManager {
     }
     if (this.activeAbortController) {
       this.activeAbortController.abort()
+    }
+    const pending = this.activeSyncPromise
+    if (pending) {
+      await pending.catch(() => {})
     }
     this.state = "PAUSED"
     return { success: true, paused: true, state: "PAUSED" }

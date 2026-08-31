@@ -15,7 +15,7 @@
     "electron": "electron .",
     "desktop": "electron .",
     "format": "oxfmt src",
-    "postinstall": "node -e \"const fs=require('fs');try{const p=require.resolve('@xmcl/core/package.json');const d=require('path').dirname(p);fs.writeFileSync(require('path').join(d,'utils.js'),'const core=require(\\\"./dist/index.js\\\");function isNotNull(v){return v!==null&&v!==undefined;}function exists(f){return require(\\\"fs/promises\\\").access(f).then(()=>true,()=>false);}module.exports={...core,isNotNull,exists};');}catch(_){}\""
+    "postinstall": "node scripts/ensure-xmcl-core-utils.cjs"
   },
   "dependencies": {
     "@hikat/shared": "workspace:*",
