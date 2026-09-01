@@ -393,15 +393,11 @@ export default function PlayerSkinModal({
             <button
               type="button"
               onClick={onClose}
+              className="launcher-btn-secondary"
               style={{
-                padding: "9px 16px",
-                borderRadius: "8px",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                backgroundColor: isDark ? "#334155" : "#f8fafc",
-                color: isDark ? "#f1f5f9" : "#334155",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: "pointer",
+                padding: "10px 18px",
+                borderRadius: "12px",
+                fontSize: "14px",
               }}
             >
               {isViewOnly ? "Cerrar" : "Cancelar"}
@@ -410,23 +406,21 @@ export default function PlayerSkinModal({
               <button
                 type="submit"
                 disabled={isSubmitting || !selectedFile}
+                className="launcher-btn-primary"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "8px",
-                  padding: "9px 20px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: "#6366f1",
-                  color: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: "600",
+                  padding: "10px 22px",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  fontWeight: "700",
                   cursor: isSubmitting || !selectedFile ? "not-allowed" : "pointer",
                   opacity: isSubmitting || !selectedFile ? 0.6 : 1,
                 }}
               >
                 {isSubmitting && <IconSpinner size={16} />}
-                {isSubmitting ? "Guardando..." : "Guardar Nueva Textura"}
+                <span>{isSubmitting ? "Guardando..." : "Guardar Nueva Textura"}</span>
               </button>
             )}
           </div>

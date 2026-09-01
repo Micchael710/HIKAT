@@ -184,7 +184,8 @@ export default function ServerConsoleView({
             alignItems: "center",
             gap: 6,
             fontSize: "12px",
-            padding: "6px 12px",
+            padding: "6px 14px",
+            borderRadius: "10px",
           }}
         >
           <IconTrash size={14} />
@@ -339,6 +340,7 @@ export default function ServerConsoleView({
             style={{
               width: "100%",
               padding: "12px 16px 12px 34px",
+              borderRadius: 12,
               fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
               boxSizing: "border-box",
             }}
@@ -354,7 +356,8 @@ export default function ServerConsoleView({
             alignItems: "center",
             justifyContent: "center",
             gap: 8,
-            padding: "12px 22px",
+            padding: "12px 24px",
+            borderRadius: 12,
             fontSize: "14px",
           }}
         >

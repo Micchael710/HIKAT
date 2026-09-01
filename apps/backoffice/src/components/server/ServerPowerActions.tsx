@@ -304,6 +304,11 @@ export default function ServerPowerActions({
                   disabled={isLoading}
                   onClick={() => setModalAction(null)}
                   className="launcher-btn-secondary"
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: 12,
+                    fontSize: "14px",
+                  }}
                 >
                   Cancelar
                 </button>
@@ -317,6 +322,9 @@ export default function ServerPowerActions({
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 8,
+                    padding: "10px 20px",
+                    borderRadius: 12,
+                    fontSize: "14px",
                   }}
                 >
                   {isLoading && <IconSpinner size={16} />}

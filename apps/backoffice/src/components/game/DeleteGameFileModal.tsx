@@ -134,6 +134,11 @@ export default function DeleteGameFileModal({
             type="button"
             onClick={onClose}
             className="launcher-btn-secondary"
+            style={{
+              padding: "10px 18px",
+              borderRadius: "12px",
+              fontSize: "14px",
+            }}
           >
             Cancelar
           </button>
@@ -146,10 +151,13 @@ export default function DeleteGameFileModal({
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
+              padding: "10px 20px",
+              borderRadius: "12px",
+              fontSize: "14px",
             }}
           >
             {isDeleting && <IconSpinner size={16} />}
-            Quitar del borrador
+            <span>Quitar del borrador</span>
           </button>
         </div>
       </div>

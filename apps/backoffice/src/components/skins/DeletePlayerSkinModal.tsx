@@ -142,15 +142,11 @@ export default function DeletePlayerSkinModal({
             type="button"
             onClick={onClose}
             disabled={isDeleting}
+            className="launcher-btn-secondary"
             style={{
-              padding: "9px 16px",
-              borderRadius: "8px",
-              border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-              backgroundColor: "transparent",
-              color: isDark ? "#f1f5f9" : "#0f172a",
-              fontSize: "13px",
-              fontWeight: "600",
-              cursor: "pointer",
+              padding: "10px 18px",
+              borderRadius: "12px",
+              fontSize: "14px",
             }}
           >
             Cancelar
@@ -159,23 +155,18 @@ export default function DeletePlayerSkinModal({
             type="button"
             onClick={handleDelete}
             disabled={isDeleting}
+            className="launcher-btn-danger"
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
-              padding: "9px 18px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: "#ef4444",
-              color: "#ffffff",
-              fontSize: "13px",
-              fontWeight: "600",
-              cursor: isDeleting ? "not-allowed" : "pointer",
-              opacity: isDeleting ? 0.7 : 1,
+              padding: "10px 20px",
+              borderRadius: "12px",
+              fontSize: "14px",
             }}
           >
             {isDeleting && <IconSpinner size={16} />}
-            Eliminar skin
+            <span>Eliminar</span>
           </button>
         </div>
       </div>

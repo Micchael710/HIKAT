@@ -871,6 +871,11 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                           type="button"
                           onClick={() => setSelectedMod(null)}
                           className="launcher-btn-secondary"
+                          style={{
+                            padding: "10px 18px",
+                            borderRadius: 12,
+                            fontSize: "14px",
+                          }}
                         >
                           Cancelar
                         </button>
@@ -882,6 +887,9 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                           disabled={installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0}
                           className="launcher-btn-primary"
                           style={{
+                            padding: "10px 22px",
+                            borderRadius: 12,
+                            fontSize: "14px",
                             opacity: installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0 ? 0.5 : 1,
                             cursor: installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0 ? "not-allowed" : "pointer",
                           }}

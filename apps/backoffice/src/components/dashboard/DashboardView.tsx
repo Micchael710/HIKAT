@@ -177,7 +177,8 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 className="launcher-btn-secondary"
                 style={{
                   marginTop: "16px",
-                  padding: "8px 14px",
+                  padding: "9px 16px",
+                  borderRadius: "12px",
                   fontSize: "13px",
                   fontWeight: "600",
                   textAlign: "center",
@@ -235,7 +236,8 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 className="launcher-btn-secondary"
                 style={{
                   marginTop: "16px",
-                  padding: "8px 14px",
+                  padding: "9px 16px",
+                  borderRadius: "12px",
                   fontSize: "13px",
                   fontWeight: "600",
                   textAlign: "center",
@@ -293,7 +295,8 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 className="launcher-btn-secondary"
                 style={{
                   marginTop: "16px",
-                  padding: "8px 14px",
+                  padding: "9px 16px",
+                  borderRadius: "12px",
                   fontSize: "13px",
                   fontWeight: "600",
                   textAlign: "center",
@@ -351,7 +354,8 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 className="launcher-btn-secondary"
                 style={{
                   marginTop: "16px",
-                  padding: "8px 14px",
+                  padding: "9px 16px",
+                  borderRadius: "12px",
                   fontSize: "13px",
                   fontWeight: "600",
                   textAlign: "center",
@@ -388,52 +392,68 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 onClick={() => onNavigate("news")}
                 className="launcher-btn-secondary"
                 style={{
-                  padding: "10px 16px",
-                  fontSize: "14px",
+                  padding: "10px 18px",
+                  borderRadius: "12px",
+                  fontSize: "13.5px",
                   fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
                 }}
               >
                 <IconPlus size={16} />
-                Nueva Noticia
+                <span>Nueva Noticia</span>
               </button>
 
               <button
                 onClick={() => onNavigate("skins")}
                 className="launcher-btn-secondary"
                 style={{
-                  padding: "10px 16px",
-                  fontSize: "14px",
+                  padding: "10px 18px",
+                  borderRadius: "12px",
+                  fontSize: "13.5px",
                   fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
                 }}
               >
                 <IconPlus size={16} />
-                Subir Skin
+                <span>Subir Skin</span>
               </button>
 
               <button
                 onClick={() => onNavigate("game")}
                 className="launcher-btn-secondary"
                 style={{
-                  padding: "10px 16px",
-                  fontSize: "14px",
+                  padding: "10px 18px",
+                  borderRadius: "12px",
+                  fontSize: "13.5px",
                   fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
                 }}
               >
                 <IconGamepad size={16} />
-                Actualizaciones del Juego
+                <span>Actualizaciones del Juego</span>
               </button>
 
               <button
                 onClick={() => onNavigate("settings")}
                 className="launcher-btn-secondary"
                 style={{
-                  padding: "10px 16px",
-                  fontSize: "14px",
+                  padding: "10px 18px",
+                  borderRadius: "12px",
+                  fontSize: "13.5px",
                   fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
                 }}
               >
                 <IconSettings size={16} />
-                Ajustes Generales
+                <span>Ajustes Generales</span>
               </button>
             </div>
           </div>

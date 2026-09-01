@@ -127,15 +127,11 @@ export default function DeleteCapeModal({
           <button
             type="button"
             onClick={onClose}
+            className="launcher-btn-secondary"
             style={{
-              padding: "9px 16px",
-              borderRadius: "8px",
-              border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-              backgroundColor: "transparent",
-              color: isDark ? "#94a3b8" : "#64748b",
-              fontSize: "13px",
-              fontWeight: "500",
-              cursor: "pointer",
+              padding: "10px 18px",
+              borderRadius: "12px",
+              fontSize: "14px",
             }}
           >
             Cancelar
@@ -144,23 +140,18 @@ export default function DeleteCapeModal({
             type="button"
             onClick={handleDelete}
             disabled={isDeleting}
+            className="launcher-btn-danger"
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: "8px",
-              padding: "9px 18px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: "#ef4444",
-              color: "#ffffff",
-              fontSize: "13px",
-              fontWeight: "600",
-              cursor: isDeleting ? "not-allowed" : "pointer",
-              opacity: isDeleting ? 0.7 : 1,
+              padding: "10px 20px",
+              borderRadius: "12px",
+              fontSize: "14px",
             }}
           >
             {isDeleting && <IconSpinner size={16} />}
-            Eliminar
+            <span>Eliminar</span>
           </button>
         </div>
       </div>

@@ -125,6 +125,7 @@ input, textarea, select {
 
 /* ── Common Components (Launcher Identity) ── */
 .launcher-input {
+  border-radius: 12px;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
@@ -137,9 +138,16 @@ input, textarea, select {
 .launcher-btn-primary {
   background: linear-gradient(135deg, #1c384e, #295372);
   border: 2px solid rgba(130, 200, 230, 0.5);
+  border-radius: 12px;
   color: white;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
   transition: border-color 0.22s ease, background 0.22s ease, box-shadow 0.25s ease, transform 0.2s ease;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .launcher-btn-primary:hover:not(:disabled) {
@@ -161,9 +169,16 @@ input, textarea, select {
 .launcher-btn-secondary {
   background: #131c23;
   border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
   color: rgba(255, 255, 255, 0.7);
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
   transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, transform 0.18s ease;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 [data-theme="light"] .launcher-btn-secondary {
@@ -188,9 +203,16 @@ input, textarea, select {
 .launcher-btn-danger {
   background: rgba(255, 60, 40, 0.12);
   border: 1.5px solid rgba(255, 100, 80, 0.35);
+  border-radius: 12px;
   color: #ff6b5b;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
   transition: all 0.18s ease;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .launcher-btn-danger:hover:not(:disabled) {

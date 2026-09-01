@@ -619,6 +619,8 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                       alignItems: "center",
                       gap: 8,
                       fontSize: "13px",
+                      padding: "8px 16px",
+                      borderRadius: "10px",
                     }}
                   >
                     <span>Revisar cambios</span>
@@ -729,7 +731,8 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
                     className="launcher-btn-secondary"
                     style={{
                       fontSize: "12px",
-                      padding: "6px 12px",
+                      padding: "6px 14px",
+                      borderRadius: "10px",
                     }}
                   >
                     <span>Abrir consola →</span>

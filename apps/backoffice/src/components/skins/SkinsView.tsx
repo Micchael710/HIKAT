@@ -222,13 +222,13 @@ export default function SkinsView({ theme }: SkinsViewProps) {
         {/* Tab Navigation */}
         <div
           style={{
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
-            gap: "6px",
-            backgroundColor: tokens.bgPill,
             padding: "4px",
-            borderRadius: "12px",
+            borderRadius: "14px",
+            backgroundColor: tokens.bgCardInner,
             border: `1px solid ${tokens.borderSubtle}`,
+            gap: "4px",
             flexWrap: "wrap",
           }}
         >
@@ -242,17 +242,18 @@ export default function SkinsView({ theme }: SkinsViewProps) {
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id as any)}
                 style={{
-                  padding: "7px 14px",
-                  borderRadius: "8px",
-                  border: isSel ? `1px solid ${tokens.borderMedium}` : "1px solid transparent",
-                  backgroundColor: isSel ? tokens.bgPillActive : "transparent",
+                  padding: "8px 16px",
+                  borderRadius: "10px",
+                  border: "none",
+                  backgroundColor: isSel ? tokens.bgCard : "transparent",
                   color: isSel ? tokens.textPrimary : tokens.textSecondary,
+                  boxShadow: isSel ? tokens.cardShadow : "none",
                   fontSize: "13px",
                   fontWeight: isSel ? "700" : "500",
                   cursor: "pointer",
-                  boxShadow: isSel ? tokens.cardShadow : "none",
                   transition: "all 0.15s ease",
                 }}
               >
@@ -271,7 +272,7 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              marginBottom: "20px",
+              marginBottom: "24px",
               gap: "16px",
               flexWrap: "wrap",
             }}
@@ -285,27 +286,25 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               />
             </div>
             <button
+              type="button"
               onClick={() => {
                 setActiveSkin(null)
                 setSkinModalMode("edit")
                 setIsSkinFormOpen(true)
               }}
+              className="launcher-btn-primary"
               style={{
-                display: "inline-flex",
+                padding: "10px 22px",
+                borderRadius: 14,
+                fontSize: 14.5,
+                fontWeight: 700,
+                display: "flex",
                 alignItems: "center",
-                gap: "8px",
-                padding: "9px 18px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: "#6366f1",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: "pointer",
+                gap: 8,
               }}
             >
-              <IconPlus size={16} />
-              Nueva Skin
+              <IconPlus size={18} />
+              <span>Nueva Skin</span>
             </button>
           </div>
 
@@ -313,8 +312,9 @@ export default function SkinsView({ theme }: SkinsViewProps) {
             <div
               style={{
                 padding: "12px 16px",
-                borderRadius: "8px",
+                borderRadius: "12px",
                 backgroundColor: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
                 color: "#ef4444",
                 marginBottom: "20px",
                 fontSize: "13px",
@@ -343,10 +343,11 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               style={{
                 padding: "60px 20px",
                 textAlign: "center",
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                borderRadius: "12px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                boxShadow: tokens.cardShadow,
+                color: tokens.textSecondary,
               }}
             >
               No se encontraron skins en el catálogo.
@@ -363,17 +364,15 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                 <div
                   key={skin.id}
                   style={{
-                    backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                    border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                    borderRadius: "14px",
+                    backgroundColor: tokens.bgCard,
+                    border: `1px solid ${tokens.borderSubtle}`,
+                    borderRadius: "18px",
                     padding: "20px",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
                     textAlign: "center",
-                    boxShadow: isDark
-                      ? "0 4px 6px -1px rgba(0,0,0,0.3)"
-                      : "0 1px 3px rgba(0,0,0,0.05)",
+                    boxShadow: tokens.cardShadow,
                   }}
                 >
                   <div
@@ -422,73 +421,70 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       display: "flex",
                       width: "100%",
-                      gap: "6px",
-                      borderTop: `1px solid ${isDark ? "#334155" : "#f1f5f9"}`,
+                      gap: "8px",
+                      borderTop: `1px solid ${tokens.borderSubtle}`,
                       paddingTop: "14px",
                     }}
                   >
                     <button
+                      type="button"
                       onClick={() => {
                         setActiveSkin(skin)
                         setSkinModalMode("view")
                         setIsSkinFormOpen(true)
                       }}
+                      className="launcher-btn-secondary"
                       style={{
                         flex: 1,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
-                        padding: "7px 8px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#f1f5f9" : "#1e293b",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
+                        gap: "6px",
+                        padding: "7px 10px",
+                        borderRadius: "10px",
+                        fontSize: "12.5px",
+                        fontWeight: "600",
                       }}
                     >
                       <IconEye size={14} />
-                      Ver
+                      <span>Ver</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         setActiveSkin(skin)
                         setSkinModalMode("edit")
                         setIsSkinFormOpen(true)
                       }}
+                      className="launcher-btn-secondary"
                       style={{
                         flex: 1,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
-                        padding: "7px 8px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#f1f5f9" : "#1e293b",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
+                        gap: "6px",
+                        padding: "7px 10px",
+                        borderRadius: "10px",
+                        fontSize: "12.5px",
+                        fontWeight: "600",
                       }}
                     >
                       <IconEdit size={14} />
-                      Editar
+                      <span>Editar</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => setDeleteSkinItem(skin)}
+                      title="Eliminar skin"
+                      className="launcher-btn-danger"
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        padding: "7px 10px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#7f1d1d" : "#fecaca"}`,
-                        backgroundColor: "rgba(239, 68, 68, 0.1)",
-                        color: "#ef4444",
-                        cursor: "pointer",
+                        width: "34px",
+                        height: "34px",
+                        borderRadius: "10px",
+                        padding: 0,
                       }}
                     >
                       <IconTrash size={14} />
@@ -509,7 +505,7 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              marginBottom: "20px",
+              marginBottom: "24px",
               gap: "16px",
               flexWrap: "wrap",
             }}
@@ -523,27 +519,25 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               />
             </div>
             <button
+              type="button"
               onClick={() => {
                 setActiveCape(null)
                 setCapeModalMode("edit")
                 setIsCapeFormOpen(true)
               }}
+              className="launcher-btn-primary"
               style={{
-                display: "inline-flex",
+                padding: "10px 22px",
+                borderRadius: 14,
+                fontSize: 14.5,
+                fontWeight: 700,
+                display: "flex",
                 alignItems: "center",
-                gap: "8px",
-                padding: "9px 18px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: "#6366f1",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "600",
-                cursor: "pointer",
+                gap: 8,
               }}
             >
-              <IconPlus size={16} />
-              Nueva Capa Global
+              <IconPlus size={18} />
+              <span>Nueva Capa Global</span>
             </button>
           </div>
 
@@ -551,8 +545,9 @@ export default function SkinsView({ theme }: SkinsViewProps) {
             <div
               style={{
                 padding: "12px 16px",
-                borderRadius: "8px",
+                borderRadius: "12px",
                 backgroundColor: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
                 color: "#ef4444",
                 marginBottom: "20px",
                 fontSize: "13px",
@@ -581,10 +576,11 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               style={{
                 padding: "60px 20px",
                 textAlign: "center",
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                borderRadius: "12px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                boxShadow: tokens.cardShadow,
+                color: tokens.textSecondary,
               }}
             >
               No se encontraron capas en el catálogo.
@@ -601,17 +597,15 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                 <div
                   key={cape.id}
                   style={{
-                    backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                    border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                    borderRadius: "14px",
+                    backgroundColor: tokens.bgCard,
+                    border: `1px solid ${tokens.borderSubtle}`,
+                    borderRadius: "18px",
                     padding: "20px",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
                     textAlign: "center",
-                    boxShadow: isDark
-                      ? "0 4px 6px -1px rgba(0,0,0,0.3)"
-                      : "0 1px 3px rgba(0,0,0,0.05)",
+                    boxShadow: tokens.cardShadow,
                   }}
                 >
                   <div
@@ -668,73 +662,70 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       display: "flex",
                       width: "100%",
-                      gap: "6px",
-                      borderTop: `1px solid ${isDark ? "#334155" : "#f1f5f9"}`,
+                      gap: "8px",
+                      borderTop: `1px solid ${tokens.borderSubtle}`,
                       paddingTop: "14px",
                     }}
                   >
                     <button
+                      type="button"
                       onClick={() => {
                         setActiveCape(cape)
                         setCapeModalMode("view")
                         setIsCapeFormOpen(true)
                       }}
+                      className="launcher-btn-secondary"
                       style={{
                         flex: 1,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
-                        padding: "7px 8px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#f1f5f9" : "#1e293b",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
+                        gap: "6px",
+                        padding: "7px 10px",
+                        borderRadius: "10px",
+                        fontSize: "12.5px",
+                        fontWeight: "600",
                       }}
                     >
                       <IconEye size={14} />
-                      Ver
+                      <span>Ver</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         setActiveCape(cape)
                         setCapeModalMode("edit")
                         setIsCapeFormOpen(true)
                       }}
+                      className="launcher-btn-secondary"
                       style={{
                         flex: 1,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
-                        padding: "7px 8px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#f1f5f9" : "#1e293b",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
+                        gap: "6px",
+                        padding: "7px 10px",
+                        borderRadius: "10px",
+                        fontSize: "12.5px",
+                        fontWeight: "600",
                       }}
                     >
                       <IconEdit size={14} />
-                      Editar
+                      <span>Editar</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => setDeleteCapeItem(cape)}
+                      title="Eliminar capa"
+                      className="launcher-btn-danger"
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        padding: "7px 10px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#7f1d1d" : "#fecaca"}`,
-                        backgroundColor: "rgba(239, 68, 68, 0.1)",
-                        color: "#ef4444",
-                        cursor: "pointer",
+                        width: "34px",
+                        height: "34px",
+                        borderRadius: "10px",
+                        padding: 0,
                       }}
                     >
                       <IconTrash size={14} />
@@ -750,21 +741,19 @@ export default function SkinsView({ theme }: SkinsViewProps) {
       {/* TAB 3: Player Custom Skins */}
       {activeTab === "skins_players" && (
         <>
-          <div style={{ marginBottom: "20px" }}>
+          <div style={{ marginBottom: "24px" }}>
             <input
               type="text"
               placeholder="Buscar por jugador..."
               value={playerSkinSearchQuery}
               onChange={(e) => setPlayerSkinSearchQuery(e.target.value)}
+              className="launcher-input"
               style={{
                 width: "100%",
                 maxWidth: "320px",
                 padding: "9px 14px",
-                borderRadius: "8px",
-                border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                color: isDark ? "#f1f5f9" : "#0f172a",
-                fontSize: "13px",
+                borderRadius: "12px",
+                fontSize: "13.5px",
               }}
             />
           </div>
@@ -773,8 +762,9 @@ export default function SkinsView({ theme }: SkinsViewProps) {
             <div
               style={{
                 padding: "12px 16px",
-                borderRadius: "8px",
+                borderRadius: "12px",
                 backgroundColor: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
                 color: "#ef4444",
                 marginBottom: "20px",
                 fontSize: "13px",
@@ -803,10 +793,11 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               style={{
                 padding: "60px 20px",
                 textAlign: "center",
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                borderRadius: "12px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                boxShadow: tokens.cardShadow,
+                color: tokens.textSecondary,
               }}
             >
               No se encontraron skins de jugadores.
@@ -823,17 +814,15 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                 <div
                   key={pskin.id}
                   style={{
-                    backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                    border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                    borderRadius: "14px",
+                    backgroundColor: tokens.bgCard,
+                    border: `1px solid ${tokens.borderSubtle}`,
+                    borderRadius: "18px",
                     padding: "20px",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
                     textAlign: "center",
-                    boxShadow: isDark
-                      ? "0 4px 6px -1px rgba(0,0,0,0.3)"
-                      : "0 1px 3px rgba(0,0,0,0.05)",
+                    boxShadow: tokens.cardShadow,
                   }}
                 >
                   <div
@@ -865,74 +854,71 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       display: "flex",
                       width: "100%",
-                      gap: "6px",
-                      borderTop: `1px solid ${isDark ? "#334155" : "#f1f5f9"}`,
+                      gap: "8px",
+                      borderTop: `1px solid ${tokens.borderSubtle}`,
                       paddingTop: "14px",
                       marginTop: "12px",
                     }}
                   >
                     <button
+                      type="button"
                       onClick={() => {
                         setActivePlayerSkin(pskin)
                         setPlayerSkinModalMode("view")
                         setIsPlayerSkinModalOpen(true)
                       }}
+                      className="launcher-btn-secondary"
                       style={{
                         flex: 1,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
-                        padding: "7px 8px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#f1f5f9" : "#1e293b",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
+                        gap: "6px",
+                        padding: "7px 10px",
+                        borderRadius: "10px",
+                        fontSize: "12.5px",
+                        fontWeight: "600",
                       }}
                     >
                       <IconEye size={14} />
-                      Ver
+                      <span>Ver</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         setActivePlayerSkin(pskin)
                         setPlayerSkinModalMode("edit")
                         setIsPlayerSkinModalOpen(true)
                       }}
+                      className="launcher-btn-secondary"
                       style={{
                         flex: 1,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
-                        padding: "7px 8px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#f1f5f9" : "#1e293b",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
+                        gap: "6px",
+                        padding: "7px 10px",
+                        borderRadius: "10px",
+                        fontSize: "12.5px",
+                        fontWeight: "600",
                       }}
                     >
                       <IconEdit size={14} />
-                      Editar
+                      <span>Editar</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => setDeletePlayerSkinItem(pskin)}
+                      title="Eliminar skin"
+                      className="launcher-btn-danger"
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        padding: "7px 10px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#7f1d1d" : "#fecaca"}`,
-                        backgroundColor: "rgba(239, 68, 68, 0.1)",
-                        color: "#ef4444",
-                        cursor: "pointer",
+                        width: "34px",
+                        height: "34px",
+                        borderRadius: "10px",
+                        padding: 0,
                       }}
                     >
                       <IconTrash size={14} />
@@ -948,21 +934,19 @@ export default function SkinsView({ theme }: SkinsViewProps) {
       {/* TAB 4: Player Custom Capes */}
       {activeTab === "capes_players" && (
         <>
-          <div style={{ marginBottom: "20px" }}>
+          <div style={{ marginBottom: "24px" }}>
             <input
               type="text"
               placeholder="Buscar por jugador..."
               value={playerCapeSearchQuery}
               onChange={(e) => setPlayerCapeSearchQuery(e.target.value)}
+              className="launcher-input"
               style={{
                 width: "100%",
                 maxWidth: "320px",
                 padding: "9px 14px",
-                borderRadius: "8px",
-                border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                color: isDark ? "#f1f5f9" : "#0f172a",
-                fontSize: "13px",
+                borderRadius: "12px",
+                fontSize: "13.5px",
               }}
             />
           </div>
@@ -971,8 +955,9 @@ export default function SkinsView({ theme }: SkinsViewProps) {
             <div
               style={{
                 padding: "12px 16px",
-                borderRadius: "8px",
+                borderRadius: "12px",
                 backgroundColor: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
                 color: "#ef4444",
                 marginBottom: "20px",
                 fontSize: "13px",
@@ -1001,10 +986,11 @@ export default function SkinsView({ theme }: SkinsViewProps) {
               style={{
                 padding: "60px 20px",
                 textAlign: "center",
-                backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                borderRadius: "12px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                boxShadow: tokens.cardShadow,
+                color: tokens.textSecondary,
               }}
             >
               No se encontraron capas de jugadores.
@@ -1021,17 +1007,15 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                 <div
                   key={pcape.id}
                   style={{
-                    backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                    border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                    borderRadius: "14px",
+                    backgroundColor: tokens.bgCard,
+                    border: `1px solid ${tokens.borderSubtle}`,
+                    borderRadius: "18px",
                     padding: "20px",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
                     textAlign: "center",
-                    boxShadow: isDark
-                      ? "0 4px 6px -1px rgba(0,0,0,0.3)"
-                      : "0 1px 3px rgba(0,0,0,0.05)",
+                    boxShadow: tokens.cardShadow,
                   }}
                 >
                   <div
@@ -1080,73 +1064,70 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       display: "flex",
                       width: "100%",
-                      gap: "6px",
-                      borderTop: `1px solid ${isDark ? "#334155" : "#f1f5f9"}`,
+                      gap: "8px",
+                      borderTop: `1px solid ${tokens.borderSubtle}`,
                       paddingTop: "14px",
                     }}
                   >
                     <button
+                      type="button"
                       onClick={() => {
                         setActivePlayerCape(pcape)
                         setPlayerCapeModalMode("view")
                         setIsPlayerCapeModalOpen(true)
                       }}
+                      className="launcher-btn-secondary"
                       style={{
                         flex: 1,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
-                        padding: "7px 8px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#f1f5f9" : "#1e293b",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
+                        gap: "6px",
+                        padding: "7px 10px",
+                        borderRadius: "10px",
+                        fontSize: "12.5px",
+                        fontWeight: "600",
                       }}
                     >
                       <IconEye size={14} />
-                      Ver
+                      <span>Ver</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         setActivePlayerCape(pcape)
                         setPlayerCapeModalMode("edit")
                         setIsPlayerCapeModalOpen(true)
                       }}
+                      className="launcher-btn-secondary"
                       style={{
                         flex: 1,
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "4px",
-                        padding: "7px 8px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#f1f5f9" : "#1e293b",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
+                        gap: "6px",
+                        padding: "7px 10px",
+                        borderRadius: "10px",
+                        fontSize: "12.5px",
+                        fontWeight: "600",
                       }}
                     >
                       <IconEdit size={14} />
-                      Editar
+                      <span>Editar</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => setDeletePlayerCapeItem(pcape)}
+                      title="Eliminar capa"
+                      className="launcher-btn-danger"
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        padding: "7px 10px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isDark ? "#7f1d1d" : "#fecaca"}`,
-                        backgroundColor: "rgba(239, 68, 68, 0.1)",
-                        color: "#ef4444",
-                        cursor: "pointer",
+                        width: "34px",
+                        height: "34px",
+                        borderRadius: "10px",
+                        padding: 0,
                       }}
                     >
                       <IconTrash size={14} />

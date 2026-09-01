@@ -335,11 +335,16 @@ export default function SettingsView({ theme }: SettingsViewProps) {
               className="launcher-btn-primary"
               style={{
                 padding: "10px 24px",
+                borderRadius: "12px",
                 fontSize: "14px",
+                fontWeight: 700,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
               }}
             >
               {isSaving ? <IconSpinner size={16} /> : <IconCheck size={16} />}
-              Guardar cambios
+              <span>Guardar cambios</span>
             </button>
           </div>
         </form>

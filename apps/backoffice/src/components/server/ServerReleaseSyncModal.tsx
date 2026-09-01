@@ -385,6 +385,11 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
             onClick={onClose}
             disabled={isApplying}
             className="launcher-btn-secondary"
+            style={{
+              padding: "10px 20px",
+              borderRadius: 12,
+              fontSize: "14px",
+            }}
           >
             Cancelar
           </button>
@@ -396,6 +401,9 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
             disabled={isApplying || !canApply}
             className="launcher-btn-primary"
             style={{
+              padding: "10px 22px",
+              borderRadius: 12,
+              fontSize: "14px",
               opacity: isApplying || !canApply ? 0.5 : 1,
               cursor: isApplying || !canApply ? "not-allowed" : "pointer",
             }}

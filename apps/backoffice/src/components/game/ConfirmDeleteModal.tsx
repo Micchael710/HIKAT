@@ -156,6 +156,11 @@ export default function ConfirmDeleteModal({
               type="button"
               onClick={onClose}
               className="launcher-btn-secondary"
+              style={{
+                padding: "10px 18px",
+                borderRadius: "12px",
+                fontSize: "14px",
+              }}
             >
               Cancelar
             </button>
@@ -168,6 +173,9 @@ export default function ConfirmDeleteModal({
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "8px",
+                padding: "10px 20px",
+                borderRadius: "12px",
+                fontSize: "14px",
               }}
             >
               {isDeleting && <IconSpinner style={{ width: 14, height: 14 }} />}

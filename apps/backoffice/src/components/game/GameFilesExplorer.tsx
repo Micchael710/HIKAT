@@ -1485,9 +1485,9 @@ function actionButtonStyle(isDark: boolean, variant: "primary" | "default" | "ic
     display: "inline-flex",
     alignItems: "center",
     gap: "6px",
-    borderRadius: "8px",
+    borderRadius: "10px",
     fontSize: "13px",
-    fontWeight: "500",
+    fontWeight: "600",
     cursor: "pointer",
     border: "none",
     transition: "all 0.15s ease",
@@ -1498,7 +1498,7 @@ function actionButtonStyle(isDark: boolean, variant: "primary" | "default" | "ic
       ...base,
       backgroundColor: "#2563eb",
       color: "#ffffff",
-      padding: "6px 12px",
+      padding: "7px 14px",
     }
   }
 
@@ -1507,7 +1507,7 @@ function actionButtonStyle(isDark: boolean, variant: "primary" | "default" | "ic
       ...base,
       backgroundColor: isDark ? "#1e293b" : "#e2e8f0",
       color: isDark ? "#f8fafc" : "#0f172a",
-      padding: "6px 10px",
+      padding: "7px 10px",
     }
   }
 
@@ -1516,7 +1516,7 @@ function actionButtonStyle(isDark: boolean, variant: "primary" | "default" | "ic
     backgroundColor: isDark ? "#1e293b" : "#ffffff",
     border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
     color: isDark ? "#f8fafc" : "#0f172a",
-    padding: "6px 12px",
+    padding: "7px 14px",
   }
 }
 

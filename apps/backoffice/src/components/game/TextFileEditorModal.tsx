@@ -293,7 +293,8 @@ export default function TextFileEditorModal({
                   alignItems: "center",
                   gap: "8px",
                   fontSize: "13px",
-                  padding: "8px 16px",
+                  padding: "8px 18px",
+                  borderRadius: "10px",
                 }}
               >
                 {isSaving ? <IconSpinner style={{ width: 14, height: 14 }} /> : <IconSave style={{ width: 14, height: 14 }} />}

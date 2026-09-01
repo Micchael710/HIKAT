@@ -343,6 +343,11 @@ export default function AddGameFileModal({
               type="button"
               onClick={onClose}
               className="launcher-btn-secondary"
+              style={{
+                padding: "10px 18px",
+                borderRadius: "12px",
+                fontSize: "14px",
+              }}
             >
               Cancelar
             </button>
@@ -354,10 +359,13 @@ export default function AddGameFileModal({
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "8px",
+                padding: "10px 22px",
+                borderRadius: "12px",
+                fontSize: "14px",
               }}
             >
               {isSubmitting && <IconSpinner size={16} />}
-              {isReplace ? "Guardar cambios" : "Añadir archivo"}
+              <span>{isReplace ? "Guardar cambios" : "Añadir archivo"}</span>
             </button>
           </div>
         </form>

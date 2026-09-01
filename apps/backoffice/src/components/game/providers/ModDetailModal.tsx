@@ -680,15 +680,12 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={installing}
+              className="launcher-btn-secondary"
               style={{
-                padding: "8px 16px",
-                background: "rgba(255, 255, 255, 0.06)",
-                border: "1px solid rgba(255, 255, 255, 0.12)",
-                color: "#e5e7eb",
-                borderRadius: "8px",
-                fontSize: "13px",
-                fontWeight: "500",
-                cursor: "pointer",
+                padding: "10px 18px",
+                borderRadius: "12px",
+                fontSize: "14px",
+                fontWeight: "600",
               }}
             >
               Cancelar
@@ -699,22 +696,20 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
               data-testid="button-confirm-install"
               onClick={handleInstall}
               disabled={installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)}
+              className="launcher-btn-primary"
               style={{
-                padding: "8px 20px",
-                background:
+                padding: "10px 22px",
+                borderRadius: "12px",
+                fontSize: "14px",
+                fontWeight: "700",
+                opacity:
                   installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)
-                    ? "rgba(16, 185, 129, 0.3)"
-                    : "#10b981",
-                border: "none",
-                color: "#ffffff",
-                borderRadius: "8px",
-                fontSize: "13px",
-                fontWeight: "600",
+                    ? 0.5
+                    : 1,
                 cursor:
                   installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)
                     ? "not-allowed"
                     : "pointer",
-                transition: "background 0.15s ease",
               }}
             >
               {installing

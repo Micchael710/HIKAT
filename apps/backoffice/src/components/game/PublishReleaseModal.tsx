@@ -675,6 +675,11 @@ export default function PublishReleaseModal({
                 data-testid="button-post-publish-close"
                 onClick={onClose}
                 className="launcher-btn-secondary"
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                }}
               >
                 Cerrar
               </button>
@@ -691,6 +696,11 @@ export default function PublishReleaseModal({
                     }
                   }}
                   className="launcher-btn-primary"
+                  style={{
+                    padding: "10px 22px",
+                    borderRadius: "12px",
+                    fontSize: "14px",
+                  }}
                 >
                   {postPublishState.plan.canApply
                     ? "Revisar cambios del servidor"
@@ -978,15 +988,11 @@ export default function PublishReleaseModal({
                   <button
                     type="button"
                     onClick={handleCloseModal}
+                    className="launcher-btn-secondary"
                     style={{
-                      padding: "9px 16px",
-                      borderRadius: "8px",
-                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                      backgroundColor: "transparent",
-                      color: isDark ? "#94a3b8" : "#64748b",
-                      fontSize: "13px",
-                      fontWeight: "500",
-                      cursor: "pointer",
+                      padding: "10px 18px",
+                      borderRadius: "12px",
+                      fontSize: "14px",
                     }}
                   >
                     Cancelar
@@ -994,15 +1000,11 @@ export default function PublishReleaseModal({
                   <button
                     type="submit"
                     disabled={isCoverUploading}
+                    className="launcher-btn-primary"
                     style={{
-                      padding: "9px 20px",
-                      borderRadius: "8px",
-                      border: "none",
-                      backgroundColor: "#3b82f6",
-                      color: "#ffffff",
-                      fontSize: "13px",
-                      fontWeight: "600",
-                      cursor: isCoverUploading ? "not-allowed" : "pointer",
+                      padding: "10px 22px",
+                      borderRadius: "12px",
+                      fontSize: "14px",
                     }}
                   >
                     Siguiente: Revisar cambios →
@@ -1242,15 +1244,11 @@ export default function PublishReleaseModal({
                   <button
                     type="button"
                     onClick={() => setCurrentStep(1)}
+                    className="launcher-btn-secondary"
                     style={{
-                      padding: "9px 16px",
-                      borderRadius: "8px",
-                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                      backgroundColor: "transparent",
-                      color: isDark ? "#94a3b8" : "#64748b",
-                      fontSize: "13px",
-                      fontWeight: "500",
-                      cursor: "pointer",
+                      padding: "10px 18px",
+                      borderRadius: "12px",
+                      fontSize: "14px",
                     }}
                   >
                     ← Volver a detalles
@@ -1258,15 +1256,11 @@ export default function PublishReleaseModal({
                   <button
                     type="button"
                     onClick={handleGoToStep3}
+                    className="launcher-btn-primary"
                     style={{
-                      padding: "9px 20px",
-                      borderRadius: "8px",
-                      border: "none",
-                      backgroundColor: "#3b82f6",
-                      color: "#ffffff",
-                      fontSize: "13px",
-                      fontWeight: "600",
-                      cursor: "pointer",
+                      padding: "10px 22px",
+                      borderRadius: "12px",
+                      fontSize: "14px",
                     }}
                   >
                     Siguiente: Confirmación →
@@ -1435,14 +1429,11 @@ export default function PublishReleaseModal({
                     type="button"
                     onClick={() => setCurrentStep(2)}
                     disabled={isSubmitting}
+                    className="launcher-btn-secondary"
                     style={{
-                      padding: "9px 16px",
-                      borderRadius: "8px",
-                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                      backgroundColor: "transparent",
-                      color: isDark ? "#94a3b8" : "#64748b",
-                      fontSize: "13px",
-                      fontWeight: "500",
+                      padding: "10px 18px",
+                      borderRadius: "12px",
+                      fontSize: "14px",
                       cursor: isSubmitting ? "not-allowed" : "pointer",
                     }}
                   >
@@ -1454,14 +1445,11 @@ export default function PublishReleaseModal({
                       type="button"
                       onClick={handleCloseModal}
                       disabled={isSubmitting}
+                      className="launcher-btn-secondary"
                       style={{
-                        padding: "9px 16px",
-                        borderRadius: "8px",
-                        border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: "transparent",
-                        color: isDark ? "#94a3b8" : "#64748b",
-                        fontSize: "13px",
-                        fontWeight: "500",
+                        padding: "10px 18px",
+                        borderRadius: "12px",
+                        fontSize: "14px",
                         cursor: isSubmitting ? "not-allowed" : "pointer",
                       }}
                     >
@@ -1471,24 +1459,21 @@ export default function PublishReleaseModal({
                     <button
                       type="submit"
                       disabled={isSubmitting || !isReady}
+                      className="launcher-btn-primary"
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
                         gap: "8px",
-                        padding: "9px 22px",
-                        borderRadius: "8px",
-                        border: "none",
-                        backgroundColor: "#22c55e",
-                        color: "#ffffff",
-                        fontSize: "13px",
+                        padding: "10px 24px",
+                        borderRadius: "12px",
+                        fontSize: "14px",
                         fontWeight: "700",
                         cursor: isSubmitting || !isReady ? "not-allowed" : "pointer",
                         opacity: isSubmitting || !isReady ? 0.6 : 1,
-                        boxShadow: isReady ? "0 2px 8px rgba(34, 197, 94, 0.4)" : "none",
                       }}
                     >
                       {isSubmitting ? <IconSpinner size={16} /> : <IconRocket size={16} />}
-                      Publicar actualización oficial
+                      <span>Publicar actualización oficial</span>
                     </button>
                   </div>
                 </div>

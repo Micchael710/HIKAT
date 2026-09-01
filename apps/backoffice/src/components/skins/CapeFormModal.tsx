@@ -430,15 +430,11 @@ export default function CapeFormModal({
             <button
               type="button"
               onClick={onClose}
+              className="launcher-btn-secondary"
               style={{
-                padding: "8px 16px",
-                borderRadius: "8px",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                backgroundColor: "transparent",
-                color: isDark ? "#94a3b8" : "#64748b",
-                fontSize: "13px",
-                fontWeight: "500",
-                cursor: "pointer",
+                padding: "10px 18px",
+                borderRadius: "12px",
+                fontSize: "14px",
               }}
             >
               {isViewOnly ? "Cerrar" : "Cancelar"}
@@ -447,23 +443,19 @@ export default function CapeFormModal({
               <button
                 type="submit"
                 disabled={isSubmitting}
+                className="launcher-btn-primary"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "8px",
-                  padding: "8px 20px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: "#6366f1",
-                  color: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  cursor: isSubmitting ? "not-allowed" : "pointer",
-                  opacity: isSubmitting ? 0.7 : 1,
+                  padding: "10px 22px",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  fontWeight: "700",
                 }}
               >
                 {isSubmitting && <IconSpinner size={16} />}
-                {isSubmitting ? "Guardando..." : isEdit ? "Actualizar Capa" : "Crear Capa"}
+                <span>{isSubmitting ? "Guardando..." : isEdit ? "Actualizar Capa" : "Crear Capa"}</span>
               </button>
             )}
           </div>
