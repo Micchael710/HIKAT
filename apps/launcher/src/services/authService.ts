@@ -52,7 +52,7 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
           localStorage.removeItem("hikat_auth_token")
           localStorage.removeItem("hikat_refresh_token")
         }
-      } catch (_) {}
+      } catch (_) { }
 
       if (typeof window !== "undefined" && window.electronAPI?.authLoadSession) {
         try {
@@ -60,7 +60,7 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
           if (session && session.accessToken && session.refreshToken && session.user) {
             return session as SessionState
           }
-        } catch (_) {}
+        } catch (_) { }
       }
       return null
     },
@@ -69,7 +69,7 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
       if (typeof window !== "undefined" && window.electronAPI?.authSaveSession) {
         try {
           await window.electronAPI.authSaveSession(session)
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // In Renderer localStorage, ONLY cache non-sensitive user profile for instant UI display
@@ -89,14 +89,14 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
             }),
           )
         }
-      } catch (_) {}
+      } catch (_) { }
     },
 
     clearSession: async () => {
       if (typeof window !== "undefined" && window.electronAPI?.authClearSession) {
         try {
           await window.electronAPI.authClearSession()
-        } catch (_) {}
+        } catch (_) { }
       }
       try {
         if (typeof localStorage !== "undefined") {
@@ -105,7 +105,7 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
           localStorage.removeItem("hikat_refresh_token")
           localStorage.removeItem("hikat_last_user")
         }
-      } catch (_) {}
+      } catch (_) { }
     },
   }
 }
@@ -317,7 +317,7 @@ class LauncherAuthService {
     const codeVerifier = generateCodeVerifier(64)
     const codeChallenge = await generateCodeChallenge(codeVerifier)
     const state = generateRandomState(32)
-    const redirectUri = "hikat://auth/callback"
+    const redirectUri = "http://127.0.0.1:47821/auth/callback"
 
     const authUrl = this.client.createOAuthAuthorizationUrl({
       provider,
@@ -336,7 +336,7 @@ class LauncherAuthService {
           keepSession,
           expiresAt: Date.now() + 10 * 60 * 1000,
         })
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // Web fallback
@@ -346,7 +346,7 @@ class LauncherAuthService {
         sessionStorage.setItem("hikat_launcher_oauth_state", state)
         sessionStorage.setItem("hikat_launcher_oauth_keep_session", keepSession ? "true" : "false")
       }
-    } catch (_) {}
+    } catch (_) { }
 
     return { authUrl, codeVerifier, state }
   }
@@ -373,7 +373,7 @@ class LauncherAuthService {
             keepSession = pending.keepSession
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // Fallback to sessionStorage
@@ -405,7 +405,7 @@ class LauncherAuthService {
         {
           code: params.code,
           codeVerifier: verifier,
-          redirectUri: "hikat://auth/callback",
+          redirectUri: "http://127.0.0.1:47821/auth/callback",
         },
         finalKeepSession,
       )
@@ -414,8 +414,8 @@ class LauncherAuthService {
       if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {
         try {
           const p = window.electronAPI.authClearPendingOAuth()
-          if (p && typeof p.catch === "function") p.catch(() => {})
-        } catch (_) {}
+          if (p && typeof p.catch === "function") p.catch(() => { })
+        } catch (_) { }
       }
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.removeItem("hikat_launcher_oauth_verifier")
@@ -435,8 +435,8 @@ class LauncherAuthService {
       if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {
         try {
           const p = window.electronAPI.authClearPendingOAuth()
-          if (p && typeof p.catch === "function") p.catch(() => {})
-        } catch (_) {}
+          if (p && typeof p.catch === "function") p.catch(() => { })
+        } catch (_) { }
       }
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.removeItem("hikat_launcher_oauth_verifier")

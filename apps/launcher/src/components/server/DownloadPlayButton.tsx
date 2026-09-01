@@ -101,6 +101,21 @@ export default function DownloadPlayButton({
     }, 2800)
   }
 
+  const markSyncedVersionInstalled = (syncingVersion: string) => {
+    setManifest((current) => {
+      if (!current || current.version !== syncingVersion) {
+        return current
+      }
+
+      return {
+        ...current,
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+      }
+    })
+  }
+
   // Close options menu on click outside
   useEffect(() => {
     if (!isMenuOpen) return
@@ -167,7 +182,7 @@ export default function DownloadPlayButton({
 
       try {
         localStorage.setItem("hikat_game_manifest", JSON.stringify(newModpack))
-      } catch (_) {}
+      } catch (_) { }
 
       latestManifestVersionRef.current = newManifest.version
       setManifest(newManifest)
@@ -324,6 +339,8 @@ export default function DownloadPlayButton({
           }
           if (res?.success) {
             gameService.setGameInstalled(true)
+            markSyncedVersionInstalled(syncingVersion)
+
             if (
               latestManifestVersionRef.current &&
               latestManifestVersionRef.current !== syncingVersion
@@ -332,6 +349,7 @@ export default function DownloadPlayButton({
             } else {
               setStatus("play")
             }
+
             showToast(t("playButton.syncSuccess"), "success")
           }
         })
@@ -384,6 +402,8 @@ export default function DownloadPlayButton({
           }
           if (res?.success) {
             gameService.setGameInstalled(true)
+            markSyncedVersionInstalled(syncingVersion)
+
             if (
               latestManifestVersionRef.current &&
               latestManifestVersionRef.current !== syncingVersion
@@ -392,6 +412,7 @@ export default function DownloadPlayButton({
             } else {
               setStatus("play")
             }
+
             showToast(t("playButton.syncSuccess"), "success")
           }
         })
@@ -413,7 +434,7 @@ export default function DownloadPlayButton({
           const parsed = JSON.parse(userRaw)
           if (parsed?.username) playerName = parsed.username
         }
-      } catch (_) {}
+      } catch (_) { }
 
       try {
         await gameService.launchGame({
@@ -455,6 +476,12 @@ export default function DownloadPlayButton({
           return
         }
         const verified = await gameService.checkGameManifest()
+
+        if (verified) {
+          latestManifestVersionRef.current = verified.version
+          setManifest(verified)
+        }
+
         if (verified?.installed && !verified?.hasUpdate) {
           gameService.setGameInstalled(true)
           setStatus("play")

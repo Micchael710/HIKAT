@@ -22,7 +22,7 @@ if (!singleInstanceLock) {
 const appDataRoot = path.join(app.getPath("appData"), "HiKAT")
 try {
   app.setPath("userData", path.join(appDataRoot, "launcher"))
-} catch (_) {}
+} catch (_) { }
 
 // Protocol client registration for OAuth deep linking (hikat://auth/callback)
 if (process.defaultApp) {
@@ -70,7 +70,7 @@ function getLauncherIcon() {
         return nativeImage.createFromPath(candidate)
       }
     }
-  } catch (_) {}
+  } catch (_) { }
   return undefined
 }
 
@@ -230,7 +230,7 @@ function destroyTray() {
   if (tray && !tray.isDestroyed()) {
     try {
       tray.destroy()
-    } catch (_) {}
+    } catch (_) { }
     tray = null
   }
 }
@@ -345,6 +345,7 @@ async function createWindow() {
 }
 
 let pendingDeepLinkUrl = null
+const completedOAuthStates = new Set()
 
 function extractDeepLinkFromArgs(args) {
   if (!Array.isArray(args)) return null
@@ -364,6 +365,20 @@ function handleDeepLinkUrl(rawUrl) {
   const validUrl = parseValidOAuthCallbackUrl(rawUrl)
   if (!validUrl) return
 
+  try {
+    const parsed = new URL(validUrl)
+    const state = parsed.searchParams.get("state")
+    const code = parsed.searchParams.get("code")
+
+    if (state && code) {
+      completedOAuthStates.add(state)
+
+      setTimeout(() => {
+        completedOAuthStates.delete(state)
+      }, 60_000)
+    }
+  } catch (_) { }
+
   focusMainWindow()
 
   if (
@@ -379,6 +394,754 @@ function handleDeepLinkUrl(rawUrl) {
   }
 }
 
+const OAUTH_LOOPBACK_HOST = "127.0.0.1"
+const OAUTH_LOOPBACK_PORT = 47821
+
+let oauthLoopbackServer = null
+
+function startOAuthLoopbackServer() {
+  if (oauthLoopbackServer) {
+    return
+  }
+
+  const logoPath = path.join(__dirname, "splash-logo.png")
+  const backgroundPath = path.join(__dirname, "oauth-bg.png")
+
+  oauthLoopbackServer = http.createServer((req, res) => {
+    const url = new URL(
+      req.url,
+      `http://${OAUTH_LOOPBACK_HOST}:${OAUTH_LOOPBACK_PORT}`,
+    )
+
+    // Logo HiKAT
+    if (url.pathname === "/auth/logo.png") {
+      if (!fs.existsSync(logoPath)) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=3600",
+      })
+
+      fs.createReadStream(logoPath).pipe(res)
+      return
+    }
+
+    // Fondo HiKAT
+    if (url.pathname === "/auth/background.png") {
+      if (!fs.existsSync(backgroundPath)) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=3600",
+      })
+
+      fs.createReadStream(backgroundPath).pipe(res)
+      return
+    }
+
+    // Estado real del callback en Electron
+    if (url.pathname === "/auth/status") {
+      const state = url.searchParams.get("state")
+
+      const completed = Boolean(
+        state &&
+        completedOAuthStates.has(state),
+      )
+
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      })
+
+      res.end(
+        JSON.stringify({
+          completed,
+        }),
+      )
+
+      return
+    }
+
+    if (url.pathname !== "/auth/callback") {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+
+    const callbackUrl =
+      `hikat://auth/callback${url.search}`
+
+    const callbackState =
+      url.searchParams.get("state") || ""
+
+    const providerError =
+      url.searchParams.get("error") || ""
+
+    const serializedCallbackUrl =
+      JSON.stringify(callbackUrl).replace(
+        /</g,
+        "\\u003c",
+      )
+
+    const serializedState =
+      JSON.stringify(callbackState).replace(
+        /</g,
+        "\\u003c",
+      )
+
+    const serializedProviderError =
+      JSON.stringify(providerError).replace(
+        /</g,
+        "\\u003c",
+      )
+
+    // Idioma preferido del navegador
+    const acceptLanguage = String(
+      req.headers["accept-language"] || "",
+    ).toLowerCase()
+
+    const language =
+      acceptLanguage.startsWith("es")
+        ? "es"
+        : acceptLanguage.startsWith("pt")
+          ? "pt"
+          : acceptLanguage.startsWith("fr")
+            ? "fr"
+            : "en"
+
+    const translations = {
+      es: {
+        waitingStatus: "Cuenta autenticada",
+        waitingTitle: "Continuando en HiKAT Launcher",
+        waitingDescription:
+          "Estamos redirigiéndote al Launcher. Tu navegador te pedirá permiso para abrir HiKAT.",
+        waitingSecondary:
+          "Confirma el aviso del navegador para continuar.",
+
+        successStatus: "Inicio de sesión completado",
+        successTitle: "Todo listo",
+        successDescription:
+          "HiKAT Launcher se abrió correctamente. Ya puedes continuar desde la aplicación.",
+        successSecondary:
+          "Puedes cerrar esta pestaña de forma segura.",
+
+        openErrorStatus: "No se pudo abrir el Launcher",
+        openErrorTitle: "Algo salió mal",
+        openErrorDescription:
+          "HiKAT Launcher no respondió. Es posible que hayas cancelado el aviso del navegador.",
+        openErrorSecondary:
+          "Puedes volver a intentarlo.",
+        retry: "Reintentar",
+
+        providerErrorStatus: "Inicio de sesión cancelado",
+        providerErrorTitle: "No se completó el acceso",
+        providerErrorDescription:
+          "El inicio de sesión con tu cuenta externa fue cancelado o no pudo completarse.",
+        providerErrorSecondary:
+          "Vuelve a HiKAT Launcher e inténtalo nuevamente.",
+      },
+
+      en: {
+        waitingStatus: "Account authenticated",
+        waitingTitle: "Continuing to HiKAT Launcher",
+        waitingDescription:
+          "We're redirecting you to the Launcher. Your browser will ask for permission to open HiKAT.",
+        waitingSecondary:
+          "Confirm the browser prompt to continue.",
+
+        successStatus: "Sign-in complete",
+        successTitle: "You're all set",
+        successDescription:
+          "HiKAT Launcher opened successfully. You can continue from the application.",
+        successSecondary:
+          "You can safely close this tab.",
+
+        openErrorStatus: "Launcher could not be opened",
+        openErrorTitle: "Something went wrong",
+        openErrorDescription:
+          "HiKAT Launcher did not respond. You may have cancelled the browser prompt.",
+        openErrorSecondary:
+          "You can try again.",
+        retry: "Try again",
+
+        providerErrorStatus: "Sign-in cancelled",
+        providerErrorTitle: "Sign-in was not completed",
+        providerErrorDescription:
+          "Sign-in with your external account was cancelled or could not be completed.",
+        providerErrorSecondary:
+          "Return to HiKAT Launcher and try again.",
+      },
+
+      pt: {
+        waitingStatus: "Conta autenticada",
+        waitingTitle: "Continuando no HiKAT Launcher",
+        waitingDescription:
+          "Estamos redirecionando você para o Launcher. Seu navegador pedirá permissão para abrir o HiKAT.",
+        waitingSecondary:
+          "Confirme o aviso do navegador para continuar.",
+
+        successStatus: "Login concluído",
+        successTitle: "Tudo pronto",
+        successDescription:
+          "O HiKAT Launcher foi aberto corretamente. Agora você pode continuar pelo aplicativo.",
+        successSecondary:
+          "Você pode fechar esta aba com segurança.",
+
+        openErrorStatus: "Não foi possível abrir o Launcher",
+        openErrorTitle: "Algo deu errado",
+        openErrorDescription:
+          "O HiKAT Launcher não respondeu. Talvez você tenha cancelado o aviso do navegador.",
+        openErrorSecondary:
+          "Você pode tentar novamente.",
+        retry: "Tentar novamente",
+
+        providerErrorStatus: "Login cancelado",
+        providerErrorTitle: "Não foi possível concluir o login",
+        providerErrorDescription:
+          "O login com sua conta externa foi cancelado ou não pôde ser concluído.",
+        providerErrorSecondary:
+          "Volte ao HiKAT Launcher e tente novamente.",
+      },
+
+      fr: {
+        waitingStatus: "Compte authentifié",
+        waitingTitle: "Redirection vers HiKAT Launcher",
+        waitingDescription:
+          "Nous vous redirigeons vers le Launcher. Votre navigateur vous demandera l’autorisation d’ouvrir HiKAT.",
+        waitingSecondary:
+          "Confirmez l’invite du navigateur pour continuer.",
+
+        successStatus: "Connexion terminée",
+        successTitle: "Tout est prêt",
+        successDescription:
+          "HiKAT Launcher s’est ouvert correctement. Vous pouvez maintenant continuer dans l’application.",
+        successSecondary:
+          "Vous pouvez fermer cet onglet en toute sécurité.",
+
+        openErrorStatus: "Impossible d’ouvrir le Launcher",
+        openErrorTitle: "Un problème est survenu",
+        openErrorDescription:
+          "HiKAT Launcher n’a pas répondu. Vous avez peut-être annulé l’invite du navigateur.",
+        openErrorSecondary:
+          "Vous pouvez réessayer.",
+        retry: "Réessayer",
+
+        providerErrorStatus: "Connexion annulée",
+        providerErrorTitle: "La connexion n’a pas été terminée",
+        providerErrorDescription:
+          "La connexion avec votre compte externe a été annulée ou n’a pas pu être terminée.",
+        providerErrorSecondary:
+          "Retournez dans HiKAT Launcher et réessayez.",
+      },
+    }
+
+    const copy =
+      translations[language] ||
+      translations.en
+
+    const serializedCopy =
+      JSON.stringify(copy).replace(
+        /</g,
+        "\\u003c",
+      )
+
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+    })
+
+    res.end(`
+      <!doctype html>
+
+      <html lang="${language}">
+        <head>
+          <meta charset="utf-8">
+
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1"
+          >
+
+          <meta
+            name="color-scheme"
+            content="dark"
+          >
+
+          <title>HiKAT Launcher</title>
+
+          <style>
+            * {
+              box-sizing: border-box;
+            }
+
+            html,
+            body {
+              margin: 0;
+              width: 100%;
+              min-height: 100%;
+
+              font-family:
+                Inter,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            }
+
+            body {
+              min-height: 100vh;
+
+              background:
+                linear-gradient(
+                  rgba(5, 8, 12, 0.72),
+                  rgba(5, 8, 12, 0.90)
+                ),
+                url("/auth/background.png")
+                center / cover no-repeat,
+                #090d12;
+
+              color: #ffffff;
+            }
+
+            .page {
+              min-height: 100vh;
+
+              display: flex;
+              flex-direction: column;
+
+              padding: 34px 42px;
+            }
+
+            .brand {
+              min-height: 64px;
+
+              display: flex;
+              align-items: center;
+            }
+
+            .brand img {
+              max-width: 180px;
+              max-height: 58px;
+
+              object-fit: contain;
+              object-position: left center;
+            }
+
+            .content {
+              flex: 1;
+
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            }
+
+            .card {
+              width: min(
+                480px,
+                calc(100vw - 48px)
+              );
+
+              padding: 42px 40px;
+
+              background:
+                rgba(12, 18, 26, 0.96);
+
+              border:
+                1px solid
+                rgba(255, 255, 255, 0.09);
+
+              border-radius: 18px;
+
+              box-shadow:
+                0 32px 90px
+                rgba(0, 0, 0, 0.48);
+
+              text-align: center;
+            }
+
+            .status {
+              margin-bottom: 20px;
+
+              color: #efc436;
+
+              font-size: 13px;
+              font-weight: 700;
+            }
+
+            h1 {
+              margin: 0 0 16px;
+
+              font-size: 30px;
+              line-height: 1.15;
+
+              font-weight: 800;
+
+              letter-spacing: -0.025em;
+            }
+
+            .description {
+              margin: 0;
+
+              color: #aab5c2;
+
+              font-size: 16px;
+              line-height: 1.65;
+            }
+
+            .secondary {
+              margin: 18px 0 0;
+
+              color: #718090;
+
+              font-size: 13px;
+              line-height: 1.5;
+            }
+
+            .loader {
+              width: 30px;
+              height: 30px;
+
+              margin: 28px auto 0;
+
+              border:
+                3px solid
+                rgba(255, 255, 255, 0.10);
+
+              border-top-color: #efc436;
+
+              border-radius: 50%;
+
+              animation:
+                spin 0.8s linear infinite;
+            }
+
+            @keyframes spin {
+              to {
+                transform: rotate(360deg);
+              }
+            }
+
+            .retry {
+              display: none;
+
+              width: 100%;
+
+              margin-top: 26px;
+              padding: 13px 18px;
+
+              border: 0;
+              border-radius: 10px;
+
+              background: #efc436;
+              color: #10151c;
+
+              font-size: 14px;
+              font-weight: 800;
+
+              cursor: pointer;
+            }
+
+            .retry:hover {
+              filter: brightness(1.06);
+            }
+
+            .footer {
+              color:
+                rgba(255, 255, 255, 0.42);
+
+              font-size: 11px;
+            }
+          </style>
+        </head>
+
+        <body>
+
+          <div class="page">
+
+            <header class="brand">
+              <img
+                src="/auth/logo.png"
+                alt="HiKAT"
+              >
+            </header>
+
+            <main class="content">
+
+              <section class="card">
+
+                <div
+                  id="status"
+                  class="status"
+                ></div>
+
+                <h1 id="title"></h1>
+
+                <p
+                  id="description"
+                  class="description"
+                ></p>
+
+                <div
+                  id="loader"
+                  class="loader"
+                ></div>
+
+                <button
+                  id="retry"
+                  class="retry"
+                  type="button"
+                ></button>
+
+                <p
+                  id="secondary"
+                  class="secondary"
+                ></p>
+
+              </section>
+
+            </main>
+
+            <footer class="footer">
+              HiKAT Launcher
+            </footer>
+
+          </div>
+
+          <script>
+            const callbackUrl =
+              ${serializedCallbackUrl};
+
+            const callbackState =
+              ${serializedState};
+
+            const providerError =
+              ${serializedProviderError};
+
+            const t =
+              ${serializedCopy};
+
+            const status =
+              document.getElementById("status");
+
+            const title =
+              document.getElementById("title");
+
+            const description =
+              document.getElementById("description");
+
+            const loader =
+              document.getElementById("loader");
+
+            const secondary =
+              document.getElementById("secondary");
+
+            const retry =
+              document.getElementById("retry");
+
+            let completed = false;
+            let launchTimeout = null;
+            let statusInterval = null;
+
+            function showWaitingState() {
+              completed = false;
+
+              status.textContent =
+                t.waitingStatus;
+
+              title.textContent =
+                t.waitingTitle;
+
+              description.textContent =
+                t.waitingDescription;
+
+              secondary.textContent =
+                t.waitingSecondary;
+
+              loader.style.display =
+                "block";
+
+              retry.style.display =
+                "none";
+            }
+
+            function showCompletedState() {
+              if (completed) {
+                return;
+              }
+
+              completed = true;
+
+              clearTimeout(launchTimeout);
+              clearInterval(statusInterval);
+
+              status.textContent =
+                t.successStatus;
+
+              title.textContent =
+                t.successTitle;
+
+              description.textContent =
+                t.successDescription;
+
+              secondary.textContent =
+                t.successSecondary;
+
+              loader.style.display =
+                "none";
+
+              retry.style.display =
+                "none";
+            }
+
+            function showLauncherError() {
+              if (completed) {
+                return;
+              }
+
+              clearInterval(statusInterval);
+
+              status.textContent =
+                t.openErrorStatus;
+
+              title.textContent =
+                t.openErrorTitle;
+
+              description.textContent =
+                t.openErrorDescription;
+
+              secondary.textContent =
+                t.openErrorSecondary;
+
+              loader.style.display =
+                "none";
+
+              retry.textContent =
+                t.retry;
+
+              retry.style.display =
+                "block";
+            }
+
+            function showProviderError() {
+              completed = true;
+
+              status.textContent =
+                t.providerErrorStatus;
+
+              title.textContent =
+                t.providerErrorTitle;
+
+              description.textContent =
+                t.providerErrorDescription;
+
+              secondary.textContent =
+                t.providerErrorSecondary;
+
+              loader.style.display =
+                "none";
+
+              retry.style.display =
+                "none";
+            }
+
+            async function checkLauncherStatus() {
+              if (
+                completed ||
+                !callbackState
+              ) {
+                return;
+              }
+
+              try {
+                const response = await fetch(
+                  "/auth/status?state=" +
+                  encodeURIComponent(callbackState),
+                  {
+                    cache: "no-store",
+                  },
+                );
+
+                if (!response.ok) {
+                  return;
+                }
+
+                const result =
+                  await response.json();
+
+                if (result.completed) {
+                  showCompletedState();
+                }
+              } catch (_) { }
+            }
+
+            function openLauncher() {
+              clearTimeout(launchTimeout);
+              clearInterval(statusInterval);
+
+              showWaitingState();
+
+              window.location.href =
+                callbackUrl;
+
+              statusInterval =
+                setInterval(
+                  checkLauncherStatus,
+                  500,
+                );
+
+              // Chrome no informa directamente
+              // si el usuario pulsó Cancel.
+              // Si Electron no responde,
+              // asumimos que no se abrió.
+              launchTimeout =
+                setTimeout(() => {
+                  checkLauncherStatus()
+                    .finally(() => {
+                      if (!completed) {
+                        showLauncherError();
+                      }
+                    });
+                }, 10000);
+            }
+
+            retry.addEventListener(
+              "click",
+              () => {
+                openLauncher();
+              },
+            );
+
+            if (providerError) {
+              showProviderError();
+            } else {
+              showWaitingState();
+
+              setTimeout(() => {
+                openLauncher();
+              }, 150);
+            }
+          </script>
+
+        </body>
+      </html>
+    `)
+  })
+
+  oauthLoopbackServer.listen(
+    OAUTH_LOOPBACK_PORT,
+    OAUTH_LOOPBACK_HOST,
+  )
+}
 
 // Second instance handler (when user launches launcher while already running or via deep link)
 app.on("second-instance", (_event, commandLine) => {
@@ -459,7 +1222,7 @@ ipcMain.handle("setting-start-with-system", async (_event, enabled) => {
 ipcMain.on("setting-start-with-system", (_event, enabled) => {
   try {
     app.setLoginItemSettings({ openAtLogin: Boolean(enabled) })
-  } catch (_) {}
+  } catch (_) { }
 })
 
 ipcMain.handle("get-minimize-to-tray", async () => {
@@ -570,7 +1333,7 @@ ipcMain.on("open-external", (_event, url) => {
       if (parsed.protocol === "http:" || parsed.protocol === "https:") {
         shell.openExternal(cleanUrl)
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 })
 
@@ -648,6 +1411,8 @@ ipcMain.handle("game-get-status", async () => {
 })
 
 app.whenReady().then(() => {
+  startOAuthLoopbackServer()
+
   createSplashWindow()
   createWindow()
 
@@ -662,6 +1427,11 @@ app.whenReady().then(() => {
 
 app.on("before-quit", () => {
   isQuitRequested = true
+
+  if (oauthLoopbackServer) {
+    oauthLoopbackServer.close()
+    oauthLoopbackServer = null
+  }
 })
 
 app.on("window-all-closed", () => {
