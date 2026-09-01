@@ -286,7 +286,9 @@ export async function exchangeGoogleCode(
   code: string,
   redirectUri: string,
   config: OAuthProviderConfig,
-  customFetcher: OAuthFetcher = { fetch },
+  customFetcher: OAuthFetcher = {
+    fetch: (input, init) => fetch(input, init),
+  },
 ): Promise<OAuthProviderProfile> {
   const tokenUrl = "https://oauth2.googleapis.com/token"
   const body = new URLSearchParams({
@@ -357,7 +359,9 @@ export async function exchangeDiscordCode(
   code: string,
   redirectUri: string,
   config: OAuthProviderConfig,
-  customFetcher: OAuthFetcher = { fetch },
+  customFetcher: OAuthFetcher = {
+    fetch: (input, init) => fetch(input, init),
+  },
 ): Promise<OAuthProviderProfile> {
   const tokenUrl = "https://discord.com/api/oauth2/token"
   const body = new URLSearchParams({
