@@ -15,46 +15,405 @@ import { validateGameFileBuffer } from "@hikat/shared"
 const mockFetch = vi.fn()
 globalThis.fetch = mockFetch
 
-function createTestR2() {
-  const store = new Map<string, { body: Uint8Array; metadata?: any }>()
-  return {
-    _store: store,
-    get: vi.fn(async (key: string) => {
-      const item = store.get(key)
-      if (!item) return null
-      return {
-        key,
-        size: item.body.byteLength,
-        arrayBuffer: async () => item.body.buffer,
-        customMetadata: item.metadata?.customMetadata,
-      }
-    }),
-    put: vi.fn(async (key: string, value: any, options?: any) => {
-      let body: Uint8Array
-      if (value instanceof Uint8Array) {
-        body = value
-      } else if (value instanceof ArrayBuffer) {
-        body = new Uint8Array(value)
-      } else if (typeof value === "string") {
-        body = new TextEncoder().encode(value)
-      } else {
-        body = new Uint8Array(0)
-      }
-      store.set(key, { body, metadata: options })
-      return { key, size: body.byteLength }
-    }),
-    delete: vi.fn(async (keys: string | string[]) => {
-      const list = Array.isArray(keys) ? keys : [keys]
-      for (const k of list) {
-        store.delete(k)
-      }
-    }),
-    head: vi.fn(async (key: string) => {
-      const item = store.get(key)
-      if (!item) return null
-      return { key, size: item.body.byteLength }
-    }),
+const fixedLengthStreams =
+  new WeakMap<object, number>()
+
+class TestFixedLengthStream {
+  readable: ReadableStream<Uint8Array>
+  writable: WritableStream<Uint8Array>
+
+  constructor(
+    length: number | bigint,
+  ) {
+    const stream =
+      new TransformStream<
+        Uint8Array,
+        Uint8Array
+      >()
+
+    this.readable =
+      stream.readable
+
+    this.writable =
+      stream.writable
+
+    fixedLengthStreams.set(
+      this.readable,
+      Number(length),
+    )
   }
+}
+
+; (globalThis as any).FixedLengthStream =
+  TestFixedLengthStream
+
+function createTestR2() {
+  const store =
+    new Map<
+      string,
+      {
+        body: Uint8Array
+        metadata?: any
+      }
+    >()
+
+  async function toUint8Array(
+    value: any,
+  ): Promise<Uint8Array> {
+    if (value instanceof Uint8Array) {
+      return value
+    }
+
+    if (value instanceof ArrayBuffer) {
+      return new Uint8Array(value)
+    }
+
+    if (ArrayBuffer.isView(value)) {
+      return new Uint8Array(
+        value.buffer,
+        value.byteOffset,
+        value.byteLength,
+      )
+    }
+
+    if (
+      value &&
+      typeof value.getReader ===
+      "function"
+    ) {
+      const reader =
+        value.getReader()
+
+      const chunks: Uint8Array[] = []
+      let total = 0
+
+      while (true) {
+        const result =
+          await reader.read()
+
+        if (result.done) {
+          break
+        }
+
+        const chunk =
+          result.value instanceof Uint8Array
+            ? result.value
+            : new Uint8Array(
+              result.value,
+            )
+
+        chunks.push(chunk)
+        total +=
+          chunk.byteLength
+      }
+
+      const combined =
+        new Uint8Array(total)
+
+      let offset = 0
+
+      for (const chunk of chunks) {
+        combined.set(
+          chunk,
+          offset,
+        )
+
+        offset +=
+          chunk.byteLength
+      }
+
+      return combined
+    }
+
+    if (typeof value === "string") {
+      return new TextEncoder().encode(
+        value,
+      )
+    }
+
+    return new Uint8Array(0)
+  }
+
+  const bucket: any = {
+    _store: store,
+
+    get: vi.fn(
+      async (
+        key: string,
+        options?: {
+          range?: {
+            offset?: number
+            length?: number
+          }
+        },
+      ) => {
+        const item =
+          store.get(key)
+
+        if (!item) {
+          return null
+        }
+
+        let body = item.body
+
+        if (options?.range) {
+          const offset =
+            options.range.offset || 0
+
+          const length =
+            options.range.length ??
+            body.byteLength
+
+          body = body.slice(
+            offset,
+            offset + length,
+          )
+        }
+
+        return {
+          key,
+          size: body.byteLength,
+
+          body:
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(body)
+                controller.close()
+              },
+            }),
+
+          arrayBuffer: async () =>
+            body.buffer.slice(
+              body.byteOffset,
+              body.byteOffset +
+              body.byteLength,
+            ),
+
+          customMetadata:
+            item.metadata
+              ?.customMetadata,
+        }
+      },
+    ),
+
+    put: vi.fn(
+      async (
+        key: string,
+        value: any,
+        options?: any,
+      ) => {
+        const body =
+          await toUint8Array(value)
+
+        if (
+          value instanceof ReadableStream
+        ) {
+          const expectedLength =
+            fixedLengthStreams.get(
+              value,
+            )
+
+          if (
+            expectedLength !== undefined &&
+            body.byteLength !==
+            expectedLength
+          ) {
+            throw new Error(
+              `FixedLengthStream expected ${expectedLength} bytes but received ${body.byteLength}`,
+            )
+          }
+        }
+
+        store.set(key, {
+          body,
+          metadata: options,
+        })
+
+        return {
+          key,
+          size: body.byteLength,
+        }
+      },
+    ),
+
+    delete: vi.fn(
+      async (
+        keys: string | string[],
+      ) => {
+        const list =
+          Array.isArray(keys)
+            ? keys
+            : [keys]
+
+        for (const key of list) {
+          store.delete(key)
+        }
+      },
+    ),
+
+    head: vi.fn(
+      async (key: string) => {
+        const item =
+          store.get(key)
+
+        if (!item) {
+          return null
+        }
+
+        return {
+          key,
+          size:
+            item.body.byteLength,
+        }
+      },
+    ),
+
+    createMultipartUpload:
+      vi.fn(
+        async (
+          key: string,
+          options?: any,
+        ) => {
+          const parts =
+            new Map<
+              number,
+              Uint8Array
+            >()
+
+          let aborted = false
+
+          return {
+            key,
+            uploadId:
+              crypto.randomUUID(),
+
+            uploadPart: vi.fn(
+              async (
+                partNumber: number,
+                value: any,
+              ) => {
+                if (aborted) {
+                  throw new Error(
+                    "Multipart upload aborted",
+                  )
+                }
+                if (
+                  value instanceof ReadableStream
+                ) {
+                  const knownLength =
+                    fixedLengthStreams.get(
+                      value,
+                    )
+
+                  if (knownLength === undefined) {
+                    throw new TypeError(
+                      "Provided readable stream must have a known length",
+                    )
+                  }
+                }
+
+                const body =
+                  await toUint8Array(
+                    value,
+                  )
+
+                parts.set(
+                  partNumber,
+                  body,
+                )
+
+                return {
+                  partNumber,
+                  etag:
+                    crypto.randomUUID(),
+                }
+              },
+            ),
+
+            complete: vi.fn(
+              async (
+                uploadedParts: Array<{
+                  partNumber: number
+                }>,
+              ) => {
+                if (aborted) {
+                  throw new Error(
+                    "Multipart upload aborted",
+                  )
+                }
+
+                const ordered =
+                  [...uploadedParts]
+                    .sort(
+                      (a, b) =>
+                        a.partNumber -
+                        b.partNumber,
+                    )
+                    .map(
+                      (part) =>
+                        parts.get(
+                          part.partNumber,
+                        ) ||
+                        new Uint8Array(
+                          0,
+                        ),
+                    )
+
+                const total =
+                  ordered.reduce(
+                    (
+                      sum,
+                      part,
+                    ) =>
+                      sum +
+                      part.byteLength,
+                    0,
+                  )
+
+                const body =
+                  new Uint8Array(
+                    total,
+                  )
+
+                let offset = 0
+
+                for (
+                  const part of ordered
+                ) {
+                  body.set(
+                    part,
+                    offset,
+                  )
+
+                  offset +=
+                    part.byteLength
+                }
+
+                store.set(key, {
+                  body,
+                  metadata: options,
+                })
+
+                return {
+                  key,
+                  size:
+                    body.byteLength,
+                }
+              },
+            ),
+
+            abort: vi.fn(
+              async () => {
+                aborted = true
+                parts.clear()
+              },
+            ),
+          }
+        },
+      ),
+  }
+
+  return bucket
 }
 
 // Sample valid JAR / ZIP buffer with magic bytes PK\x03\x04
@@ -67,6 +426,53 @@ function createSampleJarBuffer(content: string = "dummy jar content"): Uint8Arra
   buf[3] = 0x04
   buf.set(enc, 4)
   return buf
+}
+
+function createBinaryResponse(
+  bytes: Uint8Array,
+  status = 200,
+  sizeBytes?: number,
+) {
+  const targetSize =
+    sizeBytes && sizeBytes > bytes.byteLength
+      ? sizeBytes
+      : bytes.byteLength
+
+  const copy = new Uint8Array(targetSize)
+  copy.set(bytes, 0)
+
+  return {
+    ok:
+      status >= 200 &&
+      status < 300,
+
+    status,
+
+    headers:
+      new Headers({
+        "content-length":
+          String(
+            copy.byteLength,
+          ),
+      }),
+
+    body:
+      new ReadableStream<
+        Uint8Array
+      >({
+        start(controller) {
+          controller.enqueue(copy)
+          controller.close()
+        },
+      }),
+
+    arrayBuffer: async () =>
+      copy.buffer.slice(
+        copy.byteOffset,
+        copy.byteOffset +
+        copy.byteLength,
+      ),
+  }
 }
 
 describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
@@ -567,11 +973,11 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         if (u.includes("https://cdn.external-forge-cdn.net/files/secure.jar")) {
           // Binary download request: MUST NOT contain x-api-key!
           expect(opts?.headers?.["x-api-key"]).toBeUndefined()
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => createSampleJarBuffer("secure binary").buffer,
-          }
+          return createBinaryResponse(
+            createSampleJarBuffer(
+              "secure binary",
+            ),
+          )
         }
         return { ok: false, status: 404 }
       })
@@ -585,6 +991,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
 
       expect(result.length).toBe(1)
       expect(result[0]!.name).toBe("secure.jar")
+      expect(r2.createMultipartUpload).toHaveBeenCalled()
+      expect(r2.put).not.toHaveBeenCalled()
+      expect(r2._store.size).toBe(1)
     })
   })
 
@@ -1175,11 +1584,11 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           return { ok: true, status: 200, json: async () => ({ id: "proj-dep-mod", title: "Dep Mod", project_type: "mod", categories: [] }) }
         }
         if (u.includes("root.jar") || u.includes("dep.jar")) {
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => createSampleJarBuffer("jar content").buffer,
-          }
+          return createBinaryResponse(
+            createSampleJarBuffer("jar content"),
+            200,
+            u.includes("root.jar") ? 1000 : 500,
+          )
         }
         return { ok: false, status: 404 }
       })
@@ -1297,11 +1706,18 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         if (u.includes("/project/shader-proj")) return { ok: true, status: 200, json: async () => ({ id: "shader-proj", title: "Complementary", project_type: "shader", categories: [] }) }
 
         if (u.includes(".zip")) {
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => createSampleJarBuffer("zip content").buffer,
-          }
+          const expectedSize =
+            u.includes("faithful.zip")
+              ? 5000
+              : u.includes("terralith.zip")
+                ? 4000
+                : 6000
+
+          return createBinaryResponse(
+            createSampleJarBuffer("zip content"),
+            200,
+            expectedSize,
+          )
         }
         return { ok: false, status: 404 }
       })
@@ -1434,11 +1850,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           }
         }
         if (u.includes("https://cdn/md5valid.jar")) {
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => knownValidBuffer.buffer,
-          }
+          return createBinaryResponse(
+            knownValidBuffer,
+          )
         }
         return { ok: false, status: 404 }
       })
@@ -1502,11 +1916,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           }
         }
         if (u.includes("https://cdn/cfmd5.jar")) {
-          return {
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => validBuffer.buffer,
-          }
+          return createBinaryResponse(
+            validBuffer,
+          )
         }
         return { ok: false, status: 404 }
       })
@@ -1606,7 +2018,11 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           return { ok: true, status: 200, json: async () => ({ id: "batch-dep", title: "Batch Dep", project_type: "mod", categories: [] }) }
         }
         if (u.includes("root.jar") || u.includes("dep.jar")) {
-          return { ok: true, status: 200, arrayBuffer: async () => createSampleJarBuffer("identical binary").buffer }
+          return createBinaryResponse(
+            createSampleJarBuffer("identical binary"),
+            200,
+            100,
+          )
         }
         return { ok: false, status: 404 }
       })
@@ -2914,27 +3330,72 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       })
     })
 
-    describe("9.3 R2 Compensation Safety with Promise.allSettled", () => {
-      it("ensures all in-flight R2 objects are completely cleaned up when one parallel download fails", async () => {
+    describe("9.3 R2 Multipart Streaming & Compensation Safety", () => {
+      it("ensures already-uploaded R2 objects are cleaned up when a later provider download fails", async () => {
         const validJar = createSampleJarBuffer("Mod Success")
-        let r2ObjectsStored: string[] = []
+        const compensationR2 = createTestR2()
 
         const customEnv = {
           ...env,
-          ASSETS: {
-            put: vi.fn().mockImplementation(async (key: string) => {
-              r2ObjectsStored.push(key)
-              return {}
-            }),
-            delete: vi.fn().mockImplementation(async (key: string) => {
-              r2ObjectsStored = r2ObjectsStored.filter((k) => k !== key)
-              return {}
-            }),
-          } as any,
+          ASSETS: compensationR2 as any,
         }
 
         mockFetch.mockImplementation(async (url: string) => {
           const u = String(url)
+          if (u.includes("/version/ver-succ")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                id: "ver-succ",
+                project_id: "mod-succ",
+                name: "Mod Success",
+                version_number: "1.0",
+                version_type: "release",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                dependencies: [
+                  {
+                    project_id: "mod-fail",
+                    dependency_type: "required",
+                  },
+                ],
+                files: [
+                  {
+                    primary: true,
+                    filename: "mod-success.jar",
+                    size: validJar.byteLength,
+                    url: "https://cdn/mod-success.jar",
+                  },
+                ],
+              }),
+            }
+          }
+
+          if (u.includes("/version/ver-fail")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                id: "ver-fail",
+                project_id: "mod-fail",
+                name: "Mod Fail",
+                version_number: "1.0",
+                version_type: "release",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                dependencies: [],
+                files: [
+                  {
+                    primary: true,
+                    filename: "mod-fail.jar",
+                    size: 1000,
+                    url: "https://cdn/mod-fail.jar",
+                  },
+                ],
+              }),
+            }
+          }
           if (u.includes("/project/mod-succ/version")) {
             return {
               ok: true,
@@ -2986,15 +3447,11 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
             }
           }
           if (u.includes("cdn/mod-success.jar")) {
-            return {
-              ok: true,
-              status: 200,
-              arrayBuffer: async () => validJar.buffer,
-            }
+            return createBinaryResponse(
+              validJar,
+            )
           }
           if (u.includes("cdn/mod-fail.jar")) {
-            // Delay slightly to simulate in-flight parallel upload
-            await new Promise((r) => setTimeout(r, 50))
             return {
               ok: false,
               status: 500,
@@ -3017,8 +3474,10 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           ),
         ).rejects.toThrow()
 
-        // All created R2 objects must have been purged by compensation after Promise.allSettled
-        expect(r2ObjectsStored.length).toBe(0)
+        // The first provider file was uploaded, then the later download failed.
+        // Compensation must remove every newly created R2 object.
+        expect(compensationR2.createMultipartUpload).toHaveBeenCalled()
+        expect(compensationR2._store.size).toBe(0)
 
         // No D1 records written
         const filesInDb = await db.select().from(schema.gameReleaseFiles).all()

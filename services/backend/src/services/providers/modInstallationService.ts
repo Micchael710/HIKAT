@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { eq, and } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
@@ -10,7 +11,7 @@ import type {
 } from "@hikat/graphql"
 import {
   MAX_GAME_FILE_SIZE_BYTES,
-  validateGameFileBuffer,
+  validateGameFileHeader,
   sanitizeGamePath,
 } from "@hikat/shared"
 import type { Env } from "../../types"
@@ -29,69 +30,476 @@ function asBatchTuple(statements: BatchStatement[]): BatchStatements {
   return [statements[0]!, ...statements.slice(1)] as unknown as BatchStatements
 }
 
-function computeMd5Hex(data: Uint8Array): string {
-  function md5cycle(x: Int32Array, k: Int32Array) {
-    let a = x[0]!, b = x[1]!, c = x[2]!, d = x[3]!
-    a = ff(a, b, c, d, k[0]!, 7, -680876936); d = ff(d, a, b, c, k[1]!, 12, -389564586); c = ff(c, d, a, b, k[2]!, 17, 606105819); b = ff(b, c, d, a, k[3]!, 22, -1044525330)
-    a = ff(a, b, c, d, k[4]!, 7, -176418897); d = ff(d, a, b, c, k[5]!, 12, 1200080426); c = ff(c, d, a, b, k[6]!, 17, -1473231341); b = ff(b, c, d, a, k[7]!, 22, -45705983)
-    a = ff(a, b, c, d, k[8]!, 7, 1770035416); d = ff(d, a, b, c, k[9]!, 12, -1958414417); c = ff(c, d, a, b, k[10]!, 17, -42063); b = ff(b, c, d, a, k[11]!, 22, -1990404162)
-    a = ff(a, b, c, d, k[12]!, 7, 1804603682); d = ff(d, a, b, c, k[13]!, 12, -40341101); c = ff(c, d, a, b, k[14]!, 17, -1502002290); b = ff(b, c, d, a, k[15]!, 22, 1236535329)
-    a = gg(a, b, c, d, k[1]!, 5, -165796510); d = gg(d, a, b, c, k[6]!, 9, -1069501632); c = gg(c, d, a, b, k[11]!, 14, 643717713); b = gg(b, c, d, a, k[0]!, 20, -373897302)
-    a = gg(a, b, c, d, k[5]!, 5, -701558691); d = gg(d, a, b, c, k[10]!, 9, 38016083); c = gg(c, d, a, b, k[15]!, 14, -660478335); b = gg(b, c, d, a, k[4]!, 20, -405537848)
-    a = gg(a, b, c, d, k[9]!, 5, 568446438); d = gg(d, a, b, c, k[14]!, 9, -1019803690); c = gg(c, d, a, b, k[3]!, 14, -187363961); b = gg(b, c, d, a, k[8]!, 20, 1163531501)
-    a = gg(a, b, c, d, k[13]!, 5, -1444681467); d = gg(d, a, b, c, k[2]!, 9, -51403784); c = gg(c, d, a, b, k[7]!, 14, 1735328473); b = gg(b, c, d, a, k[12]!, 20, -1926607734)
-    a = hh(a, b, c, d, k[5]!, 4, -378558); d = hh(d, a, b, c, k[8]!, 11, -2022574463); c = hh(c, d, a, b, k[11]!, 16, 1839030562); b = hh(b, c, d, a, k[14]!, 23, -35309556)
-    a = hh(a, b, c, d, k[1]!, 4, -1530992060); d = hh(d, a, b, c, k[4]!, 11, 1272893353); c = hh(c, d, a, b, k[7]!, 16, -155497632); b = hh(b, c, d, a, k[10]!, 23, -1094730640)
-    a = hh(a, b, c, d, k[13]!, 4, 681279174); d = hh(d, a, b, c, k[0]!, 11, -358537222); c = hh(c, d, a, b, k[3]!, 16, -722521979); b = hh(b, c, d, a, k[6]!, 23, 76029189)
-    a = hh(a, b, c, d, k[9]!, 4, -640364487); d = hh(d, a, b, c, k[12]!, 11, -421815835); c = hh(c, d, a, b, k[15]!, 16, 530742520); b = hh(b, c, d, a, k[2]!, 23, -995338651)
-    a = ii(a, b, c, d, k[0]!, 6, -198630844); d = ii(d, a, b, c, k[7]!, 10, 1126891415); c = ii(c, d, a, b, k[14]!, 15, -1416354905); b = ii(b, c, d, a, k[5]!, 21, -57434055)
-    a = ii(a, b, c, d, k[12]!, 6, 1700485571); d = ii(d, a, b, c, k[3]!, 10, -1894986606); c = ii(c, d, a, b, k[10]!, 15, -1051523); b = ii(b, c, d, a, k[1]!, 21, -2054922799)
-    a = ii(a, b, c, d, k[8]!, 6, 1873313359); d = ii(d, a, b, c, k[15]!, 10, -30611744); c = ii(c, d, a, b, k[6]!, 15, -1560198380); b = ii(b, c, d, a, k[13]!, 21, 1309151649)
-    a = ii(a, b, c, d, k[4]!, 6, -145523070); d = ii(d, a, b, c, k[11]!, 10, -1120210379); c = ii(c, d, a, b, k[2]!, 15, 718787259); b = ii(b, c, d, a, k[9]!, 21, -343485551)
-    x[0] = add32(a, x[0]!); x[1] = add32(b, x[1]!); x[2] = add32(c, x[2]!); x[3] = add32(d, x[3]!)
-  }
-  function cmn(q: number, a: number, b: number, x: number, s: number, t: number) {
-    a = add32(add32(a, q), add32(x, t))
-    return add32((a << s) | (a >>> (32 - s)), b)
-  }
-  function ff(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn((b & c) | ((~b) & d), a, b, x, s, t) }
-  function gg(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn((b & d) | (c & (~d)), a, b, x, s, t) }
-  function hh(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn(b ^ c ^ d, a, b, x, s, t) }
-  function ii(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn(c ^ (b | (~d)), a, b, x, s, t) }
-  function add32(a: number, b: number) { return (a + b) & 0xFFFFFFFF }
+const PROVIDER_MIN_PART_SIZE_BYTES = 8 * 1024 * 1024
+const PROVIDER_MAX_PARTS = 10_000
+const PROVIDER_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000
 
-  const n = data.length
-  const state = new Int32Array([1732584193, -271733879, -1732584194, 271733878])
-  const tail = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let i = 0
-  for (; i + 64 <= n; i += 64) {
-    const block = new Int32Array(16)
-    for (let j = 0; j < 16; j++) {
-      const idx = i + j * 4
-      block[j] = data[idx]! | (data[idx + 1]! << 8) | (data[idx + 2]! << 16) | (data[idx + 3]! << 24)
+type ProviderChecksum = {
+  algorithm: "sha512" | "sha1" | "md5"
+  expected: string
+  label: "SHA-512" | "SHA-1" | "MD5"
+}
+
+function resolveProviderChecksum(
+  hashes:
+    | {
+      sha1?: string
+      sha512?: string
+      md5?: string
     }
-    md5cycle(state, block)
-  }
-  for (let j = 0; i < n; i++, j++) {
-    tail[j >> 2] = (tail[j >> 2] || 0) | (data[i]! << ((j % 4) << 3))
-  }
-  const j = n - (i - (n % 64))
-  tail[j >> 2] = (tail[j >> 2] || 0) | (0x80 << ((j % 4) << 3))
-  if (j > 55) {
-    md5cycle(state, new Int32Array(tail))
-    for (let k = 0; k < 16; k++) tail[k] = 0
-  }
-  tail[14] = (n * 8) & 0xFFFFFFFF
-  tail[15] = Math.floor((n * 8) / 0x100000000)
-  md5cycle(state, new Int32Array(tail))
-
-  let hex = ""
-  for (let k = 0; k < 4; k++) {
-    for (let b = 0; b < 4; b++) {
-      hex += ((state[k]! >> (b * 8)) & 0xFF).toString(16).padStart(2, "0")
+    | undefined,
+): ProviderChecksum | null {
+  if (hashes?.sha512) {
+    return {
+      algorithm: "sha512",
+      expected: hashes.sha512.toLowerCase(),
+      label: "SHA-512",
     }
   }
-  return hex.toLowerCase()
+
+  if (hashes?.sha1) {
+    return {
+      algorithm: "sha1",
+      expected: hashes.sha1.toLowerCase(),
+      label: "SHA-1",
+    }
+  }
+
+  if (hashes?.md5) {
+    return {
+      algorithm: "md5",
+      expected: hashes.md5.toLowerCase(),
+      label: "MD5",
+    }
+  }
+
+  return null
+}
+
+function resolveProviderPartSize(sizeBytes: number): number {
+  const oneMiB = 1024 * 1024
+
+  const requiredPartSize =
+    sizeBytes > 0
+      ? Math.ceil(sizeBytes / PROVIDER_MAX_PARTS)
+      : PROVIDER_MIN_PART_SIZE_BYTES
+
+  return Math.max(
+    PROVIDER_MIN_PART_SIZE_BYTES,
+    Math.ceil(requiredPartSize / oneMiB) * oneMiB,
+  )
+}
+
+async function uploadProviderBinaryToR2(options: {
+  bucket: R2Bucket
+  response: Response
+  objectKey: string
+  filename: string
+  category: GameFileCategoryGql
+  provider: string
+  projectId: string
+  versionId: string
+  expectedSizeBytes: number
+  hashes?: {
+    sha1?: string
+    sha512?: string
+    md5?: string
+  }
+}): Promise<{
+  sha256: string
+  sizeBytes: number
+}> {
+  const {
+    bucket,
+    response,
+    objectKey,
+    filename,
+    category,
+    provider,
+    projectId,
+    versionId,
+    expectedSizeBytes,
+    hashes,
+  } = options
+
+  if (!response.body) {
+    throw createGraphQLError(
+      `No se pudo obtener el flujo de descarga para "${filename}".`,
+      "INTERNAL_ERROR",
+    )
+  }
+
+  if (
+    expectedSizeBytes > 0 &&
+    expectedSizeBytes > MAX_GAME_FILE_SIZE_BYTES
+  ) {
+    throw createGraphQLError(
+      `El archivo "${filename}" supera el tamaño máximo permitido.`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const contentLength = Number(
+    response.headers.get("content-length") || 0,
+  )
+
+  if (
+    expectedSizeBytes > 0 &&
+    contentLength > 0 &&
+    expectedSizeBytes !== contentLength
+  ) {
+    throw createGraphQLError(
+      `El tamaño reportado por el proveedor para "${filename}" no coincide con la descarga.`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const declaredSize =
+    expectedSizeBytes > 0
+      ? expectedSizeBytes
+      : contentLength
+
+  if (
+    !Number.isSafeInteger(declaredSize) ||
+    declaredSize <= 0
+  ) {
+    throw createGraphQLError(
+      `No se pudo determinar el tamaño de "${filename}" antes de subirlo a R2.`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const partSize =
+    resolveProviderPartSize(declaredSize)
+
+  const sha256Hasher =
+    createHash("sha256")
+
+  const providerChecksum =
+    resolveProviderChecksum(hashes)
+
+  const providerHasher =
+    providerChecksum
+      ? createHash(providerChecksum.algorithm)
+      : null
+
+  const multipart =
+    await bucket.createMultipartUpload(
+      objectKey,
+      {
+        httpMetadata: {
+          contentType:
+            category === "MOD"
+              ? "application/java-archive"
+              : "application/zip",
+        },
+        customMetadata: {
+          category,
+          filename,
+          provider,
+          projectId,
+          versionId,
+        },
+      },
+    )
+
+  const reader =
+    response.body.getReader()
+
+  const uploadedParts: R2UploadedPart[] = []
+
+  let pendingChunk: Uint8Array | null = null
+  let totalBytes = 0
+
+  async function nextChunk(): Promise<Uint8Array | null> {
+    if (
+      pendingChunk &&
+      pendingChunk.byteLength > 0
+    ) {
+      const chunk = pendingChunk
+      pendingChunk = null
+      return chunk
+    }
+
+    const result =
+      await reader.read()
+
+    if (result.done) {
+      return null
+    }
+
+    return result.value instanceof Uint8Array
+      ? result.value
+      : new Uint8Array(result.value)
+  }
+
+  try {
+    let partNumber = 1
+
+    while (totalBytes < declaredSize) {
+      if (partNumber > PROVIDER_MAX_PARTS) {
+        throw createGraphQLError(
+          `El archivo "${filename}" requiere demasiadas partes para R2.`,
+          "VALIDATION_ERROR",
+        )
+      }
+
+      const targetPartLength =
+        Math.min(
+          partSize,
+          declaredSize - totalBytes,
+        )
+
+      const fixedLengthStream =
+        new FixedLengthStream(
+          targetPartLength,
+        )
+
+      const writer =
+        fixedLengthStream.writable.getWriter()
+
+      /*
+     * Start R2 reading the fixed-length stream
+     * before we begin writing provider chunks into it.
+     */
+      const uploadPromise =
+        multipart.uploadPart(
+          partNumber,
+          fixedLengthStream.readable,
+        )
+
+      let writtenToPart = 0
+
+      try {
+        while (
+          writtenToPart <
+          targetPartLength
+        ) {
+          const sourceChunk =
+            await nextChunk()
+
+          if (!sourceChunk) {
+            throw createGraphQLError(
+              `La descarga de "${filename}" terminó antes del tamaño esperado.`,
+              "VALIDATION_ERROR",
+            )
+          }
+
+          const remaining =
+            targetPartLength -
+            writtenToPart
+
+          const bytesToWrite =
+            sourceChunk.byteLength <=
+              remaining
+              ? sourceChunk
+              : sourceChunk.subarray(
+                0,
+                remaining,
+              )
+
+          if (
+            sourceChunk.byteLength >
+            remaining
+          ) {
+            pendingChunk =
+              sourceChunk.subarray(
+                remaining,
+              )
+          }
+
+          sha256Hasher.update(
+            bytesToWrite,
+          )
+
+          providerHasher?.update(
+            bytesToWrite,
+          )
+
+          await writer.write(
+            bytesToWrite,
+          )
+
+          writtenToPart +=
+            bytesToWrite.byteLength
+
+          totalBytes +=
+            bytesToWrite.byteLength
+        }
+
+        await writer.close()
+
+        const uploadedPart =
+          await uploadPromise
+
+        uploadedParts.push(
+          uploadedPart,
+        )
+
+        partNumber += 1
+      } catch (err) {
+        try {
+          await writer.abort(err)
+        } catch (_) { }
+
+        try {
+          await uploadPromise
+        } catch (_) { }
+
+        throw err
+      }
+    }
+
+    /*
+     * We already consumed exactly declaredSize bytes.
+     * There must not be any extra bytes left in the
+     * provider response.
+     */
+    if (
+      pendingChunk &&
+      pendingChunk.byteLength > 0
+    ) {
+      throw createGraphQLError(
+        `La descarga de "${filename}" contiene más bytes de los indicados por el proveedor.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    const extra =
+      await reader.read()
+
+    if (
+      !extra.done &&
+      extra.value &&
+      extra.value.byteLength > 0
+    ) {
+      throw createGraphQLError(
+        `La descarga de "${filename}" contiene más bytes de los indicados por el proveedor.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    if (totalBytes === 0) {
+      throw createGraphQLError(
+        `El archivo descargado "${filename}" está vacío.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    if (
+      expectedSizeBytes > 0 &&
+      totalBytes !== expectedSizeBytes
+    ) {
+      throw createGraphQLError(
+        `El tamaño descargado para "${filename}" no coincide con el tamaño indicado por el proveedor.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    const completedObject =
+      await multipart.complete(
+        uploadedParts,
+      )
+
+    if (
+      completedObject.size !== totalBytes
+    ) {
+      throw createGraphQLError(
+        `El tamaño almacenado en R2 para "${filename}" no coincide con la descarga.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    const sha256 =
+      sha256Hasher
+        .digest("hex")
+        .toLowerCase()
+
+    if (
+      providerChecksum &&
+      providerHasher
+    ) {
+      const providerDigest =
+        providerHasher
+          .digest("hex")
+          .toLowerCase()
+
+      if (
+        providerDigest !==
+        providerChecksum.expected
+      ) {
+        await bucket.delete(objectKey)
+
+        throw createGraphQLError(
+          `Error de integridad: el hash ${providerChecksum.label} descargado para "${filename}" no coincide con el proveedor.`,
+          "VALIDATION_ERROR",
+        )
+      }
+    }
+
+    const headerObject =
+      await bucket.get(
+        objectKey,
+        {
+          range: {
+            offset: 0,
+            length: 4,
+          },
+        },
+      )
+
+    if (!headerObject) {
+      await bucket.delete(objectKey)
+
+      throw createGraphQLError(
+        `No se pudo verificar "${filename}" después de almacenarlo.`,
+        "INTERNAL_ERROR",
+      )
+    }
+
+    const headerBytes =
+      new Uint8Array(
+        await headerObject.arrayBuffer(),
+      )
+
+    const validation =
+      validateGameFileHeader(
+        headerBytes,
+        filename,
+        category as any,
+      )
+
+    if (!validation.valid) {
+      await bucket.delete(objectKey)
+
+      throw createGraphQLError(
+        validation.error ||
+        `El archivo "${filename}" no tiene un formato válido.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    return {
+      sha256,
+      sizeBytes: totalBytes,
+    }
+  } catch (err) {
+    try {
+      await multipart.abort()
+    } catch (_) { }
+
+    try {
+      await bucket.delete(
+        objectKey,
+      )
+    } catch (_) { }
+
+    throw err
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch (_) { }
+  }
 }
 
 export async function installModPlan(
@@ -190,175 +598,140 @@ export async function installModPlan(
   const createdR2Keys: string[] = []
   const oldKeysToClean: string[] = []
 
+  if (!env.ASSETS) {
+    throw createGraphQLError(
+      "Almacenamiento R2 no disponible.",
+      "INTERNAL_ERROR",
+    )
+  }
+
   try {
-    // 4. Download and validate each binary in parallel
-    const stageResults = await Promise.allSettled(
-      itemsToProcess.map(async (item) => {
-        const adapter = modProviderManager.getAdapter(item.provider)
-        const versionObj = await adapter.getVersion(
+    // 4. Stream provider binaries directly into R2 multipart.
+    // Process sequentially to avoid holding several large provider/R2
+    // connections simultaneously inside the Worker.
+    const downloadedItems: Array<{
+      item: ModInstallationPlanItemGql
+      filename: string
+      sizeBytes: number
+      sha256: string
+      objectKey: string
+      category: GameFileCategoryGql
+    }> = []
+
+    for (const item of itemsToProcess) {
+      const adapter =
+        modProviderManager.getAdapter(
+          item.provider,
+        )
+
+      const versionObj =
+        await adapter.getVersion(
           env,
           item.versionId,
           item.projectId,
           item.contentType,
         )
-        const downloadUrl = versionObj?.downloadUrl || ""
-        const filename = versionObj?.filename || item.filename
 
-        if (!downloadUrl) {
-          throw createGraphQLError(
-            `El autor de este archivo en ${item.provider} ha deshabilitado la descarga directa de terceros.`,
-            "VALIDATION_ERROR",
-          )
-        }
+      const downloadUrl =
+        versionObj?.downloadUrl || ""
 
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 45000)
+      const filename =
+        versionObj?.filename ||
+        item.filename
 
-        let buffer: Uint8Array
-        try {
-          // Binary download MUST NOT receive CurseForge API Key (external CDN security boundary)
-          const res = await fetch(downloadUrl, {
-            headers: {
-              "User-Agent": "HiKAT/0.1.0 (contact@hikat.local)",
-            },
-            signal: controller.signal,
-          })
+      if (!downloadUrl) {
+        throw createGraphQLError(
+          `El autor de este archivo en ${item.provider} ha deshabilitado la descarga directa de terceros.`,
+          "VALIDATION_ERROR",
+        )
+      }
 
-          if (!res.ok) {
-            throw new Error(`Error ${res.status} al descargar "${item.projectName}" desde ${item.provider}`)
-          }
-
-          const arrayBuffer = await res.arrayBuffer()
-          buffer = new Uint8Array(arrayBuffer)
-        } finally {
-          clearTimeout(timeoutId)
-        }
-
-        if (buffer.byteLength === 0) {
-          throw createGraphQLError(`El archivo descargado para "${item.projectName}" está vacío.`, "VALIDATION_ERROR")
-        }
-
-        if (buffer.byteLength > MAX_GAME_FILE_SIZE_BYTES) {
-          throw createGraphQLError(
-            `El archivo descargado para "${item.projectName}" supera el tamaño máximo permitido (100 MB).`,
-            "VALIDATION_ERROR",
-          )
-        }
-
-        // Validate jar/zip format / magic bytes
-        const validationCategory =
-          item.contentType === "SHADER"
-            ? "SHADER_PACK"
-            : item.contentType === "RESOURCE_PACK"
+      const validationCategory:
+        GameFileCategoryGql =
+        item.contentType === "SHADER"
+          ? "SHADER_PACK"
+          : item.contentType === "RESOURCE_PACK"
             ? "RESOURCE_PACK"
             : item.contentType === "DATA_PACK"
-            ? "DATA_PACK"
-            : "MOD"
+              ? "DATA_PACK"
+              : "MOD"
 
-        const validation = validateGameFileBuffer(
-          buffer.buffer as ArrayBuffer,
-          filename,
-          validationCategory as any,
+      const objectKey =
+        `game-files/${crypto.randomUUID()}`
+
+      const controller =
+        new AbortController()
+
+      const timeoutId =
+        setTimeout(
+          () => controller.abort(),
+          PROVIDER_DOWNLOAD_TIMEOUT_MS,
         )
-        if (!validation.valid) {
+
+      try {
+        // Binary CDN fetch MUST NOT receive
+        // the CurseForge API key.
+        const response =
+          await fetch(
+            downloadUrl,
+            {
+              headers: {
+                "User-Agent":
+                  "HiKAT/0.1.0 (contact@hikat.local)",
+              },
+              signal:
+                controller.signal,
+            },
+          )
+
+        if (!response.ok) {
           throw createGraphQLError(
-            `El archivo descargado para "${item.projectName}" no tiene un formato binario válido.`,
+            `Error ${response.status} al descargar "${item.projectName}" desde ${item.provider}.`,
             "VALIDATION_ERROR",
           )
         }
 
-        // Compute local SHA-256
-        const shaBuffer = await crypto.subtle.digest("SHA-256", buffer.buffer as ArrayBuffer)
-        const sha256 = Array.from(new Uint8Array(shaBuffer))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("")
-          .toLowerCase()
-
-        // Verify provider checksum if provided (SHA-512 -> SHA-1 -> MD5 fallback)
-        if (versionObj?.hashes?.sha512) {
-          const sha512Buffer = await crypto.subtle.digest("SHA-512", buffer.buffer as ArrayBuffer)
-          const computedSha512 = Array.from(new Uint8Array(sha512Buffer))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("")
-            .toLowerCase()
-          if (computedSha512 !== versionObj.hashes.sha512.toLowerCase()) {
-            throw createGraphQLError(
-              `Error de integridad: el hash SHA-512 descargado para "${item.projectName}" no coincide con el proveedor.`,
-              "VALIDATION_ERROR",
-            )
-          }
-        } else if (versionObj?.hashes?.sha1) {
-          const sha1Buffer = await crypto.subtle.digest("SHA-1", buffer.buffer as ArrayBuffer)
-          const computedSha1 = Array.from(new Uint8Array(sha1Buffer))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("")
-            .toLowerCase()
-          if (computedSha1 !== versionObj.hashes.sha1.toLowerCase()) {
-            throw createGraphQLError(
-              `Error de integridad: el hash SHA-1 descargado para "${item.projectName}" no coincide con el proveedor.`,
-              "VALIDATION_ERROR",
-            )
-          }
-        } else if (versionObj?.hashes?.md5) {
-          const computedMd5 = computeMd5Hex(buffer)
-          if (computedMd5 !== versionObj.hashes.md5.toLowerCase()) {
-            throw createGraphQLError(
-              `Error de integridad: el hash MD5 descargado para "${item.projectName}" no coincide con el proveedor.`,
-              "VALIDATION_ERROR",
-            )
-          }
-        }
-
-        // Generate R2 key and upload
-        const fileId = crypto.randomUUID()
-        const objectKey = `game-files/${fileId}-${sha256.slice(0, 16)}`
-
-        if (env.ASSETS) {
-          await env.ASSETS.put(objectKey, buffer, {
-            httpMetadata: {
-              contentType:
-                item.contentType === "MOD"
-                  ? "application/java-archive"
-                  : "application/zip",
-            },
-            customMetadata: {
-              sha256,
-              category: validationCategory,
-              filename,
-              provider: item.provider,
-              projectId: item.projectId,
-              versionId: item.versionId,
-            },
+        const uploaded =
+          await uploadProviderBinaryToR2({
+            bucket: env.ASSETS,
+            response,
+            objectKey,
+            filename,
+            category:
+              validationCategory,
+            provider:
+              item.provider,
+            projectId:
+              item.projectId,
+            versionId:
+              item.versionId,
+            expectedSizeBytes:
+              Number(
+                versionObj?.sizeBytes,
+              ) || 0,
+            hashes:
+              versionObj?.hashes,
           })
-          createdR2Keys.push(objectKey)
-        }
 
-        return {
+        createdR2Keys.push(
+          objectKey,
+        )
+
+        downloadedItems.push({
           item,
           filename,
-          sizeBytes: buffer.byteLength,
-          sha256,
+          sizeBytes:
+            uploaded.sizeBytes,
+          sha256:
+            uploaded.sha256,
           objectKey,
-          category: validationCategory as GameFileCategoryGql,
-        }
-      }),
-    )
-
-    const rejected = stageResults.find((r) => r.status === "rejected")
-    if (rejected && rejected.status === "rejected") {
-      throw rejected.reason
+          category:
+            validationCategory,
+        })
+      } finally {
+        clearTimeout(timeoutId)
+      }
     }
-
-    const downloadedItems = stageResults.map(
-      (r) => (r as PromiseFulfilledResult<{
-        item: ModInstallationPlanItemGql
-        filename: string
-        sizeBytes: number
-        sha256: string
-        objectKey: string
-        category: GameFileCategoryGql
-      }>).value,
-    )
 
     // 5. Construct ALL D1 statements into a single atomic batch
     const now = new Date().toISOString()
