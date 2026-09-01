@@ -25,6 +25,7 @@ import {
   IconTrash,
   IconFolder,
   IconFile,
+  IconAlertCircle,
 } from "../../theme/icons"
 
 interface PublishReleaseModalProps {
@@ -1226,8 +1227,9 @@ export default function PublishReleaseModal({
 
                 {/* Unchanged summary notice */}
                 {currentChanges && currentChanges.unchanged > 0 && (
-                  <div style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b", textAlign: "center" }}>
-                    ✓ {currentChanges.unchanged} archivos permanecen sin cambios respecto a la versión oficial anterior.
+                  <div style={{ fontSize: "12px", color: tokens.textSecondary, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                    <IconCheck size={14} style={{ color: "#22c55e" }} />
+                    <span>{currentChanges.unchanged} archivos permanecen sin cambios respecto a la versión oficial anterior.</span>
                   </div>
                 )}
 
@@ -1330,69 +1332,57 @@ export default function PublishReleaseModal({
                         display: "flex",
                         gap: "12px",
                         paddingTop: "10px",
-                        borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+                        borderTop: `1px solid ${tokens.borderSubtle}`,
                         fontSize: "12px",
                       }}
                     >
                       <span style={{ color: "#22c55e", fontWeight: "600" }}>+{currentChanges.added} añadidos</span>
-                      <span style={{ color: "#38bdf8", fontWeight: "600" }}>↑ {currentChanges.updated} actualizados</span>
+                      <span style={{ color: isDark ? "#3ec4c0" : "#0284c7", fontWeight: "600" }}>↑ {currentChanges.updated} actualizados</span>
                       <span style={{ color: "#ef4444", fontWeight: "600" }}>− {currentChanges.removed} eliminados</span>
-                      <span style={{ color: isDark ? "#94a3b8" : "#64748b" }}>{currentChanges.total} archivos totales</span>
+                      <span style={{ color: tokens.textSecondary }}>{currentChanges.total} archivos totales</span>
                     </div>
                   )}
                 </div>
 
-                {/* Readiness Checklist Card */}
-                <div
-                  style={{
-                    padding: "14px 16px",
-                    borderRadius: "12px",
-                    backgroundColor: isReady ? "rgba(34, 197, 94, 0.08)" : "rgba(239, 68, 68, 0.08)",
-                    border: `1px solid ${isReady ? "rgba(34, 197, 94, 0.25)" : "rgba(239, 68, 68, 0.25)"}`,
-                  }}
-                >
-                  <div style={{ fontSize: "12px", fontWeight: "700", color: isReady ? "#22c55e" : "#ef4444", marginBottom: "8px" }}>
-                    {isReady ? "✓ Verificación de preparación completada" : "⚠ Problemas detectados antes de publicar"}
+                {/* Blocking Issues Alert if any */}
+                {currentReadiness?.issues && currentReadiness.issues.length > 0 && (
+                  <div
+                    style={{
+                      padding: "12px 16px",
+                      borderRadius: "12px",
+                      backgroundColor: "rgba(239, 68, 68, 0.12)",
+                      border: "1px solid rgba(239, 68, 68, 0.25)",
+                      color: "#ef4444",
+                      fontSize: "13px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <IconAlertCircle size={16} />
+                    <span>{currentReadiness.issues.join(". ")}</span>
                   </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px" }}>
-                    <div style={{ color: currentReadiness?.validVersion ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                      {currentReadiness?.validVersion ? "✓" : "✗"} Versión SemVer válida
-                    </div>
-                    <div style={{ color: currentReadiness?.uniqueVersion ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                      {currentReadiness?.uniqueVersion ? "✓" : "✗"} Versión disponible
-                    </div>
-                    <div style={{ color: currentReadiness?.hasFiles ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                      {currentReadiness?.hasFiles ? "✓" : "✗"} Archivos descargables
-                    </div>
-                    <div style={{ color: currentReadiness?.noConflicts ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                      {currentReadiness?.noConflicts ? "✓" : "✗"} Sin conflictos de ruta
-                    </div>
-                    <div style={{ color: currentReadiness?.storageVerified ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: "6px" }}>
-                      {currentReadiness?.storageVerified ? "✓" : "✗"} Almacenamiento R2 verificado
-                    </div>
-                  </div>
-
-                  {currentReadiness?.issues && currentReadiness.issues.length > 0 && (
-                    <div style={{ marginTop: "10px", fontSize: "12px", color: "#ef4444" }}>
-                      {currentReadiness.issues.join(". ")}
-                    </div>
-                  )}
-                </div>
+                )}
 
                 {/* Scope Notice */}
                 <div
                   style={{
-                    padding: "10px 14px",
-                    borderRadius: "8px",
-                    backgroundColor: isDark ? "rgba(59, 130, 246, 0.08)" : "rgba(59, 130, 246, 0.05)",
-                    border: "1px solid rgba(59, 130, 246, 0.2)",
-                    fontSize: "12px",
-                    color: isDark ? "#93c5fd" : "#2563eb",
-                    lineHeight: "1.4",
+                    padding: "12px 16px",
+                    borderRadius: "12px",
+                    backgroundColor: isDark ? "rgba(62, 196, 192, 0.08)" : "rgba(62, 196, 192, 0.05)",
+                    border: `1px solid ${isDark ? "rgba(62, 196, 192, 0.2)" : "rgba(12, 110, 107, 0.2)"}`,
+                    fontSize: "13px",
+                    color: isDark ? "#3ec4c0" : "#0c6e6b",
+                    lineHeight: "1.5",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "8px",
                   }}
                 >
-                  ℹ Publicar convierte el borrador en la versión oficial del modpack para los jugadores. Los archivos en el servidor físico se mantendrán hasta que decidas aplicar los cambios correspondientes.
+                  <IconAlertCircle size={16} style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <div>
+                    Publicar convierte el borrador en la versión oficial del modpack para los jugadores. Los archivos en el servidor físico se mantendrán hasta que decidas aplicar los cambios correspondientes.
+                  </div>
                 </div>
 
                 {/* Submit Status Banner */}

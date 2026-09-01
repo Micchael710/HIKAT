@@ -61,8 +61,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     expect(screen.getByText("Explorador de Archivos del Juego")).toBeDefined()
     expect(screen.getByText("v1.4.2")).toBeDefined()
-    expect(screen.getByText(/Modo Lectura/i)).toBeDefined()
-    expect(screen.getAllByText("Preparar actualización").length).toBeGreaterThan(0)
+    expect(screen.getByText("Preparar actualización")).toBeDefined()
 
     // Virtual root directory shows top-level folder 'config'
     expect(screen.getByText("config")).toBeDefined()
@@ -167,7 +166,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(screen.getByText("create.toml")).toBeDefined()
     expect(screen.getByText("1.2 KB")).toBeDefined()
     expect(screen.getByText("Nuevo")).toBeDefined()
-    expect(screen.getByText("✏️ Personalizable")).toBeDefined()
+    expect(screen.getByText("Personalizable")).toBeDefined()
   })
 
   it("opens text editor modal and validates JSON in real-time", async () => {
@@ -270,12 +269,12 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(screen.getByText("Histórica")).toBeDefined()
 
     // Expand historical release
-    const expandBtn = screen.getByText("Abrir explorador ▼")
+    const expandBtn = screen.getByText("Abrir explorador")
     await act(async () => {
       fireEvent.click(expandBtn)
     })
 
-    expect(screen.getByText("Ocultar explorador ▲")).toBeDefined()
+    expect(screen.getByText("Ocultar explorador")).toBeDefined()
     expect(screen.getByText("mods")).toBeDefined()
   })
 
@@ -348,7 +347,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(screen.queryByText("Guardar Cambios")).toBeNull()
 
     // Removed item shows Restore button
-    const restoreBtn = screen.getByText("↩️ Restaurar")
+    const restoreBtn = screen.getByText("Restaurar")
     await act(async () => {
       fireEvent.click(restoreBtn)
     })
@@ -1713,15 +1712,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.getByText("v1.0.1")).toBeDefined()
       expect(screen.getByText(/MC 1.21.1 • NeoForge 21.1.65/i)).toBeDefined()
 
-      // 16. Readiness Checklist
-      expect(screen.getByText("✓ Verificación de preparación completada")).toBeDefined()
-      expect(screen.getByText("✓ Versión SemVer válida")).toBeDefined()
-      expect(screen.getByText("✓ Versión disponible")).toBeDefined()
-      expect(screen.getByText("✓ Archivos descargables")).toBeDefined()
-      expect(screen.getByText("✓ Sin conflictos de ruta")).toBeDefined()
-      expect(screen.getByText("✓ Almacenamiento R2 verificado")).toBeDefined()
-
-      // 17. NO backup checkbox in publish modal
+      // 16. NO backup checkbox in publish modal
       expect(screen.queryByRole("checkbox")).toBeNull()
 
       // Publish
@@ -1951,14 +1942,13 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.getByText(/1 archivos/i)).toBeDefined()
 
       // Expand to view notes and read-only explorer
-      const expandBtn = screen.getByText("Abrir explorador ▼")
+      const expandBtn = screen.getByText("Abrir explorador")
       await act(async () => {
         fireEvent.click(expandBtn)
       })
 
       expect(screen.getByText(/Novedades de la versión 1.0.0 con portada/i)).toBeDefined()
       expect(screen.getByText("server.properties")).toBeDefined()
-      expect(screen.getByText(/Modo Lectura/i)).toBeDefined()
     })
 
     it("22. failed metadata cleanup: upload cover A -> falla updateGameDraftMetadata -> deleteContentMedia se llama para A", async () => {

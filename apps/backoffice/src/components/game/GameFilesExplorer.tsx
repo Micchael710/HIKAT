@@ -626,19 +626,19 @@ export default function GameFilesExplorer({
   // Helper for item icon
   const getItemIcon = (item: ExplorerItem) => {
     if (item.isDirectory) {
-      return <IconFolder style={{ width: 20, height: 20, color: "#3b82f6", flexShrink: 0 }} />
+      return <IconFolder style={{ width: 20, height: 20, color: isDark ? "#3ec4c0" : "#0284c7", flexShrink: 0 }} />
     }
     const ext = `.${item.name.split(".").pop()?.toLowerCase()}`
     if ([".json", ".toml", ".yaml", ".yml", ".cfg", ".properties", ".txt"].includes(ext)) {
-      return <IconFileText style={{ width: 20, height: 20, color: "#10b981", flexShrink: 0 }} />
+      return <IconFileText style={{ width: 20, height: 20, color: "#38bdf8", flexShrink: 0 }} />
     }
     if (ext === ".jar") {
-      return <span style={{ fontSize: "18px", flexShrink: 0 }}>📦</span>
+      return <IconFile style={{ width: 20, height: 20, color: "#eab308", flexShrink: 0 }} />
     }
-    if ([".png", ".jpg", ".jpeg"].includes(ext)) {
-      return <span style={{ fontSize: "18px", flexShrink: 0 }}>🖼️</span>
+    if ([".png", ".jpg", ".jpeg", ".webp"].includes(ext)) {
+      return <IconFile style={{ width: 20, height: 20, color: "#a855f7", flexShrink: 0 }} />
     }
-    return <IconFile style={{ width: 20, height: 20, color: isDark ? "#94a3b8" : "#64748b", flexShrink: 0 }} />
+    return <IconFile style={{ width: 20, height: 20, color: tokens.textSecondary, flexShrink: 0 }} />
   }
 
   const breadcrumbs = useMemo(() => {
@@ -656,9 +656,10 @@ export default function GameFilesExplorer({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        backgroundColor: isDark ? "#0f172a" : "#ffffff",
-        borderRadius: "12px",
-        border: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+        backgroundColor: tokens.bgCard,
+        borderRadius: "18px",
+        border: `1px solid ${tokens.borderSubtle}`,
+        boxShadow: tokens.cardShadow,
         overflow: "hidden",
         position: "relative",
       }}
@@ -666,44 +667,56 @@ export default function GameFilesExplorer({
       {/* Explorer Top Toolbar */}
       <div
         style={{
-          padding: "12px 16px",
-          borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+          padding: "12px 18px",
+          borderBottom: `1px solid ${tokens.borderSubtle}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           gap: "12px",
           flexWrap: "wrap",
-          backgroundColor: isDark ? "#131f37" : "#f8fafc",
+          backgroundColor: tokens.bgCardInner,
         }}
       >
         {/* Left Action Buttons */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-          {isDraft ? (
+          {isDraft && (
             <>
               <button
                 type="button"
                 data-testid="button-open-mod-providers"
                 onClick={() => setIsModSearchOpen(true)}
+                className="launcher-btn-primary"
                 style={{
-                  ...actionButtonStyle(isDark, "primary"),
-                  background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                  color: "#ffffff",
-                  border: "none",
-                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "7px",
+                  padding: "8px 16px",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: "700",
                 }}
                 title="Buscar e instalar contenido desde Modrinth y CurseForge"
               >
-                <span style={{ fontSize: "14px" }}>🧩</span>
+                <IconPlus size={15} />
                 <span>Añadir Contenido</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsNewFolderOpen(true)}
-                style={actionButtonStyle(isDark, "default")}
+                className="launcher-btn-secondary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 14px",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                }}
                 title="Crear una nueva carpeta en el directorio actual"
               >
-                <IconFolder style={{ width: 16, height: 16 }} />
+                <IconFolder size={15} />
                 <span>Nueva Carpeta</span>
               </button>
 
@@ -716,10 +729,19 @@ export default function GameFilesExplorer({
                     initialPath: currentPath ? `${currentPath}/nuevo_archivo.txt` : "nuevo_archivo.txt",
                   })
                 }
-                style={actionButtonStyle(isDark, "default")}
+                className="launcher-btn-secondary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 14px",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                }}
                 title="Crear un archivo de texto o configuración"
               >
-                <IconFileText style={{ width: 16, height: 16, color: "#10b981" }} />
+                <IconFileText size={15} />
                 <span>Nuevo Archivo</span>
               </button>
 
@@ -727,10 +749,19 @@ export default function GameFilesExplorer({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
-                style={actionButtonStyle(isDark, "default")}
+                className="launcher-btn-secondary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 14px",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                }}
                 title="Subir archivos binarios o mods al directorio actual"
               >
-                <IconUpload style={{ width: 16, height: 16 }} />
+                <IconUpload size={15} />
                 <span>Subir Archivos</span>
               </button>
 
@@ -738,26 +769,22 @@ export default function GameFilesExplorer({
                 type="button"
                 onClick={() => folderInputRef.current?.click()}
                 disabled={isUploading}
-                style={actionButtonStyle(isDark, "default")}
+                className="launcher-btn-secondary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 14px",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                }}
                 title="Subir una carpeta completa con su estructura interna"
               >
-                <IconFolder style={{ width: 16, height: 16 }} />
+                <IconFolder size={15} />
                 <span>Subir Carpeta</span>
               </button>
             </>
-          ) : (
-            <div style={{ fontSize: "13px", color: isDark ? "#94a3b8" : "#64748b", display: "flex", alignItems: "center", gap: "6px" }}>
-              <span>🔒 Modo Lectura (Versión publicada)</span>
-              {onPrepareDraft && (
-                <button
-                  type="button"
-                  onClick={onPrepareDraft}
-                  style={actionButtonStyle(isDark, "primary")}
-                >
-                  <span>Preparar Nueva Versión</span>
-                </button>
-              )}
-            </div>
           )}
 
           {/* Hidden inputs */}
@@ -781,17 +808,17 @@ export default function GameFilesExplorer({
         </div>
 
         {/* Right Search & Refresh */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginLeft: isDraft ? "0" : "auto" }}>
           <div style={{ position: "relative" }}>
             <IconSearch
               style={{
                 position: "absolute",
-                left: "10px",
+                left: "11px",
                 top: "50%",
                 transform: "translateY(-50%)",
                 width: 14,
                 height: 14,
-                color: isDark ? "#64748b" : "#94a3b8",
+                color: tokens.textMuted,
               }}
             />
             <input
@@ -799,15 +826,12 @@ export default function GameFilesExplorer({
               placeholder="Buscar en el explorador..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              className="launcher-input"
               style={{
-                padding: "6px 12px 6px 30px",
-                borderRadius: "8px",
-                border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-                backgroundColor: isDark ? "#0b1120" : "#ffffff",
-                color: isDark ? "#f8fafc" : "#0f172a",
+                padding: "7px 12px 7px 32px",
+                borderRadius: "10px",
                 fontSize: "13px",
-                outline: "none",
-                width: "200px",
+                width: "220px",
               }}
             />
           </div>
@@ -820,7 +844,14 @@ export default function GameFilesExplorer({
               setIsRefreshing(false)
             }}
             disabled={isRefreshing}
-            style={actionButtonStyle(isDark, "icon")}
+            className="launcher-btn-secondary"
+            style={{
+              padding: "7px 10px",
+              borderRadius: "10px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
             title="Recargar archivos"
           >
             <IconRefresh style={{ width: 16, height: 16, animation: isRefreshing ? "spin 1s linear infinite" : "none" }} />
@@ -831,9 +862,9 @@ export default function GameFilesExplorer({
       {/* Breadcrumb Navigation Bar */}
       <div
         style={{
-          padding: "8px 16px",
-          borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
-          backgroundColor: isDark ? "#0b1120" : "#f1f5f9",
+          padding: "10px 18px",
+          borderBottom: `1px solid ${tokens.borderSubtle}`,
+          backgroundColor: tokens.bgCardInner,
           display: "flex",
           alignItems: "center",
           gap: "6px",
@@ -852,7 +883,7 @@ export default function GameFilesExplorer({
             opacity: currentPath ? 1 : 0.4,
             padding: "4px 8px",
             borderRadius: "6px",
-            color: isDark ? "#94a3b8" : "#64748b",
+            color: tokens.textSecondary,
             display: "flex",
             alignItems: "center",
             gap: "4px",
@@ -862,20 +893,20 @@ export default function GameFilesExplorer({
           <IconArrowDown size={14} style={{ transform: "rotate(180deg)" }} />
         </button>
 
-        <div style={{ height: "16px", width: "1px", backgroundColor: isDark ? "#334155" : "#cbd5e1", margin: "0 4px" }} />
+        <div style={{ height: "16px", width: "1px", backgroundColor: tokens.borderSubtle, margin: "0 4px" }} />
 
         {/* Root item */}
         <span
           onClick={() => handleNavigateBreadcrumb(-1)}
           style={{
             cursor: "pointer",
-            fontWeight: breadcrumbs.length === 0 ? "600" : "400",
-            color: breadcrumbs.length === 0 ? (isDark ? "#60a5fa" : "#2563eb") : (isDark ? "#94a3b8" : "#64748b"),
-            padding: "2px 6px",
-            borderRadius: "4px",
+            fontWeight: breadcrumbs.length === 0 ? "700" : "500",
+            color: breadcrumbs.length === 0 ? (isDark ? "#3ec4c0" : "#0c6e6b") : tokens.textSecondary,
+            padding: "3px 8px",
+            borderRadius: "6px",
             display: "inline-flex",
             alignItems: "center",
-            gap: "4px",
+            gap: "5px",
           }}
         >
           <IconFolder size={14} />
@@ -884,15 +915,15 @@ export default function GameFilesExplorer({
 
         {breadcrumbs.map((segment, idx) => (
           <React.Fragment key={idx}>
-            <span style={{ color: isDark ? "#475569" : "#94a3b8" }}>/</span>
+            <span style={{ color: tokens.textMuted }}>/</span>
             <span
               onClick={() => handleNavigateBreadcrumb(idx)}
               style={{
                 cursor: "pointer",
-                fontWeight: idx === breadcrumbs.length - 1 ? "600" : "400",
-                color: idx === breadcrumbs.length - 1 ? (isDark ? "#60a5fa" : "#2563eb") : (isDark ? "#94a3b8" : "#64748b"),
-                padding: "2px 6px",
-                borderRadius: "4px",
+                fontWeight: idx === breadcrumbs.length - 1 ? "700" : "500",
+                color: idx === breadcrumbs.length - 1 ? (isDark ? "#3ec4c0" : "#0c6e6b") : tokens.textSecondary,
+                padding: "3px 8px",
+                borderRadius: "6px",
               }}
             >
               {segment}
@@ -905,17 +936,18 @@ export default function GameFilesExplorer({
       {isUploading && uploadProgress && (
         <div
           style={{
-            padding: "8px 16px",
-            backgroundColor: isDark ? "#1e3a8a" : "#dbeafe",
-            color: isDark ? "#93c5fd" : "#1e40af",
-            fontSize: "12px",
+            padding: "10px 18px",
+            backgroundColor: isDark ? "rgba(62, 196, 192, 0.12)" : "#e0f2fe",
+            color: isDark ? "#3ec4c0" : "#0284c7",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
+            fontSize: "13px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <IconSpinner style={{ width: 14, height: 14 }} />
+            <IconSpinner style={{ width: 15, height: 15 }} />
             <span>
               Subiendo ({uploadProgress.current}/{uploadProgress.total}): <strong>{uploadProgress.filename}</strong>
             </span>
@@ -939,11 +971,11 @@ export default function GameFilesExplorer({
             style={{
               padding: "48px 16px",
               textAlign: "center",
-              color: isDark ? "#64748b" : "#94a3b8",
+              color: tokens.textMuted,
             }}
           >
             <IconFolder style={{ width: 48, height: 48, margin: "0 auto 12px auto", opacity: 0.4 }} />
-            <div style={{ fontSize: "15px", fontWeight: "600", marginBottom: "4px" }}>
+            <div style={{ fontSize: "15px", fontWeight: "600", marginBottom: "4px", color: tokens.textSecondary }}>
               Esta carpeta está vacía
             </div>
             <div style={{ fontSize: "13px" }}>
@@ -955,8 +987,8 @@ export default function GameFilesExplorer({
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
             <thead>
-              <tr style={{ borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`, color: isDark ? "#64748b" : "#94a3b8" }}>
-                <th style={{ padding: "8px 12px", width: "36px" }}>
+              <tr style={{ borderBottom: `1px solid ${tokens.borderSubtle}`, color: tokens.textMuted }}>
+                <th style={{ padding: "10px 14px", width: "36px" }}>
                   <input
                     type="checkbox"
                     checked={selectedPaths.size === currentItems.length && currentItems.length > 0}
@@ -966,10 +998,10 @@ export default function GameFilesExplorer({
                     }}
                   />
                 </th>
-                <th style={{ padding: "8px 12px" }}>Nombre</th>
-                <th style={{ padding: "8px 12px", width: "120px" }}>Tamaño</th>
-                <th style={{ padding: "8px 12px", width: "160px" }}>Sincronización</th>
-                <th style={{ padding: "8px 12px", width: "160px" }}>Estado</th>
+                <th style={{ padding: "10px 14px", fontWeight: "600" }}>Nombre</th>
+                <th style={{ padding: "10px 14px", width: "120px", fontWeight: "600" }}>Tamaño</th>
+                <th style={{ padding: "10px 14px", width: "160px", fontWeight: "600" }}>Sincronización</th>
+                <th style={{ padding: "10px 14px", width: "160px", fontWeight: "600" }}>Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -987,15 +1019,15 @@ export default function GameFilesExplorer({
                       userSelect: "none",
                       backgroundColor: isSelected
                         ? isDark
-                          ? "rgba(59, 130, 246, 0.2)"
-                          : "#dbeafe"
+                          ? "rgba(62, 196, 192, 0.15)"
+                          : "#e0f2fe"
                         : "transparent",
-                      borderBottom: `1px solid ${isDark ? "#141c2e" : "#f1f5f9"}`,
-                      transition: "background-color 0.1s ease",
+                      borderBottom: `1px solid ${tokens.borderSubtle}`,
+                      transition: "background-color 0.12s ease",
                       opacity: isRemoved ? 0.6 : 1,
                     }}
                   >
-                    <td style={{ padding: "10px 12px" }}>
+                    <td style={{ padding: "10px 14px" }}>
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -1004,13 +1036,13 @@ export default function GameFilesExplorer({
                       />
                     </td>
 
-                    <td style={{ padding: "10px 12px" }}>
+                    <td style={{ padding: "10px 14px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                         {getItemIcon(item)}
                         <span
                           style={{
                             fontWeight: item.isDirectory ? "600" : "400",
-                            color: isDark ? "#f8fafc" : "#0f172a",
+                            color: tokens.textPrimary,
                             textDecoration: isRemoved ? "line-through" : "none",
                           }}
                         >
@@ -1019,11 +1051,11 @@ export default function GameFilesExplorer({
                       </div>
                     </td>
 
-                    <td style={{ padding: "10px 12px", color: isDark ? "#94a3b8" : "#64748b", fontFamily: "monospace" }}>
+                    <td style={{ padding: "10px 14px", color: tokens.textSecondary, fontFamily: "monospace" }}>
                       {item.isDirectory ? "—" : formatBytesToHuman(item.sizeBytes)}
                     </td>
 
-                    <td style={{ padding: "10px 12px" }}>
+                    <td style={{ padding: "10px 14px" }}>
                       <div
                         onClick={(e) => {
                           e.stopPropagation()
@@ -1036,23 +1068,20 @@ export default function GameFilesExplorer({
                           padding: "3px 8px",
                           borderRadius: "6px",
                           fontSize: "12px",
-                          fontWeight: "500",
+                          fontWeight: "600",
                           backgroundColor:
                             item.effectivePolicy === "NO_MODIFICABLE"
-                              ? isDark
-                                ? "rgba(239, 68, 68, 0.15)"
-                                : "#fee2e2"
-                              : isDark
-                              ? "rgba(16, 185, 129, 0.15)"
-                              : "#d1fae5",
+                              ? "rgba(239, 68, 68, 0.15)"
+                              : "rgba(34, 197, 94, 0.15)",
+                          border: `1px solid ${
+                            item.effectivePolicy === "NO_MODIFICABLE"
+                              ? "rgba(239, 68, 68, 0.25)"
+                              : "rgba(34, 197, 94, 0.25)"
+                          }`,
                           color:
                             item.effectivePolicy === "NO_MODIFICABLE"
-                              ? isDark
-                                ? "#f87171"
-                                : "#dc2626"
-                              : isDark
-                              ? "#34d399"
-                              : "#059669",
+                              ? "#ef4444"
+                              : "#22c55e",
                           cursor: isDraft && !isRemoved ? "pointer" : "default",
                         }}
                         title={
@@ -1061,14 +1090,24 @@ export default function GameFilesExplorer({
                             : `Heredado de la jerarquía: ${item.effectivePolicy}`
                         }
                       >
-                        <span>{item.effectivePolicy === "NO_MODIFICABLE" ? "🔒 Protegido" : "✏️ Personalizable"}</span>
+                        {item.effectivePolicy === "NO_MODIFICABLE" ? (
+                          <>
+                            <IconLock size={12} />
+                            <span>Protegido</span>
+                          </>
+                        ) : (
+                          <>
+                            <IconEdit size={12} />
+                            <span>Personalizable</span>
+                          </>
+                        )}
                         {item.explicitPolicy && (
                           <span style={{ fontSize: "10px", opacity: 0.75 }}>★</span>
                         )}
                       </div>
                     </td>
 
-                    <td style={{ padding: "10px 12px" }}>
+                    <td style={{ padding: "10px 14px" }}>
                       {item.changeStatus && item.changeStatus !== "UNCHANGED" ? (
                         <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
                           <span
@@ -1118,24 +1157,25 @@ export default function GameFilesExplorer({
                                   onToast(err instanceof Error ? err.message : "Error al restaurar.", "error")
                                 }
                               }}
+                              className="launcher-btn-secondary"
                               style={{
-                                padding: "2px 6px",
-                                borderRadius: "4px",
+                                padding: "2px 8px",
+                                borderRadius: "6px",
                                 fontSize: "11px",
-                                fontWeight: "500",
-                                backgroundColor: isDark ? "rgba(59, 130, 246, 0.2)" : "#eff6ff",
-                                color: "#3b82f6",
-                                border: `1px solid ${isDark ? "#1d4ed8" : "#bfdbfe"}`,
-                                cursor: "pointer",
+                                fontWeight: "600",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
                               }}
                               title="Restaurar este elemento al borrador activo"
                             >
-                              ↩️ Restaurar
+                              <IconRefresh size={11} />
+                              <span>Restaurar</span>
                             </button>
                           )}
                         </div>
                       ) : (
-                        <span style={{ color: isDark ? "#475569" : "#cbd5e1" }}>—</span>
+                        <span style={{ color: tokens.textMuted }}>—</span>
                       )}
                     </td>
                   </tr>
@@ -1149,14 +1189,14 @@ export default function GameFilesExplorer({
       {/* Explorer Footer Status Bar */}
       <div
         style={{
-          padding: "8px 16px",
-          borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
-          backgroundColor: isDark ? "#0b1120" : "#f8fafc",
+          padding: "10px 18px",
+          borderTop: `1px solid ${tokens.borderSubtle}`,
+          backgroundColor: tokens.bgCardInner,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          fontSize: "12px",
-          color: isDark ? "#64748b" : "#64748b",
+          fontSize: "12.5px",
+          color: tokens.textMuted,
         }}
       >
         <div>
@@ -1165,7 +1205,7 @@ export default function GameFilesExplorer({
         </div>
         <div>
           {clipboard && (
-            <span style={{ color: "#3b82f6", fontWeight: "500" }}>
+            <span style={{ color: isDark ? "#3ec4c0" : "#0c6e6b", fontWeight: "600" }}>
               Portapapeles: {clipboard.sources.length} elemento(s) para {clipboard.action === "copy" ? "copiar" : "mover"}
             </span>
           )}
@@ -1480,59 +1520,21 @@ export default function GameFilesExplorer({
   )
 }
 
-function actionButtonStyle(isDark: boolean, variant: "primary" | "default" | "icon"): React.CSSProperties {
-  const base: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px",
-    borderRadius: "10px",
-    fontSize: "13px",
-    fontWeight: "600",
-    cursor: "pointer",
-    border: "none",
-    transition: "all 0.15s ease",
-  }
-
-  if (variant === "primary") {
-    return {
-      ...base,
-      backgroundColor: "#2563eb",
-      color: "#ffffff",
-      padding: "7px 14px",
-    }
-  }
-
-  if (variant === "icon") {
-    return {
-      ...base,
-      backgroundColor: isDark ? "#1e293b" : "#e2e8f0",
-      color: isDark ? "#f8fafc" : "#0f172a",
-      padding: "7px 10px",
-    }
-  }
-
-  return {
-    ...base,
-    backgroundColor: isDark ? "#1e293b" : "#ffffff",
-    border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-    color: isDark ? "#f8fafc" : "#0f172a",
-    padding: "7px 14px",
-  }
-}
-
 function contextMenuItemStyle(isDark: boolean): React.CSSProperties {
   return {
     display: "flex",
     alignItems: "center",
     gap: "8px",
-    padding: "6px 10px",
-    borderRadius: "6px",
+    padding: "8px 12px",
+    borderRadius: "8px",
     border: "none",
     background: "none",
     width: "100%",
     textAlign: "left",
     fontSize: "13px",
-    color: isDark ? "#f8fafc" : "#0f172a",
+    fontWeight: "500",
+    color: isDark ? "#f1f5f9" : "#0f172a",
     cursor: "pointer",
+    transition: "background-color 0.12s ease",
   }
 }

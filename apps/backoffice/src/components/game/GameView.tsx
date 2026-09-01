@@ -303,10 +303,11 @@ export default function GameView({ theme }: GameViewProps) {
                   <div
                     key={rel.id}
                     style={{
-                      backgroundColor: isDark ? "#1e293b" : "#ffffff",
-                      border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                      borderRadius: "14px",
+                      backgroundColor: tokens.bgCard,
+                      border: `1px solid ${tokens.borderSubtle}`,
+                      borderRadius: "18px",
                       overflow: "hidden",
+                      boxShadow: tokens.cardShadow,
                     }}
                   >
                     <div
@@ -317,7 +318,7 @@ export default function GameView({ theme }: GameViewProps) {
                         alignItems: "center",
                         justifyContent: "space-between",
                         cursor: "pointer",
-                        backgroundColor: isSelected ? (isDark ? "rgba(99, 102, 241, 0.05)" : "#f8fafc") : "transparent",
+                        backgroundColor: isSelected ? (isDark ? "rgba(62, 196, 192, 0.05)" : "#f8fafc") : "transparent",
                       }}
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
@@ -327,9 +328,9 @@ export default function GameView({ theme }: GameViewProps) {
                             style={{
                               width: "48px",
                               height: "48px",
-                              borderRadius: "8px",
+                              borderRadius: "10px",
                               overflow: "hidden",
-                              backgroundColor: isDark ? "#0f172a" : "#f1f5f9",
+                              backgroundColor: tokens.bgCardInner,
                               flexShrink: 0,
                             }}
                           >
@@ -347,8 +348,8 @@ export default function GameView({ theme }: GameViewProps) {
                                   display: "flex",
                                   alignItems: "center",
                                   justifyContent: "center",
-                                  backgroundColor: "#1e293b",
-                                  color: "#38bdf8",
+                                  backgroundColor: tokens.bgCardInner,
+                                  color: "#3ec4c0",
                                   fontSize: "10px",
                                   fontWeight: "700",
                                 }}
@@ -362,13 +363,14 @@ export default function GameView({ theme }: GameViewProps) {
                             style={{
                               width: "48px",
                               height: "48px",
-                              borderRadius: "8px",
-                              backgroundColor: isDark ? "#0f172a" : "#f1f5f9",
+                              borderRadius: "10px",
+                              backgroundColor: tokens.bgCardInner,
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              color: isDark ? "#64748b" : "#94a3b8",
+                              color: tokens.textMuted,
                               fontSize: "10px",
+                              fontWeight: "700",
                               flexShrink: 0,
                             }}
                           >
@@ -382,7 +384,7 @@ export default function GameView({ theme }: GameViewProps) {
                               style={{
                                 fontSize: "17px",
                                 fontWeight: "700",
-                                color: isDark ? "#f1f5f9" : "#0f172a",
+                                color: tokens.textPrimary,
                               }}
                             >
                               v{rel.version}
@@ -397,27 +399,27 @@ export default function GameView({ theme }: GameViewProps) {
                                   rel.status === "PUBLISHED"
                                     ? "rgba(34, 197, 94, 0.15)"
                                     : isDark
-                                    ? "#334155"
+                                    ? "rgba(255, 255, 255, 0.08)"
                                     : "#f1f5f9",
-                                color: rel.status === "PUBLISHED" ? "#22c55e" : isDark ? "#cbd5e1" : "#64748b",
+                                color: rel.status === "PUBLISHED" ? "#22c55e" : tokens.textSecondary,
                               }}
                             >
                               {rel.status === "PUBLISHED" ? "Publicada (Activa)" : "Histórica"}
                             </span>
-                            <span style={{ fontSize: "12px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                            <span style={{ fontSize: "12px", color: tokens.textMuted }}>
                               MC {rel.minecraftVersion} • NeoForge {rel.neoForgeVersion}
                             </span>
                           </div>
 
-                          <div style={{ fontSize: "12px", color: isDark ? "#64748b" : "#94a3b8", marginTop: "2px" }}>
+                          <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
                             {rel.publishedAt ? `Publicada el ${new Date(rel.publishedAt).toLocaleDateString()}` : "Sin fecha de publicación"} • {rel.files.length} archivos
                           </div>
                         </div>
                       </div>
 
                       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                        <span style={{ fontSize: "13px", color: "#3b82f6", fontWeight: "600" }}>
-                          {isSelected ? "Ocultar explorador ▲" : "Abrir explorador ▼"}
+                        <span style={{ fontSize: "13px", color: isDark ? "#3ec4c0" : "#0c6e6b", fontWeight: "600" }}>
+                          {isSelected ? "Ocultar explorador" : "Abrir explorador"}
                         </span>
                       </div>
                     </div>
@@ -426,13 +428,13 @@ export default function GameView({ theme }: GameViewProps) {
                       <div
                         style={{
                           padding: "16px 24px",
-                          borderTop: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                          backgroundColor: isDark ? "#0f172a" : "#f8fafc",
+                          borderTop: `1px solid ${tokens.borderSubtle}`,
+                          backgroundColor: tokens.bgCardInner,
                         }}
                       >
                         {rel.notes && (
-                          <div style={{ marginBottom: "14px", fontSize: "13px", color: isDark ? "#cbd5e1" : "#334155" }}>
-                            <strong>Notas de la versión:</strong> {rel.notes}
+                          <div style={{ marginBottom: "14px", fontSize: "13px", color: tokens.textSecondary }}>
+                            <strong style={{ color: tokens.textPrimary }}>Notas de la versión:</strong> {rel.notes}
                           </div>
                         )}
                         <GameFilesExplorer
@@ -458,10 +460,11 @@ export default function GameView({ theme }: GameViewProps) {
             <div
               data-testid="game-pending-server-changes-banner"
               style={{
-                padding: "16px 20px",
-                borderRadius: "14px",
-                backgroundColor: isDark ? "rgba(59, 130, 246, 0.12)" : "#eff6ff",
-                border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.3)" : "#bfdbfe"}`,
+                padding: "18px 24px",
+                borderRadius: "18px",
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${isDark ? "rgba(62, 196, 192, 0.3)" : "#bae6fd"}`,
+                boxShadow: tokens.cardShadow,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
@@ -470,17 +473,17 @@ export default function GameView({ theme }: GameViewProps) {
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ color: "#3b82f6", display: "flex", alignItems: "center" }}>
+                <div style={{ color: isDark ? "#3ec4c0" : "#0284c7", display: "flex", alignItems: "center" }}>
                   <IconRocket style={{ width: 22, height: 22 }} />
                 </div>
                 <div>
-                  <div style={{ fontSize: "15px", fontWeight: "700", color: isDark ? "#f1f5f9" : "#1e3a8a" }}>
+                  <div style={{ fontSize: "15px", fontWeight: "700", color: tokens.textPrimary }}>
                     Cambios pendientes en el servidor
                   </div>
                   <div
                     style={{
                       fontSize: "13px",
-                      color: isDark ? "#93c5fd" : "#3b82f6",
+                      color: tokens.textSecondary,
                       marginTop: "2px",
                       display: "flex",
                       gap: "8px",
@@ -506,15 +509,28 @@ export default function GameView({ theme }: GameViewProps) {
                           ? "#ef4444"
                           : "#f59e0b",
                         fontWeight: "600",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
                       }}
                     >
-                      {serverPlan.canApply
-                        ? "🟢 Servidor apagado y listo"
-                        : serverPlan.serverStatus === "ONLINE" || serverPlan.serverStatus === "STARTING" || serverPlan.serverStatus === "STOPPING"
-                        ? `🟠 ${serverPlan.blockReason || "Apaga el servidor antes de aplicar los cambios"}`
-                        : serverPlan.serverStatus === "OFFLINE"
-                        ? `🟠 ${serverPlan.blockReason || "No se pudieron verificar los archivos del servidor"}`
-                        : `🔴 ${serverPlan.blockReason || "El servidor no está disponible"}`}
+                      {serverPlan.canApply ? (
+                        <>
+                          <IconCheck size={14} />
+                          <span>Servidor apagado y listo</span>
+                        </>
+                      ) : (
+                        <>
+                          <IconAlertCircle size={14} />
+                          <span>
+                            {serverPlan.serverStatus === "ONLINE" || serverPlan.serverStatus === "STARTING" || serverPlan.serverStatus === "STOPPING"
+                              ? serverPlan.blockReason || "Apaga el servidor antes de aplicar los cambios"
+                              : serverPlan.serverStatus === "OFFLINE"
+                              ? serverPlan.blockReason || "No se pudieron verificar los archivos del servidor"
+                              : serverPlan.blockReason || "El servidor no está disponible"}
+                          </span>
+                        </>
+                      )}
                     </span>
                   </div>
                 </div>
@@ -524,18 +540,12 @@ export default function GameView({ theme }: GameViewProps) {
                 type="button"
                 data-testid="button-open-server-changes-from-game"
                 onClick={() => setIsServerChangesModalOpen(true)}
+                className="launcher-btn-primary"
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 18px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: "#3b82f6",
-                  color: "#ffffff",
-                  fontWeight: "700",
+                  padding: "9px 20px",
+                  borderRadius: "12px",
                   fontSize: "13px",
-                  cursor: "pointer",
+                  fontWeight: "700",
                 }}
               >
                 Revisar cambios
@@ -546,15 +556,11 @@ export default function GameView({ theme }: GameViewProps) {
           {/* Status Header Banner Card */}
           <div
             style={{
-              backgroundColor: isDark ? "#1e293b" : "#ffffff",
-              border: `1px solid ${hasDraft ? "#3b82f6" : isDark ? "#334155" : "#e2e8f0"}`,
-              borderRadius: "14px",
-              padding: "20px 24px",
-              boxShadow: hasDraft
-                ? "0 4px 20px -4px rgba(59, 130, 246, 0.25)"
-                : isDark
-                ? "0 4px 6px -1px rgba(0,0,0,0.3)"
-                : "0 1px 3px rgba(0,0,0,0.05)",
+              backgroundColor: tokens.bgCard,
+              border: `1px solid ${hasDraft ? (isDark ? "rgba(62, 196, 192, 0.4)" : "#38bdf8") : tokens.borderSubtle}`,
+              borderRadius: "18px",
+              padding: "22px 26px",
+              boxShadow: tokens.cardShadow,
             }}
           >
             <div
@@ -574,8 +580,8 @@ export default function GameView({ theme }: GameViewProps) {
                       borderRadius: "6px",
                       fontSize: "12px",
                       fontWeight: "700",
-                      backgroundColor: hasDraft ? "rgba(59, 130, 246, 0.2)" : "rgba(34, 197, 94, 0.15)",
-                      color: hasDraft ? "#60a5fa" : "#22c55e",
+                      backgroundColor: hasDraft ? "rgba(62, 196, 192, 0.15)" : "rgba(34, 197, 94, 0.15)",
+                      color: hasDraft ? (isDark ? "#3ec4c0" : "#0c6e6b") : "#22c55e",
                     }}
                   >
                     {hasDraft ? "Actualización en preparación (Borrador)" : "Versión oficial publicada"}
@@ -584,7 +590,7 @@ export default function GameView({ theme }: GameViewProps) {
                     style={{
                       fontSize: "18px",
                       fontWeight: "700",
-                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      color: tokens.textPrimary,
                     }}
                   >
                     {published ? `v${published.version}` : "Sin versión previa"}
@@ -594,12 +600,12 @@ export default function GameView({ theme }: GameViewProps) {
                   {hasDraft && changes && (
                     <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "12px", fontWeight: "600" }}>
                       <span style={{ color: "#22c55e" }}>+{changes.added}</span>
-                      <span style={{ color: "#38bdf8" }}>↑ {changes.updated}</span>
+                      <span style={{ color: isDark ? "#3ec4c0" : "#0284c7" }}>↑ {changes.updated}</span>
                       <span style={{ color: "#ef4444" }}>− {changes.removed}</span>
                     </div>
                   )}
                 </div>
-                <p style={{ margin: 0, fontSize: "14px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                <p style={{ margin: 0, fontSize: "14px", color: tokens.textSecondary }}>
                   {hasDraft
                     ? "Puedes crear carpetas, editar archivos de configuración y subir mods. Los cambios se aplicarán a los jugadores al publicar."
                     : "Esta es la versión oficial actualmente descargable. Pulsa Preparar actualización para realizar modificaciones en el explorador."}
@@ -613,19 +619,15 @@ export default function GameView({ theme }: GameViewProps) {
                     type="button"
                     onClick={handlePrepareDraft}
                     disabled={isPreparingDraft}
+                    className="launcher-btn-primary"
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
                       gap: "8px",
-                      padding: "10px 20px",
-                      borderRadius: "8px",
-                      border: "none",
-                      backgroundColor: "#3b82f6",
-                      color: "#ffffff",
+                      padding: "10px 22px",
+                      borderRadius: "12px",
                       fontSize: "14px",
-                      fontWeight: "600",
-                      cursor: isPreparingDraft ? "not-allowed" : "pointer",
-                      opacity: isPreparingDraft ? 0.7 : 1,
+                      fontWeight: "700",
                     }}
                   >
                     {isPreparingDraft ? <IconSpinner style={{ width: 16, height: 16 }} /> : <IconEdit style={{ width: 16, height: 16 }} />}
@@ -637,15 +639,13 @@ export default function GameView({ theme }: GameViewProps) {
                       type="button"
                       onClick={handleDiscardDraft}
                       disabled={isDiscardingDraft}
+                      className="launcher-btn-secondary"
                       style={{
-                        padding: "9px 16px",
-                        borderRadius: "8px",
-                        border: `1px solid rgba(239, 68, 68, 0.3)`,
-                        backgroundColor: "transparent",
-                        color: "#ef4444",
-                        fontSize: "13px",
+                        padding: "10px 18px",
+                        borderRadius: "12px",
+                        fontSize: "13.5px",
                         fontWeight: "600",
-                        cursor: isDiscardingDraft ? "not-allowed" : "pointer",
+                        color: "#ef4444",
                       }}
                     >
                       {isDiscardingDraft ? "Descartando..." : "Descartar borrador"}
@@ -657,18 +657,15 @@ export default function GameView({ theme }: GameViewProps) {
                         setPublishingDraft(draft)
                         setIsPublishOpen(true)
                       }}
+                      className="launcher-btn-primary"
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
                         gap: "8px",
-                        padding: "9px 20px",
-                        borderRadius: "8px",
-                        border: "none",
-                        backgroundColor: "#22c55e",
-                        color: "#ffffff",
-                        fontSize: "13px",
-                        fontWeight: "600",
-                        cursor: "pointer",
+                        padding: "10px 22px",
+                        borderRadius: "12px",
+                        fontSize: "14px",
+                        fontWeight: "700",
                       }}
                     >
                       <IconRocket style={{ width: 16, height: 16 }} />
@@ -678,91 +675,6 @@ export default function GameView({ theme }: GameViewProps) {
                 )}
               </div>
             </div>
-
-            {/* Readiness Checklist when Draft is Active */}
-            {hasDraft && readiness && (
-              <div
-                style={{
-                  marginTop: "16px",
-                  paddingTop: "14px",
-                  borderTop: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: "12px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      fontSize: "13px",
-                      color: readiness.hasFiles ? "#22c55e" : "#ef4444",
-                    }}
-                  >
-                    <IconCheck style={{ width: 16, height: 16 }} />
-                    {files.filter((f) => !f.isDirectory && f.changeStatus !== "REMOVED").length} archivos descargables
-                  </span>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      fontSize: "13px",
-                      color: readiness.noConflicts ? "#22c55e" : "#ef4444",
-                    }}
-                  >
-                    <IconCheck style={{ width: 16, height: 16 }} />
-                    Sin conflictos
-                  </span>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      fontSize: "13px",
-                      color: readiness.storageVerified ? "#22c55e" : "#ef4444",
-                    }}
-                  >
-                    <IconCheck style={{ width: 16, height: 16 }} />
-                    Almacenamiento verificado
-                  </span>
-                </div>
-
-                <div>
-                  {readiness.isReady ? (
-                    <span
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: "700",
-                        color: "#22c55e",
-                        padding: "3px 8px",
-                        borderRadius: "6px",
-                        backgroundColor: "rgba(34, 197, 94, 0.15)",
-                      }}
-                    >
-                      ✓ Lista para publicar
-                    </span>
-                  ) : (
-                    <span
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: "700",
-                        color: "#ef4444",
-                        padding: "3px 8px",
-                        borderRadius: "6px",
-                        backgroundColor: "rgba(239, 68, 68, 0.15)",
-                      }}
-                    >
-                      ⚠ Hay problemas pendientes para publicar
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Main Game Files Explorer */}
