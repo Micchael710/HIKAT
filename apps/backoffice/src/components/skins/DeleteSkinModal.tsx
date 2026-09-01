@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import type { ThemeMode, SkinItem } from "../../types"
 import { skinsApi } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import { IconTrash, IconSpinner } from "../../theme/icons"
 
 interface DeleteSkinModalProps {
@@ -16,7 +17,7 @@ export default function DeleteSkinModal({
   onClose,
   onDeleted,
 }: DeleteSkinModalProps) {
-  const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -28,7 +29,7 @@ export default function DeleteSkinModal({
       onDeleted()
       onClose()
     } catch (err: any) {
-      setError(err.message || "No se pudo eliminar la skin.")
+      setError(err.message || "Error al eliminar la skin.")
       setIsDeleting(false)
     }
   }
@@ -38,8 +39,8 @@ export default function DeleteSkinModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.6)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.75)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -49,21 +50,21 @@ export default function DeleteSkinModal({
     >
       <div
         style={{
-          backgroundColor: isDark ? "#1e293b" : "#ffffff",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          borderRadius: "16px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
-          maxWidth: "420px",
+          maxWidth: "440px",
           padding: "24px",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
           <div
             style={{
-              width: "40px",
-              height: "40px",
-              borderRadius: "10px",
+              width: "42px",
+              height: "42px",
+              borderRadius: "12px",
               backgroundColor: "rgba(239, 68, 68, 0.15)",
               color: "#ef4444",
               display: "flex",
@@ -78,9 +79,9 @@ export default function DeleteSkinModal({
             <h3
               style={{
                 margin: 0,
-                fontSize: "16px",
-                fontWeight: "600",
-                color: isDark ? "#f1f5f9" : "#0f172a",
+                fontSize: "17px",
+                fontWeight: "700",
+                color: tokens.textPrimary,
               }}
             >
               Eliminar Skin
@@ -89,7 +90,7 @@ export default function DeleteSkinModal({
               style={{
                 margin: "2px 0 0 0",
                 fontSize: "13px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                color: tokens.textMuted,
               }}
             >
               Esta acción no se puede deshacer.
@@ -101,11 +102,11 @@ export default function DeleteSkinModal({
           style={{
             margin: "0 0 20px 0",
             fontSize: "14px",
-            color: isDark ? "#cbd5e1" : "#334155",
+            color: tokens.textSecondary,
             lineHeight: "1.5",
           }}
         >
-          ¿Estás seguro de que deseas eliminar la skin <strong>{skin.name}</strong> del catálogo?
+          ¿Estás seguro de que deseas eliminar la skin <strong style={{ color: tokens.textPrimary }}>{skin.name}</strong> del catálogo?
         </p>
 
         {error && (

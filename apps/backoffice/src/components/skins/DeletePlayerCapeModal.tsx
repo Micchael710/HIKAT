@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import type { ThemeMode, AdminPlayerCape } from "../../types"
 import { capesApi } from "../../services/graphqlClient"
+import { getThemeTokens } from "../../theme/tokens"
 import { IconTrash, IconSpinner } from "../../theme/icons"
 
 interface DeletePlayerCapeModalProps {
@@ -16,7 +17,7 @@ export default function DeletePlayerCapeModal({
   onClose,
   onDeleted,
 }: DeletePlayerCapeModalProps) {
-  const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -38,8 +39,8 @@ export default function DeletePlayerCapeModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.6)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.75)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -49,13 +50,13 @@ export default function DeletePlayerCapeModal({
     >
       <div
         style={{
-          backgroundColor: isDark ? "#1e293b" : "#ffffff",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          borderRadius: "16px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
-          maxWidth: "420px",
+          maxWidth: "440px",
           padding: "24px",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         <div
@@ -68,9 +69,9 @@ export default function DeletePlayerCapeModal({
         >
           <div
             style={{
-              width: "40px",
-              height: "40px",
-              borderRadius: "10px",
+              width: "42px",
+              height: "42px",
+              borderRadius: "12px",
               backgroundColor: "rgba(239, 68, 68, 0.15)",
               color: "#ef4444",
               display: "flex",
@@ -85,9 +86,9 @@ export default function DeletePlayerCapeModal({
             <h3
               style={{
                 margin: 0,
-                fontSize: "16px",
-                fontWeight: "600",
-                color: isDark ? "#f1f5f9" : "#0f172a",
+                fontSize: "17px",
+                fontWeight: "700",
+                color: tokens.textPrimary,
               }}
             >
               Eliminar Capa de Jugador
@@ -96,7 +97,7 @@ export default function DeletePlayerCapeModal({
               style={{
                 margin: "2px 0 0 0",
                 fontSize: "13px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                color: tokens.textMuted,
               }}
             >
               Esta acción eliminará la capa personalizada.
@@ -109,15 +110,15 @@ export default function DeletePlayerCapeModal({
             margin: "0 0 20px 0",
             fontSize: "14px",
             lineHeight: 1.5,
-            color: isDark ? "#cbd5e1" : "#475569",
+            color: tokens.textSecondary,
           }}
         >
           ¿Estás seguro de que deseas eliminar la capa{" "}
-          <strong style={{ color: isDark ? "#f1f5f9" : "#0f172a" }}>
+          <strong style={{ color: tokens.textPrimary }}>
             "{cape.name}"
           </strong>{" "}
           del jugador{" "}
-          <strong style={{ color: isDark ? "#f1f5f9" : "#0f172a" }}>
+          <strong style={{ color: tokens.textPrimary }}>
             "{cape.userDisplayName}"
           </strong>
           ?
@@ -127,9 +128,9 @@ export default function DeletePlayerCapeModal({
           <div
             style={{
               padding: "10px 14px",
-              borderRadius: "8px",
-              backgroundColor: "rgba(239, 68, 68, 0.1)",
-              border: "1px solid rgba(239, 68, 68, 0.2)",
+              borderRadius: "10px",
+              backgroundColor: "rgba(239, 68, 68, 0.15)",
+              border: "1px solid rgba(239, 68, 68, 0.25)",
               color: "#ef4444",
               fontSize: "13px",
               marginBottom: "16px",

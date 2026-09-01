@@ -4,6 +4,7 @@ import { validateCapeTextureBuffer, MAX_CAPE_SIZE_BYTES } from "@hikat/shared"
 import { loadCapeToCanvas } from "skinview-utils"
 import { capesApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
+import { getThemeTokens } from "../../theme/tokens"
 import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
 import SkinViewer3D from "./SkinViewer3D"
 
@@ -23,6 +24,7 @@ export default function PlayerCapeModal({
   onSaved,
 }: PlayerCapeModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const [currentMode, setCurrentMode] = useState<"edit" | "view">(mode)
   const isViewOnly = currentMode === "view"
 
@@ -126,8 +128,8 @@ export default function PlayerCapeModal({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.7)",
-        backdropFilter: "blur(4px)",
+        backgroundColor: "rgba(0, 0, 0, 0.75)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -141,18 +143,16 @@ export default function PlayerCapeModal({
     >
       <div
         style={{
-          backgroundColor: isDark ? "#1e293b" : "#ffffff",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          borderRadius: "16px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
           maxWidth: "800px",
           maxHeight: "90vh",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          boxShadow: isDark
-            ? "0 25px 50px -12px rgba(0,0,0,0.5)"
-            : "0 20px 25px -5px rgba(0,0,0,0.1)",
+          boxShadow: tokens.cardShadowLg,
         }}
       >
         {/* Header */}
@@ -161,8 +161,9 @@ export default function PlayerCapeModal({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "20px 24px",
-            borderBottom: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+            padding: "18px 24px",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
+            backgroundColor: tokens.bgCardInner,
           }}
         >
           <div>
@@ -171,7 +172,7 @@ export default function PlayerCapeModal({
                 margin: "0 0 4px 0",
                 fontSize: "18px",
                 fontWeight: "700",
-                color: isDark ? "#f1f5f9" : "#0f172a",
+                color: tokens.textPrimary,
               }}
             >
               Capa de {cape.userDisplayName}
@@ -180,24 +181,24 @@ export default function PlayerCapeModal({
               style={{
                 margin: 0,
                 fontSize: "13px",
-                color: isDark ? "#94a3b8" : "#64748b",
+                color: tokens.textMuted,
               }}
             >
               ID Usuario: <code style={{ fontSize: "12px" }}>{cape.userId}</code>
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             style={{
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              width: "32px",
-              height: "32px",
-              borderRadius: "8px",
+              background: "none",
               border: "none",
-              backgroundColor: isDark ? "#334155" : "#f1f5f9",
-              color: isDark ? "#94a3b8" : "#64748b",
+              color: tokens.textMuted,
+              padding: "6px",
+              borderRadius: "8px",
               cursor: "pointer",
             }}
           >
@@ -219,11 +220,11 @@ export default function PlayerCapeModal({
           {error && (
             <div
               style={{
-                padding: "12px 16px",
-                borderRadius: "8px",
-                backgroundColor: isDark ? "rgba(239, 68, 68, 0.2)" : "#fef2f2",
-                border: "1px solid #ef4444",
-                color: isDark ? "#fca5a5" : "#b91c1c",
+                padding: "10px 14px",
+                borderRadius: "10px",
+                backgroundColor: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
+                color: "#ef4444",
                 fontSize: "13px",
               }}
             >
@@ -267,22 +268,15 @@ export default function PlayerCapeModal({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
+                    className="launcher-btn-secondary"
                     style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "8px",
                       padding: "8px 16px",
-                      borderRadius: "8px",
-                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                      backgroundColor: isDark ? "#334155" : "#f8fafc",
-                      color: isDark ? "#f1f5f9" : "#1e293b",
+                      borderRadius: "10px",
                       fontSize: "13px",
-                      fontWeight: "500",
-                      cursor: "pointer",
                     }}
                   >
                     <IconUpload size={16} />
-                    {selectedFile ? "Cambiar PNG..." : "Reemplazar textura..."}
+                    <span>{selectedFile ? "Cambiar PNG..." : "Reemplazar textura..."}</span>
                   </button>
                   {fileError && (
                     <div
@@ -308,7 +302,7 @@ export default function PlayerCapeModal({
                     display: "block",
                     fontSize: "12px",
                     fontWeight: "600",
-                    color: isDark ? "#94a3b8" : "#64748b",
+                    color: tokens.textSecondary,
                     marginBottom: "4px",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
@@ -319,9 +313,9 @@ export default function PlayerCapeModal({
                 {isViewOnly ? (
                   <div
                     style={{
-                      fontSize: "15px",
-                      fontWeight: "600",
-                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      fontSize: "16px",
+                      fontWeight: "700",
+                      color: tokens.textPrimary,
                     }}
                   >
                     {name}
@@ -331,13 +325,12 @@ export default function PlayerCapeModal({
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    placeholder="Ej. Capa de Jugador..."
+                    className="launcher-input"
                     style={{
                       width: "100%",
-                      padding: "8px 12px",
-                      borderRadius: "8px",
-                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                      backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      padding: "10px 14px",
+                      borderRadius: "12px",
                       fontSize: "14px",
                       boxSizing: "border-box",
                     }}
@@ -351,7 +344,7 @@ export default function PlayerCapeModal({
                     display: "block",
                     fontSize: "12px",
                     fontWeight: "600",
-                    color: isDark ? "#94a3b8" : "#64748b",
+                    color: tokens.textSecondary,
                     marginBottom: "4px",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
@@ -361,9 +354,9 @@ export default function PlayerCapeModal({
                 </label>
                 <div
                   style={{
-                    fontSize: "15px",
-                    fontWeight: "600",
-                    color: isDark ? "#f1f5f9" : "#0f172a",
+                    fontSize: "16px",
+                    fontWeight: "700",
+                    color: tokens.textPrimary,
                   }}
                 >
                   {cape.userDisplayName}
@@ -376,7 +369,7 @@ export default function PlayerCapeModal({
                     display: "block",
                     fontSize: "12px",
                     fontWeight: "600",
-                    color: isDark ? "#94a3b8" : "#64748b",
+                    color: tokens.textSecondary,
                     marginBottom: "4px",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
@@ -387,7 +380,7 @@ export default function PlayerCapeModal({
                 <div
                   style={{
                     fontSize: "14px",
-                    color: isDark ? "#cbd5e1" : "#334155",
+                    color: tokens.textSecondary,
                   }}
                 >
                   {new Date(cape.createdAt).toLocaleString()}
@@ -400,7 +393,7 @@ export default function PlayerCapeModal({
                     display: "block",
                     fontSize: "12px",
                     fontWeight: "600",
-                    color: isDark ? "#94a3b8" : "#64748b",
+                    color: tokens.textSecondary,
                     marginBottom: "4px",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
@@ -411,7 +404,7 @@ export default function PlayerCapeModal({
                 <div
                   style={{
                     fontSize: "14px",
-                    color: isDark ? "#cbd5e1" : "#334155",
+                    color: tokens.textSecondary,
                   }}
                 >
                   {new Date(cape.updatedAt).toLocaleString()}
@@ -423,18 +416,11 @@ export default function PlayerCapeModal({
                   <button
                     type="button"
                     onClick={() => setCurrentMode("edit")}
+                    className="launcher-btn-primary"
                     style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "8px 14px",
-                      borderRadius: "8px",
-                      border: "none",
-                      backgroundColor: "#6366f1",
-                      color: "#ffffff",
+                      padding: "8px 16px",
+                      borderRadius: "10px",
                       fontSize: "13px",
-                      fontWeight: "600",
-                      cursor: "pointer",
                     }}
                   >
                     Editar como Administrador
@@ -450,8 +436,8 @@ export default function PlayerCapeModal({
               display: "flex",
               justifyContent: "flex-end",
               gap: "12px",
-              paddingTop: "16px",
-              borderTop: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+              paddingTop: "20px",
+              borderTop: `1px solid ${tokens.borderSubtle}`,
             }}
           >
             <button

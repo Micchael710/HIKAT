@@ -1,9 +1,10 @@
-import React, { useState, useRef } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import type { ThemeMode, CapeItem, CapeStatus } from "../../types"
 import { validateCapeTextureBuffer, MAX_CAPE_SIZE_BYTES } from "@hikat/shared"
 import { loadCapeToCanvas } from "skinview-utils"
 import { capesApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
+import { getThemeTokens } from "../../theme/tokens"
 import { IconCross, IconUpload, IconSpinner } from "../../theme/icons"
 import SkinViewer3D from "./SkinViewer3D"
 
@@ -23,6 +24,7 @@ export default function CapeFormModal({
   onSaved,
 }: CapeFormModalProps) {
   const isDark = theme === "dark"
+  const tokens = getThemeTokens(theme)
   const isEdit = !!cape
   const isViewOnly = mode === "view"
 
@@ -37,6 +39,15 @@ export default function CapeFormModal({
   const [error, setError] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    setName(cape?.name || "")
+    setStatus(cape?.status || "AVAILABLE")
+    setSelectedFile(null)
+    setFileError(null)
+    setError(null)
+    setPreviewUrl(cape?.imageUrl || null)
+  }, [cape, mode])
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -63,25 +74,29 @@ export default function CapeFormModal({
       }
 
       try {
-        const url = URL.createObjectURL(file)
-        const img = new Image()
-        img.src = url
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve()
-          img.onerror = () => reject(new Error("No se pudo cargar la imagen"))
-        })
-        URL.revokeObjectURL(url)
+        if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+          const url = URL.createObjectURL(file)
+          const img = new Image()
+          img.src = url
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve()
+            img.onerror = () => reject(new Error("No se pudo cargar la imagen"))
+          })
+          URL.revokeObjectURL(url)
 
-        const tempCanvas = document.createElement("canvas")
-        loadCapeToCanvas(tempCanvas, img)
+          const tempCanvas = document.createElement("canvas")
+          loadCapeToCanvas(tempCanvas, img)
+        }
       } catch {
         setFileError("Esta imagen no tiene un formato de capa compatible.")
         return
       }
 
       setSelectedFile(file)
-      const url = URL.createObjectURL(file)
-      setPreviewUrl(url)
+      if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+        const url = URL.createObjectURL(file)
+        setPreviewUrl(url)
+      }
 
       if (!name) {
         const cleanName = file.name.replace(/\.png$/i, "").replace(/[_-]/g, " ")
@@ -101,7 +116,8 @@ export default function CapeFormModal({
 
     setError(null)
 
-    if (!name.trim()) {
+    const trimmedName = name.trim()
+    if (!trimmedName) {
       setError("El nombre de la capa es obligatorio.")
       return
     }
@@ -112,6 +128,7 @@ export default function CapeFormModal({
     }
 
     setIsSubmitting(true)
+
     try {
       let mediaId: string | undefined
 
@@ -120,9 +137,9 @@ export default function CapeFormModal({
         mediaId = uploadedMedia.id
       }
 
-      if (isEdit) {
+      if (isEdit && cape) {
         await capesApi.updateCape(cape.id, {
-          name: name.trim(),
+          name: trimmedName,
           status,
           mediaId,
         })
@@ -131,7 +148,7 @@ export default function CapeFormModal({
           throw new Error("No se pudo subir la textura de la capa.")
         }
         await capesApi.createCape({
-          name: name.trim(),
+          name: trimmedName,
           status,
           mediaId,
         })
@@ -151,8 +168,8 @@ export default function CapeFormModal({
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.65)",
-        backdropFilter: "blur(5px)",
+        backgroundColor: "rgba(0, 0, 0, 0.75)",
+        backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -162,13 +179,13 @@ export default function CapeFormModal({
     >
       <div
         style={{
-          backgroundColor: isDark ? "#1e293b" : "#ffffff",
-          border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
-          borderRadius: "16px",
+          backgroundColor: tokens.bgCard,
+          border: `1px solid ${tokens.borderSubtle}`,
+          borderRadius: "18px",
           width: "100%",
           maxWidth: "760px",
           overflow: "hidden",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)",
+          boxShadow: tokens.cardShadowLg,
           display: "flex",
           flexDirection: "column",
           maxHeight: "90vh",
@@ -180,29 +197,32 @@ export default function CapeFormModal({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "20px 24px",
-            borderBottom: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+            padding: "18px 24px",
+            borderBottom: `1px solid ${tokens.borderSubtle}`,
+            backgroundColor: tokens.bgCardInner,
           }}
         >
           <h2
             style={{
               margin: 0,
               fontSize: "18px",
-              fontWeight: "600",
-              color: isDark ? "#f1f5f9" : "#0f172a",
+              fontWeight: "700",
+              color: tokens.textPrimary,
             }}
           >
             {isViewOnly ? "Detalles de la Capa" : isEdit ? "Editar Capa" : "Nueva Capa Global"}
           </h2>
           <button
+            type="button"
             onClick={onClose}
             style={{
               background: "none",
               border: "none",
               cursor: "pointer",
-              color: isDark ? "#94a3b8" : "#64748b",
+              color: tokens.textMuted,
               display: "flex",
-              padding: "4px",
+              padding: "6px",
+              borderRadius: "8px",
             }}
           >
             <IconCross size={18} />
@@ -216,8 +236,9 @@ export default function CapeFormModal({
               style={{
                 marginBottom: "20px",
                 padding: "10px 14px",
-                borderRadius: "8px",
+                borderRadius: "10px",
                 backgroundColor: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
                 color: "#ef4444",
                 fontSize: "13px",
               }}
@@ -250,21 +271,21 @@ export default function CapeFormModal({
                     style={{
                       width: "280px",
                       height: "340px",
-                      borderRadius: "12px",
-                      backgroundColor: isDark ? "#0f172a" : "#f1f5f9",
-                      border: `2px dashed ${isDark ? "#334155" : "#cbd5e1"}`,
+                      borderRadius: "14px",
+                      backgroundColor: tokens.bgCardInner,
+                      border: `2px dashed ${tokens.borderSubtle}`,
                       display: "flex",
                       flexDirection: "column",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: isDark ? "#64748b" : "#94a3b8",
+                      color: tokens.textMuted,
                       padding: "20px",
                       textAlign: "center",
                     }}
                   >
                     <IconUpload size={32} />
                     <span style={{ marginTop: "12px", fontSize: "13px", fontWeight: "500" }}>
-                      Selecciona una textura PNG de capa (estándar o HD)
+                      Selecciona una textura PNG de capa
                     </span>
                   </div>
                 )}
@@ -282,22 +303,15 @@ export default function CapeFormModal({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
+                    className="launcher-btn-secondary"
                     style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "8px",
                       padding: "8px 16px",
-                      borderRadius: "8px",
-                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                      backgroundColor: isDark ? "#334155" : "#f8fafc",
-                      color: isDark ? "#f1f5f9" : "#1e293b",
+                      borderRadius: "10px",
                       fontSize: "13px",
-                      fontWeight: "500",
-                      cursor: "pointer",
                     }}
                   >
                     <IconUpload size={16} />
-                    {selectedFile ? "Cambiar archivo..." : isEdit ? "Reemplazar textura..." : "Seleccionar PNG..."}
+                    <span>{selectedFile ? "Cambiar archivo..." : isEdit ? "Reemplazar textura..." : "Seleccionar PNG..."}</span>
                   </button>
                   {fileError && (
                     <div style={{ marginTop: "6px", fontSize: "12px", color: "#ef4444", textAlign: "center" }}>
@@ -317,14 +331,14 @@ export default function CapeFormModal({
                     display: "block",
                     fontSize: "13px",
                     fontWeight: "600",
-                    color: isDark ? "#cbd5e1" : "#334155",
+                    color: tokens.textSecondary,
                     marginBottom: "6px",
                   }}
                 >
                   Nombre de la Capa
                 </label>
                 {isViewOnly ? (
-                  <div style={{ fontSize: "15px", fontWeight: "600", color: isDark ? "#f1f5f9" : "#0f172a" }}>
+                  <div style={{ fontSize: "16px", fontWeight: "700", color: tokens.textPrimary }}>
                     {name}
                   </div>
                 ) : (
@@ -333,13 +347,11 @@ export default function CapeFormModal({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Ej. Capa de Fundador, Capa Épica..."
+                    className="launcher-input"
                     style={{
                       width: "100%",
                       padding: "10px 14px",
-                      borderRadius: "8px",
-                      border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                      backgroundColor: isDark ? "#0f172a" : "#ffffff",
-                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      borderRadius: "12px",
                       fontSize: "14px",
                       boxSizing: "border-box",
                     }}
@@ -354,7 +366,7 @@ export default function CapeFormModal({
                     display: "block",
                     fontSize: "13px",
                     fontWeight: "600",
-                    color: isDark ? "#cbd5e1" : "#334155",
+                    color: tokens.textSecondary,
                     marginBottom: "8px",
                   }}
                 >
@@ -365,7 +377,7 @@ export default function CapeFormModal({
                     style={{
                       display: "inline-block",
                       padding: "4px 10px",
-                      borderRadius: "6px",
+                      borderRadius: "8px",
                       fontSize: "12px",
                       fontWeight: "600",
                       backgroundColor: status === "AVAILABLE" ? "rgba(34, 197, 94, 0.15)" : "rgba(249, 115, 22, 0.15)",
@@ -382,13 +394,14 @@ export default function CapeFormModal({
                       style={{
                         flex: 1,
                         padding: "8px 12px",
-                        borderRadius: "8px",
-                        border: `1px solid ${status === "AVAILABLE" ? "#22c55e" : isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: status === "AVAILABLE" ? (isDark ? "rgba(34, 197, 94, 0.2)" : "#f0fdf4") : "transparent",
-                        color: status === "AVAILABLE" ? "#22c55e" : isDark ? "#94a3b8" : "#64748b",
+                        borderRadius: "10px",
+                        border: `1.5px solid ${status === "AVAILABLE" ? "#22c55e" : tokens.borderSubtle}`,
+                        backgroundColor: status === "AVAILABLE" ? (isDark ? "rgba(34, 197, 94, 0.18)" : "#f0fdf4") : tokens.bgCardInner,
+                        color: status === "AVAILABLE" ? "#22c55e" : tokens.textSecondary,
                         fontSize: "13px",
                         fontWeight: "600",
                         cursor: "pointer",
+                        transition: "all 0.15s ease",
                       }}
                     >
                       Disponible
@@ -399,13 +412,14 @@ export default function CapeFormModal({
                       style={{
                         flex: 1,
                         padding: "8px 12px",
-                        borderRadius: "8px",
-                        border: `1px solid ${status === "UNAVAILABLE" ? "#f97316" : isDark ? "#475569" : "#cbd5e1"}`,
-                        backgroundColor: status === "UNAVAILABLE" ? (isDark ? "rgba(249, 115, 22, 0.2)" : "#fff7ed") : "transparent",
-                        color: status === "UNAVAILABLE" ? "#f97316" : isDark ? "#94a3b8" : "#64748b",
+                        borderRadius: "10px",
+                        border: `1.5px solid ${status === "UNAVAILABLE" ? "#f97316" : tokens.borderSubtle}`,
+                        backgroundColor: status === "UNAVAILABLE" ? (isDark ? "rgba(249, 115, 22, 0.18)" : "#fff7ed") : tokens.bgCardInner,
+                        color: status === "UNAVAILABLE" ? "#f97316" : tokens.textSecondary,
                         fontSize: "13px",
                         fontWeight: "600",
                         cursor: "pointer",
+                        transition: "all 0.15s ease",
                       }}
                     >
                       Oculto
@@ -424,7 +438,7 @@ export default function CapeFormModal({
               gap: "12px",
               marginTop: "24px",
               paddingTop: "20px",
-              borderTop: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+              borderTop: `1px solid ${tokens.borderSubtle}`,
             }}
           >
             <button

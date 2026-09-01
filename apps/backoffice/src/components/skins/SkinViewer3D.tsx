@@ -249,10 +249,10 @@ export default function SkinViewer3D({
         position: "relative",
         width,
         height,
-        borderRadius: "12px",
+        borderRadius: "14px",
         overflow: "hidden",
-        backgroundColor: isDark ? "rgba(15, 23, 42, 0.6)" : "rgba(241, 245, 249, 0.8)",
-        border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`,
+        backgroundColor: isDark ? "#0c131a" : "#f1f5f9",
+        border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)"}`,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -281,7 +281,7 @@ export default function SkinViewer3D({
             alignItems: "center",
             justifyContent: "center",
             gap: "8px",
-            backgroundColor: isDark ? "rgba(15, 23, 42, 0.7)" : "rgba(255, 255, 255, 0.7)",
+            backgroundColor: isDark ? "rgba(12, 19, 26, 0.7)" : "rgba(255, 255, 255, 0.7)",
             color: isDark ? "#94a3b8" : "#64748b",
             fontSize: "12px",
             backdropFilter: "blur(2px)",
@@ -325,15 +325,16 @@ export default function SkinViewer3D({
               onClick={handleToggleAnimation}
               title="Cambiar animación"
               style={{
-                padding: "5px 10px",
-                borderRadius: "6px",
-                border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-                backgroundColor: isDark ? "rgba(30, 41, 59, 0.85)" : "rgba(255, 255, 255, 0.9)",
+                padding: "6px 10px",
+                borderRadius: "8px",
+                border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.12)"}`,
+                backgroundColor: isDark ? "rgba(18, 26, 34, 0.85)" : "rgba(255, 255, 255, 0.95)",
                 color: isDark ? "#f1f5f9" : "#1e293b",
                 fontSize: "11px",
                 fontWeight: "600",
                 cursor: "pointer",
                 backdropFilter: "blur(4px)",
+                transition: "all 0.15s ease",
               }}
             >
               {animationType === "idle"
@@ -350,17 +351,18 @@ export default function SkinViewer3D({
               onClick={() => setIsRotating(!isRotating)}
               title="Rotación automática"
               style={{
-                padding: "5px 8px",
-                borderRadius: "6px",
-                border: `1px solid ${isRotating ? "#6366f1" : isDark ? "#475569" : "#cbd5e1"}`,
+                padding: "6px 10px",
+                borderRadius: "8px",
+                border: `1px solid ${isRotating ? "rgba(62, 196, 192, 0.6)" : isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.12)"}`,
                 backgroundColor: isRotating
-                  ? (isDark ? "rgba(99, 102, 241, 0.3)" : "#eef2ff")
-                  : (isDark ? "rgba(30, 41, 59, 0.85)" : "rgba(255, 255, 255, 0.9)"),
-                color: isRotating ? "#6366f1" : isDark ? "#f1f5f9" : "#1e293b",
+                  ? (isDark ? "rgba(62, 196, 192, 0.2)" : "rgba(62, 196, 192, 0.15)")
+                  : (isDark ? "rgba(18, 26, 34, 0.85)" : "rgba(255, 255, 255, 0.95)"),
+                color: isRotating ? (isDark ? "#3ec4c0" : "#0c6e6b") : isDark ? "#f1f5f9" : "#1e293b",
                 fontSize: "11px",
                 fontWeight: "600",
                 cursor: "pointer",
                 backdropFilter: "blur(4px)",
+                transition: "all 0.15s ease",
               }}
             >
               Giro 360°
@@ -372,17 +374,18 @@ export default function SkinViewer3D({
             onClick={handleResetCamera}
             title="Centrar vista"
             style={{
-              width: "28px",
-              height: "28px",
-              borderRadius: "6px",
-              border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`,
-              backgroundColor: isDark ? "rgba(30, 41, 59, 0.85)" : "rgba(255, 255, 255, 0.9)",
+              width: "30px",
+              height: "30px",
+              borderRadius: "8px",
+              border: `1px solid ${isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.12)"}`,
+              backgroundColor: isDark ? "rgba(18, 26, 34, 0.85)" : "rgba(255, 255, 255, 0.95)",
               color: isDark ? "#f1f5f9" : "#1e293b",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
               backdropFilter: "blur(4px)",
+              transition: "all 0.15s ease",
             }}
           >
             <IconRefresh size={14} />

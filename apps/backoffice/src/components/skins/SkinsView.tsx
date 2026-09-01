@@ -390,8 +390,8 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       margin: "0 0 8px 0",
                       fontSize: "15px",
-                      fontWeight: "600",
-                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      fontWeight: "700",
+                      color: tokens.textPrimary,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -631,8 +631,8 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       margin: "0 0 8px 0",
                       fontSize: "15px",
-                      fontWeight: "600",
-                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      fontWeight: "700",
+                      color: tokens.textPrimary,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -840,8 +840,8 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       margin: "0 0 6px 0",
                       fontSize: "15px",
-                      fontWeight: "600",
-                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      fontWeight: "700",
+                      color: tokens.textPrimary,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -909,7 +909,7 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     <button
                       type="button"
                       onClick={() => setDeletePlayerSkinItem(pskin)}
-                      title="Eliminar skin"
+                      title="Eliminar skin del jugador"
                       className="launcher-btn-danger"
                       style={{
                         display: "inline-flex",
@@ -954,12 +954,12 @@ export default function SkinsView({ theme }: SkinsViewProps) {
           {playerCapesError && (
             <div
               style={{
+                marginBottom: "20px",
                 padding: "12px 16px",
                 borderRadius: "12px",
                 backgroundColor: "rgba(239, 68, 68, 0.15)",
                 border: "1px solid rgba(239, 68, 68, 0.25)",
                 color: "#ef4444",
-                marginBottom: "20px",
                 fontSize: "13px",
               }}
             >
@@ -970,11 +970,11 @@ export default function SkinsView({ theme }: SkinsViewProps) {
           {isPlayerCapesLoading ? (
             <div
               style={{
-                padding: "60px 0",
                 display: "flex",
-                justifyContent: "center",
                 alignItems: "center",
-                color: isDark ? "#94a3b8" : "#64748b",
+                justifyContent: "center",
+                padding: "60px 0",
+                color: tokens.textSecondary,
                 gap: "10px",
               }}
             >
@@ -1041,8 +1041,8 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       margin: "0 0 4px 0",
                       fontSize: "15px",
-                      fontWeight: "600",
-                      color: isDark ? "#f1f5f9" : "#0f172a",
+                      fontWeight: "700",
+                      color: tokens.textPrimary,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -1055,10 +1055,10 @@ export default function SkinsView({ theme }: SkinsViewProps) {
                     style={{
                       margin: "0 0 12px 0",
                       fontSize: "12px",
-                      color: isDark ? "#94a3b8" : "#64748b",
+                      color: tokens.textMuted,
                     }}
                   >
-                    Jugador: <strong>{pcape.userDisplayName}</strong>
+                    Jugador: <strong style={{ color: tokens.textSecondary }}>{pcape.userDisplayName}</strong>
                   </p>
                   <div
                     style={{
