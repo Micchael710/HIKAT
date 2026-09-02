@@ -805,7 +805,7 @@ export default function DownloadPlayButton({
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         style={{
-          width: 272,
+          width: 336,
           height: 76,
           borderRadius: 24,
           background: isDark
@@ -829,6 +829,7 @@ export default function DownloadPlayButton({
             ? "0 12px 32px rgba(0, 0, 0, 0.45)"
             : "0 8px 24px rgba(0, 0, 0, 0.08)",
           userSelect: "none",
+          transition: "width 0.25s ease",
         }}
       >
         {/* Progress bar background fill */}

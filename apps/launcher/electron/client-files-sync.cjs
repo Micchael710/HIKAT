@@ -560,6 +560,10 @@ async function downloadClientFilesToStaging({
   let totalDownloadedBytes = alreadyStagedBytes
   const startTime = Date.now()
   let lastReportTime = 0
+  let lastSpeedSampleTime = startTime
+  let lastSpeedSampleBytes = alreadyStagedBytes
+  let currentSpeedMBs = 0
+  let currentRemainingMinutes = 0
   let currentPhase = "DOWNLOADING"
 
   const reportProgress = (currentTaskPath = "") => {
@@ -569,17 +573,26 @@ async function downloadClientFilesToStaging({
     }
     lastReportTime = now
 
-    const elapsedSec = Math.max(0.1, (now - startTime) / 1000)
-    const speedMBs = (totalDownloadedBytes - alreadyStagedBytes) / 1024 / 1024 / elapsedSec
+    // Sample and update speed and remaining time every 1 second (1000ms)
+    const speedDeltaMs = now - lastSpeedSampleTime
+    if (speedDeltaMs >= 1000 || currentSpeedMBs === 0) {
+      const elapsedSec = Math.max(0.1, speedDeltaMs / 1000)
+      const instantSpeed = (totalDownloadedBytes - lastSpeedSampleBytes) / 1024 / 1024 / elapsedSec
+      currentSpeedMBs = Number(Math.max(0, instantSpeed).toFixed(2))
+      lastSpeedSampleTime = now
+      lastSpeedSampleBytes = totalDownloadedBytes
+
+      const remainingBytes = Math.max(0, plan.totalDownloadBytes - totalDownloadedBytes)
+      currentRemainingMinutes =
+        currentSpeedMBs > 0 ? Math.ceil(remainingBytes / 1024 / 1024 / currentSpeedMBs / 60) : 0
+    }
+
     const totalGB = plan.totalDownloadBytes / 1024 / 1024 / 1024
     const downloadedGB = totalDownloadedBytes / 1024 / 1024 / 1024
     const progress =
       plan.totalDownloadBytes > 0
         ? Math.min(100, Math.round((totalDownloadedBytes / plan.totalDownloadBytes) * 100))
         : 100
-    const remainingBytes = Math.max(0, plan.totalDownloadBytes - totalDownloadedBytes)
-    const remainingMinutes =
-      speedMBs > 0 ? Math.ceil(remainingBytes / 1024 / 1024 / speedMBs / 60) : 0
 
     if (typeof onProgress === "function") {
       onProgress({
@@ -587,8 +600,8 @@ async function downloadClientFilesToStaging({
         phase: currentPhase,
         downloadedGB: Number(downloadedGB.toFixed(2)),
         totalGB: Number(totalGB.toFixed(2)),
-        speedMBs: Number(Math.max(0, speedMBs).toFixed(2)),
-        remainingMinutes,
+        speedMBs: currentSpeedMBs,
+        remainingMinutes: currentRemainingMinutes,
         currentFile: currentTaskPath,
         filesToDownload: plan.toDownload.length,
         filesToPrune: plan.toPrune.length,
