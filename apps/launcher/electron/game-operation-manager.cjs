@@ -158,18 +158,29 @@ class GameOperationManager {
       Boolean(clientPlan.hasExistingInstall) ||
       Boolean(core.resolvedVersionId)
 
+    const session = await loadDownloadSession(instanceRoot)
+    const isSessionInstalling = session && session.status === "INSTALLING"
+
+    let hasInterruptedDownload = false
     let hasPausedSession = false
     let stagedBytes = 0
     let stagedFilesCount = 0
 
-    const session = await loadDownloadSession(instanceRoot)
-    if (session && session.status === "PAUSED") {
-      hasPausedSession = true
+    if (!isSessionInstalling && !isFullyInstalled && clientPlan.toDownload.length > 0) {
       const reconciled = await reconcileStagingFiles(instanceRoot, clientPlan.toDownload)
       stagedBytes = reconciled.alreadyStagedBytes
       stagedFilesCount =
-        (session.files ? Object.keys(session.files).length : 0) ||
-        Object.keys(reconciled.validStagedMap).length
+        (session?.files ? Object.keys(session.files).length : 0) ||
+        reconciled.validStagedMap.size
+
+      if (stagedBytes > 0) {
+        hasInterruptedDownload = true
+        hasPausedSession = true
+      } else if (session && session.status === "PAUSED") {
+        hasPausedSession = true
+      }
+    } else if (session && session.status === "PAUSED" && !isFullyInstalled) {
+      hasPausedSession = true
     }
 
     return {
@@ -181,6 +192,7 @@ class GameOperationManager {
       hasExistingInstall,
       isFullyInstalled,
       hasPausedSession,
+      hasInterruptedDownload,
       stagedBytes,
       stagedFilesCount,
       plan: {

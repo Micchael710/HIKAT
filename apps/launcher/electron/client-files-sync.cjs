@@ -267,16 +267,19 @@ async function reconcileStagingFiles(instanceRoot, toDownloadTasks) {
     if (fs.existsSync(filePath)) {
       try {
         const stat = await fsp.stat(filePath)
-        if (task.sizeBytes > 0 && stat.size !== task.sizeBytes) {
-          await fsp.unlink(filePath)
-          continue
-        }
-
-        const localSha = await calculateFileSha256(filePath)
-        if (localSha === task.sha256.toLowerCase()) {
-          validStagedMap.set(task.path, filePath)
+        if (task.sizeBytes > 0 && stat.size === task.sizeBytes) {
+          const localSha = await calculateFileSha256(filePath)
+          if (localSha === task.sha256.toLowerCase()) {
+            validStagedMap.set(task.path, filePath)
+            alreadyStagedBytes += stat.size
+          } else {
+            await fsp.unlink(filePath)
+          }
+        } else if (task.sizeBytes > 0 && stat.size > 0 && stat.size < task.sizeBytes) {
+          // Valid partial file: preserve for resume and count its bytes
           alreadyStagedBytes += stat.size
         } else {
+          // Inconsistent/oversized or zero-length file: delete
           await fsp.unlink(filePath)
         }
       } catch (_) {
@@ -451,9 +454,18 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
 
 /**
  * Downloads a single file to staging path, streaming and validating SHA-256 and size on the fly.
- * On pause or error: deletes ONLY this partial staging file.
+ * Supports resuming from partial staging files via HTTP Range.
+ * On pause or generic network error: preserves partial file.
+ * On explicit cancel or integrity mismatch: unlinks staging file.
  */
-async function downloadToStaging(task, stagingPath, onChunkBytes, cancelSignal, apiBaseUrl) {
+async function downloadToStaging(
+  task,
+  stagingPath,
+  onChunkBytes,
+  cancelSignal,
+  apiBaseUrl,
+  onFallbackFullDownload,
+) {
   if (cancelSignal?.isCancelled) {
     throw new Error("Download cancelled")
   }
@@ -462,79 +474,147 @@ async function downloadToStaging(task, stagingPath, onChunkBytes, cancelSignal, 
   }
 
   await fsp.mkdir(path.dirname(stagingPath), { recursive: true })
-
   const safeDownloadUrl = resolveAndValidateDownloadUrl(task.downloadUrl, apiBaseUrl)
 
-  const response = await axios({
-    url: safeDownloadUrl,
-    method: "GET",
-    responseType: "stream",
-    timeout: DOWNLOAD_TIMEOUT_MS,
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity,
-    maxRedirects: 5,
-    beforeRedirect: (options, responseDetails) => {
-      const redirectLocation = responseDetails.headers.location
-      if (redirectLocation) {
-        const redirectUrl = new URL(redirectLocation, options.href)
-        validateUrlSecurity(redirectUrl)
-      }
-    },
-  })
-
-  const hasher = crypto.createHash("sha256")
-  let downloadedBytes = 0
-
-  const progressTransform = new Transform({
-    transform(chunk, _encoding, callback) {
-      if (cancelSignal?.isCancelled) {
-        callback(new Error("Download cancelled"))
-        return
-      }
-      if (cancelSignal?.isPaused) {
-        callback(new Error("Download paused"))
-        return
-      }
-      downloadedBytes += chunk.length
-      hasher.update(chunk)
-      if (typeof onChunkBytes === "function") {
-        onChunkBytes(chunk.length)
-      }
-      callback(null, chunk)
-    },
-  })
-
-  const fileWriteStream = fs.createWriteStream(stagingPath)
-
+  // Inspect existing partial or complete staging file
+  let partialSize = 0
   try {
-    await pipeline(response.data, progressTransform, fileWriteStream)
-  } catch (err) {
-    try {
-      await fsp.unlink(stagingPath)
-    } catch (_) {}
-    throw err
+    if (fs.existsSync(stagingPath)) {
+      const stat = await fsp.stat(stagingPath)
+      if (task.sizeBytes > 0 && stat.size === task.sizeBytes) {
+        const existingSha = await calculateFileSha256(stagingPath)
+        if (existingSha === task.sha256.toLowerCase()) {
+          return { bytes: stat.size, sha256: existingSha }
+        } else {
+          await fsp.unlink(stagingPath).catch(() => {})
+        }
+      } else if (task.sizeBytes > 0 && stat.size > 0 && stat.size < task.sizeBytes) {
+        partialSize = stat.size
+      } else {
+        await fsp.unlink(stagingPath).catch(() => {})
+      }
+    }
+  } catch (_) {
+    await fsp.unlink(stagingPath).catch(() => {})
+    partialSize = 0
   }
 
-  const computedSha256 = hasher.digest("hex").toLowerCase()
-  if (task.sha256 && computedSha256 !== task.sha256.toLowerCase()) {
+  const executeDownloadStream = async (useRange) => {
+    const headers = {}
+    if (useRange && partialSize > 0) {
+      headers["Range"] = `bytes=${partialSize}-`
+    }
+
+    let response
     try {
-      await fsp.unlink(stagingPath)
-    } catch (_) {}
+      response = await axios({
+        url: safeDownloadUrl,
+        method: "GET",
+        headers,
+        responseType: "stream",
+        timeout: DOWNLOAD_TIMEOUT_MS,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        maxRedirects: 5,
+        validateStatus: (status) => (status >= 200 && status < 300) || status === 416,
+        beforeRedirect: (options, responseDetails) => {
+          const redirectLocation = responseDetails.headers.location
+          if (redirectLocation) {
+            const redirectUrl = new URL(redirectLocation, options.href)
+            validateUrlSecurity(redirectUrl)
+          }
+        },
+      })
+    } catch (reqErr) {
+      if (cancelSignal?.isCancelled) {
+        await fsp.unlink(stagingPath).catch(() => {})
+        throw new Error("Download cancelled")
+      }
+      if (cancelSignal?.isPaused) {
+        throw new Error("Download paused")
+      }
+      throw reqErr
+    }
+
+    let isAppend = false
+    if (useRange && partialSize > 0) {
+      if (response.status === 206) {
+        const contentRange =
+          response.headers["content-range"] || response.headers["Content-Range"] || ""
+        const rangeMatch = contentRange.trim().match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i)
+        if (rangeMatch && parseInt(rangeMatch[1], 10) === partialSize) {
+          isAppend = true
+        }
+      }
+
+      if (!isAppend) {
+        try {
+          if (response.data && typeof response.data.destroy === "function") {
+            response.data.destroy()
+          }
+        } catch (_) {}
+
+        if (typeof onFallbackFullDownload === "function") {
+          onFallbackFullDownload(partialSize)
+        }
+        await fsp.unlink(stagingPath).catch(() => {})
+        partialSize = 0
+
+        return executeDownloadStream(false)
+      }
+    }
+
+    const progressTransform = new Transform({
+      transform(chunk, _encoding, callback) {
+        if (cancelSignal?.isCancelled) {
+          callback(new Error("Download cancelled"))
+          return
+        }
+        if (cancelSignal?.isPaused) {
+          callback(new Error("Download paused"))
+          return
+        }
+        if (typeof onChunkBytes === "function") {
+          onChunkBytes(chunk.length)
+        }
+        callback(null, chunk)
+      },
+    })
+
+    const fileWriteStream = fs.createWriteStream(stagingPath, {
+      flags: isAppend ? "a" : "w",
+    })
+
+    try {
+      await pipeline(response.data, progressTransform, fileWriteStream)
+    } catch (err) {
+      if (cancelSignal?.isCancelled) {
+        await fsp.unlink(stagingPath).catch(() => {})
+      }
+      throw err
+    }
+  }
+
+  await executeDownloadStream(partialSize > 0)
+
+  // Validate complete file integrity at the end
+  const finalStat = await fsp.stat(stagingPath)
+  if (task.sizeBytes > 0 && finalStat.size !== task.sizeBytes) {
+    await fsp.unlink(stagingPath).catch(() => {})
+    throw new Error(
+      `Size mismatch for ${task.path}. Expected: ${task.sizeBytes} bytes, Got: ${finalStat.size} bytes`,
+    )
+  }
+
+  const computedSha256 = await calculateFileSha256(stagingPath)
+  if (task.sha256 && computedSha256 !== task.sha256.toLowerCase()) {
+    await fsp.unlink(stagingPath).catch(() => {})
     throw new Error(
       `SHA-256 mismatch for ${task.path}. Expected: ${task.sha256}, Got: ${computedSha256}`,
     )
   }
 
-  if (task.sizeBytes > 0 && downloadedBytes !== task.sizeBytes) {
-    try {
-      await fsp.unlink(stagingPath)
-    } catch (_) {}
-    throw new Error(
-      `Size mismatch for ${task.path}. Expected: ${task.sizeBytes} bytes, Got: ${downloadedBytes} bytes`,
-    )
-  }
-
-  return { bytes: downloadedBytes, sha256: computedSha256 }
+  return { bytes: finalStat.size, sha256: computedSha256 }
 }
 
 
@@ -665,6 +745,10 @@ async function downloadClientFilesToStaging({
           },
           cancelSignal,
           apiBaseUrl,
+          (deductBytes) => {
+            totalDownloadedBytes = Math.max(0, totalDownloadedBytes - deductBytes)
+            reportProgress(task.path)
+          },
         )
 
         stagedFiles.push({ task, stagingFilePath })
@@ -744,6 +828,13 @@ async function applyStagingToInstance({
     await cleanStaging(instanceRoot)
     throw new Error("Sync cancelled by user.")
   }
+
+  // Persist INSTALLING state at the start before modifying any files
+  await saveDownloadSession(instanceRoot, {
+    modpackVersion,
+    status: "INSTALLING",
+    updatedAt: new Date().toISOString(),
+  })
 
   const effectivePlan = plan || (await generateSyncPlan(instanceRoot, clientFiles, modpackVersion))
 

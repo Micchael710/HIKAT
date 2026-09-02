@@ -438,6 +438,48 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
       globalThis.WebSocket = originalWebSocket
     }
   })
+
+  it("14. checkGameManifest detects hasInterruptedDownload and stagedBytes from checkSyncPlan", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          clientFiles: [
+            {
+              path: "mods/example.jar",
+              sha256: "a".repeat(64),
+              sizeBytes: 1000,
+              downloadUrl: "/game/download/1",
+              policy: "NO_MODIFICABLE",
+            },
+          ],
+        },
+      },
+    })
+
+    window.electronAPI = {
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        filesToDownload: 1,
+        filesToPrune: 0,
+        totalDownloadBytes: 1000,
+        needsUpdate: true,
+        isFullyInstalled: false,
+        hasExistingInstall: false,
+        hasInterruptedDownload: true,
+        stagedBytes: 350,
+      }),
+    } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.hasInterruptedDownload).toBe(true)
+    expect(manifest?.stagedBytes).toBe(350)
+    expect(manifest?.totalDownloadBytes).toBe(1000)
+  })
 })
 
 

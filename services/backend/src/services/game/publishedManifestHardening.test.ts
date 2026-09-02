@@ -354,5 +354,82 @@ describe("Shard 8E: Authoritative Client Manifest & Backend Security Suite", () 
     const res = await handleGameFileDownload(req, env, db, clientModId)
     expect(res.status).toBe(200)
     expect(res.headers.get("Content-Type")).toBe("application/java-archive")
+    expect(res.headers.get("Accept-Ranges")).toBe("bytes")
+    expect(res.headers.get("Content-Length")).toBe("4")
+    expect(res.headers.get("ETag")).toBe(`"${"8".repeat(64)}"`)
+  })
+
+  it("12. /game/download/:fileId responds with 206 Partial Content for valid Range request", async () => {
+    const modId = crypto.randomUUID()
+    const modKey = "game-files/" + modId
+    const content = new Uint8Array([10, 20, 30, 40, 50, 60])
+    await mockR2.put(modKey, content)
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: modId,
+      releaseId,
+      name: "range-mod.jar",
+      logicalPath: "mods/range-mod.jar",
+      category: "MOD",
+      sha256: "9".repeat(64),
+      sizeBytes: content.length,
+      sourceProvider: "MODRINTH",
+      sourceEnvironment: "CLIENT",
+      isDirectory: 0,
+      objectKey: modKey,
+      createdAt: new Date().toISOString(),
+    })
+
+    // Range: bytes=2- (offset 2 to end, i.e. bytes 2-5 -> length 4)
+    const req = new Request(`http://localhost/game/download/${modId}`, {
+      headers: { Range: "bytes=2-" },
+    })
+    const res = await handleGameFileDownload(req, env, db, modId)
+    expect(res.status).toBe(206)
+    expect(res.headers.get("Content-Range")).toBe("bytes 2-5/6")
+    expect(res.headers.get("Content-Length")).toBe("4")
+    expect(res.headers.get("Accept-Ranges")).toBe("bytes")
+    expect(res.headers.get("ETag")).toBe(`"${"9".repeat(64)}"`)
+
+    const bodyBuffer = new Uint8Array(await res.arrayBuffer())
+    expect(bodyBuffer).toEqual(new Uint8Array([30, 40, 50, 60]))
+  })
+
+  it("13. /game/download/:fileId responds with 416 for invalid or out of bounds Range", async () => {
+    const modId = crypto.randomUUID()
+    const modKey = "game-files/" + modId
+    const content = new Uint8Array([1, 2, 3, 4])
+    await mockR2.put(modKey, content)
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: modId,
+      releaseId,
+      name: "bounds-mod.jar",
+      logicalPath: "mods/bounds-mod.jar",
+      category: "MOD",
+      sha256: "c".repeat(64),
+      sizeBytes: content.length,
+      sourceProvider: "MODRINTH",
+      sourceEnvironment: "CLIENT",
+      isDirectory: 0,
+      objectKey: modKey,
+      createdAt: new Date().toISOString(),
+    })
+
+    // Out of bounds start >= total size
+    const outOfBoundsReq = new Request(`http://localhost/game/download/${modId}`, {
+      headers: { Range: "bytes=10-" },
+    })
+    const outRes = await handleGameFileDownload(outOfBoundsReq, env, db, modId)
+    expect(outRes.status).toBe(416)
+    expect(outRes.headers.get("Content-Range")).toBe("bytes */4")
+    expect(outRes.headers.get("Accept-Ranges")).toBe("bytes")
+
+    // Malformed syntax
+    const malformedReq = new Request(`http://localhost/game/download/${modId}`, {
+      headers: { Range: "invalid-range" },
+    })
+    const malformedRes = await handleGameFileDownload(malformedReq, env, db, modId)
+    expect(malformedRes.status).toBe(416)
   })
 })

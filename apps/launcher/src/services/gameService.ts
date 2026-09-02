@@ -27,6 +27,9 @@ export interface GameManifest {
   clientFiles: ClientFile[]
   installed: boolean
   hasExistingInstall?: boolean
+  hasInterruptedDownload?: boolean
+  stagedBytes?: number
+  totalDownloadBytes?: number
 }
 
 export interface ReleaseActivatedEvent {
@@ -199,6 +202,9 @@ export const gameService = {
       let hasUpdate = false
       let isInstalled = false
       let hasExistingInstall = false
+      let hasInterruptedDownload = false
+      let stagedBytes = 0
+      let totalDownloadBytes = totalBytes
 
       if (window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
         try {
@@ -214,6 +220,11 @@ export const gameService = {
             hasUpdate = planCheck.needsUpdate
             hasExistingInstall = Boolean(planCheck.hasExistingInstall)
             isInstalled = Boolean(planCheck.isFullyInstalled)
+            hasInterruptedDownload = Boolean(planCheck.hasInterruptedDownload)
+            stagedBytes = planCheck.stagedBytes || 0
+            if (Number.isFinite(planCheck.totalDownloadBytes) && planCheck.totalDownloadBytes > 0) {
+              totalDownloadBytes = planCheck.totalDownloadBytes
+            }
             gameService.setGameInstalled(isInstalled)
           }
         } catch (_) {}
@@ -232,6 +243,9 @@ export const gameService = {
         clientFiles: modpack.clientFiles,
         installed: isInstalled,
         hasExistingInstall,
+        hasInterruptedDownload,
+        stagedBytes,
+        totalDownloadBytes,
       }
     }
 

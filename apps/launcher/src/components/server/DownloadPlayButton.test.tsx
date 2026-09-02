@@ -1316,6 +1316,68 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(container.querySelector(".dl-progress-card")).toBeNull()
       expect(container.querySelector("button")?.textContent).toContain("JUGAR")
     })
+
+    it("5. Mount with interrupted download (hasInterruptedDownload: true) initializes in PAUSED state with recovered percentage", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: false,
+        totalSizeGB: 1,
+        hasInterruptedDownload: true,
+        stagedBytes: 350 * 1024 * 1024,
+        totalDownloadBytes: 1000 * 1024 * 1024,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 1000 * 1024 * 1024,
+            downloadUrl: "/dl/example",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+      const card = container.querySelector(".dl-progress-card")
+      expect(card).not.toBeNull()
+      expect(card?.textContent).toContain("PAUSADO")
+      expect(card?.textContent).toContain("35%")
+      expect(container.querySelector(".dl-cancel-btn")).not.toBeNull()
+    })
+
+    it("6. Mount after interrupted INSTALLING initializes in natural ACTUALIZAR (UPDATE) state and NOT as PAUSED", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        hasInterruptedDownload: false, // INSTALLING interruption does not restore as PAUSED
+        clientFiles: [
+          {
+            path: "mods/patch.jar",
+            sha256: "b".repeat(64),
+            sizeBytes: 500,
+            downloadUrl: "/dl/patch",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn).not.toBeNull()
+      expect(btn.textContent).toContain("ACTUALIZAR")
+      expect(btn.textContent).not.toContain("PAUSADO")
+    })
   })
 })
 

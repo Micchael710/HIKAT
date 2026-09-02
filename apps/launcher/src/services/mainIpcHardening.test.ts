@@ -13,6 +13,7 @@ import {
 import {
   saveInstalledManifest,
   saveDownloadSession,
+  getDeterministicStagingFileName,
   // @ts-expect-error CJS module without bundled declaration
 } from "../../electron/client-files-sync.cjs"
 
@@ -551,5 +552,64 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(installing100).toBeDefined()
     expect(installing100.phase).toBe("INSTALLING")
     expect(installing100.progress).toBe(100)
+  })
+
+  it("24. Unexpected crash recovery: partial staging file without PAUSED session is detected by checkPlan as hasInterruptedDownload", async () => {
+    const task = {
+      path: "mods/crash-recovery.jar",
+      sha256: computeSha("full content for crash recovery test"),
+      sizeBytes: Buffer.byteLength("full content for crash recovery test"), // 36 bytes
+      policy: "NO_MODIFICABLE",
+      downloadUrl: `${serverBaseUrl}/fast/crash`,
+    }
+
+    // Simulate abrupt crash during downloading: partial file on disk in staging, NO session file saved
+    const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
+    await fsp.mkdir(filesDir, { recursive: true })
+    const stagingFilePath = path.join(filesDir, getDeterministicStagingFileName(task))
+    await fsp.writeFile(stagingFilePath, "full content", "utf8") // 12 bytes out of 36 bytes
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [task],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasInterruptedDownload).toBe(true)
+    expect(plan.stagedBytes).toBe(12)
+    expect(plan.totalDownloadBytes).toBe(36)
+  })
+
+  it("25. Interruption during INSTALLING: checkPlan does NOT set hasInterruptedDownload to true", async () => {
+    const task = {
+      path: "mods/installing-interrupted.jar",
+      sha256: computeSha("some mod data"),
+      sizeBytes: Buffer.byteLength("some mod data"),
+      policy: "NO_MODIFICABLE",
+      downloadUrl: `${serverBaseUrl}/fast/installing-mod`,
+    }
+
+    // Save session with status: "INSTALLING" (as saved at the start of applyStagingToInstance)
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "INSTALLING",
+      updatedAt: new Date().toISOString(),
+    })
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [task],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasInterruptedDownload).toBe(false)
+    expect(plan.hasPausedSession).toBe(false)
+    expect(plan.needsUpdate).toBe(true)
   })
 })

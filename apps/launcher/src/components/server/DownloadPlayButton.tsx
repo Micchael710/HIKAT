@@ -159,8 +159,22 @@ export default function DownloadPlayButton({
       if (!isMounted) return
       setManifest(res)
       if (res) {
-        setTotalBytes(manifestTotalBytes(res.clientFiles))
-        setStatus(resolveIdleGameButtonState(res))
+        const total = res.totalDownloadBytes || manifestTotalBytes(res.clientFiles)
+        setTotalBytes(total)
+        if (
+          res.hasInterruptedDownload &&
+          res.stagedBytes &&
+          res.stagedBytes > 0 &&
+          !res.installed
+        ) {
+          setDownloadedBytes(res.stagedBytes)
+          const pct =
+            total > 0 ? Math.min(100, Math.round((res.stagedBytes / total) * 100)) : 0
+          setProgress(pct)
+          setStatus("paused")
+        } else {
+          setStatus(resolveIdleGameButtonState(res))
+        }
       } else {
         setStatus(resolveIdleGameButtonState(null))
       }

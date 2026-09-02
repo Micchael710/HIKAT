@@ -45,6 +45,10 @@ export interface SyncPlanCheckResult {
   needsUpdate: boolean
   hasExistingInstall?: boolean
   isFullyInstalled?: boolean
+  hasPausedSession?: boolean
+  hasInterruptedDownload?: boolean
+  stagedBytes?: number
+  stagedFilesCount?: number
   error?: string
 }
 

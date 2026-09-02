@@ -52,11 +52,60 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       if (url.startsWith("/files/")) {
         const fileKey = url.replace("/files/", "")
         const content = Buffer.from(`Content for ${fileKey}`, "utf8")
+        const rangeHeader = req.headers.range
+        if (rangeHeader) {
+          const match = rangeHeader.trim().match(/^bytes=(\d+)-(\d+)?$/)
+          if (match) {
+            const start = parseInt(match[1], 10)
+            const end = match[2] ? parseInt(match[2], 10) : content.length - 1
+            if (start >= content.length || end < start) {
+              res.writeHead(416, {
+                "Content-Range": `bytes */${content.length}`,
+                "Accept-Ranges": "bytes",
+              })
+              res.end()
+              return
+            }
+            const slice = content.subarray(start, end + 1)
+            res.writeHead(206, {
+              "Content-Type": "application/octet-stream",
+              "Content-Range": `bytes ${start}-${end}/${content.length}`,
+              "Content-Length": slice.length,
+              "Accept-Ranges": "bytes",
+            })
+            res.end(slice)
+            return
+          }
+        }
+        res.writeHead(200, {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": content.length,
+          "Accept-Ranges": "bytes",
+        })
+        res.end(content)
+      } else if (url.startsWith("/no-range/")) {
+        // Ignores Range header and returns full content with 200
+        const fileKey = url.replace("/no-range/", "")
+        const content = Buffer.from(`Content for ${fileKey}`, "utf8")
         res.writeHead(200, {
           "Content-Type": "application/octet-stream",
           "Content-Length": content.length,
         })
         res.end(content)
+      } else if (url.startsWith("/fail-range/")) {
+        // Responds with 416 to Range request, 200 to plain GET
+        const fileKey = url.replace("/fail-range/", "")
+        const content = Buffer.from(`Content for ${fileKey}`, "utf8")
+        if (req.headers.range) {
+          res.writeHead(416, { "Content-Range": `bytes */${content.length}` })
+          res.end()
+        } else {
+          res.writeHead(200, {
+            "Content-Type": "application/octet-stream",
+            "Content-Length": content.length,
+          })
+          res.end(content)
+        }
       } else if (url.startsWith("/slow/")) {
         // Slow streaming endpoint for pause/abort testing
         res.writeHead(200, { "Content-Type": "application/octet-stream" })
@@ -341,7 +390,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(name1).toMatch(/^[a-zA-Z0-9._-]+$/)
     })
 
-    it("9. reconcileStagingFiles reuses verified staged files and removes corrupt ones", async () => {
+    it("9. reconcileStagingFiles reuses verified staged files, preserves partials, and removes corrupt ones", async () => {
       const validContent = "valid completed staged binary"
       const validSha = computeSha(validContent)
 
@@ -350,10 +399,20 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         sha256: validSha,
         sizeBytes: Buffer.byteLength(validContent),
       }
+      const taskPartial = {
+        path: "mods/partial.jar",
+        sha256: computeSha("full partial binary content here"),
+        sizeBytes: Buffer.byteLength("full partial binary content here"),
+      }
       const taskCorrupt = {
         path: "mods/bad.jar",
         sha256: "c".repeat(64),
         sizeBytes: 50,
+      }
+      const taskOversized = {
+        path: "mods/oversized.jar",
+        sha256: "d".repeat(64),
+        sizeBytes: 10,
       }
 
       const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
@@ -362,21 +421,31 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       const validStagingFile = path.join(filesDir, getDeterministicStagingFileName(taskValid))
       await fsp.writeFile(validStagingFile, validContent, "utf8")
 
+      const partialStagingFile = path.join(filesDir, getDeterministicStagingFileName(taskPartial))
+      await fsp.writeFile(partialStagingFile, "full partial", "utf8") // 12 bytes out of 32 bytes
+
       const corruptStagingFile = path.join(filesDir, getDeterministicStagingFileName(taskCorrupt))
-      await fsp.writeFile(corruptStagingFile, "bad content", "utf8")
+      await fsp.writeFile(corruptStagingFile, "bad content".padEnd(50, "x"), "utf8")
+
+      const oversizedStagingFile = path.join(filesDir, getDeterministicStagingFileName(taskOversized))
+      await fsp.writeFile(oversizedStagingFile, "oversized content beyond limit", "utf8")
 
       const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
         instanceRoot,
-        [taskValid, taskCorrupt],
+        [taskValid, taskPartial, taskCorrupt, taskOversized],
       )
 
       expect(validStagedMap.has("mods/valid.jar")).toBe(true)
+      expect(validStagedMap.has("mods/partial.jar")).toBe(false) // Not complete yet, so not in validStagedMap
       expect(validStagedMap.has("mods/bad.jar")).toBe(false)
-      expect(alreadyStagedBytes).toBe(Buffer.byteLength(validContent))
+      expect(alreadyStagedBytes).toBe(Buffer.byteLength(validContent) + 12) // Includes 12 bytes of partial
+      expect(fs.existsSync(validStagingFile)).toBe(true)
+      expect(fs.existsSync(partialStagingFile)).toBe(true) // Preserved for resume!
       expect(fs.existsSync(corruptStagingFile)).toBe(false)
+      expect(fs.existsSync(oversizedStagingFile)).toBe(false)
     })
 
-    it("10. Pause retains completed files in staging and deletes partial active download", async () => {
+    it("10. Pause retains completed files and partial downloads in staging", async () => {
       const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
       await fsp.mkdir(filesDir, { recursive: true })
 
@@ -401,8 +470,8 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
 
       const file11Task = {
         path: "mods/mod11.jar",
-        sha256: computeSha("Content for mod11"),
-        sizeBytes: Buffer.byteLength("Content for mod11"),
+        sha256: computeSha("part1part2"),
+        sizeBytes: 10,
         policy: "NO_MODIFICABLE",
         downloadUrl: `${serverBaseUrl}/slow/mod11`,
       }
@@ -428,8 +497,118 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         expect(fs.existsSync(stFile)).toBe(true)
       }
 
+      // Partial file11 is preserved in staging
+      const stFile11 = path.join(filesDir, getDeterministicStagingFileName(file11Task))
+      expect(fs.existsSync(stFile11)).toBe(true)
+
       const session = await loadDownloadSession(instanceRoot)
       expect(session?.status).toBe("PAUSED")
+    })
+
+    it("10B. Range resume: partial staging file continues from its exact offset and completes", async () => {
+      const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
+      await fsp.mkdir(filesDir, { recursive: true })
+
+      const fullContent = "Content for resumed-file-12345"
+      const fullSha = computeSha(fullContent)
+      const fullLength = Buffer.byteLength(fullContent) // 30 bytes
+
+      const task = {
+        path: "mods/resumed.jar",
+        sha256: fullSha,
+        sizeBytes: fullLength,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/files/resumed-file-12345`,
+      }
+
+      // Pre-create partial staging file with first 12 bytes ("Content for ")
+      const partialContent = fullContent.slice(0, 12)
+      const stagingFilePath = path.join(filesDir, getDeterministicStagingFileName(task))
+      await fsp.writeFile(stagingFilePath, partialContent, "utf8")
+
+      let reportedChunkBytes = 0
+      const progressList: number[] = []
+
+      const result = await executeSync({
+        instanceRoot,
+        clientFiles: [task],
+        modpackVersion: "1.0.0",
+        onProgress: (p: any) => progressList.push(p.downloadedBytes),
+        apiBaseUrl: serverBaseUrl,
+      })
+
+      expect(result.success).toBe(true)
+
+      // Verified final file installed in instanceRoot
+      const installedPath = path.join(instanceRoot, "mods", "resumed.jar")
+      expect(fs.existsSync(installedPath)).toBe(true)
+      const installedData = await fsp.readFile(installedPath, "utf8")
+      expect(installedData).toBe(fullContent)
+    })
+
+    it("10C. Fallback to full download if server returns 200 (no Range) or 416, discounting partial bytes from progress", async () => {
+      const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
+      await fsp.mkdir(filesDir, { recursive: true })
+
+      const fullContent = "Content for no-range-mod"
+      const fullSha = computeSha(fullContent)
+      const fullLength = Buffer.byteLength(fullContent)
+
+      const taskNoRange = {
+        path: "mods/no-range.jar",
+        sha256: fullSha,
+        sizeBytes: fullLength,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/no-range/no-range-mod`,
+      }
+
+      // Pre-create partial staging file with 8 bytes
+      const stagingFilePath = path.join(filesDir, getDeterministicStagingFileName(taskNoRange))
+      await fsp.writeFile(stagingFilePath, fullContent.slice(0, 8), "utf8")
+
+      const result = await executeSync({
+        instanceRoot,
+        clientFiles: [taskNoRange],
+        modpackVersion: "1.0.0",
+        apiBaseUrl: serverBaseUrl,
+      })
+
+      expect(result.success).toBe(true)
+      const installedPath = path.join(instanceRoot, "mods", "no-range.jar")
+      expect(fs.existsSync(installedPath)).toBe(true)
+      const installedData = await fsp.readFile(installedPath, "utf8")
+      expect(installedData).toBe(fullContent)
+    })
+
+    it("10D. Full SHA-256 and size integrity validated after resuming; corrupted final fails", async () => {
+      const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
+      await fsp.mkdir(filesDir, { recursive: true })
+
+      const fullContent = "Content for corrupted-resume"
+      const expectedSha = computeSha("Something completely different") // Wrong expected hash
+      const task = {
+        path: "mods/corrupt.jar",
+        sha256: expectedSha,
+        sizeBytes: Buffer.byteLength(fullContent),
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/files/corrupted-resume`,
+      }
+
+      // Pre-create partial file
+      const stagingFilePath = path.join(filesDir, getDeterministicStagingFileName(task))
+      await fsp.writeFile(stagingFilePath, "Content for ", "utf8")
+
+      await expect(
+        executeSync({
+          instanceRoot,
+          clientFiles: [task],
+          modpackVersion: "1.0.0",
+          apiBaseUrl: serverBaseUrl,
+        }),
+      ).rejects.toThrow(/SHA-256 mismatch/i)
+
+      // The corrupt staging file is deleted
+      expect(fs.existsSync(stagingFilePath)).toBe(false)
     })
 
     it("11. Resume reuses 10 completed files and only downloads file 11", async () => {
