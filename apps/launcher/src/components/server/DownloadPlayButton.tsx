@@ -242,6 +242,7 @@ export default function DownloadPlayButton({
 
       latestManifestVersionRef.current = published.version
       const clientFiles = published.clientFiles || []
+      const directoryPolicies = published.directoryPolicies || []
       const totalBytes = manifestTotalBytes(clientFiles)
       const totalSizeGB = totalBytes / (1024 * 1024 * 1024)
 
@@ -255,6 +256,7 @@ export default function DownloadPlayButton({
         modLoaderVersion: published.modLoaderVersion ?? manifest.modLoaderVersion ?? null,
         neoForgeVersion: published.neoForgeVersion ?? manifest.neoForgeVersion ?? null,
         clientFiles,
+        directoryPolicies,
         totalSizeGB,
         totalDownloadBytes: totalBytes,
         hasUpdate: isInstalled,
@@ -438,6 +440,8 @@ export default function DownloadPlayButton({
           manifest.modLoader,
           manifest.modLoaderVersion,
           manifest.neoForgeVersion,
+          false,
+          ...(manifest.directoryPolicies ? [manifest.directoryPolicies] : []),
         )
         .then((res: any) => {
           if (res?.paused) {
@@ -513,6 +517,8 @@ export default function DownloadPlayButton({
           manifest.modLoader,
           manifest.modLoaderVersion,
           manifest.neoForgeVersion,
+          false,
+          ...(manifest.directoryPolicies ? [manifest.directoryPolicies] : []),
         )
         .then((res: any) => {
           if (res?.paused) {
@@ -598,6 +604,7 @@ export default function DownloadPlayButton({
         manifest.modLoaderVersion,
         manifest.neoForgeVersion,
         true,
+        ...(manifest.directoryPolicies ? [manifest.directoryPolicies] : []),
       )
       .then(async (res: any) => {
         if (res?.paused) {

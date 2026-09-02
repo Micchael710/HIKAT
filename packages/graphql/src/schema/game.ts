@@ -152,6 +152,14 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
+  Directory synchronization policy contract
+  """
+  type DirectoryPolicy {
+    path: String!
+    policy: SyncPolicy!
+  }
+
+  """
   Published modpack release contract consumed by the HiKAT Launcher
   """
   type PublishedModpack {
@@ -166,6 +174,7 @@ export const gameTypeDefs = /* GraphQL */ `
 
     mandatory: Boolean!
     clientFiles: [ClientFile!]!
+    directoryPolicies: [DirectoryPolicy!]
     notes: String
     cover: ContentMedia
   }

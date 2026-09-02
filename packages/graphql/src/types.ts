@@ -604,6 +604,11 @@ export interface ClientFileGql {
   policy: SyncPolicyGql
 }
 
+export interface DirectoryPolicyGql {
+  path: string
+  policy: SyncPolicyGql
+}
+
 export interface PublishedModpackGql {
   version: string
   minecraftVersion: string
@@ -613,6 +618,7 @@ export interface PublishedModpackGql {
   neoForgeVersion?: string | null
   mandatory: boolean
   clientFiles: ClientFileGql[]
+  directoryPolicies?: DirectoryPolicyGql[] | null
   notes?: string | null
   cover?: ContentMediaGql | null
 }

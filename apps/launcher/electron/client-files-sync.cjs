@@ -350,7 +350,7 @@ function resolvePathPolicy(relPath, filesMap) {
  * Generates the SyncPlan before touching any instance files.
  * Authoritative over local filesystem and installed manifest.
  */
-async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
+async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion, directoryPolicies = []) {
   const installedManifest = await loadInstalledManifest(instanceRoot)
   const previousFilesMap = installedManifest.files || {}
   const isSameRelease = Boolean(
@@ -365,6 +365,18 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
     toPrune: [],
     totalDownloadBytes: 0,
     hasExistingInstall: Boolean(installedManifest.modpackVersion),
+  }
+
+  const dirPoliciesMap = new Map()
+  if (Array.isArray(directoryPolicies)) {
+    for (const dp of directoryPolicies) {
+      if (dp && dp.path) {
+        const norm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+        if (norm) {
+          dirPoliciesMap.set(norm, dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE")
+        }
+      }
+    }
   }
 
   const clientFilesMap = new Map()
@@ -391,7 +403,10 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
           ? "NO_MODIFICABLE"
           : null
     if (!policy) {
-      policy = resolvePathPolicy(normalizedRelative, previousFilesMap) || "NO_MODIFICABLE"
+      policy =
+        resolvePathPolicy(normalizedRelative, dirPoliciesMap) ||
+        resolvePathPolicy(normalizedRelative, previousFilesMap) ||
+        "NO_MODIFICABLE"
     }
 
     clientFilesMap.set(normalizedRelative, {
@@ -464,6 +479,17 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
           // Physical file already matches expected official hash
           plan.toRetain.push({ path: normalizedRelative, safeAbsolute })
           plan.hasExistingInstall = true
+        } else if (!wasInstalledBefore) {
+          // First installation with unknown local file: must establish official template and officialSha256
+          plan.toDownload.push({
+            path: normalizedRelative,
+            safeAbsolute,
+            downloadUrl: item.downloadUrl,
+            sha256: expectedSha256,
+            sizeBytes,
+            policy,
+          })
+          plan.totalDownloadBytes += sizeBytes
         } else if (isSameRelease) {
           // Player edited the file during this release: preserve it
           plan.toPreserveUser.push({ path: normalizedRelative, safeAbsolute })
@@ -511,6 +537,7 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
           const relative = path.relative(instanceRoot, fullPath).replace(/\\/g, "/")
           if (!clientFilesMap.has(relative)) {
             const effPolicy =
+              resolvePathPolicy(relative, dirPoliciesMap) ||
               resolvePathPolicy(relative, clientFilesMap) ||
               resolvePathPolicy(relative, previousFilesMap)
             if (effPolicy !== "MODIFICABLE") {
@@ -705,13 +732,14 @@ async function downloadToStaging(
 async function downloadClientFilesToStaging({
   instanceRoot,
   clientFiles = [],
+  directoryPolicies = [],
   modpackVersion,
   onProgress,
   onPhaseChange,
   cancelSignal,
   apiBaseUrl,
 }) {
-  const plan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+  const plan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion, directoryPolicies)
   const { filesDir } = getStagingPaths(instanceRoot)
   const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
     instanceRoot,
@@ -898,6 +926,7 @@ async function downloadClientFilesToStaging({
 async function applyStagingToInstance({
   instanceRoot,
   clientFiles = [],
+  directoryPolicies = [],
   modpackVersion,
   stagedFiles = [],
   plan,
@@ -917,7 +946,8 @@ async function applyStagingToInstance({
     updatedAt: new Date().toISOString(),
   })
 
-  const effectivePlan = plan || (await generateSyncPlan(instanceRoot, clientFiles, modpackVersion))
+  const effectivePlan =
+    plan || (await generateSyncPlan(instanceRoot, clientFiles, modpackVersion, directoryPolicies))
 
   if (typeof onPhaseChange === "function") {
     onPhaseChange("INSTALLING")
@@ -1018,7 +1048,7 @@ async function applyStagingToInstance({
   }
 
   // 4. Mandatory Final Verification
-  const postPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+  const postPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion, directoryPolicies)
   if (postPlan.toDownload.length > 0 || postPlan.toPrune.length > 0) {
     throw new Error(
       `Post-installation verification failed: ${postPlan.toDownload.length} files missing/corrupt, ${postPlan.toPrune.length} files unpruned.`,
@@ -1034,8 +1064,22 @@ async function applyStagingToInstance({
     })
   }
 
-  // 5. Persist installed manifest with official SHA-256 references
+  // 5. Persist installed manifest with directory policies and official SHA-256 references
   const newManifestFiles = {}
+
+  if (Array.isArray(directoryPolicies)) {
+    for (const dp of directoryPolicies) {
+      if (!dp || !dp.path) continue
+      const normalizedRelative = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+      if (normalizedRelative) {
+        newManifestFiles[normalizedRelative] = {
+          policy: dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE",
+          lastSyncedAt: new Date().toISOString(),
+        }
+      }
+    }
+  }
+
   for (const item of clientFiles) {
     if (!item?.path) continue
     const rawPath = String(item.path || "").trim().replace(/\\/g, "/")
@@ -1080,6 +1124,7 @@ async function executeSync(options) {
   return await applyStagingToInstance({
     instanceRoot: options.instanceRoot,
     clientFiles: options.clientFiles,
+    directoryPolicies: options.directoryPolicies,
     modpackVersion: options.modpackVersion,
     stagedFiles: downloadResult.stagedFiles,
     plan: downloadResult.plan,

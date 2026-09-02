@@ -10,6 +10,11 @@ export interface ClientFile {
   policy: SyncPolicy
 }
 
+export interface DirectoryPolicy {
+  path: string
+  policy: SyncPolicy
+}
+
 export type GameModLoader = "VANILLA" | "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT"
 
 export interface ContentMedia {
@@ -30,6 +35,7 @@ export interface PublishedModpack {
   neoForgeVersion?: string | null
   mandatory?: boolean
   clientFiles: ClientFile[]
+  directoryPolicies?: DirectoryPolicy[]
   notes?: string | null
   cover?: ContentMedia | null
 }
@@ -86,6 +92,7 @@ interface ElectronAPI {
 
   checkSyncPlan?: (payload: {
     clientFiles: ClientFile[]
+    directoryPolicies?: DirectoryPolicy[]
     modpackVersion?: string
     minecraftVersion?: string
     modLoader?: GameModLoader
@@ -94,6 +101,7 @@ interface ElectronAPI {
   }) => Promise<SyncPlanCheckResult>
   startSync?: (payload: {
     clientFiles: ClientFile[]
+    directoryPolicies?: DirectoryPolicy[]
     modpackVersion?: string
     minecraftVersion?: string
     modLoader?: GameModLoader

@@ -1263,6 +1263,154 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(planB.toDownload).toHaveLength(1)
       expect(planB.toDownload[0].path).toBe("mods/strict-mod.jar")
     })
+
+    // 8. Real Flow: Backend directoryPolicies ('mods': MODIFICABLE) is persisted in installed-manifest.json after executeSync
+    it("8. Real Flow: backend directoryPolicies ('mods': MODIFICABLE) is persisted in installed-manifest.json after executeSync", async () => {
+      const modContent = "Content for mod-alpha"
+      const modSha = computeSha(modContent)
+      const clientFiles = [
+        {
+          path: "mods/mod-alpha.jar",
+          sha256: modSha,
+          sizeBytes: Buffer.byteLength(modContent),
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/mod-alpha`,
+        },
+      ]
+      const directoryPolicies = [
+        {
+          path: "mods",
+          policy: "MODIFICABLE",
+        },
+      ]
+
+      const res = await executeSync({
+        instanceRoot,
+        clientFiles,
+        directoryPolicies,
+        modpackVersion: "1.0.0",
+        apiBaseUrl: serverBaseUrl,
+      })
+      expect(res.success).toBe(true)
+
+      const manifest = await loadInstalledManifest(instanceRoot)
+      expect(manifest.modpackVersion).toBe("1.0.0")
+      expect(manifest.files["mods"]).toBeDefined()
+      expect(manifest.files["mods"].policy).toBe("MODIFICABLE")
+      expect(manifest.files["mods/mod-alpha.jar"]).toBeDefined()
+      expect(manifest.files["mods/mod-alpha.jar"].policy).toBe("MODIFICABLE")
+    })
+
+    // 9. Real Flow: Extra local file in MODIFICABLE 'mods' folder is permitted without prune or repair
+    it("9. Real Flow: extra local file in MODIFICABLE 'mods' folder is permitted without prune or repair", async () => {
+      const modOfficialContent = "Content for mod-alpha"
+      const modOfficialSha = computeSha(modOfficialContent)
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "mods": {
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+          "mods/mod-alpha.jar": {
+            officialSha256: modOfficialSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const modsDir = path.join(instanceRoot, "mods")
+      await fsp.mkdir(modsDir, { recursive: true })
+      await fsp.writeFile(path.join(modsDir, "mod-alpha.jar"), modOfficialContent, "utf8")
+      await fsp.writeFile(path.join(modsDir, "player-extra.jar"), "extra user mod", "utf8")
+
+      const clientFiles = [
+        {
+          path: "mods/mod-alpha.jar",
+          sha256: modOfficialSha,
+          sizeBytes: Buffer.byteLength(modOfficialContent),
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/mod-alpha`,
+        },
+      ]
+      const directoryPolicies = [{ path: "mods", policy: "MODIFICABLE" }]
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", directoryPolicies)
+      expect(plan.toPrune).toHaveLength(0)
+      expect(plan.toDownload).toHaveLength(0)
+      expect(plan.toRetain).toHaveLength(1)
+    })
+
+    // 10. Real Flow: Override of file NO_MODIFICABLE inside folder MODIFICABLE takes precedence
+    it("10. Real Flow: file-level override NO_MODIFICABLE inside MODIFICABLE folder takes precedence and enforces official", async () => {
+      const lockModOfficialContent = "locked core mod"
+      const lockModOfficialSha = computeSha(lockModOfficialContent)
+
+      const modsDir = path.join(instanceRoot, "mods")
+      await fsp.mkdir(modsDir, { recursive: true })
+      await fsp.writeFile(path.join(modsDir, "locked.jar"), "player modified corrupt locked mod", "utf8")
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "mods": {
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+          "mods/locked.jar": {
+            officialSha256: lockModOfficialSha,
+            policy: "NO_MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const clientFiles = [
+        {
+          path: "mods/locked.jar",
+          sha256: lockModOfficialSha,
+          sizeBytes: Buffer.byteLength(lockModOfficialContent),
+          policy: "NO_MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/locked`,
+        },
+      ]
+      const directoryPolicies = [{ path: "mods", policy: "MODIFICABLE" }]
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", directoryPolicies)
+      expect(plan.toDownload).toHaveLength(1)
+      expect(plan.toDownload[0].path).toBe("mods/locked.jar")
+      expect(plan.toDownload[0].policy).toBe("NO_MODIFICABLE")
+    })
+
+    // 11. Real Flow: First installation with unknown local file in MODIFICABLE path installs official template
+    it("11. Real Flow: first installation with pre-existing unknown local file in MODIFICABLE path downloads and installs official template", async () => {
+      const officialContent = "Content for official options"
+      const officialSha = computeSha(officialContent)
+
+      const cfgPath = path.join(instanceRoot, "config", "options.txt")
+      await fsp.mkdir(path.dirname(cfgPath), { recursive: true })
+      await fsp.writeFile(cfgPath, "pre-existing unknown stray content", "utf8")
+
+      // No installed-manifest.json exists yet!
+      const clientFiles = [
+        {
+          path: "config/options.txt",
+          sha256: officialSha,
+          sizeBytes: Buffer.byteLength(officialContent),
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/options`,
+        },
+      ]
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0")
+      // Must download official template to establish officialSha256
+      expect(plan.toDownload).toHaveLength(1)
+      expect(plan.toDownload[0].path).toBe("config/options.txt")
+      expect(plan.toPreserveUser).toHaveLength(0)
+    })
   })
 })
 

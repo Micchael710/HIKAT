@@ -28,6 +28,7 @@ export interface GameManifest {
   needsRepair?: boolean
   installedModpackVersion?: string | null
   clientFiles: ClientFile[]
+  directoryPolicies?: import("../vite-env").DirectoryPolicy[]
   installed: boolean
   hasExistingInstall?: boolean
   hasInterruptedDownload?: boolean
@@ -138,6 +139,10 @@ export const GET_PUBLISHED_MODPACK_QUERY = `
         downloadUrl
         policy
       }
+      directoryPolicies {
+        path
+        policy
+      }
       notes
       cover {
         id
@@ -188,13 +193,14 @@ export const gameService = {
       const restRes = await apiClient<PublishedModpack | GameManifest>("/game/manifest")
       if (restRes.success && restRes.data) {
         const raw = restRes.data as any
-      modpack = {
+        modpack = {
           version: raw.version || "1.0.0",
           minecraftVersion: raw.minecraftVersion,
           modLoader: raw.modLoader || "NEOFORGE",
           modLoaderVersion: raw.modLoaderVersion ?? null,
           neoForgeVersion: raw.neoForgeVersion ?? null,
           clientFiles: Array.isArray(raw.clientFiles) ? raw.clientFiles : [],
+          directoryPolicies: Array.isArray(raw.directoryPolicies) ? raw.directoryPolicies : [],
         }
       }
     }
@@ -224,6 +230,7 @@ export const gameService = {
         try {
           const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
             clientFiles: modpack.clientFiles,
+            directoryPolicies: modpack.directoryPolicies || [],
             modpackVersion: modpack.version,
             minecraftVersion: modpack.minecraftVersion,
             modLoader: modpack.modLoader,
@@ -259,6 +266,7 @@ export const gameService = {
         needsRepair,
         installedModpackVersion,
         clientFiles: modpack.clientFiles,
+        directoryPolicies: modpack.directoryPolicies || [],
         installed: isInstalled,
         hasExistingInstall,
         hasInterruptedDownload,
@@ -368,10 +376,12 @@ export const gameService = {
     modLoaderVersion?: string | null,
     neoForgeVersion?: string | null,
     isVerify?: boolean,
+    directoryPolicies?: import("../vite-env").DirectoryPolicy[],
   ) {
     if (window.electronAPI?.startSync) {
       return await window.electronAPI.startSync({
         clientFiles,
+        directoryPolicies,
         modpackVersion,
         minecraftVersion,
         modLoader,

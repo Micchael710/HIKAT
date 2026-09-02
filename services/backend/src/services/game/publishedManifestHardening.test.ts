@@ -463,4 +463,53 @@ describe("Shard 8E: Authoritative Client Manifest & Backend Security Suite", () 
     expect(modpack?.cover?.mediaType).toBe("IMAGE")
     expect(modpack?.cover?.url).toContain(`/media/content/${coverMediaId}`)
   })
+
+  it("15. getPublishedModpack includes directoryPolicies and excludes directory records from clientFiles", async () => {
+    const dirId = crypto.randomUUID()
+    const fileId = crypto.randomUUID()
+
+    // Directory record with MODIFICABLE policy
+    await db.insert(schema.gameReleaseFiles).values({
+      id: dirId,
+      releaseId,
+      name: "mods",
+      logicalPath: "mods",
+      category: "MOD",
+      sha256: "",
+      sizeBytes: 0,
+      isDirectory: 1,
+      policy: "MODIFICABLE",
+      createdAt: new Date().toISOString(),
+    })
+
+    // File record inside mods inheriting MODIFICABLE
+    await db.insert(schema.gameReleaseFiles).values({
+      id: fileId,
+      releaseId,
+      name: "inherited.jar",
+      logicalPath: "mods/inherited.jar",
+      category: "MOD",
+      sha256: "c".repeat(64),
+      sizeBytes: 4096,
+      sourceEnvironment: "BOTH",
+      isDirectory: 0,
+      objectKey: "game-files/" + fileId,
+      createdAt: new Date().toISOString(),
+    })
+
+    const modpack = await getPublishedModpack(db, env)
+    expect(modpack).toBeDefined()
+
+    // clientFiles must contain only real files, NOT directory record
+    expect(modpack?.clientFiles.find((f) => f.path === "mods")).toBeUndefined()
+    const inheritedFile = modpack?.clientFiles.find((f) => f.path === "mods/inherited.jar")
+    expect(inheritedFile).toBeDefined()
+    expect(inheritedFile?.policy).toBe("MODIFICABLE")
+
+    // directoryPolicies must contain the directory policy
+    expect(modpack?.directoryPolicies).toBeDefined()
+    const modsDirPolicy = modpack?.directoryPolicies?.find((dp) => dp.path === "mods")
+    expect(modsDirPolicy).toBeDefined()
+    expect(modsDirPolicy?.policy).toBe("MODIFICABLE")
+  })
 })

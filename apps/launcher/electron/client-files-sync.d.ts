@@ -2,12 +2,14 @@ export declare function generateSyncPlan(
   instanceRoot: string,
   clientFiles: any[],
   modpackVersion: string,
+  directoryPolicies?: any[],
 ): Promise<any>
 
 export declare function downloadClientFilesToStaging(options: {
   instanceRoot: string
   clientFiles: any[]
   modpackVersion: string
+  directoryPolicies?: any[]
   onProgress?: (data: any) => void
   onPhaseChange?: (phase: string) => void
   cancelSignal?: { isCancelled: boolean; isPaused?: boolean }
@@ -17,6 +19,7 @@ export declare function downloadClientFilesToStaging(options: {
 export declare function applyStagingToInstance(options: {
   instanceRoot: string
   clientFiles?: any[]
+  directoryPolicies?: any[]
   modpackVersion: string
   stagedFiles?: any[]
   plan?: any
@@ -28,6 +31,7 @@ export declare function applyStagingToInstance(options: {
 export declare function executeSync(options: {
   instanceRoot: string
   clientFiles: any[]
+  directoryPolicies?: any[]
   modpackVersion: string
   onProgress?: (data: any) => void
   onPhaseChange?: (phase: string) => void

@@ -124,6 +124,7 @@ class GameOperationManager {
     const {
       instanceRoot,
       clientFiles = [],
+      directoryPolicies = [],
       modpackVersion,
       minecraftVersion,
       modLoader,
@@ -131,7 +132,12 @@ class GameOperationManager {
       neoForgeVersion,
     } = payload
 
-    const clientPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+    const clientPlan = await generateSyncPlan(
+      instanceRoot,
+      clientFiles,
+      modpackVersion,
+      directoryPolicies,
+    )
     const installedManifest = await loadInstalledManifest(instanceRoot)
     const core = await this.coreChecker({
       instanceRoot,
@@ -218,6 +224,7 @@ class GameOperationManager {
     const {
       instanceRoot,
       clientFiles = [],
+      directoryPolicies = [],
       modpackVersion,
       minecraftVersion,
       modLoader,
@@ -252,7 +259,12 @@ class GameOperationManager {
     const runOperation = async () => {
       try {
         // 1. Sync HiKAT client files (mods, configs, etc.)
-        const syncPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
+        const syncPlan = await generateSyncPlan(
+          instanceRoot,
+          clientFiles,
+          modpackVersion,
+          directoryPolicies,
+        )
         const installedManifest = await loadInstalledManifest(instanceRoot)
 
         let downloadResult = null
@@ -260,6 +272,7 @@ class GameOperationManager {
           downloadResult = await downloadClientFilesToStaging({
             instanceRoot,
             clientFiles,
+            directoryPolicies,
             modpackVersion,
             onProgress,
             onPhaseChange: isVerify ? undefined : onPhaseChange,
@@ -293,6 +306,7 @@ class GameOperationManager {
           await applyStagingToInstance({
             instanceRoot,
             clientFiles,
+            directoryPolicies,
             modpackVersion,
             plan: syncPlan,
             stagedFiles: downloadResult?.stagedFiles || [],

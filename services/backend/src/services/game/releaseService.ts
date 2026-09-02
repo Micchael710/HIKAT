@@ -4,6 +4,7 @@ import { createGraphQLError } from "@hikat/graphql"
 import type {
   PublishedModpackGql,
   ClientFileGql,
+  DirectoryPolicyGql,
   GameReleaseGql,
   AdminGameOverviewGql,
   AdminGameFileGql,
@@ -460,6 +461,13 @@ export async function getPublishedModpack(
     policy: effectiveMap.get(file.id) || "NO_MODIFICABLE",
   }))
 
+  const directoryPolicies: DirectoryPolicyGql[] = allRecords
+    .filter((record) => Boolean(record.isDirectory))
+    .map((record) => ({
+      path: record.logicalPath,
+      policy: effectiveMap.get(record.id) || "NO_MODIFICABLE",
+    }))
+
   let cover: ContentMediaGql | null = null
   if (activeRelease.coverMediaId) {
     const media = await getContentMediaById(db, activeRelease.coverMediaId)
@@ -476,6 +484,7 @@ export async function getPublishedModpack(
     neoForgeVersion: activeRelease.neoForgeVersion || null,
     mandatory: true,
     clientFiles,
+    directoryPolicies,
     notes: activeRelease.notes || null,
     cover,
   }
