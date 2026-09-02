@@ -165,46 +165,57 @@ export async function createContentMediaUpload(
   const parentApiToken = env?.R2_PARENT_API_TOKEN
   const bucketName = env?.R2_BUCKET_NAME || "hikat-r2"
 
-  let accessKeyId = "temp-access-key-id"
-  let secretAccessKey = "temp-secret-access-key"
-  let sessionToken = "temp-session-token"
+  if (!accountId || !parentAccessKeyId || !parentApiToken) {
+    throw createGraphQLError(
+      "Configuración o credenciales temporales R2 no disponibles.",
+      "INTERNAL_ERROR",
+    )
+  }
 
-  if (accountId && parentAccessKeyId && parentApiToken) {
-    try {
-      const cfRes = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/temp-access-credentials`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${parentApiToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            bucket: bucketName,
-            parentAccessKeyId,
-            permission: "object-read-write",
-            ttlSeconds: 21600,
-            objects: [objectKey],
-          }),
+  let accessKeyId: string
+  let secretAccessKey: string
+  let sessionToken: string
+
+  try {
+    const cfRes = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/temp-access-credentials`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${parentApiToken}`,
+          "Content-Type": "application/json",
         },
-      )
+        body: JSON.stringify({
+          bucket: bucketName,
+          parentAccessKeyId,
+          permission: "object-read-write",
+          ttlSeconds: 21600,
+          objects: [objectKey],
+        }),
+      },
+    )
 
-      if (cfRes.ok) {
-        const cfData = (await cfRes.json()) as any
-        if (cfData && cfData.success && cfData.result) {
-          accessKeyId = cfData.result.accessKeyId || cfData.result.access_key_id
-          secretAccessKey = cfData.result.secretAccessKey || cfData.result.secret_access_key
-          sessionToken = cfData.result.sessionToken || cfData.result.session_token
-        }
-      }
-    } catch (err: unknown) {
-      if (env?.ENVIRONMENT === "production" && env?.CLOUDFLARE_ACCOUNT_ID) {
-        throw createGraphQLError(
-          err instanceof Error ? err.message : "Error al solicitar credenciales temporales R2.",
-          "INTERNAL_ERROR",
-        )
-      }
+    if (!cfRes.ok) {
+      throw new Error(`Cloudflare API responded with status ${cfRes.status}`)
     }
+
+    const cfData = (await cfRes.json()) as any
+    if (!cfData || !cfData.success || !cfData.result) {
+      throw new Error(cfData?.errors?.[0]?.message || "Respuesta inválida de Cloudflare R2")
+    }
+
+    accessKeyId = cfData.result.accessKeyId || cfData.result.access_key_id
+    secretAccessKey = cfData.result.secretAccessKey || cfData.result.secret_access_key
+    sessionToken = cfData.result.sessionToken || cfData.result.session_token
+
+    if (!accessKeyId || !secretAccessKey || !sessionToken) {
+      throw new Error("Credenciales temporales incompletas de Cloudflare R2")
+    }
+  } catch (err: unknown) {
+    throw createGraphQLError(
+      err instanceof Error ? err.message : "Error al solicitar credenciales temporales R2.",
+      "INTERNAL_ERROR",
+    )
   }
 
   const rawTokenBytes = new Uint8Array(32)
@@ -250,7 +261,7 @@ export async function createContentMediaUpload(
     mediaId,
     objectKey,
     bucket: bucketName,
-    endpoint: `https://${accountId || "account-id"}.r2.cloudflarestorage.com`,
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
     credentials: {
       accessKeyId,
       secretAccessKey,
@@ -280,26 +291,7 @@ export async function completeContentMediaUpload(
     throw createGraphQLError("Upload token is required", "VALIDATION_ERROR")
   }
 
-  const tokenHash = await sha256Hex(rawToken)
-  const nowIso = new Date().toISOString()
-
-  const tokenRecord = await db
-    .select()
-    .from(contentMediaUploadTokens)
-    .where(eq(contentMediaUploadTokens.tokenHash, tokenHash))
-    .get()
-
-  if (!tokenRecord) {
-    throw createGraphQLError("Invalid upload token", "VALIDATION_ERROR")
-  }
-
-  if (tokenRecord.usedAt) {
-    throw createGraphQLError("Upload token has already been consumed", "CONFLICT")
-  }
-
-  if (tokenRecord.expiresAt <= nowIso) {
-    throw createGraphQLError("Upload token has expired", "VALIDATION_ERROR")
-  }
+  const tokenRecord = await getAndValidateUploadToken(db, rawToken, adminUserId)
 
   const mediaId = tokenRecord.id
   const ext = getExtensionForMime(tokenRecord.expectedMimeType)
@@ -314,24 +306,15 @@ export async function completeContentMediaUpload(
     throw createGraphQLError("Uploaded media object is empty (0 bytes)", "VALIDATION_ERROR")
   }
 
-  const actualSizeBytes = headObj.size
-
-  // Atomically consume token
-  const updated = await db
-    .update(contentMediaUploadTokens)
-    .set({
-      usedAt: nowIso,
-    })
-    .where(
-      and(
-        eq(contentMediaUploadTokens.id, tokenRecord.id),
-        sql`${contentMediaUploadTokens.usedAt} IS NULL`,
-      ),
+  if (headObj.size !== tokenRecord.maxSizeBytes) {
+    throw createGraphQLError(
+      `Uploaded media object size (${headObj.size} bytes) does not match declared ticket size (${tokenRecord.maxSizeBytes} bytes)`,
+      "VALIDATION_ERROR",
     )
-    .returning()
-    .get()
+  }
 
-  if (!updated) {
+  const consumed = await consumeUploadTokenAtomically(db, tokenRecord.tokenHash, adminUserId)
+  if (!consumed) {
     throw createGraphQLError("Upload token has already been consumed", "CONFLICT")
   }
 
@@ -344,9 +327,9 @@ export async function completeContentMediaUpload(
         objectKey,
         mediaType: tokenRecord.mediaType as MediaType,
         mimeType: tokenRecord.expectedMimeType as MediaMimeType,
-        sizeBytes: actualSizeBytes,
-        createdBy: tokenRecord.createdBy || adminUserId,
-        createdAt: nowIso,
+        sizeBytes: headObj.size,
+        createdBy: tokenRecord.createdBy,
+        createdAt: new Date().toISOString(),
       })
       .returning()
       .get()

@@ -2161,25 +2161,41 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
       playerToken = await createTestAccessToken({
         userId: playerId,
-
         sessionId: playerSessionId,
-
         role: "PLAYER",
-
         displayName: "PlayerNormal",
+      })
+
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
+        const urlStr = String(url)
+        if (urlStr.includes("/r2/temp-access-credentials")) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              errors: [],
+              result: {
+                accessKeyId: "temp-r2-key",
+                secretAccessKey: "temp-r2-secret",
+                sessionToken: "temp-r2-session",
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          )
+        }
+        return new Response("Not Found", { status: 404 })
       })
     })
 
     function createEnv(overrides?: Partial<Env>): Env {
       return {
         ENVIRONMENT: "production",
-
         AUTH_JWT_PUBLIC_KEY_PEM: publicSpkiPem,
-
         DB: testD1,
-
         ASSETS: testR2,
-
+        CLOUDFLARE_ACCOUNT_ID: "cf-test-acc",
+        R2_PARENT_ACCESS_KEY_ID: "parent-key",
+        R2_PARENT_API_TOKEN: "parent-token",
+        R2_BUCKET_NAME: "hikat-r2",
         ...overrides,
       }
     }
