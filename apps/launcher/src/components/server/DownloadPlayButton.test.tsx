@@ -1253,6 +1253,69 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       })
       expect(card.textContent).toContain("Casi listo...")
     })
+
+    it("4. Late IPC event { phase: 'INSTALLING', progress: 100 } after sync success does NOT revert JUGAR back to INSTALANDO", async () => {
+      let progressCallback: any
+      window.electronAPI = {
+        ...window.electronAPI,
+        onDownloadProgress: vi.fn((cb) => {
+          progressCallback = cb
+          return () => {}
+        }),
+      } as any
+
+      let resolveSync: (val: any) => void
+      vi.spyOn(gameService, "startSync").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSync = resolve
+          }),
+      )
+
+      const { container } = await mountButton()
+
+      // 1. Click download to start sync
+      await act(async () => {
+        (container.querySelector("button") as HTMLElement).click()
+      })
+
+      // Active download progress
+      await act(async () => {
+        progressCallback({
+          phase: "DOWNLOADING",
+          progress: 50,
+          downloadedBytes: 50 * 1024 * 1024,
+          totalBytes: 100 * 1024 * 1024,
+          speedMBs: 10,
+          remainingMinutes: 1,
+        })
+      })
+
+      expect(container.querySelector(".dl-progress-card")).not.toBeNull()
+
+      // 2. startSync completes with success
+      await act(async () => {
+        resolveSync({ success: true })
+      })
+
+      // Button must now be in PLAY state
+      const playBtn = container.querySelector("button") as HTMLElement
+      expect(playBtn).not.toBeNull()
+      expect(playBtn.textContent).toContain("JUGAR")
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+
+      // 3. Late IPC event arrives after completion
+      await act(async () => {
+        progressCallback({
+          phase: "INSTALLING",
+          progress: 100,
+        })
+      })
+
+      // Button must STAY in PLAY state and not revert to INSTALANDO / progress card
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+    })
   })
 })
 

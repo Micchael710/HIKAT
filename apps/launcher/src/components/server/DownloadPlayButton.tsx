@@ -261,6 +261,7 @@ export default function DownloadPlayButton({
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
     const unsubProgress = window.electronAPI?.onDownloadProgress?.((data: any) => {
+      if (!isStartingSyncRef.current) return
       setProgress(data.progress)
       setSpeed(data.speedMBs || 0)
       if (Number.isFinite(data.downloadedBytes)) {
@@ -273,6 +274,8 @@ export default function DownloadPlayButton({
 
       setStatus((prev) => {
         if (prev === "verifying") return prev
+        if (!isStartingSyncRef.current) return prev
+        if (prev !== "downloading" && prev !== "installing") return prev
         if (data.phase === "INSTALLING") return "installing"
         if (data.phase === "DOWNLOADING" && prev === "installing") return "downloading"
         return prev
@@ -282,6 +285,8 @@ export default function DownloadPlayButton({
     const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string) => {
       setStatus((prev) => {
         if (prev === "verifying") return prev
+        if (!isStartingSyncRef.current) return prev
+        if (prev !== "downloading" && prev !== "installing") return prev
         if (phase === "INSTALLING") return "installing"
         if (phase === "DOWNLOADING" && prev === "installing") return "downloading"
         return prev
@@ -368,6 +373,7 @@ export default function DownloadPlayButton({
             return
           }
           if (res?.success) {
+            isStartingSyncRef.current = false
             gameService.setGameInstalled(true)
             markSyncedVersionInstalled(syncingVersion)
 
@@ -434,6 +440,7 @@ export default function DownloadPlayButton({
             return
           }
           if (res?.success) {
+            isStartingSyncRef.current = false
             gameService.setGameInstalled(true)
             markSyncedVersionInstalled(syncingVersion)
 
