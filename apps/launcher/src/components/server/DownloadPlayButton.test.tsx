@@ -2089,6 +2089,78 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(activeBtn?.textContent).toContain("REPARAR")
       expect(container.querySelector(".settings-live-toast")?.textContent).toContain("Se detectaron cambios")
     })
+
+    it("10. React.StrictMode: running -> watcher detects corruption -> idle transitions cleanly to REPARAR", async () => {
+      let launchStatusCallback: any = null
+      let watcherCallback: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      })
+      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
+        watcherCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+
+      const container = document.createElement("div")
+      document.body.appendChild(container)
+      const root = createRoot(container)
+
+      await act(async () => {
+        root.render(
+          <React.StrictMode>
+            <LanguageProvider>
+              <DownloadPlayButton left={0} top={0} theme="dark" />
+            </LanguageProvider>
+          </React.StrictMode>,
+        )
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      // 1. Minecraft starts running
+      await act(async () => {
+        launchStatusCallback?.("running")
+      })
+      expect(btn.textContent).toContain("EN EJECUCIÓN")
+
+      // 2. Watcher detects corrupted file while game is running
+      await act(async () => {
+        watcherCallback?.({ path: "mods/corrupted.jar" })
+      })
+      expect(btn.textContent).toContain("EN EJECUCIÓN")
+
+      // 3. Minecraft exits -> idle
+      await act(async () => {
+        launchStatusCallback?.("idle")
+      })
+
+      // In React.StrictMode, status must cleanly resolve to REPARAR (not reverting to JUGAR)
+      const finalBtn = container.querySelector("button") as HTMLElement
+      expect(finalBtn.textContent).toContain("REPARAR")
+      expect(finalBtn.textContent).not.toContain("JUGAR")
+
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    })
   })
 })
 

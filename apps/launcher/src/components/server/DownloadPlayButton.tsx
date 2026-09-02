@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, useCallback } from "react"
 import { ThemeMode } from "../../types"
 import {
   IconDownload,
@@ -93,7 +93,20 @@ export default function DownloadPlayButton({
   onPlay,
 }: DownloadPlayButtonProps) {
   const { t } = useTranslation()
-  const [status, setStatus] = useState<GameButtonState>("checking")
+  const [status, setStatusState] = useState<GameButtonState>("checking")
+  const statusRef = useRef<GameButtonState>("checking")
+
+  const setStatus = useCallback((next: GameButtonState | ((prev: GameButtonState) => GameButtonState)) => {
+    setStatusState((prev: GameButtonState) => {
+      const resolved = typeof next === "function" ? next(prev) : next
+      statusRef.current = resolved
+      return resolved
+    })
+  }, [])
+
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
 
   const [manifest, setManifest] = useState<GameManifest | null>(null)
   const [progress, setProgress] = useState(0)
@@ -126,26 +139,24 @@ export default function DownloadPlayButton({
   // Listen to filesystem integrity changes while launcher is open
   useEffect(() => {
     const unsubscribe = window.electronAPI?.onGameFileIntegrityChanged?.(() => {
-      setStatus((prevStatus) => {
-        if (prevStatus === "running" || prevStatus === "launching") {
-          if (!isRepairPendingRef.current) {
-            isRepairPendingRef.current = true
-            showToast(t("playButton.fileWatcherChangeDetected"), "info")
-          }
-          return prevStatus
-        }
+      const currentStatus = statusRef.current
 
-        if (prevStatus === "play") {
+      if (currentStatus === "running" || currentStatus === "launching") {
+        if (!isRepairPendingRef.current) {
+          isRepairPendingRef.current = true
           showToast(t("playButton.fileWatcherChangeDetected"), "info")
-          return "repair"
         }
+        return
+      }
 
-        return prevStatus
-      })
+      if (currentStatus === "play") {
+        showToast(t("playButton.fileWatcherChangeDetected"), "info")
+        setStatus("repair")
+      }
     })
 
     return () => unsubscribe?.()
-  }, [t])
+  }, [t, setStatus])
 
   const showToast = (
     msg: string,
@@ -270,26 +281,28 @@ export default function DownloadPlayButton({
       }
 
       if (launchStatus === "idle") {
-        setStatus((prev) => {
-          if (prev === "launching" || prev === "running") {
-            const idleState = resolveIdleGameButtonState(manifest)
-            if (idleState === "update") {
-              isRepairPendingRef.current = false
-              return "update"
-            }
-            if (isRepairPendingRef.current) {
-              isRepairPendingRef.current = false
-              return "repair"
-            }
-            return idleState
+        const wasRunningOrLaunching =
+          statusRef.current === "launching" || statusRef.current === "running"
+        const hadPendingRepair = isRepairPendingRef.current
+        isRepairPendingRef.current = false
+
+        if (wasRunningOrLaunching) {
+          const idleState = resolveIdleGameButtonState(manifest)
+          if (idleState === "update") {
+            setStatus("update")
+            return
           }
-          return prev
-        })
+          if (hadPendingRepair) {
+            setStatus("repair")
+            return
+          }
+          setStatus(idleState)
+        }
       }
     })
 
     return () => unsubscribe?.()
-  }, [manifest])
+  }, [manifest, setStatus])
 
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
