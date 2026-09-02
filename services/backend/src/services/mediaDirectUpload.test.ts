@@ -95,7 +95,23 @@ describe("HiKAT Content Media Direct R2 Multipart Upload Suite", () => {
     expect(payload.maxSizeBytes).toBe(100 * 1024 * 1024)
   })
 
-  it("3. Fail-closed: throws INTERNAL_ERROR when R2 credentials or env are missing", async () => {
+  it("3. Content Media upload token expires in 6 hours (21600 seconds) matching R2 STS credentials TTL", async () => {
+    const beforeTime = Date.now()
+    const payload = await createContentMediaUpload(db, env, adminId, {
+      mimeType: "image/png",
+      sizeBytes: 1024,
+    })
+    const afterTime = Date.now()
+
+    const expiresAtTime = new Date(payload.expiresAt).getTime()
+    const expectedExpiryMin = beforeTime + 6 * 3600 * 1000 - 2000
+    const expectedExpiryMax = afterTime + 6 * 3600 * 1000 + 2000
+
+    expect(expiresAtTime).toBeGreaterThanOrEqual(expectedExpiryMin)
+    expect(expiresAtTime).toBeLessThanOrEqual(expectedExpiryMax)
+  })
+
+  it("4. Fail-closed: throws INTERNAL_ERROR when R2 credentials or env are missing", async () => {
     const brokenEnv: Env = {
       DB: testD1 as unknown as D1Database,
       ASSETS: mockR2 as unknown as R2Bucket,

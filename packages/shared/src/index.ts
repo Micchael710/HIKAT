@@ -144,8 +144,8 @@ export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
 export const MAX_VIDEO_SIZE_BYTES = 25 * 1024 * 1024 // 25 MB
 export const MAX_MEDIA_SIZE_BYTES = MAX_VIDEO_SIZE_BYTES // 25 MB max legacy buffer capacity
 export const MAX_CONTENT_MEDIA_SIZE_BYTES = 5 * 1024 * 1024 * 1024 * 1024 // 5 TB (Cloudflare R2 single multipart object limit)
-export const MAX_R2_OBJECT_SIZE_BYTES = MAX_CONTENT_MEDIA_SIZE_BYTES
 export const MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS = 15 * 60 // 15 minutes
+export const CONTENT_MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS = 6 * 60 * 60 // 6 hours (matches R2 STS temp credentials TTL)
 
 export const NEWS_LIMITS = {
   TITLE_MIN_LENGTH: 3,

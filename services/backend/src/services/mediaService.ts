@@ -27,6 +27,7 @@ import {
   MAX_MEDIA_SIZE_BYTES,
   MAX_CONTENT_MEDIA_SIZE_BYTES,
   MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS,
+  CONTENT_MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS,
   MediaType,
   MediaMimeType,
   getMediaTypeFromMime,
@@ -227,7 +228,7 @@ export async function createContentMediaUpload(
   const tokenHash = await sha256Hex(rawToken)
   const now = new Date()
   const expiresAt = new Date(
-    now.getTime() + MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS * 1000,
+    now.getTime() + CONTENT_MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS * 1000,
   ).toISOString()
 
   await db.insert(contentMediaUploadTokens).values({
