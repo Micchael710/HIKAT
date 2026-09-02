@@ -632,4 +632,84 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(manager.getState()).toBe("IDLE")
     expect(fs.existsSync(path.join(instanceRoot, ".hikat", "staging"))).toBe(false)
   })
+
+  it("27. Fresh install interrupted during INSTALLING: hasExistingInstall is false when no previous core-state exists", async () => {
+    // Create custom manager where core has never completed (no resolvedVersionId)
+    const freshManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: false,
+          hasExistingInstall: false,
+          resolvedVersionId: null,
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    // Simulate installedManifest existing from partial apply
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      lastSync: new Date().toISOString(),
+      files: {
+        "mods/partial.jar": {
+          officialSha256: "a".repeat(64),
+          policy: "NO_MODIFICABLE",
+          lastSyncedAt: new Date().toISOString(),
+        },
+      },
+    })
+
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "INSTALLING",
+      updatedAt: new Date().toISOString(),
+    })
+
+    const plan = await freshManager.checkPlan({
+      instanceRoot,
+      clientFiles: [
+        {
+          path: "mods/partial.jar",
+          sha256: "a".repeat(64),
+          sizeBytes: 100,
+          policy: "NO_MODIFICABLE",
+          downloadUrl: "/dl",
+        },
+      ],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasExistingInstall).toBe(false)
+    expect(plan.needsUpdate).toBe(true)
+  })
+
+  it("28. Existing previous installation: hasExistingInstall is true when core.resolvedVersionId exists even if new version requires sync", async () => {
+    const updateManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: false, // Core for 1.21.1 not installed yet
+          hasExistingInstall: true,
+          resolvedVersionId: "1.20.1-neoforge-47.1.0", // Previous version resolved
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    const plan = await updateManager.checkPlan({
+      instanceRoot,
+      clientFiles: [],
+      modpackVersion: "2.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasExistingInstall).toBe(true)
+    expect(plan.needsUpdate).toBe(true)
+  })
 })

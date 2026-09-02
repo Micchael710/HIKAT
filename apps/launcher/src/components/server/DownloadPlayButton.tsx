@@ -559,11 +559,13 @@ export default function DownloadPlayButton({
     try {
       const success = await gameService.uninstallGame()
       if (success) {
-        setStatus(
-          manifest?.clientFiles && manifest.clientFiles.length > 0
-            ? "download"
-            : "unavailable",
+        const freshManifest = await gameService.checkGameManifest()
+        setManifest(freshManifest)
+        setTotalBytes(
+          freshManifest?.totalDownloadBytes ||
+            (freshManifest ? manifestTotalBytes(freshManifest.clientFiles) : 0),
         )
+        setStatus(resolveIdleGameButtonState(freshManifest))
         showToast(t("playButton.uninstallSuccess"), "success")
       } else {
         showToast(t("playButton.uninstallError"), "error")

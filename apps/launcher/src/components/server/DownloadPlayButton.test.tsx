@@ -1019,6 +1019,91 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     expect(card.textContent).not.toContain("DESCARGANDO")
   })
 
+  it("Test 11E — Desinstalar actualiza manifest con checkGameManifest: pasa a DESCARGAR, y al pulsar muestra DESCARGANDO (nunca ACTUALIZANDO)", async () => {
+    vi.spyOn(gameService, "checkGameManifest")
+      .mockResolvedValueOnce({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true, // Initially installed
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/file.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/file",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: false, // Freshly uninstalled
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/file.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/file",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+    vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+
+    const { container } = await mountButton()
+    const playBtn = container.querySelector("button") as HTMLElement
+    expect(playBtn.textContent).toContain("JUGAR")
+
+    // Open options menu
+    const buttons = container.querySelectorAll("button")
+    const gearBtn = buttons[1] // Second button is the gear icon
+    expect(gearBtn).toBeDefined()
+    await act(async () => {
+      gearBtn.click()
+    })
+
+    // Click "Desinstalar juego"
+    const menuItems = Array.from(container.querySelectorAll(".profile-menu-item"))
+    const uninstallItem = menuItems.find((item) =>
+      item.textContent?.includes("Desinstalar"),
+    ) as HTMLElement
+    expect(uninstallItem).toBeDefined()
+
+    await act(async () => {
+      uninstallItem.click()
+    })
+
+    // Button transitions to DESCARGAR
+    const dlBtn = container.querySelector("button") as HTMLElement
+    expect(dlBtn.textContent).toContain("DESCARGAR")
+    expect(dlBtn.textContent).not.toContain("ACTUALIZAR")
+    expect(dlBtn.textContent).not.toContain("JUGAR")
+
+    // Click DESCARGAR
+    await act(async () => {
+      dlBtn.click()
+    })
+
+    // Card shows DESCARGANDO, NOT ACTUALIZANDO
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    expect(card.textContent).toContain("DESCARGANDO")
+    expect(card.textContent).not.toContain("ACTUALIZANDO")
+  })
+
   it("Test 12 — Realtime RELEASE_ACTIVATED does NOT interrupt in-progress download/pause/install", async () => {
     let releaseCallback: any
     vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {

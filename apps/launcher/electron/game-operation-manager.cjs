@@ -153,10 +153,7 @@ class GameOperationManager {
 
     const isFullyInstalled = clientSynced && Boolean(core.installed) && javaValid
     const needsUpdate = !isFullyInstalled
-    const hasExistingInstall =
-      Boolean(installedManifest.modpackVersion) ||
-      Boolean(clientPlan.hasExistingInstall) ||
-      Boolean(core.resolvedVersionId)
+    const hasExistingInstall = Boolean(core.resolvedVersionId)
 
     const session = await loadDownloadSession(instanceRoot)
     const isSessionInstalling = session && session.status === "INSTALLING"
