@@ -84,6 +84,7 @@ function setupInstanceWatcher() {
           relPath,
           latestDirectoryPolicies,
           installedManifest.files || {},
+          instanceRoot,
         )
 
         if (decision === "EMIT") {

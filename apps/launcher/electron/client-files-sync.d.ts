@@ -47,6 +47,7 @@ export declare function resolveWatcherDecision(
   relPath: string,
   directoryPolicies?: any[],
   installedManifestFiles?: any,
+  instanceRoot?: string | null,
 ): "EMIT" | "IGNORE"
 
 export declare function loadInstalledManifest(instanceRoot: string): Promise<any>

@@ -346,22 +346,68 @@ function resolvePathPolicy(relPath, filesMap) {
   return null
 }
 
-function resolveWatcherDecision(relPath, directoryPolicies = [], installedManifestFiles = {}) {
+function resolveWatcherDecision(
+  relPath,
+  directoryPolicies = [],
+  installedManifestFiles = {},
+  instanceRoot = null,
+) {
   const norm = String(relPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
   if (!norm) return "IGNORE"
 
-  // 1. Exact match on installedManifestFiles
+  // 1. Identify directory policies and directory entries
+  let isDirectory = false
+  let dirExplicitPolicy = null
+
+  if (Array.isArray(directoryPolicies) && directoryPolicies.length > 0) {
+    for (const dp of directoryPolicies) {
+      if (dp && dp.path) {
+        const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+        if (dNorm === norm) {
+          isDirectory = true
+          dirExplicitPolicy = dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
+          break
+        }
+      }
+    }
+  }
+
+  // 2. Exact match in installedManifestFiles
   let exactPolicy = null
+  let isManifestDir = false
+
   if (installedManifestFiles instanceof Map) {
     if (installedManifestFiles.has(norm)) {
       const item = installedManifestFiles.get(norm)
       exactPolicy = item?.policy || item
+      if (item && typeof item === "object" && !item.officialSha256) {
+        isManifestDir = true
+      }
     }
   } else if (Object.prototype.hasOwnProperty.call(installedManifestFiles, norm)) {
     const item = installedManifestFiles[norm]
     exactPolicy = item?.policy || item
+    if (item && typeof item === "object" && !item.officialSha256) {
+      isManifestDir = true
+    }
   }
 
+  // If it's a directory container event:
+  if (isDirectory || isManifestDir) {
+    const fullPath = instanceRoot ? path.join(instanceRoot, norm) : null
+    const dirStillExists = fullPath ? fs.existsSync(fullPath) : false
+
+    if (dirStillExists) {
+      // Container directory modified because a child inside changed -> ignore container, child event decides
+      return "IGNORE"
+    } else {
+      // Whole directory was deleted or checked without existing path
+      const effectiveDirPolicy = dirExplicitPolicy || exactPolicy || "NO_MODIFICABLE"
+      return effectiveDirPolicy === "NO_MODIFICABLE" ? "EMIT" : "IGNORE"
+    }
+  }
+
+  // 3. Exact file policy match
   if (exactPolicy === "NO_MODIFICABLE") {
     return "EMIT"
   }
@@ -369,7 +415,7 @@ function resolveWatcherDecision(relPath, directoryPolicies = [], installedManife
     return "IGNORE"
   }
 
-  // 2. Ancestor directory match in directoryPolicies or installedManifestFiles
+  // 4. Ancestor directory match in directoryPolicies or installedManifestFiles
   let dirPolicy = null
   if (Array.isArray(directoryPolicies) && directoryPolicies.length > 0) {
     const dirMap = new Map()
@@ -395,7 +441,7 @@ function resolveWatcherDecision(relPath, directoryPolicies = [], installedManife
     return "EMIT"
   }
 
-  // 3. Fallback to ENFORCED_DIRECTORIES
+  // 5. Fallback to ENFORCED_DIRECTORIES
   const enforcedDirs = Array.isArray(ENFORCED_DIRECTORIES)
     ? ENFORCED_DIRECTORIES
     : ["mods", "resourcepacks", "shaderpacks", "kubejs", "scripts"]
