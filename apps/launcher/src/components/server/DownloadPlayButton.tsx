@@ -237,16 +237,38 @@ export default function DownloadPlayButton({
         return
       }
 
-      const freshManifest = await gameService.checkGameManifest()
-      if (!freshManifest || freshManifest.version === manifest.version) return
+      const published = await gameService.getPublishedModpack()
+      if (!published || published.version === manifest.version) return
 
-      latestManifestVersionRef.current = freshManifest.version
+      latestManifestVersionRef.current = published.version
+      const clientFiles = published.clientFiles || []
+      const totalBytes = manifestTotalBytes(clientFiles)
+      const totalSizeGB = totalBytes / (1024 * 1024 * 1024)
+
+      const isInstalled = Boolean(manifest.installed || manifest.hasExistingInstall)
+
+      const freshManifest: GameManifest = {
+        ...manifest,
+        version: published.version,
+        minecraftVersion: published.minecraftVersion,
+        modLoader: (published.modLoader as any) || manifest.modLoader || "NEOFORGE",
+        modLoaderVersion: published.modLoaderVersion ?? manifest.modLoaderVersion ?? null,
+        neoForgeVersion: published.neoForgeVersion ?? manifest.neoForgeVersion ?? null,
+        clientFiles,
+        totalSizeGB,
+        totalDownloadBytes: totalBytes,
+        hasUpdate: isInstalled,
+        installed: false,
+        hasExistingInstall: isInstalled,
+        installedModpackVersion:
+          manifest.installedModpackVersion || (manifest.installed ? manifest.version : null),
+        needsRepair: false,
+      }
+
       setManifest(freshManifest)
-      setTotalBytes(
-        freshManifest.totalDownloadBytes || manifestTotalBytes(freshManifest.clientFiles),
-      )
+      setTotalBytes(totalBytes)
 
-      setStatus((prevStatus) => {
+      setStatus((prevStatus: GameButtonState) => {
         if (
           prevStatus === "downloading" ||
           prevStatus === "paused" ||
@@ -265,7 +287,7 @@ export default function DownloadPlayButton({
     return () => {
       unsubscribe()
     }
-  }, [manifest?.version])
+  }, [manifest])
 
   // Listen to game launch lifecycle status from Electron Main
   useEffect(() => {
