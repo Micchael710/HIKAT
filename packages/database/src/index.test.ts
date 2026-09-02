@@ -782,6 +782,8 @@ describe("@hikat/database schema and D1 operations", () => {
       "0018_operation_lock_lease.sql",
       "0019_release_activation_and_deployment_order.sql",
       "0020_game_file_upload_tokens_categories.sql",
+      "0021_generic_mod_loader.sql",
+      "0022_generic_mod_loader_columns.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard

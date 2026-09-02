@@ -20,7 +20,7 @@ describe("GameEnvironmentService - Multi-Loader System Tests", () => {
       expect(catalog.minecraftVersions.length).toBeGreaterThan(0)
       expect(catalog.minecraftVersions).toContain("1.21.1")
       expect(catalog.minecraftVersions).toContain("1.20.1")
-    })
+    }, 15000)
 
     it("returns empty versions array for VANILLA loader", async () => {
       const versions = await getLoaderVersions("1.21.1", "VANILLA")

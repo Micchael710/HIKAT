@@ -91,7 +91,6 @@ export default function GameEnvironmentModal({
             })
 
         return () => { cancelled = true }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     // --- Load loader versions when minecraft or loader changes ---
@@ -120,15 +119,13 @@ export default function GameEnvironmentModal({
                 setLoaderVersionsLoading(false)
             }
         },
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [],
+        [modLoaderVersion],
     )
 
     useEffect(() => {
         if (!minecraftVersion) return
         void fetchLoaderVersions(minecraftVersion, modLoader)
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [minecraftVersion, modLoader])
+    }, [minecraftVersion, modLoader, fetchLoaderVersions])
 
     // --- Computed ---
     const normalizedMinecraftVersion = minecraftVersion.trim()

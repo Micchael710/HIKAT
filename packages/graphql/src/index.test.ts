@@ -509,6 +509,8 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(modpackFields).toEqual([
       "version",
       "minecraftVersion",
+      "modLoader",
+      "modLoaderVersion",
       "neoForgeVersion",
       "mandatory",
       "clientFiles",
