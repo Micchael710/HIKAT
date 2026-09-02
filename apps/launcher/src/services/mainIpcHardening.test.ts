@@ -519,4 +519,37 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
 
     expect(fs.existsSync(existingFile)).toBe(true)
   })
+
+  it("23. Client-files-only operation emits INSTALLING 100% before transitioning to IDLE", async () => {
+    const fileContent = "fast content"
+    const fileSha = computeSha(fileContent)
+    const progressEvents: any[] = []
+
+    const result = await manager.startSync({
+      instanceRoot,
+      clientFiles: [
+        {
+          path: "mods/new-mod.jar",
+          sha256: fileSha,
+          sizeBytes: Buffer.byteLength(fileContent),
+          policy: "NO_MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/fast/new-mod.jar`,
+        },
+      ],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      onProgress: (p: any) => progressEvents.push(p),
+    })
+
+    expect(result.success).toBe(true)
+    expect(manager.getState()).toBe("IDLE")
+
+    const installing100 = progressEvents.find(
+      (e) => e.phase === "INSTALLING" && e.progress === 100,
+    )
+    expect(installing100).toBeDefined()
+    expect(installing100.phase).toBe("INSTALLING")
+    expect(installing100.progress).toBe(100)
+  })
 })

@@ -4,7 +4,11 @@
 import React, { act } from "react"
 import { createRoot } from "react-dom/client"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import DownloadPlayButton, { resolveIdleGameButtonState } from "./DownloadPlayButton"
+import DownloadPlayButton, {
+  resolveIdleGameButtonState,
+  formatDownloadSize,
+  manifestTotalBytes,
+} from "./DownloadPlayButton"
 import { LanguageProvider } from "../../context/LanguageContext"
 import { gameService, GameManifest } from "../../services/gameService"
 
@@ -1060,6 +1064,195 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       launchStatusCallback("idle")
     })
     expect(btn.textContent).toContain("ACTUALIZAR")
+  })
+
+  /* ─────────────────────────────────────────────────────────────
+   * Real Progress Formatting & Milestone Messages Tests
+   * ───────────────────────────────────────────────────────────── */
+
+  describe("Real Progress Formatting & Milestone Messages", () => {
+    it("1. formatDownloadSize formats < 1 GB in MB and >= 1 GB in GB with correct precision", () => {
+      const MB = 1024 ** 2
+      const GB = 1024 ** 3
+
+      // < 100 MB: 2 decimals
+      expect(formatDownloadSize(98.65 * MB)).toBe("98.65 MB")
+      // >= 100 MB: 1 decimal
+      expect(formatDownloadSize(428.6 * MB)).toBe("428.6 MB")
+      expect(formatDownloadSize(912.4 * MB)).toBe("912.4 MB")
+
+      // < 10 GB: 2 decimals
+      expect(formatDownloadSize(1.28 * GB)).toBe("1.28 GB")
+      expect(formatDownloadSize(2.83 * GB)).toBe("2.83 GB")
+      // >= 10 GB: 1 decimal
+      expect(formatDownloadSize(15.4 * GB)).toBe("15.4 GB")
+
+      // 0 bytes
+      expect(formatDownloadSize(0)).toBe("0.00 MB")
+    })
+
+    it("2. Does not use 28.8 fallback, uses real manifest total bytes", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: false,
+        totalSizeGB: 0.1,
+        clientFiles: [
+          {
+            path: "mods/mod1.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 50 * 1024 * 1024,
+            downloadUrl: "/dl/1",
+            policy: "NO_MODIFICABLE",
+          },
+          {
+            path: "mods/mod2.jar",
+            sha256: "b".repeat(64),
+            sizeBytes: 50 * 1024 * 1024,
+            downloadUrl: "/dl/2",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let progressCallback: any
+      window.electronAPI = {
+        ...window.electronAPI,
+        onDownloadProgress: vi.fn((cb) => {
+          progressCallback = cb
+          return () => {}
+        }),
+      } as any
+
+      vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+
+      const { container } = await mountButton()
+
+      // Start download
+      await act(async () => {
+        (container.querySelector("button") as HTMLElement).click()
+      })
+
+      // Simulate download progress event with real bytes (e.g. 50 MB / 100 MB)
+      await act(async () => {
+        progressCallback({
+          phase: "DOWNLOADING",
+          progress: 50,
+          downloadedBytes: 50 * 1024 * 1024,
+          totalBytes: 100 * 1024 * 1024,
+          speedMBs: 12.5,
+          remainingMinutes: 1,
+        })
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card).not.toBeNull()
+      expect(card.textContent).not.toContain("28.8")
+      expect(card.textContent).toContain("50.00 MB / 100.0 MB")
+      expect(card.textContent).toContain("12.5 MB/s")
+      expect(card.textContent).toContain("1 MIN")
+    })
+
+    it("3. During INSTALLING phase: hides MB/GB, speed, and MIN; displays milestone phrases based on percentage", async () => {
+      let progressCallback: any
+      window.electronAPI = {
+        ...window.electronAPI,
+        onDownloadProgress: vi.fn((cb) => {
+          progressCallback = cb
+          return () => {}
+        }),
+      } as any
+
+      vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+
+      const { container } = await mountButton()
+
+      // Start download
+      await act(async () => {
+        (container.querySelector("button") as HTMLElement).click()
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card).not.toBeNull()
+
+      // Milestone 1: 0-14% (e.g. 10%)
+      await act(async () => {
+        progressCallback({
+          phase: "INSTALLING",
+          progress: 10,
+          downloadedBytes: 100 * 1024 * 1024,
+          totalBytes: 100 * 1024 * 1024,
+          speedMBs: 0,
+          remainingMinutes: 0,
+        })
+      })
+
+      expect(card.textContent).toContain("INSTALANDO")
+      expect(card.textContent).toContain("10%")
+      expect(card.textContent).toContain("Afinando los bigotes...")
+      expect(card.textContent).not.toContain("MB")
+      expect(card.textContent).not.toContain("GB")
+      expect(card.textContent).not.toContain("MB/s")
+      expect(card.textContent).not.toContain("MIN")
+
+      // Milestone 2: 15-29% (e.g. 20%)
+      await act(async () => {
+        progressCallback({
+          phase: "INSTALLING",
+          progress: 20,
+        })
+      })
+      expect(card.textContent).toContain("Preparando las patitas...")
+
+      // Milestone 3: 30-44% (e.g. 35%)
+      await act(async () => {
+        progressCallback({
+          phase: "INSTALLING",
+          progress: 35,
+        })
+      })
+      expect(card.textContent).toContain("Ordenando unas cuantas cosas...")
+
+      // Milestone 4: 45-59% (e.g. 50%)
+      await act(async () => {
+        progressCallback({
+          phase: "INSTALLING",
+          progress: 50,
+        })
+      })
+      expect(card.textContent).toContain("El gato está haciendo magia...")
+
+      // Milestone 5: 60-74% (e.g. 70%)
+      await act(async () => {
+        progressCallback({
+          phase: "INSTALLING",
+          progress: 70,
+        })
+      })
+      expect(card.textContent).toContain("Poniendo todo en su sitio...")
+
+      // Milestone 6: 75-89% (e.g. 85%)
+      await act(async () => {
+        progressCallback({
+          phase: "INSTALLING",
+          progress: 85,
+        })
+      })
+      expect(card.textContent).toContain("Dando los últimos retoques...")
+
+      // Milestone 7: 90-100% (e.g. 100%)
+      await act(async () => {
+        progressCallback({
+          phase: "INSTALLING",
+          progress: 100,
+        })
+      })
+      expect(card.textContent).toContain("Casi listo...")
+    })
   })
 })
 

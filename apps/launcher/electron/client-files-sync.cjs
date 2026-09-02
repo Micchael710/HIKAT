@@ -740,10 +740,9 @@ async function applyStagingToInstance({
   if (typeof onProgress === "function") {
     onProgress({
       phase: "INSTALLING",
-      currentFile: "Applying game files...",
       downloadedBytes: effectivePlan.totalDownloadBytes,
       totalBytes: effectivePlan.totalDownloadBytes,
-      progress: 100,
+      progress: 10,
     })
   }
 
@@ -760,6 +759,15 @@ async function applyStagingToInstance({
     if (fileSha !== task.sha256.toLowerCase()) {
       throw new Error(`Staged file hash mismatch before installation: ${task.path}`)
     }
+  }
+
+  if (typeof onProgress === "function") {
+    onProgress({
+      phase: "INSTALLING",
+      downloadedBytes: effectivePlan.totalDownloadBytes,
+      totalBytes: effectivePlan.totalDownloadBytes,
+      progress: 15,
+    })
   }
 
   // 2. Safe per-file copy to instanceRoot via temp siblings
@@ -815,12 +823,30 @@ async function applyStagingToInstance({
     }
   }
 
+  if (typeof onProgress === "function") {
+    onProgress({
+      phase: "INSTALLING",
+      downloadedBytes: effectivePlan.totalDownloadBytes,
+      totalBytes: effectivePlan.totalDownloadBytes,
+      progress: 20,
+    })
+  }
+
   // 4. Mandatory Final Verification
   const postPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion)
   if (postPlan.toDownload.length > 0 || postPlan.toPrune.length > 0) {
     throw new Error(
       `Post-installation verification failed: ${postPlan.toDownload.length} files missing/corrupt, ${postPlan.toPrune.length} files unpruned.`,
     )
+  }
+
+  if (typeof onProgress === "function") {
+    onProgress({
+      phase: "INSTALLING",
+      downloadedBytes: effectivePlan.totalDownloadBytes,
+      totalBytes: effectivePlan.totalDownloadBytes,
+      progress: 25,
+    })
   }
 
   // 5. Persist installed manifest with official SHA-256 references

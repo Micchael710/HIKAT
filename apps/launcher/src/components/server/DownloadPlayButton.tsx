@@ -55,6 +55,30 @@ export function resolveIdleGameButtonState(
   return "unavailable"
 }
 
+export function manifestTotalBytes(files?: any[] | null): number {
+  return (files || []).reduce(
+    (sum: number, file: any) => sum + (Number(file.sizeBytes) || 0),
+    0,
+  )
+}
+
+export function formatDownloadSize(bytes: number): string {
+  const value = Math.max(0, Number(bytes) || 0)
+
+  const MB = 1024 ** 2
+  const GB = 1024 ** 3
+
+  if (value >= GB) {
+    const gb = value / GB
+
+    return `${gb.toFixed(gb >= 10 ? 1 : 2)} GB`
+  }
+
+  const mb = value / MB
+
+  return `${mb.toFixed(mb >= 100 ? 1 : 2)} MB`
+}
+
 export default function DownloadPlayButton({
   left,
   top,
@@ -67,8 +91,8 @@ export default function DownloadPlayButton({
   const [manifest, setManifest] = useState<GameManifest | null>(null)
   const [progress, setProgress] = useState(0)
   const [speed, setSpeed] = useState(0)
-  const [totalGB, setTotalGB] = useState(28.8)
-  const [downloadedGB, setDownloadedGB] = useState(0)
+  const [totalBytes, setTotalBytes] = useState(0)
+  const [downloadedBytes, setDownloadedBytes] = useState(0)
   const [timeRemainingMin, setTimeRemainingMin] = useState(0)
   const [isHovered, setIsHovered] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -135,7 +159,7 @@ export default function DownloadPlayButton({
       if (!isMounted) return
       setManifest(res)
       if (res) {
-        if (res.totalSizeGB) setTotalGB(res.totalSizeGB)
+        setTotalBytes(manifestTotalBytes(res.clientFiles))
         setStatus(resolveIdleGameButtonState(res))
       } else {
         setStatus(resolveIdleGameButtonState(null))
@@ -158,11 +182,8 @@ export default function DownloadPlayButton({
       const newModpack = await gameService.getPublishedModpack()
       if (!newModpack || newModpack.version === manifest.version) return
 
-      const totalBytes = (newModpack.clientFiles || []).reduce(
-        (sum, file) => sum + (Number(file.sizeBytes) || 0),
-        0,
-      )
-      const totalSizeGB = Number((totalBytes / 1024 / 1024 / 1024).toFixed(2))
+      const totalBytesCalculated = manifestTotalBytes(newModpack.clientFiles)
+      const totalSizeGB = Number((totalBytesCalculated / 1024 / 1024 / 1024).toFixed(2))
 
       const hasPrevInstall =
         Boolean(manifest.hasExistingInstall) ||
@@ -188,7 +209,7 @@ export default function DownloadPlayButton({
 
       latestManifestVersionRef.current = newManifest.version
       setManifest(newManifest)
-      if (newManifest.totalSizeGB) setTotalGB(newManifest.totalSizeGB)
+      setTotalBytes(totalBytesCalculated)
 
       setStatus((prevStatus) => {
         if (
@@ -242,8 +263,12 @@ export default function DownloadPlayButton({
     const unsubProgress = window.electronAPI?.onDownloadProgress?.((data: any) => {
       setProgress(data.progress)
       setSpeed(data.speedMBs || 0)
-      setDownloadedGB(data.downloadedGB)
-      if (data.totalGB) setTotalGB(data.totalGB)
+      if (Number.isFinite(data.downloadedBytes)) {
+        setDownloadedBytes(data.downloadedBytes)
+      }
+      if (Number.isFinite(data.totalBytes) && data.totalBytes >= 0) {
+        setTotalBytes(data.totalBytes)
+      }
       setTimeRemainingMin(data.remainingMinutes)
 
       setStatus((prev) => {
@@ -285,6 +310,7 @@ export default function DownloadPlayButton({
         setStatus(resolveIdleGameButtonState(manifest))
         setProgress(0)
         setSpeed(0)
+        setDownloadedBytes(0)
         setIsHovered(false)
       } else {
         showToast(t("playButton.syncError"), "error")
@@ -387,6 +413,7 @@ export default function DownloadPlayButton({
         showToast(t("playButton.noClientFiles"), "error")
         return
       }
+      setDownloadedBytes(0)
       isStartingSyncRef.current = true
       setStatus("downloading")
 
@@ -467,6 +494,7 @@ export default function DownloadPlayButton({
       return
     }
     showToast(t("playButton.verifying"), "info")
+    setDownloadedBytes(0)
     isStartingSyncRef.current = true
     setStatus("verifying")
 
@@ -731,10 +759,26 @@ export default function DownloadPlayButton({
   }
 
   /* ── DOWNLOADING / PAUSED / INSTALLING / VERIFYING (Progress card) ── */
-  const dlGB = downloadedGB > 0 ? downloadedGB : (totalGB * progress) / 100
+  const currentDownloadedBytes =
+    downloadedBytes > 0 ? downloadedBytes : (totalBytes * progress) / 100
   const isUpdating = manifest?.hasUpdate
   const isInstalling = status === "installing"
   const isVerifying = status === "verifying"
+
+  const installMessageKey =
+    progress < 15
+      ? "installMessage1"
+      : progress < 30
+        ? "installMessage2"
+        : progress < 45
+          ? "installMessage3"
+          : progress < 60
+            ? "installMessage4"
+            : progress < 75
+              ? "installMessage5"
+              : progress < 90
+                ? "installMessage6"
+                : "installMessage7"
 
   return (
     <div
@@ -850,7 +894,7 @@ export default function DownloadPlayButton({
           </span>
         </div>
 
-        {/* Bottom row: Download details & Speed or hover action prompt */}
+        {/* Bottom row: Download details & Speed or hover action prompt or install phrase */}
         <div
           style={{
             display: "flex",
@@ -884,6 +928,17 @@ export default function DownloadPlayButton({
                 {t("playButton.pause")}
               </span>
             </div>
+          ) : isInstalling ? (
+            <span
+              style={{
+                color: isDark ? "rgba(255,255,255,.6)" : "#475569",
+                fontFamily: BASE_FONT,
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              {t(`playButton.${installMessageKey}`)}
+            </span>
           ) : (
             <span
               style={{
@@ -893,20 +948,22 @@ export default function DownloadPlayButton({
                 fontSize: 13,
               }}
             >
-              {Math.round(dlGB * 10) / 10} / {totalGB} {t("common.gb")} · {speed > 0 ? `${speed.toFixed(1)} MB/s` : `-- MB/s`}
+              {formatDownloadSize(currentDownloadedBytes)} / {formatDownloadSize(totalBytes)} · {speed > 0 ? `${speed.toFixed(1)} MB/s` : `-- MB/s`}
             </span>
           )}
 
-          <span
-            style={{
-              color: isDark ? "rgba(255,255,255,.6)" : "#475569",
-              fontFamily: BASE_FONT,
-              fontWeight: 700,
-              fontSize: 13,
-            }}
-          >
-            {timeRemainingMin > 0 ? `${timeRemainingMin} ${t("common.min")}` : `-- ${t("common.min")}`}
-          </span>
+          {!isInstalling && (
+            <span
+              style={{
+                color: isDark ? "rgba(255,255,255,.6)" : "#475569",
+                fontFamily: BASE_FONT,
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              {timeRemainingMin > 0 ? `${timeRemainingMin} ${t("common.min")}` : `-- ${t("common.min")}`}
+            </span>
+          )}
         </div>
       </div>
 

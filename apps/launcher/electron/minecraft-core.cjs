@@ -134,7 +134,17 @@ async function installCore({
   const folder = MinecraftFolder.from(instanceRoot)
   const runtime = createHiKatInstallRuntime({ signal })
 
+  const reportInstallProgress = (value) => {
+    if (typeof onProgress === "function") {
+      onProgress({
+        phase: "INSTALLING",
+        progress: value,
+      })
+    }
+  }
+
   // 1. Fetch official version metadata
+  reportInstallProgress(30)
   const versionList = await getVersionList({ signal })
   const versionItem = versionList?.versions?.find((v) => v.id === cleanMc)
   if (!versionItem) {
@@ -181,6 +191,8 @@ async function installCore({
     effectiveJavaPath = javaInfo.cliJavaPath || "java"
   }
 
+  reportInstallProgress(45)
+
   // 4. Resolve and install Vanilla client jar, libraries, and assets
   const clientJarFile = resolveMinecraftJarInstallFile(vanillaVersion, { side: "client", signal })
   const libraryFiles = resolveLibraryInstallFiles(vanillaVersion.libraries, folder, { signal })
@@ -210,6 +222,8 @@ async function installCore({
       { signal }
     )
   }
+
+  reportInstallProgress(70)
 
   let finalVersionId = cleanMc
 
@@ -309,12 +323,16 @@ async function installCore({
     }
   }
 
+  reportInstallProgress(90)
+
   // 6. Diagnose installed version to confirm integrity (XMCL is sole authority)
   const resolvedVersion = await Version.parse(folder, finalVersionId)
   const issue = await diagnoseInstallation(resolvedVersion)
   if (issue) {
     throw new Error(`Core installation integrity check failed: ${JSON.stringify(issue)}`)
   }
+
+  reportInstallProgress(98)
 
   // 7. Persist authoritative core state v2
   const state = {
@@ -329,6 +347,8 @@ async function installCore({
     resolvedVersionId: finalVersionId,
   }
   await saveCoreState(instanceRoot, state)
+
+  reportInstallProgress(100)
 
   return {
     success: true,

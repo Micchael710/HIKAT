@@ -337,6 +337,13 @@ class GameOperationManager {
           throw new Error("Operation was cancelled.")
         }
 
+        if (!isVerify && typeof onProgress === "function") {
+          onProgress({
+            phase: "INSTALLING",
+            progress: 100,
+          })
+        }
+
         this.state = "IDLE"
         if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
         return { success: true }

@@ -26,8 +26,10 @@ export interface PublishedModpack {
 export interface DownloadProgressData {
   progress: number
   phase?: "DOWNLOADING" | "INSTALLING" | string
-  downloadedGB: number
-  totalGB: number
+  downloadedGB?: number
+  totalGB?: number
+  downloadedBytes?: number
+  totalBytes?: number
   speedMBs: number
   remainingMinutes: number
   currentFile?: string
