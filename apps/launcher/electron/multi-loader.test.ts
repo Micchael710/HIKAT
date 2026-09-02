@@ -2,13 +2,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import path from "path"
 import fsp from "fs/promises"
 import os from "os"
+import child_process from "child_process"
 
 // @ts-expect-error CJS module
 import { checkCore, saveCoreState, loadCoreState } from "./minecraft-core.cjs"
 // @ts-expect-error CJS module
-import { validateSyncPayload, GameOperationManager } from "./game-operation-manager.cjs"
+import { validateSyncPayload } from "./game-operation-manager.cjs"
 // @ts-expect-error CJS module
 import { GameLauncher } from "./game-launcher.cjs"
+// @ts-expect-error CJS module
+import { validateJavaBinary, getJavaRuntimeDir, resolveJavaRuntime } from "./java-runtime.cjs"
 
 describe("Launcher Multi-Loader Core & Lifecycle Suite", () => {
   let tempDir: string
@@ -53,16 +56,20 @@ describe("Launcher Multi-Loader Core & Lifecycle Suite", () => {
         )
 
         await saveCoreState(instanceRoot, {
-          schemaVersion: 1,
+          schemaVersion: 2,
           minecraftVersion: mcVersion,
           modLoader: loader,
           modLoaderVersion: version,
+          javaMajorVersion: loader === "FORGE" ? 17 : 21,
+          javaComponent: "java-runtime-delta",
           resolvedVersionId: profileId,
         })
 
         const state = await loadCoreState(instanceRoot)
+        expect(state?.schemaVersion).toBe(2)
         expect(state?.modLoader).toBe(loader)
         expect(state?.resolvedVersionId).toBe(profileId)
+        expect(state?.javaMajorVersion).toBe(loader === "FORGE" ? 17 : 21)
 
         const check = await checkCore({
           instanceRoot,
@@ -73,16 +80,18 @@ describe("Launcher Multi-Loader Core & Lifecycle Suite", () => {
 
         expect(check.installed).toBe(true)
         expect(check.resolvedVersionId).toBe(profileId)
+        expect(check.javaMajorVersion).toBe(loader === "FORGE" ? 17 : 21)
       })
     }
 
     it("returns installed: false if loader type changes on disk", async () => {
       const profileId = "1.21.1-fabric-0.16.10"
       await saveCoreState(instanceRoot, {
-        schemaVersion: 1,
+        schemaVersion: 2,
         minecraftVersion: "1.21.1",
         modLoader: "FABRIC",
         modLoaderVersion: "0.16.10",
+        javaMajorVersion: 21,
         resolvedVersionId: profileId,
       })
 
@@ -148,11 +157,12 @@ describe("Launcher Multi-Loader Core & Lifecycle Suite", () => {
     })
   })
 
-  describe("3. GameLauncher multi-loader handling", () => {
-    it("allows launching VANILLA without requiring loader version", async () => {
+  describe("3. GameLauncher dynamic Java handling", () => {
+    it("allows launching VANILLA without requiring loader version, resolving required Java", async () => {
       const mockChecker = vi.fn().mockResolvedValue({
         installed: true,
         resolvedVersionId: "1.21.1",
+        javaMajorVersion: 21,
       })
       const mockResolver = vi.fn().mockReturnValue({
         javaPath: "C:\\Java\\javaw.exe",
@@ -182,6 +192,58 @@ describe("Launcher Multi-Loader Core & Lifecycle Suite", () => {
           modLoader: "VANILLA",
         }),
       )
+      expect(mockResolver).toHaveBeenCalledWith(
+        instanceRoot,
+        expect.objectContaining({
+          majorVersion: 21,
+        }),
+      )
+    })
+  })
+
+  describe("4. Dynamic Java validation unit tests", () => {
+    it("validates Java 8, 17, and 21 binaries according to expected version", async () => {
+      const dummyJava = path.join(tempDir, "fake-java.exe")
+      await fsp.writeFile(dummyJava, "fake-binary")
+
+      vi.spyOn(child_process, "spawnSync").mockImplementation((_cmd, _args) => {
+        return {
+          status: 0,
+          stderr: 'openjdk version "17.0.12" 2024-07-16',
+          stdout: "",
+        } as any
+      })
+
+      const check17 = validateJavaBinary(dummyJava, 17)
+      expect(check17.valid).toBe(true)
+      expect(check17.majorVersion).toBe(17)
+
+      const check21 = validateJavaBinary(dummyJava, 21)
+      expect(check21.valid).toBe(false)
+      expect(check21.error).toContain("Expected Java 21")
+
+      vi.spyOn(child_process, "spawnSync").mockImplementation((_cmd, _args) => {
+        return {
+          status: 0,
+          stderr: 'java version "1.8.0_391"',
+          stdout: "",
+        } as any
+      })
+
+      const check8 = validateJavaBinary(dummyJava, 8)
+      expect(check8.valid).toBe(true)
+      expect(check8.majorVersion).toBe(8)
+    })
+
+    it("resolves dynamic java runtime paths per major version", () => {
+      const dir8 = getJavaRuntimeDir("C:\\HiKAT\\game files", 8)
+      expect(dir8).toBe(path.join("C:\\HiKAT", "runtime", "java", "8"))
+
+      const dir17 = getJavaRuntimeDir("C:\\HiKAT\\game files", 17)
+      expect(dir17).toBe(path.join("C:\\HiKAT", "runtime", "java", "17"))
+
+      const dir21 = getJavaRuntimeDir("C:\\HiKAT\\game files", 21)
+      expect(dir21).toBe(path.join("C:\\HiKAT", "runtime", "java", "21"))
     })
   })
 })

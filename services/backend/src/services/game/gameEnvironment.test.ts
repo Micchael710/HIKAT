@@ -3,11 +3,13 @@ import {
   getGameEnvironmentCatalog,
   getLoaderVersions,
   validateGameEnvironment,
+  clearGameEnvironmentCache,
 } from "./gameEnvironmentService"
 
 describe("GameEnvironmentService - Multi-Loader System Tests", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    clearGameEnvironmentCache()
   })
 
   describe("1. Catalog & Loaders", () => {
@@ -78,5 +80,27 @@ describe("GameEnvironmentService - Multi-Loader System Tests", () => {
         /no es una versión oficial/i,
       )
     })
+
+    it("fails closed when official Minecraft source is unreachable", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network connection failed"))
+      await expect(validateGameEnvironment("1.21.1", "VANILLA", null)).rejects.toThrow(
+        /No se pudo verificar la versión de Minecraft con la fuente oficial/i,
+      )
+    })
+
+    it("fails closed when official loader source is unreachable", async () => {
+      // First fetch succeeds for Mojang manifest, second fetch fails for Fabric API
+      const mockManifest = {
+        versions: [{ id: "1.21.1", type: "release" }],
+      }
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(JSON.stringify(mockManifest), { status: 200 }))
+        .mockRejectedValueOnce(new Error("Fabric meta API timeout"))
+
+      await expect(validateGameEnvironment("1.21.1", "FABRIC", "0.16.10")).rejects.toThrow(
+        /No se pudo verificar la versión de FABRIC con la fuente oficial/i,
+      )
+    })
   })
 })
+

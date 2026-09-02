@@ -11,12 +11,14 @@ const {
 } = require("@xmcl/installer")
 const { createHiKatInstallRuntime } = require("./xmcl-install-runtime.cjs")
 
-function getJavaRuntimeDir(appDataRoot) {
+function getJavaRuntimeDir(appDataRoot, majorVersion = 21) {
   if (!appDataRoot) return null
-  if (path.basename(appDataRoot).toLowerCase() === "game files") {
-    return path.join(path.dirname(appDataRoot), "runtime", "java", "21")
-  }
-  return path.join(appDataRoot, "runtime", "java", "21")
+  const base =
+    path.basename(appDataRoot).toLowerCase() === "game files"
+      ? path.dirname(appDataRoot)
+      : appDataRoot
+
+  return path.join(base, "runtime", "java", String(majorVersion))
 }
 
 function parseJavaMajorVersion(output) {
@@ -30,7 +32,7 @@ function parseJavaMajorVersion(output) {
   return firstNum
 }
 
-function validateJavaBinary(executablePath) {
+function validateJavaBinary(executablePath, expectedMajorVersion = 21) {
   if (!executablePath || typeof executablePath !== "string") {
     return { valid: false, majorVersion: null, output: "", error: "No executable path provided" }
   }
@@ -46,19 +48,19 @@ function validateJavaBinary(executablePath) {
     })
     const output = (res.stderr || "") + "\n" + (res.stdout || "")
     const major = parseJavaMajorVersion(output)
-    const valid = res.status === 0 && major === 21
+    const valid = res.status === 0 && major === expectedMajorVersion
     return {
       valid,
       majorVersion: major,
       output: output.trim(),
-      error: valid ? null : `Expected Java 21, found version ${major ?? "unknown"}`,
+      error: valid ? null : `Expected Java ${expectedMajorVersion}, found version ${major ?? "unknown"}`,
     }
   } catch (err) {
     return { valid: false, majorVersion: null, output: "", error: err.message }
   }
 }
 
-function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
+function resolveJavaRuntime(root, { isGui = false, customPath, majorVersion = 21 } = {}) {
   const isWin = process.platform === "win32"
   const exeName = isGui && isWin ? "javaw.exe" : isWin ? "java.exe" : "java"
   const cliExeName = isWin ? "java.exe" : "java"
@@ -72,13 +74,15 @@ function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
 
   const searchRoots = []
   if (root && typeof root === "string") {
-    searchRoots.push(getJavaRuntimeDir(root))
-    searchRoots.push(path.join(root, "runtime", "java", "21"))
+    searchRoots.push(getJavaRuntimeDir(root, majorVersion))
+    searchRoots.push(path.join(root, "runtime", "java", String(majorVersion)))
     if (path.basename(root).toLowerCase() === "game files") {
-      searchRoots.push(path.join(path.dirname(root), "runtime", "java", "21"))
+      searchRoots.push(path.join(path.dirname(root), "runtime", "java", String(majorVersion)))
     }
-    // Legacy fallback directory
-    searchRoots.push(path.join(root, "jdk-21"))
+    // Legacy fallback directory only when majorVersion === 21
+    if (majorVersion === 21) {
+      searchRoots.push(path.join(root, "jdk-21"))
+    }
   }
 
   for (const candidateDir of searchRoots) {
@@ -110,18 +114,18 @@ function resolveJavaRuntime(root, { isGui = false, customPath } = {}) {
     javaPath: null,
     cliJavaPath: null,
     isOfficialJdk: false,
-    error: "Official HiKAT Java 21 runtime not found.",
+    error: `Official HiKAT Java ${majorVersion} runtime not found.`,
   }
 }
 
-async function ensureJavaRuntime({ appDataRoot, signal, onProgress, component = "java-runtime-delta" } = {}) {
-  const existing = resolveJavaRuntime(appDataRoot, { isGui: false })
+async function ensureJavaRuntime({ appDataRoot, majorVersion = 21, component, signal, onProgress } = {}) {
+  const existing = resolveJavaRuntime(appDataRoot, { isGui: false, majorVersion })
   if (existing.cliJavaPath) {
-    const check = validateJavaBinary(existing.cliJavaPath)
+    const check = validateJavaBinary(existing.cliJavaPath, majorVersion)
     if (check.valid) return existing
   }
 
-  const destination = getJavaRuntimeDir(appDataRoot)
+  const destination = getJavaRuntimeDir(appDataRoot, majorVersion)
   if (!destination) throw new Error("Invalid appDataRoot for Java installation")
 
   // Fetch official Mojang runtime index
@@ -136,28 +140,33 @@ async function ensureJavaRuntime({ appDataRoot, signal, onProgress, component = 
         : platform.arch === "x64" ? "linux" : "linux-i386"
 
   const platformTargets = allData[platformKey] || allData["windows-x64"]
-  if (!platformTargets) throw new Error(`Unsupported platform for Java 21 runtime: ${platformKey}`)
+  if (!platformTargets) throw new Error(`Unsupported platform for Java ${majorVersion} runtime: ${platformKey}`)
 
-  const targetList =
-    platformTargets[component] ||
-    platformTargets["java-runtime-delta"] ||
-    platformTargets["java-runtime-gamma"] ||
-    platformTargets["java-runtime-alpha"]
+  let targetList = null
+  if (component && platformTargets[component]) {
+    targetList = platformTargets[component]
+  } else {
+    targetList =
+      platformTargets["java-runtime-delta"] ||
+      platformTargets["java-runtime-gamma"] ||
+      platformTargets["java-runtime-alpha"] ||
+      platformTargets["jre-legacy"]
+  }
 
   const target = Array.isArray(targetList) ? targetList[0] : targetList
-  if (!target) throw new Error(`No Java runtime target found for component: ${component}`)
+  if (!target) throw new Error(`No Java runtime target found for component: ${component || "default"}`)
 
   await fsp.mkdir(destination, { recursive: true })
   const workflow = createJavaRuntimeInstallWorkflow({ target, destination })
   const runtime = createHiKatInstallRuntime({ signal })
   await executeInstallWorkflow(workflow, runtime, { signal })
 
-  const installed = resolveJavaRuntime(appDataRoot, { isGui: false })
+  const installed = resolveJavaRuntime(appDataRoot, { isGui: false, majorVersion })
   if (!installed.cliJavaPath) {
-    throw new Error("Java 21 installation completed but binary was not found.")
+    throw new Error(`Java ${majorVersion} installation completed but binary was not found.`)
   }
 
-  const finalCheck = validateJavaBinary(installed.cliJavaPath)
+  const finalCheck = validateJavaBinary(installed.cliJavaPath, majorVersion)
   if (!finalCheck.valid) {
     throw new Error(`Installed Java binary failed validation: ${finalCheck.error}`)
   }

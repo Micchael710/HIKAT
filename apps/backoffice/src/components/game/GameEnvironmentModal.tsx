@@ -141,7 +141,10 @@ export default function GameEnvironmentModal({
 
     const isValid =
         Boolean(normalizedMinecraftVersion) &&
-        (modLoader === "VANILLA" || Boolean(normalizedModLoaderVersion))
+        minecraftVersions.includes(normalizedMinecraftVersion) &&
+        (modLoader === "VANILLA" ||
+            (Boolean(normalizedModLoaderVersion) &&
+                loaderVersions.some((v) => v.version === normalizedModLoaderVersion)))
 
     // --- Submit ---
     const handleSubmit = async (e: React.FormEvent) => {
@@ -376,16 +379,15 @@ export default function GameEnvironmentModal({
                                 ))}
                             </select>
                         ) : (
-                            <input
-                                id="environment-minecraft-version"
-                                data-testid="environment-minecraft-version"
-                                type="text"
-                                value={minecraftVersion}
-                                onChange={(e) => setMinecraftVersion(e.target.value)}
-                                placeholder="Ejemplo: 1.21.1"
-                                className="launcher-input"
-                                style={{ width: "100%", boxSizing: "border-box" }}
-                            />
+                            <div
+                                style={{
+                                    color: tokens.textMuted,
+                                    fontSize: "13px",
+                                    padding: "10px 0",
+                                }}
+                            >
+                                No se pudieron obtener versiones oficiales de Minecraft.
+                            </div>
                         )}
                     </div>
 
@@ -476,16 +478,15 @@ export default function GameEnvironmentModal({
                                     ))}
                                 </select>
                             ) : (
-                                <input
-                                    id="environment-loader-version"
-                                    data-testid={modLoader === "NEOFORGE" ? "environment-neoforge-version" : "environment-loader-version"}
-                                    type="text"
-                                    value={modLoaderVersion}
-                                    onChange={(e) => setModLoaderVersion(e.target.value)}
-                                    placeholder={`Ejemplo: ${modLoader === "NEOFORGE" ? "21.1.209" : "0.16.0"}`}
-                                    className="launcher-input"
-                                    style={{ width: "100%", boxSizing: "border-box" }}
-                                />
+                                <div
+                                    style={{
+                                        color: tokens.textMuted,
+                                        fontSize: "13px",
+                                        padding: "10px 0",
+                                    }}
+                                >
+                                    {`No hay versiones de ${LOADER_LABELS[modLoader] || modLoader} disponibles para Minecraft ${minecraftVersion}.`}
+                                </div>
                             )}
                         </div>
                     )}
@@ -618,7 +619,7 @@ export default function GameEnvironmentModal({
                         <button
                             data-testid="button-save-game-environment"
                             type="submit"
-                            disabled={isSubmitting || !isValid}
+                            disabled={!isValid || catalogLoading || loaderVersionsLoading || isSubmitting || Boolean(catalogError)}
                             className="launcher-btn-primary"
                             style={{
                                 display: "inline-flex",

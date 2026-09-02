@@ -891,13 +891,29 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
       expect(providerMod?.sourceEnvironment).toBe("BOTH")
     })
 
-    it("42. no aparece ningún server-sync side effect durante publish", async () => {
-      // Publication is purely a metadata and catalog transition in D1; verify no external network calls or server side effects
+    it("43. prepareGameDraft inherits modLoader and modLoaderVersion from published release", async () => {
       await prepareGameDraft(db, adminId)
+      await updateGameDraftMetadata(
+        db,
+        env,
+        {
+          minecraftVersion: "1.21.1",
+          modLoader: "FABRIC",
+          modLoaderVersion: "0.16.10",
+        },
+        adminId,
+      )
       await saveGameFileContent(db, { logicalPath: "config/main.toml", content: "data = 1" }, adminId, env)
-
       const published = await publishGameRelease(db, env, { version: "1.0.0" }, adminId)
-      expect(published.status).toBe("PUBLISHED")
+      expect(published.modLoader).toBe("FABRIC")
+      expect(published.modLoaderVersion).toBe("0.16.10")
+
+      // Now create a new draft
+      const draft2 = await prepareGameDraft(db, adminId)
+      expect(draft2.minecraftVersion).toBe("1.21.1")
+      expect(draft2.modLoader).toBe("FABRIC")
+      expect(draft2.modLoaderVersion).toBe("0.16.10")
     })
   })
 })
+

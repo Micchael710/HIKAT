@@ -616,11 +616,20 @@ export async function prepareGameDraft(
   const draftId = crypto.randomUUID()
   const tempVersion = `draft-${Date.now()}`
 
+  const inheritedModLoader = (baseRelease?.modLoader || "NEOFORGE") as GameModLoaderGql
+  const inheritedModLoaderVersion =
+    inheritedModLoader === "VANILLA"
+      ? null
+      : baseRelease?.modLoaderVersion ??
+        (inheritedModLoader === "NEOFORGE" ? baseRelease?.neoForgeVersion || "21.1.65" : null)
+
   await db.insert(schema.gameReleases).values({
     id: draftId,
     version: tempVersion,
     minecraftVersion: baseRelease?.minecraftVersion || "1.21.1",
-    neoForgeVersion: baseRelease?.neoForgeVersion || "21.1.65",
+    modLoader: inheritedModLoader,
+    modLoaderVersion: inheritedModLoaderVersion,
+    neoForgeVersion: baseRelease?.neoForgeVersion || (inheritedModLoader === "NEOFORGE" ? inheritedModLoaderVersion : null) || "21.1.65",
     status: "DRAFT",
     notes: baseRelease?.notes || null,
     coverMediaId: baseRelease?.coverMediaId || null,

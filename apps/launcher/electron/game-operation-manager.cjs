@@ -141,8 +141,9 @@ class GameOperationManager {
       neoForgeVersion,
     })
 
-    const java = this.javaResolver(instanceRoot, { isGui: false })
-    const javaValid = java.cliJavaPath ? Boolean(this.javaValidator(java.cliJavaPath).valid) : false
+    const javaMajor = core.javaMajorVersion || 21
+    const java = this.javaResolver(instanceRoot, { isGui: false, majorVersion: javaMajor })
+    const javaValid = java.cliJavaPath ? Boolean(this.javaValidator(java.cliJavaPath, javaMajor).valid) : false
 
     const releaseMatches = installedManifest.modpackVersion === modpackVersion
     const clientSynced =
@@ -295,33 +296,7 @@ class GameOperationManager {
           throw new Error("Operation was cancelled.")
         }
 
-        // 2. Ensure Java 21 runtime
-        if (!isVerify && this.state !== "INSTALLING") {
-          this.state = "INSTALLING"
-          if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
-        }
-
-        let javaInfo = this.javaResolver(instanceRoot, { isGui: false })
-        if (!javaInfo.cliJavaPath || !this.javaValidator(javaInfo.cliJavaPath).valid) {
-          javaInfo = await this.javaEnsurer({
-            appDataRoot: instanceRoot,
-            signal: abortController.signal,
-            onProgress,
-          })
-        }
-
-        if (cancelSignal.isPaused) {
-          this.state = "PAUSED"
-          if (typeof onPhaseChange === "function") onPhaseChange("PAUSED")
-          return { success: false, paused: true, state: "PAUSED" }
-        }
-        if (cancelSignal.isCancelled) {
-          this.state = "IDLE"
-          if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
-          throw new Error("Operation was cancelled.")
-        }
-
-        // 3. Ensure Minecraft & Loader Core
+        // 2. Ensure Minecraft & Loader Core (minecraft-core discovers required Java)
         const coreStatus = await this.coreChecker({
           instanceRoot,
           minecraftVersion,
@@ -345,7 +320,6 @@ class GameOperationManager {
               modLoader,
               modLoaderVersion,
               neoForgeVersion,
-              javaPath: javaInfo.cliJavaPath,
               signal: abortController.signal,
               onProgress,
             })

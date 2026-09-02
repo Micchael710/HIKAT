@@ -34,6 +34,14 @@ let cachedForgeVersions: CacheEntry<string[]> | null = null
 const cachedFabricLoaders = new Map<string, CacheEntry<GameLoaderVersionGql[]>>()
 const cachedQuiltLoaders = new Map<string, CacheEntry<GameLoaderVersionGql[]>>()
 
+export function clearGameEnvironmentCache(): void {
+    cachedMinecraftVersions = null
+    cachedNeoForgeVersions = null
+    cachedForgeVersions = null
+    cachedFabricLoaders.clear()
+    cachedQuiltLoaders.clear()
+}
+
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 interface MinecraftManifestVersion {
@@ -214,30 +222,31 @@ async function getOfficialFabricLoaderVersions(
     const cached = cachedFabricLoaders.get(minecraftVersion)
     if (cached && cached.expiresAt > now) return cached.data
 
-    try {
-        const response = await fetchWithTimeout(
-            `${FABRIC_LOADER_BASE_URL}/${encodeURIComponent(minecraftVersion)}`,
-        )
-        const json = (await response.json()) as FabricLoaderEntry[]
-        if (!Array.isArray(json) || json.length === 0) {
-            cachedFabricLoaders.set(minecraftVersion, { data: [], expiresAt: now + CACHE_TTL_MS })
-            return []
-        }
-        const versions = sortLoaderVersions(
-            json
-                .filter((e) => e?.loader?.version)
-                .map((e) => ({
-                    version: e.loader!.version!,
-                    stable: Boolean(e.loader?.stable),
-                })),
-        )
-        cachedFabricLoaders.set(minecraftVersion, { data: versions, expiresAt: now + CACHE_TTL_MS })
-        return versions
-    } catch (_) {
-        // Fabric may not support this Minecraft version
+    const response = await fetchWithTimeout(
+        `${FABRIC_LOADER_BASE_URL}/${encodeURIComponent(minecraftVersion)}`,
+    )
+    if (response.status === 404 || response.status === 400) {
         cachedFabricLoaders.set(minecraftVersion, { data: [], expiresAt: now + CACHE_TTL_MS })
         return []
     }
+    if (!response.ok) {
+        throw new Error(`Fabric meta API error: HTTP ${response.status}`)
+    }
+    const json = (await response.json()) as FabricLoaderEntry[]
+    if (!Array.isArray(json) || json.length === 0) {
+        cachedFabricLoaders.set(minecraftVersion, { data: [], expiresAt: now + CACHE_TTL_MS })
+        return []
+    }
+    const versions = sortLoaderVersions(
+        json
+            .filter((e) => e?.loader?.version)
+            .map((e) => ({
+                version: e.loader!.version!,
+                stable: Boolean(e.loader?.stable),
+            })),
+    )
+    cachedFabricLoaders.set(minecraftVersion, { data: versions, expiresAt: now + CACHE_TTL_MS })
+    return versions
 }
 
 // ─── Quilt ────────────────────────────────────────────────────────────────────
@@ -253,30 +262,32 @@ async function getOfficialQuiltLoaderVersions(
     const cached = cachedQuiltLoaders.get(minecraftVersion)
     if (cached && cached.expiresAt > now) return cached.data
 
-    try {
-        const response = await fetchWithTimeout(
-            `${QUILT_LOADER_BASE_URL}/${encodeURIComponent(minecraftVersion)}`,
-        )
-        const json = (await response.json()) as QuiltLoaderEntry[]
-        if (!Array.isArray(json) || json.length === 0) {
-            cachedQuiltLoaders.set(minecraftVersion, { data: [], expiresAt: now + CACHE_TTL_MS })
-            return []
-        }
-        // Quilt marks stable: versions without pre-release suffix
-        const versions = sortLoaderVersions(
-            json
-                .filter((e) => e?.loader?.version)
-                .map((e) => ({
-                    version: e.loader!.version!,
-                    stable: !e.loader!.version!.includes("-"),
-                })),
-        )
-        cachedQuiltLoaders.set(minecraftVersion, { data: versions, expiresAt: now + CACHE_TTL_MS })
-        return versions
-    } catch (_) {
+    const response = await fetchWithTimeout(
+        `${QUILT_LOADER_BASE_URL}/${encodeURIComponent(minecraftVersion)}`,
+    )
+    if (response.status === 404 || response.status === 400) {
         cachedQuiltLoaders.set(minecraftVersion, { data: [], expiresAt: now + CACHE_TTL_MS })
         return []
     }
+    if (!response.ok) {
+        throw new Error(`Quilt meta API error: HTTP ${response.status}`)
+    }
+    const json = (await response.json()) as QuiltLoaderEntry[]
+    if (!Array.isArray(json) || json.length === 0) {
+        cachedQuiltLoaders.set(minecraftVersion, { data: [], expiresAt: now + CACHE_TTL_MS })
+        return []
+    }
+    // Quilt marks stable: versions without pre-release suffix
+    const versions = sortLoaderVersions(
+        json
+            .filter((e) => e?.loader?.version)
+            .map((e) => ({
+                version: e.loader!.version!,
+                stable: !e.loader!.version!.includes("-"),
+            })),
+    )
+    cachedQuiltLoaders.set(minecraftVersion, { data: versions, expiresAt: now + CACHE_TTL_MS })
+    return versions
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -371,9 +382,10 @@ export async function validateGameEnvironment(
     try {
         mcVersions = await getOfficialMinecraftVersions()
     } catch (_) {
-        // If external API is unavailable, skip strict validation but warn
-        console.warn("[GameEnvironment] Could not verify Minecraft version against Mojang manifest.")
-        return
+        throw createGraphQLError(
+            "No se pudo verificar la versión de Minecraft con la fuente oficial. Inténtalo nuevamente.",
+            "INTERNAL_ERROR",
+        )
     }
 
     if (!mcVersions.some((v) => v.id === cleanMc)) {
@@ -407,9 +419,10 @@ export async function validateGameEnvironment(
     try {
         loaderVersions = await getLoaderVersions(cleanMc, modLoader)
     } catch (_) {
-        // If external API fails, skip strict loader validation
-        console.warn(`[GameEnvironment] Could not verify ${modLoader} version against official source.`)
-        return
+        throw createGraphQLError(
+            `No se pudo verificar la versión de ${modLoader} con la fuente oficial. Inténtalo nuevamente.`,
+            "INTERNAL_ERROR",
+        )
     }
 
     const isValid = loaderVersions.some((v) => v.version === cleanVersion)

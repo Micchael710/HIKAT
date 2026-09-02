@@ -89,22 +89,25 @@ class GameLauncher {
         )
       }
 
+      const requiredJavaMajor = readiness.javaMajorVersion || 21
+
       // 2. Resolve & Validate Java Runtime (GUI javaw.exe)
       const javaRuntime = this.javaResolver(this.instanceRoot, {
         isGui: true,
         customPath: customJavaPath,
+        majorVersion: requiredJavaMajor,
       })
 
       if (!javaRuntime.javaPath) {
         throw new Error(
-          `Cannot launch Minecraft: Java runtime resolution failed (${javaRuntime.error || "Java 21 not found"}).`,
+          `Cannot launch Minecraft: Java runtime resolution failed (${javaRuntime.error || `Java ${requiredJavaMajor} not found`}).`,
         )
       }
 
       const javawPath = javaRuntime.javaPath
       const javaCliPath = javaRuntime.cliJavaPath || javawPath
 
-      const javaValidation = this.javaValidator(javaCliPath)
+      const javaValidation = this.javaValidator(javaCliPath, requiredJavaMajor)
       if (!javaValidation.valid) {
         throw new Error(
           `Cannot launch Minecraft: Java runtime validation failed (${javaValidation.error}).`,

@@ -10,7 +10,10 @@ const {
   resolveAssetMetadataInstallManifest,
   resolveAssetObjectInstallFiles,
   resolveNeoForgedInstallerFile,
+  resolveForgeArtifactVersion,
+  resolveForgeInstallerFile,
   createModernForgeInstallWorkflow,
+  createLegacyForgeInstallWorkflow,
   createFabricInstallWorkflow,
   createQuiltInstallWorkflow,
   executeInstallManifest,
@@ -18,6 +21,11 @@ const {
   diagnoseInstallation,
 } = require("@xmcl/installer")
 const { createHiKatInstallRuntime } = require("./xmcl-install-runtime.cjs")
+const {
+  resolveJavaRuntime,
+  ensureJavaRuntime,
+  validateJavaBinary,
+} = require("./java-runtime.cjs")
 
 const CORE_STATE_REL_PATH = path.join(".hikat", "core-state.json")
 
@@ -64,10 +72,10 @@ async function checkCore({ instanceRoot, minecraftVersion, modLoader, modLoaderV
   const stateLoader = (state.modLoader || (state.neoForgeVersion ? "NEOFORGE" : "VANILLA")).toUpperCase()
   const stateLoaderVersion = String(state.modLoaderVersion || state.neoForgeVersion || "").trim()
 
-  if (state.minecraftVersion !== cleanMc) return { installed: false }
-  if (stateLoader !== resolvedLoader) return { installed: false }
+  if (state.minecraftVersion !== cleanMc) return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
+  if (stateLoader !== resolvedLoader) return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
   if (resolvedLoader !== "VANILLA" && stateLoaderVersion !== resolvedLoaderVersion) {
-    return { installed: false }
+    return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
   }
 
   const folder = MinecraftFolder.from(instanceRoot)
@@ -75,23 +83,28 @@ async function checkCore({ instanceRoot, minecraftVersion, modLoader, modLoaderV
   try {
     resolvedVersion = await Version.parse(folder, state.resolvedVersionId)
   } catch (_) {
-    return { installed: false, resolvedVersionId: state.resolvedVersionId }
+    return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
   }
 
   if (!resolvedVersion) {
-    return { installed: false, resolvedVersionId: state.resolvedVersionId }
+    return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
   }
 
   try {
     const issue = await diagnoseInstallation(resolvedVersion)
     if (issue) {
-      return { installed: false, resolvedVersionId: state.resolvedVersionId }
+      return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
     }
   } catch (_) {
-    return { installed: false, resolvedVersionId: state.resolvedVersionId }
+    return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
   }
 
-  return { installed: true, resolvedVersionId: state.resolvedVersionId }
+  return {
+    installed: true,
+    resolvedVersionId: state.resolvedVersionId,
+    javaMajorVersion: state.javaMajorVersion || 21,
+    javaComponent: state.javaComponent || null,
+  }
 }
 
 /**
@@ -142,6 +155,32 @@ async function installCore({
   // 3. Parse Vanilla version
   const vanillaVersion = await Version.parse(folder, cleanMc)
 
+  // 3.1 Dynamically resolve and ensure required Java runtime for this Minecraft version
+  const requiredJavaMajor = vanillaVersion.javaVersion?.majorVersion ?? 8
+  const requiredJavaComponent = vanillaVersion.javaVersion?.component ?? "jre-legacy"
+
+  let effectiveJavaPath = javaPath
+  if (!effectiveJavaPath) {
+    let javaInfo = resolveJavaRuntime(instanceRoot, {
+      isGui: false,
+      majorVersion: requiredJavaMajor,
+    })
+
+    if (
+      !javaInfo.cliJavaPath ||
+      !validateJavaBinary(javaInfo.cliJavaPath, requiredJavaMajor).valid
+    ) {
+      javaInfo = await ensureJavaRuntime({
+        appDataRoot: instanceRoot,
+        majorVersion: requiredJavaMajor,
+        component: requiredJavaComponent,
+        signal,
+        onProgress,
+      })
+    }
+    effectiveJavaPath = javaInfo.cliJavaPath || "java"
+  }
+
   // 4. Resolve and install Vanilla client jar, libraries, and assets
   const clientJarFile = resolveMinecraftJarInstallFile(vanillaVersion, { side: "client", signal })
   const libraryFiles = resolveLibraryInstallFiles(vanillaVersion.libraries, folder, { signal })
@@ -180,27 +219,62 @@ async function installCore({
       throw new Error(`modLoaderVersion is required when modLoader is ${resolvedLoader}`)
     }
 
-    if (resolvedLoader === "NEOFORGE" || resolvedLoader === "FORGE") {
-      // Both NeoForge and Forge use createModernForgeInstallWorkflow via resolveNeoForgedInstallerFile
-      const loaderSlug = resolvedLoader === "NEOFORGE" ? "neoforge" : "forge"
+    if (resolvedLoader === "NEOFORGE") {
       const { file: installerFile } = await resolveNeoForgedInstallerFile(
-        loaderSlug,
+        "neoforge",
         resolvedLoaderVersion,
         folder,
         { signal }
       )
 
-      const targetProfileId = `${cleanMc}-${loaderSlug}-${resolvedLoaderVersion}`
+      const targetProfileId = `${cleanMc}-neoforge-${resolvedLoaderVersion}`
       const workflow = createModernForgeInstallWorkflow({
         id: targetProfileId,
         minecraft: folder,
         minecraftVersion: cleanMc,
         installer: installerFile,
         artifactVersion: resolvedLoaderVersion,
-        java: javaPath || "java",
+        java: effectiveJavaPath,
         installOptions: { signal },
         side: "client",
       })
+
+      const result = await executeInstallWorkflow(workflow, runtime, { signal })
+      finalVersionId =
+        (result && typeof result === "object" ? result.version : result) || targetProfileId
+
+    } else if (resolvedLoader === "FORGE") {
+      const artifactVersion = resolveForgeArtifactVersion(cleanMc, resolvedLoaderVersion)
+      const legacy = cleanMc.startsWith("1.4.") || cleanMc.startsWith("1.5.")
+
+      const { file: installerFile } = resolveForgeInstallerFile(
+        artifactVersion,
+        undefined,
+        folder,
+        { signal },
+        legacy,
+      )
+
+      const targetProfileId = `${cleanMc}-forge-${resolvedLoaderVersion}`
+      const workflow = legacy
+        ? createLegacyForgeInstallWorkflow({
+            id: targetProfileId,
+            minecraft: folder,
+            minecraftVersion: cleanMc,
+            universal: installerFile,
+            artifactVersion,
+            installOptions: { signal },
+          })
+        : createModernForgeInstallWorkflow({
+            id: targetProfileId,
+            minecraft: folder,
+            minecraftVersion: cleanMc,
+            installer: installerFile,
+            artifactVersion,
+            java: effectiveJavaPath,
+            installOptions: { signal },
+            side: "client",
+          })
 
       const result = await executeInstallWorkflow(workflow, runtime, { signal })
       finalVersionId =
@@ -210,8 +284,7 @@ async function installCore({
       const workflow = createFabricInstallWorkflow({
         minecraft: folder,
         minecraftVersion: cleanMc,
-        loaderVersion: resolvedLoaderVersion,
-        signal,
+        version: resolvedLoaderVersion,
         side: "client",
       })
       const result = await executeInstallWorkflow(workflow, runtime, { signal })
@@ -223,8 +296,7 @@ async function installCore({
       const workflow = createQuiltInstallWorkflow({
         minecraft: folder,
         minecraftVersion: cleanMc,
-        loaderVersion: resolvedLoaderVersion,
-        signal,
+        version: resolvedLoaderVersion,
         side: "client",
       })
       const result = await executeInstallWorkflow(workflow, runtime, { signal })
@@ -244,12 +316,14 @@ async function installCore({
     throw new Error(`Core installation integrity check failed: ${JSON.stringify(issue)}`)
   }
 
-  // 7. Persist authoritative core state
+  // 7. Persist authoritative core state v2
   const state = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     minecraftVersion: cleanMc,
     modLoader: resolvedLoader,
     modLoaderVersion: resolvedLoader !== "VANILLA" ? resolvedLoaderVersion : null,
+    javaMajorVersion: requiredJavaMajor,
+    javaComponent: requiredJavaComponent,
     // Keep legacy field for compatibility with older state readers
     neoForgeVersion: resolvedLoader === "NEOFORGE" ? resolvedLoaderVersion : null,
     resolvedVersionId: finalVersionId,
