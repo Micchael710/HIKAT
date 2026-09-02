@@ -277,6 +277,65 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     expect(idleBtn.textContent).not.toContain("JUGAR")
   })
 
+  it("Test D3 — Cancelling during active download when startSync rejects with cancellation does NOT show syncError toast", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: false,
+      totalSizeGB: 1,
+      clientFiles: [
+        {
+          path: "mods/example.jar",
+          sha256: "a".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/example",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    let rejectSync: (err: any) => void
+    vi.spyOn(gameService, "startSync").mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectSync = reject
+        }),
+    )
+
+    vi.spyOn(gameService, "cancelSync").mockImplementation(async () => {
+      // Simulate real Electron backend: cancelSync causes active startSync to reject with cancellation error
+      rejectSync(new Error("Operation was cancelled."))
+      return { success: true }
+    })
+
+    const { container } = await mountButton()
+
+    // Click Download
+    await act(async () => {
+      (container.querySelector("button") as HTMLElement).click()
+    })
+
+    expect(container.querySelector(".dl-progress-card")).not.toBeNull()
+
+    // Click Cancel
+    const cancelBtn = container.querySelector(".dl-cancel-btn") as HTMLElement
+    await act(async () => {
+      cancelBtn.click()
+    })
+
+    // Confirm that NO error toast is displayed in the DOM
+    const toast = container.querySelector(".play-button-toast")
+    expect(toast).toBeNull()
+
+    // Button cleanly in DESCARGAR state
+    const idleBtn = container.querySelector("button") as HTMLElement
+    expect(idleBtn.textContent).toContain("DESCARGAR")
+  })
+
   it("Test E — Existing install + Cancel returns to ACTUALIZAR (UPDATE)", async () => {
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
       version: "1.2.0",

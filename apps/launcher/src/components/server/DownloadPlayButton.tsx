@@ -106,6 +106,7 @@ export default function DownloadPlayButton({
   const menuRef = useRef<HTMLDivElement>(null)
   const toastTimeoutRef = useRef<any>(null)
   const isStartingSyncRef = useRef(false)
+  const isCancellingRef = useRef(false)
   const latestManifestVersionRef = useRef<string | null>(null)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const isDark = theme === "dark"
@@ -322,6 +323,7 @@ export default function DownloadPlayButton({
   const cancel = async () => {
     if (isTransitioning || status === "installing") return
     setIsTransitioning(true)
+    isCancellingRef.current = true
     try {
       const res: any = await gameService.cancelSync()
       if (res?.success || res === true) {
@@ -340,6 +342,7 @@ export default function DownloadPlayButton({
       console.error("Cancel sync error:", err)
       showToast(t("playButton.syncError"), "error")
     } finally {
+      isCancellingRef.current = false
       setIsTransitioning(false)
     }
   }
@@ -406,6 +409,10 @@ export default function DownloadPlayButton({
           }
         })
         .catch((err) => {
+          const msg = String(err?.message || err || "").toLowerCase()
+          if (isCancellingRef.current || msg.includes("cancel") || msg.includes("abort")) {
+            return
+          }
           console.error("Sync resume error:", err)
           gameService.setGameInstalled(false)
           setStatus(resolveIdleGameButtonState(manifest))
@@ -473,6 +480,10 @@ export default function DownloadPlayButton({
           }
         })
         .catch((err: any) => {
+          const msg = String(err?.message || err || "").toLowerCase()
+          if (isCancellingRef.current || msg.includes("cancel") || msg.includes("abort")) {
+            return
+          }
           console.error("Sync error:", err)
           gameService.setGameInstalled(false)
           setStatus(resolveIdleGameButtonState(manifest))
