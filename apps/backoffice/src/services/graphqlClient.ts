@@ -72,12 +72,21 @@ export interface CreateMediaUploadTicketInput {
 }
 
 export interface MediaUploadTicketPayload {
-  uploadUrl: string
   uploadToken: string
   expiresAt: string
   maxSizeBytes: number
   expectedMimeType: string
   allowedMimeTypes: string[]
+  mediaId: string
+  objectKey: string
+  bucket: string
+  endpoint: string
+  credentials: {
+    accessKeyId: string
+    secretAccessKey: string
+    sessionToken: string
+  }
+  uploadUrl?: string | null
 }
 
 const NEWS_FIELDS = `
@@ -328,12 +337,21 @@ export const newsApi = {
     const mutation = /* GraphQL */ `
       mutation CreateContentMediaUpload($input: CreateContentMediaUploadInput!) {
         createContentMediaUpload(input: $input) {
-          uploadUrl
           uploadToken
           expiresAt
           maxSizeBytes
           expectedMimeType
           allowedMimeTypes
+          mediaId
+          objectKey
+          bucket
+          endpoint
+          credentials {
+            accessKeyId
+            secretAccessKey
+            sessionToken
+          }
+          uploadUrl
         }
       }
     `
@@ -343,6 +361,29 @@ export const newsApi = {
     }>(mutation, { input })
 
     return data.createContentMediaUpload
+  },
+
+  async completeContentMediaUpload(input: {
+    uploadToken: string
+  }): Promise<ContentMedia> {
+    const mutation = /* GraphQL */ `
+      mutation CompleteContentMediaUpload($input: CompleteContentMediaUploadInput!) {
+        completeContentMediaUpload(input: $input) {
+          id
+          mediaType
+          mimeType
+          sizeBytes
+          url
+          createdAt
+        }
+      }
+    `
+
+    const data = await executeGraphQL<{
+      completeContentMediaUpload: ContentMedia
+    }>(mutation, { input })
+
+    return data.completeContentMediaUpload
   },
 
   async deleteContentMedia(id: string): Promise<boolean> {

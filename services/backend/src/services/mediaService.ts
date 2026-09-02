@@ -4,7 +4,7 @@
  * Cloudflare R2 binary storage with explicit compensation rollback, and metadata records.
  */
 
-import { eq, sql, inArray } from "drizzle-orm"
+import { eq, sql, inArray, and } from "drizzle-orm"
 import {
   Database,
   contentMedia,
@@ -25,6 +25,7 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   MAX_VIDEO_SIZE_BYTES,
   MAX_MEDIA_SIZE_BYTES,
+  MAX_CONTENT_MEDIA_SIZE_BYTES,
   MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS,
   MediaType,
   MediaMimeType,
@@ -35,6 +36,7 @@ import type {
   ContentMediaGql,
   ContentMediaUploadPayloadGql,
   CreateContentMediaUploadInputGql,
+  CompleteContentMediaUploadInputGql,
 } from "@hikat/graphql"
 import type { Env } from "../types"
 
@@ -115,7 +117,7 @@ export async function getContentMediaByIds(
 }
 
 /**
- * Creates a single-use upload ticket for binary media (images or videos).
+ * Creates a single-use upload ticket for direct multipart binary media upload (images or videos) to R2.
  */
 export async function createContentMediaUpload(
   db: Database,
@@ -140,9 +142,6 @@ export async function createContentMediaUpload(
     )
   }
 
-  const maxTypeLimit =
-    mediaType === "VIDEO" ? MAX_VIDEO_SIZE_BYTES : MAX_IMAGE_SIZE_BYTES
-
   if (input.sizeBytes <= 0) {
     throw createGraphQLError(
       "Media size must be greater than 0",
@@ -150,11 +149,62 @@ export async function createContentMediaUpload(
     )
   }
 
-  if (input.sizeBytes > maxTypeLimit) {
+  if (input.sizeBytes > MAX_CONTENT_MEDIA_SIZE_BYTES) {
     throw createGraphQLError(
-      `Requested size (${input.sizeBytes} bytes) exceeds maximum limit for ${mediaType} (${maxTypeLimit} bytes)`,
+      `Requested size (${input.sizeBytes} bytes) exceeds maximum limit (${MAX_CONTENT_MEDIA_SIZE_BYTES} bytes)`,
       "VALIDATION_ERROR",
     )
+  }
+
+  const mediaId = crypto.randomUUID()
+  const ext = getExtensionForMime(normalizedMime)
+  const objectKey = `content/media/${mediaId}.${ext}`
+
+  const accountId = env?.CLOUDFLARE_ACCOUNT_ID
+  const parentAccessKeyId = env?.R2_PARENT_ACCESS_KEY_ID
+  const parentApiToken = env?.R2_PARENT_API_TOKEN
+  const bucketName = env?.R2_BUCKET_NAME || "hikat-r2"
+
+  let accessKeyId = "temp-access-key-id"
+  let secretAccessKey = "temp-secret-access-key"
+  let sessionToken = "temp-session-token"
+
+  if (accountId && parentAccessKeyId && parentApiToken) {
+    try {
+      const cfRes = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/temp-access-credentials`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${parentApiToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            bucket: bucketName,
+            parentAccessKeyId,
+            permission: "object-read-write",
+            ttlSeconds: 21600,
+            objects: [objectKey],
+          }),
+        },
+      )
+
+      if (cfRes.ok) {
+        const cfData = (await cfRes.json()) as any
+        if (cfData && cfData.success && cfData.result) {
+          accessKeyId = cfData.result.accessKeyId || cfData.result.access_key_id
+          secretAccessKey = cfData.result.secretAccessKey || cfData.result.secret_access_key
+          sessionToken = cfData.result.sessionToken || cfData.result.session_token
+        }
+      }
+    } catch (err: unknown) {
+      if (env?.ENVIRONMENT === "production" && env?.CLOUDFLARE_ACCOUNT_ID) {
+        throw createGraphQLError(
+          err instanceof Error ? err.message : "Error al solicitar credenciales temporales R2.",
+          "INTERNAL_ERROR",
+        )
+      }
+    }
   }
 
   const rawTokenBytes = new Uint8Array(32)
@@ -164,14 +214,13 @@ export async function createContentMediaUpload(
     .join("")
 
   const tokenHash = await sha256Hex(rawToken)
-  const tokenId = crypto.randomUUID()
   const now = new Date()
   const expiresAt = new Date(
     now.getTime() + MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS * 1000,
   ).toISOString()
 
   await db.insert(contentMediaUploadTokens).values({
-    id: tokenId,
+    id: mediaId,
     tokenHash,
     mediaType,
     createdBy: adminUserId,
@@ -193,12 +242,124 @@ export async function createContentMediaUpload(
   }
 
   return {
-    uploadUrl,
     uploadToken: rawToken,
     expiresAt,
     maxSizeBytes: input.sizeBytes,
     expectedMimeType: normalizedMime,
     allowedMimeTypes: [...ALLOWED_MEDIA_MIME_TYPES],
+    mediaId,
+    objectKey,
+    bucket: bucketName,
+    endpoint: `https://${accountId || "account-id"}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+      sessionToken,
+    },
+    uploadUrl,
+  }
+}
+
+/**
+ * Finalizes and verifies a direct R2 multipart upload for content media,
+ * validating existence and real size before creating D1 record.
+ */
+export async function completeContentMediaUpload(
+  db: Database,
+  env: Env,
+  adminUserId: string,
+  input: CompleteContentMediaUploadInputGql,
+  request?: Request,
+): Promise<ContentMediaGql> {
+  if (!env.ASSETS) {
+    throw createGraphQLError("Cloudflare R2 ASSETS binding is unavailable", "INTERNAL_ERROR")
+  }
+
+  const rawToken = input.uploadToken?.trim()
+  if (!rawToken) {
+    throw createGraphQLError("Upload token is required", "VALIDATION_ERROR")
+  }
+
+  const tokenHash = await sha256Hex(rawToken)
+  const nowIso = new Date().toISOString()
+
+  const tokenRecord = await db
+    .select()
+    .from(contentMediaUploadTokens)
+    .where(eq(contentMediaUploadTokens.tokenHash, tokenHash))
+    .get()
+
+  if (!tokenRecord) {
+    throw createGraphQLError("Invalid upload token", "VALIDATION_ERROR")
+  }
+
+  if (tokenRecord.usedAt) {
+    throw createGraphQLError("Upload token has already been consumed", "CONFLICT")
+  }
+
+  if (tokenRecord.expiresAt <= nowIso) {
+    throw createGraphQLError("Upload token has expired", "VALIDATION_ERROR")
+  }
+
+  const mediaId = tokenRecord.id
+  const ext = getExtensionForMime(tokenRecord.expectedMimeType)
+  const objectKey = `content/media/${mediaId}.${ext}`
+
+  const headObj = await env.ASSETS.head(objectKey)
+  if (!headObj) {
+    throw createGraphQLError("Media object not found in R2 storage", "VALIDATION_ERROR")
+  }
+
+  if (headObj.size <= 0) {
+    throw createGraphQLError("Uploaded media object is empty (0 bytes)", "VALIDATION_ERROR")
+  }
+
+  const actualSizeBytes = headObj.size
+
+  // Atomically consume token
+  const updated = await db
+    .update(contentMediaUploadTokens)
+    .set({
+      usedAt: nowIso,
+    })
+    .where(
+      and(
+        eq(contentMediaUploadTokens.id, tokenRecord.id),
+        sql`${contentMediaUploadTokens.usedAt} IS NULL`,
+      ),
+    )
+    .returning()
+    .get()
+
+  if (!updated) {
+    throw createGraphQLError("Upload token has already been consumed", "CONFLICT")
+  }
+
+  // Insert metadata into D1 with explicit compensation rollback
+  try {
+    const insertResult = await db
+      .insert(contentMedia)
+      .values({
+        id: mediaId,
+        objectKey,
+        mediaType: tokenRecord.mediaType as MediaType,
+        mimeType: tokenRecord.expectedMimeType as MediaMimeType,
+        sizeBytes: actualSizeBytes,
+        createdBy: tokenRecord.createdBy || adminUserId,
+        createdAt: nowIso,
+      })
+      .returning()
+      .get()
+
+    return formatMediaGql(insertResult, env, request)
+  } catch (err) {
+    // Explicit compensation rollback: delete orphaned R2 object if D1 insertion fails
+    try {
+      await env.ASSETS.delete(objectKey)
+    } catch {
+      // Ignore secondary deletion error
+    }
+    throw err
   }
 }
 

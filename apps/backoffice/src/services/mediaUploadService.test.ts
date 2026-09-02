@@ -1,32 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { uploadMediaFile } from "./mediaUploadService"
-import { authService } from "./authService"
+import { uploadMediaFile, MediaUploadError } from "./mediaUploadService"
+import { newsApi } from "./graphqlClient"
+import * as gameFileUploadModule from "./gameFileUploadService"
 
-function createMockAdminJwt(expiresInSeconds = 900): string {
-  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
-  const payload = btoa(
-    JSON.stringify({
-      sub: "admin-1",
-      role: "ADMIN",
-      exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
-    }),
-  )
-  return `${header}.${payload}.mock-sig`
-}
-
-describe("Back Office MediaUploadService", () => {
+describe("Back Office MediaUploadService (Direct R2 Multipart Upload)", () => {
   beforeEach(() => {
-    authService.clearSession()
     vi.restoreAllMocks()
   })
 
-  it("validates image format and size limits before upload", async () => {
-    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
-      id: "admin-1",
-      role: "ADMIN",
-    })
-
-    // Invalid format
+  it("1. Rejects invalid image MIME types", async () => {
     const invalidFile = new File(["dummy content"], "test.gif", {
       type: "image/gif",
     })
@@ -34,24 +16,9 @@ describe("Back Office MediaUploadService", () => {
     await expect(uploadMediaFile(invalidFile, "IMAGE")).rejects.toThrow(
       "Formato de imagen no compatible. Use PNG, JPEG o WebP.",
     )
-
-    // Exceeding 5 MB
-    const largeFile = new File([new ArrayBuffer(6 * 1024 * 1024)], "large.png", {
-      type: "image/png",
-    })
-
-    await expect(uploadMediaFile(largeFile, "IMAGE")).rejects.toThrow(
-      "La imagen no puede superar los 5 MB.",
-    )
   })
 
-  it("validates video format and size limits before upload", async () => {
-    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
-      id: "admin-1",
-      role: "ADMIN",
-    })
-
-    // Invalid format
+  it("2. Rejects invalid video MIME types", async () => {
     const invalidVideo = new File(["dummy video"], "test.avi", {
       type: "video/x-msvideo",
     })
@@ -59,189 +26,183 @@ describe("Back Office MediaUploadService", () => {
     await expect(uploadMediaFile(invalidVideo, "VIDEO")).rejects.toThrow(
       "Formato de video no compatible. Use MP4 o WebM.",
     )
+  })
 
-    // Exceeding 25 MB
-    const largeVideo = new File([new ArrayBuffer(26 * 1024 * 1024)], "large.mp4", {
+  it("3. Rejects empty (0-byte) files immediately without requesting ticket", async () => {
+    const emptyFile = new File([], "empty.png", { type: "image/png" })
+    const createSpy = vi.spyOn(newsApi, "createContentMediaUpload")
+
+    await expect(uploadMediaFile(emptyFile, "IMAGE")).rejects.toThrow(
+      "El archivo seleccionado está vacío.",
+    )
+    expect(createSpy).not.toHaveBeenCalled()
+  })
+
+  it("4. Allows image > 5 MB (e.g. 12 MB) without artificial size rejection", async () => {
+    const largeImage = new File([new Uint8Array(12 * 1024 * 1024)], "large-banner.png", {
+      type: "image/png",
+    })
+
+    const createSpy = vi.spyOn(newsApi, "createContentMediaUpload").mockResolvedValue({
+      uploadToken: "tok-123",
+      expiresAt: "2026-09-02T15:00:00Z",
+      maxSizeBytes: largeImage.size,
+      expectedMimeType: "image/png",
+      allowedMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+      mediaId: "media-img-123",
+      objectKey: "content/media/media-img-123.png",
+      bucket: "hikat-r2",
+      endpoint: "https://account.r2.cloudflarestorage.com",
+      credentials: {
+        accessKeyId: "key-1",
+        secretAccessKey: "secret-1",
+        sessionToken: "token-1",
+      },
+    })
+
+    const multipartSpy = vi.spyOn(gameFileUploadModule, "uploadFileToR2Multipart").mockResolvedValue()
+
+    const completeSpy = vi.spyOn(newsApi, "completeContentMediaUpload").mockResolvedValue({
+      id: "media-img-123",
+      mediaType: "IMAGE",
+      mimeType: "image/png",
+      sizeBytes: largeImage.size,
+      url: "http://localhost:8787/media/content/media-img-123",
+      createdAt: "2026-09-02T12:00:00Z",
+    })
+
+    const result = await uploadMediaFile(largeImage, "IMAGE")
+
+    expect(createSpy).toHaveBeenCalledWith({
+      mimeType: "image/png",
+      sizeBytes: largeImage.size,
+    })
+    expect(multipartSpy).toHaveBeenCalledWith(largeImage, expect.objectContaining({
+      bucket: "hikat-r2",
+      objectKey: "content/media/media-img-123.png",
+      contentType: "image/png",
+    }))
+    expect(completeSpy).toHaveBeenCalledWith({
+      uploadToken: "tok-123",
+    })
+    expect(result.id).toBe("media-img-123")
+    expect(result.sizeBytes).toBe(12 * 1024 * 1024)
+  })
+
+  it("5. Allows video > 25 MB (e.g. 50 MB) without artificial size rejection", async () => {
+    const largeVideo = new File([new Uint8Array(50 * 1024 * 1024)], "cinematic.mp4", {
       type: "video/mp4",
     })
 
-    await expect(uploadMediaFile(largeVideo, "VIDEO")).rejects.toThrow(
-      "El video no puede superar los 25 MB.",
-    )
+    vi.spyOn(newsApi, "createContentMediaUpload").mockResolvedValue({
+      uploadToken: "tok-vid-456",
+      expiresAt: "2026-09-02T15:00:00Z",
+      maxSizeBytes: largeVideo.size,
+      expectedMimeType: "video/mp4",
+      allowedMimeTypes: ["video/mp4", "video/webm"],
+      mediaId: "media-vid-456",
+      objectKey: "content/media/media-vid-456.mp4",
+      bucket: "hikat-r2",
+      endpoint: "https://account.r2.cloudflarestorage.com",
+      credentials: {
+        accessKeyId: "key-1",
+        secretAccessKey: "secret-1",
+        sessionToken: "token-1",
+      },
+    })
+
+    const multipartSpy = vi.spyOn(gameFileUploadModule, "uploadFileToR2Multipart").mockResolvedValue()
+
+    const completeSpy = vi.spyOn(newsApi, "completeContentMediaUpload").mockResolvedValue({
+      id: "media-vid-456",
+      mediaType: "VIDEO",
+      mimeType: "video/mp4",
+      sizeBytes: largeVideo.size,
+      url: "http://localhost:8787/media/content/media-vid-456",
+      createdAt: "2026-09-02T12:00:00Z",
+    })
+
+    const result = await uploadMediaFile(largeVideo, "VIDEO")
+
+    expect(multipartSpy).toHaveBeenCalledWith(largeVideo, expect.objectContaining({
+      bucket: "hikat-r2",
+      objectKey: "content/media/media-vid-456.mp4",
+      contentType: "video/mp4",
+    }))
+    expect(completeSpy).toHaveBeenCalledWith({
+      uploadToken: "tok-vid-456",
+    })
+    expect(result.id).toBe("media-vid-456")
+    expect(result.sizeBytes).toBe(50 * 1024 * 1024)
   })
 
-  it("completes full ticket request + binary PUT upload flow", async () => {
-    authService.setSession(createMockAdminJwt(600), "refresh-tok", {
-      id: "admin-1",
-      role: "ADMIN",
+  it("6. Does NOT call file.arrayBuffer() to load the full file into memory", async () => {
+    const imageFile = new File(["some image bytes"], "banner.webp", {
+      type: "image/webp",
     })
 
-    const validImageFile = new File(["image-bytes"], "banner.png", {
-      type: "image/png",
+    const arrayBufferSpy = vi.spyOn(imageFile, "arrayBuffer")
+
+    vi.spyOn(newsApi, "createContentMediaUpload").mockResolvedValue({
+      uploadToken: "tok-webp",
+      expiresAt: "2026-09-02T15:00:00Z",
+      maxSizeBytes: imageFile.size,
+      expectedMimeType: "image/webp",
+      allowedMimeTypes: ["image/webp"],
+      mediaId: "media-webp",
+      objectKey: "content/media/media-webp.webp",
+      bucket: "hikat-r2",
+      endpoint: "https://account.r2.cloudflarestorage.com",
+      credentials: {
+        accessKeyId: "k",
+        secretAccessKey: "s",
+        sessionToken: "t",
+      },
     })
 
-    // 1. GraphQL ticket request
-    vi.spyOn(global, "fetch")
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            createContentMediaUpload: {
-              uploadUrl: "/media/content/upload",
-              uploadToken: "single-use-ticket-token",
-              expiresAt: "2026-08-26T12:00:00Z",
-              maxSizeBytes: 5242880,
-              expectedMimeType: "image/png",
-              allowedMimeTypes: ["image/png", "image/jpeg", "image/webp"],
-            },
-          },
-        }),
-      } as Response)
-      // 2. Binary PUT request
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 201,
-        json: async () => ({
-          id: "media-uuid-123",
-          mediaType: "IMAGE",
-          mimeType: "image/png",
-          sizeBytes: validImageFile.size,
-          url: "http://localhost:8787/media/content/media-uuid-123",
-          createdAt: "2026-08-26T11:00:00Z",
-        }),
-      } as Response)
+    vi.spyOn(gameFileUploadModule, "uploadFileToR2Multipart").mockResolvedValue()
+    vi.spyOn(newsApi, "completeContentMediaUpload").mockResolvedValue({
+      id: "media-webp",
+      mediaType: "IMAGE",
+      mimeType: "image/webp",
+      sizeBytes: imageFile.size,
+      url: "http://localhost:8787/media/content/media-webp",
+      createdAt: "2026-09-02T12:00:00Z",
+    })
 
-    const result = await uploadMediaFile(validImageFile, "IMAGE")
+    await uploadMediaFile(imageFile, "IMAGE")
 
-    expect(result.id).toBe("media-uuid-123")
-    expect(result.mediaType).toBe("IMAGE")
-    expect(result.url).toContain("media-uuid-123")
+    // The whole file is streamed by AWS SDK Upload without calling file.arrayBuffer() in mediaUploadService
+    expect(arrayBufferSpy).not.toHaveBeenCalled()
   })
 
-  it("refreshes token and retries binary upload with fresh ticket when binary PUT returns 401", async () => {
-    authService.setSession(createMockAdminJwt(600), "valid-refresh-tok", {
-      id: "admin-1",
-      email: "admin@hikat.org",
-      role: "ADMIN",
+  it("7. Propagates errors when R2 multipart upload or Backend verification fails", async () => {
+    const validFile = new File(["bytes"], "cover.jpg", { type: "image/jpeg" })
+
+    vi.spyOn(newsApi, "createContentMediaUpload").mockResolvedValue({
+      uploadToken: "tok-err",
+      expiresAt: "2026-09-02T15:00:00Z",
+      maxSizeBytes: validFile.size,
+      expectedMimeType: "image/jpeg",
+      allowedMimeTypes: ["image/jpeg"],
+      mediaId: "media-err",
+      objectKey: "content/media/media-err.jpg",
+      bucket: "hikat-r2",
+      endpoint: "https://account.r2.cloudflarestorage.com",
+      credentials: {
+        accessKeyId: "k",
+        secretAccessKey: "s",
+        sessionToken: "t",
+      },
     })
 
-    const validImageFile = new File(["image-bytes"], "banner.png", {
-      type: "image/png",
-    })
-
-    const freshJwt = createMockAdminJwt(900)
-
-    vi.spyOn(global, "fetch")
-      // 1. Initial GraphQL ticket request
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            createContentMediaUpload: {
-              uploadUrl: "/media/content/upload",
-              uploadToken: "ticket-1",
-              expiresAt: "2026-08-26T12:00:00Z",
-              maxSizeBytes: 5242880,
-              expectedMimeType: "image/png",
-              allowedMimeTypes: ["image/png"],
-            },
-          },
-        }),
-      } as Response)
-      // 2. Binary PUT returns 401 expired
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        json: async () => ({ error: "UNAUTHORIZED" }),
-      } as Response)
-      // 3. Auth refresh succeeds
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          accessToken: freshJwt,
-          refreshToken: "new-refresh-token",
-          expiresIn: 900,
-          tokenType: "Bearer",
-          user: { id: "admin-1", email: "admin@hikat.org", role: "ADMIN" },
-        }),
-      } as Response)
-      // 4. Retried GraphQL ticket request with new token
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            createContentMediaUpload: {
-              uploadUrl: "/media/content/upload",
-              uploadToken: "ticket-fresh",
-              expiresAt: "2026-08-26T12:00:00Z",
-              maxSizeBytes: 5242880,
-              expectedMimeType: "image/png",
-              allowedMimeTypes: ["image/png"],
-            },
-          },
-        }),
-      } as Response)
-      // 5. Retried binary PUT succeeds
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 201,
-        json: async () => ({
-          id: "media-uuid-fresh",
-          mediaType: "IMAGE",
-          mimeType: "image/png",
-          sizeBytes: validImageFile.size,
-          url: "http://localhost:8787/media/content/media-uuid-fresh",
-          createdAt: "2026-08-26T12:05:00Z",
-        }),
-      } as Response)
-
-    const result = await uploadMediaFile(validImageFile, "IMAGE")
-    expect(result.id).toBe("media-uuid-fresh")
-    expect(authService.getAccessToken()).toBe(freshJwt)
-  })
-
-  it("rejects binary upload when token is unavailable without calling binary PUT fetch and never sends Bearer null/undefined", async () => {
-    authService.clearSession()
-
-    const validImageFile = new File(["image-bytes"], "banner.png", {
-      type: "image/png",
-    })
-
-    let putFetchCalled = 0
-    let capturedAuth: string | undefined
-
-    vi.spyOn(global, "fetch").mockImplementation(async (url: any, opts: any) => {
-      if (opts?.method === "PUT") {
-        putFetchCalled++
-        capturedAuth = opts?.headers?.Authorization
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: {
-            createContentMediaUpload: {
-              uploadUrl: "/media/content/upload",
-              uploadToken: "ticket-no-token",
-              expiresAt: "2026-08-26T12:00:00Z",
-              maxSizeBytes: 5242880,
-              expectedMimeType: "image/png",
-              allowedMimeTypes: ["image/png"],
-            },
-          },
-        }),
-      } as Response
-    })
-
-    await expect(uploadMediaFile(validImageFile, "IMAGE")).rejects.toThrow(
-      "No hay una sesión activa para subir archivos.",
+    // R2 network failure
+    vi.spyOn(gameFileUploadModule, "uploadFileToR2Multipart").mockRejectedValue(
+      new Error("Network connection lost during R2 multipart upload"),
     )
 
-    expect(putFetchCalled).toBe(0)
-    expect(capturedAuth).toBeUndefined()
+    await expect(uploadMediaFile(validFile, "IMAGE")).rejects.toThrow(
+      "Network connection lost during R2 multipart upload",
+    )
   })
 })

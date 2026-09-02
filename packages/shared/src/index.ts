@@ -142,7 +142,9 @@ export type MediaMimeType = typeof ALLOWED_MEDIA_MIME_TYPES[number]
 
 export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
 export const MAX_VIDEO_SIZE_BYTES = 25 * 1024 * 1024 // 25 MB
-export const MAX_MEDIA_SIZE_BYTES = MAX_VIDEO_SIZE_BYTES // 25 MB max global buffer capacity
+export const MAX_MEDIA_SIZE_BYTES = MAX_VIDEO_SIZE_BYTES // 25 MB max legacy buffer capacity
+export const MAX_CONTENT_MEDIA_SIZE_BYTES = 5 * 1024 * 1024 * 1024 * 1024 // 5 TB (Cloudflare R2 single multipart object limit)
+export const MAX_R2_OBJECT_SIZE_BYTES = MAX_CONTENT_MEDIA_SIZE_BYTES
 export const MEDIA_UPLOAD_TOKEN_EXPIRATION_SECONDS = 15 * 60 // 15 minutes
 
 export const NEWS_LIMITS = {

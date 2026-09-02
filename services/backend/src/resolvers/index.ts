@@ -12,8 +12,10 @@ import type {
   NewsConnectionGql,
   CreateNewsInputGql,
   UpdateNewsInputGql,
+  ContentMediaGql,
   ContentMediaUploadPayloadGql,
   CreateContentMediaUploadInputGql,
+  CompleteContentMediaUploadInputGql,
   ServerResourcesGql,
   ServerPowerActionResultGql,
   ServerCommandResultGql,
@@ -112,7 +114,7 @@ import {
   unpublishNews,
   deleteNews,
 } from "../services/newsService"
-import { createContentMediaUpload, deleteMedia } from "../services/mediaService"
+import { createContentMediaUpload, completeContentMediaUpload, deleteMedia } from "../services/mediaService"
 import {
   getServerStatus,
   executeServerPowerAction,
@@ -1348,6 +1350,26 @@ export const resolvers = {
       }
 
       return createContentMediaUpload(
+        context.db,
+        context.env,
+        identity.userId,
+        args.input,
+        context.request,
+      )
+    },
+
+    completeContentMediaUpload: async (
+      _parent: unknown,
+      args: { input: CompleteContentMediaUploadInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ContentMediaGql> => {
+      const identity = requireAdmin(context)
+
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+
+      return completeContentMediaUpload(
         context.db,
         context.env,
         identity.userId,

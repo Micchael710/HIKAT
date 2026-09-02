@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * HiKAT Launcher Local Development Orchestrator
  *

@@ -3137,54 +3137,43 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         )
       })
 
-      it("REJECTS createContentMediaUpload exceeding type size limit (6MB for image, 30MB for video)", async () => {
-        const resOversizedImg = await executeGql(
+      it("ALLOWS createContentMediaUpload for images > 5MB and videos > 25MB (no artificial limits)", async () => {
+        const resLargeImg = await executeGql(
           `
           mutation($input: CreateContentMediaUploadInput!) {
-            createContentMediaUpload(input: $input) { uploadToken }
+            createContentMediaUpload(input: $input) { uploadToken maxSizeBytes objectKey }
           }
           `,
-
           {
             input: {
               mimeType: "image/png",
-
               sizeBytes: 6 * 1024 * 1024, // > 5 MB
             },
           },
-
           adminToken,
         )
 
-        expect(resOversizedImg.errors).toBeDefined()
+        expect(resLargeImg.errors).toBeUndefined()
+        expect(resLargeImg.data.createContentMediaUpload.uploadToken).toBeDefined()
+        expect(resLargeImg.data.createContentMediaUpload.objectKey).toContain("content/media/")
 
-        expect(resOversizedImg.errors[0].extensions.code).toBe(
-          "VALIDATION_ERROR",
-        )
-
-        const resOversizedVid = await executeGql(
+        const resLargeVid = await executeGql(
           `
           mutation($input: CreateContentMediaUploadInput!) {
-            createContentMediaUpload(input: $input) { uploadToken }
+            createContentMediaUpload(input: $input) { uploadToken maxSizeBytes objectKey }
           }
           `,
-
           {
             input: {
               mimeType: "video/mp4",
-
               sizeBytes: 30 * 1024 * 1024, // > 25 MB
             },
           },
-
           adminToken,
         )
 
-        expect(resOversizedVid.errors).toBeDefined()
-
-        expect(resOversizedVid.errors[0].extensions.code).toBe(
-          "VALIDATION_ERROR",
-        )
+        expect(resLargeVid.errors).toBeUndefined()
+        expect(resLargeVid.data.createContentMediaUpload.uploadToken).toBeDefined()
       })
 
       it("REJECTS createContentMediaUpload for PLAYER role (FORBIDDEN)", async () => {

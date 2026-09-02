@@ -252,17 +252,17 @@ export interface NewsConnectionGql {
 }
 
 export interface ContentMediaUploadPayloadGql {
-  uploadUrl: string
-
   uploadToken: string
-
   expiresAt: string
-
   maxSizeBytes: number
-
   expectedMimeType: string
-
   allowedMimeTypes: string[]
+  mediaId?: string
+  objectKey?: string
+  bucket?: string
+  endpoint?: string
+  credentials?: R2TemporaryCredentialsGql
+  uploadUrl?: string | null
 }
 
 export interface CreateNewsInputGql {
@@ -301,6 +301,10 @@ export interface CreateContentMediaUploadInputGql {
   mimeType: string
 
   sizeBytes: number
+}
+
+export interface CompleteContentMediaUploadInputGql {
+  uploadToken: string
 }
 
 // --- Dashboard Types (Shard 06.5) ---

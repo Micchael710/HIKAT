@@ -87,12 +87,17 @@ export const newsTypeDefs = /* GraphQL */ `
   Payload returned when requesting a media upload ticket
   """
   type ContentMediaUploadPayload {
-    uploadUrl: String!
     uploadToken: String!
     expiresAt: DateTime!
-    maxSizeBytes: Int!
+    maxSizeBytes: Float!
     expectedMimeType: String!
     allowedMimeTypes: [String!]!
+    mediaId: ID
+    objectKey: String
+    bucket: String
+    endpoint: String
+    credentials: R2TemporaryCredentials
+    uploadUrl: String
   }
 
   input CreateNewsInput {
@@ -117,7 +122,14 @@ export const newsTypeDefs = /* GraphQL */ `
 
   input CreateContentMediaUploadInput {
     mimeType: String!
-    sizeBytes: Int!
+    sizeBytes: Float!
+  }
+
+  """
+  Input payload to finalize and verify a direct R2 multipart upload for content media
+  """
+  input CompleteContentMediaUploadInput {
+    uploadToken: String!
   }
 
   extend type Query {
@@ -181,6 +193,11 @@ export const newsTypeDefs = /* GraphQL */ `
     Request a single-use token to upload binary media - requires ADMIN role
     """
     createContentMediaUpload(input: CreateContentMediaUploadInput!): ContentMediaUploadPayload!
+
+    """
+    Finalize and verify a direct R2 multipart upload for content media - requires ADMIN role
+    """
+    completeContentMediaUpload(input: CompleteContentMediaUploadInput!): ContentMedia!
 
     """
     Delete a media asset from D1 and R2 - requires ADMIN role

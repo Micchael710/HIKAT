@@ -23,6 +23,47 @@ export async function calculateFileSha256(file: File): Promise<string> {
   return hasher.digest("hex")
 }
 
+export interface DirectR2UploadTarget {
+  endpoint: string
+  credentials: {
+    accessKeyId: string
+    secretAccessKey: string
+    sessionToken: string
+  }
+  bucket: string
+  objectKey: string
+  contentType?: string
+}
+
+/**
+ * Performs a direct multipart upload from the browser to Cloudflare R2 using AWS S3 SDK.
+ * Handles File/Blob streams without reading the full file into memory.
+ */
+export async function uploadFileToR2Multipart(
+  file: File | Blob,
+  target: DirectR2UploadTarget,
+): Promise<void> {
+  const client = new S3Client({
+    region: "auto",
+    endpoint: target.endpoint,
+    credentials: target.credentials,
+  })
+
+  const upload = new Upload({
+    client,
+    params: {
+      Bucket: target.bucket,
+      Key: target.objectKey,
+      Body: file,
+      ContentLength: file.size,
+      ContentType: target.contentType || ("type" in file && file.type ? file.type : "application/octet-stream"),
+    },
+    leavePartsOnError: false,
+  })
+
+  await upload.done()
+}
+
 /**
  * Uploads a game file directly from the browser to Cloudflare R2 using AWS S3 multipart,
  * calculates SHA-256 incrementally, and returns { sha256, sizeBytes }.
@@ -51,27 +92,14 @@ export async function uploadGameFileDirect(
   // 2. Compute incremental SHA-256 hash
   const sha256 = await calculateFileSha256(file)
 
-  // 3. Configure S3 client with temporary scoped R2 credentials
-  const client = new S3Client({
-    region: "auto",
+  // 3. Perform direct multipart upload to R2
+  await uploadFileToR2Multipart(file, {
     endpoint: ticket.endpoint,
     credentials: ticket.credentials,
+    bucket: ticket.bucket,
+    objectKey: ticket.objectKey,
+    contentType: file.type || "application/octet-stream",
   })
-
-  // 4. Perform direct multipart upload to R2
-  const upload = new Upload({
-    client,
-    params: {
-      Bucket: ticket.bucket,
-      Key: ticket.objectKey,
-      Body: file,
-      ContentLength: file.size,
-      ContentType: file.type || "application/octet-stream",
-    },
-    leavePartsOnError: false,
-  })
-
-  await upload.done()
 
   return {
     sha256,

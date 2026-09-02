@@ -1,16 +1,12 @@
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   ALLOWED_VIDEO_MIME_TYPES,
-  MAX_IMAGE_SIZE_BYTES,
-  MAX_VIDEO_SIZE_BYTES,
   ImageMimeType,
   VideoMimeType,
 } from "@hikat/shared"
 import type { ContentMedia } from "../types"
 import { newsApi } from "./graphqlClient"
-import { authService } from "./authService"
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_API_URL || "http://localhost:8787"
+import { uploadFileToR2Multipart } from "./gameFileUploadService"
 
 export class MediaUploadError extends Error {
   constructor(message: string) {
@@ -22,19 +18,15 @@ export class MediaUploadError extends Error {
 export async function uploadMediaFile(
   file: File,
   expectedType: "IMAGE" | "VIDEO",
-  isRetry: boolean = false,
 ): Promise<ContentMedia> {
   const mimeType = file.type.toLowerCase().trim()
 
-  // 1. Validate MIME type & file size
+  // 1. Validate MIME type
   if (expectedType === "IMAGE") {
     if (!ALLOWED_IMAGE_MIME_TYPES.includes(mimeType as ImageMimeType)) {
       throw new MediaUploadError(
         "Formato de imagen no compatible. Use PNG, JPEG o WebP.",
       )
-    }
-    if (file.size > MAX_IMAGE_SIZE_BYTES) {
-      throw new MediaUploadError("La imagen no puede superar los 5 MB.")
     }
   } else if (expectedType === "VIDEO") {
     if (!ALLOWED_VIDEO_MIME_TYPES.includes(mimeType as VideoMimeType)) {
@@ -42,72 +34,48 @@ export async function uploadMediaFile(
         "Formato de video no compatible. Use MP4 o WebM.",
       )
     }
-    if (file.size > MAX_VIDEO_SIZE_BYTES) {
-      throw new MediaUploadError("El video no puede superar los 25 MB.")
-    }
   }
 
+  // 2. Reject empty files
   if (file.size === 0) {
     throw new MediaUploadError("El archivo seleccionado está vacío.")
   }
 
-  // 2. Request single-use upload ticket via GraphQL (with automatic refresh handling)
-  const ticket = await newsApi.createContentMediaUpload({
-    mimeType,
-    sizeBytes: file.size,
-  })
-
-  const tokenOutcome = await authService.getValidAccessTokenOutcome()
-  if (tokenOutcome.kind !== "READY") {
-    if (tokenOutcome.kind === "TRANSIENT_FAILURE") {
-      throw new MediaUploadError(tokenOutcome.error || "Error temporal al renovar sesión.")
-    }
-    throw new MediaUploadError("No hay una sesión activa para subir archivos.")
+  // 3. Request single-use upload ticket via GraphQL
+  let ticket: import("./graphqlClient").MediaUploadTicketPayload
+  try {
+    ticket = await newsApi.createContentMediaUpload({
+      mimeType,
+      sizeBytes: file.size,
+    })
+  } catch (err: any) {
+    throw new MediaUploadError(err.message || "Error al solicitar autorización de subida.")
   }
 
-  // 3. Resolve upload URL (relative to backend endpoint or absolute)
-  let targetUrl = ticket.uploadUrl
-  if (targetUrl.startsWith("/")) {
-    targetUrl = `${BACKEND_URL}${targetUrl}`
+  if (!ticket || !ticket.credentials || !ticket.endpoint || !ticket.bucket || !ticket.objectKey) {
+    throw new MediaUploadError("Credenciales de subida directa R2 no disponibles.")
   }
 
-  // 4. Send binary PUT request
-  const arrayBuffer = await file.arrayBuffer()
-  const response = await fetch(targetUrl, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${tokenOutcome.accessToken}`,
-      "X-Upload-Token": ticket.uploadToken,
-      "Content-Type": mimeType,
-    },
-    body: arrayBuffer,
-  })
-
-  if (!response.ok) {
-    // If token expired during binary transport, refresh once and retry with fresh ticket
-    if (response.status === 401) {
-      if (!isRetry) {
-        const outcome = await authService.refreshOutcome()
-        if (outcome.kind === "REFRESHED") {
-          return uploadMediaFile(file, expectedType, true)
-        }
-        if (outcome.kind === "TRANSIENT_FAILURE") {
-          throw new MediaUploadError("Error temporal de conexión al renovar sesión.")
-        }
-      }
-      throw new MediaUploadError("Su sesión ha expirado al subir el archivo.")
-    }
-
-    const errData = await response.json().catch(() => ({}))
-    const msg =
-      errData.error ||
-      errData.message ||
-      (response.status === 413
-        ? "El archivo supera el tamaño máximo permitido."
-        : "Error al subir el archivo multimedia.")
-    throw new MediaUploadError(msg)
+  // 4. Direct multipart upload to R2 (without reading the entire file into memory)
+  try {
+    await uploadFileToR2Multipart(file, {
+      endpoint: ticket.endpoint,
+      credentials: ticket.credentials,
+      bucket: ticket.bucket,
+      objectKey: ticket.objectKey,
+      contentType: mimeType,
+    })
+  } catch (err: any) {
+    throw new MediaUploadError(err.message || "Error al transferir el archivo multimedia a R2.")
   }
 
-  const saved = (await response.json()) as ContentMedia
-  return saved
+  // 5. Finalize and verify in Backend via completeContentMediaUpload
+  try {
+    const saved = await newsApi.completeContentMediaUpload({
+      uploadToken: ticket.uploadToken,
+    })
+    return saved
+  } catch (err: any) {
+    throw new MediaUploadError(err.message || "Error al verificar la subida en el servidor.")
+  }
 }
