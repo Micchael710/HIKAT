@@ -306,12 +306,56 @@ async function reconcileStagingFiles(instanceRoot, toDownloadTasks) {
 }
 
 /**
+ * Resolves the effective policy ("MODIFICABLE" | "NO_MODIFICABLE") for a path,
+ * checking exact path first, then closest ancestor directory in the files map.
+ */
+function resolvePathPolicy(relPath, filesMap) {
+  if (!relPath || !filesMap) return null
+  const normalized = relPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+
+  // 1. Direct match
+  if (filesMap instanceof Map) {
+    if (filesMap.has(normalized)) {
+      const item = filesMap.get(normalized)
+      const p = item?.policy || item
+      if (p === "MODIFICABLE" || p === "NO_MODIFICABLE") return p
+    }
+  } else if (Object.prototype.hasOwnProperty.call(filesMap, normalized)) {
+    const item = filesMap[normalized]
+    const p = item?.policy || item
+    if (p === "MODIFICABLE" || p === "NO_MODIFICABLE") return p
+  }
+
+  // 2. Ancestor directory match (from deepest to root)
+  const segments = normalized.split("/")
+  for (let i = segments.length - 1; i > 0; i--) {
+    const parentPath = segments.slice(0, i).join("/")
+    if (filesMap instanceof Map) {
+      if (filesMap.has(parentPath)) {
+        const parentItem = filesMap.get(parentPath)
+        const p = parentItem?.policy || parentItem
+        if (p === "MODIFICABLE" || p === "NO_MODIFICABLE") return p
+      }
+    } else if (Object.prototype.hasOwnProperty.call(filesMap, parentPath)) {
+      const parentItem = filesMap[parentPath]
+      const p = parentItem?.policy || parentItem
+      if (p === "MODIFICABLE" || p === "NO_MODIFICABLE") return p
+    }
+  }
+
+  return null
+}
+
+/**
  * Generates the SyncPlan before touching any instance files.
  * Authoritative over local filesystem and installed manifest.
  */
 async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
   const installedManifest = await loadInstalledManifest(instanceRoot)
   const previousFilesMap = installedManifest.files || {}
+  const isSameRelease = Boolean(
+    installedManifest.modpackVersion && installedManifest.modpackVersion === modpackVersion,
+  )
 
   const plan = {
     modpackVersion,
@@ -337,9 +381,18 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
 
     const safeAbsolute = resolveSafePath(instanceRoot, item.path)
     const normalizedRelative = path.relative(instanceRoot, safeAbsolute).replace(/\\/g, "/")
-    const policy = item.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
     const expectedSha256 = String(item.sha256 || "").toLowerCase().trim()
     const sizeBytes = Number(item.sizeBytes) || 0
+
+    let policy =
+      item.policy === "MODIFICABLE"
+        ? "MODIFICABLE"
+        : item.policy === "NO_MODIFICABLE"
+          ? "NO_MODIFICABLE"
+          : null
+    if (!policy) {
+      policy = resolvePathPolicy(normalizedRelative, previousFilesMap) || "NO_MODIFICABLE"
+    }
 
     clientFilesMap.set(normalizedRelative, {
       ...item,
@@ -349,8 +402,16 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
       expectedSha256,
       sizeBytes,
     })
+  }
 
+  for (const [normalizedRelative, item] of clientFilesMap.entries()) {
+    const { safeAbsolute, policy, expectedSha256, sizeBytes } = item
     const fileExists = fs.existsSync(safeAbsolute)
+    const prevFileMeta = previousFilesMap[normalizedRelative]
+    const lastOfficialSha256 = prevFileMeta?.officialSha256
+      ? prevFileMeta.officialSha256.toLowerCase().trim()
+      : null
+    const wasInstalledBefore = Boolean(prevFileMeta)
 
     if (policy === "NO_MODIFICABLE") {
       if (fileExists) {
@@ -374,18 +435,24 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
       })
       plan.totalDownloadBytes += sizeBytes
     } else {
-      // MODIFICABLE policy
+      // policy === "MODIFICABLE"
       if (!fileExists) {
-        // Missing required config/script -> download official
-        plan.toDownload.push({
-          path: normalizedRelative,
-          safeAbsolute,
-          downloadUrl: item.downloadUrl,
-          sha256: expectedSha256,
-          sizeBytes,
-          policy,
-        })
-        plan.totalDownloadBytes += sizeBytes
+        if (isSameRelease && wasInstalledBefore) {
+          // Player deleted it within the same release: permitted, do NOT download or repair
+          plan.toPreserveUser.push({ path: normalizedRelative, safeAbsolute })
+          plan.hasExistingInstall = true
+        } else {
+          // Fresh install OR new release that contains it: download fresh template
+          plan.toDownload.push({
+            path: normalizedRelative,
+            safeAbsolute,
+            downloadUrl: item.downloadUrl,
+            sha256: expectedSha256,
+            sizeBytes,
+            policy,
+          })
+          plan.totalDownloadBytes += sizeBytes
+        }
       } else {
         // File exists physically on disk. Check its physical hash:
         let localSha256 = null
@@ -394,19 +461,22 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
         } catch (_) {}
 
         if (localSha256 && localSha256 === expectedSha256) {
-          // Physical file already matches expected official hash (e.g. freshly applied or unchanged official)
+          // Physical file already matches expected official hash
           plan.toRetain.push({ path: normalizedRelative, safeAbsolute })
           plan.hasExistingInstall = true
+        } else if (isSameRelease) {
+          // Player edited the file during this release: preserve it
+          plan.toPreserveUser.push({ path: normalizedRelative, safeAbsolute })
+          plan.hasExistingInstall = true
         } else {
-          // Physical file differs from expected official hash:
-          // Check if previous official hash matches expected official hash:
-          const lastOfficialSha256 = previousFilesMap[normalizedRelative]?.officialSha256
-          if (lastOfficialSha256 && lastOfficialSha256.toLowerCase() === expectedSha256) {
-            // Admin official hash has not changed -> preserve user local edit
-            plan.toPreserveUser.push({ path: normalizedRelative, safeAbsolute })
-            plan.hasExistingInstall = true
-          } else {
-            // Admin published NEW official hash -> download updated admin version
+          // New release:
+          // If local was untouched from the previous official and admin changed it -> update
+          if (
+            lastOfficialSha256 &&
+            localSha256 &&
+            localSha256 === lastOfficialSha256 &&
+            lastOfficialSha256 !== expectedSha256
+          ) {
             plan.toDownload.push({
               path: normalizedRelative,
               safeAbsolute,
@@ -416,13 +486,17 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
               policy,
             })
             plan.totalDownloadBytes += sizeBytes
+          } else {
+            // Player customized it (localSha256 !== lastOfficialSha256) -> preserve player's customization
+            plan.toPreserveUser.push({ path: normalizedRelative, safeAbsolute })
+            plan.hasExistingInstall = true
           }
         }
       }
     }
   }
 
-  // Scan strictly enforced directories for pruning unauthorized extra files
+  // Scan enforced directories for pruning unauthorized extra files, respecting MODIFICABLE folder policies
   for (const dirName of ENFORCED_DIRECTORIES) {
     const dirAbsolute = path.join(instanceRoot, dirName)
     if (!fs.existsSync(dirAbsolute)) continue
@@ -436,7 +510,14 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion) {
         } else if (entry.isFile()) {
           const relative = path.relative(instanceRoot, fullPath).replace(/\\/g, "/")
           if (!clientFilesMap.has(relative)) {
-            plan.toPrune.push({ path: relative, safeAbsolute: fullPath })
+            const effPolicy =
+              resolvePathPolicy(relative, clientFilesMap) ||
+              resolvePathPolicy(relative, previousFilesMap)
+            if (effPolicy !== "MODIFICABLE") {
+              plan.toPrune.push({ path: relative, safeAbsolute: fullPath })
+            } else {
+              plan.toPreserveUser.push({ path: relative, safeAbsolute: fullPath })
+            }
           }
         }
       }
@@ -1050,5 +1131,6 @@ module.exports = {
   validateUrlSecurity,
   getEffectiveApiBaseUrl,
   uninstallGame,
+  resolvePathPolicy,
   ENFORCED_DIRECTORIES,
 }

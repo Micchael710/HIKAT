@@ -20,6 +20,8 @@ import {
   validateUrlSecurity,
   getEffectiveApiBaseUrl,
   uninstallGame,
+  resolvePathPolicy,
+  ENFORCED_DIRECTORIES,
   // @ts-expect-error CJS module without bundled declaration
 } from "../../electron/client-files-sync.cjs"
 
@@ -283,13 +285,13 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(plan.toDownload).toHaveLength(0)
     })
 
-    it("6. MODIFICABLE policy: updates file when admin publishes new official version", async () => {
-      const oldOfficialSha = computeSha("old official config")
+    it("6. MODIFICABLE policy: updates file when admin publishes new official version and local file was unmodified", async () => {
+      const oldOfficialContent = "old official config"
+      const oldOfficialSha = computeSha(oldOfficialContent)
       const newOfficialSha = computeSha("new official config updated")
-      const userContent = "user modifications"
       const configPath = path.join(instanceRoot, "config", "custom.toml")
       await fsp.mkdir(path.dirname(configPath), { recursive: true })
-      await fsp.writeFile(configPath, userContent, "utf8")
+      await fsp.writeFile(configPath, oldOfficialContent, "utf8")
 
       await saveInstalledManifest(instanceRoot, {
         modpackVersion: "1.0.0",
@@ -965,5 +967,303 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(content).toBe("Content for smoke-mod")
     })
   })
+
+  // ─────────────────────────────────────────────────────────────
+  // 5. MODIFICABLE / NO_MODIFICABLE Policy Hardening Suite
+  // ─────────────────────────────────────────────────────────────
+  describe("MODIFICABLE / NO_MODIFICABLE Policy Hardening Suite", () => {
+    // 1. MODIFICABLE editado → preservado
+    it("1. MODIFICABLE editado -> preservado", async () => {
+      const officialContent = "official base config"
+      const officialSha = computeSha(officialContent)
+      const userEditedContent = "user edited custom options"
+
+      const cfgPath = path.join(instanceRoot, "config", "custom.json")
+      await fsp.mkdir(path.dirname(cfgPath), { recursive: true })
+      await fsp.writeFile(cfgPath, userEditedContent, "utf8")
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "config/custom.json": {
+            officialSha256: officialSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const clientFiles = [
+        {
+          path: "config/custom.json",
+          sha256: officialSha,
+          sizeBytes: 100,
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/cfg`,
+        },
+      ]
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0")
+      expect(plan.toPreserveUser).toHaveLength(1)
+      expect(plan.toPreserveUser[0].path).toBe("config/custom.json")
+      expect(plan.toDownload).toHaveLength(0)
+      expect(plan.toPrune).toHaveLength(0)
+    })
+
+    // 2. MODIFICABLE eliminado → no repair en la misma release
+    it("2. MODIFICABLE eliminado -> no repair en la misma release", async () => {
+      const officialSha = computeSha("official base config")
+      const cfgPath = path.join(instanceRoot, "config", "custom.json")
+      if (fs.existsSync(cfgPath)) {
+        await fsp.unlink(cfgPath)
+      }
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "config/custom.json": {
+            officialSha256: officialSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const clientFiles = [
+        {
+          path: "config/custom.json",
+          sha256: officialSha,
+          sizeBytes: 100,
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/cfg`,
+        },
+      ]
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0")
+      expect(plan.toDownload).toHaveLength(0)
+      expect(plan.toPreserveUser).toHaveLength(1)
+      expect(plan.toPrune).toHaveLength(0)
+    })
+
+    // 3. MODIFICABLE eliminado + nueva release que lo contiene → se vuelve a descargar
+    it("3. MODIFICABLE eliminado + nueva release que lo contiene -> se vuelve a descargar", async () => {
+      const officialSha = computeSha("official base config")
+      const cfgPath = path.join(instanceRoot, "config", "custom.json")
+      if (fs.existsSync(cfgPath)) {
+        await fsp.unlink(cfgPath)
+      }
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "config/custom.json": {
+            officialSha256: officialSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const clientFiles = [
+        {
+          path: "config/custom.json",
+          sha256: officialSha,
+          sizeBytes: 100,
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/cfg`,
+        },
+      ]
+
+      // Release version is 1.1.0 (new release)
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.1.0")
+      expect(plan.toDownload).toHaveLength(1)
+      expect(plan.toDownload[0].path).toBe("config/custom.json")
+    })
+
+    // 4. MODIFICABLE personalizado + nuevo hash oficial → se preserva el del jugador
+    it("4. MODIFICABLE personalizado + nuevo hash oficial -> se preserva el del jugador", async () => {
+      const oldOfficialSha = computeSha("old official config v1")
+      const newOfficialSha = computeSha("new official config v2")
+      const userCustomizedContent = "user customized specific changes"
+
+      const cfgPath = path.join(instanceRoot, "config", "custom.json")
+      await fsp.mkdir(path.dirname(cfgPath), { recursive: true })
+      await fsp.writeFile(cfgPath, userCustomizedContent, "utf8")
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "config/custom.json": {
+            officialSha256: oldOfficialSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const clientFiles = [
+        {
+          path: "config/custom.json",
+          sha256: newOfficialSha,
+          sizeBytes: 100,
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/cfg`,
+        },
+      ]
+
+      // New release 1.1.0 with new official sha, but user had customized it:
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.1.0")
+      expect(plan.toPreserveUser).toHaveLength(1)
+      expect(plan.toPreserveUser[0].path).toBe("config/custom.json")
+      expect(plan.toDownload).toHaveLength(0)
+    })
+
+    // 5. MODIFICABLE → NO_MODIFICABLE → se impone el oficial
+    it("5. MODIFICABLE -> NO_MODIFICABLE -> se impone el oficial", async () => {
+      const oldOfficialSha = computeSha("old official config v1")
+      const newOfficialSha = computeSha("new official config v2 enforced")
+      const userCustomizedContent = "user customized specific changes"
+
+      const cfgPath = path.join(instanceRoot, "config", "custom.json")
+      await fsp.mkdir(path.dirname(cfgPath), { recursive: true })
+      await fsp.writeFile(cfgPath, userCustomizedContent, "utf8")
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "config/custom.json": {
+            officialSha256: oldOfficialSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      // Admin switched policy to NO_MODIFICABLE
+      const clientFiles = [
+        {
+          path: "config/custom.json",
+          sha256: newOfficialSha,
+          sizeBytes: 100,
+          policy: "NO_MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/cfg`,
+        },
+      ]
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.1.0")
+      expect(plan.toDownload).toHaveLength(1)
+      expect(plan.toDownload[0].path).toBe("config/custom.json")
+      expect(plan.toDownload[0].policy).toBe("NO_MODIFICABLE")
+      expect(plan.toPreserveUser).toHaveLength(0)
+    })
+
+    // 6. carpeta mods MODIFICABLE + archivo extra local → no repair/prune
+    it("6. carpeta mods MODIFICABLE + archivo extra local -> no repair/prune", async () => {
+      const modsDir = path.join(instanceRoot, "mods")
+      await fsp.mkdir(modsDir, { recursive: true })
+
+      const officialModPath = path.join(modsDir, "official-mod.jar")
+      const officialModContent = "official mod binary"
+      const officialModSha = computeSha(officialModContent)
+      await fsp.writeFile(officialModPath, officialModContent, "utf8")
+
+      const userExtraModPath = path.join(modsDir, "extra-user-mod.jar")
+      await fsp.writeFile(userExtraModPath, "extra user mod binary", "utf8")
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "mods": {
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+          "mods/official-mod.jar": {
+            officialSha256: officialModSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const clientFiles = [
+        {
+          path: "mods",
+          policy: "MODIFICABLE",
+        },
+        {
+          path: "mods/official-mod.jar",
+          sha256: officialModSha,
+          sizeBytes: Buffer.byteLength(officialModContent),
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/official-mod`,
+        },
+      ]
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0")
+      expect(plan.toPrune).toHaveLength(0)
+      expect(plan.toDownload).toHaveLength(0)
+      expect(plan.toRetain).toHaveLength(1)
+      expect(plan.toRetain[0].path).toBe("mods/official-mod.jar")
+
+      // Effective policy resolution for extra file is MODIFICABLE
+      expect(resolvePathPolicy("mods/extra-user-mod.jar", { mods: { policy: "MODIFICABLE" } })).toBe("MODIFICABLE")
+    })
+
+    // 7. NO_MODIFICABLE sigue reaccionando igual ante editar/borrar/extra
+    it("7. NO_MODIFICABLE sigue reaccionando igual ante editar/borrar/extra", async () => {
+      const modsDir = path.join(instanceRoot, "mods")
+      await fsp.mkdir(modsDir, { recursive: true })
+
+      const modOfficialContent = "strict official mod binary"
+      const modOfficialSha = computeSha(modOfficialContent)
+      const officialModPath = path.join(modsDir, "strict-mod.jar")
+      await fsp.writeFile(officialModPath, "corrupt / edited binary", "utf8")
+
+      const extraModPath = path.join(modsDir, "unauthorized-extra.jar")
+      await fsp.writeFile(extraModPath, "unauthorized mod", "utf8")
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "mods/strict-mod.jar": {
+            officialSha256: modOfficialSha,
+            policy: "NO_MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const clientFiles = [
+        {
+          path: "mods/strict-mod.jar",
+          sha256: modOfficialSha,
+          sizeBytes: Buffer.byteLength(modOfficialContent),
+          policy: "NO_MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/strict-mod`,
+        },
+      ]
+
+      // Case A: Edited NO_MODIFICABLE -> toDownload, extra in strict directory -> toPrune
+      const planA = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0")
+      expect(planA.toDownload).toHaveLength(1)
+      expect(planA.toDownload[0].path).toBe("mods/strict-mod.jar")
+      expect(planA.toPrune).toHaveLength(1)
+      expect(planA.toPrune[0].path).toBe("mods/unauthorized-extra.jar")
+
+      // Case B: Deleted NO_MODIFICABLE
+      await fsp.unlink(officialModPath)
+      const planB = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0")
+      expect(planB.toDownload).toHaveLength(1)
+      expect(planB.toDownload[0].path).toBe("mods/strict-mod.jar")
+    })
+  })
 })
+
 

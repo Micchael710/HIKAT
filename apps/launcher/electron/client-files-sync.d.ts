@@ -47,4 +47,8 @@ export declare function resolveAndValidateDownloadUrl(rawUrl: string, apiBaseUrl
 export declare function validateUrlSecurity(parsedUrl: URL): boolean
 export declare function getEffectiveApiBaseUrl(): string
 export declare function uninstallGame(instanceRoot: string, appDataRoot: string): Promise<{ success: boolean }>
+export declare function resolvePathPolicy(
+  relPath: string,
+  filesMap: any,
+): "MODIFICABLE" | "NO_MODIFICABLE" | null
 export declare const ENFORCED_DIRECTORIES: string[]

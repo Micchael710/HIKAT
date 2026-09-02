@@ -33,7 +33,11 @@ if (process.defaultApp) {
   app.setAsDefaultProtocolClient("hikat")
 }
 
-const { loadInstalledManifest, ENFORCED_DIRECTORIES } = require("./client-files-sync.cjs")
+const {
+  loadInstalledManifest,
+  resolvePathPolicy,
+  ENFORCED_DIRECTORIES,
+} = require("./client-files-sync.cjs")
 
 const instanceRoot = path.join(appDataRoot, "game files")
 const gameLauncher = new GameLauncher(app, { instanceRoot })
@@ -76,14 +80,14 @@ function setupInstanceWatcher() {
         const installedManifest = await loadInstalledManifest(instanceRoot)
         if (!installedManifest || !installedManifest.modpackVersion) return
 
-        const fileMeta = installedManifest.files && installedManifest.files[relPath]
-        // If file is explicitly tracked as MODIFICABLE, ignore
-        if (fileMeta && fileMeta.policy === "MODIFICABLE") {
+        const effectivePolicy = resolvePathPolicy(relPath, installedManifest.files)
+
+        // If file or containing folder is MODIFICABLE, player changes/deletions/additions are permitted
+        if (effectivePolicy === "MODIFICABLE") {
           return
         }
 
         // Check if file is tracked as NO_MODIFICABLE or in an enforced directory controlled by sync engine
-        const isNoModificable = fileMeta && fileMeta.policy === "NO_MODIFICABLE"
         const enforcedDirs = Array.isArray(ENFORCED_DIRECTORIES)
           ? ENFORCED_DIRECTORIES
           : ["mods", "resourcepacks", "shaderpacks", "kubejs", "scripts"]
@@ -91,7 +95,7 @@ function setupInstanceWatcher() {
           (dir) => relPath === dir || relPath.startsWith(`${dir}/`),
         )
 
-        if (isNoModificable || isEnforcedDir) {
+        if (effectivePolicy === "NO_MODIFICABLE" || isEnforcedDir) {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send("game-file-integrity-changed", { path: relPath })
           }
