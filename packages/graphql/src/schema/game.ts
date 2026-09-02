@@ -465,6 +465,7 @@ export const gameTypeDefs = /* GraphQL */ `
     versionId: String!
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
+    environmentOverride: ModEnvironment
   }
 
   input InstallModPlanInput {
@@ -473,6 +474,7 @@ export const gameTypeDefs = /* GraphQL */ `
     versionId: String!
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
+    environmentOverride: ModEnvironment
   }
 
   extend type Query {

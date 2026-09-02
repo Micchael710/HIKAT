@@ -431,12 +431,21 @@ export interface ModVersionOverrideInput {
   contentType?: ContentType | null
 }
 
+export interface GameHandoffPayload {
+  provider: ModProvider
+  projectId: string
+  versionId?: string
+  contentType?: ContentType
+  environmentOverride?: ModEnvironment
+}
+
 export interface ResolveModPlanInput {
   provider: ModProvider
   projectId: string
   versionId: string
   contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
+  environmentOverride?: ModEnvironment | null
 }
 
 export interface InstallModPlanInput {
@@ -445,6 +454,7 @@ export interface InstallModPlanInput {
   versionId: string
   contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
+  environmentOverride?: ModEnvironment | null
 }
 
 export interface UpdateGameDraftMetadataInput {
@@ -732,6 +742,7 @@ export interface ResolveServerContentPlanInput {
   versionId: string
   contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
+  environmentOverride?: ModEnvironment | null
 }
 
 export interface InstallServerContentPlanInput {
@@ -740,6 +751,7 @@ export interface InstallServerContentPlanInput {
   versionId: string
   contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
+  environmentOverride?: ModEnvironment | null
 }
 
 export type ServerReleaseSyncPlanAction = "INSTALL" | "UPDATE" | "REMOVE" | "KEEP"

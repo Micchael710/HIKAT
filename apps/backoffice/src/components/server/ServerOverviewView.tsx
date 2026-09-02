@@ -29,7 +29,7 @@ import {
 
 interface ServerOverviewViewProps {
   theme: ThemeMode
-  onNavigate?: (section: any) => void
+  onNavigate?: (section: any, handoff?: import("../../types").GameHandoffPayload) => void
 }
 
 export type ServerSubTab = "general" | "console" | "files" | "backups" | "tasks"
@@ -805,7 +805,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
         <ServerFilesView
           theme={theme}
           onToast={showToast}
-          onNavigateToGame={() => onNavigate?.("game")}
+          onNavigateToGame={(handoff) => onNavigate?.("game", handoff)}
         />
       )}
 

@@ -26,7 +26,7 @@ interface ServerModSearchModalProps {
   theme?: ThemeMode
   onClose: () => void
   onSuccess: () => void
-  onNavigateToGame?: () => void
+  onNavigateToGame?: (handoff?: import("../../../types").GameHandoffPayload) => void
 }
 
 const PAGE_SIZE = 20
@@ -70,6 +70,9 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   const [modDetail, setModDetail] = useState<ModProjectDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [selectedVersionId, setSelectedVersionId] = useState<string>("")
+  const [selectedEnvironmentOverride, setSelectedEnvironmentOverride] = useState<
+    import("../../../types").ModEnvironment | null
+  >(null)
   const [plan, setPlan] = useState<ServerContentInstallationPlan | null>(null)
   const [resolvingPlan, setResolvingPlan] = useState(false)
   const [installing, setInstalling] = useState(false)
@@ -182,11 +185,20 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     executeSearch(query, selectedContentType, selectedProviderTab, nextOffset, cursor, true)
   }
 
+  const isCurseForgeModUnknown = (mod: ModSearchResultItem | null, detail: ModProjectDetail | null) =>
+    Boolean(
+      mod &&
+        mod.provider === "CURSEFORGE" &&
+        (mod.contentType || selectedContentType) === "MOD" &&
+        (detail?.environment === "UNKNOWN" || !detail?.environment),
+    )
+
   // When a mod is selected, load detail
   const handleSelectMod = async (mod: ModSearchResultItem) => {
     setSelectedMod(mod)
     setModDetail(null)
     setPlan(null)
+    setSelectedEnvironmentOverride(null)
     setInstallError(null)
     setLoadingDetail(true)
 
@@ -201,7 +213,10 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
       if (detail.compatibleVersions && detail.compatibleVersions.length > 0) {
         const firstVer = detail.compatibleVersions[0]!
         setSelectedVersionId(firstVer.id)
-        resolvePlanForVersion(mod.provider, mod.projectId, firstVer.id, mod.contentType || selectedContentType)
+        const isUnknown = isCurseForgeModUnknown(mod, detail)
+        if (!isUnknown && detail.environment !== "BOTH") {
+          resolvePlanForVersion(mod.provider, mod.projectId, firstVer.id, mod.contentType || selectedContentType, null)
+        }
       }
     } catch (err: any) {
       setInstallError(err.message || "Error al cargar los detalles del contenido.")
@@ -215,6 +230,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     projectId: string,
     versionId: string,
     contentType: ContentType,
+    environmentOverride?: import("../../../types").ModEnvironment | null,
   ) => {
     setResolvingPlan(true)
     setInstallError(null)
@@ -224,6 +240,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         projectId,
         versionId,
         contentType,
+        environmentOverride: environmentOverride || undefined,
       })
       setPlan(resolvedPlan)
     } catch (err: any) {
@@ -235,8 +252,45 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
 
   const handleVersionChange = (newVersionId: string) => {
     setSelectedVersionId(newVersionId)
-    if (selectedMod) {
-      resolvePlanForVersion(selectedMod.provider, selectedMod.projectId, newVersionId, selectedMod.contentType || selectedContentType)
+    if (selectedMod && modDetail) {
+      const isUnknown = isCurseForgeModUnknown(selectedMod, modDetail)
+      if (isUnknown) {
+        if (selectedEnvironmentOverride === "SERVER") {
+          resolvePlanForVersion(
+            selectedMod.provider,
+            selectedMod.projectId,
+            newVersionId,
+            selectedMod.contentType || selectedContentType,
+            "SERVER",
+          )
+        }
+      } else if (modDetail.environment !== "BOTH") {
+        resolvePlanForVersion(
+          selectedMod.provider,
+          selectedMod.projectId,
+          newVersionId,
+          selectedMod.contentType || selectedContentType,
+          null,
+        )
+      }
+    }
+  }
+
+  const handleEnvironmentOverrideChange = (env: "SERVER" | "BOTH") => {
+    setSelectedEnvironmentOverride(env)
+    setInstallError(null)
+    if (!selectedMod || !selectedVersionId) return
+
+    if (env === "SERVER") {
+      resolvePlanForVersion(
+        selectedMod.provider,
+        selectedMod.projectId,
+        selectedVersionId,
+        selectedMod.contentType || selectedContentType,
+        "SERVER",
+      )
+    } else {
+      setPlan(null)
     }
   }
 
@@ -251,6 +305,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         projectId: selectedMod.projectId,
         versionId: selectedVersionId,
         contentType: selectedMod.contentType || selectedContentType,
+        environmentOverride: selectedEnvironmentOverride || undefined,
       })
       onSuccess()
       onClose()
@@ -717,8 +772,115 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                     </div>
                   </div>
 
-                  {/* BOTH Mod Guard Alert */}
-                  {modDetail.environment === "BOTH" ? (
+                  {/* CurseForge Environment Selector for UNKNOWN environment MODs */}
+                  {isCurseForgeModUnknown(selectedMod, modDetail) && (
+                    <div data-testid="server-curseforge-environment-selector">
+                      <label
+                        style={{
+                          display: "block",
+                          fontSize: "13px",
+                          fontWeight: "600",
+                          color: tokens.textPrimary,
+                          marginBottom: "8px",
+                        }}
+                      >
+                        ¿Dónde necesita ejecutarse este mod?
+                      </label>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        {/* SERVER OPTION */}
+                        <label
+                          data-testid="option-server-env-server"
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "12px",
+                            padding: "12px 14px",
+                            borderRadius: "12px",
+                            border: `1px solid ${
+                              selectedEnvironmentOverride === "SERVER"
+                                ? "#3ec4c0"
+                                : tokens.borderSubtle
+                            }`,
+                            backgroundColor:
+                              selectedEnvironmentOverride === "SERVER"
+                                ? isDark
+                                  ? "rgba(62, 196, 192, 0.1)"
+                                  : "rgba(62, 196, 192, 0.06)"
+                                : tokens.bgCardInner,
+                            cursor: "pointer",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name="curseforge-env-server"
+                            value="SERVER"
+                            checked={selectedEnvironmentOverride === "SERVER"}
+                            onChange={() => handleEnvironmentOverrideChange("SERVER")}
+                            disabled={installing}
+                            style={{ marginTop: "3px", accentColor: "#3ec4c0" }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: "14px", fontWeight: "700", color: tokens.textPrimary }}>
+                              Solo servidor
+                            </div>
+                            <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
+                              El mod se instalará directamente en la carpeta mods del servidor.
+                            </div>
+                          </div>
+                        </label>
+
+                        {/* BOTH OPTION */}
+                        <label
+                          data-testid="option-server-env-both"
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "12px",
+                            padding: "12px 14px",
+                            borderRadius: "12px",
+                            border: `1px solid ${
+                              selectedEnvironmentOverride === "BOTH"
+                                ? "#3ec4c0"
+                                : tokens.borderSubtle
+                            }`,
+                            backgroundColor:
+                              selectedEnvironmentOverride === "BOTH"
+                                ? isDark
+                                  ? "rgba(62, 196, 192, 0.1)"
+                                  : "rgba(62, 196, 192, 0.06)"
+                                : tokens.bgCardInner,
+                            cursor: "pointer",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name="curseforge-env-server"
+                            value="BOTH"
+                            checked={selectedEnvironmentOverride === "BOTH"}
+                            onChange={() => handleEnvironmentOverrideChange("BOTH")}
+                            disabled={installing}
+                            style={{ marginTop: "3px", accentColor: "#3ec4c0" }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: "14px", fontWeight: "700", color: tokens.textPrimary }}>
+                              Cliente y servidor
+                            </div>
+                            <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
+                              El mod requiere instalación conjunta en el modpack del cliente y sincronización con el servidor.
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                      <div style={{ fontSize: "11px", color: tokens.textSecondary, marginTop: "6px" }}>
+                        Esta elección se aplicará también a dependencias obligatorias de CurseForge cuyo entorno no se pueda determinar.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* BOTH Mod Guard Alert (Reusable for Modrinth BOTH and CurseForge BOTH) */}
+                  {modDetail.environment === "BOTH" || selectedEnvironmentOverride === "BOTH" ? (
                     <div
                       data-testid="alert-both-mod-redirect"
                       style={{
@@ -749,7 +911,13 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                           data-testid="button-redirect-to-game"
                           onClick={() => {
                             onClose()
-                            onNavigateToGame()
+                            onNavigateToGame({
+                              provider: selectedMod.provider,
+                              projectId: selectedMod.projectId,
+                              versionId: selectedVersionId,
+                              contentType: "MOD",
+                              environmentOverride: "BOTH",
+                            })
                           }}
                           className="launcher-btn-primary"
                           style={{
@@ -762,7 +930,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                         </button>
                       )}
                     </div>
-                  ) : (
+                  ) : (!isCurseForgeModUnknown(selectedMod, modDetail) || selectedEnvironmentOverride === "SERVER") ? (
                     <>
                       {/* Version selector */}
                       <div>
@@ -904,7 +1072,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                         </button>
                       </div>
                     </>
-                  )}
+                  ) : null}
                 </>
               ) : null}
             </div>

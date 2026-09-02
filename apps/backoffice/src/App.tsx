@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react"
-import type { ThemeMode, BackofficeSection } from "./types"
+import type { ThemeMode, BackofficeSection, GameHandoffPayload } from "./types"
 import { AuthProvider, useAuth } from "./context/AuthContext"
 import LoginView from "./components/auth/LoginView"
 import BackofficeSidebar from "./components/layout/BackofficeSidebar"
@@ -21,6 +21,7 @@ function BackofficeShell({
 }) {
   const { user, isAuthenticated, logout } = useAuth()
   const [section, setSection] = useState<BackofficeSection>("dashboard")
+  const [gameHandoff, setGameHandoff] = useState<GameHandoffPayload | null>(null)
   const isDark = theme === "dark"
 
   // If not authenticated, show Login View
@@ -106,8 +107,22 @@ function BackofficeShell({
           {section === "dashboard" && <DashboardView theme={theme} onNavigate={setSection} />}
           {section === "news" && <NewsListView theme={theme} />}
           {section === "skins" && <SkinsView theme={theme} />}
-          {section === "server" && <ServerOverviewView theme={theme} onNavigate={setSection} />}
-          {section === "game" && <GameView theme={theme} />}
+          {section === "server" && (
+            <ServerOverviewView
+              theme={theme}
+              onNavigate={(sec, handoff) => {
+                setSection(sec)
+                setGameHandoff(handoff || null)
+              }}
+            />
+          )}
+          {section === "game" && (
+            <GameView
+              theme={theme}
+              handoff={gameHandoff}
+              onClearHandoff={() => setGameHandoff(null)}
+            />
+          )}
           {section === "settings" && <SettingsView theme={theme} />}
         </main>
       </div>

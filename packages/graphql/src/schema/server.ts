@@ -292,6 +292,7 @@ export const serverTypeDefs = /* GraphQL */ `
     versionId: String!
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
+    environmentOverride: ModEnvironment
   }
 
   input InstallServerContentPlanInput {
@@ -300,6 +301,7 @@ export const serverTypeDefs = /* GraphQL */ `
     versionId: String!
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
+    environmentOverride: ModEnvironment
   }
 
   enum ServerReleaseSyncPlanAction {

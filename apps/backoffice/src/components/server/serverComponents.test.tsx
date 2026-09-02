@@ -1442,6 +1442,113 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
 
     expect(screen.getByText(/Server started listening on port 25565/i)).toBeDefined()
   })
+
+  it("10. ServerModSearchModal presents environment selector for CurseForge UNKNOWN mods and triggers onNavigateToGame with handoff when BOTH is selected", async () => {
+    const { ServerModSearchModal } = await import("./providers/ServerModSearchModal")
+    const { graphqlClient } = await import("../../services/graphqlClient")
+
+    const onNavigateToGameMock = vi.fn()
+
+    vi.spyOn(graphqlClient, "searchServerContent").mockResolvedValue({
+      items: [
+        {
+          provider: "CURSEFORGE",
+          projectId: "cf-mod-1",
+          name: "CF Unknown Mod",
+          summary: "Unknown environment mod",
+          author: "authorCF",
+          downloads: 1000,
+          categories: ["utility"],
+          contentType: "MOD",
+          environment: "UNKNOWN",
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+      nextCursor: null,
+      providersStatus: [{ provider: "CURSEFORGE", available: true, error: null }],
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
+      isPublishedEnvironment: true,
+    })
+
+    vi.spyOn(graphqlClient, "getServerContentProjectDetail").mockResolvedValue({
+      provider: "CURSEFORGE",
+      projectId: "cf-mod-1",
+      name: "CF Unknown Mod",
+      summary: "Unknown environment mod",
+      description: "Description",
+      author: "authorCF",
+      downloads: 1000,
+      contentType: "MOD",
+      environment: "UNKNOWN",
+      compatibleVersions: [
+        {
+          id: "cf-ver-1",
+          name: "1.0.0",
+          versionNumber: "1.0.0",
+          releaseType: "RELEASE",
+          gameVersions: ["1.21.1"],
+          loaders: ["neoforge"],
+          publishedAt: new Date().toISOString(),
+          downloads: 1000,
+          filename: "cf-mod.jar",
+          sizeBytes: 50000,
+          dependencies: [],
+        },
+      ],
+      isInstalled: false,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
+    })
+
+    await act(async () => {
+      render(
+        <ServerModSearchModal
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          onNavigateToGame={onNavigateToGameMock}
+        />,
+      )
+    })
+
+    const modItem = await screen.findByText("CF Unknown Mod")
+    await act(async () => {
+      fireEvent.click(modItem)
+    })
+
+    // Environment selector is displayed
+    const envSelector = await screen.findByTestId("server-curseforge-environment-selector")
+    expect(envSelector).toBeDefined()
+    expect(screen.getByTestId("option-server-env-server")).toBeDefined()
+    expect(screen.getByTestId("option-server-env-both")).toBeDefined()
+
+    // Select BOTH option
+    const optionBoth = screen.getByTestId("option-server-env-both")
+    await act(async () => {
+      fireEvent.click(optionBoth)
+    })
+
+    // BOTH redirect alert is displayed
+    const redirectAlert = await screen.findByTestId("alert-both-mod-redirect")
+    expect(redirectAlert).toBeDefined()
+
+    // Click redirect button
+    const redirectBtn = screen.getByTestId("button-redirect-to-game")
+    await act(async () => {
+      fireEvent.click(redirectBtn)
+    })
+
+    expect(onNavigateToGameMock).toHaveBeenCalledWith({
+      provider: "CURSEFORGE",
+      projectId: "cf-mod-1",
+      versionId: "cf-ver-1",
+      contentType: "MOD",
+      environmentOverride: "BOTH",
+    })
+  })
 })
 
 

@@ -16,11 +16,19 @@ interface ModSearchModalProps {
   onClose: () => void
   onSuccess: () => void
   theme?: ThemeMode
+  handoff?: import("../../../types").GameHandoffPayload | null
+  onClearHandoff?: () => void
 }
 
 const PAGE_SIZE = 20
 
-export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSuccess, theme = "dark" }) => {
+export const ModSearchModal: React.FC<ModSearchModalProps> = ({
+  onClose,
+  onSuccess,
+  theme = "dark",
+  handoff,
+  onClearHandoff,
+}) => {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
 
@@ -34,6 +42,13 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
   const [offset, setOffset] = useState(0)
   const [providerStatuses, setProviderStatuses] = useState<ModProviderStatus[]>([])
   const [selectedMod, setSelectedMod] = useState<ModSearchResultItem | null>(null)
+  const [handoffDetail, setHandoffDetail] = useState<{
+    provider: ModProvider
+    projectId: string
+    contentType: ContentType
+    initialVersionId?: string
+    initialEnvironmentOverride?: import("../../../types").ModEnvironment
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [envInfo, setEnvInfo] = useState<{ minecraftVersion: string; modLoader: import("../../../types").GameModLoader; modLoaderVersion: string | null | undefined }>({
     minecraftVersion: "1.21.1",
@@ -92,6 +107,26 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
         setLoadingMore(false)
       })
   }
+
+  // When handoff is provided from Server View, preselect tab and open ModDetailModal directly
+  useEffect(() => {
+    if (handoff) {
+      if (handoff.contentType) {
+        setSelectedContentType(handoff.contentType)
+      }
+      if (handoff.provider) {
+        setSelectedProviderTab(handoff.provider)
+      }
+      setHandoffDetail({
+        provider: handoff.provider,
+        projectId: handoff.projectId,
+        contentType: handoff.contentType || "MOD",
+        initialVersionId: handoff.versionId,
+        initialEnvironmentOverride: handoff.environmentOverride,
+      })
+      onClearHandoff?.()
+    }
+  }, [handoff, onClearHandoff])
 
   // Clear debounce and trigger search on tab changes
   useEffect(() => {
@@ -491,16 +526,22 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
         </div>
       </div>
 
-      {/* Selected Mod Detail Modal */}
-      {selectedMod && (
+      {/* Selected Mod Detail Modal (via search selection or handoff) */}
+      {(selectedMod || handoffDetail) && (
         <ModDetailModal
-          provider={selectedMod.provider}
-          projectId={selectedMod.projectId}
-          contentType={selectedMod.contentType || selectedContentType}
+          provider={selectedMod?.provider || handoffDetail!.provider}
+          projectId={selectedMod?.projectId || handoffDetail!.projectId}
+          contentType={selectedMod ? (selectedMod.contentType || selectedContentType) : handoffDetail!.contentType}
+          initialVersionId={handoffDetail?.initialVersionId}
+          initialEnvironmentOverride={handoffDetail?.initialEnvironmentOverride}
           theme={theme}
-          onClose={() => setSelectedMod(null)}
+          onClose={() => {
+            setSelectedMod(null)
+            setHandoffDetail(null)
+          }}
           onSuccess={() => {
             setSelectedMod(null)
+            setHandoffDetail(null)
             onClose()
             onSuccess()
           }}

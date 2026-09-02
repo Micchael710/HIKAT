@@ -47,6 +47,8 @@ interface GameFilesExplorerProps {
   onRefresh: () => Promise<void>
   onToast: (message: string, type: "success" | "error") => void
   onPrepareDraft?: () => void
+  handoff?: import("../../types").GameHandoffPayload | null
+  onClearHandoff?: () => void
 }
 
 interface ExplorerItem {
@@ -115,6 +117,8 @@ export default function GameFilesExplorer({
   onRefresh,
   onToast,
   onPrepareDraft,
+  handoff,
+  onClearHandoff,
 }: GameFilesExplorerProps) {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
@@ -123,6 +127,14 @@ export default function GameFilesExplorer({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState("")
   const [isRefreshing, setIsRefreshing] = useState(false)
+
+  // Handle transient handoff from Server
+  useEffect(() => {
+    if (handoff) {
+      setCurrentPath("mods")
+      setIsModSearchOpen(true)
+    }
+  }, [handoff])
 
   // Clipboard (Copy / Cut / Paste)
   const [clipboard, setClipboard] = useState<{
@@ -1582,6 +1594,8 @@ export default function GameFilesExplorer({
       {isModSearchOpen && (
         <ModSearchModal
           theme={theme}
+          handoff={handoff}
+          onClearHandoff={onClearHandoff}
           onClose={() => setIsModSearchOpen(false)}
           onSuccess={async () => {
             onToast("Mods y dependencias instalados exitosamente en el borrador.", "success")

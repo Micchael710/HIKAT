@@ -546,6 +546,19 @@ export async function installModPlan(
     (i) => i.action === "INSTALL" || i.action === "UPDATE",
   )
 
+  for (const item of itemsToProcess) {
+    if (
+      item.contentType === "MOD" &&
+      item.provider === "CURSEFORGE" &&
+      (!item.environment || item.environment === "UNKNOWN")
+    ) {
+      throw createGraphQLError(
+        `Se requiere especificar el entorno de ejecución (Solo cliente o Cliente y servidor) para "${item.projectName}".`,
+        "VALIDATION_ERROR",
+      )
+    }
+  }
+
   if (itemsToProcess.length === 0) {
     const allFiles = await db
       .select()

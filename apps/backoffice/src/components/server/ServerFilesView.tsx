@@ -25,7 +25,7 @@ interface ServerFilesViewProps {
   theme: ThemeMode
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
-  onNavigateToGame?: () => void
+  onNavigateToGame?: (handoff?: import("../../types").GameHandoffPayload) => void
 }
 
 export default function ServerFilesView({ theme, serverStatus, onToast, onNavigateToGame }: ServerFilesViewProps) {

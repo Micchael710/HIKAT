@@ -878,6 +878,7 @@ export interface ResolveModPlanInputGql {
   versionId: string
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
+  environmentOverride?: ModEnvironmentGql | null
 }
 
 export interface InstallModPlanInputGql {
@@ -886,6 +887,7 @@ export interface InstallModPlanInputGql {
   versionId: string
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
+  environmentOverride?: ModEnvironmentGql | null
 }
 
 // --- Settings Types (Shard 06.5 & Shard 08F) ---
@@ -1039,6 +1041,7 @@ export interface ResolveServerContentPlanInputGql {
   versionId: string
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
+  environmentOverride?: ModEnvironmentGql | null
 }
 
 export interface InstallServerContentPlanInputGql {
@@ -1047,6 +1050,7 @@ export interface InstallServerContentPlanInputGql {
   versionId: string
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
+  environmentOverride?: ModEnvironmentGql | null
 }
 
 export type ServerReleaseSyncPlanActionGql = "INSTALL" | "UPDATE" | "REMOVE" | "KEEP"

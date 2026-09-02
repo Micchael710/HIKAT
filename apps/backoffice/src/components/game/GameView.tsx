@@ -26,13 +26,21 @@ import LiveToast from "../common/LiveToast"
 
 interface GameViewProps {
   theme: ThemeMode
+  handoff?: import("../../types").GameHandoffPayload | null
+  onClearHandoff?: () => void
 }
 
-export default function GameView({ theme }: GameViewProps) {
+export default function GameView({ theme, handoff, onClearHandoff }: GameViewProps) {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
 
   const [activeTab, setActiveTab] = useState<"current" | "history">("current")
+
+  useEffect(() => {
+    if (handoff) {
+      setActiveTab("current")
+    }
+  }, [handoff])
   const [overview, setOverview] = useState<AdminGameOverview | null>(null)
   const [history, setHistory] = useState<GameRelease[]>([])
   const [selectedHistoryRelease, setSelectedHistoryRelease] = useState<GameRelease | null>(null)
@@ -694,6 +702,8 @@ export default function GameView({ theme }: GameViewProps) {
             onRefresh={refreshSilently}
             onToast={showToast}
             onPrepareDraft={handlePrepareDraft}
+            handoff={handoff}
+            onClearHandoff={onClearHandoff}
           />
         </div>
       )}

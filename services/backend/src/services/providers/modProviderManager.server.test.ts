@@ -473,13 +473,13 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     expect(projectIds).toContain("mod-d")
   })
 
-  // Test 7: searchServerMods filters and returns SERVER mods only
-  it("searchServerMods excludes CLIENT and BOTH mods, returning only SERVER mods", async () => {
+  // Test 7: searchServerMods filters and returns SERVER and BOTH mods for Modrinth (excludes CLIENT)
+  it("searchServerMods excludes CLIENT mods, returning SERVER and BOTH mods for Modrinth", async () => {
     const mockProjects = [
-      { projectId: "srv-mod-1", name: "Chunky", environment: "SERVER", contentType: "MOD" },
-      { projectId: "client-mod-1", name: "Sodium", environment: "CLIENT", contentType: "MOD" },
-      { projectId: "both-mod-1", name: "FerriteCore", environment: "BOTH", contentType: "MOD" },
-      { projectId: "srv-mod-2", name: "Spark", environment: "SERVER", contentType: "MOD" },
+      { projectId: "srv-mod-1", name: "Chunky", environment: "SERVER", contentType: "MOD", provider: "MODRINTH" },
+      { projectId: "client-mod-1", name: "Sodium", environment: "CLIENT", contentType: "MOD", provider: "MODRINTH" },
+      { projectId: "both-mod-1", name: "FerriteCore", environment: "BOTH", contentType: "MOD", provider: "MODRINTH" },
+      { projectId: "srv-mod-2", name: "Spark", environment: "SERVER", contentType: "MOD", provider: "MODRINTH" },
     ]
 
     const mockAdapter = {
@@ -503,8 +503,8 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
       "MOD",
     )
 
-    expect(results.items).toHaveLength(2)
-    expect(results.items.map((i) => i.projectId)).toEqual(["srv-mod-1", "srv-mod-2"])
+    expect(results.items).toHaveLength(3)
+    expect(results.items.map((i) => i.projectId)).toEqual(["srv-mod-1", "both-mod-1", "srv-mod-2"])
   })
 
   // Test 8: searchMods excludes SERVER mods in Game Updates flow
@@ -825,13 +825,14 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
   })
 
   // Test 14: Sparse provider results preserve leftovers in next page
-  it("Shard 8D: Sparse provider results (raw 0..199 BOTH, raw 200..224 SERVER) preserve leftovers in next page", async () => {
-    // 0..199 = BOTH, 200..224 = SERVER (25 items), 225..299 = BOTH
+  it("Shard 8D: Sparse provider results (raw 0..199 CLIENT, raw 200..224 SERVER) preserve leftovers in next page", async () => {
+    // 0..199 = CLIENT, 200..224 = SERVER (25 items), 225..299 = CLIENT
     const allProviderItems = Array.from({ length: 300 }, (_, i) => ({
       projectId: `sparse-mod-${i}`,
       name: `Sparse Mod ${i}`,
-      environment: i >= 200 && i < 225 ? "SERVER" : "BOTH",
+      environment: i >= 200 && i < 225 ? "SERVER" : "CLIENT",
       contentType: "MOD",
+      provider: "MODRINTH",
     }))
 
     const mockAdapter = {

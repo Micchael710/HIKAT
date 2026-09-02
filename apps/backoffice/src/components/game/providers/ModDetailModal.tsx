@@ -5,6 +5,7 @@ import type {
   ModInstallationPlan,
   ModVersionOverrideInput,
   ContentType,
+  ModEnvironment,
   ThemeMode,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
@@ -15,6 +16,8 @@ interface ModDetailModalProps {
   provider: ModProvider
   projectId: string
   contentType?: ContentType
+  initialVersionId?: string
+  initialEnvironmentOverride?: ModEnvironment
   onClose: () => void
   onSuccess: () => void
   theme?: ThemeMode
@@ -24,6 +27,8 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   provider,
   projectId,
   contentType = "MOD",
+  initialVersionId,
+  initialEnvironmentOverride,
   onClose,
   onSuccess,
   theme = "dark",
@@ -34,11 +39,19 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<ModProjectDetail | null>(null)
   const [selectedVersionId, setSelectedVersionId] = useState<string>("")
+  const [selectedEnvironmentOverride, setSelectedEnvironmentOverride] = useState<ModEnvironment | null>(
+    initialEnvironmentOverride || null,
+  )
   const [manualMode, setManualMode] = useState(false)
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({})
   const [plan, setPlan] = useState<ModInstallationPlan | null>(null)
   const [resolvingPlan, setResolvingPlan] = useState(false)
   const [installing, setInstalling] = useState(false)
+
+  const isCurseForgeModUnknown =
+    provider === "CURSEFORGE" &&
+    contentType === "MOD" &&
+    (detail?.environment === "UNKNOWN" || !detail?.environment)
 
   // 1. Fetch project details
   useEffect(() => {
@@ -51,11 +64,26 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
       .then((data) => {
         if (!active) return
         setDetail(data)
-        // Preselect latest stable release (or first compatible version)
-        const stable = data.compatibleVersions.find((v) => v.releaseType === "RELEASE")
-        const initialVer = stable || data.compatibleVersions[0]
-        if (initialVer) {
-          setSelectedVersionId(initialVer.id || initialVer.fileId || "")
+        if (initialVersionId) {
+          const matched = data.compatibleVersions.find(
+            (v) => v.id === initialVersionId || v.fileId === initialVersionId,
+          )
+          if (matched) {
+            setSelectedVersionId(matched.id || matched.fileId || initialVersionId)
+          } else {
+            const stable = data.compatibleVersions.find((v) => v.releaseType === "RELEASE")
+            const initialVer = stable || data.compatibleVersions[0]
+            if (initialVer) {
+              setSelectedVersionId(initialVer.id || initialVer.fileId || "")
+            }
+          }
+        } else {
+          // Preselect latest stable release (or first compatible version)
+          const stable = data.compatibleVersions.find((v) => v.releaseType === "RELEASE")
+          const initialVer = stable || data.compatibleVersions[0]
+          if (initialVer) {
+            setSelectedVersionId(initialVer.id || initialVer.fileId || "")
+          }
         }
         setLoading(false)
       })
@@ -68,11 +96,16 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     return () => {
       active = false
     }
-  }, [provider, projectId, contentType])
+  }, [provider, projectId, contentType, initialVersionId])
 
-  // 2. Resolve installation plan whenever selected version or manual overrides change
+  // 2. Resolve installation plan whenever selected version, environment override, or manual overrides change
   useEffect(() => {
     if (!selectedVersionId) return
+
+    if (isCurseForgeModUnknown && !selectedEnvironmentOverride) {
+      setPlan(null)
+      return
+    }
 
     let active = true
     setResolvingPlan(true)
@@ -96,6 +129,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         versionId: selectedVersionId,
         contentType,
         manualOverrides: overridesList.length > 0 ? overridesList : null,
+        environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride : undefined,
       })
       .then((resPlan) => {
         if (!active) return
@@ -111,7 +145,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     return () => {
       active = false
     }
-  }, [provider, projectId, selectedVersionId, manualOverrides, contentType])
+  }, [provider, projectId, selectedVersionId, manualOverrides, contentType, isCurseForgeModUnknown, selectedEnvironmentOverride])
 
   const handleInstall = async () => {
     if (!selectedVersionId || !plan || !plan.isValid) return
@@ -138,6 +172,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         versionId: selectedVersionId,
         contentType,
         manualOverrides: overridesList.length > 0 ? overridesList : null,
+        environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride : undefined,
       })
 
       onSuccess()
@@ -353,6 +388,113 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   })}
                 </select>
               </div>
+
+              {/* CurseForge Environment Selector for UNKNOWN environment MODs */}
+              {isCurseForgeModUnknown && (
+                <div style={{ marginBottom: "20px" }} data-testid="curseforge-environment-selector">
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: tokens.textPrimary,
+                      marginBottom: "8px",
+                    }}
+                  >
+                    ¿Dónde necesita ejecutarse este mod?
+                  </label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {/* CLIENT OPTION */}
+                    <label
+                      data-testid="option-env-client"
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "12px",
+                        padding: "12px 14px",
+                        borderRadius: "12px",
+                        border: `1px solid ${
+                          selectedEnvironmentOverride === "CLIENT"
+                            ? "#3ec4c0"
+                            : tokens.borderSubtle
+                        }`,
+                        backgroundColor:
+                          selectedEnvironmentOverride === "CLIENT"
+                            ? isDark
+                              ? "rgba(62, 196, 192, 0.1)"
+                              : "rgba(62, 196, 192, 0.06)"
+                            : tokens.bgCardInner,
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="curseforge-env-game"
+                        value="CLIENT"
+                        checked={selectedEnvironmentOverride === "CLIENT"}
+                        onChange={() => setSelectedEnvironmentOverride("CLIENT")}
+                        disabled={installing}
+                        style={{ marginTop: "3px", accentColor: "#3ec4c0" }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: "14px", fontWeight: "700", color: tokens.textPrimary }}>
+                          Solo cliente
+                        </div>
+                        <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
+                          El mod solo se descargará en los clientes del juego.
+                        </div>
+                      </div>
+                    </label>
+
+                    {/* BOTH OPTION */}
+                    <label
+                      data-testid="option-env-both"
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "12px",
+                        padding: "12px 14px",
+                        borderRadius: "12px",
+                        border: `1px solid ${
+                          selectedEnvironmentOverride === "BOTH"
+                            ? "#3ec4c0"
+                            : tokens.borderSubtle
+                        }`,
+                        backgroundColor:
+                          selectedEnvironmentOverride === "BOTH"
+                            ? isDark
+                              ? "rgba(62, 196, 192, 0.1)"
+                              : "rgba(62, 196, 192, 0.06)"
+                            : tokens.bgCardInner,
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="curseforge-env-game"
+                        value="BOTH"
+                        checked={selectedEnvironmentOverride === "BOTH"}
+                        onChange={() => setSelectedEnvironmentOverride("BOTH")}
+                        disabled={installing}
+                        style={{ marginTop: "3px", accentColor: "#3ec4c0" }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: "14px", fontWeight: "700", color: tokens.textPrimary }}>
+                          Cliente y servidor
+                        </div>
+                        <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
+                          El mod se descargará en los clientes y se sincronizará con el servidor tras publicar la release.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                  <div style={{ fontSize: "11px", color: tokens.textSecondary, marginTop: "6px" }}>
+                    Esta elección se aplicará también a dependencias obligatorias de CurseForge cuyo entorno no se pueda determinar.
+                  </div>
+                </div>
+              )}
 
               {/* Dependencies Section */}
               <div
@@ -695,7 +837,14 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
               type="button"
               data-testid="button-confirm-install"
               onClick={handleInstall}
-              disabled={installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)}
+              disabled={
+                installing ||
+                loading ||
+                resolvingPlan ||
+                !plan ||
+                !plan.isValid ||
+                Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+              }
               className="launcher-btn-primary"
               style={{
                 padding: "10px 22px",
@@ -703,11 +852,21 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                 fontSize: "14px",
                 fontWeight: "700",
                 opacity:
-                  installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)
+                  installing ||
+                  loading ||
+                  resolvingPlan ||
+                  !plan ||
+                  !plan.isValid ||
+                  Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
                     ? 0.5
                     : 1,
                 cursor:
-                  installing || loading || resolvingPlan || Boolean(plan && !plan.isValid)
+                  installing ||
+                  loading ||
+                  resolvingPlan ||
+                  !plan ||
+                  !plan.isValid ||
+                  Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
                     ? "not-allowed"
                     : "pointer",
               }}

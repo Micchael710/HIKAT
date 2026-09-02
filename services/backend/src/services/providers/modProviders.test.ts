@@ -914,7 +914,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       const plan = await manager.resolveInstallationPlan(
         env,
         db,
-        { provider: "CURSEFORGE", projectId: "328085", versionId: "1111", contentType: "MOD" },
+        { provider: "CURSEFORGE", projectId: "328085", versionId: "1111", contentType: "MOD", environmentOverride: "CLIENT" },
       )
 
       expect(plan.isValid).toBe(false)
@@ -985,7 +985,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       const result = await installModPlan(
         db,
         env,
-        { provider: "CURSEFORGE", projectId: "328085", versionId: "99999" },
+        { provider: "CURSEFORGE", projectId: "328085", versionId: "99999", environmentOverride: "CLIENT" },
         adminUserId,
       )
 
@@ -1860,7 +1860,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       const installed = await installModPlan(
         db,
         env,
-        { provider: "CURSEFORGE", projectId: "328085", versionId: "7777" },
+        { provider: "CURSEFORGE", projectId: "328085", versionId: "7777", environmentOverride: "CLIENT" },
         adminUserId,
       )
 
@@ -1928,7 +1928,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         installModPlan(
           db,
           env,
-          { provider: "CURSEFORGE", projectId: "328085", versionId: "5555" },
+          { provider: "CURSEFORGE", projectId: "328085", versionId: "5555", environmentOverride: "CLIENT" },
           adminUserId,
         ),
       ).rejects.toThrow(/hash MD5 descargado/)
@@ -4271,6 +4271,363 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         expect(versions.length).toBe(1)
         expect(versions[0]!.id).toBe("ver-multi")
       })
+    })
+  })
+
+  describe("13. CurseForge Environment Selection, Fail-Closed Rules & Dependency Inheritance", () => {
+    it("resolveInstallationPlan fails closed with conflict when CurseForge MOD has unknown environment and no override is provided", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/555555/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 10001,
+                  fileName: "cf-unknown.jar",
+                  downloadUrl: "https://cdn/cf-unknown.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/555555")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 555555, name: "CF Unknown Mod", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "CURSEFORGE", projectId: "555555", versionId: "10001", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.some((c) => c.includes("Se requiere especificar el entorno de ejecución"))).toBe(true)
+    })
+
+    it("resolveInstallationPlan applies CLIENT environmentOverride to root and inherits it to unknown CurseForge dependencies", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/555555/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 10001,
+                  fileName: "cf-root.jar",
+                  downloadUrl: "https://cdn/cf-root.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [{ modId: 666666, relationType: 3 }], // Required dep
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/555555")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 555555, name: "CF Root Mod", classId: 6 } }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/666666/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 20001,
+                  fileName: "cf-dep.jar",
+                  downloadUrl: "https://cdn/cf-dep.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "1234567890abcdef1234567890abcdef12345678" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/666666")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 666666, name: "CF Dep Mod", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        {
+          provider: "CURSEFORGE",
+          projectId: "555555",
+          versionId: "10001",
+          contentType: "MOD",
+          environmentOverride: "CLIENT",
+        },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.items).toHaveLength(2)
+
+      const rootItem = plan.items.find((i) => i.projectId === "555555")
+      const depItem = plan.items.find((i) => i.projectId === "666666")
+
+      expect(rootItem?.environment).toBe("CLIENT")
+      expect(depItem?.environment).toBe("CLIENT")
+    })
+
+    it("resolveInstallationPlan applies BOTH environmentOverride to root and inherits it to unknown CurseForge dependencies", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/777777/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 30001,
+                  fileName: "cf-both-root.jar",
+                  downloadUrl: "https://cdn/cf-both-root.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [{ modId: 888888, relationType: 3 }],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/777777")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 777777, name: "CF Both Root", classId: 6 } }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/888888/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 40001,
+                  fileName: "cf-both-dep.jar",
+                  downloadUrl: "https://cdn/cf-both-dep.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "1234567890abcdef1234567890abcdef12345678" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/888888")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 888888, name: "CF Both Dep", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        {
+          provider: "CURSEFORGE",
+          projectId: "777777",
+          versionId: "30001",
+          contentType: "MOD",
+          environmentOverride: "BOTH",
+        },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.items).toHaveLength(2)
+
+      const rootItem = plan.items.find((i) => i.projectId === "777777")
+      const depItem = plan.items.find((i) => i.projectId === "888888")
+
+      expect(rootItem?.environment).toBe("BOTH")
+      expect(depItem?.environment).toBe("BOTH")
+    })
+
+    it("resolveInstallationPlan rejects SERVER environmentOverride with validation error", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/555555/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 10001,
+                  fileName: "cf-unknown.jar",
+                  downloadUrl: "https://cdn/cf-unknown.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/555555")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 555555, name: "CF Unknown Mod", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      await expect(
+        manager.resolveInstallationPlan(
+          env,
+          db,
+          {
+            provider: "CURSEFORGE",
+            projectId: "555555",
+            versionId: "10001",
+            contentType: "MOD",
+            environmentOverride: "SERVER",
+          },
+        ),
+      ).rejects.toThrow(/mods exclusivos de servidor/)
+    })
+
+    it("resolveServerInstallationPlan with environmentOverride BOTH flags requiresGameUpdate = true", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/555555")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 555555, name: "CF Unknown Mod", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveServerInstallationPlan(
+        env,
+        db,
+        {
+          provider: "CURSEFORGE",
+          projectId: "555555",
+          versionId: "10001",
+          contentType: "MOD",
+          environmentOverride: "BOTH",
+        },
+      )
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.requiresGameUpdate).toBe(true)
+      expect(plan.gameUpdateReason).toContain("Juego → Actualizaciones")
+    })
+
+    it("resolveServerInstallationPlan with environmentOverride SERVER sets environment to SERVER and inherits to dependencies", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/555555/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 10001,
+                  fileName: "cf-server-root.jar",
+                  downloadUrl: "https://cdn/cf-server-root.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [{ modId: 666666, relationType: 3 }],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/555555")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 555555, name: "CF Server Root", classId: 6 } }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/666666/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 20001,
+                  fileName: "cf-server-dep.jar",
+                  downloadUrl: "https://cdn/cf-server-dep.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "1234567890abcdef1234567890abcdef12345678" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/666666")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 666666, name: "CF Server Dep", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveServerInstallationPlan(
+        env,
+        db,
+        {
+          provider: "CURSEFORGE",
+          projectId: "555555",
+          versionId: "10001",
+          contentType: "MOD",
+          environmentOverride: "SERVER",
+        },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.requiresGameUpdate).toBe(false)
+      expect(plan.items).toHaveLength(2)
+
+      const rootItem = plan.items.find((i) => i.projectId === "555555")
+      const depItem = plan.items.find((i) => i.projectId === "666666")
+
+      expect(rootItem?.environment).toBe("SERVER")
+      expect(depItem?.environment).toBe("SERVER")
     })
   })
 })

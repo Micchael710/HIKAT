@@ -1299,6 +1299,279 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       const installBtn = screen.getByTestId("button-confirm-install")
       expect(installBtn.textContent).toBe("Añadir a la actualización")
     })
+
+    it("CurseForge Mod with UNKNOWN environment shows environment selector and resolves plan once selected", async () => {
+      const onRefresh = vi.fn().mockResolvedValue(undefined)
+      const onToast = vi.fn()
+
+      vi.spyOn(graphqlClient, "searchMods").mockResolvedValue({
+        items: [
+          {
+            provider: "CURSEFORGE",
+            projectId: "cf-unknown-1",
+            name: "CF Unknown Environment Mod",
+            summary: "Unknown environment",
+            author: "authorCF",
+            downloads: 50000,
+            categories: ["utility"],
+            contentType: "MOD",
+            environment: "UNKNOWN",
+          },
+        ],
+        totalCount: 1,
+        providersStatus: [{ provider: "CURSEFORGE", available: true, error: null }],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+      })
+
+      vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "CURSEFORGE",
+        projectId: "cf-unknown-1",
+        name: "CF Unknown Environment Mod",
+        summary: "Unknown environment",
+        description: "Description",
+        author: "authorCF",
+        downloads: 50000,
+        contentType: "MOD",
+        environment: "UNKNOWN",
+        compatibleVersions: [
+          {
+            id: "cf-ver-100",
+            name: "1.0.0",
+            versionNumber: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: new Date().toISOString(),
+            downloads: 50000,
+            filename: "cf-mod.jar",
+            sizeBytes: 80000,
+            dependencies: [],
+          },
+        ],
+        isInstalled: false,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+      })
+
+      const resolvePlanSpy = vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
+        items: [
+          {
+            provider: "CURSEFORGE",
+            projectId: "cf-unknown-1",
+            projectName: "CF Unknown Environment Mod",
+            versionId: "cf-ver-100",
+            fileId: "cf-ver-100",
+            versionNumber: "1.0.0",
+            filename: "cf-mod.jar",
+            sizeBytes: 80000,
+            sha256: "hash100",
+            contentType: "MOD",
+            environment: "CLIENT",
+            logicalPath: "mods/cf-mod.jar",
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            installedFileId: null,
+            installedVersionNumber: null,
+            availableCompatibleVersions: [],
+          },
+        ],
+        totalDownloadSizeBytes: 80000,
+        conflicts: [],
+        optionalDependencies: [],
+        isValid: true,
+      })
+
+      render(
+        <GameFilesExplorer
+          theme="dark"
+          files={[]}
+          isDraft={true}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />,
+      )
+
+      // 1. Open search modal
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("button-open-mod-providers"))
+      })
+
+      // 2. Select mod
+      const card = await screen.findByTestId("mod-card-curseforge-cf-unknown-1")
+      await act(async () => {
+        fireEvent.click(card)
+      })
+
+      // 3. ModDetailModal opened
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
+      })
+
+      // Verify that resolvePlan was NOT called initially because environment is unknown
+      expect(resolvePlanSpy).not.toHaveBeenCalled()
+
+      // Verify environment selector is rendered
+      const envSelector = await screen.findByTestId("curseforge-environment-selector")
+      expect(envSelector).toBeDefined()
+      expect(screen.getByTestId("option-env-client")).toBeDefined()
+      expect(screen.getByTestId("option-env-both")).toBeDefined()
+
+      // Select CLIENT option
+      const clientOption = screen.getByTestId("option-env-client")
+      await act(async () => {
+        fireEvent.click(clientOption)
+      })
+
+      // Now resolvePlan is called with environmentOverride: "CLIENT"
+      await waitFor(() => {
+        expect(resolvePlanSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            provider: "CURSEFORGE",
+            projectId: "cf-unknown-1",
+            versionId: "cf-ver-100",
+            environmentOverride: "CLIENT",
+          }),
+        )
+      })
+
+      // Install button is enabled and shows 1 item
+      const installBtn = screen.getByTestId("button-confirm-install")
+      expect(installBtn.hasAttribute("disabled")).toBe(false)
+    })
+
+    it("GameView processes server handoff and directly opens ModDetailModal with BOTH override preselected", async () => {
+      const onClearHandoff = vi.fn()
+
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        draftRelease: {
+          id: "draft-test",
+          version: "draft-123",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          status: "DRAFT",
+          notes: null,
+          publishedAt: null,
+          coverMediaId: null,
+          cover: null,
+          files: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        publishedRelease: null,
+        pendingChangesCount: 0,
+        readiness: {
+          isReady: true,
+          validVersion: true,
+          uniqueVersion: true,
+          hasFiles: true,
+          noConflicts: true,
+          storageVerified: true,
+          issues: [],
+        },
+      })
+
+      vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "CURSEFORGE",
+        projectId: "cf-mod-both",
+        name: "CF Both Mod",
+        summary: "Both environment mod",
+        description: "Description",
+        author: "authorCF",
+        downloads: 50000,
+        contentType: "MOD",
+        environment: "UNKNOWN",
+        compatibleVersions: [
+          {
+            id: "ver-both-99",
+            name: "1.0.0",
+            versionNumber: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: new Date().toISOString(),
+            downloads: 50000,
+            filename: "cf-both.jar",
+            sizeBytes: 60000,
+            dependencies: [],
+          },
+        ],
+        isInstalled: false,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+      })
+
+      const resolvePlanSpy = vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
+        items: [
+          {
+            provider: "CURSEFORGE",
+            projectId: "cf-mod-both",
+            projectName: "CF Both Mod",
+            versionId: "ver-both-99",
+            fileId: "ver-both-99",
+            versionNumber: "1.0.0",
+            filename: "cf-both.jar",
+            sizeBytes: 60000,
+            sha256: "hash99",
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/cf-both.jar",
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            installedFileId: null,
+            installedVersionNumber: null,
+            availableCompatibleVersions: [],
+          },
+        ],
+        totalDownloadSizeBytes: 60000,
+        conflicts: [],
+        optionalDependencies: [],
+        isValid: true,
+      })
+
+      render(
+        <GameView
+          theme="dark"
+          handoff={{
+            provider: "CURSEFORGE",
+            projectId: "cf-mod-both",
+            versionId: "ver-both-99",
+            contentType: "MOD",
+            environmentOverride: "BOTH",
+          }}
+          onClearHandoff={onClearHandoff}
+        />,
+      )
+
+      // ModDetailModal should automatically open with BOTH override and version preselected
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
+      })
+
+      expect(onClearHandoff).toHaveBeenCalled()
+
+      // Verify resolveModInstallationPlan was called with environmentOverride: "BOTH" and versionId: "ver-both-99"
+      await waitFor(() => {
+        expect(resolvePlanSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            provider: "CURSEFORGE",
+            projectId: "cf-mod-both",
+            versionId: "ver-both-99",
+            environmentOverride: "BOTH",
+          }),
+        )
+      })
+    })
   })
 
   describe("HiKAT Shard 8C: Release Experience & Publication Suite (React & Wizards)", () => {
