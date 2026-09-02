@@ -36,8 +36,11 @@ function createHiKatInstallRuntime({
         tracker.expectedTotal = totalKnown
       }
 
+      const isSingleSmallMetadata = files.length <= 1 && totalKnown < 1024 * 1024
+      const shouldTrack = typeof onTransferProgress === "function" && !isSingleSmallMetadata
+
       let interval = null
-      if (typeof onTransferProgress === "function") {
+      if (shouldTrack) {
         interval = setInterval(() => {
           const total = tracker.total || totalKnown || 0
           const progress = tracker.progress || 0
@@ -69,7 +72,7 @@ function createHiKatInstallRuntime({
           )
         }
 
-        if (typeof onTransferProgress === "function") {
+        if (shouldTrack) {
           reportProgress(progressEnd)
         }
       } finally {

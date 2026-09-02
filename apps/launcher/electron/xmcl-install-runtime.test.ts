@@ -118,9 +118,63 @@ describe("HiKAT XMCL Install Runtime & ProgressTrackerMultiple Suite", () => {
     })
 
     await expect(
-      runtime.download([{ urls: ["https://example.com/fail.jar"], path: "/dest/fail.jar", size: 100 }]),
+      runtime.download([
+        { urls: ["https://example.com/fail1.jar"], path: "/dest/fail1.jar", size: 1000 },
+        { urls: ["https://example.com/fail2.jar"], path: "/dest/fail2.jar", size: 2000 },
+      ]),
     ).rejects.toThrow(/XMCL download failed/)
 
     expect(clearIntervalSpy).toHaveBeenCalled()
+  })
+
+  it("5. Small manifest download does not consume progress range, allowing subsequent runtime batch to track dynamically", async () => {
+    const progressHistory: number[] = []
+
+    const mockDownloader = vi.fn().mockImplementation(async (options: any) => {
+      const tracker = options.tracker
+
+      if (options.options.length === 1 && options.options[0].expectedTotal < 1024 * 1024) {
+        // First batch: small manifest.json (~100 KB)
+        return [{ status: "fulfilled", value: undefined }]
+      }
+
+      // Second batch: multiple runtime files (e.g. 50 MB total)
+      tracker.trackers.push({ progress: 25 * 1024 * 1024, total: 50 * 1024 * 1024 })
+      await new Promise((r) => setTimeout(r, 200))
+
+      tracker.trackers[0] = { progress: 50 * 1024 * 1024, total: 50 * 1024 * 1024 }
+      await new Promise((r) => setTimeout(r, 200))
+
+      return [
+        { status: "fulfilled", value: undefined },
+        { status: "fulfilled", value: undefined },
+      ]
+    })
+
+    const runtime = createHiKatInstallRuntime({
+      onTransferProgress: (p: number) => progressHistory.push(p),
+      progressStart: 30,
+      progressEnd: 40,
+      downloader: mockDownloader,
+    })
+
+    // Batch 1: Small manifest.json (~100 KB)
+    await runtime.download([
+      { urls: ["https://example.com/manifest.json"], path: "/dest/manifest.json", size: 100 * 1024 },
+    ])
+
+    // Verify progress did NOT jump to 40% after manifest download
+    expect(progressHistory).not.toContain(40)
+    expect(progressHistory.length).toBe(0)
+
+    // Batch 2: Large runtime files
+    await runtime.download([
+      { urls: ["https://example.com/java-bin.jar"], path: "/dest/bin.jar", size: 25 * 1024 * 1024 },
+      { urls: ["https://example.com/java-lib.jar"], path: "/dest/lib.jar", size: 25 * 1024 * 1024 },
+    ])
+
+    // Verify dynamic progress tracked through 30 -> 40
+    expect(progressHistory).toContain(35)
+    expect(progressHistory[progressHistory.length - 1]).toBe(40)
   })
 })
