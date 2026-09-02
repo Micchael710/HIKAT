@@ -149,6 +149,7 @@ declare module "../../electron/client-files-sync.cjs" {
   export const validateUrlSecurity: any
   export const getEffectiveApiBaseUrl: any
   export const uninstallGame: any
+  export const ENFORCED_DIRECTORIES: string[]
 }
 
 declare module "../../electron/game-operation-manager.cjs" {

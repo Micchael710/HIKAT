@@ -1050,4 +1050,5 @@ module.exports = {
   validateUrlSecurity,
   getEffectiveApiBaseUrl,
   uninstallGame,
+  ENFORCED_DIRECTORIES,
 }

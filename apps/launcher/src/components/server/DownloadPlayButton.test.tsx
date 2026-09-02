@@ -1904,6 +1904,133 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
       expect(btn.textContent).toContain("REPARAR")
     })
+
+    it("6. Pending repair + new release published while Minecraft is running resolves to ACTUALIZAR (update > repair)", async () => {
+      let launchStatusCallback: any = null
+      let watcherCallback: any = null
+      let releaseCallback: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      })
+      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
+        watcherCallback = cb
+        return () => {}
+      })
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      const initialManifest = {
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE" as const,
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(initialManifest)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      // Game starts running
+      await act(async () => {
+        launchStatusCallback?.("running")
+      })
+      expect(btn.textContent).toContain("EN EJECUCIÓN")
+
+      // File watcher detects corruption while game is running -> marks pending repair
+      await act(async () => {
+        watcherCallback?.({ path: "mods/corrupt.jar" })
+      })
+      // Stays EN EJECUCIÓN while running
+      expect(btn.textContent).toContain("EN EJECUCIÓN")
+
+      // While Minecraft is running, a new release (1.1.0) is published and manifest is updated
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        ...initialManifest,
+        version: "1.1.0",
+        hasUpdate: true,
+        installed: false,
+      })
+
+      // WebSocket activates release 1.1.0
+      await act(async () => {
+        await releaseCallback?.({ version: "1.1.0" })
+      })
+
+      // Minecraft process exits -> returns to idle
+      await act(async () => {
+        launchStatusCallback?.("idle")
+      })
+
+      // Must resolve to ACTUALIZAR (update > repair priority)
+      expect(btn.textContent).toContain("ACTUALIZAR")
+      expect(btn.textContent).not.toContain("REPARAR")
+    })
+
+    it("7. Pre-launch check is strictly fail-closed: blocks launch when checkSyncPlan returns success: false or throws", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/mod.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const launchSpy = vi.spyOn(gameService, "launchGame")
+
+      // Scenario A: checkSyncPlan returns { success: false }
+      window.electronAPI!.checkSyncPlan = vi.fn().mockResolvedValue({ success: false })
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      await act(async () => {
+        btn.click()
+      })
+      expect(launchSpy).not.toHaveBeenCalled()
+
+      // Scenario B: checkSyncPlan throws an exception
+      window.electronAPI!.checkSyncPlan = vi.fn().mockRejectedValue(new Error("IPC failure"))
+
+      await act(async () => {
+        btn.click()
+      })
+      expect(launchSpy).not.toHaveBeenCalled()
+    })
+
+    it("8. Sync Engine and Watcher use the exact same ENFORCED_DIRECTORIES", async () => {
+      // @ts-expect-error CJS module without bundled declaration
+      const { ENFORCED_DIRECTORIES } = await import("../../../electron/client-files-sync.cjs")
+      expect(ENFORCED_DIRECTORIES).toEqual([
+        "mods",
+        "resourcepacks",
+        "shaderpacks",
+        "kubejs",
+        "scripts",
+      ])
+    })
   })
 })
 

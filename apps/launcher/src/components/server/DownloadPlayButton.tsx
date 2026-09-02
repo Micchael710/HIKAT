@@ -130,6 +130,11 @@ export default function DownloadPlayButton({
       const now = Date.now()
       const shouldShowToast = now - lastWatcherToastTimeRef.current > 8000
 
+      if (shouldShowToast) {
+        lastWatcherToastTimeRef.current = now
+        showToast(t("playButton.fileWatcherChangeDetected"), "info")
+      }
+
       setStatus((prevStatus) => {
         if (prevStatus === "running" || prevStatus === "launching") {
           isRepairPendingRef.current = true
@@ -137,10 +142,6 @@ export default function DownloadPlayButton({
         }
 
         if (prevStatus === "play") {
-          if (shouldShowToast) {
-            lastWatcherToastTimeRef.current = now
-            showToast(t("playButton.fileWatcherChangeDetected"), "info")
-          }
           return "repair"
         }
 
@@ -276,12 +277,17 @@ export default function DownloadPlayButton({
       if (launchStatus === "idle") {
         setStatus((prev) => {
           if (prev === "launching" || prev === "running") {
+            const idleState = resolveIdleGameButtonState(manifest)
+            if (idleState === "update") {
+              isRepairPendingRef.current = false
+              return "update"
+            }
             if (isRepairPendingRef.current) {
               isRepairPendingRef.current = false
               showToast(t("playButton.fileWatcherChangeDetected"), "info")
               return "repair"
             }
-            return resolveIdleGameButtonState(manifest)
+            return idleState
           }
           return prev
         })
@@ -515,7 +521,7 @@ export default function DownloadPlayButton({
           isStartingSyncRef.current = false
         })
     } else if (status === "play") {
-      // Pre-launch integrity check: verify sync plan before launching
+      // Pre-launch integrity check: verify sync plan before launching (fail-closed)
       if (window.electronAPI?.checkSyncPlan && manifest && manifest.clientFiles && manifest.clientFiles.length > 0) {
         try {
           const planCheck = await window.electronAPI.checkSyncPlan({
@@ -546,9 +552,16 @@ export default function DownloadPlayButton({
               setStatus("update")
               return
             }
+          } else {
+            // checkSyncPlan returned success: false -> FAIL CLOSED: do not launch Minecraft
+            showToast(t("playButton.launchError"), "error")
+            return
           }
         } catch (err) {
+          // checkSyncPlan threw an exception -> FAIL CLOSED: do not launch Minecraft
           console.error("Pre-launch check failed:", err)
+          showToast(t("playButton.launchError"), "error")
+          return
         }
       }
 

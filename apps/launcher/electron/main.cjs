@@ -33,7 +33,7 @@ if (process.defaultApp) {
   app.setAsDefaultProtocolClient("hikat")
 }
 
-const { loadInstalledManifest } = require("./client-files-sync.cjs")
+const { loadInstalledManifest, ENFORCED_DIRECTORIES } = require("./client-files-sync.cjs")
 
 const instanceRoot = path.join(appDataRoot, "game files")
 const gameLauncher = new GameLauncher(app, { instanceRoot })
@@ -82,9 +82,14 @@ function setupInstanceWatcher() {
           return
         }
 
-        // Check if file is tracked as NO_MODIFICABLE or in an enforced directory
+        // Check if file is tracked as NO_MODIFICABLE or in an enforced directory controlled by sync engine
         const isNoModificable = fileMeta && fileMeta.policy === "NO_MODIFICABLE"
-        const isEnforcedDir = relPath.startsWith("mods/") || relPath.startsWith("datapacks/")
+        const enforcedDirs = Array.isArray(ENFORCED_DIRECTORIES)
+          ? ENFORCED_DIRECTORIES
+          : ["mods", "resourcepacks", "shaderpacks", "kubejs", "scripts"]
+        const isEnforcedDir = enforcedDirs.some(
+          (dir) => relPath === dir || relPath.startsWith(`${dir}/`),
+        )
 
         if (isNoModificable || isEnforcedDir) {
           if (mainWindow && !mainWindow.isDestroyed()) {
