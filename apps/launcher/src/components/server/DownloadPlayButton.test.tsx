@@ -1718,6 +1718,193 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(btn.textContent).not.toContain("PAUSADO")
     })
   })
+
+  /* ─────────────────────────────────────────────────────────────
+   * Shard 8G: Repair State, Pre-Launch Integrity & Watcher Suite
+   * ───────────────────────────────────────────────────────────── */
+  describe("Shard 8G: Repair State, Pre-Launch Integrity & Watcher Suite", () => {
+    it("1. Same modpackVersion + missing/corrupt NO_MODIFICABLE file resolves to REPARAR (repair)", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        needsRepair: true,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/corrupted.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/corrupted",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn).not.toBeNull()
+      expect(btn.textContent).toContain("REPARAR")
+      expect(btn.textContent).not.toContain("ACTUALIZAR")
+      expect(btn.textContent).not.toContain("JUGAR")
+    })
+
+    it("2. Different modpackVersion resolves to ACTUALIZAR (update), prioritizing update > repair", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        needsRepair: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn).not.toBeNull()
+      expect(btn.textContent).toContain("ACTUALIZAR")
+      expect(btn.textContent).not.toContain("REPARAR")
+    })
+
+    it("3. Pre-launch check blocks launch and transitions to REPARAR when corrupted install is detected at play-time", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/required.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/required",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const launchSpy = vi.spyOn(gameService, "launchGame")
+
+      // At click time, checkSyncPlan discovers that required.jar is missing on disk
+      window.electronAPI!.checkSyncPlan = vi.fn().mockResolvedValue({
+        success: true,
+        filesToDownload: 1,
+        filesToPrune: 0,
+        totalDownloadBytes: 100,
+        needsUpdate: true,
+        needsRepair: true,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        isFullyInstalled: false,
+      })
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      // Click JUGAR
+      await act(async () => {
+        btn.click()
+      })
+
+      // Must NOT launch Minecraft
+      expect(launchSpy).not.toHaveBeenCalled()
+
+      // Button transitions to REPARAR
+      expect(btn.textContent).toContain("REPARAR")
+    })
+
+    it("4. Clicking REPARAR reuses handleVerifyInstallation without duplicating verify logic", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        needsRepair: true,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/fix.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/fix",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("REPARAR")
+
+      // Click REPARAR
+      await act(async () => {
+        btn.click()
+      })
+
+      // startSync was called with isVerify = true
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        expect.any(Array),
+        "1.0.0",
+        "1.21.1",
+        "NEOFORGE",
+        undefined,
+        "21.1.65",
+        true,
+      )
+    })
+
+    it("5. Filesystem integrity watcher updates status to REPARAR when idle in PLAY", async () => {
+      let watcherCallback: any = null
+      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
+        watcherCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      // Trigger watcher event for a deleted NO_MODIFICABLE file
+      await act(async () => {
+        watcherCallback?.({ path: "mods/core-mod.jar" })
+      })
+
+      expect(btn.textContent).toContain("REPARAR")
+    })
+  })
 })
 
 

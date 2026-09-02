@@ -33,6 +33,8 @@ if (process.defaultApp) {
   app.setAsDefaultProtocolClient("hikat")
 }
 
+const { loadInstalledManifest } = require("./client-files-sync.cjs")
+
 const instanceRoot = path.join(appDataRoot, "game files")
 const gameLauncher = new GameLauncher(app, { instanceRoot })
 const operationManager = new GameOperationManager()
@@ -41,6 +43,67 @@ const authStore = new SecureAuthStore(app.getPath("userData"))
 
 let mainWindow = null
 let splashWindow = null
+let instanceWatcher = null
+
+function setupInstanceWatcher() {
+  if (instanceWatcher) return
+  if (!fs.existsSync(instanceRoot)) return
+
+  try {
+    instanceWatcher = fs.watch(instanceRoot, { recursive: true }, async (_eventType, filename) => {
+      try {
+        if (!filename) return
+        const relPath = String(filename).replace(/\\/g, "/")
+
+        // Ignore internal metadata, logs, crashes, saves, screenshots, temp files
+        if (
+          relPath.startsWith(".hikat/") ||
+          relPath.startsWith("logs/") ||
+          relPath.startsWith("crash-reports/") ||
+          relPath.startsWith("saves/") ||
+          relPath.startsWith("screenshots/") ||
+          relPath.endsWith(".tmp") ||
+          relPath.endsWith(".log")
+        ) {
+          return
+        }
+
+        // If currently syncing/downloading, ignore watcher
+        if (operationManager && operationManager.getState() !== "IDLE") {
+          return
+        }
+
+        const installedManifest = await loadInstalledManifest(instanceRoot)
+        if (!installedManifest || !installedManifest.modpackVersion) return
+
+        const fileMeta = installedManifest.files && installedManifest.files[relPath]
+        // If file is explicitly tracked as MODIFICABLE, ignore
+        if (fileMeta && fileMeta.policy === "MODIFICABLE") {
+          return
+        }
+
+        // Check if file is tracked as NO_MODIFICABLE or in an enforced directory
+        const isNoModificable = fileMeta && fileMeta.policy === "NO_MODIFICABLE"
+        const isEnforcedDir = relPath.startsWith("mods/") || relPath.startsWith("datapacks/")
+
+        if (isNoModificable || isEnforcedDir) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("game-file-integrity-changed", { path: relPath })
+          }
+        }
+      } catch (_) {}
+    })
+
+    instanceWatcher.on("error", () => {
+      try {
+        instanceWatcher?.close()
+      } catch (_) {}
+      instanceWatcher = null
+    })
+  } catch (_) {
+    instanceWatcher = null
+  }
+}
 
 gameLauncher.onStatusChangeCallback = (status) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1340,6 +1403,7 @@ ipcMain.on("open-external", (_event, url) => {
 // Game Download, Verification & Launch IPC Bridges
 ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
   try {
+    setupInstanceWatcher()
     return await operationManager.checkPlan({
       instanceRoot,
       clientFiles: payload.clientFiles,
@@ -1368,7 +1432,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     }
   }
 
-  return await operationManager.startSync({
+  const result = await operationManager.startSync({
     instanceRoot,
     clientFiles: payload.clientFiles,
     modpackVersion: payload.modpackVersion,
@@ -1381,6 +1445,9 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     onProgress,
     onPhaseChange,
   })
+
+  setupInstanceWatcher()
+  return result
 })
 
 ipcMain.handle("game-pause-sync", async () => {
@@ -1418,6 +1485,7 @@ ipcMain.handle("game-get-status", async () => {
 
 app.whenReady().then(() => {
   startOAuthLoopbackServer()
+  setupInstanceWatcher()
 
   createSplashWindow()
   createWindow()

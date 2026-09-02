@@ -154,6 +154,11 @@ class GameOperationManager {
     const isFullyInstalled = clientSynced && Boolean(core.installed) && javaValid
     const needsUpdate = !isFullyInstalled
     const hasExistingInstall = Boolean(core.resolvedVersionId)
+    const needsRepair = Boolean(
+      installedManifest.modpackVersion &&
+      releaseMatches &&
+      !isFullyInstalled
+    )
 
     const session = await loadDownloadSession(instanceRoot)
     const isSessionInstalling = session && session.status === "INSTALLING"
@@ -186,6 +191,8 @@ class GameOperationManager {
       filesToPrune: clientPlan.toPrune.length,
       totalDownloadBytes: clientPlan.totalDownloadBytes,
       needsUpdate,
+      needsRepair,
+      installedModpackVersion: installedManifest.modpackVersion || null,
       hasExistingInstall,
       isFullyInstalled,
       hasPausedSession,

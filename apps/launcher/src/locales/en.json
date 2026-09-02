@@ -71,6 +71,7 @@
     "running": "RUNNING",
     "download": "DOWNLOAD",
     "update": "UPDATE",
+    "repair": "REPAIR",
     "play": "PLAY",
     "unavailable": "UNAVAILABLE",
     "downloading": "DOWNLOADING",
@@ -99,7 +100,8 @@
     "noClientFiles": "Game files are not available at this moment.",
     "syncError": "Could not complete the download. Please check your internet connection.",
     "syncSuccess": "Download completed successfully",
-    "launchError": "Could not launch the game. Try repairing the installation in Settings."
+    "launchError": "Could not launch the game. Try repairing the installation in Settings.",
+    "fileWatcherChangeDetected": "Changes detected in game files. The installation must be repaired before playing."
   },
   "home": {
     "heroSubtitle": "Master this vast world through engineering, soar through the skies, sail the seas and create an industrial revolution.",

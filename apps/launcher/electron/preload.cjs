@@ -69,4 +69,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("game-launch-status", handler)
     return () => ipcRenderer.removeListener("game-launch-status", handler)
   },
+  onGameFileIntegrityChanged: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on("game-file-integrity-changed", handler)
+    return () => ipcRenderer.removeListener("game-file-integrity-changed", handler)
+  },
 })

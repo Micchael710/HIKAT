@@ -71,6 +71,7 @@
     "running": "EN COURS",
     "download": "TÉLÉCHARGER",
     "update": "METTRE À JOUR",
+    "repair": "RÉPARER",
     "play": "JOUER",
     "unavailable": "INDISPONIBLE",
     "downloading": "TÉLÉCHARGEMENT",
@@ -98,7 +99,8 @@
     "noClientFiles": "Les fichiers du jeu ne sont pas disponibles pour le moment.",
     "syncError": "Impossible de terminer le téléchargement. Veuillez vérifier votre connexion Internet.",
     "syncSuccess": "Téléchargement terminé avec succès",
-    "launchError": "Impossible de lancer le jeu. Essayez de réparer l'installation dans les Paramètres."
+    "launchError": "Impossible de lancer le jeu. Essayez de réparer l'installation dans les Paramètres.",
+    "fileWatcherChangeDetected": "Des modifications ont été détectées dans les fichiers du jeu. L'installation doit être réparée avant de jouer."
   },
   "home": {
     "heroSubtitle": "Maîtrisez ce vaste monde grâce à l'ingénierie, sillonnez les cieux, naviguez sur les mers et créez une révolution industrielle.",

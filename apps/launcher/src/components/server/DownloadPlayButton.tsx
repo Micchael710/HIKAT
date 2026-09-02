@@ -30,12 +30,19 @@ export function resolveIdleGameButtonState(
   }
 
   // 1. Installed and fully synchronized
-  if (manifest.installed && !manifest.hasUpdate) {
+  if (manifest.installed && !manifest.hasUpdate && !manifest.needsRepair) {
     return "play"
   }
 
-  // 2. Existing previous installation that needs update/synchronization
-  if (manifest.hasExistingInstall && (manifest.hasUpdate || !manifest.installed)) {
+  // 2. Existing previous installation that needs update/synchronization or repair
+  if (manifest.hasExistingInstall && (manifest.hasUpdate || manifest.needsRepair || !manifest.installed)) {
+    // Priority: update > repair
+    if (manifest.hasUpdate) {
+      return "update"
+    }
+    if (manifest.needsRepair) {
+      return "repair"
+    }
     return "update"
   }
 
@@ -48,7 +55,7 @@ export function resolveIdleGameButtonState(
   }
 
   // 4. Fallback if marked installed
-  if (manifest.installed) {
+  if (manifest.installed && !manifest.needsRepair) {
     return "play"
   }
 
@@ -108,12 +115,41 @@ export default function DownloadPlayButton({
   const isStartingSyncRef = useRef(false)
   const isCancellingRef = useRef(false)
   const latestManifestVersionRef = useRef<string | null>(null)
+  const isRepairPendingRef = useRef(false)
+  const lastWatcherToastTimeRef = useRef(0)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const isDark = theme === "dark"
 
   useEffect(() => {
     latestManifestVersionRef.current = manifest?.version ?? null
   }, [manifest?.version])
+
+  // Listen to filesystem integrity changes while launcher is open
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onGameFileIntegrityChanged?.(() => {
+      const now = Date.now()
+      const shouldShowToast = now - lastWatcherToastTimeRef.current > 8000
+
+      setStatus((prevStatus) => {
+        if (prevStatus === "running" || prevStatus === "launching") {
+          isRepairPendingRef.current = true
+          return prevStatus
+        }
+
+        if (prevStatus === "play") {
+          if (shouldShowToast) {
+            lastWatcherToastTimeRef.current = now
+            showToast(t("playButton.fileWatcherChangeDetected"), "info")
+          }
+          return "repair"
+        }
+
+        return prevStatus
+      })
+    })
+
+    return () => unsubscribe?.()
+  }, [t])
 
   const showToast = (
     msg: string,
@@ -240,6 +276,11 @@ export default function DownloadPlayButton({
       if (launchStatus === "idle") {
         setStatus((prev) => {
           if (prev === "launching" || prev === "running") {
+            if (isRepairPendingRef.current) {
+              isRepairPendingRef.current = false
+              showToast(t("playButton.fileWatcherChangeDetected"), "info")
+              return "repair"
+            }
             return resolveIdleGameButtonState(manifest)
           }
           return prev
@@ -414,6 +455,10 @@ export default function DownloadPlayButton({
     ) {
       return
     }
+    if (status === "repair") {
+      handleVerifyInstallation()
+      return
+    }
     if (status === "download" || status === "update") {
       if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
         showToast(t("playButton.noClientFiles"), "error")
@@ -470,6 +515,43 @@ export default function DownloadPlayButton({
           isStartingSyncRef.current = false
         })
     } else if (status === "play") {
+      // Pre-launch integrity check: verify sync plan before launching
+      if (window.electronAPI?.checkSyncPlan && manifest && manifest.clientFiles && manifest.clientFiles.length > 0) {
+        try {
+          const planCheck = await window.electronAPI.checkSyncPlan({
+            clientFiles: manifest.clientFiles,
+            modpackVersion: manifest.version,
+            minecraftVersion: manifest.minecraftVersion,
+            modLoader: manifest.modLoader,
+            modLoaderVersion: manifest.modLoaderVersion ?? undefined,
+            neoForgeVersion: manifest.neoForgeVersion ?? undefined,
+          })
+          if (planCheck && planCheck.success) {
+            if (
+              planCheck.needsRepair ||
+              (planCheck.hasExistingInstall &&
+                planCheck.needsUpdate &&
+                planCheck.installedModpackVersion === manifest.version)
+            ) {
+              setManifest((prev) =>
+                prev ? { ...prev, installed: false, hasUpdate: false, needsRepair: true } : prev,
+              )
+              setStatus("repair")
+              showToast(t("playButton.fileWatcherChangeDetected"), "info")
+              return
+            } else if (planCheck.needsUpdate) {
+              setManifest((prev) =>
+                prev ? { ...prev, installed: false, hasUpdate: true, needsRepair: false } : prev,
+              )
+              setStatus("update")
+              return
+            }
+          }
+        } catch (err) {
+          console.error("Pre-launch check failed:", err)
+        }
+      }
+
       const ramGB = Number(localStorage.getItem("hikat_ram_gb")) || 4
       let playerName = "Player"
       try {
@@ -575,11 +657,12 @@ export default function DownloadPlayButton({
     }
   }
 
-  /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / PLAY ── */
+  /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / REPAIR / PLAY ── */
   if (!isExpanded) {
     const isChecking = status === "checking"
     const isUnavailable = status === "unavailable"
     const isUpdate = status === "update"
+    const isRepair = status === "repair"
     const isPlay = status === "play"
     const isLaunching = status === "launching"
     const isRunning = status === "running"
@@ -655,9 +738,11 @@ export default function DownloadPlayButton({
                     ? t("playButton.unavailable")
                     : isUpdate
                       ? t("playButton.update")
-                      : isPlay
-                        ? t("playButton.play")
-                        : t("playButton.download")}
+                      : isRepair
+                        ? t("playButton.repair")
+                        : isPlay
+                          ? t("playButton.play")
+                          : t("playButton.download")}
           </span>
         </button>
 

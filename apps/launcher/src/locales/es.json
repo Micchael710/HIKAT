@@ -71,6 +71,7 @@
     "running": "EN EJECUCIÓN",
     "download": "DESCARGAR",
     "update": "ACTUALIZAR",
+    "repair": "REPARAR",
     "play": "JUGAR",
     "unavailable": "NO DISPONIBLE",
     "downloading": "DESCARGANDO",
@@ -99,7 +100,8 @@
     "noClientFiles": "Los archivos del juego no están disponibles en este momento.",
     "syncError": "No se pudo completar la descarga. Comprueba tu conexión a internet.",
     "syncSuccess": "Descarga completada con éxito",
-    "launchError": "No se pudo iniciar el juego. Intenta reparar la instalación en Configuración."
+    "launchError": "No se pudo iniciar el juego. Intenta reparar la instalación en Configuración.",
+    "fileWatcherChangeDetected": "Se detectaron cambios en los archivos del juego. La instalación debe repararse antes de jugar."
   },
   "home": {
     "heroSubtitle": "Domina este vasto mundo a través de la ingeniería, surca los cielos, navega los mares y crea una revolución industrial.",

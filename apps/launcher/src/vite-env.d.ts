@@ -54,6 +54,8 @@ export interface SyncPlanCheckResult {
   filesToPrune: number
   totalDownloadBytes: number
   needsUpdate: boolean
+  needsRepair?: boolean
+  installedModpackVersion?: string | null
   hasExistingInstall?: boolean
   isFullyInstalled?: boolean
   hasPausedSession?: boolean
@@ -125,6 +127,7 @@ interface ElectronAPI {
   onLaunchStatus?: (
     callback: (status: "idle" | "preparing" | "running") => void
   ) => () => void
+  onGameFileIntegrityChanged?: (callback: (data: { path: string }) => void) => () => void
 }
 
 interface Window {
