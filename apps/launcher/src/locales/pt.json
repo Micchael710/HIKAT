@@ -91,6 +91,8 @@
     "verifyInstallation": "Verificar instalação",
     "uninstallGame": "Desinstalar jogo",
     "verifying": "Verificando os arquivos do jogo...",
+    "verifyingAction": "VERIFICANDO",
+    "verifyMessage": "Conferindo as patinhas...",
     "verifySuccess": "Arquivos do jogo verificados com sucesso",
     "verifyError": "Não foi possível verificar o jogo. Tente novamente mais tarde.",
     "uninstallSuccess": "Jogo desinstalado com sucesso",

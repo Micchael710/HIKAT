@@ -2305,6 +2305,93 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       })
       container.remove()
     })
+
+    it("15. VERIFICANDO shows VERIFICANDO and verifyMessage, hides MB, MB/s and MIN", async () => {
+      let downloadProgressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        downloadProgressCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let resolveSyncPromise: any = null
+      vi.spyOn(gameService, "startSync").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSyncPromise = resolve
+          })
+      )
+
+      const { container } = await mountButton()
+
+      // Open options dropdown menu
+      const optionsBtn = container.querySelector("button[title='Opciones del juego']") as HTMLElement
+      expect(optionsBtn).not.toBeNull()
+      await act(async () => {
+        optionsBtn.click()
+      })
+
+      // Click "Verificar instalación"
+      const verifyMenuItem = Array.from(container.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Verificar instalación")
+      )
+      expect(verifyMenuItem).toBeDefined()
+
+      await act(async () => {
+        verifyMenuItem!.click()
+      })
+
+      // In verifying state
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card).not.toBeNull()
+      expect(card.textContent).toContain("VERIFICANDO")
+      expect(card.textContent).toContain("Revisando las patitas...")
+
+      // Verify that download metrics (MB, MB/s, min) are completely hidden
+      expect(card.textContent).not.toContain("MB /")
+      expect(card.textContent).not.toContain("MB/s")
+      expect(card.textContent).not.toContain("min")
+
+      // Emit progress 60%
+      await act(async () => {
+        downloadProgressCb?.({
+          phase: "VERIFYING",
+          progress: 60,
+        })
+      })
+
+      expect(card.textContent).toContain("60%")
+      expect(card.textContent).toContain("Revisando las patitas...")
+      expect(card.textContent).not.toContain("MB /")
+      expect(card.textContent).not.toContain("MB/s")
+      expect(card.textContent).not.toContain("min")
+
+      // Complete sync
+      await act(async () => {
+        resolveSyncPromise?.({ success: true })
+      })
+    })
   })
 })
 

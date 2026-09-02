@@ -956,4 +956,160 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     const finalManifest = await loadInstalledManifest(instanceRoot)
     expect(finalManifest.modpackVersion).toBe("1.0.0")
   })
+
+  it("38. Verification progress advances beyond 25% and finishes at 100% with healthy core", async () => {
+    const progressEmissions: number[] = []
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({
+        installed: true,
+        resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      }),
+      coreInstaller: async () => ({ success: true }),
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "valid-mod")
+    const hash = crypto.createHash("sha256").update("valid-mod").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      isVerify: true,
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 9,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      onProgress: (data: any) => {
+        if (typeof data?.progress === "number") {
+          progressEmissions.push(data.progress)
+        }
+      },
+    }
+
+    const result = await manager.startSync(payload)
+    expect(result.success).toBe(true)
+
+    // Verify progress advanced beyond 25% and ended at 100%
+    expect(progressEmissions.some((p) => p > 25)).toBe(true)
+    expect(progressEmissions.some((p) => p >= 90)).toBe(true)
+    expect(progressEmissions[progressEmissions.length - 1]).toBe(100)
+  })
+
+  it("39. Update with healthy Core advances beyond 25% and finishes at 100%", async () => {
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      lastSync: new Date().toISOString(),
+      files: { "mods": { policy: "NO_MODIFICABLE" } },
+    })
+
+    const progressEmissions: number[] = []
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({
+        installed: true,
+        resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      }),
+      coreInstaller: async () => ({ success: true }),
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "v2-content")
+    const hash = crypto.createHash("sha256").update("v2-content").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.1.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 10,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      onProgress: (data: any) => {
+        if (typeof data?.progress === "number") {
+          progressEmissions.push(data.progress)
+        }
+      },
+    }
+
+    const result = await manager.startSync(payload)
+    expect(result.success).toBe(true)
+
+    expect(progressEmissions.some((p) => p > 25)).toBe(true)
+    expect(progressEmissions.some((p) => p >= 90)).toBe(true)
+    expect(progressEmissions[progressEmissions.length - 1]).toBe(100)
+  })
+
+  it("40. Fresh installation with XMCL core installer emits installer progress", async () => {
+    const progressEmissions: number[] = []
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({
+        installed: false,
+        resolvedVersionId: null,
+      }),
+      coreInstaller: async ({ onProgress }: any) => {
+        onProgress?.({ phase: "INSTALLING", progress: 50 })
+        onProgress?.({ phase: "INSTALLING", progress: 80 })
+        return { success: true }
+      },
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "fresh-content")
+    const hash = crypto.createHash("sha256").update("fresh-content").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 13,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      onProgress: (data: any) => {
+        if (typeof data?.progress === "number") {
+          progressEmissions.push(data.progress)
+        }
+      },
+    }
+
+    const result = await manager.startSync(payload)
+    expect(result.success).toBe(true)
+
+    expect(progressEmissions).toContain(50)
+    expect(progressEmissions).toContain(80)
+    expect(progressEmissions[progressEmissions.length - 1]).toBe(100)
+  })
 })

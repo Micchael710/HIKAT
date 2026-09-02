@@ -268,6 +268,7 @@ class GameOperationManager {
           modpackVersion,
           directoryPolicies,
           isVerify,
+          onProgress,
         )
         const installedManifest = await loadInstalledManifest(instanceRoot)
 
@@ -361,6 +362,12 @@ class GameOperationManager {
 
           if (isVerify && coreStatus.installed) {
             // Core is already healthy
+            if (typeof onProgress === "function") {
+              onProgress({
+                phase: "VERIFYING",
+                progress: 95,
+              })
+            }
           } else {
             await this.coreInstaller({
               instanceRoot,
@@ -370,6 +377,14 @@ class GameOperationManager {
               neoForgeVersion,
               signal: abortController.signal,
               onProgress,
+            })
+          }
+        } else {
+          // Core is already installed and healthy during update/install
+          if (typeof onProgress === "function") {
+            onProgress({
+              phase: "INSTALLING",
+              progress: 95,
             })
           }
         }
@@ -391,9 +406,9 @@ class GameOperationManager {
         }
         await cleanStaging(instanceRoot)
 
-        if (!isVerify && typeof onProgress === "function") {
+        if (typeof onProgress === "function") {
           onProgress({
-            phase: "INSTALLING",
+            phase: isVerify ? "VERIFYING" : "INSTALLING",
             progress: 100,
           })
         }

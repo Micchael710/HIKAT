@@ -995,6 +995,17 @@ export default function DownloadPlayButton({
                 {t("playButton.pause")}
               </span>
             </div>
+          ) : isVerifying ? (
+            <span
+              style={{
+                color: isDark ? "rgba(255,255,255,.6)" : "#475569",
+                fontFamily: BASE_FONT,
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              {t("playButton.verifyMessage")}
+            </span>
           ) : isInstalling ? (
             <span
               style={{
@@ -1019,7 +1030,7 @@ export default function DownloadPlayButton({
             </span>
           )}
 
-          {!isInstalling && (
+          {!isInstalling && !isVerifying && (
             <span
               style={{
                 color: isDark ? "rgba(255,255,255,.6)" : "#475569",

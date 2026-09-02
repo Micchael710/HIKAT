@@ -4,6 +4,7 @@ export declare function generateSyncPlan(
   modpackVersion: string,
   directoryPolicies?: any[],
   isVerify?: boolean,
+  onProgress?: (data: any) => void,
 ): Promise<any>
 
 export declare function downloadClientFilesToStaging(options: {

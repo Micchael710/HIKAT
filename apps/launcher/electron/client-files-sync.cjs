@@ -466,6 +466,7 @@ async function generateSyncPlan(
   modpackVersion,
   directoryPolicies = [],
   isVerify = false,
+  onProgress = null,
 ) {
   const installedManifest = await loadInstalledManifest(instanceRoot)
   const previousFilesMap = installedManifest.files || {}
@@ -535,7 +536,18 @@ async function generateSyncPlan(
     })
   }
 
+  let checkedCount = 0
+  const totalClientFiles = clientFilesMap.size
+
   for (const [normalizedRelative, item] of clientFilesMap.entries()) {
+    checkedCount++
+    if (typeof onProgress === "function" && totalClientFiles > 0) {
+      const p = Math.round((checkedCount / totalClientFiles) * 30)
+      onProgress({
+        phase: isVerify ? "VERIFYING" : "INSTALLING",
+        progress: p,
+      })
+    }
     const { safeAbsolute, policy, expectedSha256, sizeBytes } = item
     const fileExists = fs.existsSync(safeAbsolute)
     const prevFileMeta = previousFilesMap[normalizedRelative]
@@ -1146,19 +1158,25 @@ async function applyStagingToInstance({
       isVerify,
     ))
 
+  const currentPhase = isVerify ? "VERIFYING" : "INSTALLING"
+
   if (typeof onPhaseChange === "function") {
-    onPhaseChange("INSTALLING")
+    onPhaseChange(currentPhase)
   }
+
+  const totalStaged = stagedFiles.length
+
   if (typeof onProgress === "function") {
     onProgress({
-      phase: "INSTALLING",
+      phase: currentPhase,
       downloadedBytes: effectivePlan.totalDownloadBytes,
       totalBytes: effectivePlan.totalDownloadBytes,
-      progress: 10,
+      progress: 35,
     })
   }
 
   // 1. Pre-application verification: Verify EVERY staged file before touching instance files
+  let verifiedCount = 0
   for (const { task, stagingFilePath } of stagedFiles) {
     if (!fs.existsSync(stagingFilePath)) {
       throw new Error(`Staged file missing before installation: ${task.path}`)
@@ -1175,18 +1193,20 @@ async function applyStagingToInstance({
         `Staged file SHA-256 mismatch for ${task.path}: expected ${task.sha256}, got ${actualSha256}.`,
       )
     }
-  }
-
-  if (typeof onProgress === "function") {
-    onProgress({
-      phase: "INSTALLING",
-      downloadedBytes: effectivePlan.totalDownloadBytes,
-      totalBytes: effectivePlan.totalDownloadBytes,
-      progress: 15,
-    })
+    verifiedCount++
+    if (typeof onProgress === "function" && totalStaged > 0) {
+      const p = Math.round(35 + (verifiedCount / totalStaged) * 15)
+      onProgress({
+        phase: currentPhase,
+        downloadedBytes: effectivePlan.totalDownloadBytes,
+        totalBytes: effectivePlan.totalDownloadBytes,
+        progress: p,
+      })
+    }
   }
 
   // 2. Atomic Replacement into instance root
+  let appliedCount = 0
   for (const { task, stagingFilePath } of stagedFiles) {
     const destPath = task.safeAbsolute
     await fsp.mkdir(path.dirname(destPath), { recursive: true })
@@ -1206,9 +1226,21 @@ async function applyStagingToInstance({
       } catch (_) {}
       throw err
     }
+    appliedCount++
+    if (typeof onProgress === "function" && totalStaged > 0) {
+      const p = Math.round(50 + (appliedCount / totalStaged) * 25)
+      onProgress({
+        phase: currentPhase,
+        downloadedBytes: effectivePlan.totalDownloadBytes,
+        totalBytes: effectivePlan.totalDownloadBytes,
+        progress: p,
+      })
+    }
   }
 
   // 3. Prune obsolete files in strict directories
+  const totalPrune = effectivePlan.toPrune.length
+  let prunedCount = 0
   for (const pruneItem of effectivePlan.toPrune) {
     if (fs.existsSync(pruneItem.safeAbsolute)) {
       try {
@@ -1219,14 +1251,24 @@ async function applyStagingToInstance({
         )
       }
     }
+    prunedCount++
+    if (typeof onProgress === "function" && totalPrune > 0) {
+      const p = Math.round(75 + (prunedCount / totalPrune) * 10)
+      onProgress({
+        phase: currentPhase,
+        downloadedBytes: effectivePlan.totalDownloadBytes,
+        totalBytes: effectivePlan.totalDownloadBytes,
+        progress: p,
+      })
+    }
   }
 
   if (typeof onProgress === "function") {
     onProgress({
-      phase: "INSTALLING",
+      phase: currentPhase,
       downloadedBytes: effectivePlan.totalDownloadBytes,
       totalBytes: effectivePlan.totalDownloadBytes,
-      progress: 20,
+      progress: 85,
     })
   }
 
@@ -1246,10 +1288,10 @@ async function applyStagingToInstance({
 
   if (typeof onProgress === "function") {
     onProgress({
-      phase: "INSTALLING",
+      phase: currentPhase,
       downloadedBytes: effectivePlan.totalDownloadBytes,
       totalBytes: effectivePlan.totalDownloadBytes,
-      progress: 25,
+      progress: 90,
     })
   }
 
