@@ -194,37 +194,14 @@ export default function DownloadPlayButton({
         return
       }
 
-      const newModpack = await gameService.getPublishedModpack()
-      if (!newModpack || newModpack.version === manifest.version) return
+      const freshManifest = await gameService.checkGameManifest()
+      if (!freshManifest || freshManifest.version === manifest.version) return
 
-      const totalBytesCalculated = manifestTotalBytes(newModpack.clientFiles)
-      const totalSizeGB = Number((totalBytesCalculated / 1024 / 1024 / 1024).toFixed(2))
-
-      const hasPrevInstall =
-        Boolean(manifest.hasExistingInstall) ||
-        Boolean(manifest.installed) ||
-        gameService.isGameInstalled()
-
-      const newManifest: GameManifest = {
-        version: newModpack.version,
-        minecraftVersion: newModpack.minecraftVersion,
-        modLoader: newModpack.modLoader || "NEOFORGE",
-        modLoaderVersion: newModpack.modLoaderVersion ?? null,
-        neoForgeVersion: newModpack.neoForgeVersion ?? null,
-        totalSizeGB,
-        hasUpdate: hasPrevInstall,
-        clientFiles: newModpack.clientFiles,
-        installed: false,
-        hasExistingInstall: hasPrevInstall,
-      }
-
-      try {
-        localStorage.setItem("hikat_game_manifest", JSON.stringify(newModpack))
-      } catch (_) { }
-
-      latestManifestVersionRef.current = newManifest.version
-      setManifest(newManifest)
-      setTotalBytes(totalBytesCalculated)
+      latestManifestVersionRef.current = freshManifest.version
+      setManifest(freshManifest)
+      setTotalBytes(
+        freshManifest.totalDownloadBytes || manifestTotalBytes(freshManifest.clientFiles),
+      )
 
       setStatus((prevStatus) => {
         if (
@@ -238,7 +215,7 @@ export default function DownloadPlayButton({
           return prevStatus
         }
 
-        return hasPrevInstall ? "update" : "download"
+        return resolveIdleGameButtonState(freshManifest)
       })
     })
 
@@ -795,7 +772,7 @@ export default function DownloadPlayButton({
   /* ── DOWNLOADING / PAUSED / INSTALLING / VERIFYING (Progress card) ── */
   const currentDownloadedBytes =
     downloadedBytes > 0 ? downloadedBytes : (totalBytes * progress) / 100
-  const isUpdating = manifest?.hasUpdate
+  const isUpdating = Boolean(manifest?.hasExistingInstall)
   const isInstalling = status === "installing"
   const isVerifying = status === "verifying"
 

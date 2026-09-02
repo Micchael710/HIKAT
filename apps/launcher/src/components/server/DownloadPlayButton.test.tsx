@@ -784,41 +784,44 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     container.remove()
   })
 
-  it("Test 10 — Realtime RELEASE_ACTIVATED event triggers getPublishedModpack and switches to ACTUALIZAR (UPDATE) when installed", async () => {
+  it("Test 10 — Realtime RELEASE_ACTIVATED event queries checkGameManifest and switches to ACTUALIZAR (UPDATE) when installed", async () => {
     let releaseCallback: any
     vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
       releaseCallback = cb
       return () => {}
     })
 
-    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-      version: "1.0.0",
-      minecraftVersion: "1.21.1",
-      neoForgeVersion: "21.1.65",
-      modLoader: "NEOFORGE",
-      installed: true,
-      hasUpdate: false,
-      hasExistingInstall: true,
-      totalSizeGB: 10,
-      clientFiles: [],
-    })
-
-    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
-      version: "1.1.0",
-      minecraftVersion: "1.21.1",
-      neoForgeVersion: "21.1.65",
-      modLoader: "NEOFORGE",
-      mandatory: true,
-      clientFiles: [
-        {
-          path: "mods/new.jar",
-          sha256: "e".repeat(64),
-          sizeBytes: 300,
-          downloadUrl: "/dl/new",
-          policy: "NO_MODIFICABLE",
-        },
-      ],
-    })
+    const checkSpy = vi.spyOn(gameService, "checkGameManifest")
+      .mockResolvedValueOnce({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 10,
+        clientFiles: [],
+      })
+      .mockResolvedValueOnce({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        totalSizeGB: 10,
+        clientFiles: [
+          {
+            path: "mods/new.jar",
+            sha256: "e".repeat(64),
+            sizeBytes: 300,
+            downloadUrl: "/dl/new",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
 
     const { container } = await mountButton()
     const btn = container.querySelector("button") as HTMLElement
@@ -836,20 +839,19 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       })
     })
 
-    expect(getPublishedSpy).toHaveBeenCalledTimes(1)
-    // Does NOT call window.electronAPI.checkSyncPlan on WS event
+    expect(checkSpy).toHaveBeenCalledTimes(2)
     expect(btn.textContent).toContain("ACTUALIZAR")
     expect(btn.textContent).not.toContain("JUGAR")
   })
 
-  it("Test 11 — Realtime RELEASE_ACTIVATED with matching version does NOT trigger getPublishedModpack", async () => {
+  it("Test 11 — Realtime RELEASE_ACTIVATED with matching version does NOT re-query checkGameManifest", async () => {
     let releaseCallback: any
     vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
       releaseCallback = cb
       return () => {}
     })
 
-    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+    const checkSpy = vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
@@ -861,11 +863,10 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       clientFiles: [],
     })
 
-    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack")
-
     const { container } = await mountButton()
     const btn = container.querySelector("button") as HTMLElement
     expect(btn.textContent).toContain("JUGAR")
+    expect(checkSpy).toHaveBeenCalledTimes(1)
 
     // Event with identical version
     await act(async () => {
@@ -879,8 +880,143 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       })
     })
 
-    expect(getPublishedSpy).not.toHaveBeenCalled()
+    expect(checkSpy).toHaveBeenCalledTimes(1)
     expect(btn.textContent).toContain("JUGAR")
+  })
+
+  it("Test 11B — Sin juego instalado + nueva release → permanece en DESCARGAR", async () => {
+    let releaseCallback: any
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+      releaseCallback = cb
+      return () => {}
+    })
+
+    const checkSpy = vi.spyOn(gameService, "checkGameManifest")
+      .mockResolvedValueOnce({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: false,
+        totalSizeGB: 10,
+        clientFiles: [],
+      })
+      .mockResolvedValueOnce({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: false,
+        totalSizeGB: 10,
+        clientFiles: [
+          {
+            path: "mods/file.jar",
+            sha256: "f".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/file",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn.textContent).toContain("DESCARGAR")
+
+    // New release arrives
+    await act(async () => {
+      await releaseCallback?.({
+        type: "RELEASE_ACTIVATED",
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        mandatory: true,
+      })
+    })
+
+    expect(checkSpy).toHaveBeenCalledTimes(2)
+    // Must remain DESCARGAR, NOT switch to ACTUALIZAR
+    expect(btn.textContent).toContain("DESCARGAR")
+    expect(btn.textContent).not.toContain("ACTUALIZAR")
+  })
+
+  it("Test 11C — Sin juego + pulsar descargar muestra DESCARGANDO en vez de ACTUALIZANDO", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: false, // Clean install
+      totalSizeGB: 1,
+      clientFiles: [
+        {
+          path: "mods/file.jar",
+          sha256: "a".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/file",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn.textContent).toContain("DESCARGAR")
+
+    await act(async () => {
+      btn.click()
+    })
+
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    expect(card.textContent).toContain("DESCARGANDO")
+    expect(card.textContent).not.toContain("ACTUALIZANDO")
+  })
+
+  it("Test 11D — Juego instalado + pulsar actualizar muestra ACTUALIZANDO", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.1.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
+      installed: false,
+      hasUpdate: true,
+      hasExistingInstall: true, // Existing install update
+      totalSizeGB: 1,
+      clientFiles: [
+        {
+          path: "mods/patch.jar",
+          sha256: "b".repeat(64),
+          sizeBytes: 100,
+          downloadUrl: "/dl/patch",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+    })
+
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+
+    const { container } = await mountButton()
+    const btn = container.querySelector("button") as HTMLElement
+    expect(btn.textContent).toContain("ACTUALIZAR")
+
+    await act(async () => {
+      btn.click()
+    })
+
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    expect(card.textContent).toContain("ACTUALIZANDO")
+    expect(card.textContent).not.toContain("DESCARGANDO")
   })
 
   it("Test 12 — Realtime RELEASE_ACTIVATED does NOT interrupt in-progress download/pause/install", async () => {
@@ -955,25 +1091,45 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       return () => {}
     })
 
-    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-      version: "1.0.1",
-      minecraftVersion: "1.21.1",
-      neoForgeVersion: "21.1.65",
-      modLoader: "NEOFORGE",
-      installed: false,
-      hasUpdate: false,
-      hasExistingInstall: false,
-      totalSizeGB: 10,
-      clientFiles: [
-        {
-          path: "mods/mod-101.jar",
-          sha256: "a".repeat(64),
-          sizeBytes: 100,
-          downloadUrl: "/dl/mod101",
-          policy: "NO_MODIFICABLE",
-        },
-      ],
-    })
+    vi.spyOn(gameService, "checkGameManifest")
+      .mockResolvedValueOnce({
+        version: "1.0.1",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasExistingInstall: false,
+        totalSizeGB: 10,
+        clientFiles: [
+          {
+            path: "mods/mod-101.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/mod101",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        version: "1.0.2",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        totalSizeGB: 10,
+        clientFiles: [
+          {
+            path: "mods/mod-102.jar",
+            sha256: "b".repeat(64),
+            sizeBytes: 120,
+            downloadUrl: "/dl/mod102",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
 
     let resolveSync: any
     vi.spyOn(gameService, "startSync").mockImplementation(
@@ -982,23 +1138,6 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
           resolveSync = resolve
         }),
     )
-
-    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
-      version: "1.0.2",
-      minecraftVersion: "1.21.1",
-      neoForgeVersion: "21.1.65",
-      modLoader: "NEOFORGE",
-      mandatory: true,
-      clientFiles: [
-        {
-          path: "mods/mod-102.jar",
-          sha256: "b".repeat(64),
-          sizeBytes: 120,
-          downloadUrl: "/dl/mod102",
-          policy: "NO_MODIFICABLE",
-        },
-      ],
-    })
 
     const { container } = await mountButton()
 
@@ -1127,26 +1266,29 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     } as any
 
     vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
-    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-      version: "1.0.0",
-      minecraftVersion: "1.21.1",
-      neoForgeVersion: "21.1.65",
-      modLoader: "NEOFORGE",
-      installed: true,
-      hasUpdate: false,
-      hasExistingInstall: true,
-      totalSizeGB: 10,
-      clientFiles: [],
-    })
-
-    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
-      version: "1.0.1",
-      minecraftVersion: "1.21.1",
-      neoForgeVersion: "21.1.65",
-      modLoader: "NEOFORGE",
-      mandatory: true,
-      clientFiles: [],
-    })
+    vi.spyOn(gameService, "checkGameManifest")
+      .mockResolvedValueOnce({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 10,
+        clientFiles: [],
+      })
+      .mockResolvedValueOnce({
+        version: "1.0.1",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        totalSizeGB: 10,
+        clientFiles: [],
+      })
 
     const { container } = await mountButton()
     const btn = container.querySelector("button") as HTMLButtonElement
