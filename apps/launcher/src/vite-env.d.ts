@@ -12,6 +12,15 @@ export interface ClientFile {
 
 export type GameModLoader = "VANILLA" | "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT"
 
+export interface ContentMedia {
+  id: string
+  mediaType: "IMAGE" | "VIDEO"
+  mimeType: string
+  sizeBytes: number
+  url: string
+  createdAt: string
+}
+
 export interface PublishedModpack {
   version: string
   minecraftVersion: string
@@ -21,6 +30,8 @@ export interface PublishedModpack {
   neoForgeVersion?: string | null
   mandatory?: boolean
   clientFiles: ClientFile[]
+  notes?: string | null
+  cover?: ContentMedia | null
 }
 
 export interface DownloadProgressData {

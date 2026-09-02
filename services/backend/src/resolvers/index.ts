@@ -770,7 +770,7 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getPublishedModpack(context.db, context.env)
+      return getPublishedModpack(context.db, context.env, context.request)
     },
 
     adminGameOverview: async (

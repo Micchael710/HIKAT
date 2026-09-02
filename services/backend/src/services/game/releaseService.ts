@@ -15,6 +15,7 @@ import type {
   PrepareGameDraftInputGql,
   UpdateGameDraftMetadataInputGql,
   GameModLoaderGql,
+  ContentMediaGql,
 } from "@hikat/graphql"
 import {
   validateSemVer,
@@ -424,6 +425,7 @@ export async function hasServerRelevantChanges(
 export async function getPublishedModpack(
   db: Database,
   env: Env,
+  request?: Request,
 ): Promise<PublishedModpackGql | null> {
   const settings = await ensureSettingsRecord(db)
   if (!settings.launcherActiveReleaseId) {
@@ -450,7 +452,6 @@ export async function getPublishedModpack(
   // 2. Filter strictly for client-appropriate files
   const realFiles = allRecords.filter(isClientGameReleaseFile)
 
-
   const clientFiles: ClientFileGql[] = realFiles.map((file) => ({
     path: file.logicalPath,
     sha256: file.sha256,
@@ -458,6 +459,14 @@ export async function getPublishedModpack(
     downloadUrl: `/game/download/${file.id}`,
     policy: effectiveMap.get(file.id) || "NO_MODIFICABLE",
   }))
+
+  let cover: ContentMediaGql | null = null
+  if (activeRelease.coverMediaId) {
+    const media = await getContentMediaById(db, activeRelease.coverMediaId)
+    if (media) {
+      cover = formatMediaGql(media, env, request)
+    }
+  }
 
   return {
     version: activeRelease.version,
@@ -467,6 +476,8 @@ export async function getPublishedModpack(
     neoForgeVersion: activeRelease.neoForgeVersion || null,
     mandatory: true,
     clientFiles,
+    notes: activeRelease.notes || null,
+    cover,
   }
 }
 

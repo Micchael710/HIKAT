@@ -514,6 +514,8 @@ describe("@hikat/graphql foundation & contracts", () => {
       "neoForgeVersion",
       "mandatory",
       "clientFiles",
+      "notes",
+      "cover",
     ])
   })
 

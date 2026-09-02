@@ -135,6 +135,15 @@ export const GET_PUBLISHED_MODPACK_QUERY = `
         downloadUrl
         policy
       }
+      notes
+      cover {
+        id
+        mediaType
+        mimeType
+        sizeBytes
+        url
+        createdAt
+      }
     }
   }
 `

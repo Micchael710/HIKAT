@@ -613,6 +613,8 @@ export interface PublishedModpackGql {
   neoForgeVersion?: string | null
   mandatory: boolean
   clientFiles: ClientFileGql[]
+  notes?: string | null
+  cover?: ContentMediaGql | null
 }
 
 export interface AdminGameFileGql {

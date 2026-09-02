@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useState, useEffect } from "react"
 import { ThemeMode } from "../types"
 import { getThemeTokens, CANVAS_W, CANVAS_H } from "../theme/tokens"
 import { heroHomeBg, apparatiaLogo } from "../assets"
@@ -7,6 +7,9 @@ import NewsCarousel from "../components/news/NewsCarousel"
 import ServerStatsGrid from "../components/server/ServerStatsGrid"
 import CommunityHubGrid from "../components/server/CommunityHubGrid"
 import { useTranslation } from "../context/LanguageContext"
+import { gameService } from "../services/gameService"
+import { resolveApiAssetUrl } from "../config/api"
+import type { PublishedModpack } from "../vite-env"
 
 interface HomeViewProps {
   theme?: ThemeMode
@@ -22,6 +25,41 @@ export default function HomeView({
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
   const CONTENT_LEFT = 184
+
+  const [publishedModpack, setPublishedModpack] = useState<PublishedModpack | null>(null)
+  const [mediaError, setMediaError] = useState(false)
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadPublished = async () => {
+      try {
+        const data = await gameService.getPublishedModpack()
+        if (isMounted) {
+          setPublishedModpack(data)
+          setMediaError(false)
+        }
+      } catch {
+        // Fallback to default assets
+      }
+    }
+
+    loadPublished()
+
+    const unsubscribe = gameService.subscribeReleaseEvents((event) => {
+      if (event.type === "RELEASE_ACTIVATED") {
+        loadPublished()
+      }
+    })
+
+    return () => {
+      isMounted = false
+      unsubscribe()
+    }
+  }, [])
+
+  const cover = publishedModpack?.cover
+  const coverUrl = cover?.url ? resolveApiAssetUrl(cover.url) : ""
 
   return (
     <div
@@ -42,16 +80,46 @@ export default function HomeView({
           height: 1080,
         }}
       >
-        <img
-          alt="Apparatia World"
-          src={heroHomeBg}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
-        />
+        {!mediaError && cover?.mediaType === "VIDEO" && coverUrl ? (
+          <video
+            src={coverUrl}
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            onError={() => setMediaError(true)}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+        ) : !mediaError && cover?.mediaType === "IMAGE" && coverUrl ? (
+          <img
+            alt="Apparatia World"
+            src={coverUrl}
+            onError={() => setMediaError(true)}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+        ) : (
+          <img
+            alt="Apparatia World"
+            src={heroHomeBg}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+        )}
       </div>
       <div
         style={{
@@ -149,7 +217,7 @@ export default function HomeView({
           lineHeight: 1.55,
         }}
       >
-        {t("home.heroSubtitle")}
+        {publishedModpack?.notes?.trim() ? publishedModpack.notes : t("home.heroSubtitle")}
       </div>
 
       {/* ÚLTIMAS NOVEDADES (Positioned to peek smoothly at the bottom fold) */}

@@ -166,6 +166,8 @@ export const gameTypeDefs = /* GraphQL */ `
 
     mandatory: Boolean!
     clientFiles: [ClientFile!]!
+    notes: String
+    cover: ContentMedia
   }
 
   """

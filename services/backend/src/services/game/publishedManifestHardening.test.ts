@@ -13,6 +13,7 @@ describe("Shard 8E: Authoritative Client Manifest & Backend Security Suite", () 
   let mockR2: ReturnType<typeof createTestR2Bucket>
   let env: Env
   let releaseId: string
+  let adminId: string
 
   beforeEach(async () => {
     testD1 = createTestD1()
@@ -26,7 +27,7 @@ describe("Shard 8E: Authoritative Client Manifest & Backend Security Suite", () 
 
     releaseId = crypto.randomUUID()
     const now = new Date().toISOString()
-    const adminId = crypto.randomUUID()
+    adminId = crypto.randomUUID()
 
     await db.insert(schema.users).values({
       id: adminId,
@@ -431,5 +432,35 @@ describe("Shard 8E: Authoritative Client Manifest & Backend Security Suite", () 
     })
     const malformedRes = await handleGameFileDownload(malformedReq, env, db, modId)
     expect(malformedRes.status).toBe(416)
+  })
+
+  it("14. getPublishedModpack returns notes and cover (IMAGE / VIDEO) when configured in active release", async () => {
+    const coverMediaId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    await db.insert(schema.contentMedia).values({
+      id: coverMediaId,
+      objectKey: `content/media/${coverMediaId}.png`,
+      mediaType: "IMAGE",
+      mimeType: "image/png",
+      sizeBytes: 1024,
+      createdBy: adminId,
+      createdAt: now,
+    })
+
+    await db
+      .update(schema.gameReleases)
+      .set({
+        notes: "Changelog v1.5.0: Added sodium and performance patches",
+        coverMediaId,
+      })
+      .where(eq(schema.gameReleases.id, releaseId))
+
+    const modpack = await getPublishedModpack(db, env)
+    expect(modpack).toBeDefined()
+    expect(modpack?.notes).toBe("Changelog v1.5.0: Added sodium and performance patches")
+    expect(modpack?.cover).toBeDefined()
+    expect(modpack?.cover?.id).toBe(coverMediaId)
+    expect(modpack?.cover?.mediaType).toBe("IMAGE")
+    expect(modpack?.cover?.url).toContain(`/media/content/${coverMediaId}`)
   })
 })
