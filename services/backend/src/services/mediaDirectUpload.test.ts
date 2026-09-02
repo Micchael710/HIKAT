@@ -29,28 +29,9 @@ describe("HiKAT Content Media Direct R2 Multipart Upload Suite", () => {
       ENVIRONMENT: "test",
       CLOUDFLARE_ACCOUNT_ID: "cf-test-account-id",
       R2_PARENT_ACCESS_KEY_ID: "r2-parent-key-id",
-      R2_PARENT_API_TOKEN: "r2-parent-api-token",
+      R2_PARENT_SECRET_ACCESS_KEY: "r2-parent-secret-key-123456789",
       R2_BUCKET_NAME: "hikat-r2",
     }
-
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
-      const urlStr = String(url)
-      if (urlStr.includes("/r2/temp-access-credentials")) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            errors: [],
-            result: {
-              accessKeyId: "temp-access-key-id",
-              secretAccessKey: "temp-secret-access-key",
-              sessionToken: "temp-session-token",
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        )
-      }
-      return new Response("Not Found", { status: 404 })
-    })
 
     await db.insert(schema.users).values({
       id: adminId,
@@ -80,7 +61,8 @@ describe("HiKAT Content Media Direct R2 Multipart Upload Suite", () => {
     expect(payload.mediaId).toBeDefined()
     expect(payload.objectKey).toBe(`content/media/${payload.mediaId}.png`)
     expect(payload.maxSizeBytes).toBe(15 * 1024 * 1024)
-    expect(payload.credentials?.accessKeyId).toBe("temp-access-key-id")
+    expect(payload.credentials?.accessKeyId).toBe("r2-parent-key-id")
+    expect(payload.credentials?.sessionToken).toBeDefined()
   })
 
   it("2. Video > 25 MB (e.g. 100 MB) is NOT rejected by artificial limit", async () => {
@@ -126,20 +108,18 @@ describe("HiKAT Content Media Direct R2 Multipart Upload Suite", () => {
     ).rejects.toThrow("Configuración o credenciales temporales R2 no disponibles.")
   })
 
-  it("4. Fail-closed: throws INTERNAL_ERROR when Cloudflare responds with error", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ success: false, errors: [{ message: "Unauthorized token" }] }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      }),
-    )
+  it("5. Fail-closed: throws INTERNAL_ERROR when R2_PARENT_SECRET_ACCESS_KEY is missing", async () => {
+    const envNoSecret: Env = {
+      ...env,
+      R2_PARENT_SECRET_ACCESS_KEY: undefined,
+    }
 
     await expect(
-      createContentMediaUpload(db, env, adminId, {
+      createContentMediaUpload(db, envNoSecret, adminId, {
         mimeType: "image/png",
         sizeBytes: 1024,
       }),
-    ).rejects.toThrow("Cloudflare API responded with status 401")
+    ).rejects.toThrow("Configuración o credenciales temporales R2 no disponibles.")
   })
 
   it("5. Non-allowed MIME type is rejected", async () => {

@@ -20,7 +20,7 @@ export interface Env {
   RELEASE_EVENTS?: DurableObjectNamespace
   CLOUDFLARE_ACCOUNT_ID?: string
   R2_PARENT_ACCESS_KEY_ID?: string
-  R2_PARENT_API_TOKEN?: string
+  R2_PARENT_SECRET_ACCESS_KEY?: string
   R2_BUCKET_NAME?: string
 }
 

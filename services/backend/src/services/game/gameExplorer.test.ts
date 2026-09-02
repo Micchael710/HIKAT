@@ -53,28 +53,9 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       ENVIRONMENT: "test",
       CLOUDFLARE_ACCOUNT_ID: "cf-test-account-id",
       R2_PARENT_ACCESS_KEY_ID: "r2-parent-key-id",
-      R2_PARENT_API_TOKEN: "r2-parent-api-token",
+      R2_PARENT_SECRET_ACCESS_KEY: "r2-parent-secret-key-123456789",
       R2_BUCKET_NAME: "hikat-r2",
     }
-
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
-      const urlStr = String(url)
-      if (urlStr.includes("/r2/temp-access-credentials")) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            errors: [],
-            result: {
-              accessKeyId: "temp-access-key-id",
-              secretAccessKey: "temp-secret-access-key",
-              sessionToken: "temp-session-token",
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        )
-      }
-      return new Response("Not Found", { status: 404 })
-    })
 
     await db.insert(schema.users).values({
       id: adminId,
@@ -1273,7 +1254,8 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       expect(ticket.expectedCategory).toBe(category)
       expect(ticket.objectKey).toMatch(/^game-files\//)
       expect(ticket.bucket).toBe("hikat-r2")
-      expect(ticket.credentials.accessKeyId).toBe("temp-access-key-id")
+      expect(ticket.credentials.accessKeyId).toBe("r2-parent-key-id")
+      expect(ticket.credentials.sessionToken).toBeDefined()
 
       // Verify token in database
       const rawTokenBytes = new Uint8Array(
@@ -1577,27 +1559,7 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
   })
 
   describe("Large Game File Direct Upload Suite (R2 Multipart)", () => {
-    it("accepts 4 GB (4294967296 bytes) size and requests scoped R2 credentials", async () => {
-      let capturedRequestUrl: string | undefined
-      let capturedRequestBody: any
-
-      vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (url: any, opts: any) => {
-        capturedRequestUrl = String(url)
-        capturedRequestBody = JSON.parse(opts.body)
-        return new Response(
-          JSON.stringify({
-            success: true,
-            errors: [],
-            result: {
-              accessKeyId: "temp-4gb-key",
-              secretAccessKey: "temp-4gb-secret",
-              sessionToken: "temp-4gb-session",
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        )
-      })
-
+    it("accepts 4 GB (4294967296 bytes) size and generates scoped R2 credentials", async () => {
       const size4GB = 4 * 1024 * 1024 * 1024 // 4 GB
       const ticket = await createGameFileUploadToken(
         db,
@@ -1610,18 +1572,12 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
         env,
       )
 
-      expect(ticket.credentials.accessKeyId).toBe("temp-4gb-key")
-      expect(ticket.credentials.secretAccessKey).toBe("temp-4gb-secret")
-      expect(ticket.credentials.sessionToken).toBe("temp-4gb-session")
+      expect(ticket.credentials.accessKeyId).toBe("r2-parent-key-id")
+      expect(ticket.credentials.secretAccessKey).toBeDefined()
+      expect(ticket.credentials.sessionToken).toBeDefined()
       expect(ticket.objectKey).toMatch(/^game-files\//)
       expect(ticket.bucket).toBe("hikat-r2")
       expect(ticket.endpoint).toBe("https://cf-test-account-id.r2.cloudflarestorage.com")
-
-      // Verify fetch payload to Cloudflare
-      expect(capturedRequestUrl).toContain("/accounts/cf-test-account-id/r2/temp-access-credentials")
-      expect(capturedRequestBody.permission).toBe("object-read-write")
-      expect(capturedRequestBody.ttlSeconds).toBe(21600)
-      expect(capturedRequestBody.objects).toEqual([ticket.objectKey])
     })
 
     it("rejects invalid size <= 0 or exceeding practical multipart max", async () => {

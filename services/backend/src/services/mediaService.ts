@@ -40,6 +40,7 @@ import type {
   CompleteContentMediaUploadInputGql,
 } from "@hikat/graphql"
 import type { Env } from "../types"
+import { generateR2TemporaryCredentials } from "./r2CredentialsService"
 
 export async function sha256Hex(data: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -157,67 +158,16 @@ export async function createContentMediaUpload(
     )
   }
 
+  const accountId = env?.CLOUDFLARE_ACCOUNT_ID
+  const bucketName = env?.R2_BUCKET_NAME || "hikat-r2"
   const mediaId = crypto.randomUUID()
   const ext = getExtensionForMime(normalizedMime)
   const objectKey = `content/media/${mediaId}.${ext}`
 
-  const accountId = env?.CLOUDFLARE_ACCOUNT_ID
-  const parentAccessKeyId = env?.R2_PARENT_ACCESS_KEY_ID
-  const parentApiToken = env?.R2_PARENT_API_TOKEN
-  const bucketName = env?.R2_BUCKET_NAME || "hikat-r2"
-
-  if (!accountId || !parentAccessKeyId || !parentApiToken) {
-    throw createGraphQLError(
-      "Configuración o credenciales temporales R2 no disponibles.",
-      "INTERNAL_ERROR",
-    )
-  }
-
-  let accessKeyId: string
-  let secretAccessKey: string
-  let sessionToken: string
-
-  try {
-    const cfRes = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/temp-access-credentials`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${parentApiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          bucket: bucketName,
-          parentAccessKeyId,
-          permission: "object-read-write",
-          ttlSeconds: 21600,
-          objects: [objectKey],
-        }),
-      },
-    )
-
-    if (!cfRes.ok) {
-      throw new Error(`Cloudflare API responded with status ${cfRes.status}`)
-    }
-
-    const cfData = (await cfRes.json()) as any
-    if (!cfData || !cfData.success || !cfData.result) {
-      throw new Error(cfData?.errors?.[0]?.message || "Respuesta inválida de Cloudflare R2")
-    }
-
-    accessKeyId = cfData.result.accessKeyId || cfData.result.access_key_id
-    secretAccessKey = cfData.result.secretAccessKey || cfData.result.secret_access_key
-    sessionToken = cfData.result.sessionToken || cfData.result.session_token
-
-    if (!accessKeyId || !secretAccessKey || !sessionToken) {
-      throw new Error("Credenciales temporales incompletas de Cloudflare R2")
-    }
-  } catch (err: unknown) {
-    throw createGraphQLError(
-      err instanceof Error ? err.message : "Error al solicitar credenciales temporales R2.",
-      "INTERNAL_ERROR",
-    )
-  }
+  const credentials = await generateR2TemporaryCredentials({
+    env,
+    objectKey,
+  })
 
   const rawTokenBytes = new Uint8Array(32)
   crypto.getRandomValues(rawTokenBytes)
@@ -263,11 +213,7 @@ export async function createContentMediaUpload(
     objectKey,
     bucket: bucketName,
     endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-      sessionToken,
-    },
+    credentials,
     uploadUrl,
   }
 }
