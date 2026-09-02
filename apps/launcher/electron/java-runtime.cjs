@@ -158,7 +158,19 @@ async function ensureJavaRuntime({ appDataRoot, majorVersion = 21, component, si
 
   await fsp.mkdir(destination, { recursive: true })
   const workflow = createJavaRuntimeInstallWorkflow({ target, destination })
-  const runtime = createHiKatInstallRuntime({ signal })
+  const runtime = createHiKatInstallRuntime({
+    signal,
+    onTransferProgress: (progress) => {
+      if (typeof onProgress === "function") {
+        onProgress({
+          phase: "INSTALLING",
+          progress,
+        })
+      }
+    },
+    progressStart: 30,
+    progressEnd: 40,
+  })
   await executeInstallWorkflow(workflow, runtime, { signal })
 
   const installed = resolveJavaRuntime(appDataRoot, { isGui: false, majorVersion })

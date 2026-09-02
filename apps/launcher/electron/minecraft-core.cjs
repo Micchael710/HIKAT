@@ -132,13 +132,16 @@ async function installCore({
   const resolvedLoaderVersion = String(modLoaderVersion || neoForgeVersion || "").trim()
 
   const folder = MinecraftFolder.from(instanceRoot)
-  const runtime = createHiKatInstallRuntime({ signal })
+  const metadataRuntime = createHiKatInstallRuntime({ signal })
 
+  let lastReportedProgress = 0
   const reportInstallProgress = (value) => {
+    const clamped = Math.max(lastReportedProgress, Math.min(100, Math.round(value)))
+    lastReportedProgress = clamped
     if (typeof onProgress === "function") {
       onProgress({
         phase: "INSTALLING",
-        progress: value,
+        progress: clamped,
       })
     }
   }
@@ -158,7 +161,7 @@ async function installCore({
       schemaVersion: 1,
       tasks: [{ id: `minecraft:${cleanMc}:version-json`, type: "files", files: [versionJsonFile] }],
     },
-    runtime,
+    metadataRuntime,
     { signal }
   )
 
@@ -191,16 +194,16 @@ async function installCore({
     effectiveJavaPath = javaInfo.cliJavaPath || "java"
   }
 
-  reportInstallProgress(45)
+  reportInstallProgress(40)
 
-  // 4. Resolve and install Vanilla client jar, libraries, and assets
+  // 4. Resolve and install Vanilla client jar, libraries, and assets (Dynamic progress 40% -> 90%)
   const clientJarFile = resolveMinecraftJarInstallFile(vanillaVersion, { side: "client", signal })
   const libraryFiles = resolveLibraryInstallFiles(vanillaVersion.libraries, folder, { signal })
   const assetMetaManifest = resolveAssetMetadataInstallManifest(vanillaVersion, folder, {
     useHashForAssetsIndex: true,
     abortSignal: signal,
   })
-  await executeInstallManifest(assetMetaManifest, runtime, { signal })
+  await executeInstallManifest(assetMetaManifest, metadataRuntime, { signal })
   const assetFiles = await resolveAssetObjectInstallFiles(vanillaVersion, folder, {
     useHashForAssetsIndex: true,
     abortSignal: signal,
@@ -212,26 +215,40 @@ async function installCore({
     ...assetFiles,
   ]
 
+  const vanillaRuntime = createHiKatInstallRuntime({
+    signal,
+    onTransferProgress: reportInstallProgress,
+    progressStart: 40,
+    progressEnd: 90,
+  })
+
   if (vanillaFiles.length > 0) {
     await executeInstallManifest(
       {
         schemaVersion: 1,
         tasks: [{ id: `minecraft:${cleanMc}:files`, type: "files", files: vanillaFiles }],
       },
-      runtime,
+      vanillaRuntime,
       { signal }
     )
   }
 
-  reportInstallProgress(70)
+  reportInstallProgress(90)
 
   let finalVersionId = cleanMc
 
-  // 5. Install mod loader if required
+  // 5. Install mod loader if required (Dynamic progress 90% -> 95%)
   if (resolvedLoader !== "VANILLA") {
     if (!resolvedLoaderVersion) {
       throw new Error(`modLoaderVersion is required when modLoader is ${resolvedLoader}`)
     }
+
+    const loaderRuntime = createHiKatInstallRuntime({
+      signal,
+      onTransferProgress: reportInstallProgress,
+      progressStart: 90,
+      progressEnd: 95,
+    })
 
     if (resolvedLoader === "NEOFORGE") {
       const { file: installerFile } = await resolveNeoForgedInstallerFile(
@@ -253,7 +270,7 @@ async function installCore({
         side: "client",
       })
 
-      const result = await executeInstallWorkflow(workflow, runtime, { signal })
+      const result = await executeInstallWorkflow(workflow, loaderRuntime, { signal })
       finalVersionId =
         (result && typeof result === "object" ? result.version : result) || targetProfileId
 
@@ -290,7 +307,7 @@ async function installCore({
             side: "client",
           })
 
-      const result = await executeInstallWorkflow(workflow, runtime, { signal })
+      const result = await executeInstallWorkflow(workflow, loaderRuntime, { signal })
       finalVersionId =
         (result && typeof result === "object" ? result.version : result) || targetProfileId
 
@@ -301,7 +318,7 @@ async function installCore({
         version: resolvedLoaderVersion,
         side: "client",
       })
-      const result = await executeInstallWorkflow(workflow, runtime, { signal })
+      const result = await executeInstallWorkflow(workflow, loaderRuntime, { signal })
       finalVersionId =
         (result && typeof result === "object" ? result.version : result) ||
         `${cleanMc}-fabric-${resolvedLoaderVersion}`
@@ -313,7 +330,7 @@ async function installCore({
         version: resolvedLoaderVersion,
         side: "client",
       })
-      const result = await executeInstallWorkflow(workflow, runtime, { signal })
+      const result = await executeInstallWorkflow(workflow, loaderRuntime, { signal })
       finalVersionId =
         (result && typeof result === "object" ? result.version : result) ||
         `${cleanMc}-quilt-${resolvedLoaderVersion}`
@@ -323,7 +340,7 @@ async function installCore({
     }
   }
 
-  reportInstallProgress(90)
+  reportInstallProgress(95)
 
   // 6. Diagnose installed version to confirm integrity (XMCL is sole authority)
   const resolvedVersion = await Version.parse(folder, finalVersionId)
