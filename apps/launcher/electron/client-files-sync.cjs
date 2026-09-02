@@ -346,11 +346,81 @@ function resolvePathPolicy(relPath, filesMap) {
   return null
 }
 
+function resolveWatcherDecision(relPath, directoryPolicies = [], installedManifestFiles = {}) {
+  const norm = String(relPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+  if (!norm) return "IGNORE"
+
+  // 1. Exact match on installedManifestFiles
+  let exactPolicy = null
+  if (installedManifestFiles instanceof Map) {
+    if (installedManifestFiles.has(norm)) {
+      const item = installedManifestFiles.get(norm)
+      exactPolicy = item?.policy || item
+    }
+  } else if (Object.prototype.hasOwnProperty.call(installedManifestFiles, norm)) {
+    const item = installedManifestFiles[norm]
+    exactPolicy = item?.policy || item
+  }
+
+  if (exactPolicy === "NO_MODIFICABLE") {
+    return "EMIT"
+  }
+  if (exactPolicy === "MODIFICABLE") {
+    return "IGNORE"
+  }
+
+  // 2. Ancestor directory match in directoryPolicies or installedManifestFiles
+  let dirPolicy = null
+  if (Array.isArray(directoryPolicies) && directoryPolicies.length > 0) {
+    const dirMap = new Map()
+    for (const dp of directoryPolicies) {
+      if (dp && dp.path) {
+        const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+        if (dNorm) {
+          dirMap.set(dNorm, dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE")
+        }
+      }
+    }
+    dirPolicy = resolvePathPolicy(norm, dirMap)
+  }
+
+  if (!dirPolicy) {
+    dirPolicy = resolvePathPolicy(norm, installedManifestFiles)
+  }
+
+  if (dirPolicy === "MODIFICABLE") {
+    return "IGNORE"
+  }
+  if (dirPolicy === "NO_MODIFICABLE") {
+    return "EMIT"
+  }
+
+  // 3. Fallback to ENFORCED_DIRECTORIES
+  const enforcedDirs = Array.isArray(ENFORCED_DIRECTORIES)
+    ? ENFORCED_DIRECTORIES
+    : ["mods", "resourcepacks", "shaderpacks", "kubejs", "scripts"]
+  const isEnforcedDir = enforcedDirs.some(
+    (dir) => norm === dir || norm.startsWith(`${dir}/`),
+  )
+
+  if (isEnforcedDir) {
+    return "EMIT"
+  }
+
+  return "IGNORE"
+}
+
 /**
  * Generates the SyncPlan before touching any instance files.
  * Authoritative over local filesystem and installed manifest.
  */
-async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion, directoryPolicies = []) {
+async function generateSyncPlan(
+  instanceRoot,
+  clientFiles,
+  modpackVersion,
+  directoryPolicies = [],
+  isVerify = false,
+) {
   const installedManifest = await loadInstalledManifest(instanceRoot)
   const previousFilesMap = installedManifest.files || {}
   const isSameRelease = Boolean(
@@ -452,7 +522,7 @@ async function generateSyncPlan(instanceRoot, clientFiles, modpackVersion, direc
     } else {
       // policy === "MODIFICABLE"
       if (!fileExists) {
-        if (isSameRelease && wasInstalledBefore) {
+        if (isSameRelease && wasInstalledBefore && !isVerify) {
           // Player deleted it within the same release: permitted, do NOT download or repair
           plan.toPreserveUser.push({ path: normalizedRelative, safeAbsolute })
           plan.hasExistingInstall = true
@@ -738,8 +808,15 @@ async function downloadClientFilesToStaging({
   onPhaseChange,
   cancelSignal,
   apiBaseUrl,
+  isVerify = false,
 }) {
-  const plan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion, directoryPolicies)
+  const plan = await generateSyncPlan(
+    instanceRoot,
+    clientFiles,
+    modpackVersion,
+    directoryPolicies,
+    isVerify,
+  )
   const { filesDir } = getStagingPaths(instanceRoot)
   const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
     instanceRoot,
@@ -933,6 +1010,7 @@ async function applyStagingToInstance({
   onProgress,
   onPhaseChange,
   cancelSignal,
+  isVerify = false,
 }) {
   if (cancelSignal?.isCancelled) {
     await cleanStaging(instanceRoot)
@@ -947,7 +1025,14 @@ async function applyStagingToInstance({
   })
 
   const effectivePlan =
-    plan || (await generateSyncPlan(instanceRoot, clientFiles, modpackVersion, directoryPolicies))
+    plan ||
+    (await generateSyncPlan(
+      instanceRoot,
+      clientFiles,
+      modpackVersion,
+      directoryPolicies,
+      isVerify,
+    ))
 
   if (typeof onPhaseChange === "function") {
     onPhaseChange("INSTALLING")
@@ -1048,7 +1133,13 @@ async function applyStagingToInstance({
   }
 
   // 4. Mandatory Final Verification
-  const postPlan = await generateSyncPlan(instanceRoot, clientFiles, modpackVersion, directoryPolicies)
+  const postPlan = await generateSyncPlan(
+    instanceRoot,
+    clientFiles,
+    modpackVersion,
+    directoryPolicies,
+    isVerify,
+  )
   if (postPlan.toDownload.length > 0 || postPlan.toPrune.length > 0) {
     throw new Error(
       `Post-installation verification failed: ${postPlan.toDownload.length} files missing/corrupt, ${postPlan.toPrune.length} files unpruned.`,
@@ -1131,6 +1222,7 @@ async function executeSync(options) {
     onProgress: options.onProgress,
     onPhaseChange: options.onPhaseChange,
     cancelSignal: options.cancelSignal,
+    isVerify: Boolean(options.isVerify),
   })
 }
 
@@ -1177,5 +1269,6 @@ module.exports = {
   getEffectiveApiBaseUrl,
   uninstallGame,
   resolvePathPolicy,
+  resolveWatcherDecision,
   ENFORCED_DIRECTORIES,
 }

@@ -59,8 +59,9 @@ export interface SyncPlanCheckResult {
   filesToDownload: number
   filesToPrune: number
   totalDownloadBytes: number
-  needsUpdate: boolean
-  needsRepair?: boolean
+  hasUpdate?: boolean
+  hasIntegrityIssue?: boolean
+  needsUpdate?: boolean
   installedModpackVersion?: string | null
   hasExistingInstall?: boolean
   isFullyInstalled?: boolean

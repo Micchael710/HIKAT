@@ -29,37 +29,15 @@ export function resolveIdleGameButtonState(
     return gameService.isGameInstalled() ? "play" : "unavailable"
   }
 
-  // 1. Installed and fully synchronized
-  if (manifest.installed && !manifest.hasUpdate && !manifest.needsRepair) {
-    return "play"
+  if (!manifest.installedModpackVersion) {
+    return (!manifest.clientFiles?.length && !manifest.version) ? "unavailable" : "download"
   }
 
-  // 2. Existing previous installation that needs update/synchronization or repair
-  if (manifest.hasExistingInstall && (manifest.hasUpdate || manifest.needsRepair || !manifest.installed)) {
-    // Priority: update > repair
-    if (manifest.hasUpdate) {
-      return "update"
-    }
-    if (manifest.needsRepair) {
-      return "repair"
-    }
+  if (manifest.installedModpackVersion !== manifest.version) {
     return "update"
   }
 
-  // 3. Fresh installation (hasExistingInstall is false) with downloadable clientFiles or release
-  if (
-    !manifest.hasExistingInstall &&
-    ((manifest.clientFiles && manifest.clientFiles.length > 0) || manifest.version)
-  ) {
-    return "download"
-  }
-
-  // 4. Fallback if marked installed
-  if (manifest.installed && !manifest.needsRepair) {
-    return "play"
-  }
-
-  return "unavailable"
+  return "play"
 }
 
 export function manifestTotalBytes(files?: any[] | null): number {
@@ -128,7 +106,7 @@ export default function DownloadPlayButton({
   const isStartingSyncRef = useRef(false)
   const isCancellingRef = useRef(false)
   const latestManifestVersionRef = useRef<string | null>(null)
-  const isRepairPendingRef = useRef(false)
+  const isIntegrityBlockedRef = useRef(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const isDark = theme === "dark"
 
@@ -136,27 +114,14 @@ export default function DownloadPlayButton({
     latestManifestVersionRef.current = manifest?.version ?? null
   }, [manifest?.version])
 
-  // Listen to filesystem integrity changes while launcher is open
+  // Listen to filesystem integrity changes while launcher is open (marks integrity lock silently)
   useEffect(() => {
     const unsubscribe = window.electronAPI?.onGameFileIntegrityChanged?.(() => {
-      const currentStatus = statusRef.current
-
-      if (currentStatus === "running" || currentStatus === "launching") {
-        if (!isRepairPendingRef.current) {
-          isRepairPendingRef.current = true
-          showToast(t("playButton.fileWatcherChangeDetected"), "info")
-        }
-        return
-      }
-
-      if (currentStatus === "play") {
-        showToast(t("playButton.fileWatcherChangeDetected"), "info")
-        setStatus("repair")
-      }
+      isIntegrityBlockedRef.current = true
     })
 
     return () => unsubscribe?.()
-  }, [t, setStatus])
+  }, [])
 
   const showToast = (
     msg: string,
@@ -180,6 +145,8 @@ export default function DownloadPlayButton({
         installed: true,
         hasUpdate: false,
         hasExistingInstall: true,
+        installedModpackVersion: syncingVersion,
+        hasIntegrityIssue: false,
       }
     })
   }
@@ -203,6 +170,12 @@ export default function DownloadPlayButton({
       if (!isMounted) return
       setManifest(res)
       if (res) {
+        if (res.hasIntegrityIssue) {
+          isIntegrityBlockedRef.current = true
+        } else if (res.installedModpackVersion === res.version) {
+          isIntegrityBlockedRef.current = false
+        }
+
         const total = res.totalDownloadBytes || manifestTotalBytes(res.clientFiles)
         setTotalBytes(total)
         if (
@@ -264,7 +237,7 @@ export default function DownloadPlayButton({
         hasExistingInstall: isInstalled,
         installedModpackVersion:
           manifest.installedModpackVersion || (manifest.installed ? manifest.version : null),
-        needsRepair: false,
+        hasIntegrityIssue: false,
       }
 
       setManifest(freshManifest)
@@ -307,19 +280,9 @@ export default function DownloadPlayButton({
       if (launchStatus === "idle") {
         const wasRunningOrLaunching =
           statusRef.current === "launching" || statusRef.current === "running"
-        const hadPendingRepair = isRepairPendingRef.current
-        isRepairPendingRef.current = false
 
         if (wasRunningOrLaunching) {
           const idleState = resolveIdleGameButtonState(manifest)
-          if (idleState === "update") {
-            setStatus("update")
-            return
-          }
-          if (hadPendingRepair) {
-            setStatus("repair")
-            return
-          }
           setStatus(idleState)
         }
       }
@@ -494,10 +457,6 @@ export default function DownloadPlayButton({
     ) {
       return
     }
-    if (status === "repair") {
-      handleVerifyInstallation()
-      return
-    }
     if (status === "download" || status === "update") {
       if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
         showToast(t("playButton.noClientFiles"), "error")
@@ -527,6 +486,7 @@ export default function DownloadPlayButton({
           }
           if (res?.success) {
             isStartingSyncRef.current = false
+            isIntegrityBlockedRef.current = false
             gameService.setGameInstalled(true)
             markSyncedVersionInstalled(syncingVersion)
 
@@ -556,6 +516,11 @@ export default function DownloadPlayButton({
           isStartingSyncRef.current = false
         })
     } else if (status === "play") {
+      if (isIntegrityBlockedRef.current) {
+        showToast(t("playButton.launchVerifyHint"), "error")
+        return
+      }
+
       const ramGB = Number(localStorage.getItem("hikat_ram_gb")) || 4
       let playerName = "Player"
       try {
@@ -578,7 +543,7 @@ export default function DownloadPlayButton({
         if (onPlay) onPlay()
       } catch (err: any) {
         console.error("Launch error:", err)
-        showToast(t("playButton.launchError"), "error")
+        showToast(t("playButton.launchVerifyHint"), "error")
       }
     }
   }
@@ -618,7 +583,8 @@ export default function DownloadPlayButton({
           setManifest(verified)
         }
 
-        if (verified?.installed && !verified?.hasUpdate) {
+        if (verified?.installed && !verified?.hasUpdate && !verified?.hasIntegrityIssue) {
+          isIntegrityBlockedRef.current = false
           gameService.setGameInstalled(true)
           setStatus("play")
           showToast(t("playButton.verifySuccess"), "success")
@@ -662,12 +628,11 @@ export default function DownloadPlayButton({
     }
   }
 
-  /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / REPAIR / PLAY ── */
+  /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / PLAY ── */
   if (!isExpanded) {
     const isChecking = status === "checking"
     const isUnavailable = status === "unavailable"
     const isUpdate = status === "update"
-    const isRepair = status === "repair"
     const isPlay = status === "play"
     const isLaunching = status === "launching"
     const isRunning = status === "running"
@@ -743,11 +708,9 @@ export default function DownloadPlayButton({
                     ? t("playButton.unavailable")
                     : isUpdate
                       ? t("playButton.update")
-                      : isRepair
-                        ? t("playButton.repair")
-                        : isPlay
-                          ? t("playButton.play")
-                          : t("playButton.download")}
+                      : isPlay
+                        ? t("playButton.play")
+                        : t("playButton.download")}
           </span>
         </button>
 

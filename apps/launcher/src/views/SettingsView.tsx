@@ -179,10 +179,6 @@ export default function SettingsView({
     window.electronAPI?.setRamAllocation?.(v)
   }
 
-  // Maintenance state
-  const [repairState, setRepairState] = useState<"idle" | "scanning" | "done">(
-    "idle",
-  )
   const [toastState, setToastState] = useState<{
     message: string | null
     type: "success" | "error" | "info"
@@ -199,28 +195,6 @@ export default function SettingsView({
     toastTimeoutRef.current = setTimeout(() => {
       setToastState({ message: null, type: "success" })
     }, 2800)
-  }
-
-  const handleRepair = async () => {
-    if (repairState === "scanning") return
-    setRepairState("scanning")
-    notifySaved(t("settings.repairScanning"), "info")
-    try {
-      const manifest = await gameService.checkGameManifest()
-      if (manifest?.clientFiles && manifest.clientFiles.length > 0) {
-        await gameService.startSync(manifest.clientFiles, manifest.version)
-        setRepairState("done")
-        notifySaved(t("settings.repairSuccess"), "success")
-        setTimeout(() => setRepairState("idle"), 3500)
-      } else {
-        setRepairState("idle")
-        notifySaved(t("settings.repairNoFiles"), "error")
-      }
-    } catch (err: any) {
-      console.error("Repair error:", err)
-      setRepairState("idle")
-      notifySaved(t("settings.repairError"), "error")
-    }
   }
 
   const CONTENT_LEFT = 184
@@ -1134,161 +1108,6 @@ export default function SettingsView({
                     }}
                     label={t("settings.gpuTitle")}
                   />
-                </div>
-              </div>
-
-              {/* Card 2: Herramientas y Mantenimiento */}
-              <div className="settings-card">
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    fontWeight: 800,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    color: isDark ? "#657788" : "#778899",
-                    marginBottom: 6,
-                  }}
-                >
-                  {t("settings.maintenance")}
-                </div>
-
-                <div
-                  className="settings-row"
-                  style={{
-                    borderBottom: "none",
-                    paddingBottom: 0,
-                    paddingTop: 6,
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 17,
-                        fontWeight: 700,
-                        color: isDark ? "white" : "#111822",
-                        marginBottom: 2,
-                      }}
-                    >
-                      {t("settings.repairTitle")}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 14.5,
-                        color: isDark ? "#8899aa" : "#556677",
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      {t("settings.repairDesc")}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleRepair}
-                    disabled={repairState === "scanning"}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "10px 22px",
-                      borderRadius: 12,
-                      background: isDark ? "#0d1217" : "#f0f3f7",
-                      border: isDark
-                        ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                        : "1.5px solid rgba(0, 0, 0, 0.12)",
-                      cursor: repairState === "scanning" ? "wait" : "pointer",
-                      color: isDark ? "white" : "#111822",
-                      fontFamily: BASE_FONT,
-                      fontSize: 14.5,
-                      fontWeight: 700,
-                      transition: "all 0.16s ease",
-                      flexShrink: 0,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (repairState !== "scanning") {
-                        e.currentTarget.style.borderColor = isDark
-                          ? "rgba(255, 255, 255, 0.28)"
-                          : "rgba(0, 0, 0, 0.25)"
-                        e.currentTarget.style.background = isDark
-                          ? "#151e26"
-                          : "#e4e8ee"
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (repairState !== "scanning") {
-                        e.currentTarget.style.borderColor = isDark
-                          ? "rgba(255, 255, 255, 0.12)"
-                          : "rgba(0, 0, 0, 0.12)"
-                        e.currentTarget.style.background = isDark
-                          ? "#0d1217"
-                          : "#f0f3f7"
-                      }
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: 6,
-                        background: isDark
-                          ? "rgba(255, 255, 255, 0.06)"
-                          : "rgba(0, 0, 0, 0.06)",
-                        color: "#3ec4c0",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {repairState === "scanning" ? (
-                        <svg
-                          width={14}
-                          height={14}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          style={{ animation: "spin 1s linear infinite" }}
-                        >
-                          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                        </svg>
-                      ) : repairState === "done" ? (
-                        <svg
-                          width={14}
-                          height={14}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="#3ec4c0"
-                          strokeWidth="2.4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      ) : (
-                        <svg
-                          width={14}
-                          height={14}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-                        </svg>
-                      )}
-                    </div>
-                    <span>
-                      {repairState === "scanning"
-                        ? t("settings.repairScanning")
-                        : repairState === "done"
-                          ? t("settings.repairSuccess")
-                          : t("settings.repairBtn")}
-                    </span>
-                  </button>
                 </div>
               </div>
             </div>

@@ -1,45 +1,7 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect } from "vitest"
+import { resolveWatcherDecision } from "./client-files-sync.cjs"
 
-const mockApp = {
-  requestSingleInstanceLock: () => true,
-  getPath: () => "/tmp/appData",
-  setPath: vi.fn(),
-  setAsDefaultProtocolClient: vi.fn(),
-  on: vi.fn(),
-  whenReady: () => new Promise(() => {}),
-  quit: vi.fn(),
-  getLoginItemSettings: () => ({ openAtLogin: false }),
-  setLoginItemSettings: vi.fn(),
-}
-
-const mockIpcMain = {
-  handle: vi.fn(),
-  on: vi.fn(),
-}
-
-try {
-  const electronPath = require.resolve("electron")
-  require.cache[electronPath] = {
-    id: electronPath,
-    filename: electronPath,
-    loaded: true,
-    exports: {
-      app: mockApp,
-      ipcMain: mockIpcMain,
-      BrowserWindow: vi.fn(),
-      screen: { getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }) },
-      nativeImage: { createFromPath: () => ({}) },
-      shell: { openExternal: vi.fn() },
-      Tray: vi.fn(),
-      Menu: { buildFromTemplate: vi.fn() },
-    },
-  } as any
-} catch (_) {}
-
-// @ts-expect-error CJS module without declaration
-const { resolveWatcherDecision } = require("./main.cjs")
-
-describe("Launcher Watcher Policy Resolution (main.cjs)", () => {
+describe("Launcher Watcher Policy Resolution", () => {
   it("1. installed-manifest antiguo sin entrada 'mods' + directoryPolicies (mods = MODIFICABLE) -> ignora evento (no emit)", () => {
     // 1. installed-manifest antiguo sin entrada 'mods'
     const legacyInstalledFiles = {
@@ -72,12 +34,27 @@ describe("Launcher Watcher Policy Resolution (main.cjs)", () => {
       { path: "mods", policy: "NO_MODIFICABLE" },
     ]
 
-    // 4. mods = NO_MODIFICABLE sí debe seguir emitiéndolo
     expect(resolveWatcherDecision("mods", directoryPolicies, legacyInstalledFiles)).toBe("EMIT")
     expect(resolveWatcherDecision("mods/corrupt.jar", directoryPolicies, legacyInstalledFiles)).toBe("EMIT")
   })
 
-  it("3. fallback ENFORCED_DIRECTORIES cuando no hay directoryPolicies ni entrada en manifest", () => {
+  it("3. Exact file policy override takes precedence over directory policy", () => {
+    // Directory is MODIFICABLE, but a specific file is NO_MODIFICABLE
+    const directoryPolicies = [
+      { path: "mods", policy: "MODIFICABLE" },
+    ]
+    const installedFiles = {
+      "mods/locked.jar": {
+        officialSha256: "abc",
+        policy: "NO_MODIFICABLE",
+      },
+    }
+
+    expect(resolveWatcherDecision("mods/locked.jar", directoryPolicies, installedFiles)).toBe("EMIT")
+    expect(resolveWatcherDecision("mods/custom.jar", directoryPolicies, installedFiles)).toBe("IGNORE")
+  })
+
+  it("4. fallback ENFORCED_DIRECTORIES cuando no hay directoryPolicies ni entrada en manifest", () => {
     const legacyInstalledFiles = {
       "config/options.txt": {
         officialSha256: "abc",

@@ -54,7 +54,7 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     const manifest = await gameService.checkGameManifest()
     expect(manifest).not.toBeNull()
     expect(manifest?.installed).toBe(false)
-    expect(manifest?.hasUpdate).toBe(true)
+    expect(manifest?.hasUpdate).toBe(false)
     expect(gameService.isGameInstalled()).toBe(false)
     expect(localStorage.getItem("hikat_game_installed")).toBe("false")
   })

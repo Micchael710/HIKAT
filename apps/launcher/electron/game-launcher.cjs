@@ -85,7 +85,7 @@ class GameLauncher {
 
       if (!readiness.installed || !readiness.resolvedVersionId) {
         throw new Error(
-          "Cannot launch Minecraft: Installation is incomplete. Please update or repair the game first.",
+          "Cannot launch Minecraft: Installation is incomplete. Please verify the game installation first.",
         )
       }
 

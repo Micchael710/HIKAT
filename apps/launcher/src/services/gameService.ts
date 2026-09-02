@@ -7,7 +7,6 @@ export type GameButtonState =
   | "unavailable"
   | "download"
   | "update"
-  | "repair"
   | "play"
   | "downloading"
   | "paused"
@@ -25,7 +24,7 @@ export interface GameManifest {
   neoForgeVersion?: string | null
   totalSizeGB: number
   hasUpdate: boolean
-  needsRepair?: boolean
+  hasIntegrityIssue?: boolean
   installedModpackVersion?: string | null
   clientFiles: ClientFile[]
   directoryPolicies?: import("../vite-env").DirectoryPolicy[]
@@ -221,7 +220,7 @@ export const gameService = {
       let isInstalled = false
       let hasExistingInstall = false
       let hasInterruptedDownload = false
-      let needsRepair = false
+      let hasIntegrityIssue = false
       let installedModpackVersion: string | null = null
       let stagedBytes = 0
       let totalDownloadBytes = totalBytes
@@ -238,9 +237,11 @@ export const gameService = {
             neoForgeVersion: modpack.neoForgeVersion ?? undefined,
           })
           if (planCheck.success) {
-            needsRepair = Boolean(planCheck.needsRepair)
             installedModpackVersion = planCheck.installedModpackVersion || null
-            hasUpdate = !needsRepair && Boolean(planCheck.needsUpdate)
+            hasUpdate = Boolean(
+              installedModpackVersion && installedModpackVersion !== modpack.version,
+            )
+            hasIntegrityIssue = Boolean(planCheck.hasIntegrityIssue)
             hasExistingInstall = Boolean(planCheck.hasExistingInstall)
             isInstalled = Boolean(planCheck.isFullyInstalled)
             hasInterruptedDownload = Boolean(planCheck.hasInterruptedDownload)
@@ -263,7 +264,7 @@ export const gameService = {
         neoForgeVersion: modpack.neoForgeVersion ?? null,
         totalSizeGB,
         hasUpdate,
-        needsRepair,
+        hasIntegrityIssue,
         installedModpackVersion,
         clientFiles: modpack.clientFiles,
         directoryPolicies: modpack.directoryPolicies || [],
@@ -283,7 +284,7 @@ export const gameService = {
         if (parsed && typeof parsed === "object") {
           const cachedFiles = Array.isArray(parsed.clientFiles) ? parsed.clientFiles : []
           let offlineInstalled = false
-          let offlineNeedsRepair = false
+          let offlineIntegrityIssue = false
 
           if (window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
             try {
@@ -296,10 +297,10 @@ export const gameService = {
                 neoForgeVersion: parsed.neoForgeVersion,
               })
               if (planCheck.success) {
-                if (!planCheck.needsUpdate && planCheck.isFullyInstalled) {
+                if (planCheck.isFullyInstalled) {
                   offlineInstalled = true
-                } else if (planCheck.needsRepair) {
-                  offlineNeedsRepair = true
+                } else if (planCheck.hasIntegrityIssue) {
+                  offlineIntegrityIssue = true
                 }
               }
             } catch (_) {}
@@ -317,11 +318,11 @@ export const gameService = {
             neoForgeVersion: parsed.neoForgeVersion ?? null,
             totalSizeGB: 0,
             hasUpdate: false,
-            needsRepair: offlineNeedsRepair,
+            hasIntegrityIssue: offlineIntegrityIssue,
             installedModpackVersion: parsed.version || null,
             clientFiles: cachedFiles,
             installed: offlineInstalled,
-            hasExistingInstall: offlineInstalled || offlineNeedsRepair,
+            hasExistingInstall: offlineInstalled || offlineIntegrityIssue,
           }
         }
       }

@@ -1,6 +1,4 @@
-const electron = require("electron")
-const { app, BrowserWindow, ipcMain, screen, nativeImage, shell, Tray, Menu } =
-  typeof electron === "object" && electron !== null ? electron : {}
+const { app, BrowserWindow, ipcMain, screen, nativeImage, shell, Tray, Menu } = require("electron")
 const path = require("path")
 const http = require("http")
 const fs = require("fs")
@@ -12,100 +10,44 @@ const { SettingsStore } = require("./settings-store.cjs")
 const { SecureAuthStore } = require("./secure-auth-store.cjs")
 const { parseValidOAuthCallbackUrl } = require("./url-utils.cjs")
 
-
 // Single instance lock to prevent duplicate launcher instances and focus existing instance
-const singleInstanceLock =
-  app && typeof app.requestSingleInstanceLock === "function"
-    ? app.requestSingleInstanceLock()
-    : true
+const singleInstanceLock = app.requestSingleInstanceLock()
 
 if (!singleInstanceLock) {
-  if (app && typeof app.quit === "function") app.quit()
+  app.quit()
   process.exit(0)
 }
 
-const appDataRoot =
-  app && typeof app.getPath === "function"
-    ? path.join(app.getPath("appData"), "HiKAT")
-    : path.join(os.homedir(), "AppData", "Roaming", "HiKAT")
+const appDataRoot = path.join(app.getPath("appData"), "HiKAT")
 
 try {
-  if (app && typeof app.setPath === "function") {
-    app.setPath("userData", path.join(appDataRoot, "launcher"))
-  }
+  app.setPath("userData", path.join(appDataRoot, "launcher"))
 } catch (_) { }
 
 // Protocol client registration for OAuth deep linking (hikat://auth/callback)
-if (app && typeof app.setAsDefaultProtocolClient === "function") {
-  if (process.defaultApp) {
-    if (process.argv.length >= 2) {
-      app.setAsDefaultProtocolClient("hikat", process.execPath, [path.resolve(process.argv[1])])
-    }
-  } else {
-    app.setAsDefaultProtocolClient("hikat")
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient("hikat", process.execPath, [path.resolve(process.argv[1])])
   }
+} else {
+  app.setAsDefaultProtocolClient("hikat")
 }
 
 const {
   loadInstalledManifest,
-  resolvePathPolicy,
-  ENFORCED_DIRECTORIES,
+  resolveWatcherDecision,
 } = require("./client-files-sync.cjs")
 
 const instanceRoot = path.join(appDataRoot, "game files")
-const userDataPath =
-  app && typeof app.getPath === "function"
-    ? app.getPath("userData")
-    : path.join(appDataRoot, "launcher")
-const gameLauncher = new GameLauncher(app || {}, { instanceRoot })
+const gameLauncher = new GameLauncher(app, { instanceRoot })
 const operationManager = new GameOperationManager()
-const settingsStore = new SettingsStore(userDataPath)
-const authStore = new SecureAuthStore(userDataPath)
+const settingsStore = new SettingsStore(app.getPath("userData"))
+const authStore = new SecureAuthStore(app.getPath("userData"))
 
 let mainWindow = null
 let splashWindow = null
 let instanceWatcher = null
 let latestDirectoryPolicies = []
-
-function resolveWatcherDecision(relPath, directoryPolicies = [], installedManifestFiles = {}) {
-  let effectivePolicy = null
-  if (Array.isArray(directoryPolicies) && directoryPolicies.length > 0) {
-    const dirMap = new Map()
-    for (const dp of directoryPolicies) {
-      if (dp && dp.path) {
-        const norm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-        if (norm) {
-          dirMap.set(norm, dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE")
-        }
-      }
-    }
-    effectivePolicy = resolvePathPolicy(relPath, dirMap)
-  }
-
-  // 2. Fallback to installedManifest.files
-  if (!effectivePolicy) {
-    effectivePolicy = resolvePathPolicy(relPath, installedManifestFiles)
-  }
-
-  // If file or containing folder is MODIFICABLE, player changes/deletions/additions are permitted
-  if (effectivePolicy === "MODIFICABLE") {
-    return "IGNORE"
-  }
-
-  // 3. Fallback to ENFORCED_DIRECTORIES if NO_MODIFICABLE or untracked in enforced dir
-  const enforcedDirs = Array.isArray(ENFORCED_DIRECTORIES)
-    ? ENFORCED_DIRECTORIES
-    : ["mods", "resourcepacks", "shaderpacks", "kubejs", "scripts"]
-  const isEnforcedDir = enforcedDirs.some(
-    (dir) => relPath === dir || relPath.startsWith(`${dir}/`),
-  )
-
-  if (effectivePolicy === "NO_MODIFICABLE" || isEnforcedDir) {
-    return "EMIT"
-  }
-
-  return "IGNORE"
-}
 
 function setupInstanceWatcher() {
   if (instanceWatcher) return
@@ -1266,21 +1208,19 @@ function startOAuthLoopbackServer() {
 }
 
 // Second instance handler (when user launches launcher while already running or via deep link)
-if (app && typeof app.on === "function") {
-  app.on("second-instance", (_event, commandLine) => {
-    focusMainWindow()
-    const deepLink = extractDeepLinkFromArgs(commandLine)
-    if (deepLink) {
-      handleDeepLinkUrl(deepLink)
-    }
-  })
+app.on("second-instance", (_event, commandLine) => {
+  focusMainWindow()
+  const deepLink = extractDeepLinkFromArgs(commandLine)
+  if (deepLink) {
+    handleDeepLinkUrl(deepLink)
+  }
+})
 
-  // macOS open-url deep link handler
-  app.on("open-url", (event, url) => {
-    event.preventDefault()
-    handleDeepLinkUrl(url)
-  })
-}
+// macOS open-url deep link handler
+app.on("open-url", (event, url) => {
+  event.preventDefault()
+  handleDeepLinkUrl(url)
+})
 
 
 
@@ -1552,46 +1492,38 @@ ipcMain.handle("game-get-status", async () => {
   }
 })
 
-if (app && typeof app.whenReady === "function") {
-  app.whenReady().then(() => {
-    startOAuthLoopbackServer()
-    setupInstanceWatcher()
+app.whenReady().then(() => {
+  startOAuthLoopbackServer()
+  setupInstanceWatcher()
 
-    createSplashWindow()
-    createWindow()
+  createSplashWindow()
+  createWindow()
 
-    app.on("activate", () => {
-      if (BrowserWindow && BrowserWindow.getAllWindows && BrowserWindow.getAllWindows().length === 0) {
-        createWindow()
-      } else {
-        focusMainWindow()
-      }
-    })
-  })
-
-  app.on("before-quit", () => {
-    isQuitRequested = true
-
-    if (oauthLoopbackServer) {
-      oauthLoopbackServer.close()
-      oauthLoopbackServer = null
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+    } else {
+      focusMainWindow()
     }
   })
+})
 
-  app.on("window-all-closed", () => {
-    if (minimizeToTrayEnabled) {
-      ensureTray()
-      return
-    }
-    destroyTray()
-    if (process.platform !== "darwin") {
-      app.quit()
-    }
-  })
-}
+app.on("before-quit", () => {
+  isQuitRequested = true
 
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = {
-    resolveWatcherDecision,
+  if (oauthLoopbackServer) {
+    oauthLoopbackServer.close()
+    oauthLoopbackServer = null
   }
-}
+})
+
+app.on("window-all-closed", () => {
+  if (minimizeToTrayEnabled) {
+    ensureTray()
+    return
+  }
+  destroyTray()
+  if (process.platform !== "darwin") {
+    app.quit()
+  }
+})

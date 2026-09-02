@@ -71,7 +71,6 @@
     "running": "EM EXECUÇÃO",
     "download": "BAIXAR",
     "update": "ATUALIZAR",
-    "repair": "REPARAR",
     "play": "JOGAR",
     "unavailable": "INDISPONÍVEL",
     "downloading": "BAIXANDO",
@@ -99,8 +98,7 @@
     "noClientFiles": "Os arquivos do jogo não estão disponíveis no momento.",
     "syncError": "Não foi possível concluir o download. Verifique sua conexão com a internet.",
     "syncSuccess": "Download concluído com sucesso",
-    "launchError": "Não foi possível iniciar o jogo. Tente reparar a instalação nas Configurações.",
-    "fileWatcherChangeDetected": "Foram detectadas alterações nos arquivos do jogo. A instalação deve ser reparada antes de jogar."
+    "launchVerifyHint": "Não foi possível iniciar o jogo, verifique os arquivos e tente novamente"
   },
   "home": {
     "heroSubtitle": "Domine este vasto mundo através da engenharia, cruze os céus, navegue pelos mares e crie uma revolução industrial.",
@@ -190,24 +188,11 @@
     "gpuDesc": "Utilizar a placa de vídeo de alto desempenho em vez de gráficos integrados.",
     "forceDedicatedGpu": "Forçar GPU dedicada",
     "forceDedicatedGpuDesc": "Utilizar a placa de vídeo de alto desempenho em vez de gráficos integrados.",
-    "maintenance": "Ferramentas e Manutenção",
-    "toolsMaintenance": "Ferramentas e Manutenção",
-    "repairTitle": "Reparar instalação",
-    "repairDesc": "Verifica e repara automaticamente os arquivos do jogo.",
-    "repairBtn": "Reparar instalação",
-    "repairScanning": "Verificando arquivos do jogo...",
-    "repairSuccess": "Jogo reparado e otimizado com sucesso",
-    "repairError": "Não foi possível reparar o jogo. Tente novamente mais tarde.",
-    "repairNoFiles": "Nenhum arquivo do jogo encontrado para verificar.",
-    "repairInstall": "Reparar instalação",
-    "repairInstallDesc": "Verifica e repara automaticamente os arquivos do jogo.",
     "verifying": "Verificando...",
     "verifiedSuccess": "Jogo verificado com sucesso",
     "toastSaved": "Alterações aplicadas com sucesso",
     "toastDarkTheme": "Tema escuro ativado",
-    "toastLightTheme": "Tema claro ativado",
-    "toastScanning": "Verificando arquivos do jogo...",
-    "toastRepaired": "Jogo reparado e otimizado com sucesso"
+    "toastLightTheme": "Tema claro ativado"
   },
   "skins": {
     "title": "Skins e Capas",

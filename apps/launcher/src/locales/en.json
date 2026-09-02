@@ -71,7 +71,6 @@
     "running": "RUNNING",
     "download": "DOWNLOAD",
     "update": "UPDATE",
-    "repair": "REPAIR",
     "play": "PLAY",
     "unavailable": "UNAVAILABLE",
     "downloading": "DOWNLOADING",
@@ -100,8 +99,7 @@
     "noClientFiles": "Game files are not available at this moment.",
     "syncError": "Could not complete the download. Please check your internet connection.",
     "syncSuccess": "Download completed successfully",
-    "launchError": "Could not launch the game. Try repairing the installation in Settings.",
-    "fileWatcherChangeDetected": "Changes detected in game files. The installation must be repaired before playing."
+    "launchVerifyHint": "The game could not be launched, verify the game files and try again"
   },
   "home": {
     "heroSubtitle": "Master this vast world through engineering, soar through the skies, sail the seas and create an industrial revolution.",
@@ -191,24 +189,11 @@
     "gpuDesc": "Use high-performance graphics card instead of integrated graphics.",
     "forceDedicatedGpu": "Force dedicated GPU",
     "forceDedicatedGpuDesc": "Use high-performance graphics card instead of integrated graphics.",
-    "maintenance": "Tools & Maintenance",
-    "toolsMaintenance": "Tools & Maintenance",
-    "repairTitle": "Repair installation",
-    "repairDesc": "Automatically checks and repairs game files.",
-    "repairBtn": "Repair installation",
-    "repairScanning": "Checking game files...",
-    "repairSuccess": "Game successfully repaired and optimized",
-    "repairError": "Could not repair the game. Please try again later.",
-    "repairNoFiles": "No game files found to verify.",
-    "repairInstall": "Repair installation",
-    "repairInstallDesc": "Automatically checks and repairs game files.",
     "verifying": "Verifying...",
     "verifiedSuccess": "Game verified successfully",
     "toastSaved": "Changes applied successfully",
     "toastDarkTheme": "Dark theme activated",
-    "toastLightTheme": "Light theme activated",
-    "toastScanning": "Checking game files...",
-    "toastRepaired": "Game successfully repaired and optimized"
+    "toastLightTheme": "Light theme activated"
   },
   "skins": {
     "title": "Skins & Capes",

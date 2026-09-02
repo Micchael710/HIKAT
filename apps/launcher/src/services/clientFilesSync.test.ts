@@ -482,7 +482,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       const cancelSignal = { isCancelled: false, isPaused: false }
       setTimeout(() => {
         cancelSignal.isPaused = true
-      }, 50)
+      }, 120)
 
       const result = await executeSync({
         instanceRoot,
@@ -1410,6 +1410,72 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(plan.toDownload).toHaveLength(1)
       expect(plan.toDownload[0].path).toBe("config/options.txt")
       expect(plan.toPreserveUser).toHaveLength(0)
+    })
+
+    // 12. Verification Flow: isVerify re-downloads missing MODIFICABLE official files but preserves existing customized MODIFICABLE files
+    it("12. Verification Flow: isVerify re-downloads missing MODIFICABLE file but preserves customized MODIFICABLE and extra files", async () => {
+      const optOfficialContent = "official options"
+      const optOfficialSha = computeSha(optOfficialContent)
+      const missingModContent = "missing mod"
+      const missingModSha = computeSha(missingModContent)
+
+      const optPath = path.join(instanceRoot, "config", "options.txt")
+      await fsp.mkdir(path.dirname(optPath), { recursive: true })
+      await fsp.writeFile(optPath, "user customized options", "utf8")
+
+      const modsDir = path.join(instanceRoot, "mods")
+      await fsp.mkdir(modsDir, { recursive: true })
+      await fsp.writeFile(path.join(modsDir, "extra-user-mod.jar"), "extra mod", "utf8")
+
+      await saveInstalledManifest(instanceRoot, {
+        modpackVersion: "1.0.0",
+        lastSync: new Date().toISOString(),
+        files: {
+          "config/options.txt": {
+            officialSha256: optOfficialSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+          "mods/missing.jar": {
+            officialSha256: missingModSha,
+            policy: "MODIFICABLE",
+            lastSyncedAt: new Date().toISOString(),
+          },
+        },
+      })
+
+      const clientFiles = [
+        {
+          path: "config/options.txt",
+          sha256: optOfficialSha,
+          sizeBytes: Buffer.byteLength(optOfficialContent),
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/options`,
+        },
+        {
+          path: "mods/missing.jar",
+          sha256: missingModSha,
+          sizeBytes: Buffer.byteLength(missingModContent),
+          policy: "MODIFICABLE",
+          downloadUrl: `${serverBaseUrl}/files/missing`,
+        },
+      ]
+      const directoryPolicies = [{ path: "mods", policy: "MODIFICABLE" }]
+
+      // Normal check (isVerify = false): missing MODIFICABLE is preserved (not downloaded)
+      const normalPlan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", directoryPolicies, false)
+      expect(normalPlan.toDownload).toHaveLength(0)
+      expect(normalPlan.toPreserveUser.some((f: any) => f.path === "mods/missing.jar")).toBe(true)
+      expect(normalPlan.toPreserveUser.some((f: any) => f.path === "config/options.txt")).toBe(true)
+
+      // Verification check (isVerify = true): missing MODIFICABLE is placed in toDownload
+      const verifyPlan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", directoryPolicies, true)
+      expect(verifyPlan.toDownload).toHaveLength(1)
+      expect(verifyPlan.toDownload[0].path).toBe("mods/missing.jar")
+      // Existing customized MODIFICABLE options.txt is NOT overwritten (goes to toPreserveUser)
+      expect(verifyPlan.toPreserveUser.some((f: any) => f.path === "config/options.txt")).toBe(true)
+      // Extra mod in mods directory is NOT pruned
+      expect(verifyPlan.toPrune).toHaveLength(0)
     })
   })
 })

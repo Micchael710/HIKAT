@@ -3,6 +3,7 @@ export declare function generateSyncPlan(
   clientFiles: any[],
   modpackVersion: string,
   directoryPolicies?: any[],
+  isVerify?: boolean,
 ): Promise<any>
 
 export declare function downloadClientFilesToStaging(options: {
@@ -14,6 +15,7 @@ export declare function downloadClientFilesToStaging(options: {
   onPhaseChange?: (phase: string) => void
   cancelSignal?: { isCancelled: boolean; isPaused?: boolean }
   apiBaseUrl?: string
+  isVerify?: boolean
 }): Promise<any>
 
 export declare function applyStagingToInstance(options: {
@@ -26,6 +28,7 @@ export declare function applyStagingToInstance(options: {
   onProgress?: (data: any) => void
   onPhaseChange?: (phase: string) => void
   cancelSignal?: { isCancelled: boolean; isPaused?: boolean }
+  isVerify?: boolean
 }): Promise<any>
 
 export declare function executeSync(options: {
@@ -37,7 +40,14 @@ export declare function executeSync(options: {
   onPhaseChange?: (phase: string) => void
   cancelSignal?: { isCancelled: boolean; isPaused?: boolean }
   apiBaseUrl?: string
+  isVerify?: boolean
 }): Promise<any>
+
+export declare function resolveWatcherDecision(
+  relPath: string,
+  directoryPolicies?: any[],
+  installedManifestFiles?: any,
+): "EMIT" | "IGNORE"
 
 export declare function loadInstalledManifest(instanceRoot: string): Promise<any>
 export declare function saveInstalledManifest(instanceRoot: string, manifestData: any): Promise<void>

@@ -151,20 +151,20 @@ class GameOperationManager {
     const java = this.javaResolver(instanceRoot, { isGui: false, majorVersion: javaMajor })
     const javaValid = java.cliJavaPath ? Boolean(this.javaValidator(java.cliJavaPath, javaMajor).valid) : false
 
-    const releaseMatches = installedManifest.modpackVersion === modpackVersion
+    const releaseMatches = Boolean(
+      installedManifest.modpackVersion && installedManifest.modpackVersion === modpackVersion,
+    )
     const clientSynced =
       clientPlan.toDownload.length === 0 &&
       clientPlan.toPrune.length === 0 &&
       releaseMatches
 
     const isFullyInstalled = clientSynced && Boolean(core.installed) && javaValid
-    const needsUpdate = !isFullyInstalled
-    const hasExistingInstall = Boolean(core.resolvedVersionId)
-    const needsRepair = Boolean(
-      installedManifest.modpackVersion &&
-      releaseMatches &&
-      !isFullyInstalled
+    const hasUpdate = Boolean(
+      installedManifest.modpackVersion && installedManifest.modpackVersion !== modpackVersion,
     )
+    const hasExistingInstall = Boolean(core.resolvedVersionId)
+    const hasIntegrityIssue = Boolean(releaseMatches && !isFullyInstalled)
 
     const session = await loadDownloadSession(instanceRoot)
     const isSessionInstalling = session && session.status === "INSTALLING"
@@ -196,8 +196,9 @@ class GameOperationManager {
       filesToDownload: clientPlan.toDownload.length,
       filesToPrune: clientPlan.toPrune.length,
       totalDownloadBytes: clientPlan.totalDownloadBytes,
-      needsUpdate,
-      needsRepair,
+      hasUpdate,
+      hasIntegrityIssue,
+      needsUpdate: !isFullyInstalled,
       installedModpackVersion: installedManifest.modpackVersion || null,
       hasExistingInstall,
       isFullyInstalled,
@@ -264,6 +265,7 @@ class GameOperationManager {
           clientFiles,
           modpackVersion,
           directoryPolicies,
+          isVerify,
         )
         const installedManifest = await loadInstalledManifest(instanceRoot)
 
@@ -278,6 +280,7 @@ class GameOperationManager {
             onPhaseChange: isVerify ? undefined : onPhaseChange,
             cancelSignal,
             apiBaseUrl,
+            isVerify,
           })
         }
 
@@ -312,6 +315,7 @@ class GameOperationManager {
             stagedFiles: downloadResult?.stagedFiles || [],
             onProgress,
             cancelSignal,
+            isVerify,
           })
         }
 

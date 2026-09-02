@@ -142,6 +142,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: false,
       hasUpdate: true,
       hasExistingInstall: true,
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 10,
       clientFiles: [
         {
@@ -169,6 +170,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 10,
       clientFiles: [],
     })
@@ -345,6 +347,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: false,
       hasUpdate: true,
       hasExistingInstall: true,
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 10,
       clientFiles: [
         {
@@ -421,6 +424,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: false,
       hasUpdate: true,
       hasExistingInstall: true,
+      installedModpackVersion: "0.9.0",
       totalSizeGB: 10,
       clientFiles: [
         {
@@ -770,6 +774,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         installed: true,
         hasUpdate: false,
         hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
         totalSizeGB: 10,
         clientFiles: [],
       })
@@ -799,6 +804,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 10,
       clientFiles: [],
     })
@@ -858,6 +864,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 10,
       clientFiles: [],
     })
@@ -989,6 +996,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: false,
       hasUpdate: true,
       hasExistingInstall: true, // Existing install update
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 1,
       clientFiles: [
         {
@@ -1027,6 +1035,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         installed: true,
         hasUpdate: false,
         hasExistingInstall: true, // Initially installed
+        installedModpackVersion: "1.0.0",
         totalSizeGB: 1,
         clientFiles: [
           {
@@ -1046,6 +1055,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         installed: false,
         hasUpdate: true,
         hasExistingInstall: false, // Freshly uninstalled
+        installedModpackVersion: null,
         totalSizeGB: 1,
         clientFiles: [
           {
@@ -1271,6 +1281,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 10,
       clientFiles: [],
     })
@@ -1306,6 +1317,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 10,
       clientFiles: [],
     })
@@ -1354,6 +1366,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
+      installedModpackVersion: "1.0.0",
       totalSizeGB: 10,
       clientFiles: [],
     })
@@ -1689,6 +1702,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         installed: false,
         hasUpdate: true,
         hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
         totalSizeGB: 1,
         hasInterruptedDownload: false, // INSTALLING interruption does not restore as PAUSED
         clientFiles: [
@@ -1712,10 +1726,93 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
   })
 
   /* ─────────────────────────────────────────────────────────────
-   * Shard 8G: Repair State, Pre-Launch Integrity & Watcher Suite
+   * Shard 8G: Integrity Lock, Pre-Launch Verification & Watcher Suite
    * ───────────────────────────────────────────────────────────── */
-  describe("Shard 8G: Repair State, Pre-Launch Integrity & Watcher Suite", () => {
-    it("1. Same modpackVersion + missing/corrupt NO_MODIFICABLE file resolves to REPARAR (repair)", async () => {
+  describe("Shard 8G: Integrity Lock, Pre-Launch Verification & Watcher Suite", () => {
+    it("1. resolveIdleGameButtonState visual rules based on installedModpackVersion", () => {
+      // Missing / null installedModpackVersion -> download (or unavailable if empty)
+      expect(
+        resolveIdleGameButtonState({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          totalSizeGB: 1,
+          hasUpdate: false,
+          clientFiles: [{ path: "mods/a.jar", sha256: "a", sizeBytes: 10, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+          installed: false,
+        }),
+      ).toBe("download")
+
+      expect(
+        resolveIdleGameButtonState({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          totalSizeGB: 1,
+          hasUpdate: false,
+          clientFiles: [],
+          installed: false,
+        }),
+      ).toBe("download")
+
+      expect(
+        resolveIdleGameButtonState({
+          version: "",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          totalSizeGB: 0,
+          hasUpdate: false,
+          clientFiles: [],
+          installed: false,
+        }),
+      ).toBe("unavailable")
+
+      // Different version -> update
+      expect(
+        resolveIdleGameButtonState({
+          version: "1.1.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          totalSizeGB: 1,
+          hasUpdate: true,
+          installedModpackVersion: "1.0.0",
+          clientFiles: [],
+          installed: false,
+        }),
+      ).toBe("update")
+
+      // Same version -> play (even with hasIntegrityIssue: true)
+      expect(
+        resolveIdleGameButtonState({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          totalSizeGB: 1,
+          hasUpdate: false,
+          hasIntegrityIssue: true,
+          installedModpackVersion: "1.0.0",
+          clientFiles: [],
+          installed: false,
+        }),
+      ).toBe("play")
+
+      // Same version healthy -> play
+      expect(
+        resolveIdleGameButtonState({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          totalSizeGB: 1,
+          hasUpdate: false,
+          hasIntegrityIssue: false,
+          installedModpackVersion: "1.0.0",
+          clientFiles: [],
+          installed: true,
+        }),
+      ).toBe("play")
+    })
+
+    it("2. Same modpackVersion with hasIntegrityIssue: true renders JUGAR (never REPARAR), clicking JUGAR blocks launch and shows launchVerifyHint toast", async () => {
       vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
         version: "1.0.0",
         minecraftVersion: "1.21.1",
@@ -1723,7 +1820,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         modLoader: "NEOFORGE",
         installed: false,
         hasUpdate: false,
-        needsRepair: true,
+        hasIntegrityIssue: true,
         installedModpackVersion: "1.0.0",
         hasExistingInstall: true,
         totalSizeGB: 1,
@@ -1738,37 +1835,27 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         ],
       })
 
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
       const { container } = await mountButton()
       const btn = container.querySelector("button") as HTMLElement
       expect(btn).not.toBeNull()
-      expect(btn.textContent).toContain("REPARAR")
+      expect(btn.textContent).toContain("JUGAR")
+      expect(btn.textContent).not.toContain("REPARAR")
       expect(btn.textContent).not.toContain("ACTUALIZAR")
-      expect(btn.textContent).not.toContain("JUGAR")
-    })
 
-    it("2. Different modpackVersion resolves to ACTUALIZAR (update), prioritizing update > repair", async () => {
-      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-        version: "1.1.0",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-        modLoader: "NEOFORGE",
-        installed: false,
-        hasUpdate: true,
-        needsRepair: false,
-        installedModpackVersion: "1.0.0",
-        hasExistingInstall: true,
-        totalSizeGB: 1,
-        clientFiles: [],
+      // Click JUGAR -> launch is blocked, toast is shown
+      await act(async () => {
+        btn.click()
       })
 
-      const { container } = await mountButton()
-      const btn = container.querySelector("button") as HTMLElement
-      expect(btn).not.toBeNull()
-      expect(btn.textContent).toContain("ACTUALIZAR")
-      expect(btn.textContent).not.toContain("REPARAR")
+      expect(launchSpy).not.toHaveBeenCalled()
+      const toast = container.querySelector(".play-button-toast, .settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.textContent).toContain("No se pudo iniciar el juego, verifica los archivos e inténtalo de nuevo")
     })
 
-    it("3. Clicking JUGAR in PLAY state launches game directly without calling checkSyncPlan", async () => {
+    it("3. Clicking JUGAR in healthy PLAY state launches game directly without calling checkSyncPlan", async () => {
       vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
         version: "1.0.0",
         minecraftVersion: "1.21.1",
@@ -1776,6 +1863,8 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         modLoader: "NEOFORGE",
         installed: true,
         hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
         hasExistingInstall: true,
         totalSizeGB: 1,
         clientFiles: [
@@ -1810,41 +1899,167 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(checkSyncPlanSpy).not.toHaveBeenCalled()
     })
 
-    it("4. Clicking REPARAR reuses handleVerifyInstallation without duplicating verify logic", async () => {
+    it("4. When launchGame fails (throws error), shows launchVerifyHint toast", async () => {
       vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
         version: "1.0.0",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
         modLoader: "NEOFORGE",
-        installed: false,
+        installed: true,
         hasUpdate: false,
-        needsRepair: true,
+        hasIntegrityIssue: false,
         installedModpackVersion: "1.0.0",
         hasExistingInstall: true,
         totalSizeGB: 1,
-        clientFiles: [
-          {
-            path: "mods/fix.jar",
-            sha256: "a".repeat(64),
-            sizeBytes: 100,
-            downloadUrl: "/dl/fix",
-            policy: "NO_MODIFICABLE",
-          },
-        ],
+        clientFiles: [],
       })
 
-      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+      vi.spyOn(gameService, "launchGame").mockRejectedValue(new Error("Java corrupted"))
 
       const { container } = await mountButton()
       const btn = container.querySelector("button") as HTMLElement
-      expect(btn.textContent).toContain("REPARAR")
+      expect(btn.textContent).toContain("JUGAR")
 
-      // Click REPARAR
       await act(async () => {
         btn.click()
       })
 
-      // startSync was called with isVerify = true
+      const toast = container.querySelector(".play-button-toast, .settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.textContent).toContain("No se pudo iniciar el juego, verifica los archivos e inténtalo de nuevo")
+    })
+
+    it("5. Filesystem integrity watcher event sets integrity lock silently without toast or changing button text", async () => {
+      let watcherCallback: any = null
+      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
+        watcherCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [{ path: "mods/core.jar", sha256: "a", sizeBytes: 10, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+      })
+
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      // Trigger watcher event
+      await act(async () => {
+        watcherCallback?.({ path: "mods/core-mod.jar" })
+      })
+
+      // Button stays JUGAR, no toast immediately
+      expect(btn.textContent).toContain("JUGAR")
+      expect(btn.textContent).not.toContain("REPARAR")
+      expect(container.querySelector(".play-button-toast, .settings-live-toast")).toBeNull()
+
+      // But when user clicks JUGAR, launch is blocked and toast is shown
+      await act(async () => {
+        btn.click()
+      })
+
+      expect(launchSpy).not.toHaveBeenCalled()
+      const toast = container.querySelector(".play-button-toast, .settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.textContent).toContain("No se pudo iniciar el juego, verifica los archivos e inténtalo de nuevo")
+    })
+
+    it("6. Verification via handleVerifyInstallation resets integrity lock on success and enables launch", async () => {
+      let checkCount = 0
+      vi.spyOn(gameService, "checkGameManifest").mockImplementation(async () => {
+        checkCount++
+        if (checkCount === 1) {
+          // Initial mount: has integrity issue
+          return {
+            version: "1.0.0",
+            minecraftVersion: "1.21.1",
+            neoForgeVersion: "21.1.65",
+            modLoader: "NEOFORGE",
+            installed: false,
+            hasUpdate: false,
+            hasIntegrityIssue: true,
+            installedModpackVersion: "1.0.0",
+            hasExistingInstall: true,
+            totalSizeGB: 1,
+            clientFiles: [
+              {
+                path: "mods/fix.jar",
+                sha256: "a".repeat(64),
+                sizeBytes: 100,
+                downloadUrl: "/dl/fix",
+                policy: "NO_MODIFICABLE",
+              },
+            ],
+          }
+        }
+        // After verify: clean install
+        return {
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          installed: true,
+          hasUpdate: false,
+          hasIntegrityIssue: false,
+          installedModpackVersion: "1.0.0",
+          hasExistingInstall: true,
+          totalSizeGB: 1,
+          clientFiles: [
+            {
+              path: "mods/fix.jar",
+              sha256: "a".repeat(64),
+              sizeBytes: 100,
+              downloadUrl: "/dl/fix",
+              policy: "NO_MODIFICABLE",
+            },
+          ],
+        }
+      })
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      // 1. Initial click blocked
+      await act(async () => {
+        btn.click()
+      })
+      expect(launchSpy).not.toHaveBeenCalled()
+
+      // 2. Open quick options menu
+      const optionsBtn = container.querySelector("button[title='Opciones del juego']") as HTMLElement
+      expect(optionsBtn).not.toBeNull()
+      await act(async () => {
+        optionsBtn.click()
+      })
+
+      // 3. Click "Verificar instalación"
+      const verifyOption = Array.from(container.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Verificar instalación"),
+      )
+      expect(verifyOption).toBeDefined()
+
+      await act(async () => {
+        verifyOption!.click()
+      })
+
+      // startSync called with isVerify = true
       expect(startSyncSpy).toHaveBeenCalledWith(
         expect.any(Array),
         "1.0.0",
@@ -1854,10 +2069,109 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         "21.1.65",
         true,
       )
+
+      await act(async () => {
+        await Promise.resolve()
+        await new Promise((r) => setTimeout(r, 20))
+      })
+
+      // Toast confirms verification success
+      expect(container.querySelector(".play-button-toast, .settings-live-toast")?.textContent).toContain(
+        "Juego verificado correctamente",
+      )
+
+      // 4. Now clicking JUGAR launches the game without blocking
+      const playBtn = container.querySelector("button") as HTMLElement
+      expect(playBtn).not.toBeNull()
+      expect(playBtn.textContent).toContain("JUGAR")
+
+      await act(async () => {
+        playBtn.click()
+      })
+      expect(launchSpy).toHaveBeenCalled()
     })
 
-    it("5. Filesystem integrity watcher updates status to REPARAR when idle in PLAY", async () => {
+    it("7. Successful release update resets integrity lock", async () => {
       let watcherCallback: any = null
+      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
+        watcherCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/update.jar",
+            sha256: "b".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/update",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let resolveSync: any
+      vi.spyOn(gameService, "startSync").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSync = resolve
+          }),
+      )
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("ACTUALIZAR")
+
+      // Simulate watcher event prior to update
+      await act(async () => {
+        watcherCallback?.({ path: "mods/old.jar" })
+      })
+
+      // Click ACTUALIZAR
+      await act(async () => {
+        btn.click()
+      })
+
+      // Resolve sync successfully
+      await act(async () => {
+        resolveSync({ success: true })
+      })
+
+      await act(async () => {
+        await Promise.resolve()
+        await new Promise((r) => setTimeout(r, 20))
+      })
+
+      // Transitions to JUGAR
+      const playBtn = container.querySelector("button") as HTMLElement
+      expect(playBtn).not.toBeNull()
+      expect(playBtn.textContent).toContain("JUGAR")
+
+      // Clicking JUGAR launches directly because update cleared the lock
+      await act(async () => {
+        playBtn.click()
+      })
+      expect(launchSpy).toHaveBeenCalled()
+    })
+
+    it("8. Watcher event while game is running marks lock silently; after game exits, clicking JUGAR blocks with hint", async () => {
+      let launchStatusCallback: any = null
+      let watcherCallback: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      })
       window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
         watcherCallback = cb
         return () => {}
@@ -1870,53 +2184,13 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         modLoader: "NEOFORGE",
         installed: true,
         hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
         hasExistingInstall: true,
         totalSizeGB: 1,
         clientFiles: [],
       })
-
-      const { container } = await mountButton()
-      const btn = container.querySelector("button") as HTMLElement
-      expect(btn.textContent).toContain("JUGAR")
-
-      // Trigger watcher event for a deleted NO_MODIFICABLE file
-      await act(async () => {
-        watcherCallback?.({ path: "mods/core-mod.jar" })
-      })
-
-      expect(btn.textContent).toContain("REPARAR")
-    })
-
-    it("6. Pending repair + new release published while Minecraft is running resolves to ACTUALIZAR (update > repair)", async () => {
-      let launchStatusCallback: any = null
-      let watcherCallback: any = null
-      let releaseCallback: any = null
-      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
-        launchStatusCallback = cb
-        return () => {}
-      })
-      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
-        watcherCallback = cb
-        return () => {}
-      })
-      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
-        releaseCallback = cb
-        return () => {}
-      })
-
-      const initialManifest = {
-        version: "1.0.0",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-        modLoader: "NEOFORGE" as const,
-        installed: true,
-        hasUpdate: false,
-        hasExistingInstall: true,
-        totalSizeGB: 1,
-        clientFiles: [],
-      }
-
-      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(initialManifest)
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
 
       const { container } = await mountButton()
       const btn = container.querySelector("button") as HTMLElement
@@ -1928,163 +2202,31 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       })
       expect(btn.textContent).toContain("EN EJECUCIÓN")
 
-      // File watcher detects corruption while game is running -> marks pending repair
+      // Watcher detects modification while running (silent)
       await act(async () => {
         watcherCallback?.({ path: "mods/corrupt.jar" })
       })
-      // Stays EN EJECUCIÓN while running
       expect(btn.textContent).toContain("EN EJECUCIÓN")
+      expect(container.querySelector(".play-button-toast, .settings-live-toast")).toBeNull()
 
-      // While Minecraft is running, a new release (1.1.0) is published
-      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
-        version: "1.1.0",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-        modLoader: "NEOFORGE",
-        mandatory: true,
-        clientFiles: [],
-      })
-
-      // WebSocket activates release 1.1.0
-      await act(async () => {
-        await releaseCallback?.({ version: "1.1.0" })
-      })
-
-      // Minecraft process exits -> returns to idle
+      // Game exits
       await act(async () => {
         launchStatusCallback?.("idle")
       })
-
-      // Must resolve to ACTUALIZAR (update > repair priority)
-      expect(btn.textContent).toContain("ACTUALIZAR")
+      expect(btn.textContent).toContain("JUGAR")
       expect(btn.textContent).not.toContain("REPARAR")
-    })
 
-    it("7. Sync Engine and Watcher use the exact same ENFORCED_DIRECTORIES", async () => {
-      // @ts-expect-error CJS module without bundled declaration
-      const { ENFORCED_DIRECTORIES } = await import("../../../electron/client-files-sync.cjs")
-      expect(ENFORCED_DIRECTORIES).toEqual([
-        "mods",
-        "resourcepacks",
-        "shaderpacks",
-        "kubejs",
-        "scripts",
-      ])
-    })
-
-    it("8. Multiple consecutive watcher events in idle PLAY state show the warning toast ONLY ONCE while remaining in REPARAR", async () => {
-      let watcherCallback: any = null
-      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
-        watcherCallback = cb
-        return () => {}
-      })
-
-      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-        version: "1.0.0",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-        modLoader: "NEOFORGE",
-        installed: true,
-        hasUpdate: false,
-        hasExistingInstall: true,
-        totalSizeGB: 1,
-        clientFiles: [],
-      })
-
-      const { container } = await mountButton()
-      const btn = container.querySelector("button") as HTMLElement
-      expect(btn.textContent).toContain("JUGAR")
-
-      // First event: transitions to REPARAR and shows toast
-      await act(async () => {
-        watcherCallback?.({ path: "mods/file1.jar" })
-      })
-      expect(btn.textContent).toContain("REPARAR")
-      const toast = container.querySelector(".settings-live-toast")
-      expect(toast).not.toBeNull()
-      expect(toast?.textContent).toContain("Se detectaron cambios en los archivos del juego")
-
-      // Consecutive events while already in REPARAR: must not re-trigger or crash
-      await act(async () => {
-        watcherCallback?.({ path: "mods/file2.jar" })
-        watcherCallback?.({ path: "mods/file3.jar" })
-      })
-      expect(btn.textContent).toContain("REPARAR")
-    })
-
-    it("9. Consecutive watcher events while running trigger toast once; after repair resets, a future event shows toast again", async () => {
-      let launchStatusCallback: any = null
-      let watcherCallback: any = null
-      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
-        launchStatusCallback = cb
-        return () => {}
-      })
-      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
-        watcherCallback = cb
-        return () => {}
-      })
-
-      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-        version: "1.0.0",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-        modLoader: "NEOFORGE",
-        installed: true,
-        hasUpdate: false,
-        hasExistingInstall: true,
-        totalSizeGB: 1,
-        clientFiles: [{ path: "mods/mod.jar", sha256: "a".repeat(64), sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
-      })
-      vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
-
-      const { container } = await mountButton()
-      const btn = container.querySelector("button") as HTMLElement
-      expect(btn.textContent).toContain("JUGAR")
-
-      // 1. Start Minecraft
-      await act(async () => {
-        launchStatusCallback?.("running")
-      })
-      expect(btn.textContent).toContain("EN EJECUCIÓN")
-
-      // 2. First watcher event while running -> shows toast and sets repair pending
-      await act(async () => {
-        watcherCallback?.({ path: "mods/corrupt1.jar" })
-      })
-      expect(container.querySelector(".settings-live-toast")?.textContent).toContain("Se detectaron cambios")
-
-      // 3. Second and third watcher events while running -> ignored (no duplicate toast)
-      await act(async () => {
-        watcherCallback?.({ path: "mods/corrupt2.jar" })
-        watcherCallback?.({ path: "mods/corrupt3.jar" })
-      })
-      expect(btn.textContent).toContain("EN EJECUCIÓN")
-
-      // 4. Minecraft exits -> switches to REPARAR
-      await act(async () => {
-        launchStatusCallback?.("idle")
-      })
-      expect(btn.textContent).toContain("REPARAR")
-
-      // 5. User clicks REPARAR and repairs installation -> returns to JUGAR (healthy)
+      // Clicking JUGAR is blocked
       await act(async () => {
         btn.click()
       })
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 50))
-      })
-      const activeBtn = container.querySelector("button") as HTMLElement
-      expect(activeBtn?.textContent).toContain("JUGAR")
-
-      // 6. Future watcher event on healthy installation -> shows toast once again
-      await act(async () => {
-        watcherCallback?.({ path: "mods/new-corrupt.jar" })
-      })
-      expect(activeBtn?.textContent).toContain("REPARAR")
-      expect(container.querySelector(".settings-live-toast")?.textContent).toContain("Se detectaron cambios")
+      expect(launchSpy).not.toHaveBeenCalled()
+      expect(container.querySelector(".play-button-toast, .settings-live-toast")?.textContent).toContain(
+        "No se pudo iniciar el juego, verifica los archivos e inténtalo de nuevo",
+      )
     })
 
-    it("10. React.StrictMode: running -> watcher detects corruption -> idle transitions cleanly to REPARAR", async () => {
+    it("9. React.StrictMode: watcher event while running preserves silent lock through remounts", async () => {
       let launchStatusCallback: any = null
       let watcherCallback: any = null
       window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
@@ -2103,10 +2245,14 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         modLoader: "NEOFORGE",
         installed: true,
         hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
         hasExistingInstall: true,
         totalSizeGB: 1,
         clientFiles: [],
       })
+
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
 
       const container = document.createElement("div")
       document.body.appendChild(container)
@@ -2128,27 +2274,31 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       const btn = container.querySelector("button") as HTMLElement
       expect(btn.textContent).toContain("JUGAR")
 
-      // 1. Minecraft starts running
+      // 1. Running
       await act(async () => {
         launchStatusCallback?.("running")
       })
       expect(btn.textContent).toContain("EN EJECUCIÓN")
 
-      // 2. Watcher detects corrupted file while game is running
+      // 2. Watcher detects corrupted file
       await act(async () => {
         watcherCallback?.({ path: "mods/corrupted.jar" })
       })
-      expect(btn.textContent).toContain("EN EJECUCIÓN")
 
-      // 3. Minecraft exits -> idle
+      // 3. Exit running
       await act(async () => {
         launchStatusCallback?.("idle")
       })
+      expect(btn.textContent).toContain("JUGAR")
 
-      // In React.StrictMode, status must cleanly resolve to REPARAR (not reverting to JUGAR)
-      const finalBtn = container.querySelector("button") as HTMLElement
-      expect(finalBtn.textContent).toContain("REPARAR")
-      expect(finalBtn.textContent).not.toContain("JUGAR")
+      // 4. Click blocked
+      await act(async () => {
+        btn.click()
+      })
+      expect(launchSpy).not.toHaveBeenCalled()
+      expect(container.querySelector(".play-button-toast, .settings-live-toast")?.textContent).toContain(
+        "No se pudo iniciar el juego, verifica los archivos e inténtalo de nuevo",
+      )
 
       act(() => {
         root.unmount()
