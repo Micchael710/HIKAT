@@ -541,10 +541,10 @@ async function generateSyncPlan(
 
   for (const [normalizedRelative, item] of clientFilesMap.entries()) {
     checkedCount++
-    if (typeof onProgress === "function" && totalClientFiles > 0) {
+    if (isVerify && typeof onProgress === "function" && totalClientFiles > 0) {
       const p = Math.round((checkedCount / totalClientFiles) * 30)
       onProgress({
-        phase: isVerify ? "VERIFYING" : "INSTALLING",
+        phase: "VERIFYING",
         progress: p,
       })
     }
@@ -703,6 +703,13 @@ async function generateSyncPlan(
     } catch (err) {
       console.warn(`[SyncEngine] Directory scan warning for ${dirName}:`, err.message)
     }
+  }
+
+  if (isVerify && typeof onProgress === "function") {
+    onProgress({
+      phase: "VERIFYING",
+      progress: 35,
+    })
   }
 
   return plan
@@ -1135,6 +1142,7 @@ async function applyStagingToInstance({
   onPhaseChange,
   cancelSignal,
   isVerify = false,
+  progressRange,
 }) {
   if (cancelSignal?.isCancelled) {
     await cleanStaging(instanceRoot)
@@ -1164,6 +1172,10 @@ async function applyStagingToInstance({
     onPhaseChange(currentPhase)
   }
 
+  const rStart = typeof progressRange?.start === "number" ? progressRange.start : (isVerify ? 50 : 0)
+  const rEnd = typeof progressRange?.end === "number" ? progressRange.end : (isVerify ? 90 : 90)
+  const rSpan = Math.max(0, rEnd - rStart)
+
   const totalStaged = stagedFiles.length
 
   if (typeof onProgress === "function") {
@@ -1171,7 +1183,7 @@ async function applyStagingToInstance({
       phase: currentPhase,
       downloadedBytes: effectivePlan.totalDownloadBytes,
       totalBytes: effectivePlan.totalDownloadBytes,
-      progress: 35,
+      progress: rStart,
     })
   }
 
@@ -1195,7 +1207,7 @@ async function applyStagingToInstance({
     }
     verifiedCount++
     if (typeof onProgress === "function" && totalStaged > 0) {
-      const p = Math.round(35 + (verifiedCount / totalStaged) * 15)
+      const p = Math.round(rStart + (verifiedCount / totalStaged) * (0.25 * rSpan))
       onProgress({
         phase: currentPhase,
         downloadedBytes: effectivePlan.totalDownloadBytes,
@@ -1228,7 +1240,7 @@ async function applyStagingToInstance({
     }
     appliedCount++
     if (typeof onProgress === "function" && totalStaged > 0) {
-      const p = Math.round(50 + (appliedCount / totalStaged) * 25)
+      const p = Math.round(rStart + 0.25 * rSpan + (appliedCount / totalStaged) * (0.5 * rSpan))
       onProgress({
         phase: currentPhase,
         downloadedBytes: effectivePlan.totalDownloadBytes,
@@ -1253,7 +1265,7 @@ async function applyStagingToInstance({
     }
     prunedCount++
     if (typeof onProgress === "function" && totalPrune > 0) {
-      const p = Math.round(75 + (prunedCount / totalPrune) * 10)
+      const p = Math.round(rStart + 0.75 * rSpan + (prunedCount / totalPrune) * (0.15 * rSpan))
       onProgress({
         phase: currentPhase,
         downloadedBytes: effectivePlan.totalDownloadBytes,
@@ -1261,15 +1273,6 @@ async function applyStagingToInstance({
         progress: p,
       })
     }
-  }
-
-  if (typeof onProgress === "function") {
-    onProgress({
-      phase: currentPhase,
-      downloadedBytes: effectivePlan.totalDownloadBytes,
-      totalBytes: effectivePlan.totalDownloadBytes,
-      progress: 85,
-    })
   }
 
   // 4. Mandatory Final Verification
@@ -1291,7 +1294,7 @@ async function applyStagingToInstance({
       phase: currentPhase,
       downloadedBytes: effectivePlan.totalDownloadBytes,
       totalBytes: effectivePlan.totalDownloadBytes,
-      progress: 90,
+      progress: rEnd,
     })
   }
 

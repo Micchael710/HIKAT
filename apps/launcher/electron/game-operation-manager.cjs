@@ -260,6 +260,18 @@ class GameOperationManager {
     }
 
     const runOperation = async () => {
+      let maxReportedProgress = 0
+      const safeProgress = (data) => {
+        if (typeof onProgress !== "function" || !data) return
+        const rawProgress = typeof data.progress === "number" ? data.progress : 0
+        const progress = Math.max(maxReportedProgress, Math.min(100, Math.round(rawProgress)))
+        maxReportedProgress = progress
+        onProgress({
+          ...data,
+          progress,
+        })
+      }
+
       try {
         // 1. Sync HiKAT client files (mods, configs, etc.)
         const syncPlan = await generateSyncPlan(
@@ -268,7 +280,7 @@ class GameOperationManager {
           modpackVersion,
           directoryPolicies,
           isVerify,
-          onProgress,
+          safeProgress,
         )
         const installedManifest = await loadInstalledManifest(instanceRoot)
 
@@ -279,7 +291,7 @@ class GameOperationManager {
             clientFiles,
             directoryPolicies,
             modpackVersion,
-            onProgress,
+            onProgress: safeProgress,
             onPhaseChange: isVerify ? undefined : onPhaseChange,
             cancelSignal,
             apiBaseUrl,
@@ -298,6 +310,16 @@ class GameOperationManager {
           throw new Error("Operation was cancelled.")
         }
 
+        // Check whether XMCL Core installation is required
+        const coreStatusPre = await this.coreChecker({
+          instanceRoot,
+          minecraftVersion,
+          modLoader,
+          modLoaderVersion,
+          neoForgeVersion,
+        })
+        const needsCoreInstall = !coreStatusPre.installed && !isVerify
+
         let pendingManifestData = null
 
         // Apply staged/pruned files to instanceRoot when needed
@@ -305,6 +327,12 @@ class GameOperationManager {
           syncPlan.toDownload.length > 0 ||
           syncPlan.toPrune.length > 0 ||
           installedManifest.modpackVersion !== modpackVersion
+
+        const progressRange = isVerify
+          ? { start: 50, end: 90 }
+          : needsCoreInstall
+            ? { start: 0, end: 30 }
+            : { start: 0, end: 90 }
 
         if (needsClientApply) {
           if (!isVerify) {
@@ -318,9 +346,10 @@ class GameOperationManager {
             modpackVersion,
             plan: syncPlan,
             stagedFiles: downloadResult?.stagedFiles || [],
-            onProgress,
+            onProgress: safeProgress,
             cancelSignal,
             isVerify,
+            progressRange,
           })
           pendingManifestData = applyResult?.manifestData || null
         }
@@ -362,13 +391,28 @@ class GameOperationManager {
 
           if (isVerify && coreStatus.installed) {
             // Core is already healthy
-            if (typeof onProgress === "function") {
-              onProgress({
-                phase: "VERIFYING",
-                progress: 95,
-              })
-            }
+            safeProgress({
+              phase: "VERIFYING",
+              progress: 95,
+            })
           } else {
+            const coreProgressAdapter = (data) => {
+              if (typeof data?.progress === "number") {
+                const raw = data.progress
+                const mapped =
+                  raw >= 30
+                    ? Math.min(98, raw)
+                    : Math.round(30 + (raw / 100) * 68)
+                safeProgress({
+                  ...data,
+                  phase: isVerify ? "VERIFYING" : "INSTALLING",
+                  progress: mapped,
+                })
+              } else {
+                safeProgress(data)
+              }
+            }
+
             await this.coreInstaller({
               instanceRoot,
               minecraftVersion,
@@ -376,17 +420,15 @@ class GameOperationManager {
               modLoaderVersion,
               neoForgeVersion,
               signal: abortController.signal,
-              onProgress,
+              onProgress: coreProgressAdapter,
             })
           }
         } else {
           // Core is already installed and healthy during update/install
-          if (typeof onProgress === "function") {
-            onProgress({
-              phase: "INSTALLING",
-              progress: 95,
-            })
-          }
+          safeProgress({
+            phase: "INSTALLING",
+            progress: 95,
+          })
         }
 
         if (cancelSignal.isPaused) {
@@ -406,12 +448,10 @@ class GameOperationManager {
         }
         await cleanStaging(instanceRoot)
 
-        if (typeof onProgress === "function") {
-          onProgress({
-            phase: isVerify ? "VERIFYING" : "INSTALLING",
-            progress: 100,
-          })
-        }
+        safeProgress({
+          phase: isVerify ? "VERIFYING" : "INSTALLING",
+          progress: 100,
+        })
 
         this.state = "IDLE"
         if (typeof onPhaseChange === "function") onPhaseChange("IDLE")

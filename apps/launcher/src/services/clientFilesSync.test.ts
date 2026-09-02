@@ -479,10 +479,11 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       }
       const allTasks = [...completedTasks, file11Task]
 
+      const initialStagedBytes = completedTasks.reduce((sum, t) => sum + t.sizeBytes, 0)
       const cancelSignal = { isCancelled: false, isPaused: false }
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         cancelSignal.isPaused = true
-      }, 120)
+      }, 500)
 
       const result = await executeSync({
         instanceRoot,
@@ -490,7 +491,13 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         modpackVersion: "1.0.0",
         cancelSignal,
         apiBaseUrl: serverBaseUrl,
+        onProgress: (data: any) => {
+          if (data?.downloadedBytes > initialStagedBytes) {
+            cancelSignal.isPaused = true
+          }
+        },
       })
+      clearTimeout(timer)
 
       expect(result.paused).toBe(true)
 

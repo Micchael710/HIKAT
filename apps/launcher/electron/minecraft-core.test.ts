@@ -15,7 +15,7 @@ import { GameLauncher } from "./game-launcher.cjs"
 // @ts-expect-error CJS module
 import { resolveJavaRuntime, validateJavaBinary } from "./java-runtime.cjs"
 // @ts-expect-error CJS module
-import { loadInstalledManifest, saveInstalledManifest } from "./client-files-sync.cjs"
+import { loadInstalledManifest, saveInstalledManifest, generateSyncPlan } from "./client-files-sync.cjs"
 
 describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
   let tempDir: string
@@ -1061,7 +1061,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(progressEmissions[progressEmissions.length - 1]).toBe(100)
   })
 
-  it("40. Fresh installation with XMCL core installer emits installer progress", async () => {
+  it("40. Fresh installation with XMCL core installer emits installer progress and never moves backwards", async () => {
     const progressEmissions: number[] = []
     const manager = new GameOperationManager({
       coreChecker: async () => ({
@@ -1071,6 +1071,9 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
       coreInstaller: async ({ onProgress }: any) => {
         onProgress?.({ phase: "INSTALLING", progress: 50 })
         onProgress?.({ phase: "INSTALLING", progress: 80 })
+        // Even if an underlying installer emitted a lower number, safeProgress prevents backward jumps
+        onProgress?.({ phase: "INSTALLING", progress: 60 })
+        onProgress?.({ phase: "INSTALLING", progress: 95 })
         return { success: true }
       },
       javaResolver: () => ({ cliJavaPath: "java" }),
@@ -1108,8 +1111,72 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     const result = await manager.startSync(payload)
     expect(result.success).toBe(true)
 
+    // Verify progress strictly never moves backwards
+    for (let i = 1; i < progressEmissions.length; i++) {
+      expect(progressEmissions[i]).toBeGreaterThanOrEqual(progressEmissions[i - 1])
+    }
     expect(progressEmissions).toContain(50)
     expect(progressEmissions).toContain(80)
+    expect(progressEmissions).toContain(95)
     expect(progressEmissions[progressEmissions.length - 1]).toBe(100)
+  })
+
+  it("41. generateSyncPlan in normal mode (isVerify: false) does not emit progress or change phase to INSTALLING", async () => {
+    const emittedEvents: any[] = []
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "test-content")
+    const hash = crypto.createHash("sha256").update("test-content").digest("hex")
+
+    const plan = await generateSyncPlan(
+      instanceRoot,
+      [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 12,
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      "1.0.0",
+      [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      false, // isVerify: false
+      (data: any) => {
+        emittedEvents.push(data)
+      },
+    )
+
+    expect(plan).toBeDefined()
+    expect(emittedEvents.length).toBe(0)
+  })
+
+  it("42. generateSyncPlan in isVerify mode emits VERIFYING phase progress", async () => {
+    const emittedEvents: any[] = []
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "test-content")
+    const hash = crypto.createHash("sha256").update("test-content").digest("hex")
+
+    const plan = await generateSyncPlan(
+      instanceRoot,
+      [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 12,
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      "1.0.0",
+      [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      true, // isVerify: true
+      (data: any) => {
+        emittedEvents.push(data)
+      },
+    )
+
+    expect(plan).toBeDefined()
+    expect(emittedEvents.length).toBeGreaterThan(0)
+    expect(emittedEvents.every((e) => e.phase === "VERIFYING")).toBe(true)
   })
 })

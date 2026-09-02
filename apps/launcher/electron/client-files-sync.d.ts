@@ -30,6 +30,7 @@ export declare function applyStagingToInstance(options: {
   onPhaseChange?: (phase: string) => void
   cancelSignal?: { isCancelled: boolean; isPaused?: boolean }
   isVerify?: boolean
+  progressRange?: { start: number; end: number }
 }): Promise<any>
 
 export declare function executeSync(options: {
