@@ -71,11 +71,10 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
           if (matched) {
             setSelectedVersionId(matched.id || matched.fileId || initialVersionId)
           } else {
-            const stable = data.compatibleVersions.find((v) => v.releaseType === "RELEASE")
-            const initialVer = stable || data.compatibleVersions[0]
-            if (initialVer) {
-              setSelectedVersionId(initialVer.id || initialVer.fileId || "")
-            }
+            setSelectedVersionId("")
+            setError(
+              "La versión seleccionada desde Servidor ya no está disponible o no es compatible con el Mod Loader y versión de Minecraft actuales. Selecciona manualmente una versión compatible para continuar.",
+            )
           }
         } else {
           // Preselect latest stable release (or first compatible version)
@@ -343,6 +342,25 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
             </div>
           ) : (
             <div>
+              {/* Error Notice */}
+              {error && (
+                <div
+                  data-testid="mod-detail-error"
+                  style={{
+                    padding: "12px 16px",
+                    background: "rgba(239, 68, 68, 0.12)",
+                    border: "1px solid rgba(239, 68, 68, 0.25)",
+                    borderRadius: "8px",
+                    color: "#fca5a5",
+                    fontSize: "13px",
+                    marginBottom: "16px",
+                    lineHeight: "1.4",
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+
               {/* Summary */}
               <p style={{ margin: "0 0 20px 0", fontSize: "14px", color: "#d1d5db", lineHeight: "1.5" }}>
                 {detail?.summary}
@@ -364,7 +382,10 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                 <select
                   data-testid="select-mod-version"
                   value={selectedVersionId}
-                  onChange={(e) => setSelectedVersionId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedVersionId(e.target.value)
+                    setError(null)
+                  }}
                   disabled={installing}
                   style={{
                     width: "100%",
@@ -377,6 +398,11 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     outline: "none",
                   }}
                 >
+                  {!selectedVersionId && (
+                    <option value="" disabled style={{ background: "#1f2937", color: "#9ca3af" }}>
+                      Selecciona una versión compatible...
+                    </option>
+                  )}
                   {detail?.compatibleVersions.map((ver) => {
                     const verKey = ver.id || ver.fileId || ""
                     const isStable = ver.releaseType === "RELEASE"

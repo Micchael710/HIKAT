@@ -1572,6 +1572,101 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         )
       })
     })
+
+    it("GameView with non-existent initialVersionId in handoff does not silently switch versions and blocks install", async () => {
+      const onClearHandoff = vi.fn()
+
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        draftRelease: {
+          id: "draft-test",
+          version: "draft-123",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          status: "DRAFT",
+          notes: null,
+          publishedAt: null,
+          coverMediaId: null,
+          cover: null,
+          files: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        publishedRelease: null,
+        pendingChangesCount: 0,
+        readiness: {
+          isReady: true,
+          validVersion: true,
+          uniqueVersion: true,
+          hasFiles: true,
+          noConflicts: true,
+          storageVerified: true,
+          issues: [],
+        },
+      })
+
+      vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "CURSEFORGE",
+        projectId: "cf-mod-both",
+        name: "CF Both Mod",
+        summary: "Both environment mod",
+        description: "Description",
+        author: "authorCF",
+        downloads: 50000,
+        contentType: "MOD",
+        environment: "UNKNOWN",
+        compatibleVersions: [
+          {
+            id: "different-ver-1",
+            name: "1.0.0",
+            versionNumber: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: new Date().toISOString(),
+            downloads: 50000,
+            filename: "cf-both.jar",
+            sizeBytes: 60000,
+            dependencies: [],
+          },
+        ],
+        isInstalled: false,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+      })
+
+      const resolvePlanSpy = vi.spyOn(graphqlClient, "resolveModInstallationPlan")
+
+      render(
+        <GameView
+          theme="dark"
+          handoff={{
+            provider: "CURSEFORGE",
+            projectId: "cf-mod-both",
+            versionId: "obsolete-server-ver-888",
+            contentType: "MOD",
+            environmentOverride: "BOTH",
+          }}
+          onClearHandoff={onClearHandoff}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
+      })
+
+      // Error message is displayed explaining the version is no longer compatible
+      const errorNotice = await screen.findByTestId("mod-detail-error")
+      expect(errorNotice.textContent).toContain("La versión seleccionada desde Servidor ya no está disponible")
+
+      // resolveModInstallationPlan is NEVER called with a silent fallback version
+      expect(resolvePlanSpy).not.toHaveBeenCalled()
+
+      // Install button is disabled
+      const installBtn = screen.getByTestId("button-confirm-install")
+      expect(installBtn.hasAttribute("disabled")).toBe(true)
+    })
   })
 
   describe("HiKAT Shard 8C: Release Experience & Publication Suite (React & Wizards)", () => {

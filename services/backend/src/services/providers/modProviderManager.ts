@@ -1153,9 +1153,12 @@ export class ModProviderManager {
       )
     }
 
-    let rootEnv: ModEnvironmentGql | null = rootProject?.environment || rootVersion.environment || null
+    const knownRootEnv: ModEnvironmentGql | null =
+      rootProject?.environment || rootVersion.environment || null
+
+    let rootEnv: ModEnvironmentGql | null = knownRootEnv
     if (contentType === "MOD") {
-      if (input.provider === "CURSEFORGE" && (!rootEnv || rootEnv === "UNKNOWN")) {
+      if (input.provider === "CURSEFORGE" && !rootEnv) {
         if (input.environmentOverride === "CLIENT" || input.environmentOverride === "BOTH") {
           rootEnv = input.environmentOverride
         } else if (input.environmentOverride === "SERVER") {
@@ -1437,18 +1440,6 @@ export class ModProviderManager {
           continue
         }
 
-        let depEnv: ModEnvironmentGql | null = depProject?.environment || null
-        if (input.provider === "CURSEFORGE" && depContentType === "MOD" && (!depEnv || depEnv === "UNKNOWN")) {
-          depEnv = rootEnv || null
-        }
-
-        if (depContentType === "MOD" && depEnv === "SERVER") {
-          conflicts.push(
-            `Conflicto: la dependencia "${dep.projectName || depProjectId}" es un mod exclusivo de servidor y no corresponde al cliente.`,
-          )
-          continue
-        }
-
         let selectedDepVersion: NormalizedModVersion | undefined
 
         // Priority 1: Manual override (exact 3-part key first, then 2-part key fallback)
@@ -1522,8 +1513,12 @@ export class ModProviderManager {
           continue
         }
 
-        if (depContentType === "MOD" && (!depEnv || depEnv === "UNKNOWN") && selectedDepVersion.environment) {
-          depEnv = selectedDepVersion.environment
+        const knownDepEnv: ModEnvironmentGql | null =
+          depProject?.environment || selectedDepVersion.environment || null
+
+        let depEnv: ModEnvironmentGql | null = knownDepEnv
+        if (input.provider === "CURSEFORGE" && depContentType === "MOD" && !depEnv) {
+          depEnv = rootEnv || null
         }
 
         if (depContentType === "MOD" && depEnv === "SERVER") {
@@ -1742,9 +1737,11 @@ export class ModProviderManager {
     }
 
     // Root project environment check for server installation
-    let rootEnv: ModEnvironmentGql | null = rootProject.environment || null
+    const knownRootEnv: ModEnvironmentGql | null = rootProject.environment || null
+
+    let rootEnv: ModEnvironmentGql | null = knownRootEnv
     if (contentType === "MOD") {
-      if (input.provider === "CURSEFORGE" && (!rootEnv || rootEnv === "UNKNOWN")) {
+      if (input.provider === "CURSEFORGE" && !rootEnv) {
         if (input.environmentOverride === "BOTH") {
           return {
             items: [],
@@ -1787,7 +1784,7 @@ export class ModProviderManager {
           "VALIDATION_ERROR",
         )
       }
-      if (rootEnv === "UNKNOWN" || !rootEnv) {
+      if (!rootEnv) {
         throw createGraphQLError(
           "HiKAT no puede garantizar que este mod sea exclusivamente de servidor. Debe añadirse desde Juego → Actualizaciones o verificar su configuración.",
           "VALIDATION_ERROR",
@@ -2066,35 +2063,6 @@ export class ModProviderManager {
           continue
         }
 
-        // Check environment of required dependency!
-        let depEnv: ModEnvironmentGql | null = depProject?.environment || null
-        if (depContentType === "MOD") {
-          if (input.provider === "CURSEFORGE" && (!depEnv || depEnv === "UNKNOWN")) {
-            if (rootEnv === "SERVER") {
-              depEnv = "SERVER"
-            }
-          }
-
-          if (depEnv === "BOTH") {
-            conflicts.push(
-              `Una dependencia ("${depProject?.name || dep.projectName || depProjectId}") también es necesaria en los clientes. Instala este contenido desde Juego → Actualizaciones.`,
-            )
-            requiresGameUpdate = true
-            gameUpdateReason = `Una dependencia ("${depProject?.name || dep.projectName || depProjectId}") también es necesaria en los clientes. Instala este contenido desde Juego → Actualizaciones.`
-            continue
-          } else if (depEnv === "CLIENT") {
-            conflicts.push(
-              `La dependencia ("${depProject?.name || dep.projectName || depProjectId}") es exclusiva de cliente y no corresponde al servidor.`,
-            )
-            continue
-          } else if (depEnv === "UNKNOWN" || !depEnv) {
-            conflicts.push(
-              `La dependencia ("${depProject?.name || dep.projectName || depProjectId}") tiene un entorno ambiguo o desconocido. HiKAT no puede garantizar que sea exclusivamente de servidor.`,
-            )
-            continue
-          }
-        }
-
         let selectedDepVersion: NormalizedModVersion | undefined
         const overrideVersionId =
           manualOverridesMap.get(depKey) || manualOverridesMap.get(`${current.provider}:${depProjectId}`)
@@ -2136,6 +2104,38 @@ export class ModProviderManager {
         if (!selectedDepVersion) {
           conflicts.push(`No se pudo resolver una versión válida para la dependencia "${dep.projectName || depProjectId}".`)
           continue
+        }
+
+        // Check environment of required dependency based on priority: project -> version -> root override
+        const knownDepEnv: ModEnvironmentGql | null =
+          depProject?.environment || selectedDepVersion.environment || null
+
+        let depEnv: ModEnvironmentGql | null = knownDepEnv
+        if (depContentType === "MOD") {
+          if (input.provider === "CURSEFORGE" && !depEnv) {
+            if (rootEnv === "SERVER") {
+              depEnv = "SERVER"
+            }
+          }
+
+          if (depEnv === "BOTH") {
+            conflicts.push(
+              `Una dependencia ("${depProject?.name || dep.projectName || depProjectId}") también es necesaria en los clientes. Instala este contenido desde Juego → Actualizaciones.`,
+            )
+            requiresGameUpdate = true
+            gameUpdateReason = `Una dependencia ("${depProject?.name || dep.projectName || depProjectId}") también es necesaria en los clientes. Instala este contenido desde Juego → Actualizaciones.`
+            continue
+          } else if (depEnv === "CLIENT") {
+            conflicts.push(
+              `La dependencia ("${depProject?.name || dep.projectName || depProjectId}") es exclusiva de cliente y no corresponde al servidor.`,
+            )
+            continue
+          } else if (!depEnv) {
+            conflicts.push(
+              `La dependencia ("${depProject?.name || dep.projectName || depProjectId}") tiene un entorno ambiguo o desconocido. HiKAT no puede garantizar que sea exclusivamente de servidor.`,
+            )
+            continue
+          }
         }
 
         const finalDepContentType: ContentTypeGql = selectedDepVersion.contentType || depContentType

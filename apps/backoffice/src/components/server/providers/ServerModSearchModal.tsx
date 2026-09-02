@@ -417,7 +417,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
             }}
           >
             {[
-              { type: "MOD" as ContentType, label: "Mods de servidor (Solo Server)", testId: "server-tab-content-mod" },
+              { type: "MOD" as ContentType, label: "Mods para servidor", testId: "server-tab-content-mod" },
               { type: "DATA_PACK" as ContentType, label: "Data Packs", testId: "server-tab-content-datapack" },
             ].map((tab) => {
               const isSelected = selectedContentType === tab.type
@@ -456,7 +456,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                 type="text"
                 value={query}
                 onChange={handleQueryChange}
-                placeholder={`Buscar ${selectedContentType === "MOD" ? "mods de servidor" : "data packs"} en Modrinth y CurseForge...`}
+                placeholder={`Buscar ${selectedContentType === "MOD" ? "mods para servidor" : "data packs"} en Modrinth y CurseForge...`}
                 className="launcher-input"
                 style={{
                   width: "100%",
@@ -604,7 +604,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                 </div>
                 <div style={{ fontSize: "13px" }}>
                   {selectedContentType === "MOD"
-                    ? "Solo se muestran mods marcados exclusivamente para el servidor."
+                    ? "Intenta con otro término de búsqueda o cambia de proveedor."
                     : "Intenta con otro término de búsqueda."}
                 </div>
               </div>

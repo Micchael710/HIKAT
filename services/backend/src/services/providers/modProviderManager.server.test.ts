@@ -542,12 +542,13 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
 
   // Test 9: Filtered pagination fetches through chunks and returns items with accurate hasMore
   it("Shard 8D: searchServerMods fetches chunks across provider pages without premature termination and computes hasMore", async () => {
-    // Page 1 from provider: 20 items, ALL BOTH environment (0 SERVER)
+    // Page 1 from provider: 20 items, ALL CLIENT environment (must be filtered out for Modrinth)
     const providerPage1 = Array.from({ length: 20 }, (_, i) => ({
-      projectId: `both-mod-${i + 1}`,
-      name: `Both Mod ${i + 1}`,
-      environment: "BOTH",
+      projectId: `client-mod-${i + 1}`,
+      name: `Client Mod ${i + 1}`,
+      environment: "CLIENT",
       contentType: "MOD",
+      provider: "MODRINTH",
     }))
 
     // Page 2 from provider: 5 SERVER items
@@ -556,11 +557,12 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
       name: `Server Mod ${i + 1}`,
       environment: "SERVER",
       contentType: "MOD",
+      provider: "MODRINTH",
     }))
 
     const mockAdapter = {
       isConfigured: () => true,
-      searchMods: vi.fn().mockImplementation(async (_env, _query, _limit, offset) => {
+      searchMods: vi.fn().mockImplementation(async (_env, _query, _mc, _loader, _limit, offset) => {
         if (offset === 0) {
           return { items: providerPage1, totalCount: 25 }
         } else {

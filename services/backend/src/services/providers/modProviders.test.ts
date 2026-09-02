@@ -4629,5 +4629,93 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(rootItem?.environment).toBe("SERVER")
       expect(depItem?.environment).toBe("SERVER")
     })
+
+    it("respects known authoritative environment on dependency over inherited root override", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/999111/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 10001,
+                  fileName: "cf-root-override.jar",
+                  downloadUrl: "https://cdn/cf-root-override.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [{ modId: 999222, relationType: 3 }],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/999111")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 999111, name: "CF Root Unknown", classId: 6 } }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/999222/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 20001,
+                  fileName: "cf-dep-known.jar",
+                  downloadUrl: "https://cdn/cf-dep-known.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "1234567890abcdef1234567890abcdef12345678" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/999222")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 999222, name: "CF Dep Known", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      // We spy on adapter.getProject to simulate that dependency 999222 has known environment "BOTH"
+      const origGetProject = (manager as any).curseforge.getProject.bind((manager as any).curseforge)
+      vi.spyOn((manager as any).curseforge, "getProject").mockImplementation((async (env: any, id: any, ct: any) => {
+        const res = await origGetProject(env, id, ct)
+        if (id === "999222") {
+          return { ...res, environment: "BOTH" }
+        }
+        return res
+      }) as any)
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        {
+          provider: "CURSEFORGE",
+          projectId: "999111",
+          versionId: "10001",
+          contentType: "MOD",
+          environmentOverride: "CLIENT", // Root override is CLIENT
+        },
+      )
+
+      expect(plan.isValid).toBe(true)
+      const rootItem = plan.items.find((i) => i.projectId === "999111")
+      const depItem = plan.items.find((i) => i.projectId === "999222")
+
+      // Root item takes the override CLIENT
+      expect(rootItem?.environment).toBe("CLIENT")
+      // Dependency preserves its known authoritative environment BOTH rather than being overwritten with CLIENT
+      expect(depItem?.environment).toBe("BOTH")
+    })
   })
 })
