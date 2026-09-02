@@ -116,7 +116,6 @@ export default function DownloadPlayButton({
   const isCancellingRef = useRef(false)
   const latestManifestVersionRef = useRef<string | null>(null)
   const isRepairPendingRef = useRef(false)
-  const lastWatcherToastTimeRef = useRef(0)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const isDark = theme === "dark"
 
@@ -127,21 +126,17 @@ export default function DownloadPlayButton({
   // Listen to filesystem integrity changes while launcher is open
   useEffect(() => {
     const unsubscribe = window.electronAPI?.onGameFileIntegrityChanged?.(() => {
-      const now = Date.now()
-      const shouldShowToast = now - lastWatcherToastTimeRef.current > 8000
-
-      if (shouldShowToast) {
-        lastWatcherToastTimeRef.current = now
-        showToast(t("playButton.fileWatcherChangeDetected"), "info")
-      }
-
       setStatus((prevStatus) => {
         if (prevStatus === "running" || prevStatus === "launching") {
-          isRepairPendingRef.current = true
+          if (!isRepairPendingRef.current) {
+            isRepairPendingRef.current = true
+            showToast(t("playButton.fileWatcherChangeDetected"), "info")
+          }
           return prevStatus
         }
 
         if (prevStatus === "play") {
+          showToast(t("playButton.fileWatcherChangeDetected"), "info")
           return "repair"
         }
 
@@ -284,7 +279,6 @@ export default function DownloadPlayButton({
             }
             if (isRepairPendingRef.current) {
               isRepairPendingRef.current = false
-              showToast(t("playButton.fileWatcherChangeDetected"), "info")
               return "repair"
             }
             return idleState

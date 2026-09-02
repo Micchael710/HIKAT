@@ -2031,6 +2031,118 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         "scripts",
       ])
     })
+
+    it("9. Multiple consecutive watcher events in idle PLAY state show the warning toast ONLY ONCE while remaining in REPARAR", async () => {
+      let watcherCallback: any = null
+      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
+        watcherCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      // First event: transitions to REPARAR and shows toast
+      await act(async () => {
+        watcherCallback?.({ path: "mods/file1.jar" })
+      })
+      expect(btn.textContent).toContain("REPARAR")
+      const toast = container.querySelector(".settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.textContent).toContain("Se detectaron cambios en los archivos del juego")
+
+      // Consecutive events while already in REPARAR: must not re-trigger or crash
+      await act(async () => {
+        watcherCallback?.({ path: "mods/file2.jar" })
+        watcherCallback?.({ path: "mods/file3.jar" })
+      })
+      expect(btn.textContent).toContain("REPARAR")
+    })
+
+    it("10. Consecutive watcher events while running trigger toast once; after repair resets, a future event shows toast again", async () => {
+      let launchStatusCallback: any = null
+      let watcherCallback: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      })
+      window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
+        watcherCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [{ path: "mods/mod.jar", sha256: "a".repeat(64), sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+      })
+      vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      // 1. Start Minecraft
+      await act(async () => {
+        launchStatusCallback?.("running")
+      })
+      expect(btn.textContent).toContain("EN EJECUCIÓN")
+
+      // 2. First watcher event while running -> shows toast and sets repair pending
+      await act(async () => {
+        watcherCallback?.({ path: "mods/corrupt1.jar" })
+      })
+      expect(container.querySelector(".settings-live-toast")?.textContent).toContain("Se detectaron cambios")
+
+      // 3. Second and third watcher events while running -> ignored (no duplicate toast)
+      await act(async () => {
+        watcherCallback?.({ path: "mods/corrupt2.jar" })
+        watcherCallback?.({ path: "mods/corrupt3.jar" })
+      })
+      expect(btn.textContent).toContain("EN EJECUCIÓN")
+
+      // 4. Minecraft exits -> switches to REPARAR
+      await act(async () => {
+        launchStatusCallback?.("idle")
+      })
+      expect(btn.textContent).toContain("REPARAR")
+
+      // 5. User clicks REPARAR and repairs installation -> returns to JUGAR (healthy)
+      await act(async () => {
+        btn.click()
+      })
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50))
+      })
+      const activeBtn = container.querySelector("button") as HTMLElement
+      expect(activeBtn?.textContent).toContain("JUGAR")
+
+      // 6. Future watcher event on healthy installation -> shows toast once again
+      await act(async () => {
+        watcherCallback?.({ path: "mods/new-corrupt.jar" })
+      })
+      expect(activeBtn?.textContent).toContain("REPARAR")
+      expect(container.querySelector(".settings-live-toast")?.textContent).toContain("Se detectaron cambios")
+    })
   })
 })
 
