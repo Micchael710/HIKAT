@@ -333,7 +333,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
 
         for (const v of versions) {
           const rawLoaders = (v.loaders || []).map((l: string) => l.toLowerCase())
-          if (rawLoaders.some((l) => l === "neoforge")) {
+          if (rawLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
             hasModVersion = true
           }
           if (rawLoaders.includes("datapack")) {
@@ -406,12 +406,13 @@ export class ModrinthAdapter implements ModProviderAdapter {
       const list = Array.isArray(data) ? data : data ? [data] : []
       const mapped = list.map((v) => this.mapModrinthVersion(v, contentType))
 
-      // Authoritatively filter by requested contentType
+      // Authoritatively filter by requested contentType and active loader
+      const targetLoader = loader ? loader.trim().toLowerCase() : ""
       return mapped.filter((v) => {
         if (contentType === "MOD") {
           return (
             v.contentType === "MOD" &&
-            v.loaders.some((l) => l.toLowerCase() === "neoforge")
+            (!targetLoader || v.loaders.some((l) => l.toLowerCase() === targetLoader))
           )
         }
         if (contentType === "DATA_PACK") {

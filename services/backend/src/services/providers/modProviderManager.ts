@@ -41,6 +41,16 @@ export function mapModLoaderToProviderName(modLoader: GameModLoaderGql | string)
   }
 }
 
+export function formatModLoaderDisplayName(modLoader: string): string {
+  switch (modLoader.toUpperCase()) {
+    case "NEOFORGE": return "NeoForge"
+    case "FORGE": return "Forge"
+    case "FABRIC": return "Fabric"
+    case "QUILT": return "Quilt"
+    default: return modLoader
+  }
+}
+
 export function getLogicalPathForContent(contentType: ContentTypeGql, filename: string): string {
   const cleanFilename = filename.trim().replace(/^[/\\]+/, "")
   switch (contentType) {
@@ -1134,19 +1144,21 @@ export class ModProviderManager {
             "VALIDATION_ERROR",
           )
         }
+        const targetLoader = loader.trim().toLowerCase()
+        const displayLoader = formatModLoaderDisplayName(modLoader || loader)
         if (
           contentType === "MOD" &&
           (!directVersion.loaders ||
             directVersion.loaders.length === 0 ||
-            !directVersion.loaders.map((l) => l.toLowerCase()).includes("neoforge"))
+            !directVersion.loaders.map((l) => l.toLowerCase()).includes(targetLoader))
         ) {
           throw createGraphQLError(
-            `La versión "${input.versionId}" no es compatible con el loader NeoForge.`,
+            `La versión "${input.versionId}" no es compatible con el loader ${displayLoader}.`,
             "VALIDATION_ERROR",
           )
         }
         throw createGraphQLError(
-          `La versión "${input.versionId}" no es compatible con el entorno actual (Minecraft ${minecraftVersion}${contentType === "MOD" ? " · NeoForge" : ""}).`,
+          `La versión "${input.versionId}" no es compatible con el entorno actual (Minecraft ${minecraftVersion}${contentType === "MOD" ? ` · ${displayLoader}` : ""}).`,
           "VALIDATION_ERROR",
         )
       }
@@ -1433,9 +1445,9 @@ export class ModProviderManager {
         // Fetch compatible versions for the required dependency using its discovered depContentType
         let depCompatibleVersions: NormalizedModVersion[] = []
         let depProject: NormalizedModProject | null = null
+        const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
         try {
           depProject = await depAdapter.getProject(env, depProjectId, depContentType).catch(() => null)
-          const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
           depCompatibleVersions = await depAdapter.getCompatibleVersions(
             env,
             depProjectId,
@@ -1481,10 +1493,10 @@ export class ModProviderManager {
                 )
               } else if (
                 depContentType === "MOD" &&
-                !pinnedVersionObj.loaders.map((l) => l.toLowerCase()).includes("neoforge")
+                !pinnedVersionObj.loaders.map((l) => l.toLowerCase()).includes(depLoader.toLowerCase())
               ) {
                 conflicts.push(
-                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con el loader NeoForge.`,
+                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con el loader ${formatModLoaderDisplayName(modLoader || depLoader)}.`,
                 )
               } else {
                 conflicts.push(
@@ -1779,19 +1791,21 @@ export class ModProviderManager {
             "VALIDATION_ERROR",
           )
         }
+        const targetLoader = loader.trim().toLowerCase()
+        const displayLoader = formatModLoaderDisplayName(modLoader || loader)
         if (
           contentType === "MOD" &&
           (!directVersion.loaders ||
             directVersion.loaders.length === 0 ||
-            !directVersion.loaders.map((l) => l.toLowerCase()).includes("neoforge"))
+            !directVersion.loaders.map((l) => l.toLowerCase()).includes(targetLoader))
         ) {
           throw createGraphQLError(
-            `La versión "${input.versionId}" no es compatible con el loader NeoForge.`,
+            `La versión "${input.versionId}" no es compatible con el loader ${displayLoader}.`,
             "VALIDATION_ERROR",
           )
         }
         throw createGraphQLError(
-          `La versión "${input.versionId}" no es compatible con el entorno actual del servidor (Minecraft ${minecraftVersion}${contentType === "MOD" ? " · NeoForge" : ""}).`,
+          `La versión "${input.versionId}" no es compatible con el entorno actual del servidor (Minecraft ${minecraftVersion}${contentType === "MOD" ? ` · ${displayLoader}` : ""}).`,
           "VALIDATION_ERROR",
         )
       }

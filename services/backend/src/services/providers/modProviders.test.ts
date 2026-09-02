@@ -731,6 +731,63 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(validDpPlan.items[0]!.targetPath).toBe("world/datapacks/hybrid-dp.zip")
     })
 
+    it.each([
+      { loaderName: "NeoForge", rawLoader: "neoforge" },
+      { loaderName: "Forge", rawLoader: "forge" },
+      { loaderName: "Fabric", rawLoader: "fabric" },
+      { loaderName: "Quilt", rawLoader: "quilt" },
+    ])("ModrinthAdapter accepts and resolves versions for loader $loaderName ($rawLoader)", async ({ loaderName, rawLoader }) => {
+      const adapter = new ModrinthAdapter()
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/multi-mod/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: `ver-${rawLoader}`,
+                name: `${loaderName} Mod 1.0`,
+                loaders: [rawLoader],
+                game_versions: ["1.21.1"],
+                files: [{ filename: `mod-${rawLoader}.jar`, size: 4000, url: `https://cdn/mod-${rawLoader}.jar` }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/multi-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "multi-mod",
+              title: "Multi Mod",
+              project_type: "mod",
+              categories: [rawLoader],
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      // Check getSupportedContentTypes recognizes MOD with this loader
+      const types = await adapter.getSupportedContentTypes(env, "multi-mod", "1.21.1")
+      expect(types).toContain("MOD")
+
+      // Check getCompatibleVersions matches the requested loader
+      const versions = await adapter.getCompatibleVersions(env, "multi-mod", "1.21.1", loaderName, "MOD")
+      expect(versions).toHaveLength(1)
+      expect(versions[0]!.id).toBe(`ver-${rawLoader}`)
+      expect(versions[0]!.contentType).toBe("MOD")
+
+      // Check requesting a different loader returns 0 compatible versions
+      const otherLoader = rawLoader === "fabric" ? "NeoForge" : "Fabric"
+      const mismatchedVersions = await adapter.getCompatibleVersions(env, "multi-mod", "1.21.1", otherLoader, "MOD")
+      expect(mismatchedVersions).toHaveLength(0)
+    })
+
     it("parses SHA-512 and SHA-1 hashes from Modrinth without inventing SHA-256", async () => {
       const adapter = new ModrinthAdapter()
 
