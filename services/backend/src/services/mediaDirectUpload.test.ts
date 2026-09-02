@@ -7,6 +7,7 @@ import {
   createContentMediaUpload,
   completeContentMediaUpload,
 } from "./mediaService"
+import { handleMediaServe } from "../media/transport"
 import { MAX_SKIN_SIZE_BYTES, MAX_CAPE_SIZE_BYTES } from "@hikat/shared"
 import type { Env } from "../types"
 
@@ -312,5 +313,112 @@ describe("HiKAT Content Media Direct R2 Multipart Upload Suite", () => {
       .where(eq(schema.contentMedia.id, ticket.mediaId!))
       .get()
     expect(d1Record).toBeUndefined()
+  })
+
+  it("13. handleMediaServe without Range responds with 200, full Content-Length, and Accept-Ranges: bytes", async () => {
+    const mediaId = crypto.randomUUID()
+    const objectKey = `content/media/${mediaId}.png`
+    const content = new Uint8Array([10, 20, 30, 40, 50])
+    await env.ASSETS!.put(objectKey, content)
+
+    await db.insert(schema.contentMedia).values({
+      id: mediaId,
+      objectKey,
+      mediaType: "IMAGE",
+      mimeType: "image/png",
+      sizeBytes: content.length,
+      createdBy: adminId,
+      createdAt: new Date().toISOString(),
+    })
+
+    const req = new Request(`http://localhost/media/content/${mediaId}`)
+    const res = await handleMediaServe(req, env, db, mediaId)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Content-Type")).toBe("image/png")
+    expect(res.headers.get("Content-Length")).toBe("5")
+    expect(res.headers.get("Accept-Ranges")).toBe("bytes")
+    expect(res.headers.get("Cache-Control")).toContain("immutable")
+
+    const body = new Uint8Array(await res.arrayBuffer())
+    expect(body).toEqual(content)
+  })
+
+  it("14. handleMediaServe with valid Range responds with 206, Content-Range, and exact byte slice", async () => {
+    const mediaId = crypto.randomUUID()
+    const objectKey = `content/media/${mediaId}.mp4`
+    const content = new Uint8Array([100, 101, 102, 103, 104, 105, 106, 107])
+    await env.ASSETS!.put(objectKey, content)
+
+    await db.insert(schema.contentMedia).values({
+      id: mediaId,
+      objectKey,
+      mediaType: "VIDEO",
+      mimeType: "video/mp4",
+      sizeBytes: content.length,
+      createdBy: adminId,
+      createdAt: new Date().toISOString(),
+    })
+
+    // Range: bytes=2-5 (4 bytes)
+    const req = new Request(`http://localhost/media/content/${mediaId}`, {
+      headers: { Range: "bytes=2-5" },
+    })
+    const res = await handleMediaServe(req, env, db, mediaId)
+
+    expect(res.status).toBe(206)
+    expect(res.headers.get("Content-Type")).toBe("video/mp4")
+    expect(res.headers.get("Content-Range")).toBe("bytes 2-5/8")
+    expect(res.headers.get("Content-Length")).toBe("4")
+    expect(res.headers.get("Accept-Ranges")).toBe("bytes")
+
+    const body = new Uint8Array(await res.arrayBuffer())
+    expect(body).toEqual(new Uint8Array([102, 103, 104, 105]))
+
+    // Open-ended range: bytes=4- (4 bytes: 4..7)
+    const reqOpen = new Request(`http://localhost/media/content/${mediaId}`, {
+      headers: { Range: "bytes=4-" },
+    })
+    const resOpen = await handleMediaServe(reqOpen, env, db, mediaId)
+
+    expect(resOpen.status).toBe(206)
+    expect(resOpen.headers.get("Content-Range")).toBe("bytes 4-7/8")
+    expect(resOpen.headers.get("Content-Length")).toBe("4")
+
+    const bodyOpen = new Uint8Array(await resOpen.arrayBuffer())
+    expect(bodyOpen).toEqual(new Uint8Array([104, 105, 106, 107]))
+  })
+
+  it("15. handleMediaServe with invalid or out of bounds Range responds with 416", async () => {
+    const mediaId = crypto.randomUUID()
+    const objectKey = `content/media/${mediaId}.png`
+    const content = new Uint8Array([1, 2, 3, 4])
+    await env.ASSETS!.put(objectKey, content)
+
+    await db.insert(schema.contentMedia).values({
+      id: mediaId,
+      objectKey,
+      mediaType: "IMAGE",
+      mimeType: "image/png",
+      sizeBytes: content.length,
+      createdBy: adminId,
+      createdAt: new Date().toISOString(),
+    })
+
+    // Out of bounds: start >= total
+    const reqOutOfBounds = new Request(`http://localhost/media/content/${mediaId}`, {
+      headers: { Range: "bytes=10-" },
+    })
+    const resOutOfBounds = await handleMediaServe(reqOutOfBounds, env, db, mediaId)
+    expect(resOutOfBounds.status).toBe(416)
+    expect(resOutOfBounds.headers.get("Content-Range")).toBe("bytes */4")
+    expect(resOutOfBounds.headers.get("Accept-Ranges")).toBe("bytes")
+
+    // Invalid format
+    const reqInvalid = new Request(`http://localhost/media/content/${mediaId}`, {
+      headers: { Range: "invalid-range" },
+    })
+    const resInvalid = await handleMediaServe(reqInvalid, env, db, mediaId)
+    expect(resInvalid.status).toBe(416)
   })
 })

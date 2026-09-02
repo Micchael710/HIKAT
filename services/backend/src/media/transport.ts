@@ -350,6 +350,80 @@ export async function handleMediaServe(
       )
     }
 
+    const rangeHeader = request.headers.get("Range") || request.headers.get("range")
+    const totalSizeBytes = media.sizeBytes
+
+    if (rangeHeader) {
+      const rangeMatch = rangeHeader.trim().match(/^bytes=(\d+)-(\d+)?$/)
+      if (!rangeMatch) {
+        return new Response(JSON.stringify({ error: "Rango de bytes no satisfacible." }), {
+          status: 416,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Range": `bytes */${totalSizeBytes}`,
+            "Accept-Ranges": "bytes",
+            ...cors,
+          },
+        })
+      }
+
+      const rawStart = rangeMatch[1]
+      const rawEnd = rangeMatch[2]
+      if (!rawStart) {
+        return new Response(JSON.stringify({ error: "Rango de bytes no satisfacible." }), {
+          status: 416,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Range": `bytes */${totalSizeBytes}`,
+            "Accept-Ranges": "bytes",
+            ...cors,
+          },
+        })
+      }
+
+      const start = parseInt(rawStart, 10)
+      const end = rawEnd !== undefined ? parseInt(rawEnd, 10) : totalSizeBytes - 1
+
+      if (isNaN(start) || start >= totalSizeBytes || end < start || end >= totalSizeBytes) {
+        return new Response(JSON.stringify({ error: "Rango de bytes no satisfacible." }), {
+          status: 416,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Range": `bytes */${totalSizeBytes}`,
+            "Accept-Ranges": "bytes",
+            ...cors,
+          },
+        })
+      }
+
+      const contentLength = end - start + 1
+      const r2Object = await env.ASSETS.get(media.objectKey, {
+        range: { offset: start, length: contentLength },
+      })
+
+      if (!r2Object) {
+        return jsonResponse({ error: "Media object not found" }, 404, request, env)
+      }
+
+      const headers = new Headers()
+      headers.set("Content-Type", media.mimeType || "application/octet-stream")
+      headers.set("Content-Range", `bytes ${start}-${end}/${totalSizeBytes}`)
+      headers.set("Content-Length", String(contentLength))
+      headers.set("Accept-Ranges", "bytes")
+      headers.set("Cache-Control", "public, max-age=31536000, immutable")
+      if (r2Object.httpEtag) {
+        headers.set("ETag", r2Object.httpEtag)
+      }
+      for (const [k, v] of Object.entries(cors)) {
+        headers.set(k, v)
+      }
+
+      return new Response(r2Object.body, {
+        status: 206,
+        headers,
+      })
+    }
+
     const object = await env.ASSETS.get(media.objectKey)
     if (!object) {
       return jsonResponse(
@@ -364,6 +438,7 @@ export async function handleMediaServe(
     const headers = new Headers()
     headers.set("Content-Type", media.mimeType || "application/octet-stream")
     headers.set("Content-Length", String(media.sizeBytes))
+    headers.set("Accept-Ranges", "bytes")
     headers.set("Cache-Control", "public, max-age=31536000, immutable")
     if (object.httpEtag) {
       headers.set("ETag", object.httpEtag)
