@@ -4523,6 +4523,24 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
     it("resolveServerInstallationPlan with environmentOverride BOTH flags requiresGameUpdate = true", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/555555/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 10001,
+                  fileName: "cf-unknown-root.jar",
+                  downloadUrl: "https://cdn/cf-unknown-root.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
         if (u.includes("api.curseforge.com/v1/mods/555555")) {
           return {
             ok: true,
@@ -4716,6 +4734,120 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(rootItem?.environment).toBe("CLIENT")
       // Dependency preserves its known authoritative environment BOTH rather than being overwritten with CLIENT
       expect(depItem?.environment).toBe("BOTH")
+    })
+
+    it("prioritizes version environment over project UNKNOWN environment", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/888111/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 50001,
+                  fileName: "cf-ver-both.jar",
+                  downloadUrl: "https://cdn/cf-ver-both.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/888111")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 888111, name: "CF UNKNOWN Project", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const origGetVersion = (manager as any).curseforge.getVersion.bind((manager as any).curseforge)
+      vi.spyOn((manager as any).curseforge, "getVersion").mockImplementation((async (env: any, vid: any, pid: any, ct: any) => {
+        const res = await origGetVersion(env, vid, pid, ct)
+        return { ...res, environment: "BOTH" }
+      }) as any)
+
+      const origGetCompVersions = (manager as any).curseforge.getCompatibleVersions.bind((manager as any).curseforge)
+      vi.spyOn((manager as any).curseforge, "getCompatibleVersions").mockImplementation((async (env: any, pid: any, mc: any, l: any, ct: any) => {
+        const list = await origGetCompVersions(env, pid, mc, l, ct)
+        return list.map((v: any) => ({ ...v, environment: "BOTH" }))
+      }) as any)
+
+      // Even without environmentOverride, since version has BOTH, it resolves successfully as BOTH
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        {
+          provider: "CURSEFORGE",
+          projectId: "888111",
+          versionId: "50001",
+          contentType: "MOD",
+        },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.items[0]?.environment).toBe("BOTH")
+    })
+
+    it("Server flow treats project UNKNOWN as unknown and allows version environment to resolve", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/777111/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 60001,
+                  fileName: "cf-server-ver.jar",
+                  downloadUrl: "https://cdn/cf-server-ver.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/777111")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 777111, name: "CF Server Unknown Project", classId: 6 } }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const origGetCompVersions = (manager as any).curseforge.getCompatibleVersions.bind((manager as any).curseforge)
+      vi.spyOn((manager as any).curseforge, "getCompatibleVersions").mockImplementation((async (env: any, pid: any, mc: any, l: any, ct: any) => {
+        const list = await origGetCompVersions(env, pid, mc, l, ct)
+        return list.map((v: any) => ({ ...v, environment: "SERVER" }))
+      }) as any)
+
+      // When version has SERVER, it resolves in Server flow without needing override
+      const plan = await manager.resolveServerInstallationPlan(
+        env,
+        db,
+        {
+          provider: "CURSEFORGE",
+          projectId: "777111",
+          versionId: "60001",
+          contentType: "MOD",
+        },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.requiresGameUpdate).toBe(false)
+      expect(plan.items[0]?.environment).toBe("SERVER")
     })
   })
 })

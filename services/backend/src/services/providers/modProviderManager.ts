@@ -57,6 +57,10 @@ export function getLogicalPathForContent(contentType: ContentTypeGql, filename: 
   }
 }
 
+function isKnownEnvironment(env?: string | null): env is "CLIENT" | "SERVER" | "BOTH" {
+  return env === "CLIENT" || env === "SERVER" || env === "BOTH"
+}
+
 export function getLogicalPathForServerContent(
   contentType: ContentTypeGql,
   filename: string,
@@ -1154,11 +1158,15 @@ export class ModProviderManager {
     }
 
     const knownRootEnv: ModEnvironmentGql | null =
-      rootProject?.environment || rootVersion.environment || null
+      isKnownEnvironment(rootProject?.environment)
+        ? rootProject.environment
+        : isKnownEnvironment(rootVersion.environment)
+        ? rootVersion.environment
+        : null
 
     let rootEnv: ModEnvironmentGql | null = knownRootEnv
     if (contentType === "MOD") {
-      if (input.provider === "CURSEFORGE" && !rootEnv) {
+      if (input.provider === "CURSEFORGE" && !isKnownEnvironment(rootEnv)) {
         if (input.environmentOverride === "CLIENT" || input.environmentOverride === "BOTH") {
           rootEnv = input.environmentOverride
         } else if (input.environmentOverride === "SERVER") {
@@ -1514,11 +1522,15 @@ export class ModProviderManager {
         }
 
         const knownDepEnv: ModEnvironmentGql | null =
-          depProject?.environment || selectedDepVersion.environment || null
+          isKnownEnvironment(depProject?.environment)
+            ? depProject.environment
+            : isKnownEnvironment(selectedDepVersion.environment)
+            ? selectedDepVersion.environment
+            : null
 
         let depEnv: ModEnvironmentGql | null = knownDepEnv
-        if (input.provider === "CURSEFORGE" && depContentType === "MOD" && !depEnv) {
-          depEnv = rootEnv || null
+        if (input.provider === "CURSEFORGE" && depContentType === "MOD" && !isKnownEnvironment(depEnv)) {
+          depEnv = isKnownEnvironment(rootEnv) ? rootEnv : null
         }
 
         if (depContentType === "MOD" && depEnv === "SERVER") {
@@ -1736,62 +1748,6 @@ export class ModProviderManager {
       )
     }
 
-    // Root project environment check for server installation
-    const knownRootEnv: ModEnvironmentGql | null = rootProject.environment || null
-
-    let rootEnv: ModEnvironmentGql | null = knownRootEnv
-    if (contentType === "MOD") {
-      if (input.provider === "CURSEFORGE" && !rootEnv) {
-        if (input.environmentOverride === "BOTH") {
-          return {
-            items: [],
-            totalDownloadSizeBytes: 0,
-            conflicts: ["Este mod también es necesario en los clientes. Debe añadirse desde Juego → Actualizaciones."],
-            optionalDependencies: [],
-            isValid: false,
-            requiresGameUpdate: true,
-            gameUpdateReason: "Este mod también es necesario en los clientes. Añade este mod desde Juego → Actualizaciones.",
-          }
-        } else if (input.environmentOverride === "SERVER") {
-          rootEnv = "SERVER"
-        } else if (input.environmentOverride === "CLIENT") {
-          throw createGraphQLError(
-            "Este mod es exclusivo del cliente y no corresponde al servidor.",
-            "VALIDATION_ERROR",
-          )
-        } else {
-          throw createGraphQLError(
-            "HiKAT no puede garantizar que este mod sea exclusivamente de servidor. Debe añadirse desde Juego → Actualizaciones o verificar su configuración.",
-            "VALIDATION_ERROR",
-          )
-        }
-      }
-
-      if (rootEnv === "BOTH") {
-        return {
-          items: [],
-          totalDownloadSizeBytes: 0,
-          conflicts: ["Este mod también es necesario en los clientes. Debe añadirse desde Juego → Actualizaciones."],
-          optionalDependencies: [],
-          isValid: false,
-          requiresGameUpdate: true,
-          gameUpdateReason: "Este mod también es necesario en los clientes. Añade este mod desde Juego → Actualizaciones.",
-        }
-      }
-      if (rootEnv === "CLIENT") {
-        throw createGraphQLError(
-          "Este mod es exclusivo del cliente y no corresponde al servidor.",
-          "VALIDATION_ERROR",
-        )
-      }
-      if (!rootEnv) {
-        throw createGraphQLError(
-          "HiKAT no puede garantizar que este mod sea exclusivamente de servidor. Debe añadirse desde Juego → Actualizaciones o verificar su configuración.",
-          "VALIDATION_ERROR",
-        )
-      }
-    }
-
     // Fetch compatible versions with strict compatibility validation
     const rootCompatibleVersions = await adapter.getCompatibleVersions(
       env,
@@ -1844,6 +1800,67 @@ export class ModProviderManager {
         `La versión seleccionada no fue encontrada o no es compatible con Minecraft ${minecraftVersion}.`,
         "NOT_FOUND",
       )
+    }
+
+    // Root project/version environment check for server installation
+    const knownRootEnv: ModEnvironmentGql | null =
+      isKnownEnvironment(rootProject.environment)
+        ? rootProject.environment
+        : isKnownEnvironment(rootVersion.environment)
+        ? rootVersion.environment
+        : null
+
+    let rootEnv: ModEnvironmentGql | null = knownRootEnv
+    if (contentType === "MOD") {
+      if (input.provider === "CURSEFORGE" && !isKnownEnvironment(rootEnv)) {
+        if (input.environmentOverride === "BOTH") {
+          return {
+            items: [],
+            totalDownloadSizeBytes: 0,
+            conflicts: ["Este mod también es necesario en los clientes. Debe añadirse desde Juego → Actualizaciones."],
+            optionalDependencies: [],
+            isValid: false,
+            requiresGameUpdate: true,
+            gameUpdateReason: "Este mod también es necesario en los clientes. Añade este mod desde Juego → Actualizaciones.",
+          }
+        } else if (input.environmentOverride === "SERVER") {
+          rootEnv = "SERVER"
+        } else if (input.environmentOverride === "CLIENT") {
+          throw createGraphQLError(
+            "Este mod es exclusivo del cliente y no corresponde al servidor.",
+            "VALIDATION_ERROR",
+          )
+        } else {
+          throw createGraphQLError(
+            "HiKAT no puede garantizar que este mod sea exclusivamente de servidor. Debe añadirse desde Juego → Actualizaciones o verificar su configuración.",
+            "VALIDATION_ERROR",
+          )
+        }
+      }
+
+      if (rootEnv === "BOTH") {
+        return {
+          items: [],
+          totalDownloadSizeBytes: 0,
+          conflicts: ["Este mod también es necesario en los clientes. Debe añadirse desde Juego → Actualizaciones."],
+          optionalDependencies: [],
+          isValid: false,
+          requiresGameUpdate: true,
+          gameUpdateReason: "Este mod también es necesario en los clientes. Añade este mod desde Juego → Actualizaciones.",
+        }
+      }
+      if (rootEnv === "CLIENT") {
+        throw createGraphQLError(
+          "Este mod es exclusivo del cliente y no corresponde al servidor.",
+          "VALIDATION_ERROR",
+        )
+      }
+      if (!isKnownEnvironment(rootEnv)) {
+        throw createGraphQLError(
+          "HiKAT no puede garantizar que este mod sea exclusivamente de servidor. Debe añadirse desde Juego → Actualizaciones o verificar su configuración.",
+          "VALIDATION_ERROR",
+        )
+      }
     }
 
     const rootProjectName = rootProject?.name || rootVersion.name || "Elemento Principal"
@@ -2108,11 +2125,15 @@ export class ModProviderManager {
 
         // Check environment of required dependency based on priority: project -> version -> root override
         const knownDepEnv: ModEnvironmentGql | null =
-          depProject?.environment || selectedDepVersion.environment || null
+          isKnownEnvironment(depProject?.environment)
+            ? depProject.environment
+            : isKnownEnvironment(selectedDepVersion.environment)
+            ? selectedDepVersion.environment
+            : null
 
         let depEnv: ModEnvironmentGql | null = knownDepEnv
         if (depContentType === "MOD") {
-          if (input.provider === "CURSEFORGE" && !depEnv) {
+          if (input.provider === "CURSEFORGE" && !isKnownEnvironment(depEnv)) {
             if (rootEnv === "SERVER") {
               depEnv = "SERVER"
             }
@@ -2130,7 +2151,7 @@ export class ModProviderManager {
               `La dependencia ("${depProject?.name || dep.projectName || depProjectId}") es exclusiva de cliente y no corresponde al servidor.`,
             )
             continue
-          } else if (!depEnv) {
+          } else if (!isKnownEnvironment(depEnv)) {
             conflicts.push(
               `La dependencia ("${depProject?.name || dep.projectName || depProjectId}") tiene un entorno ambiguo o desconocido. HiKAT no puede garantizar que sea exclusivamente de servidor.`,
             )
