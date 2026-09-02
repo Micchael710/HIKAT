@@ -15,8 +15,13 @@ export interface GenerateR2TemporaryCredentialsParams {
 }
 
 /**
- * Generates temporary R2 scoped credentials locally using parent S3 credentials and JWT HS256.
- * Restricted strictly to the requested objectKey with object-read-write scope and 6-hour TTL.
+ * Generates temporary R2 scoped credentials locally following Cloudflare's official specification:
+ * - JWT HS256 signed with R2_PARENT_SECRET_ACCESS_KEY
+ * - Claims: bucket, scope: "object-read-write", paths: { prefixPaths: [], objectPaths: [objectKey] }
+ * - audience: host only (e.g. "<accountId>.r2.cloudflarestorage.com")
+ * - secretAccessKey = SHA256 hex digest of the signed JWT
+ * - sessionToken = base64("jwt/" + signedJwt)
+ * - accessKeyId = R2_PARENT_ACCESS_KEY_ID
  */
 export async function generateR2TemporaryCredentials(
   params: GenerateR2TemporaryCredentialsParams,
@@ -34,27 +39,39 @@ export async function generateR2TemporaryCredentials(
     )
   }
 
-  const endpointHost = `https://${accountId}.r2.cloudflarestorage.com`
+  // Audience must be the host of the R2 endpoint without "https://"
+  const audienceHost = `${accountId}.r2.cloudflarestorage.com`
   const secretBytes = new TextEncoder().encode(parentSecretAccessKey)
 
-  const sessionToken = await new jose.SignJWT({
+  const signedJwt = await new jose.SignJWT({
     bucket: bucketName,
     scope: "object-read-write",
-    permission: "object-read-write",
-    objects: [params.objectKey],
-    objectKey: params.objectKey,
+    paths: {
+      prefixPaths: [],
+      objectPaths: [params.objectKey],
+    },
   })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setIssuer(parentAccessKeyId)
     .setSubject(accountId)
-    .setAudience(endpointHost)
+    .setAudience(audienceHost)
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + ttlSeconds)
     .sign(secretBytes)
 
+  // secretAccessKey = SHA-256 hexadecimal of the signed JWT
+  const jwtBytes = new TextEncoder().encode(signedJwt)
+  const digestBuffer = await crypto.subtle.digest("SHA-256", jwtBytes)
+  const secretAccessKey = Array.from(new Uint8Array(digestBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+
+  // sessionToken = base64("jwt/" + signedJwt)
+  const sessionToken = btoa(`jwt/${signedJwt}`)
+
   return {
     accessKeyId: parentAccessKeyId,
-    secretAccessKey: "temporary-access-key",
+    secretAccessKey,
     sessionToken,
   }
 }
