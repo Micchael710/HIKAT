@@ -638,10 +638,24 @@ async function generateSyncPlan(
     }
   }
 
-  // Scan enforced directories for pruning unauthorized extra files, respecting MODIFICABLE folder policies
-  for (const dirName of ENFORCED_DIRECTORIES) {
-    const dirAbsolute = path.join(instanceRoot, dirName)
-    if (!fs.existsSync(dirAbsolute)) continue
+  // Scan enforced directories and custom directoryPolicies for pruning unauthorized extra files, respecting MODIFICABLE folder policies
+  const scanDirsSet = new Set(ENFORCED_DIRECTORIES)
+  if (Array.isArray(directoryPolicies)) {
+    for (const dp of directoryPolicies) {
+      if (dp && dp.path) {
+        const norm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+        if (norm) {
+          scanDirsSet.add(norm)
+        }
+      }
+    }
+  }
+
+  const scannedPaths = new Set()
+
+  for (const dirName of scanDirsSet) {
+    const safeAbsolute = resolveSafePath(instanceRoot, dirName)
+    if (!fs.existsSync(safeAbsolute)) continue
 
     const scanDirectory = async (currentDir) => {
       const entries = await fsp.readdir(currentDir, { withFileTypes: true })
@@ -651,6 +665,9 @@ async function generateSyncPlan(
           await scanDirectory(fullPath)
         } else if (entry.isFile()) {
           const relative = path.relative(instanceRoot, fullPath).replace(/\\/g, "/")
+          if (scannedPaths.has(relative)) continue
+          scannedPaths.add(relative)
+
           if (!clientFilesMap.has(relative)) {
             const effPolicy =
               resolvePathPolicy(relative, dirPoliciesMap) ||
@@ -667,7 +684,10 @@ async function generateSyncPlan(
     }
 
     try {
-      await scanDirectory(dirAbsolute)
+      const stat = await fsp.stat(safeAbsolute)
+      if (stat.isDirectory()) {
+        await scanDirectory(safeAbsolute)
+      }
     } catch (err) {
       console.warn(`[SyncEngine] Directory scan warning for ${dirName}:`, err.message)
     }

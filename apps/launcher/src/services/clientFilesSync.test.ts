@@ -1477,6 +1477,65 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       // Extra mod in mods directory is NOT pruned
       expect(verifyPlan.toPrune).toHaveLength(0)
     })
+
+    it("62. config = NO_MODIFICABLE: generateSyncPlan adds extra file config/extra.json to toPrune", async () => {
+      const extraFile = path.join(instanceRoot, "config", "extra.json")
+      await fsp.mkdir(path.dirname(extraFile), { recursive: true })
+      await fsp.writeFile(extraFile, JSON.stringify({ custom: "data" }), "utf8")
+
+      const directoryPolicies = [{ path: "config", policy: "NO_MODIFICABLE" }]
+      const clientFiles: any[] = []
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", directoryPolicies, true)
+      expect(plan.toPrune.some((f: any) => f.path === "config/extra.json")).toBe(true)
+    })
+
+    it("63. custom-folder = NO_MODIFICABLE: generateSyncPlan adds extra file custom-folder/extra.txt to toPrune", async () => {
+      const extraFile = path.join(instanceRoot, "custom-folder", "extra.txt")
+      await fsp.mkdir(path.dirname(extraFile), { recursive: true })
+      await fsp.writeFile(extraFile, "unauthorized custom content", "utf8")
+
+      const directoryPolicies = [{ path: "custom-folder", policy: "NO_MODIFICABLE" }]
+      const clientFiles: any[] = []
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", directoryPolicies, true)
+      expect(plan.toPrune.some((f: any) => f.path === "custom-folder/extra.txt")).toBe(true)
+    })
+
+    it("64. config = MODIFICABLE: generateSyncPlan preserves config/extra.json without pruning", async () => {
+      const extraFile = path.join(instanceRoot, "config", "extra.json")
+      await fsp.mkdir(path.dirname(extraFile), { recursive: true })
+      await fsp.writeFile(extraFile, JSON.stringify({ user: "settings" }), "utf8")
+
+      const directoryPolicies = [{ path: "config", policy: "MODIFICABLE" }]
+      const clientFiles: any[] = []
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", directoryPolicies, true)
+      expect(plan.toPrune.some((f: any) => f.path === "config/extra.json")).toBe(false)
+      expect(plan.toPreserveUser.some((f: any) => f.path === "config/extra.json")).toBe(true)
+    })
+
+    it("65. Subdirectory overrides parent directory policy: config = NO_MODIFICABLE, config/custom = MODIFICABLE", async () => {
+      const forbiddenFile = path.join(instanceRoot, "config", "extra.json")
+      const allowedFile = path.join(instanceRoot, "config", "custom", "user.json")
+      await fsp.mkdir(path.dirname(forbiddenFile), { recursive: true })
+      await fsp.mkdir(path.dirname(allowedFile), { recursive: true })
+      await fsp.writeFile(forbiddenFile, "forbidden", "utf8")
+      await fsp.writeFile(allowedFile, "allowed", "utf8")
+
+      const directoryPolicies = [
+        { path: "config", policy: "NO_MODIFICABLE" },
+        { path: "config/custom", policy: "MODIFICABLE" },
+      ]
+      const clientFiles: any[] = []
+
+      const plan = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", directoryPolicies, true)
+      // config/extra.json is pruned
+      expect(plan.toPrune.some((f: any) => f.path === "config/extra.json")).toBe(true)
+      // config/custom/user.json is preserved
+      expect(plan.toPrune.some((f: any) => f.path === "config/custom/user.json")).toBe(false)
+      expect(plan.toPreserveUser.some((f: any) => f.path === "config/custom/user.json")).toBe(true)
+    })
   })
 })
 
