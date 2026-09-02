@@ -27,3 +27,6 @@ overrides:
   "@rolldown/binding-freebsd-x64": "1.2.5"
   "@rolldown/binding-openharmony-arm64": "1.2.5"
 
+patchedDependencies:
+  "@xmcl/file-transfer@2.1.2": patches/@xmcl__file-transfer@2.1.2.patch
+
