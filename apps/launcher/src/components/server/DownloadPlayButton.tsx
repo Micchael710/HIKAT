@@ -515,50 +515,6 @@ export default function DownloadPlayButton({
           isStartingSyncRef.current = false
         })
     } else if (status === "play") {
-      // Pre-launch integrity check: verify sync plan before launching (fail-closed)
-      if (window.electronAPI?.checkSyncPlan && manifest && manifest.clientFiles && manifest.clientFiles.length > 0) {
-        try {
-          const planCheck = await window.electronAPI.checkSyncPlan({
-            clientFiles: manifest.clientFiles,
-            modpackVersion: manifest.version,
-            minecraftVersion: manifest.minecraftVersion,
-            modLoader: manifest.modLoader,
-            modLoaderVersion: manifest.modLoaderVersion ?? undefined,
-            neoForgeVersion: manifest.neoForgeVersion ?? undefined,
-          })
-          if (planCheck && planCheck.success) {
-            if (
-              planCheck.needsRepair ||
-              (planCheck.hasExistingInstall &&
-                planCheck.needsUpdate &&
-                planCheck.installedModpackVersion === manifest.version)
-            ) {
-              setManifest((prev) =>
-                prev ? { ...prev, installed: false, hasUpdate: false, needsRepair: true } : prev,
-              )
-              setStatus("repair")
-              showToast(t("playButton.fileWatcherChangeDetected"), "info")
-              return
-            } else if (planCheck.needsUpdate) {
-              setManifest((prev) =>
-                prev ? { ...prev, installed: false, hasUpdate: true, needsRepair: false } : prev,
-              )
-              setStatus("update")
-              return
-            }
-          } else {
-            // checkSyncPlan returned success: false -> FAIL CLOSED: do not launch Minecraft
-            showToast(t("playButton.launchError"), "error")
-            return
-          }
-        } catch (err) {
-          // checkSyncPlan threw an exception -> FAIL CLOSED: do not launch Minecraft
-          console.error("Pre-launch check failed:", err)
-          showToast(t("playButton.launchError"), "error")
-          return
-        }
-      }
-
       const ramGB = Number(localStorage.getItem("hikat_ram_gb")) || 4
       let playerName = "Player"
       try {

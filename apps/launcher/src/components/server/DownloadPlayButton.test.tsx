@@ -1776,7 +1776,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(btn.textContent).not.toContain("REPARAR")
     })
 
-    it("3. Pre-launch check blocks launch and transitions to REPARAR when corrupted install is detected at play-time", async () => {
+    it("3. Clicking JUGAR in PLAY state launches game directly without calling checkSyncPlan", async () => {
       vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
         version: "1.0.0",
         minecraftVersion: "1.21.1",
@@ -1797,35 +1797,25 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         ],
       })
 
-      const launchSpy = vi.spyOn(gameService, "launchGame")
-
-      // At click time, checkSyncPlan discovers that required.jar is missing on disk
-      window.electronAPI!.checkSyncPlan = vi.fn().mockResolvedValue({
-        success: true,
-        filesToDownload: 1,
-        filesToPrune: 0,
-        totalDownloadBytes: 100,
-        needsUpdate: true,
-        needsRepair: true,
-        installedModpackVersion: "1.0.0",
-        hasExistingInstall: true,
-        isFullyInstalled: false,
-      })
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+      const checkSyncPlanSpy = vi.fn().mockResolvedValue({ success: true })
+      window.electronAPI!.checkSyncPlan = checkSyncPlanSpy
 
       const { container } = await mountButton()
       const btn = container.querySelector("button") as HTMLElement
       expect(btn.textContent).toContain("JUGAR")
+
+      // Clear the call from initial mount
+      checkSyncPlanSpy.mockClear()
 
       // Click JUGAR
       await act(async () => {
         btn.click()
       })
 
-      // Must NOT launch Minecraft
-      expect(launchSpy).not.toHaveBeenCalled()
-
-      // Button transitions to REPARAR
-      expect(btn.textContent).toContain("REPARAR")
+      // Must launch Minecraft directly and NOT call checkSyncPlan on play click
+      expect(launchSpy).toHaveBeenCalled()
+      expect(checkSyncPlanSpy).not.toHaveBeenCalled()
     })
 
     it("4. Clicking REPARAR reuses handleVerifyInstallation without duplicating verify logic", async () => {
@@ -1976,51 +1966,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(btn.textContent).not.toContain("REPARAR")
     })
 
-    it("7. Pre-launch check is strictly fail-closed: blocks launch when checkSyncPlan returns success: false or throws", async () => {
-      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-        version: "1.0.0",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-        modLoader: "NEOFORGE",
-        installed: true,
-        hasUpdate: false,
-        hasExistingInstall: true,
-        totalSizeGB: 1,
-        clientFiles: [
-          {
-            path: "mods/mod.jar",
-            sha256: "a".repeat(64),
-            sizeBytes: 100,
-            downloadUrl: "/dl",
-            policy: "NO_MODIFICABLE",
-          },
-        ],
-      })
-
-      const launchSpy = vi.spyOn(gameService, "launchGame")
-
-      // Scenario A: checkSyncPlan returns { success: false }
-      window.electronAPI!.checkSyncPlan = vi.fn().mockResolvedValue({ success: false })
-
-      const { container } = await mountButton()
-      const btn = container.querySelector("button") as HTMLElement
-      expect(btn.textContent).toContain("JUGAR")
-
-      await act(async () => {
-        btn.click()
-      })
-      expect(launchSpy).not.toHaveBeenCalled()
-
-      // Scenario B: checkSyncPlan throws an exception
-      window.electronAPI!.checkSyncPlan = vi.fn().mockRejectedValue(new Error("IPC failure"))
-
-      await act(async () => {
-        btn.click()
-      })
-      expect(launchSpy).not.toHaveBeenCalled()
-    })
-
-    it("8. Sync Engine and Watcher use the exact same ENFORCED_DIRECTORIES", async () => {
+    it("7. Sync Engine and Watcher use the exact same ENFORCED_DIRECTORIES", async () => {
       // @ts-expect-error CJS module without bundled declaration
       const { ENFORCED_DIRECTORIES } = await import("../../../electron/client-files-sync.cjs")
       expect(ENFORCED_DIRECTORIES).toEqual([
@@ -2032,7 +1978,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       ])
     })
 
-    it("9. Multiple consecutive watcher events in idle PLAY state show the warning toast ONLY ONCE while remaining in REPARAR", async () => {
+    it("8. Multiple consecutive watcher events in idle PLAY state show the warning toast ONLY ONCE while remaining in REPARAR", async () => {
       let watcherCallback: any = null
       window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
         watcherCallback = cb
@@ -2072,7 +2018,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(btn.textContent).toContain("REPARAR")
     })
 
-    it("10. Consecutive watcher events while running trigger toast once; after repair resets, a future event shows toast again", async () => {
+    it("9. Consecutive watcher events while running trigger toast once; after repair resets, a future event shows toast again", async () => {
       let launchStatusCallback: any = null
       let watcherCallback: any = null
       window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
