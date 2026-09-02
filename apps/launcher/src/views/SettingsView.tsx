@@ -5,7 +5,6 @@ import { CANVAS_W, BASE_FONT } from "../theme/tokens"
 import LauncherToggle from "../components/common/LauncherToggle"
 import LauncherSelect from "../components/common/LauncherSelect"
 import LiveToast from "../components/common/LiveToast"
-import { gameService } from "../services/gameService"
 import {
   useTranslation,
   getTranslation,

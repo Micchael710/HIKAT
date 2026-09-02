@@ -283,13 +283,20 @@ export const gameService = {
         const parsed = JSON.parse(cached)
         if (parsed && typeof parsed === "object") {
           const cachedFiles = Array.isArray(parsed.clientFiles) ? parsed.clientFiles : []
+          const cachedDirectoryPolicies = Array.isArray(parsed.directoryPolicies)
+            ? parsed.directoryPolicies
+            : []
           let offlineInstalled = false
           let offlineIntegrityIssue = false
+          let offlineInstalledVersion: string | null = null
+          let offlineHasUpdate = false
+          let offlineHasExistingInstall = false
 
           if (window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
             try {
               const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
                 clientFiles: cachedFiles,
+                directoryPolicies: cachedDirectoryPolicies,
                 modpackVersion: parsed.version,
                 minecraftVersion: parsed.minecraftVersion,
                 modLoader: parsed.modLoader,
@@ -297,11 +304,13 @@ export const gameService = {
                 neoForgeVersion: parsed.neoForgeVersion,
               })
               if (planCheck.success) {
-                if (planCheck.isFullyInstalled) {
-                  offlineInstalled = true
-                } else if (planCheck.hasIntegrityIssue) {
-                  offlineIntegrityIssue = true
-                }
+                offlineInstalledVersion = planCheck.installedModpackVersion || null
+                offlineHasUpdate = Boolean(
+                  offlineInstalledVersion && offlineInstalledVersion !== parsed.version,
+                )
+                offlineIntegrityIssue = Boolean(planCheck.hasIntegrityIssue)
+                offlineHasExistingInstall = Boolean(planCheck.hasExistingInstall)
+                offlineInstalled = Boolean(planCheck.isFullyInstalled)
               }
             } catch (_) {}
           } else {
@@ -317,12 +326,13 @@ export const gameService = {
             modLoaderVersion: parsed.modLoaderVersion ?? null,
             neoForgeVersion: parsed.neoForgeVersion ?? null,
             totalSizeGB: 0,
-            hasUpdate: false,
+            hasUpdate: offlineHasUpdate,
             hasIntegrityIssue: offlineIntegrityIssue,
-            installedModpackVersion: parsed.version || null,
+            installedModpackVersion: offlineInstalledVersion,
             clientFiles: cachedFiles,
+            directoryPolicies: cachedDirectoryPolicies,
             installed: offlineInstalled,
-            hasExistingInstall: offlineInstalled || offlineIntegrityIssue,
+            hasExistingInstall: offlineHasExistingInstall,
           }
         }
       }

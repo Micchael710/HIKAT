@@ -1,9 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, afterEach, beforeAll } from "vitest"
 import http from "node:http"
-import { waitForUrl, LAUNCHER_DEV_URL, pnpmCmd } from "./devLauncher.mjs"
+import fs from "node:fs"
+import path from "node:path"
+import url from "node:url"
+
+let waitForUrl, LAUNCHER_DEV_URL, pnpmCmd
 
 describe("devLauncher Orchestration Script", () => {
   let server
+
+  beforeAll(async () => {
+    const filePath = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "devLauncher.mjs")
+    const content = fs.readFileSync(filePath, "utf8").replace(/^#![^\n]+/, "")
+    const mod = await import(`data:text/javascript;base64,${Buffer.from(content).toString("base64")}`)
+    waitForUrl = mod.waitForUrl
+    LAUNCHER_DEV_URL = mod.LAUNCHER_DEV_URL
+    pnpmCmd = mod.pnpmCmd
+  })
 
   afterEach(() => {
     if (server) {

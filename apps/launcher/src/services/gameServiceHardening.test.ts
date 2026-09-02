@@ -480,6 +480,151 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     expect(manifest?.stagedBytes).toBe(350)
     expect(manifest?.totalDownloadBytes).toBe(1000)
   })
+
+  it("15. Offline mode: cached published 1.1 + real local install 1.0 does NOT consider 1.1 installed", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      error: "Network error",
+    } as any)
+    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
+      success: false,
+      error: "Network error",
+    } as any)
+
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/file.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/game/download/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }),
+    )
+
+    window.electronAPI = {
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        isFullyInstalled: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+      }),
+    } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.version).toBe("1.1.0")
+    expect(manifest?.installedModpackVersion).toBe("1.0.0")
+    expect(manifest?.installed).toBe(false)
+    expect(manifest?.hasUpdate).toBe(true)
+    expect(manifest?.hasExistingInstall).toBe(true)
+  })
+
+  it("16. Offline mode: cached published manifest exists but no real local install sets installedModpackVersion = null", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      error: "Network error",
+    } as any)
+    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
+      success: false,
+      error: "Network error",
+    } as any)
+
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/file.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/game/download/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }),
+    )
+
+    window.electronAPI = {
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        installedModpackVersion: null,
+        hasExistingInstall: false,
+        isFullyInstalled: false,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+      }),
+    } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.installedModpackVersion).toBeNull()
+    expect(manifest?.installed).toBe(false)
+    expect(manifest?.hasUpdate).toBe(false)
+  })
+
+  it("17. Offline mode: passes directoryPolicies to checkSyncPlan and returns them in manifest", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      error: "Network error",
+    } as any)
+    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
+      success: false,
+      error: "Network error",
+    } as any)
+
+    const testPolicies = [{ path: "mods", policy: "MODIFICABLE" }]
+
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        directoryPolicies: testPolicies,
+        clientFiles: [
+          {
+            path: "mods/file.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/game/download/1",
+            policy: "MODIFICABLE",
+          },
+        ],
+      }),
+    )
+
+    const checkSyncPlanSpy = vi.fn().mockResolvedValue({
+      success: true,
+      installedModpackVersion: "1.0.0",
+      hasExistingInstall: true,
+      isFullyInstalled: true,
+      hasUpdate: false,
+      hasIntegrityIssue: false,
+    })
+    window.electronAPI = { checkSyncPlan: checkSyncPlanSpy } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.directoryPolicies).toEqual(testPolicies)
+    expect(checkSyncPlanSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directoryPolicies: testPolicies,
+      }),
+    )
+  })
 })
 
 
