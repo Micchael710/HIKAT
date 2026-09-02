@@ -4,6 +4,8 @@ const {
   downloadClientFilesToStaging,
   applyStagingToInstance,
   loadInstalledManifest,
+  saveInstalledManifest,
+  buildInstalledManifestData,
   loadDownloadSession,
   reconcileStagingFiles,
   cleanStaging,
@@ -295,6 +297,8 @@ class GameOperationManager {
           throw new Error("Operation was cancelled.")
         }
 
+        let pendingManifestData = null
+
         // Apply staged/pruned files to instanceRoot when needed
         const needsClientApply =
           syncPlan.toDownload.length > 0 ||
@@ -306,7 +310,7 @@ class GameOperationManager {
             this.state = "INSTALLING"
             if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
           }
-          await applyStagingToInstance({
+          const applyResult = await applyStagingToInstance({
             instanceRoot,
             clientFiles,
             directoryPolicies,
@@ -317,6 +321,16 @@ class GameOperationManager {
             cancelSignal,
             isVerify,
           })
+          pendingManifestData = applyResult?.manifestData || null
+        }
+
+        if (!pendingManifestData) {
+          pendingManifestData = buildInstalledManifestData(
+            instanceRoot,
+            clientFiles,
+            modpackVersion,
+            directoryPolicies,
+          )
         }
 
         if (cancelSignal.isPaused) {
@@ -370,6 +384,12 @@ class GameOperationManager {
           if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
           throw new Error("Operation was cancelled.")
         }
+
+        // 3. Persist installed manifest and clean staging ONLY after Core and all stages succeed
+        if (pendingManifestData) {
+          await saveInstalledManifest(instanceRoot, pendingManifestData)
+        }
+        await cleanStaging(instanceRoot)
 
         if (!isVerify && typeof onProgress === "function") {
           onProgress({

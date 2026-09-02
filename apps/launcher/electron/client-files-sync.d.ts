@@ -50,6 +50,13 @@ export declare function resolveWatcherDecision(
   instanceRoot?: string | null,
 ): "EMIT" | "IGNORE"
 
+export declare function buildInstalledManifestData(
+  instanceRoot: string,
+  clientFiles?: any[],
+  modpackVersion?: string,
+  directoryPolicies?: any[],
+): any
+
 export declare function loadInstalledManifest(instanceRoot: string): Promise<any>
 export declare function saveInstalledManifest(instanceRoot: string, manifestData: any): Promise<void>
 export declare function loadDownloadSession(instanceRoot: string): Promise<any>

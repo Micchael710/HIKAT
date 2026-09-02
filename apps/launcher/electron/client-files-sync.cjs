@@ -1043,6 +1043,52 @@ async function downloadClientFilesToStaging({
 }
 
 /**
+ * Builds installed manifest metadata with directory policies and official SHA-256 references.
+ */
+function buildInstalledManifestData(
+  instanceRoot,
+  clientFiles = [],
+  modpackVersion,
+  directoryPolicies = [],
+) {
+  const newManifestFiles = {}
+
+  if (Array.isArray(directoryPolicies)) {
+    for (const dp of directoryPolicies) {
+      if (!dp || !dp.path) continue
+      const normalizedRelative = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+      if (normalizedRelative) {
+        newManifestFiles[normalizedRelative] = {
+          policy: dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE",
+          lastSyncedAt: new Date().toISOString(),
+        }
+      }
+    }
+  }
+
+  for (const item of clientFiles) {
+    if (!item?.path) continue
+    const rawPath = String(item.path || "").trim().replace(/\\/g, "/")
+    if (rawPath === "jdk-21" || rawPath.startsWith("jdk-21/")) continue
+
+    const normalizedRelative = path
+      .relative(instanceRoot, resolveSafePath(instanceRoot, item.path))
+      .replace(/\\/g, "/")
+    newManifestFiles[normalizedRelative] = {
+      officialSha256: String(item.sha256 || "").toLowerCase().trim(),
+      policy: item.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE",
+      lastSyncedAt: new Date().toISOString(),
+    }
+  }
+
+  return {
+    modpackVersion,
+    lastSync: new Date().toISOString(),
+    files: newManifestFiles,
+  }
+}
+
+/**
  * Applies all staged files to instanceRoot atomically, prunes obsolete files, validates manifest, and cleans staging.
  * Local operation only: ZERO network calls.
  */
@@ -1098,12 +1144,16 @@ async function applyStagingToInstance({
       throw new Error(`Staged file missing before installation: ${task.path}`)
     }
     const stat = await fsp.stat(stagingFilePath)
-    if (task.sizeBytes > 0 && stat.size !== task.sizeBytes) {
-      throw new Error(`Staged file size mismatch before installation: ${task.path}`)
+    if (stat.size !== task.sizeBytes) {
+      throw new Error(
+        `Staged file size mismatch for ${task.path}: expected ${task.sizeBytes} bytes, got ${stat.size} bytes.`,
+      )
     }
-    const fileSha = await calculateFileSha256(stagingFilePath)
-    if (fileSha !== task.sha256.toLowerCase()) {
-      throw new Error(`Staged file hash mismatch before installation: ${task.path}`)
+    const actualSha256 = await calculateFileSha256(stagingFilePath)
+    if (actualSha256 !== task.sha256) {
+      throw new Error(
+        `Staged file SHA-256 mismatch for ${task.path}: expected ${task.sha256}, got ${actualSha256}.`,
+      )
     }
   }
 
@@ -1116,36 +1166,18 @@ async function applyStagingToInstance({
     })
   }
 
-  // 2. Safe per-file copy to instanceRoot via temp siblings
+  // 2. Atomic Replacement into instance root
   for (const { task, stagingFilePath } of stagedFiles) {
-    const targetDir = path.dirname(task.safeAbsolute)
-    await fsp.mkdir(targetDir, { recursive: true })
+    const destPath = task.safeAbsolute
+    await fsp.mkdir(path.dirname(destPath), { recursive: true })
 
     const tempSibling = path.join(
-      targetDir,
-      `.hikat_tmp_${path.basename(task.safeAbsolute)}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.tmp`,
+      path.dirname(destPath),
+      `.${path.basename(destPath)}.${Date.now()}.tmp`,
     )
-
     try {
       await fsp.copyFile(stagingFilePath, tempSibling)
-
-      const tempStat = await fsp.stat(tempSibling)
-      if (task.sizeBytes > 0 && tempStat.size !== task.sizeBytes) {
-        throw new Error(`Temp copy size mismatch for ${task.path}`)
-      }
-      const tempSha = await calculateFileSha256(tempSibling)
-      if (tempSha !== task.sha256.toLowerCase()) {
-        throw new Error(`Temp copy hash mismatch for ${task.path}`)
-      }
-
-      try {
-        await fsp.rename(tempSibling, task.safeAbsolute)
-      } catch (_) {
-        if (fs.existsSync(task.safeAbsolute)) {
-          await fsp.unlink(task.safeAbsolute)
-        }
-        await fsp.rename(tempSibling, task.safeAbsolute)
-      }
+      await fsp.rename(tempSibling, destPath)
     } catch (err) {
       try {
         if (fs.existsSync(tempSibling)) {
@@ -1201,51 +1233,20 @@ async function applyStagingToInstance({
     })
   }
 
-  // 5. Persist installed manifest with directory policies and official SHA-256 references
-  const newManifestFiles = {}
-
-  if (Array.isArray(directoryPolicies)) {
-    for (const dp of directoryPolicies) {
-      if (!dp || !dp.path) continue
-      const normalizedRelative = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-      if (normalizedRelative) {
-        newManifestFiles[normalizedRelative] = {
-          policy: dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE",
-          lastSyncedAt: new Date().toISOString(),
-        }
-      }
-    }
-  }
-
-  for (const item of clientFiles) {
-    if (!item?.path) continue
-    const rawPath = String(item.path || "").trim().replace(/\\/g, "/")
-    if (rawPath === "jdk-21" || rawPath.startsWith("jdk-21/")) continue
-
-    const normalizedRelative = path
-      .relative(instanceRoot, resolveSafePath(instanceRoot, item.path))
-      .replace(/\\/g, "/")
-    newManifestFiles[normalizedRelative] = {
-      officialSha256: String(item.sha256 || "").toLowerCase().trim(),
-      policy: item.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE",
-      lastSyncedAt: new Date().toISOString(),
-    }
-  }
-
-  await saveInstalledManifest(instanceRoot, {
+  // 5. Build installed manifest metadata with directory policies and official SHA-256 references
+  const manifestData = buildInstalledManifestData(
+    instanceRoot,
+    clientFiles,
     modpackVersion,
-    lastSync: new Date().toISOString(),
-    files: newManifestFiles,
-  })
-
-  // 6. Cleanup staging directory after fully validated installation
-  await cleanStaging(instanceRoot)
+    directoryPolicies,
+  )
 
   return {
     success: true,
     downloadedCount: stagedFiles.length,
     prunedCount: effectivePlan.toPrune.length,
     retainedCount: effectivePlan.toRetain.length + effectivePlan.toPreserveUser.length,
+    manifestData,
   }
 }
 
@@ -1258,7 +1259,7 @@ async function executeSync(options) {
     return downloadResult
   }
 
-  return await applyStagingToInstance({
+  const applyResult = await applyStagingToInstance({
     instanceRoot: options.instanceRoot,
     clientFiles: options.clientFiles,
     directoryPolicies: options.directoryPolicies,
@@ -1270,6 +1271,13 @@ async function executeSync(options) {
     cancelSignal: options.cancelSignal,
     isVerify: Boolean(options.isVerify),
   })
+
+  if (applyResult && applyResult.manifestData) {
+    await saveInstalledManifest(options.instanceRoot, applyResult.manifestData)
+    await cleanStaging(options.instanceRoot)
+  }
+
+  return applyResult
 }
 
 /**
@@ -1316,5 +1324,6 @@ module.exports = {
   uninstallGame,
   resolvePathPolicy,
   resolveWatcherDecision,
+  buildInstalledManifestData,
   ENFORCED_DIRECTORIES,
 }

@@ -755,4 +755,205 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
       )
     ).toThrow(/invalid policy/i)
   })
+
+  it("34. Fresh install interrupted during Core does NOT confirm release in installed-manifest", async () => {
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({ installed: false }),
+      coreInstaller: async () => {
+        throw new Error("Simulated interruption during Core install")
+      },
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "content")
+    const hash = crypto.createHash("sha256").update("content").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 7,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+    }
+
+    await expect(manager.startSync(payload)).rejects.toThrow("Simulated interruption during Core install")
+
+    // Manifest was NOT prematurely saved as 1.0.0
+    const manifest = await loadInstalledManifest(instanceRoot)
+    expect(manifest.modpackVersion).toBeNull()
+
+    // checkPlan reflects no installed modpack version (so UI shows DESCARGAR)
+    const planCheck = await manager.checkPlan(payload)
+    expect(planCheck.installedModpackVersion).toBeNull()
+    expect(planCheck.hasUpdate).toBe(false)
+    expect(planCheck.isFullyInstalled).toBe(false)
+  })
+
+  it("35. Update from 1.0.0 to 1.1.0 interrupted during Core preserves previous 1.0.0 version", async () => {
+    // Initial installed version 1.0.0
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      lastSync: new Date().toISOString(),
+      files: {
+        "mods": { policy: "NO_MODIFICABLE" },
+      },
+    })
+
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({ installed: false }),
+      coreInstaller: async () => {
+        throw new Error("Simulated interruption during Core install of update")
+      },
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "content-v2")
+    const hash = crypto.createHash("sha256").update("content-v2").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.1.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 10,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+    }
+
+    await expect(manager.startSync(payload)).rejects.toThrow("Simulated interruption during Core install of update")
+
+    // Manifest still preserves 1.0.0
+    const manifest = await loadInstalledManifest(instanceRoot)
+    expect(manifest.modpackVersion).toBe("1.0.0")
+
+    // checkPlan reflects installedModpackVersion: "1.0.0" and hasUpdate: true (so UI shows ACTUALIZAR)
+    const planCheck = await manager.checkPlan(payload)
+    expect(planCheck.installedModpackVersion).toBe("1.0.0")
+    expect(planCheck.hasUpdate).toBe(true)
+    expect(planCheck.isFullyInstalled).toBe(false)
+  })
+
+  it("36. Full installation success persists new modpack version to manifest", async () => {
+    let coreInstalledState = false
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({
+        installed: coreInstalledState,
+        resolvedVersionId: coreInstalledState ? "1.21.1-neoforge-21.1.65" : null,
+      }),
+      coreInstaller: async () => {
+        coreInstalledState = true
+        return { success: true }
+      },
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "complete-content")
+    const hash = crypto.createHash("sha256").update("complete-content").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.1.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 16,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+    }
+
+    const result = await manager.startSync(payload)
+    expect(result.success).toBe(true)
+
+    // Manifest is now officially 1.1.0
+    const manifest = await loadInstalledManifest(instanceRoot)
+    expect(manifest.modpackVersion).toBe("1.1.0")
+
+    const planCheck = await manager.checkPlan(payload)
+    expect(planCheck.installedModpackVersion).toBe("1.1.0")
+    expect(planCheck.isFullyInstalled).toBe(true)
+    expect(planCheck.hasUpdate).toBe(false)
+    expect(planCheck.hasIntegrityIssue).toBe(false)
+  })
+
+  it("37. Retry after interruption with clientFiles already applied skips re-downloading them", async () => {
+    let coreInstalledState = false
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({
+        installed: coreInstalledState,
+        resolvedVersionId: coreInstalledState ? "1.21.1-neoforge-21.1.65" : null,
+      }),
+      coreInstaller: async () => {
+        coreInstalledState = true
+        return { success: true }
+      },
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "already-applied")
+    const hash = crypto.createHash("sha256").update("already-applied").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 15,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+    }
+
+    const planCheck = await manager.checkPlan(payload)
+    expect(planCheck.filesToDownload).toBe(0)
+
+    const syncResult = await manager.startSync(payload)
+    expect(syncResult.success).toBe(true)
+
+    const finalManifest = await loadInstalledManifest(instanceRoot)
+    expect(finalManifest.modpackVersion).toBe("1.0.0")
+  })
 })
