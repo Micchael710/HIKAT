@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@xmcl/file-transfer@2.1.2':
+    hash: menko77cphbrjz52ruo4byyxxy
+    path: patches/@xmcl__file-transfer@2.1.2.patch
+
 importers:
 
   .:
@@ -113,7 +118,7 @@ importers:
         version: 2.16.1(yauzl@2.10.0)
       '@xmcl/file-transfer':
         specifier: 2.1.2
-        version: 2.1.2
+        version: 2.1.2(patch_hash=menko77cphbrjz52ruo4byyxxy)
       '@xmcl/installer':
         specifier: 6.3.2
         version: 6.3.2(yauzl@2.10.0)
@@ -4824,7 +4829,7 @@ snapshots:
     transitivePeerDependencies:
       - yauzl
 
-  '@xmcl/file-transfer@2.1.2':
+  '@xmcl/file-transfer@2.1.2(patch_hash=menko77cphbrjz52ruo4byyxxy)':
     dependencies:
       undici: 7.29.0
 
@@ -4836,7 +4841,7 @@ snapshots:
     dependencies:
       '@xmcl/asm': 1.0.1
       '@xmcl/core': 2.16.1(yauzl@2.10.0)
-      '@xmcl/file-transfer': 2.1.2
+      '@xmcl/file-transfer': 2.1.2(patch_hash=menko77cphbrjz52ruo4byyxxy)
       '@xmcl/forge-site-parser': 2.0.9
       '@xmcl/unzip': 2.1.2(yauzl@2.10.0)
       '@xmcl/yauzl': 2.10.0
