@@ -612,4 +612,24 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(plan.hasPausedSession).toBe(false)
     expect(plan.needsUpdate).toBe(true)
   })
+
+  it("26. cancelSync cleans partial staging files on disk and resets state to IDLE", async () => {
+    const task = {
+      path: "mods/to-cancel.jar",
+      sha256: computeSha("data"),
+      sizeBytes: 100,
+      policy: "NO_MODIFICABLE",
+      downloadUrl: "/dl",
+    }
+    const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
+    await fsp.mkdir(filesDir, { recursive: true })
+    const stagingFilePath = path.join(filesDir, getDeterministicStagingFileName(task))
+    await fsp.writeFile(stagingFilePath, "partial data in staging", "utf8")
+    expect(fs.existsSync(stagingFilePath)).toBe(true)
+
+    const cancelRes = await manager.cancelSync(instanceRoot)
+    expect(cancelRes.success).toBe(true)
+    expect(manager.getState()).toBe("IDLE")
+    expect(fs.existsSync(path.join(instanceRoot, ".hikat", "staging"))).toBe(false)
+  })
 })

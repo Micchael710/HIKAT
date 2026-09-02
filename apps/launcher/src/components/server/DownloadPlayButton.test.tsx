@@ -218,10 +218,63 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       cancelBtn.click()
     })
 
-    // Returns to DESCARGAR, not ACTUALIZAR
+    // Returns to DESCARGAR, not ACTUALIZAR or JUGAR
     const idleBtn = container.querySelector("button") as HTMLElement
     expect(idleBtn.textContent).toContain("DESCARGAR")
     expect(idleBtn.textContent).not.toContain("ACTUALIZAR")
+    expect(idleBtn.textContent).not.toContain("JUGAR")
+  })
+
+  it("Test D2 — Cancel fresh download when stale manifest existed queries checkGameManifest afresh and returns to DESCARGAR, never JUGAR", async () => {
+    let checkCount = 0
+    vi.spyOn(gameService, "checkGameManifest").mockImplementation(async () => {
+      checkCount++
+      return {
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: false,
+        totalSizeGB: 10,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/example",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+    })
+
+    vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+    vi.spyOn(gameService, "cancelSync").mockResolvedValue({ success: true })
+
+    const { container } = await mountButton()
+
+    // Click Download
+    await act(async () => {
+      (container.querySelector("button") as HTMLElement).click()
+    })
+
+    expect(container.querySelector(".dl-progress-card")).not.toBeNull()
+
+    // Click Cancel
+    const cancelBtn = container.querySelector(".dl-cancel-btn") as HTMLElement
+    await act(async () => {
+      cancelBtn.click()
+    })
+
+    // checkGameManifest called on mount + after cancel
+    expect(checkCount).toBeGreaterThanOrEqual(2)
+
+    // Button strictly returns to DESCARGAR, NEVER JUGAR
+    const idleBtn = container.querySelector("button") as HTMLElement
+    expect(idleBtn.textContent).toContain("DESCARGAR")
+    expect(idleBtn.textContent).not.toContain("JUGAR")
   })
 
   it("Test E — Existing install + Cancel returns to ACTUALIZAR (UPDATE)", async () => {

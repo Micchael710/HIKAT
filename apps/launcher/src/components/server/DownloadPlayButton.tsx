@@ -326,7 +326,9 @@ export default function DownloadPlayButton({
       const res: any = await gameService.cancelSync()
       if (res?.success || res === true) {
         isStartingSyncRef.current = false
-        setStatus(resolveIdleGameButtonState(manifest))
+        const freshManifest = await gameService.checkGameManifest()
+        setManifest(freshManifest)
+        setStatus(resolveIdleGameButtonState(freshManifest))
         setProgress(0)
         setSpeed(0)
         setDownloadedBytes(0)
