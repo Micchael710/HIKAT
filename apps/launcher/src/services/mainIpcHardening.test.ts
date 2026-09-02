@@ -712,4 +712,38 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(plan.hasExistingInstall).toBe(true)
     expect(plan.needsUpdate).toBe(true)
   })
+
+  it("29. GameOperationManager checkPlan and startSync accept and respect directoryPolicies", async () => {
+    // Write extra file inside mods/
+    const modsDir = path.join(instanceRoot, "mods")
+    await fsp.mkdir(modsDir, { recursive: true })
+    const extraMod = path.join(modsDir, "extra-addon.jar")
+    await fsp.writeFile(extraMod, "extra addon binary")
+
+    // With directoryPolicies: [{ path: "mods", policy: "MODIFICABLE" }]
+    const planWithPolicy = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [],
+      directoryPolicies: [{ path: "mods", policy: "MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(planWithPolicy.success).toBe(true)
+    // Extra file inside MODIFICABLE folder is NOT pruned
+    expect(planWithPolicy.filesToPrune).toBe(0)
+
+    // Without directoryPolicies (default strict), extra file is flagged for pruning
+    const planWithoutPolicy = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(planWithoutPolicy.success).toBe(true)
+    expect(planWithoutPolicy.filesToPrune).toBe(1)
+  })
 })

@@ -1416,6 +1416,7 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
     return await operationManager.checkPlan({
       instanceRoot,
       clientFiles: payload.clientFiles,
+      directoryPolicies: payload.directoryPolicies,
       modpackVersion: payload.modpackVersion,
       minecraftVersion: payload.minecraftVersion,
       modLoader: payload.modLoader,
@@ -1444,6 +1445,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
   const result = await operationManager.startSync({
     instanceRoot,
     clientFiles: payload.clientFiles,
+    directoryPolicies: payload.directoryPolicies,
     modpackVersion: payload.modpackVersion,
     minecraftVersion: payload.minecraftVersion,
     modLoader: payload.modLoader,
