@@ -543,6 +543,18 @@ export interface SetActiveCapeInputGql {
 
 // --- Game & Launcher Types (Shard 06.5 / Shard 08A) ---
 
+export type GameModLoaderGql = "VANILLA" | "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT"
+
+export interface GameLoaderVersionGql {
+  version: string
+  stable: boolean
+}
+
+export interface GameEnvironmentCatalogGql {
+  minecraftVersions: string[]
+  loaders: GameModLoaderGql[]
+}
+
 export type GameFileCategoryGql =
   | "MOD"
   | "RESOURCE_PACK"
@@ -591,7 +603,10 @@ export interface ClientFileGql {
 export interface PublishedModpackGql {
   version: string
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
   mandatory: boolean
   clientFiles: ClientFileGql[]
 }
@@ -621,7 +636,10 @@ export interface GameReleaseGql {
   id: string
   version: string
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
   status: GameReleaseStatusGql
   notes?: string | null
   coverMediaId?: string | null
@@ -706,6 +724,11 @@ export interface UpdateGameDraftMetadataInputGql {
   version?: string | null
   notes?: string | null
   coverMediaId?: string | null
+  minecraftVersion?: string | null
+  modLoader?: GameModLoaderGql | null
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
 }
 
 export interface PublishGameReleaseInputGql {
@@ -752,7 +775,10 @@ export interface ModSearchPayloadGql {
   totalCount: number
   providersStatus: ModProviderStatusGql[]
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
 }
 
 export interface ModDependencyGql {
@@ -796,7 +822,10 @@ export interface ModProjectDetailGql {
   installedVersion?: string | null
   isInstalled: boolean
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
 }
 
 export interface ModInstallationPlanItemGql {
@@ -958,7 +987,10 @@ export interface ServerContentSearchPayloadGql {
   nextCursor?: string | null
   providersStatus: ModProviderStatusGql[]
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
   isPublishedEnvironment: boolean
 }
 

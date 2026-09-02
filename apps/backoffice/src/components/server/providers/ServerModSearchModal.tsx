@@ -53,11 +53,15 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   const [error, setError] = useState<string | null>(null)
   const [envInfo, setEnvInfo] = useState<{
     minecraftVersion: string
-    neoForgeVersion: string
+    modLoader: import("../../../types").GameModLoader
+    modLoaderVersion: string | null | undefined
+    neoForgeVersion?: string | null
     isPublishedEnvironment: boolean
   }>({
     minecraftVersion: "1.21.1",
-    neoForgeVersion: "21.1.65",
+    modLoader: "NEOFORGE",
+    modLoaderVersion: null,
+    neoForgeVersion: null,
     isPublishedEnvironment: true,
   })
 
@@ -111,7 +115,9 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         if (payload.minecraftVersion) {
           setEnvInfo({
             minecraftVersion: payload.minecraftVersion,
-            neoForgeVersion: payload.neoForgeVersion,
+            modLoader: payload.modLoader || "NEOFORGE",
+            modLoaderVersion: payload.modLoaderVersion ?? null,
+            neoForgeVersion: payload.neoForgeVersion ?? null,
             isPublishedEnvironment: payload.isPublishedEnvironment,
           })
         }
@@ -312,11 +318,11 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                 <span style={{ color: "#34d399", fontWeight: "600" }}>
                   Minecraft {envInfo.minecraftVersion}
                 </span>
-                {selectedContentType === "MOD" && (
+                {selectedContentType === "MOD" && envInfo.modLoader !== "VANILLA" && (
                   <>
                     {" "}·{" "}
                     <span style={{ color: "#60a5fa", fontWeight: "600" }}>
-                      NeoForge {envInfo.neoForgeVersion}
+                      {envInfo.modLoader}{envInfo.modLoaderVersion ? ` ${envInfo.modLoaderVersion}` : ""}
                     </span>
                   </>
                 )}{" "}

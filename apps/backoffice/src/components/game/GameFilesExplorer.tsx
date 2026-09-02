@@ -26,6 +26,7 @@ import {
   IconSearch,
   IconLock,
   IconArrowDown,
+  IconSettings,
 } from "../../theme/icons"
 import TextFileEditorModal from "./TextFileEditorModal"
 import NewFolderModal from "./NewFolderModal"
@@ -34,11 +35,15 @@ import PolicyModal from "./PolicyModal"
 import ConfirmDeleteModal from "./ConfirmDeleteModal"
 import { ModSearchModal } from "./providers/ModSearchModal"
 import { getThemeTokens } from "../../theme/tokens"
+import GameEnvironmentModal from "./GameEnvironmentModal"
 
 interface GameFilesExplorerProps {
   theme: ThemeMode
   files: AdminGameFile[]
   isDraft: boolean
+  minecraftVersion?: string
+  modLoader?: import("../../types").GameModLoader
+  modLoaderVersion?: string | null
   onRefresh: () => Promise<void>
   onToast: (message: string, type: "success" | "error") => void
   onPrepareDraft?: () => void
@@ -104,6 +109,9 @@ export default function GameFilesExplorer({
   theme,
   files,
   isDraft,
+  minecraftVersion = "1.21.1",
+  modLoader = "NEOFORGE",
+  modLoaderVersion = null,
   onRefresh,
   onToast,
   onPrepareDraft,
@@ -144,6 +152,10 @@ export default function GameFilesExplorer({
   const [policyTarget, setPolicyTarget] = useState<ExplorerItem | null>(null)
   const [deleteTargets, setDeleteTargets] = useState<string[] | null>(null)
   const [isModSearchOpen, setIsModSearchOpen] = useState(false)
+  const [
+    isEnvironmentModalOpen,
+    setIsEnvironmentModalOpen,
+  ] = useState(false)
 
   // Uploading state
   const [isUploading, setIsUploading] = useState(false)
@@ -703,6 +715,28 @@ export default function GameFilesExplorer({
 
               <button
                 type="button"
+                data-testid="button-configure-game-environment"
+                onClick={() =>
+                  setIsEnvironmentModalOpen(true)
+                }
+                className="launcher-btn-secondary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 14px",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                }}
+                title="Configurar las versiones de Minecraft y NeoForge de esta actualización"
+              >
+                <IconSettings size={15} />
+                <span>Configurar entorno</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setIsNewFolderOpen(true)}
                 className="launcher-btn-secondary"
                 style={{
@@ -1031,7 +1065,7 @@ export default function GameFilesExplorer({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => {}}
+                        onChange={() => { }}
                         onClick={(e) => e.stopPropagation()}
                       />
                     </td>
@@ -1073,11 +1107,10 @@ export default function GameFilesExplorer({
                             item.effectivePolicy === "NO_MODIFICABLE"
                               ? "rgba(239, 68, 68, 0.15)"
                               : "rgba(34, 197, 94, 0.15)",
-                          border: `1px solid ${
-                            item.effectivePolicy === "NO_MODIFICABLE"
+                          border: `1px solid ${item.effectivePolicy === "NO_MODIFICABLE"
                               ? "rgba(239, 68, 68, 0.25)"
                               : "rgba(34, 197, 94, 0.25)"
-                          }`,
+                            }`,
                           color:
                             item.effectivePolicy === "NO_MODIFICABLE"
                               ? "#ef4444"
@@ -1123,25 +1156,25 @@ export default function GameFilesExplorer({
                                     ? "rgba(34, 197, 94, 0.2)"
                                     : "#dcfce7"
                                   : item.changeStatus === "UPDATED"
-                                  ? isDark
-                                    ? "rgba(59, 130, 246, 0.2)"
-                                    : "#dbeafe"
-                                  : isDark
-                                  ? "rgba(239, 68, 68, 0.2)"
-                                  : "#fee2e2",
+                                    ? isDark
+                                      ? "rgba(59, 130, 246, 0.2)"
+                                      : "#dbeafe"
+                                    : isDark
+                                      ? "rgba(239, 68, 68, 0.2)"
+                                      : "#fee2e2",
                               color:
                                 item.changeStatus === "ADDED"
                                   ? "#22c55e"
                                   : item.changeStatus === "UPDATED"
-                                  ? "#3b82f6"
-                                  : "#ef4444",
+                                    ? "#3b82f6"
+                                    : "#ef4444",
                             }}
                           >
                             {item.changeStatus === "ADDED"
                               ? "Nuevo"
                               : item.changeStatus === "UPDATED"
-                              ? "Modificado"
-                              : "Eliminado"}
+                                ? "Modificado"
+                                : "Eliminado"}
                           </span>
 
                           {isRemoved && isDraft && (
@@ -1501,6 +1534,46 @@ export default function GameFilesExplorer({
             await gameApi.deleteGamePaths(deleteTargets)
             onToast(`${deleteTargets.length} elemento(s) eliminado(s).`, "success")
             setSelectedPaths(new Set())
+            await onRefresh()
+          }}
+        />
+      )}
+
+      {isEnvironmentModalOpen && (
+        <GameEnvironmentModal
+          theme={theme}
+          minecraftVersion={minecraftVersion}
+          modLoader={modLoader}
+          modLoaderVersion={modLoaderVersion}
+          providerManagedFileCount={
+            files.filter(
+              (file) =>
+                !file.isDirectory &&
+                Boolean(file.sourceProvider),
+            ).length
+          }
+          onClose={() =>
+            setIsEnvironmentModalOpen(false)
+          }
+          onSubmit={async (input) => {
+            await gameApi.updateGameDraftMetadata(input)
+
+            const formatLoader = (l: string) => {
+              if (l === "NEOFORGE") return "NeoForge"
+              if (l === "FORGE") return "Forge"
+              if (l === "FABRIC") return "Fabric"
+              if (l === "QUILT") return "Quilt"
+              if (l === "VANILLA") return "Vanilla"
+              return l
+            }
+            const loaderLabel = input.modLoader === "VANILLA"
+              ? "Vanilla"
+              : `${formatLoader(input.modLoader)} ${input.modLoaderVersion || ""}`
+            onToast(
+              `Entorno actualizado: Minecraft ${input.minecraftVersion} · ${loaderLabel.trim()}.`,
+              "success",
+            )
+
             await onRefresh()
           }}
         />

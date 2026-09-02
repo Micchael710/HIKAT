@@ -11,6 +11,8 @@ const {
   resolveAssetObjectInstallFiles,
   resolveNeoForgedInstallerFile,
   createModernForgeInstallWorkflow,
+  createFabricInstallWorkflow,
+  createQuiltInstallWorkflow,
   executeInstallManifest,
   executeInstallWorkflow,
   diagnoseInstallation,
@@ -43,19 +45,30 @@ async function saveCoreState(instanceRoot, state) {
 }
 
 /**
- * Check if the core Minecraft + NeoForge installation is healthy locally.
+ * Check if the core Minecraft + loader installation is healthy locally.
  * Strictly local and offline.
+ * Accepts: { instanceRoot, minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion }
+ * neoForgeVersion is legacy: if modLoader is not provided, NEOFORGE is assumed.
  */
-async function checkCore({ instanceRoot, minecraftVersion, neoForgeVersion }) {
+async function checkCore({ instanceRoot, minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion }) {
   if (!instanceRoot) return { installed: false }
   const cleanMc = String(minecraftVersion || "").trim()
-  const cleanNf = String(neoForgeVersion || "").trim()
+
+  // Resolve loader / version from new or legacy fields
+  const resolvedLoader = (modLoader || (neoForgeVersion ? "NEOFORGE" : "VANILLA")).toUpperCase()
+  const resolvedLoaderVersion = (modLoaderVersion || neoForgeVersion || "").trim()
 
   const state = await loadCoreState(instanceRoot)
   if (!state) return { installed: false }
 
+  const stateLoader = (state.modLoader || (state.neoForgeVersion ? "NEOFORGE" : "VANILLA")).toUpperCase()
+  const stateLoaderVersion = String(state.modLoaderVersion || state.neoForgeVersion || "").trim()
+
   if (state.minecraftVersion !== cleanMc) return { installed: false }
-  if (cleanNf && state.neoForgeVersion !== cleanNf) return { installed: false }
+  if (stateLoader !== resolvedLoader) return { installed: false }
+  if (resolvedLoader !== "VANILLA" && stateLoaderVersion !== resolvedLoaderVersion) {
+    return { installed: false }
+  }
 
   const folder = MinecraftFolder.from(instanceRoot)
   let resolvedVersion = null
@@ -82,11 +95,16 @@ async function checkCore({ instanceRoot, minecraftVersion, neoForgeVersion }) {
 }
 
 /**
- * Install or repair Minecraft Vanilla and NeoForge using XMCL 6.3.2 manifests and workflows.
+ * Install or repair Minecraft Vanilla and the configured mod loader using XMCL.
+ * Accepts: { instanceRoot, minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion, javaPath, signal, onProgress }
+ * modLoader: VANILLA | NEOFORGE | FORGE | FABRIC | QUILT
+ * neoForgeVersion is legacy: used as modLoaderVersion when modLoader is NEOFORGE and modLoaderVersion is absent.
  */
 async function installCore({
   instanceRoot,
   minecraftVersion,
+  modLoader,
+  modLoaderVersion,
   neoForgeVersion,
   javaPath,
   signal,
@@ -94,8 +112,11 @@ async function installCore({
 }) {
   if (!instanceRoot) throw new Error("instanceRoot is required for installCore")
   const cleanMc = String(minecraftVersion || "").trim()
-  const cleanNf = String(neoForgeVersion || "").trim()
   if (!cleanMc) throw new Error("minecraftVersion is required for installCore")
+
+  // Normalize loader
+  const resolvedLoader = (modLoader || (neoForgeVersion ? "NEOFORGE" : "VANILLA")).toUpperCase()
+  const resolvedLoaderVersion = String(modLoaderVersion || neoForgeVersion || "").trim()
 
   const folder = MinecraftFolder.from(instanceRoot)
   const runtime = createHiKatInstallRuntime({ signal })
@@ -153,30 +174,67 @@ async function installCore({
 
   let finalVersionId = cleanMc
 
-  // 5. Install NeoForge if required
-  if (cleanNf) {
-    const { file: installerFile } = await resolveNeoForgedInstallerFile(
-      "neoforge",
-      cleanNf,
-      folder,
-      { signal }
-    )
+  // 5. Install mod loader if required
+  if (resolvedLoader !== "VANILLA") {
+    if (!resolvedLoaderVersion) {
+      throw new Error(`modLoaderVersion is required when modLoader is ${resolvedLoader}`)
+    }
 
-    const targetProfileId = `${cleanMc}-neoforge-${cleanNf}`
-    const workflow = createModernForgeInstallWorkflow({
-      id: targetProfileId,
-      minecraft: folder,
-      minecraftVersion: cleanMc,
-      installer: installerFile,
-      artifactVersion: cleanNf,
-      java: javaPath || "java",
-      installOptions: { signal },
-      side: "client",
-    })
+    if (resolvedLoader === "NEOFORGE" || resolvedLoader === "FORGE") {
+      // Both NeoForge and Forge use createModernForgeInstallWorkflow via resolveNeoForgedInstallerFile
+      const loaderSlug = resolvedLoader === "NEOFORGE" ? "neoforge" : "forge"
+      const { file: installerFile } = await resolveNeoForgedInstallerFile(
+        loaderSlug,
+        resolvedLoaderVersion,
+        folder,
+        { signal }
+      )
 
-    const result = await executeInstallWorkflow(workflow, runtime, { signal })
-    finalVersionId =
-      (result && typeof result === "object" ? result.version : result) || targetProfileId
+      const targetProfileId = `${cleanMc}-${loaderSlug}-${resolvedLoaderVersion}`
+      const workflow = createModernForgeInstallWorkflow({
+        id: targetProfileId,
+        minecraft: folder,
+        minecraftVersion: cleanMc,
+        installer: installerFile,
+        artifactVersion: resolvedLoaderVersion,
+        java: javaPath || "java",
+        installOptions: { signal },
+        side: "client",
+      })
+
+      const result = await executeInstallWorkflow(workflow, runtime, { signal })
+      finalVersionId =
+        (result && typeof result === "object" ? result.version : result) || targetProfileId
+
+    } else if (resolvedLoader === "FABRIC") {
+      const workflow = createFabricInstallWorkflow({
+        minecraft: folder,
+        minecraftVersion: cleanMc,
+        loaderVersion: resolvedLoaderVersion,
+        signal,
+        side: "client",
+      })
+      const result = await executeInstallWorkflow(workflow, runtime, { signal })
+      finalVersionId =
+        (result && typeof result === "object" ? result.version : result) ||
+        `${cleanMc}-fabric-${resolvedLoaderVersion}`
+
+    } else if (resolvedLoader === "QUILT") {
+      const workflow = createQuiltInstallWorkflow({
+        minecraft: folder,
+        minecraftVersion: cleanMc,
+        loaderVersion: resolvedLoaderVersion,
+        signal,
+        side: "client",
+      })
+      const result = await executeInstallWorkflow(workflow, runtime, { signal })
+      finalVersionId =
+        (result && typeof result === "object" ? result.version : result) ||
+        `${cleanMc}-quilt-${resolvedLoaderVersion}`
+
+    } else {
+      throw new Error(`Unsupported modLoader: ${resolvedLoader}`)
+    }
   }
 
   // 6. Diagnose installed version to confirm integrity (XMCL is sole authority)
@@ -190,7 +248,10 @@ async function installCore({
   const state = {
     schemaVersion: 1,
     minecraftVersion: cleanMc,
-    neoForgeVersion: cleanNf,
+    modLoader: resolvedLoader,
+    modLoaderVersion: resolvedLoader !== "VANILLA" ? resolvedLoaderVersion : null,
+    // Keep legacy field for compatibility with older state readers
+    neoForgeVersion: resolvedLoader === "NEOFORGE" ? resolvedLoaderVersion : null,
     resolvedVersionId: finalVersionId,
   }
   await saveCoreState(instanceRoot, state)

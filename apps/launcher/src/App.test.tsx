@@ -58,6 +58,8 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
       version: "1.0.0",
       minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
       neoForgeVersion: "21.1.65",
       installed: false,
       hasUpdate: false,

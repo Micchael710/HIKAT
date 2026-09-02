@@ -18,7 +18,10 @@ export type GameButtonState =
 export interface GameManifest {
   version: string
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: import("../vite-env").GameModLoader
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
   totalSizeGB: number
   hasUpdate: boolean
   clientFiles: ClientFile[]
@@ -30,7 +33,10 @@ export interface ReleaseActivatedEvent {
   type: "RELEASE_ACTIVATED"
   version: string
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader?: string
+  modLoaderVersion?: string | null
+  /** @deprecated */
+  neoForgeVersion?: string | null
   mandatory?: boolean
 }
 
@@ -115,6 +121,8 @@ export const GET_PUBLISHED_MODPACK_QUERY = `
     publishedModpack {
       version
       minecraftVersion
+      modLoader
+      modLoaderVersion
       neoForgeVersion
       mandatory
       clientFiles {
@@ -165,10 +173,12 @@ export const gameService = {
       const restRes = await apiClient<PublishedModpack | GameManifest>("/game/manifest")
       if (restRes.success && restRes.data) {
         const raw = restRes.data as any
-        modpack = {
+      modpack = {
           version: raw.version || "1.0.0",
           minecraftVersion: raw.minecraftVersion,
-          neoForgeVersion: raw.neoForgeVersion,
+          modLoader: raw.modLoader || "NEOFORGE",
+          modLoaderVersion: raw.modLoaderVersion ?? null,
+          neoForgeVersion: raw.neoForgeVersion ?? null,
           clientFiles: Array.isArray(raw.clientFiles) ? raw.clientFiles : [],
         }
       }
@@ -196,7 +206,9 @@ export const gameService = {
             clientFiles: modpack.clientFiles,
             modpackVersion: modpack.version,
             minecraftVersion: modpack.minecraftVersion,
-            neoForgeVersion: modpack.neoForgeVersion,
+            modLoader: modpack.modLoader,
+            modLoaderVersion: modpack.modLoaderVersion ?? undefined,
+            neoForgeVersion: modpack.neoForgeVersion ?? undefined,
           })
           if (planCheck.success) {
             hasUpdate = planCheck.needsUpdate
@@ -212,7 +224,9 @@ export const gameService = {
       return {
         version: modpack.version,
         minecraftVersion: modpack.minecraftVersion,
-        neoForgeVersion: modpack.neoForgeVersion,
+        modLoader: modpack.modLoader || "NEOFORGE",
+        modLoaderVersion: modpack.modLoaderVersion ?? null,
+        neoForgeVersion: modpack.neoForgeVersion ?? null,
         totalSizeGB,
         hasUpdate,
         clientFiles: modpack.clientFiles,
@@ -236,6 +250,8 @@ export const gameService = {
                 clientFiles: cachedFiles,
                 modpackVersion: parsed.version,
                 minecraftVersion: parsed.minecraftVersion,
+                modLoader: parsed.modLoader,
+                modLoaderVersion: parsed.modLoaderVersion,
                 neoForgeVersion: parsed.neoForgeVersion,
               })
               if (planCheck.success && !planCheck.needsUpdate && planCheck.isFullyInstalled) {
@@ -251,7 +267,9 @@ export const gameService = {
           return {
             version: parsed.version || "1.0.0",
             minecraftVersion: parsed.minecraftVersion,
-            neoForgeVersion: parsed.neoForgeVersion,
+            modLoader: parsed.modLoader || "NEOFORGE",
+            modLoaderVersion: parsed.modLoaderVersion ?? null,
+            neoForgeVersion: parsed.neoForgeVersion ?? null,
             totalSizeGB: 0,
             hasUpdate: false,
             clientFiles: cachedFiles,
@@ -307,7 +325,9 @@ export const gameService = {
     clientFiles: ClientFile[],
     modpackVersion: string,
     minecraftVersion?: string,
-    neoForgeVersion?: string,
+    modLoader?: import("../vite-env").GameModLoader,
+    modLoaderVersion?: string | null,
+    neoForgeVersion?: string | null,
     isVerify?: boolean,
   ) {
     if (window.electronAPI?.startSync) {
@@ -315,7 +335,9 @@ export const gameService = {
         clientFiles,
         modpackVersion,
         minecraftVersion,
-        neoForgeVersion,
+        modLoader,
+        modLoaderVersion: modLoaderVersion ?? undefined,
+        neoForgeVersion: neoForgeVersion ?? undefined,
         apiBaseUrl: getApiBaseUrl(),
         isVerify,
       })
@@ -338,12 +360,18 @@ export const gameService = {
     playerName?: string
     ramGB?: number
     minecraftVersion?: string
-    neoForgeVersion?: string
+    modLoader?: import("../vite-env").GameModLoader
+    modLoaderVersion?: string | null
+    neoForgeVersion?: string | null
     customJavaPath?: string
     customArgs?: string[]
   }) {
     if (window.electronAPI?.launchGame) {
-      return await window.electronAPI.launchGame(options)
+      return await window.electronAPI.launchGame({
+        ...options,
+        modLoaderVersion: options.modLoaderVersion ?? undefined,
+        neoForgeVersion: options.neoForgeVersion ?? undefined,
+      })
     }
   },
 }

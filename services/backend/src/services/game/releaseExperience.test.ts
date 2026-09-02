@@ -142,20 +142,100 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
       expect(cleanedEmpty.notes).toBeNull()
     })
 
-    it("6. Minecraft/NeoForge no se pueden cambiar mediante metadata mutation (inmutabilidad de entorno)", async () => {
-      const draft = await prepareGameDraft(db, adminId)
-      expect(draft.minecraftVersion).toBe("1.21.1")
-      expect(draft.neoForgeVersion).toBe("21.1.65")
+    it("6. Minecraft/NeoForge se pueden cambiar en el draft sin modificar releases publicadas", async () => {
+      const draft =
+        await prepareGameDraft(
+          db,
+          adminId,
+        )
 
-      // Metadata input only accepts version, notes, coverMediaId
-      await updateGameDraftMetadata(db, env, { version: "1.0.1", notes: "Test" }, adminId)
+      expect(
+        draft.minecraftVersion,
+      ).toBe("1.21.1")
 
-      const fromDb = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft.id)).get()
-      expect(fromDb?.minecraftVersion).toBe("1.21.1")
-      expect(fromDb?.neoForgeVersion).toBe("21.1.65")
-      expect(fromDb?.status).toBe("DRAFT")
-      expect(fromDb?.publishedAt).toBeNull()
-      expect(fromDb?.createdBy).toBe(adminId)
+      expect(
+        draft.neoForgeVersion,
+      ).toBe("21.1.65")
+
+      const updated =
+        await updateGameDraftMetadata(
+          db,
+          env,
+          {
+            minecraftVersion: "1.21.1",
+            neoForgeVersion: "21.1.209",
+          },
+          adminId,
+        )
+
+      expect(
+        updated.minecraftVersion,
+      ).toBe("1.21.1")
+
+      expect(
+        updated.neoForgeVersion,
+      ).toBe("21.1.209")
+
+      const fromDb =
+        await db
+          .select()
+          .from(schema.gameReleases)
+          .where(
+            eq(
+              schema.gameReleases.id,
+              draft.id,
+            ),
+          )
+          .get()
+
+      expect(
+        fromDb?.minecraftVersion,
+      ).toBe("1.21.1")
+
+      expect(
+        fromDb?.neoForgeVersion,
+      ).toBe("21.1.209")
+
+      expect(fromDb?.status).toBe(
+        "DRAFT",
+      )
+
+      expect(
+        fromDb?.publishedAt,
+      ).toBeNull()
+    })
+
+    it("6.1 rechaza versiones de entorno vacías o inválidas", async () => {
+      await prepareGameDraft(
+        db,
+        adminId,
+      )
+
+      await expect(
+        updateGameDraftMetadata(
+          db,
+          env,
+          {
+            minecraftVersion: "   ",
+          },
+          adminId,
+        ),
+      ).rejects.toThrow(
+        /versión de Minecraft no puede estar vacía/i,
+      )
+
+      await expect(
+        updateGameDraftMetadata(
+          db,
+          env,
+          {
+            neoForgeVersion: "   ",
+          },
+          adminId,
+        ),
+      ).rejects.toThrow(
+        /versión de NeoForge no puede estar vacía/i,
+      )
     })
   })
 

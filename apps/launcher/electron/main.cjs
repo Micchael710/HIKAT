@@ -1345,6 +1345,8 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
       clientFiles: payload.clientFiles,
       modpackVersion: payload.modpackVersion,
       minecraftVersion: payload.minecraftVersion,
+      modLoader: payload.modLoader,
+      modLoaderVersion: payload.modLoaderVersion,
       neoForgeVersion: payload.neoForgeVersion,
     })
   } catch (err) {
@@ -1371,6 +1373,8 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     clientFiles: payload.clientFiles,
     modpackVersion: payload.modpackVersion,
     minecraftVersion: payload.minecraftVersion,
+    modLoader: payload.modLoader,
+    modLoaderVersion: payload.modLoaderVersion,
     neoForgeVersion: payload.neoForgeVersion,
     apiBaseUrl: payload.apiBaseUrl,
     isVerify: Boolean(payload.isVerify),
@@ -1396,6 +1400,8 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
     playerName: options.playerName || "Player",
     ramGB: options.ramGB || 4,
     minecraftVersion: options.minecraftVersion,
+    modLoader: options.modLoader,
+    modLoaderVersion: options.modLoaderVersion,
     neoForgeVersion: options.neoForgeVersion,
     dedicatedGpu: dedicatedGpuEnabled,
     customJavaPath: options.customJavaPath,

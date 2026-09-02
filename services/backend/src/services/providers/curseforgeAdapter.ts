@@ -23,7 +23,20 @@ const CURSEFORGE_CLASS_MAP: Record<ContentTypeGql, number> = {
   SHADER: 6552,
 }
 
-const NEOFORGE_LOADER_TYPE = 6
+// Official CurseForge modLoaderType IDs for supported loaders
+// Reference: https://docs.curseforge.com/#tocS_ModLoaderType
+const CURSEFORGE_LOADER_TYPE_MAP: Record<string, number> = {
+  FORGE: 1,
+  FABRIC: 4,
+  QUILT: 5,
+  NEOFORGE: 6,
+  // 'neoforge' (lowercase from mapModLoaderToProviderName)
+  neoforge: 6,
+  forge: 1,
+  fabric: 4,
+  quilt: 5,
+}
+
 
 export class CurseForgeAdapter implements ModProviderAdapter {
   readonly provider = "CURSEFORGE" as const
@@ -97,7 +110,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     env: Env,
     query: string,
     minecraftVersion: string,
-    _loader: string,
+    loader: string,
     limit: number,
     offset: number,
     contentType: ContentTypeGql = "MOD",
@@ -117,8 +130,8 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       index: String(offset || 0),
     }
 
-    if (contentType === "MOD") {
-      paramsRecord.modLoaderType = String(NEOFORGE_LOADER_TYPE)
+    if (contentType === "MOD" && loader && CURSEFORGE_LOADER_TYPE_MAP[loader] !== undefined) {
+      paramsRecord.modLoaderType = String(CURSEFORGE_LOADER_TYPE_MAP[loader]!)
     }
 
     if (query.trim()) {
@@ -319,8 +332,8 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       pageSize: "50",
     }
 
-    if (contentType === "MOD") {
-      paramsRecord.modLoaderType = String(NEOFORGE_LOADER_TYPE)
+    if (contentType === "MOD" && _loader && CURSEFORGE_LOADER_TYPE_MAP[_loader] !== undefined) {
+      paramsRecord.modLoaderType = String(CURSEFORGE_LOADER_TYPE_MAP[_loader]!)
     }
 
     const params = new URLSearchParams(paramsRecord)

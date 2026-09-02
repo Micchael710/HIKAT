@@ -10,10 +10,15 @@ export interface ClientFile {
   policy: SyncPolicy
 }
 
+export type GameModLoader = "VANILLA" | "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT"
+
 export interface PublishedModpack {
   version: string
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoader
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
   mandatory?: boolean
   clientFiles: ClientFile[]
 }
@@ -64,12 +69,16 @@ interface ElectronAPI {
     clientFiles: ClientFile[]
     modpackVersion?: string
     minecraftVersion?: string
+    modLoader?: GameModLoader
+    modLoaderVersion?: string
     neoForgeVersion?: string
   }) => Promise<SyncPlanCheckResult>
   startSync?: (payload: {
     clientFiles: ClientFile[]
     modpackVersion?: string
     minecraftVersion?: string
+    modLoader?: GameModLoader
+    modLoaderVersion?: string
     neoForgeVersion?: string
     apiBaseUrl?: string
     isVerify?: boolean
@@ -87,6 +96,8 @@ interface ElectronAPI {
     playerName?: string
     ramGB?: number
     minecraftVersion?: string
+    modLoader?: GameModLoader
+    modLoaderVersion?: string
     neoForgeVersion?: string
     customJavaPath?: string
     customArgs?: string[]

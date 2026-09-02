@@ -35,9 +35,10 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
   const [providerStatuses, setProviderStatuses] = useState<ModProviderStatus[]>([])
   const [selectedMod, setSelectedMod] = useState<ModSearchResultItem | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [envInfo, setEnvInfo] = useState<{ minecraftVersion: string; neoForgeVersion: string }>({
+  const [envInfo, setEnvInfo] = useState<{ minecraftVersion: string; modLoader: import("../../../types").GameModLoader; modLoaderVersion: string | null | undefined }>({
     minecraftVersion: "1.21.1",
-    neoForgeVersion: "21.1.65",
+    modLoader: "NEOFORGE",
+    modLoaderVersion: null,
   })
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null)
@@ -77,7 +78,8 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
         if (payload.minecraftVersion) {
           setEnvInfo({
             minecraftVersion: payload.minecraftVersion,
-            neoForgeVersion: payload.neoForgeVersion,
+            modLoader: payload.modLoader || "NEOFORGE",
+            modLoaderVersion: payload.modLoaderVersion ?? null,
           })
         }
         setLoading(false)
@@ -198,11 +200,19 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({ onClose, onSucce
                 <span style={{ color: "#34d399", fontWeight: "700" }}>
                   Minecraft {envInfo.minecraftVersion}
                 </span>
-                {selectedContentType === "MOD" && (
+                {selectedContentType === "MOD" && envInfo.modLoader !== "VANILLA" && (
                   <>
                     {" "}·{" "}
                     <span style={{ color: "#60a5fa", fontWeight: "700" }}>
-                      NeoForge
+                      {envInfo.modLoader === "NEOFORGE"
+                        ? "NeoForge"
+                        : envInfo.modLoader === "FORGE"
+                        ? "Forge"
+                        : envInfo.modLoader === "FABRIC"
+                        ? "Fabric"
+                        : envInfo.modLoader === "QUILT"
+                        ? "Quilt"
+                        : envInfo.modLoader}
                     </span>
                   </>
                 )}

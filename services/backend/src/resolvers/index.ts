@@ -233,6 +233,11 @@ import {
 } from "../services/game"
 
 import {
+  getGameEnvironmentCatalog,
+  getLoaderVersions,
+} from "../services/game/gameEnvironmentService"
+
+import {
   getAdminSettings,
   getClientConfiguration,
   updateAdminSettings,
@@ -812,6 +817,24 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return readGameFileContent(context.db, args.id, context.env)
+    },
+
+    gameEnvironmentCatalog: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ) => {
+      requireAdmin(context)
+      return getGameEnvironmentCatalog()
+    },
+
+    gameLoaderVersions: async (
+      _parent: unknown,
+      args: { minecraftVersion: string; modLoader: string },
+      context: BackendGraphQLContext,
+    ) => {
+      requireAdmin(context)
+      return getLoaderVersions(args.minecraftVersion, args.modLoader as any)
     },
 
     searchMods: async (

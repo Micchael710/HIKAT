@@ -154,7 +154,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     plan?.items.filter((i) => i.action === "INSTALL" || i.action === "UPDATE").length || 1
 
   const currentMcVersion = detail?.minecraftVersion || "1.21.1"
-  const currentLoader = detail?.neoForgeVersion ? "NeoForge" : ""
+  const currentLoader = (detail?.modLoader && detail.modLoader !== "VANILLA") ? detail.modLoader : ""
 
   return (
     <div

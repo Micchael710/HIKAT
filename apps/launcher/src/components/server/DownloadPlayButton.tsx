@@ -172,7 +172,9 @@ export default function DownloadPlayButton({
       const newManifest: GameManifest = {
         version: newModpack.version,
         minecraftVersion: newModpack.minecraftVersion,
-        neoForgeVersion: newModpack.neoForgeVersion,
+        modLoader: newModpack.modLoader || "NEOFORGE",
+        modLoaderVersion: newModpack.modLoaderVersion ?? null,
+        neoForgeVersion: newModpack.neoForgeVersion ?? null,
         totalSizeGB,
         hasUpdate: hasPrevInstall,
         clientFiles: newModpack.clientFiles,
@@ -330,6 +332,8 @@ export default function DownloadPlayButton({
           manifest.clientFiles,
           manifest.version,
           manifest.minecraftVersion,
+          manifest.modLoader,
+          manifest.modLoaderVersion,
           manifest.neoForgeVersion,
         )
         .then((res: any) => {
@@ -393,6 +397,8 @@ export default function DownloadPlayButton({
           manifest.clientFiles,
           manifest.version,
           manifest.minecraftVersion,
+          manifest.modLoader,
+          manifest.modLoaderVersion,
           manifest.neoForgeVersion,
         )
         .then((res: any) => {
@@ -441,6 +447,8 @@ export default function DownloadPlayButton({
           playerName,
           ramGB,
           minecraftVersion: manifest?.minecraftVersion,
+          modLoader: manifest?.modLoader,
+          modLoaderVersion: manifest?.modLoaderVersion,
           neoForgeVersion: manifest?.neoForgeVersion,
         })
         if (onPlay) onPlay()
@@ -467,6 +475,8 @@ export default function DownloadPlayButton({
         manifest.clientFiles,
         manifest.version,
         manifest.minecraftVersion,
+        manifest.modLoader,
+        manifest.modLoaderVersion,
         manifest.neoForgeVersion,
         true,
       )

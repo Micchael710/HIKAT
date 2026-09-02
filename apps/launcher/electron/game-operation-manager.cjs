@@ -27,8 +27,21 @@ function validateSyncPayload(payload = {}, isStartSync = true) {
     if (!payload.minecraftVersion || typeof payload.minecraftVersion !== "string" || !payload.minecraftVersion.trim()) {
       throw new Error("Invalid payload: minecraftVersion must be a non-empty string.")
     }
-    if (!payload.neoForgeVersion || typeof payload.neoForgeVersion !== "string" || !payload.neoForgeVersion.trim()) {
-      throw new Error("Invalid payload: neoForgeVersion must be a non-empty string.")
+    if (payload.modLoader) {
+      if (typeof payload.modLoader !== "string" || !payload.modLoader.trim()) {
+        throw new Error("Invalid payload: modLoader must be a non-empty string.")
+      }
+      const loaderUpper = payload.modLoader.trim().toUpperCase()
+      if (loaderUpper !== "VANILLA") {
+        const loaderVer = payload.modLoaderVersion || payload.neoForgeVersion
+        if (!loaderVer || typeof loaderVer !== "string" || !loaderVer.trim()) {
+          throw new Error("Invalid payload: modLoaderVersion must be a non-empty string.")
+        }
+      }
+    } else {
+      if (!payload.neoForgeVersion || typeof payload.neoForgeVersion !== "string" || !payload.neoForgeVersion.trim()) {
+        throw new Error("Invalid payload: neoForgeVersion must be a non-empty string.")
+      }
     }
   }
 
@@ -113,6 +126,8 @@ class GameOperationManager {
       clientFiles = [],
       modpackVersion,
       minecraftVersion,
+      modLoader,
+      modLoaderVersion,
       neoForgeVersion,
     } = payload
 
@@ -121,6 +136,8 @@ class GameOperationManager {
     const core = await this.coreChecker({
       instanceRoot,
       minecraftVersion,
+      modLoader,
+      modLoaderVersion,
       neoForgeVersion,
     })
 
@@ -186,6 +203,8 @@ class GameOperationManager {
       clientFiles = [],
       modpackVersion,
       minecraftVersion,
+      modLoader,
+      modLoaderVersion,
       neoForgeVersion,
       apiBaseUrl,
       isVerify = false,
@@ -302,10 +321,12 @@ class GameOperationManager {
           throw new Error("Operation was cancelled.")
         }
 
-        // 3. Ensure Minecraft & NeoForge Core
+        // 3. Ensure Minecraft & Loader Core
         const coreStatus = await this.coreChecker({
           instanceRoot,
           minecraftVersion,
+          modLoader,
+          modLoaderVersion,
           neoForgeVersion,
         })
 
@@ -321,6 +342,8 @@ class GameOperationManager {
             await this.coreInstaller({
               instanceRoot,
               minecraftVersion,
+              modLoader,
+              modLoaderVersion,
               neoForgeVersion,
               javaPath: javaInfo.cliJavaPath,
               signal: abortController.signal,

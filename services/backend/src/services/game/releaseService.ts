@@ -14,6 +14,7 @@ import type {
   PublishGameReleaseInputGql,
   PrepareGameDraftInputGql,
   UpdateGameDraftMetadataInputGql,
+  GameModLoaderGql,
 } from "@hikat/graphql"
 import {
   validateSemVer,
@@ -29,6 +30,7 @@ import {
 } from "../mediaService"
 import { ensureSettingsRecord } from "../settingsService"
 import { broadcastReleaseActivated } from "../../releaseEvents"
+import { validateGameEnvironment } from "./gameEnvironmentService"
 import type { Env } from "../../types"
 
 
@@ -65,7 +67,8 @@ export async function computeDraftFingerprint(
     draft.notes || "",
     draft.coverMediaId || "",
     draft.minecraftVersion,
-    draft.neoForgeVersion,
+    draft.modLoader || draft.neoForgeVersion || "",
+    draft.modLoaderVersion || "",
     serializedFiles,
   ].join("#")
 
@@ -145,7 +148,9 @@ export function formatGameRelease(
     id: release.id,
     version: release.version,
     minecraftVersion: release.minecraftVersion,
-    neoForgeVersion: release.neoForgeVersion,
+    modLoader: (release.modLoader || "NEOFORGE") as GameModLoaderGql,
+    modLoaderVersion: release.modLoaderVersion || null,
+    neoForgeVersion: release.neoForgeVersion || null,
     status: release.status as any,
     notes: release.notes || null,
     coverMediaId: release.coverMediaId || null,
@@ -237,7 +242,7 @@ export function computeDraftChanges(
 
 export async function validateDraftReadiness(
   env: Env,
-  draft: { id?: string; version: string; minecraftVersion?: string; neoForgeVersion?: string },
+  draft: { id?: string; version: string; minecraftVersion?: string | null; neoForgeVersion?: string | null },
   draftFiles: schema.GameReleaseFile[],
   db?: Database,
   targetVersion?: string,
@@ -457,7 +462,9 @@ export async function getPublishedModpack(
   return {
     version: activeRelease.version,
     minecraftVersion: activeRelease.minecraftVersion,
-    neoForgeVersion: activeRelease.neoForgeVersion,
+    modLoader: (activeRelease.modLoader || "NEOFORGE") as GameModLoaderGql,
+    modLoaderVersion: activeRelease.modLoaderVersion || null,
+    neoForgeVersion: activeRelease.neoForgeVersion || null,
     mandatory: true,
     clientFiles,
   }
@@ -726,7 +733,73 @@ export async function updateGameDraftMetadata(
     updates.version = trimmed
   }
 
-  // 2. Notes validation
+  // 2. Minecraft environment validation
+  if (
+    input.minecraftVersion !== undefined &&
+    input.minecraftVersion !== null
+  ) {
+    const minecraftVersion =
+      input.minecraftVersion.trim()
+
+    if (!minecraftVersion) {
+      throw createGraphQLError(
+        "La versión de Minecraft no puede estar vacía.",
+        "VALIDATION_ERROR",
+      )
+    }
+
+    if (
+      minecraftVersion.length > 32 ||
+      !/^[0-9A-Za-z._+-]+$/.test(minecraftVersion)
+    ) {
+      throw createGraphQLError(
+        "La versión de Minecraft tiene un formato inválido.",
+        "VALIDATION_ERROR",
+      )
+    }
+
+    updates.minecraftVersion =
+      minecraftVersion
+  }
+
+  // 3. Generic mod loader environment validation
+  const hasModLoaderInput = input.modLoader !== undefined && input.modLoader !== null
+  const hasModLoaderVersionInput = input.modLoaderVersion !== undefined
+  const hasNeoForgeInput = input.neoForgeVersion !== undefined && input.neoForgeVersion !== null
+
+  if (hasModLoaderInput || hasModLoaderVersionInput) {
+    // New generic path: modLoader + modLoaderVersion
+    const modLoader = input.modLoader || (draft.modLoader as GameModLoaderGql) || "NEOFORGE"
+    const minecraftVersion = updates.minecraftVersion || draft.minecraftVersion
+    const modLoaderVersion = hasModLoaderVersionInput
+      ? (input.modLoaderVersion ?? null)
+      : (draft.modLoaderVersion ?? null)
+
+    await validateGameEnvironment(minecraftVersion, modLoader, modLoaderVersion)
+
+    updates.modLoader = modLoader
+    updates.modLoaderVersion = modLoaderVersion
+    // Keep neoForgeVersion in sync for NEOFORGE (backwards compat)
+    if (modLoader === "NEOFORGE" && modLoaderVersion) {
+      updates.neoForgeVersion = modLoaderVersion
+    }
+  } else if (hasNeoForgeInput) {
+    // Legacy path: neoForgeVersion only
+    const neoForgeVersion = (input.neoForgeVersion as string).trim()
+    if (!neoForgeVersion) {
+      throw createGraphQLError("La versión de NeoForge no puede estar vacía.", "VALIDATION_ERROR")
+    }
+    if (neoForgeVersion.length > 64 || !/^[0-9A-Za-z._+-]+$/.test(neoForgeVersion)) {
+      throw createGraphQLError("La versión de NeoForge tiene un formato inválido.", "VALIDATION_ERROR")
+    }
+    const minecraftVersion = updates.minecraftVersion || draft.minecraftVersion
+    await validateGameEnvironment(minecraftVersion, "NEOFORGE", neoForgeVersion)
+    updates.neoForgeVersion = neoForgeVersion
+    updates.modLoader = "NEOFORGE"
+    updates.modLoaderVersion = neoForgeVersion
+  }
+
+  // 4. Notes validation
   if (input.notes !== undefined) {
     if (input.notes !== null && input.notes.length > 5000) {
       throw createGraphQLError("Las notas de la versión no pueden superar los 5000 caracteres.", "VALIDATION_ERROR")
@@ -734,7 +807,7 @@ export async function updateGameDraftMetadata(
     updates.notes = input.notes ? input.notes.trim() || null : null
   }
 
-  // 3. Cover media validation
+  // 5. Cover media validation
   let targetCover: schema.ContentMedia | null = null
   if (input.coverMediaId !== undefined) {
     if (input.coverMediaId === null || input.coverMediaId.trim() === "") {
@@ -1032,6 +1105,8 @@ export async function publishGameRelease(
     await broadcastReleaseActivated(env, {
       version: published.version,
       minecraftVersion: published.minecraftVersion,
+      modLoader: published.modLoader || "NEOFORGE",
+      modLoaderVersion: published.modLoaderVersion || null,
       neoForgeVersion: published.neoForgeVersion,
       mandatory: true,
     }).catch((err) => {

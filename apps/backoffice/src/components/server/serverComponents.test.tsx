@@ -1079,6 +1079,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
       providersStatus: [{ provider: "MODRINTH", available: true }],
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+     modLoader: "NEOFORGE",
       isPublishedEnvironment: true,
     })
 
@@ -1096,6 +1097,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
       isInstalled: false,
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+    modLoader: "NEOFORGE",
     })
 
     await act(async () => {
@@ -1158,6 +1160,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
         providersStatus: [{ provider: "MODRINTH", available: true }],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+       modLoader: "NEOFORGE",
         isPublishedEnvironment: true,
       })
       .mockResolvedValueOnce({
@@ -1181,6 +1184,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
         providersStatus: [{ provider: "MODRINTH", available: true }],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+       modLoader: "NEOFORGE",
         isPublishedEnvironment: true,
       })
 

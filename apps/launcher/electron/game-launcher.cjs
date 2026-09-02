@@ -44,6 +44,8 @@ class GameLauncher {
     playerName = "Player",
     ramGB = DEFAULT_RAM_GB,
     minecraftVersion,
+    modLoader,
+    modLoaderVersion,
     neoForgeVersion,
     dedicatedGpu = true,
     customJavaPath,
@@ -57,23 +59,28 @@ class GameLauncher {
       throw new Error("Cannot launch Minecraft: Missing required minecraftVersion.")
     }
 
-    if (!neoForgeVersion || !String(neoForgeVersion).trim()) {
-      throw new Error("Cannot launch Minecraft: Missing required neoForgeVersion.")
+    // Resolve effective loader (supports legacy neoForgeVersion path)
+    const resolvedLoader = (modLoader || (neoForgeVersion ? "NEOFORGE" : "VANILLA")).toUpperCase()
+    const resolvedLoaderVersion = String(modLoaderVersion || neoForgeVersion || "").trim()
+
+    if (resolvedLoader !== "VANILLA" && !resolvedLoaderVersion) {
+      throw new Error(`Cannot launch Minecraft: Missing required loader version for ${resolvedLoader}.`)
     }
 
     this.setStatus("preparing")
 
     try {
       const cleanMc = String(minecraftVersion).trim()
-      const cleanNf = String(neoForgeVersion).trim()
 
-      console.log(`[GameLauncher] Initiating launch for MC: ${cleanMc}, NeoForge: ${cleanNf}`)
+      console.log(`[GameLauncher] Initiating launch for MC: ${cleanMc}, Loader: ${resolvedLoader} ${resolvedLoaderVersion}`)
 
       // 1. Quick local readiness check (Strictly Local, NO Downloads)
       const readiness = await this.readinessChecker({
         instanceRoot: this.instanceRoot,
         minecraftVersion: cleanMc,
-        neoForgeVersion: cleanNf,
+        modLoader: resolvedLoader,
+        modLoaderVersion: resolvedLoaderVersion,
+        neoForgeVersion,
       })
 
       if (!readiness.installed || !readiness.resolvedVersionId) {

@@ -256,6 +256,14 @@ export type SyncPolicy = "NO_MODIFICABLE" | "MODIFICABLE"
 
 export type GameDraftChangeStatus = "UNCHANGED" | "ADDED" | "UPDATED" | "REMOVED"
 
+export type GameModLoader = "VANILLA" | "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT"
+
+export interface GameLoaderVersion {
+  version: string
+  stable: boolean
+}
+
+
 export interface GameDraftChanges {
   added: number
   updated: number
@@ -332,7 +340,10 @@ export interface ModSearchPayload {
   totalCount: number
   providersStatus: ModProviderStatus[]
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoader
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
 }
 
 export interface ModDependency {
@@ -376,7 +387,10 @@ export interface ModProjectDetail {
   installedVersion?: string | null
   isInstalled: boolean
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoader
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
 }
 
 export interface ModInstallationPlanItem {
@@ -437,6 +451,11 @@ export interface UpdateGameDraftMetadataInput {
   version?: string | null
   notes?: string | null
   coverMediaId?: string | null
+  minecraftVersion?: string | null
+  modLoader?: GameModLoader | null
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
 }
 
 export interface PublishGameReleaseInput {
@@ -448,17 +467,14 @@ export interface PublishGameReleaseInput {
 
 export interface GameRelease {
   id: string
-
   version: string
-
   minecraftVersion: string
-
-  neoForgeVersion: string
-
+  modLoader: GameModLoader
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
   status: GameReleaseStatus
-
   notes?: string | null
-
   coverMediaId?: string | null
 
   cover?: ContentMedia | null
@@ -670,7 +686,10 @@ export interface ServerContentSearchPayload {
   nextCursor?: string | null
   providersStatus: ModProviderStatus[]
   minecraftVersion: string
-  neoForgeVersion: string
+  modLoader: GameModLoader
+  modLoaderVersion?: string | null
+  /** @deprecated Use modLoader + modLoaderVersion */
+  neoForgeVersion?: string | null
   isPublishedEnvironment: boolean
 }
 

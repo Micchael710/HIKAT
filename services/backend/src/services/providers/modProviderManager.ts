@@ -21,8 +21,24 @@ import type {
   ServerContentInstallationPlanGql,
   ServerContentPlanItemGql,
   ResolveServerContentPlanInputGql,
+  GameModLoaderGql,
 } from "@hikat/graphql"
 import { createGraphQLError } from "@hikat/graphql"
+
+/**
+ * Maps HiKAT GameModLoader enum to the loader string used by Modrinth and CurseForge search APIs.
+ * Returns empty string when loader filtering is not applicable (e.g. VANILLA or non-MOD content).
+ */
+export function mapModLoaderToProviderName(modLoader: GameModLoaderGql | string): string {
+  switch (modLoader) {
+    case "NEOFORGE": return "neoforge"
+    case "FORGE": return "forge"
+    case "FABRIC": return "fabric"
+    case "QUILT": return "quilt"
+    case "VANILLA":
+    default: return ""
+  }
+}
 
 export function getLogicalPathForContent(contentType: ContentTypeGql, filename: string): string {
   const cleanFilename = filename.trim().replace(/^[/\\]+/, "")
@@ -117,12 +133,14 @@ export class ModProviderManager {
 
   async getActiveEnvironment(
     db: Database,
-  ): Promise<{ minecraftVersion: string; neoForgeVersion: string }> {
+  ): Promise<{ minecraftVersion: string; modLoader: GameModLoaderGql; modLoaderVersion: string | null; neoForgeVersion: string }> {
     // 1. Try active draft
     const draft = await db
       .select({
         minecraftVersion: schema.gameReleases.minecraftVersion,
         neoForgeVersion: schema.gameReleases.neoForgeVersion,
+        modLoader: schema.gameReleases.modLoader,
+        modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
       .where(eq(schema.gameReleases.status, "DRAFT"))
@@ -131,6 +149,8 @@ export class ModProviderManager {
     if (draft) {
       return {
         minecraftVersion: draft.minecraftVersion || "1.21.1",
+        modLoader: ((draft.modLoader || "NEOFORGE") as GameModLoaderGql),
+        modLoaderVersion: draft.modLoaderVersion || null,
         neoForgeVersion: draft.neoForgeVersion || "21.1.65",
       }
     }
@@ -140,6 +160,8 @@ export class ModProviderManager {
       .select({
         minecraftVersion: schema.gameReleases.minecraftVersion,
         neoForgeVersion: schema.gameReleases.neoForgeVersion,
+        modLoader: schema.gameReleases.modLoader,
+        modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
       .where(eq(schema.gameReleases.status, "PUBLISHED"))
@@ -148,24 +170,30 @@ export class ModProviderManager {
     if (published) {
       return {
         minecraftVersion: published.minecraftVersion || "1.21.1",
+        modLoader: ((published.modLoader || "NEOFORGE") as GameModLoaderGql),
+        modLoaderVersion: published.modLoaderVersion || null,
         neoForgeVersion: published.neoForgeVersion || "21.1.65",
       }
     }
 
     return {
       minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
       neoForgeVersion: "21.1.65",
     }
   }
 
   async getPublishedEnvironment(
     db: Database,
-  ): Promise<{ minecraftVersion: string; neoForgeVersion: string; isPublished: boolean; releaseId?: string }> {
+  ): Promise<{ minecraftVersion: string; modLoader: GameModLoaderGql; modLoaderVersion: string | null; neoForgeVersion: string; isPublished: boolean; releaseId?: string }> {
     const published = await db
       .select({
         id: schema.gameReleases.id,
         minecraftVersion: schema.gameReleases.minecraftVersion,
         neoForgeVersion: schema.gameReleases.neoForgeVersion,
+        modLoader: schema.gameReleases.modLoader,
+        modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
       .where(eq(schema.gameReleases.status, "PUBLISHED"))
@@ -175,6 +203,8 @@ export class ModProviderManager {
       return {
         releaseId: published.id,
         minecraftVersion: published.minecraftVersion || "1.21.1",
+        modLoader: ((published.modLoader || "NEOFORGE") as GameModLoaderGql),
+        modLoaderVersion: published.modLoaderVersion || null,
         neoForgeVersion: published.neoForgeVersion || "21.1.65",
         isPublished: true,
       }
@@ -182,6 +212,8 @@ export class ModProviderManager {
 
     return {
       minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
       neoForgeVersion: "21.1.65",
       isPublished: false,
     }
@@ -197,8 +229,8 @@ export class ModProviderManager {
     contentType: ContentTypeGql = "MOD",
   ): Promise<ModSearchPayloadGql> {
     const envData = await this.getActiveEnvironment(db)
-    const { minecraftVersion, neoForgeVersion } = envData
-    const loader = contentType === "MOD" ? "NeoForge" : ""
+    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
     const providersStatus: ModProviderStatusGql[] = []
 
     if (provider === "MODRINTH") {
@@ -225,6 +257,8 @@ export class ModProviderManager {
           totalCount: res.providerTotalCount || res.totalCount,
           providersStatus,
           minecraftVersion,
+          modLoader,
+          modLoaderVersion,
           neoForgeVersion,
         }
       } catch (err: any) {
@@ -234,6 +268,8 @@ export class ModProviderManager {
           totalCount: 0,
           providersStatus,
           minecraftVersion,
+          modLoader,
+          modLoaderVersion,
           neoForgeVersion,
         }
       }
@@ -251,6 +287,8 @@ export class ModProviderManager {
           totalCount: 0,
           providersStatus,
           minecraftVersion,
+          modLoader,
+          modLoaderVersion,
           neoForgeVersion,
         }
       }
@@ -278,6 +316,8 @@ export class ModProviderManager {
           totalCount: res.providerTotalCount || res.totalCount,
           providersStatus,
           minecraftVersion,
+          modLoader,
+          modLoaderVersion,
           neoForgeVersion,
         }
       } catch (err: any) {
@@ -287,6 +327,8 @@ export class ModProviderManager {
           totalCount: 0,
           providersStatus,
           minecraftVersion,
+          modLoader,
+          modLoaderVersion,
           neoForgeVersion,
         }
       }
@@ -349,6 +391,8 @@ export class ModProviderManager {
       totalCount: totalCount || allItems.length,
       providersStatus,
       minecraftVersion,
+      modLoader,
+      modLoaderVersion,
       neoForgeVersion,
     }
   }
@@ -371,8 +415,8 @@ export class ModProviderManager {
     }
 
     const envData = await this.getPublishedEnvironment(db)
-    const { minecraftVersion, neoForgeVersion, isPublished } = envData
-    const loader = contentType === "MOD" ? "NeoForge" : ""
+    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion, isPublished } = envData
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
     const providersStatus: ModProviderStatusGql[] = []
 
     const isAllowedInServer = (item: NormalizedModProject) =>
@@ -635,6 +679,8 @@ export class ModProviderManager {
       nextCursor: rawResults.nextCursor,
       providersStatus: rawResults.providersStatus,
       minecraftVersion,
+      modLoader,
+      modLoaderVersion,
       neoForgeVersion,
       isPublishedEnvironment: isPublished,
     }
@@ -655,8 +701,8 @@ export class ModProviderManager {
     }
 
     const envData = await this.getPublishedEnvironment(db)
-    const { minecraftVersion, neoForgeVersion } = envData
-    const loader = contentType === "MOD" ? "NeoForge" : ""
+    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
 
     const adapter = this.getAdapter(provider)
     if (!adapter.isConfigured(env)) {
@@ -714,6 +760,8 @@ export class ModProviderManager {
       installedVersion,
       isInstalled,
       minecraftVersion,
+      modLoader,
+      modLoaderVersion,
       neoForgeVersion,
     }
   }
@@ -845,8 +893,8 @@ export class ModProviderManager {
     contentType: ContentTypeGql = "MOD",
   ): Promise<ModProjectDetailGql> {
     const envData = await this.getActiveEnvironment(db)
-    const { minecraftVersion, neoForgeVersion } = envData
-    const loader = contentType === "MOD" ? "NeoForge" : ""
+    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
 
     const adapter = this.getAdapter(provider)
     if (!adapter.isConfigured(env)) {
@@ -939,6 +987,8 @@ export class ModProviderManager {
       installedVersion,
       isInstalled,
       minecraftVersion,
+      modLoader,
+      modLoaderVersion,
       neoForgeVersion,
     }
   }
@@ -957,7 +1007,7 @@ export class ModProviderManager {
     input: ResolveModPlanInputGql,
   ): Promise<ModInstallationPlanGql> {
     const envData = await this.getActiveEnvironment(db)
-    const { minecraftVersion, neoForgeVersion } = envData
+    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
     const contentType = input.contentType || "MOD"
     if (contentType === "DATA_PACK") {
       throw createGraphQLError(
@@ -965,7 +1015,7 @@ export class ModProviderManager {
         "VALIDATION_ERROR",
       )
     }
-    const loader = contentType === "MOD" ? "NeoForge" : ""
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
 
     const adapter = this.getAdapter(input.provider)
     if (!adapter.isConfigured(env)) {
@@ -1347,7 +1397,7 @@ export class ModProviderManager {
         let depProject: NormalizedModProject | null = null
         try {
           depProject = await depAdapter.getProject(env, depProjectId, depContentType).catch(() => null)
-          const depLoader = depContentType === "MOD" ? "NeoForge" : ""
+          const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
           depCompatibleVersions = await depAdapter.getCompatibleVersions(
             env,
             depProjectId,
@@ -1587,8 +1637,8 @@ export class ModProviderManager {
     }
 
     const envData = await this.getPublishedEnvironment(db)
-    const { minecraftVersion, neoForgeVersion } = envData
-    const loader = contentType === "MOD" ? "NeoForge" : ""
+    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
 
     const adapter = this.getAdapter(input.provider)
     if (!adapter.isConfigured(env)) {
@@ -1940,7 +1990,7 @@ export class ModProviderManager {
         let depProject: NormalizedModProject | null = null
         try {
           depProject = await depAdapter.getProject(env, depProjectId, depContentType).catch(() => null)
-          const depLoader = depContentType === "MOD" ? "NeoForge" : ""
+          const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
           depCompatibleVersions = await depAdapter.getCompatibleVersions(
             env,
             depProjectId,

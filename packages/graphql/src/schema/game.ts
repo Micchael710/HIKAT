@@ -97,6 +97,25 @@ export const gameTypeDefs = /* GraphQL */ `
     CONFLICT
   }
 
+  enum GameModLoader {
+    VANILLA
+    NEOFORGE
+    FORGE
+    FABRIC
+    QUILT
+  }
+
+  type GameLoaderVersion {
+    version: String!
+    stable: Boolean!
+  }
+
+  type GameEnvironmentCatalog {
+    minecraftVersions: [String!]!
+    loaders: [GameModLoader!]!
+  }
+
+
   """
   Summary of file modifications between published version and active draft
   """
@@ -138,7 +157,13 @@ export const gameTypeDefs = /* GraphQL */ `
   type PublishedModpack {
     version: String!
     minecraftVersion: String!
+
+    modLoader: GameModLoader!
+    modLoaderVersion: String
+
+    # Compatibilidad temporal con launchers anteriores
     neoForgeVersion: String!
+
     mandatory: Boolean!
     clientFiles: [ClientFile!]!
   }
@@ -174,7 +199,9 @@ export const gameTypeDefs = /* GraphQL */ `
     id: ID!
     version: String!
     minecraftVersion: String!
-    neoForgeVersion: String!
+    modLoader: GameModLoader!
+    modLoaderVersion: String
+    neoForgeVersion: String
     status: GameReleaseStatus!
     notes: String
     coverMediaId: ID
@@ -276,7 +303,9 @@ export const gameTypeDefs = /* GraphQL */ `
     totalCount: Int!
     providersStatus: [ModProviderStatus!]!
     minecraftVersion: String!
-    neoForgeVersion: String!
+    modLoader: GameModLoader!
+    modLoaderVersion: String
+    neoForgeVersion: String
   }
 
   """
@@ -329,7 +358,9 @@ export const gameTypeDefs = /* GraphQL */ `
     installedVersion: String
     isInstalled: Boolean!
     minecraftVersion: String!
-    neoForgeVersion: String!
+    modLoader: GameModLoader!
+    modLoaderVersion: String
+    neoForgeVersion: String
   }
 
   """
@@ -406,6 +437,10 @@ export const gameTypeDefs = /* GraphQL */ `
     version: String
     notes: String
     coverMediaId: ID
+    
+    minecraftVersion: String
+    modLoader: GameModLoader
+    modLoaderVersion: String
   }
 
   input PublishGameReleaseInput {
@@ -468,7 +503,20 @@ export const gameTypeDefs = /* GraphQL */ `
     readGameFileContent(id: ID!): String!
 
     """
-    Search mods across Modrinth and/or CurseForge filtered by Minecraft version & NeoForge - requires ADMIN role
+    Official Minecraft releases and supported mod loaders for environment selection - requires ADMIN role
+    """
+    gameEnvironmentCatalog: GameEnvironmentCatalog!
+
+    """
+    Official loader versions compatible with a given Minecraft version - requires ADMIN role
+    """
+    gameLoaderVersions(
+      minecraftVersion: String!
+      modLoader: GameModLoader!
+    ): [GameLoaderVersion!]!
+
+    """
+    Search mods across Modrinth and/or CurseForge filtered by Minecraft version & mod loader - requires ADMIN role
     """
     searchMods(
       query: String!

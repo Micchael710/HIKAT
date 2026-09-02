@@ -1296,6 +1296,8 @@ export const gameApi = {
             id
             version
             minecraftVersion
+            modLoader
+            modLoaderVersion
             neoForgeVersion
             status
             notes
@@ -1335,6 +1337,8 @@ export const gameApi = {
             id
             version
             minecraftVersion
+            modLoader
+            modLoaderVersion
             neoForgeVersion
             status
             notes
@@ -1403,6 +1407,8 @@ export const gameApi = {
           id
           version
           minecraftVersion
+          modLoader
+          modLoaderVersion
           neoForgeVersion
           status
           notes
@@ -1451,6 +1457,8 @@ export const gameApi = {
           id
           version
           minecraftVersion
+          modLoader
+          modLoaderVersion
           neoForgeVersion
           status
           notes
@@ -1745,6 +1753,38 @@ export const gameApi = {
     return data.restoreGameFile
   },
 
+  async getGameEnvironmentCatalog(): Promise<{ minecraftVersions: string[]; loaders: import("../types").GameModLoader[] }> {
+    const query = /* GraphQL */ `
+      query GameEnvironmentCatalog {
+        gameEnvironmentCatalog {
+          minecraftVersions
+          loaders
+        }
+      }
+    `
+    const data = await executeGraphQL<{ gameEnvironmentCatalog: { minecraftVersions: string[]; loaders: import("../types").GameModLoader[] } }>(query)
+    return data.gameEnvironmentCatalog
+  },
+
+  async getGameLoaderVersions(
+    minecraftVersion: string,
+    modLoader: import("../types").GameModLoader,
+  ): Promise<import("../types").GameLoaderVersion[]> {
+    const query = /* GraphQL */ `
+      query GameLoaderVersions($minecraftVersion: String!, $modLoader: GameModLoader!) {
+        gameLoaderVersions(minecraftVersion: $minecraftVersion, modLoader: $modLoader) {
+          version
+          stable
+        }
+      }
+    `
+    const data = await executeGraphQL<{ gameLoaderVersions: import("../types").GameLoaderVersion[] }>(
+      query,
+      { minecraftVersion, modLoader },
+    )
+    return data.gameLoaderVersions
+  },
+
   async updateGameDraftMetadata(
     input: import("../types").UpdateGameDraftMetadataInput,
   ): Promise<import("../types").GameRelease> {
@@ -1754,6 +1794,8 @@ export const gameApi = {
           id
           version
           minecraftVersion
+          modLoader
+          modLoaderVersion
           neoForgeVersion
           status
           notes
@@ -1805,6 +1847,8 @@ export const gameApi = {
           id
           version
           minecraftVersion
+          modLoader
+          modLoaderVersion
           neoForgeVersion
           status
           notes
@@ -1981,6 +2025,8 @@ export const modProvidersApi = {
             error
           }
           minecraftVersion
+          modLoader
+          modLoaderVersion
           neoForgeVersion
         }
       }
@@ -2047,6 +2093,8 @@ export const modProvidersApi = {
           installedVersion
           isInstalled
           minecraftVersion
+          modLoader
+          modLoaderVersion
           neoForgeVersion
         }
       }
@@ -2238,6 +2286,8 @@ export const serverContentApi = {
             error
           }
           minecraftVersion
+          modLoader
+          modLoaderVersion
           neoForgeVersion
           isPublishedEnvironment
         }
@@ -2306,6 +2356,8 @@ export const serverContentApi = {
           installedVersion
           isInstalled
           minecraftVersion
+          modLoader
+          modLoaderVersion
           neoForgeVersion
         }
       }
@@ -2503,6 +2555,7 @@ export const graphqlClient = {
   ...modProvidersApi,
   ...serverContentApi,
 }
+
 
 
 

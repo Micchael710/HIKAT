@@ -399,8 +399,8 @@ export default function GameView({ theme }: GameViewProps) {
                                   rel.status === "PUBLISHED"
                                     ? "rgba(34, 197, 94, 0.15)"
                                     : isDark
-                                    ? "rgba(255, 255, 255, 0.08)"
-                                    : "#f1f5f9",
+                                      ? "rgba(255, 255, 255, 0.08)"
+                                      : "#f1f5f9",
                                 color: rel.status === "PUBLISHED" ? "#22c55e" : tokens.textSecondary,
                               }}
                             >
@@ -506,8 +506,8 @@ export default function GameView({ theme }: GameViewProps) {
                         color: serverPlan.canApply
                           ? "#22c55e"
                           : serverPlan.serverStatus === "DISCONNECTED" || serverPlan.serverStatus === "UNKNOWN"
-                          ? "#ef4444"
-                          : "#f59e0b",
+                            ? "#ef4444"
+                            : "#f59e0b",
                         fontWeight: "600",
                         display: "inline-flex",
                         alignItems: "center",
@@ -526,8 +526,8 @@ export default function GameView({ theme }: GameViewProps) {
                             {serverPlan.serverStatus === "ONLINE" || serverPlan.serverStatus === "STARTING" || serverPlan.serverStatus === "STOPPING"
                               ? serverPlan.blockReason || "Apaga el servidor antes de aplicar los cambios"
                               : serverPlan.serverStatus === "OFFLINE"
-                              ? serverPlan.blockReason || "No se pudieron verificar los archivos del servidor"
-                              : serverPlan.blockReason || "El servidor no está disponible"}
+                                ? serverPlan.blockReason || "No se pudieron verificar los archivos del servidor"
+                                : serverPlan.blockReason || "El servidor no está disponible"}
                           </span>
                         </>
                       )}
@@ -682,6 +682,15 @@ export default function GameView({ theme }: GameViewProps) {
             theme={theme}
             files={files}
             isDraft={hasDraft}
+            minecraftVersion={
+              activeRelease?.minecraftVersion
+            }
+            modLoader={
+              activeRelease?.modLoader
+            }
+            modLoaderVersion={
+              activeRelease?.modLoaderVersion
+            }
             onRefresh={refreshSilently}
             onToast={showToast}
             onPrepareDraft={handlePrepareDraft}

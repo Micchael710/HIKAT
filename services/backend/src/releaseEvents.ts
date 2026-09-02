@@ -46,6 +46,9 @@ export class ReleaseEventsDurableObject {
 export interface ReleaseActivatedBroadcastData {
   version: string
   minecraftVersion?: string | null
+  modLoader?: string | null
+  modLoaderVersion?: string | null
+  /** @deprecated kept for backwards compat with old launchers */
   neoForgeVersion?: string | null
   mandatory?: boolean
 }
@@ -60,7 +63,9 @@ export async function broadcastReleaseActivated(
     type: "RELEASE_ACTIVATED",
     version: release.version,
     minecraftVersion: release.minecraftVersion || "1.21.1",
-    neoForgeVersion: release.neoForgeVersion || "21.1.65",
+    modLoader: release.modLoader || "NEOFORGE",
+    modLoaderVersion: release.modLoaderVersion || null,
+    neoForgeVersion: release.neoForgeVersion || release.modLoaderVersion || "21.1.65",
     mandatory: true,
   })
 

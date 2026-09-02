@@ -157,6 +157,8 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
       type: "RELEASE_ACTIVATED",
       version: "1.3.0",
       minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: null,
       neoForgeVersion: "21.1.65",
       mandatory: true,
     })

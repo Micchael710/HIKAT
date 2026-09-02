@@ -10,6 +10,8 @@ export const gameReleases = sqliteTable(
     version: text("version").notNull().unique(),
     minecraftVersion: text("minecraft_version").notNull().default("1.21.1"),
     neoForgeVersion: text("neoforge_version").notNull().default("21.1.65"),
+    modLoader: text("mod_loader").notNull().default("NEOFORGE"),
+    modLoaderVersion: text("mod_loader_version"),
     status: text("status").notNull().default("DRAFT"),
     notes: text("notes"),
     coverMediaId: text("cover_media_id").references(() => contentMedia.id, {

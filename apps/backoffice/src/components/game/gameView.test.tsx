@@ -27,6 +27,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         version: "1.4.2",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+       modLoader: "NEOFORGE",
         status: "PUBLISHED",
         notes: "Versión inicial",
         publishedAt: new Date().toISOString(),
@@ -67,6 +68,119 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(screen.getByText("config")).toBeDefined()
   })
 
+  it("permite configurar el entorno del draft desde el explorador", async () => {
+    const onRefresh =
+      vi.fn().mockResolvedValue(undefined)
+
+    const onToast = vi.fn()
+
+    const updateSpy =
+      vi
+        .spyOn(
+          gameApi,
+          "updateGameDraftMetadata",
+        )
+        .mockResolvedValue({
+          id: "draft-env-test",
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.209",
+          modLoader: "NEOFORGE",
+          status: "DRAFT",
+          notes: null,
+          files: [],
+          createdAt:
+            new Date().toISOString(),
+          updatedAt:
+            new Date().toISOString(),
+        })
+
+    vi.spyOn(gameApi, "getGameEnvironmentCatalog").mockResolvedValue({
+      minecraftVersions: ["1.21.1", "1.20.1"],
+      loaders: ["VANILLA", "NEOFORGE", "FORGE", "FABRIC", "QUILT"],
+    })
+    vi.spyOn(gameApi, "getGameLoaderVersions").mockResolvedValue([
+      { version: "21.1.65", stable: true },
+      { version: "21.1.209", stable: true },
+    ])
+
+    render(
+      <GameFilesExplorer
+        theme="dark"
+        files={[]}
+        isDraft={true}
+        minecraftVersion="1.21.1"
+        modLoader="NEOFORGE"
+        modLoaderVersion="21.1.65"
+        onRefresh={onRefresh}
+        onToast={onToast}
+      />,
+    )
+
+    const button =
+      screen.getByTestId(
+        "button-configure-game-environment",
+      )
+
+    expect(
+      button.textContent,
+    ).toContain("Configurar entorno")
+
+    await act(async () => {
+      fireEvent.click(button)
+    })
+
+    expect(
+      screen.getByTestId(
+        "game-environment-modal",
+      ),
+    ).toBeDefined()
+
+    const neoForgeInput =
+      await screen.findByTestId(
+        "environment-neoforge-version",
+      )
+
+    await act(async () => {
+      fireEvent.change(
+        neoForgeInput,
+        {
+          target: {
+            value: "21.1.209",
+          },
+        },
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByTestId(
+          "button-save-game-environment",
+        ),
+      )
+    })
+
+    expect(
+      updateSpy,
+    ).toHaveBeenCalledWith({
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.209",
+    })
+
+    expect(
+      onRefresh,
+    ).toHaveBeenCalled()
+
+    expect(
+      onToast,
+    ).toHaveBeenCalledWith(
+      "Entorno actualizado: Minecraft 1.21.1 · NeoForge 21.1.209.",
+      "success",
+    )
+  })
+
+
   it("renders active draft with explorer actions and allows navigating into folders", async () => {
     const mockOverview: import("../../types").AdminGameOverview = {
       publishedRelease: {
@@ -74,6 +188,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         version: "1.4.2",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+       modLoader: "NEOFORGE",
         status: "PUBLISHED",
         notes: null,
         publishedAt: new Date().toISOString(),
@@ -86,6 +201,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         version: "1.4.3",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+       modLoader: "NEOFORGE",
         status: "DRAFT",
         notes: null,
         publishedAt: null,
@@ -232,6 +348,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         version: "1.0.0",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+       modLoader: "NEOFORGE",
         status: "ARCHIVED",
         notes: "Versión histórica",
         publishedAt: "2026-08-20T12:00:00.000Z",
@@ -744,6 +861,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       })
 
       render(
@@ -813,6 +931,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         providersStatus: [{ provider: "MODRINTH", available: true }],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       })
 
       const getDetailSpy = vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
@@ -855,6 +974,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       })
 
       const resolvePlanSpy = vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
@@ -1008,6 +1128,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             totalCount: 0,
             minecraftVersion: "1.21.1",
             neoForgeVersion: "21.1.65",
+           modLoader: "NEOFORGE",
             providersStatus: [],
           }
         })
@@ -1064,6 +1185,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         providersStatus: [{ provider: "MODRINTH", available: true }],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       })
 
       vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
@@ -1093,6 +1215,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       })
 
       vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
@@ -1184,6 +1307,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       version: "draft-1700000000",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+     modLoader: "NEOFORGE",
       status: "DRAFT",
       notes: "Notas iniciales del borrador",
       publishedAt: null,
@@ -1261,6 +1385,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+     modLoader: "NEOFORGE",
       status: "PUBLISHED",
       notes: "Release 1.0.0",
       publishedAt: "2026-08-20T10:00:00Z",
@@ -1894,6 +2019,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
           version: "1.0.0",
           minecraftVersion: "1.21.1",
           neoForgeVersion: "21.1.65",
+         modLoader: "NEOFORGE",
           status: "PUBLISHED",
           notes: "Novedades de la versión 1.0.0 con portada e integración total.",
           publishedAt: "2026-08-20T10:00:00Z",
@@ -2550,6 +2676,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
           version: "1.5.0-draft",
           minecraftVersion: "1.21.1",
           neoForgeVersion: "21.1.65",
+         modLoader: "NEOFORGE",
           status: "DRAFT",
           notes: null,
           publishedAt: null,

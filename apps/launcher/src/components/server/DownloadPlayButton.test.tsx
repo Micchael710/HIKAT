@@ -40,6 +40,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: false,
       hasExistingInstall: false,
@@ -104,6 +105,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: true,
       hasExistingInstall: false,
@@ -132,6 +134,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.1.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: true,
       hasExistingInstall: true,
@@ -158,6 +161,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
@@ -176,6 +180,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: true,
       hasExistingInstall: false,
@@ -220,6 +225,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.2.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: true,
       hasExistingInstall: true,
@@ -261,6 +267,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: true,
       hasExistingInstall: false,
@@ -294,6 +301,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: true,
       hasExistingInstall: true,
@@ -327,6 +335,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: true,
       hasExistingInstall: false,
@@ -631,7 +640,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     const btn = container.querySelector("button") as HTMLElement
     expect(btn).not.toBeNull()
     expect(btn.hasAttribute("disabled")).toBe(true)
-    expect(btn.textContent).toContain("BUSCANDO ACTUALIZACIONES...")
+    expect(btn.textContent).toContain("BUSCANDO...")
     expect(btn.textContent).not.toContain("NO DISPONIBLE")
     expect(btn.textContent).not.toContain("JUGAR")
 
@@ -641,6 +650,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         version: "1.0.0",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
         installed: true,
         hasUpdate: false,
         hasExistingInstall: true,
@@ -669,6 +679,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
@@ -680,6 +691,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.1.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       mandatory: true,
       clientFiles: [
         {
@@ -703,6 +715,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         version: "1.1.0",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
         mandatory: true,
       })
     })
@@ -724,6 +737,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
@@ -744,6 +758,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         version: "1.0.0",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
         mandatory: true,
       })
     })
@@ -763,6 +778,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: false,
       hasExistingInstall: false,
@@ -783,6 +799,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "2.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       mandatory: true,
       clientFiles: [],
     })
@@ -805,6 +822,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         version: "2.0.0",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
         mandatory: true,
       })
     })
@@ -825,6 +843,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.1",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: false,
       hasUpdate: false,
       hasExistingInstall: false,
@@ -852,6 +871,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.2",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       mandatory: true,
       clientFiles: [
         {
@@ -880,6 +900,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         version: "1.0.2",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
         mandatory: true,
       })
     })
@@ -911,6 +932,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
@@ -945,6 +967,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
@@ -992,6 +1015,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       installed: true,
       hasUpdate: false,
       hasExistingInstall: true,
@@ -1003,6 +1027,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       version: "1.0.1",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
       mandatory: true,
       clientFiles: [],
     })
@@ -1024,6 +1049,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         version: "1.0.1",
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
         mandatory: true,
       })
     })
