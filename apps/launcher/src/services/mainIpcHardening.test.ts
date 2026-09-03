@@ -1099,4 +1099,104 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(plan.hasInterruptedDownload).toBe(false)
     expect(plan.installedModpackVersion).toBe("1.0.0")
   })
+
+  it("39. Interrupted verification during first file partial download: session already contains VERIFY, checkPlan suppresses PAUSED, and retry completes", async () => {
+    const fullContent = "part1part2"
+    const fullSha = computeSha(fullContent)
+
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/slow.jar", sha256: fullSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    // 1. Start verification which begins downloading slow file
+    const syncPromise = manager.startSync({
+      instanceRoot,
+      clientFiles: [{ path: "mods/slow.jar", sha256: fullSha, downloadUrl: `${serverBaseUrl}/slow/slow.jar`, sizeBytes: fullContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      isVerify: true,
+    })
+
+    // 2. Wait 50ms for initial session write and first chunk (part1) to be written
+    await new Promise((r) => setTimeout(r, 50))
+
+    // 3. Verify session was ALREADY written before first file finished
+    const sessionDuringDl = await loadDownloadSession(instanceRoot)
+    expect(sessionDuringDl).not.toBeNull()
+    expect(sessionDuringDl.operationKind).toBe("VERIFY")
+    expect(sessionDuringDl.status).toBe("DOWNLOADING")
+
+    // 4. Simulate process crash / abrupt interruption
+    await manager.cancelSync().catch(() => {})
+    await syncPromise.catch(() => {})
+
+    // Re-create session with VERIFY if cancel removed it, or simulate sudden power loss where file was left on disk
+    const { filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+    const stagingFileName = getDeterministicStagingFileName({ path: "mods/slow.jar", sha256: fullSha })
+    await fsp.writeFile(path.join(filesDir, stagingFileName), "part1") // 5 bytes partial
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "DOWNLOADING",
+      operationKind: "VERIFY",
+      updatedAt: new Date().toISOString(),
+      files: {},
+    })
+
+    // 5. Simulate reopening launcher with new GameOperationManager instance
+    const newManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    const plan = await newManager.checkPlan({
+      instanceRoot,
+      clientFiles: [{ path: "mods/slow.jar", sha256: fullSha, downloadUrl: `${serverBaseUrl}/fast/slow.jar`, sizeBytes: fullContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    // 6. Must NOT report interrupted/paused download, but keep integrity lock
+    expect(plan.success).toBe(true)
+    expect(plan.hasInterruptedDownload).toBe(false)
+    expect(plan.hasPausedSession).toBe(false)
+    expect(plan.hasIntegrityIssue).toBe(true)
+    expect(plan.stagedBytes).toBe(5) // Partial 5 bytes detected
+
+    // 7. Verify again -> reuses partial staging, finishes download, applies file
+    const fastContent = "fast content"
+    const fastSha = computeSha(fastContent)
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/file.jar", sha256: fastSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    const verifyRes = await newManager.startSync({
+      instanceRoot,
+      clientFiles: [{ path: "mods/file.jar", sha256: fastSha, downloadUrl: `${serverBaseUrl}/fast/file.jar`, sizeBytes: fastContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      isVerify: true,
+    })
+
+    expect(verifyRes.success).toBe(true)
+    const appliedPath = path.join(instanceRoot, "mods", "file.jar")
+    expect(fs.existsSync(appliedPath)).toBe(true)
+    expect(await fsp.readFile(appliedPath, "utf8")).toBe(fastContent)
+  })
 })

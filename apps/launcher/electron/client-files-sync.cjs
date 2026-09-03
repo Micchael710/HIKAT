@@ -965,6 +965,27 @@ async function downloadClientFilesToStaging({
   const stagedFiles = []
   const sessionCompletedFiles = {}
 
+  for (const task of plan.toDownload) {
+    if (validStagedMap.has(task.path)) {
+      const stagingFileName = getDeterministicStagingFileName(task)
+      sessionCompletedFiles[task.path] = {
+        stagingFileName,
+        sha256: task.sha256,
+        sizeBytes: task.sizeBytes,
+        completedAt: new Date().toISOString(),
+      }
+    }
+  }
+
+  // Persist session before starting downloads so operationKind is always known
+  await saveDownloadSession(instanceRoot, {
+    modpackVersion,
+    status: "DOWNLOADING",
+    operationKind: isVerify ? "VERIFY" : "SYNC",
+    updatedAt: new Date().toISOString(),
+    files: sessionCompletedFiles,
+  })
+
   try {
     for (let i = 0; i < plan.toDownload.length; i++) {
       if (cancelSignal?.isCancelled) {
