@@ -975,6 +975,7 @@ async function downloadClientFilesToStaging({
         await saveDownloadSession(instanceRoot, {
           modpackVersion,
           status: "PAUSED",
+          operationKind: isVerify ? "VERIFY" : "SYNC",
           updatedAt: new Date().toISOString(),
           files: sessionCompletedFiles,
         })
@@ -1033,6 +1034,7 @@ async function downloadClientFilesToStaging({
         await saveDownloadSession(instanceRoot, {
           modpackVersion,
           status: "DOWNLOADING",
+          operationKind: isVerify ? "VERIFY" : "SYNC",
           updatedAt: new Date().toISOString(),
           files: sessionCompletedFiles,
         })
@@ -1045,6 +1047,7 @@ async function downloadClientFilesToStaging({
           await saveDownloadSession(instanceRoot, {
             modpackVersion,
             status: "PAUSED",
+            operationKind: isVerify ? "VERIFY" : "SYNC",
             updatedAt: new Date().toISOString(),
             files: sessionCompletedFiles,
           })
@@ -1059,6 +1062,7 @@ async function downloadClientFilesToStaging({
         await saveDownloadSession(instanceRoot, {
           modpackVersion,
           status: "ERROR",
+          operationKind: isVerify ? "VERIFY" : "SYNC",
           updatedAt: new Date().toISOString(),
           files: sessionCompletedFiles,
         })
@@ -1149,10 +1153,11 @@ async function applyStagingToInstance({
     throw new Error("Sync cancelled by user.")
   }
 
-  // Persist INSTALLING state at the start before modifying any files
+  // Persist INSTALLING / VERIFYING state at the start before modifying any files
   await saveDownloadSession(instanceRoot, {
     modpackVersion,
-    status: "INSTALLING",
+    status: isVerify ? "VERIFYING" : "INSTALLING",
+    operationKind: isVerify ? "VERIFY" : "SYNC",
     updatedAt: new Date().toISOString(),
   })
 
@@ -1391,4 +1396,5 @@ module.exports = {
   resolveWatcherDecision,
   buildInstalledManifestData,
   ENFORCED_DIRECTORIES,
+  getStagingPaths,
 }

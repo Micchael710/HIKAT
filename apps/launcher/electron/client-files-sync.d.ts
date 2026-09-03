@@ -64,6 +64,7 @@ export declare function saveInstalledManifest(instanceRoot: string, manifestData
 export declare function loadDownloadSession(instanceRoot: string): Promise<any>
 export declare function saveDownloadSession(instanceRoot: string, sessionData: any): Promise<void>
 export declare function cleanStaging(instanceRoot: string): Promise<void>
+export declare function getStagingPaths(instanceRoot: string): { stagingDir: string; filesDir: string; sessionPath: string }
 export declare function reconcileStagingFiles(instanceRoot: string, tasks: any[]): Promise<any>
 export declare function getDeterministicStagingFileName(task: any): string
 export declare function calculateFileSha256(filePath: string): Promise<string>

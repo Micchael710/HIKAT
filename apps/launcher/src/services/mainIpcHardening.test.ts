@@ -13,6 +13,8 @@ import {
 import {
   saveInstalledManifest,
   saveDownloadSession,
+  loadDownloadSession,
+  getStagingPaths,
   getDeterministicStagingFileName,
   // @ts-expect-error CJS module without bundled declaration
 } from "../../electron/client-files-sync.cjs"
@@ -881,5 +883,220 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(phases.has("DOWNLOADING")).toBe(true)
     expect(phases.has("INSTALLING")).toBe(true)
     expect(phases.has("VERIFYING")).toBe(false)
+  })
+
+  it("34. Interrupted verification with files in staging: checkPlan returns hasInterruptedDownload=false, hasPausedSession=false, hasIntegrityIssue=true", async () => {
+    const correctContent = "fast content"
+    const correctSha = computeSha(correctContent)
+
+    // Installed manifest has 1.0.0, but the file on disk is missing/corrupted
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/missing.jar", sha256: correctSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    // Simulate staged file downloaded during verification
+    const { filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+    const stagingFileName = getDeterministicStagingFileName({ path: "mods/missing.jar", sha256: correctSha })
+    await fsp.writeFile(path.join(filesDir, stagingFileName), correctContent)
+
+    // Simulate verification session
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "DOWNLOADING",
+      operationKind: "VERIFY",
+      updatedAt: new Date().toISOString(),
+      files: {
+        "mods/missing.jar": {
+          stagingFileName,
+          sha256: correctSha,
+          sizeBytes: correctContent.length,
+        },
+      },
+    })
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [{ path: "mods/missing.jar", sha256: correctSha, downloadUrl: `${serverBaseUrl}/fast/missing.jar`, sizeBytes: correctContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasInterruptedDownload).toBe(false)
+    expect(plan.hasPausedSession).toBe(false)
+    expect(plan.hasIntegrityIssue).toBe(true)
+    expect(plan.hasUpdate).toBe(false)
+    expect(plan.isFullyInstalled).toBe(false)
+  })
+
+  it("35. Running Verify again after interrupted verification reuses valid staging files without re-downloading", async () => {
+    const correctContent = "fast content"
+    const correctSha = computeSha(correctContent)
+
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/missing.jar", sha256: correctSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    const { filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+    const stagingFileName = getDeterministicStagingFileName({ path: "mods/missing.jar", sha256: correctSha })
+    await fsp.writeFile(path.join(filesDir, stagingFileName), correctContent)
+
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "DOWNLOADING",
+      operationKind: "VERIFY",
+      updatedAt: new Date().toISOString(),
+      files: {
+        "mods/missing.jar": {
+          stagingFileName,
+          sha256: correctSha,
+          sizeBytes: correctContent.length,
+        },
+      },
+    })
+
+    let downloadServerHit = false
+    const customManager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    // Server URL pointing to a non-existent endpoint to prove it does not download
+    const res = await customManager.startSync({
+      instanceRoot,
+      clientFiles: [{ path: "mods/missing.jar", sha256: correctSha, downloadUrl: `http://127.0.0.1:9999/nonexistent.jar`, sizeBytes: correctContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      isVerify: true,
+    })
+
+    expect(res.success).toBe(true)
+
+    // Applied file should now exist in instanceRoot
+    const appliedPath = path.join(instanceRoot, "mods", "missing.jar")
+    const appliedContent = await fsp.readFile(appliedPath, "utf8")
+    expect(appliedContent).toBe(correctContent)
+
+    // And staging should be cleanly removed
+    const sessionAfter = await loadDownloadSession(instanceRoot)
+    expect(sessionAfter).toBeNull()
+  })
+
+  it("36. Verify interrupted during application phase requires verifying again and does not show PAUSED", async () => {
+    const correctContent = "fast content"
+    const correctSha = computeSha(correctContent)
+
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/missing.jar", sha256: correctSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "VERIFYING",
+      operationKind: "VERIFY",
+      updatedAt: new Date().toISOString(),
+    })
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [{ path: "mods/missing.jar", sha256: correctSha, downloadUrl: `${serverBaseUrl}/fast/missing.jar`, sizeBytes: correctContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasInterruptedDownload).toBe(false)
+    expect(plan.hasPausedSession).toBe(false)
+    expect(plan.hasIntegrityIssue).toBe(true)
+  })
+
+  it("37. Normal download/update interrupted or paused continues to return hasInterruptedDownload=true and hasPausedSession=true", async () => {
+    const correctContent = "fast content"
+    const correctSha = computeSha(correctContent)
+
+    const { filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+    const stagingFileName = getDeterministicStagingFileName({ path: "mods/normal.jar", sha256: correctSha })
+    await fsp.writeFile(path.join(filesDir, stagingFileName), correctContent)
+
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "PAUSED",
+      operationKind: "SYNC",
+      updatedAt: new Date().toISOString(),
+      files: {
+        "mods/normal.jar": {
+          stagingFileName,
+          sha256: correctSha,
+          sizeBytes: correctContent.length,
+        },
+      },
+    })
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [{ path: "mods/normal.jar", sha256: correctSha, downloadUrl: `${serverBaseUrl}/fast/normal.jar`, sizeBytes: correctContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasInterruptedDownload).toBe(true)
+    expect(plan.hasPausedSession).toBe(true)
+  })
+
+  it("38. Real new release appearing after interrupted verify gives priority to ACTUALIZAR", async () => {
+    const correctContent = "fast content"
+    const correctSha = computeSha(correctContent)
+
+    // User had 1.0.0 installed
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/mod1.jar", sha256: correctSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    // Interrupted verify session for 1.0.0
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "DOWNLOADING",
+      operationKind: "VERIFY",
+      updatedAt: new Date().toISOString(),
+    })
+
+    // Now server published 2.0.0
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [{ path: "mods/mod2.jar", sha256: correctSha, downloadUrl: `${serverBaseUrl}/fast/mod2.jar`, sizeBytes: correctContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "2.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasUpdate).toBe(true)
+    expect(plan.hasIntegrityIssue).toBe(false)
+    expect(plan.hasInterruptedDownload).toBe(false)
+    expect(plan.installedModpackVersion).toBe("1.0.0")
   })
 })

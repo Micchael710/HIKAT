@@ -169,7 +169,9 @@ class GameOperationManager {
     const hasIntegrityIssue = Boolean(releaseMatches && !isFullyInstalled)
 
     const session = await loadDownloadSession(instanceRoot)
-    const isSessionInstalling = session && session.status === "INSTALLING"
+    const isSessionInstalling =
+      session && (session.status === "INSTALLING" || session.status === "VERIFYING")
+    const isVerifySession = Boolean(session && session.operationKind === "VERIFY")
 
     let hasInterruptedDownload = false
     let hasPausedSession = false
@@ -183,13 +185,15 @@ class GameOperationManager {
         (session?.files ? Object.keys(session.files).length : 0) ||
         reconciled.validStagedMap.size
 
-      if (stagedBytes > 0) {
-        hasInterruptedDownload = true
-        hasPausedSession = true
-      } else if (session && session.status === "PAUSED") {
-        hasPausedSession = true
+      if (!isVerifySession) {
+        if (stagedBytes > 0) {
+          hasInterruptedDownload = true
+          hasPausedSession = true
+        } else if (session && session.status === "PAUSED") {
+          hasPausedSession = true
+        }
       }
-    } else if (session && session.status === "PAUSED" && !isFullyInstalled) {
+    } else if (session && session.status === "PAUSED" && !isFullyInstalled && !isVerifySession) {
       hasPausedSession = true
     }
 

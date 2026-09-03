@@ -3236,6 +3236,81 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       // 3. UI now reflects the actual download size
       expect(container.textContent).toContain("1.55 MB / 15.50 MB · 3.2 MB/s")
     })
+
+    it("27. Interrupted verification on restart does NOT show PAUSADO or ACTUALIZANDO, and keeps JUGAR locked by integrity", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasIntegrityIssue: true,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        hasInterruptedDownload: false,
+        stagedBytes: 5000,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const launchGameSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({} as any)
+
+      const { container } = await mountButton()
+
+      // Must show JUGAR button (not PAUSADO or ACTUALIZAR or progress card)
+      const btn = container.querySelector("button")
+      expect(btn?.textContent).toContain("JUGAR")
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+
+      // Clicking JUGAR is blocked by integrity
+      await act(async () => {
+        btn?.click()
+      })
+
+      expect(launchGameSpy).not.toHaveBeenCalled()
+      expect(container.textContent).toContain("verifica los archivos")
+    })
+
+    it("28. Real new release appearing after interrupted verify gives priority to ACTUALIZAR", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "2.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        hasInterruptedDownload: false,
+        clientFiles: [
+          {
+            path: "mods/example2.jar",
+            sha256: "def",
+            sizeBytes: 2048,
+            downloadUrl: "/game/2",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      localStorage.setItem("hikat_auto_updates", "false")
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button")
+      expect(btn?.textContent).toContain("ACTUALIZAR")
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+    })
   })
 })
 
