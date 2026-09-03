@@ -716,11 +716,27 @@ export default function DownloadPlayButton({
           setManifest(verified)
         }
 
-        if (verified?.installed && !verified?.hasUpdate && !verified?.hasIntegrityIssue) {
+        const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+        const hasUpdate = Boolean(
+          verified?.installedModpackVersion &&
+          verified?.installedModpackVersion !== verified?.version
+        )
+
+        if (verified?.installed && !hasUpdate && !verified?.hasIntegrityIssue) {
           isIntegrityBlockedRef.current = false
           gameService.setGameInstalled(true)
           setStatus("play")
           showToast(t("playButton.verifySuccess"), "success")
+        } else if (hasUpdate && verified?.clientFiles && verified.clientFiles.length > 0) {
+          isIntegrityBlockedRef.current = false
+          if (autoUpdatesEnabled) {
+            if (syncOpIdRef.current === syncOpId) {
+              isStartingSyncRef.current = false
+            }
+            triggerSync(verified)
+          } else {
+            setStatus("update")
+          }
         } else {
           gameService.setGameInstalled(false)
           setStatus(resolveIdleGameButtonState(verified))
