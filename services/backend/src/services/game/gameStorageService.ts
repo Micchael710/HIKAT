@@ -28,14 +28,8 @@ export async function handleGameFileDownload(
 
   // 1. Fetch settings to get current launcherActiveReleaseId
   const settings = await ensureSettingsRecord(db)
-  if (!settings.launcherActiveReleaseId) {
-    return new Response(JSON.stringify({ error: "No hay ninguna versión activa actualmente." }), {
-      status: 404,
-      headers: { "Content-Type": "application/json", ...cors },
-    })
-  }
 
-  // 2. Verify that fileId belongs strictly to the currently active release for players
+  // 2. Query file and joined release status
   const fileRecord = await db
     .select({
       file: schema.gameReleaseFiles,
@@ -49,13 +43,25 @@ export async function handleGameFileDownload(
     .where(
       and(
         eq(schema.gameReleaseFiles.id, fileId),
-        eq(schema.gameReleaseFiles.releaseId, settings.launcherActiveReleaseId),
         eq(schema.gameReleaseFiles.isDirectory, 0),
       ),
     )
     .get()
 
   if (!fileRecord || !isClientGameReleaseFile(fileRecord.file)) {
+    return new Response(JSON.stringify({ error: "Archivo de juego no encontrado o no disponible públicamente." }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", ...cors },
+    })
+  }
+
+  // 3. Verify file belongs to launcherActiveReleaseId OR belongs to an ARCHIVED release
+  const isAllowedRelease =
+    (Boolean(settings.launcherActiveReleaseId) &&
+      fileRecord.file.releaseId === settings.launcherActiveReleaseId) ||
+    fileRecord.releaseStatus === "ARCHIVED"
+
+  if (!isAllowedRelease) {
     return new Response(JSON.stringify({ error: "Archivo de juego no encontrado o no disponible públicamente." }), {
       status: 404,
       headers: { "Content-Type": "application/json", ...cors },

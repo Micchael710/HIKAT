@@ -581,9 +581,9 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
       expect((await getAdminSettings(db)).launcherActiveReleaseId).toBe(draft2.id)
 
       // === PERMISSION CHECKS AFTER ACTIVATION (active = 1.1.0) ===
-      // Old 1.0 file (now archived non-active) -> 404
+      // Old 1.0 file (now archived non-active) -> 200 OK (ongoing downloads do not break)
       const resOld = await handleGameFileDownload(new Request(`http://localhost/game/download/${file1Id}`), testEnv, db, file1Id)
-      expect(resOld.status).toBe(404)
+      expect(resOld.status).toBe(200)
 
       // New 1.1 file (now active) -> 200 OK
       const resNew = await handleGameFileDownload(new Request(`http://localhost/game/download/${file2Id}`), testEnv, db, file2Id)

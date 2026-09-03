@@ -512,4 +512,194 @@ describe("Shard 8E: Authoritative Client Manifest & Backend Security Suite", () 
     expect(modsDirPolicy).toBeDefined()
     expect(modsDirPolicy?.policy).toBe("MODIFICABLE")
   })
+
+  it("16. /game/download/:fileId allows downloading client files of ARCHIVED releases while another release is active", async () => {
+    // Create an archived release (e.g. 1.0.0)
+    const archivedReleaseId = crypto.randomUUID()
+    await db.insert(schema.gameReleases).values({
+      id: archivedReleaseId,
+      createdBy: adminId,
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      status: "ARCHIVED",
+      publishedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+
+    const archivedFileId = crypto.randomUUID()
+    const archivedKey = "game-files/" + archivedFileId
+    const content = new Uint8Array([1, 2, 3, 4, 5])
+    await mockR2.put(archivedKey, content)
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: archivedFileId,
+      releaseId: archivedReleaseId,
+      name: "archived-mod.jar",
+      logicalPath: "mods/archived-mod.jar",
+      category: "MOD",
+      sha256: "1".repeat(64),
+      sizeBytes: content.length,
+      sourceEnvironment: "CLIENT",
+      isDirectory: 0,
+      objectKey: archivedKey,
+      createdAt: new Date().toISOString(),
+    })
+
+    // Active release in settings is `releaseId` (1.5.0), but file is from ARCHIVED (1.0.0)
+    const req = new Request(`http://localhost/game/download/${archivedFileId}`)
+    const res = await handleGameFileDownload(req, env, db, archivedFileId)
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Content-Length")).toBe("5")
+  })
+
+  it("17. /game/download/:fileId rejects files belonging to DRAFT releases", async () => {
+    const draftReleaseId = crypto.randomUUID()
+    await db.insert(schema.gameReleases).values({
+      id: draftReleaseId,
+      createdBy: adminId,
+      version: "1.6.0-draft",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      status: "DRAFT",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+
+    const draftFileId = crypto.randomUUID()
+    await db.insert(schema.gameReleaseFiles).values({
+      id: draftFileId,
+      releaseId: draftReleaseId,
+      name: "draft-mod.jar",
+      logicalPath: "mods/draft-mod.jar",
+      category: "MOD",
+      sha256: "2".repeat(64),
+      sizeBytes: 100,
+      sourceEnvironment: "CLIENT",
+      isDirectory: 0,
+      objectKey: "game-files/" + draftFileId,
+      createdAt: new Date().toISOString(),
+    })
+
+    const req = new Request(`http://localhost/game/download/${draftFileId}`)
+    const res = await handleGameFileDownload(req, env, db, draftFileId)
+    expect(res.status).toBe(404)
+  })
+
+  it("18. /game/download/:fileId rejects files of PUBLISHED releases that are NOT launcherActiveReleaseId", async () => {
+    // Current release is PUBLISHED (`releaseId`), but launcherActiveReleaseId points to another release
+    const otherReleaseId = crypto.randomUUID()
+    await db.insert(schema.gameReleases).values({
+      id: otherReleaseId,
+      createdBy: adminId,
+      version: "0.9.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      status: "ARCHIVED",
+      publishedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    await db.update(schema.projectSettings).set({
+      launcherActiveReleaseId: otherReleaseId,
+    }).run()
+
+    const pendingFileId = crypto.randomUUID()
+    await db.insert(schema.gameReleaseFiles).values({
+      id: pendingFileId,
+      releaseId,
+      name: "pending-mod.jar",
+      logicalPath: "mods/pending-mod.jar",
+      category: "MOD",
+      sha256: "3".repeat(64),
+      sizeBytes: 100,
+      sourceEnvironment: "CLIENT",
+      isDirectory: 0,
+      objectKey: "game-files/" + pendingFileId,
+      createdAt: new Date().toISOString(),
+    })
+
+    const req = new Request(`http://localhost/game/download/${pendingFileId}`)
+    const res = await handleGameFileDownload(req, env, db, pendingFileId)
+    expect(res.status).toBe(404)
+  })
+
+  it("19. /game/download/:fileId rejects SERVER-only files even from an ARCHIVED release", async () => {
+    const archivedReleaseId = crypto.randomUUID()
+    await db.insert(schema.gameReleases).values({
+      id: archivedReleaseId,
+      createdBy: adminId,
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      status: "ARCHIVED",
+      publishedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+
+    const serverOnlyFileId = crypto.randomUUID()
+    await db.insert(schema.gameReleaseFiles).values({
+      id: serverOnlyFileId,
+      releaseId: archivedReleaseId,
+      name: "server-only.jar",
+      logicalPath: "mods/server-only.jar",
+      category: "MOD",
+      sha256: "4".repeat(64),
+      sizeBytes: 100,
+      sourceEnvironment: "SERVER",
+      isDirectory: 0,
+      objectKey: "game-files/" + serverOnlyFileId,
+      createdAt: new Date().toISOString(),
+    })
+
+    const req = new Request(`http://localhost/game/download/${serverOnlyFileId}`)
+    const res = await handleGameFileDownload(req, env, db, serverOnlyFileId)
+    expect(res.status).toBe(404)
+  })
+
+  it("20. /game/download/:fileId handles 206 Partial Content Range requests on ARCHIVED release files", async () => {
+    const archivedReleaseId = crypto.randomUUID()
+    await db.insert(schema.gameReleases).values({
+      id: archivedReleaseId,
+      createdBy: adminId,
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      status: "ARCHIVED",
+      publishedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+
+    const archivedRangeFileId = crypto.randomUUID()
+    const key = "game-files/" + archivedRangeFileId
+    const content = new Uint8Array([100, 101, 102, 103, 104, 105])
+    await mockR2.put(key, content)
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: archivedRangeFileId,
+      releaseId: archivedReleaseId,
+      name: "archived-range.jar",
+      logicalPath: "mods/archived-range.jar",
+      category: "MOD",
+      sha256: "5".repeat(64),
+      sizeBytes: content.length,
+      sourceEnvironment: "CLIENT",
+      isDirectory: 0,
+      objectKey: key,
+      createdAt: new Date().toISOString(),
+    })
+
+    const req = new Request(`http://localhost/game/download/${archivedRangeFileId}`, {
+      headers: { Range: "bytes=1-3" },
+    })
+    const res = await handleGameFileDownload(req, env, db, archivedRangeFileId)
+    expect(res.status).toBe(206)
+    expect(res.headers.get("Content-Range")).toBe("bytes 1-3/6")
+    expect(res.headers.get("Content-Length")).toBe("3")
+    const body = new Uint8Array(await res.arrayBuffer())
+    expect(body).toEqual(new Uint8Array([101, 102, 103]))
+  })
 })
