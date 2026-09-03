@@ -503,6 +503,61 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(fs.existsSync(pidFile)).toBe(false)
   })
 
+  it("10.4. GameLauncher passes detached extraExecOption and calls unref on spawned child", async () => {
+    const mockChildProcess = new EventEmitter() as any
+    mockChildProcess.pid = 67890
+    mockChildProcess.unref = vi.fn()
+
+    const mockXmcl = vi.fn().mockResolvedValue(mockChildProcess)
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      xmclLauncher: mockXmcl,
+      versionParser: vi.fn().mockResolvedValue({ id: "1.21.1-neoforge-21.1.65" }),
+      readinessChecker: vi.fn().mockResolvedValue({ installed: true, resolvedVersionId: "1.21.1-neoforge-21.1.65", javaMajorVersion: 21 }),
+      javaResolver: vi.fn().mockReturnValue({ javaPath: "/mock/javaw.exe" }),
+      javaValidator: vi.fn().mockReturnValue({ valid: true }),
+      processChecker: () => true,
+    })
+
+    const result = await launcher.launch({
+      playerName: "TestPlayer",
+      ramGB: 4,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(result.success).toBe(true)
+    expect(mockXmcl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extraExecOption: {
+          detached: true,
+          stdio: "ignore",
+        },
+      })
+    )
+    expect(mockChildProcess.unref).toHaveBeenCalledTimes(1)
+
+    // Saved PID exists
+    const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
+    expect(fs.existsSync(pidFile)).toBe(true)
+    const saved = JSON.parse(fs.readFileSync(pidFile, "utf8"))
+    expect(saved.pid).toBe(67890)
+
+    // Simulate reopening new GameLauncher while process is still alive
+    const reopenedLauncher = new GameLauncher(null, {
+      instanceRoot,
+      processChecker: (pid) => pid === 67890,
+    })
+    expect(reopenedLauncher.getLaunchStatus()).toEqual({ status: "running", pid: 67890 })
+    reopenedLauncher.stopProcessPoll()
+
+    // When original process closes, PID is cleaned and original launcher becomes idle
+    mockChildProcess.emit("close", 0)
+    expect(fs.existsSync(pidFile)).toBe(false)
+    expect(launcher.getLaunchStatus()).toEqual({ status: "idle", pid: null })
+  })
+
   // ─────────────────────────────────────────────────────────────
   // Explicit New Architectural Invariant Tests (A - G)
   // ─────────────────────────────────────────────────────────────

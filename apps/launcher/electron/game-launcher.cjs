@@ -263,6 +263,10 @@ class GameLauncher {
         minMemory: minMemoryMb,
         maxMemory: maxMemoryMb,
         extraJVMArgs: [...jvmOptimizationArgs, ...customArgs],
+        extraExecOption: {
+          detached: true,
+          stdio: "ignore",
+        },
       }
 
       console.log(`[GameLauncher] Spawning XMCL launch process with version: ${readiness.resolvedVersionId}`)
@@ -270,6 +274,10 @@ class GameLauncher {
 
       if (!child || typeof child.on !== "function") {
         throw new Error("Minecraft Launcher failed to return a valid process handle.")
+      }
+
+      if (typeof child.unref === "function") {
+        child.unref()
       }
 
       this.activeChildProcess = child
