@@ -3544,6 +3544,119 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(btn?.textContent).toContain("ACTUALIZAR")
       expect(container.querySelector(".dl-progress-card")).toBeNull()
     })
+
+    it("31. Launcher reopens with update available + autoUpdates ON, but Minecraft is still running -> does NOT auto-sync on mount; when Minecraft exits -> starts auto-update", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+
+      let launchStatusCallback: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      })
+      window.electronAPI!.getLaunchStatus = vi.fn().mockResolvedValue({ status: "running", pid: 7777 })
+
+      const manifestWithUpdate: GameManifest = {
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(manifestWithUpdate)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+
+      // 1. On mount: detected game is running -> status is "running", NO sync started
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      const btn = container.querySelector("button")
+      expect(btn?.textContent).toContain("EN EJECUCIÓN")
+
+      // 2. Minecraft exits -> onLaunchStatus emits "idle"
+      await act(async () => {
+        launchStatusCallback?.("idle")
+      })
+
+      // 3. Since autoUpdates is ON and update was pending, startSync is triggered automatically
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        manifestWithUpdate.clientFiles,
+        "1.1.0",
+        "1.21.1",
+        "NEOFORGE",
+        undefined,
+        "21.1.65",
+        false
+      )
+    })
+
+    it("32. Launcher reopens with update available + autoUpdates OFF, and Minecraft is running -> on exit leaves button in ACTUALIZAR without starting sync", async () => {
+      localStorage.setItem("hikat_auto_updates", "false")
+
+      let launchStatusCallback: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      })
+      window.electronAPI!.getLaunchStatus = vi.fn().mockResolvedValue({ status: "running", pid: 7777 })
+
+      const manifestWithUpdate: GameManifest = {
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(manifestWithUpdate)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+
+      // 1. On mount: detected game is running
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      const btn = container.querySelector("button")
+      expect(btn?.textContent).toContain("EN EJECUCIÓN")
+
+      // 2. Minecraft exits -> onLaunchStatus emits "idle"
+      await act(async () => {
+        launchStatusCallback?.("idle")
+      })
+
+      // 3. Since autoUpdates is OFF, button becomes ACTUALIZAR and startSync is NOT called
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      expect(btn?.textContent).toContain("ACTUALIZAR")
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+    })
   })
 })
 

@@ -7,6 +7,16 @@ const { checkCore } = require("./minecraft-core.cjs")
 
 const DEFAULT_RAM_GB = 4
 
+function defaultProcessChecker(pid) {
+  if (!pid || typeof pid !== "number" || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return err.code === "EPERM"
+  }
+}
+
 class GameLauncher {
   constructor(app, options = {}) {
     this.app = app
@@ -19,6 +29,106 @@ class GameLauncher {
     this.readinessChecker = options.readinessChecker || checkCore
     this.javaResolver = options.javaResolver || resolveJavaRuntime
     this.javaValidator = options.javaValidator || validateJavaBinary
+    this.processChecker = options.processChecker || defaultProcessChecker
+    this.pollIntervalMs = options.pollIntervalMs || 1000
+    this.trackedPid = null
+    this.pollTimer = null
+
+    this.initProcessMonitoring()
+  }
+
+  getPidFilePath() {
+    return path.join(this.instanceRoot, ".hikat", "game-process.json")
+  }
+
+  saveProcessPid(pid, metadata = {}) {
+    try {
+      const filePath = this.getPidFilePath()
+      const dir = path.dirname(filePath)
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true })
+      }
+      fs.writeFileSync(
+        filePath,
+        JSON.stringify({
+          pid,
+          launchedAt: new Date().toISOString(),
+          ...metadata,
+        }),
+        "utf8"
+      )
+    } catch (e) {
+      console.error("[GameLauncher] Failed to save PID file:", e)
+    }
+  }
+
+  clearProcessPid() {
+    try {
+      const filePath = this.getPidFilePath()
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath)
+      }
+    } catch (e) {
+      console.error("[GameLauncher] Failed to clear PID file:", e)
+    }
+  }
+
+  readSavedPid() {
+    try {
+      const filePath = this.getPidFilePath()
+      if (!fs.existsSync(filePath)) return null
+      const content = fs.readFileSync(filePath, "utf8")
+      const parsed = JSON.parse(content)
+      return typeof parsed.pid === "number" ? parsed.pid : null
+    } catch (_) {
+      return null
+    }
+  }
+
+  isProcessRunning(pid) {
+    return this.processChecker(pid)
+  }
+
+  initProcessMonitoring() {
+    const savedPid = this.readSavedPid()
+    if (savedPid) {
+      if (this.isProcessRunning(savedPid)) {
+        console.log(`[GameLauncher] Detected existing game process running with PID ${savedPid}`)
+        this.launchStatus = "running"
+        this.trackedPid = savedPid
+        this.startProcessPoll(savedPid)
+      } else {
+        console.log(`[GameLauncher] Cleaned stale PID file for inactive process ${savedPid}`)
+        this.clearProcessPid()
+        this.launchStatus = "idle"
+        this.trackedPid = null
+      }
+    }
+  }
+
+  startProcessPoll(pid) {
+    this.stopProcessPoll()
+    this.trackedPid = pid
+    this.pollTimer = setInterval(() => {
+      if (!this.isProcessRunning(pid)) {
+        console.log(`[GameLauncher] Monitored game process ${pid} exited`)
+        this.stopProcessPoll()
+        this.clearProcessPid()
+        this.activeChildProcess = null
+        this.setStatus("idle")
+      }
+    }, this.pollIntervalMs)
+    if (this.pollTimer && this.pollTimer.unref) {
+      this.pollTimer.unref()
+    }
+  }
+
+  stopProcessPoll() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer)
+      this.pollTimer = null
+    }
+    this.trackedPid = null
   }
 
   setStatus(status) {
@@ -31,7 +141,7 @@ class GameLauncher {
   getLaunchStatus() {
     return {
       status: this.launchStatus,
-      pid: this.activeChildProcess?.pid || null,
+      pid: this.activeChildProcess?.pid || this.trackedPid || null,
     }
   }
 
@@ -163,17 +273,25 @@ class GameLauncher {
       }
 
       this.activeChildProcess = child
+      this.saveProcessPid(child.pid, {
+        minecraftVersion: cleanMc,
+        modLoader: resolvedLoader,
+      })
       this.setStatus("running")
 
       child.on("close", (code) => {
         console.log(`[GameLauncher] Game process exited with code ${code}`)
         this.activeChildProcess = null
+        this.clearProcessPid()
+        this.stopProcessPoll()
         this.setStatus("idle")
       })
 
       child.on("error", (err) => {
         console.error("[GameLauncher] Game process encountered an error:", err)
         this.activeChildProcess = null
+        this.clearProcessPid()
+        this.stopProcessPoll()
         this.setStatus("idle")
       })
 
@@ -183,6 +301,8 @@ class GameLauncher {
       }
     } catch (err) {
       this.activeChildProcess = null
+      this.clearProcessPid()
+      this.stopProcessPoll()
       this.setStatus("idle")
       throw err
     }

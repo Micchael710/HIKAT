@@ -426,6 +426,83 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(launcher.getLaunchStatus().status).toBe("running")
   })
 
+  it("10.1. GameLauncher persists PID file on launch and removes it on close", async () => {
+    const mockChildProcess = new EventEmitter() as any
+    mockChildProcess.pid = 54321
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      xmclLauncher: vi.fn().mockResolvedValue(mockChildProcess),
+      versionParser: vi.fn().mockResolvedValue({ id: "1.21.1-neoforge-21.1.65" }),
+      readinessChecker: vi.fn().mockResolvedValue({ installed: true, resolvedVersionId: "1.21.1-neoforge-21.1.65", javaMajorVersion: 21 }),
+      javaResolver: vi.fn().mockReturnValue({ javaPath: "/mock/javaw.exe" }),
+      javaValidator: vi.fn().mockReturnValue({ valid: true }),
+      processChecker: () => true,
+    })
+
+    const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
+    expect(fs.existsSync(pidFile)).toBe(false)
+
+    await launcher.launch({
+      playerName: "TestPlayer",
+      ramGB: 4,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(fs.existsSync(pidFile)).toBe(true)
+    const saved = JSON.parse(fs.readFileSync(pidFile, "utf8"))
+    expect(saved.pid).toBe(54321)
+    expect(launcher.getLaunchStatus()).toEqual({ status: "running", pid: 54321 })
+
+    // When process closes, PID file is cleaned
+    mockChildProcess.emit("close", 0)
+    expect(fs.existsSync(pidFile)).toBe(false)
+    expect(launcher.getLaunchStatus()).toEqual({ status: "idle", pid: null })
+  })
+
+  it("10.2. GameLauncher detects existing alive process on startup and tracks until exit", async () => {
+    const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true })
+    fs.writeFileSync(pidFile, JSON.stringify({ pid: 99999, launchedAt: new Date().toISOString() }))
+
+    let isAlive = true
+    const statusChanges: string[] = []
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      processChecker: (pid) => pid === 99999 && isAlive,
+      pollIntervalMs: 20,
+    })
+    launcher.onStatusChangeCallback = (st) => statusChanges.push(st)
+
+    expect(launcher.getLaunchStatus()).toEqual({ status: "running", pid: 99999 })
+    expect(fs.existsSync(pidFile)).toBe(true)
+
+    // Simulate process exiting later
+    isAlive = false
+    await new Promise((r) => setTimeout(r, 60))
+
+    expect(launcher.getLaunchStatus()).toEqual({ status: "idle", pid: null })
+    expect(fs.existsSync(pidFile)).toBe(false)
+    expect(statusChanges).toContain("idle")
+    launcher.stopProcessPoll()
+  })
+
+  it("10.3. GameLauncher with stale PID on startup cleans PID file and initializes as idle", async () => {
+    const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true })
+    fs.writeFileSync(pidFile, JSON.stringify({ pid: 88888, launchedAt: new Date().toISOString() }))
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      processChecker: () => false, // Process dead
+    })
+
+    expect(launcher.getLaunchStatus()).toEqual({ status: "idle", pid: null })
+    expect(fs.existsSync(pidFile)).toBe(false)
+  })
+
   // ─────────────────────────────────────────────────────────────
   // Explicit New Architectural Invariant Tests (A - G)
   // ─────────────────────────────────────────────────────────────

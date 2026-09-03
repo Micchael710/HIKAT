@@ -276,7 +276,7 @@ export default function DownloadPlayButton({
   // Check manifest and authoritative filesystem state on mount
   useEffect(() => {
     let isMounted = true
-    gameService.checkGameManifest().then((res) => {
+    gameService.checkGameManifest().then(async (res) => {
       if (!isMounted) return
       setManifest(res)
       if (res) {
@@ -300,6 +300,25 @@ export default function DownloadPlayButton({
           setProgress(pct)
           setStatus("paused")
         } else {
+          const launchInfo = await window.electronAPI?.getLaunchStatus?.().catch(() => null)
+          const isGameRunning =
+            launchInfo?.status === "running" ||
+            launchInfo?.status === "preparing" ||
+            statusRef.current === "launching" ||
+            statusRef.current === "running"
+
+          if (isGameRunning) {
+            setStatus("running")
+            const hasUpdate = Boolean(
+              res.installedModpackVersion && res.installedModpackVersion !== res.version
+            )
+            const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+            if (autoUpdatesEnabled && hasUpdate) {
+              pendingAutoUpdateRef.current = true
+            }
+            return
+          }
+
           const idleState = resolveIdleGameButtonState(res)
           setStatus(idleState)
 
@@ -307,12 +326,10 @@ export default function DownloadPlayButton({
           const hasUpdate = Boolean(
             res.installedModpackVersion && res.installedModpackVersion !== res.version
           )
-          const isGameBusy = statusRef.current === "launching" || statusRef.current === "running"
 
           if (
             autoUpdatesEnabled &&
             hasUpdate &&
-            !isGameBusy &&
             !isStartingSyncRef.current &&
             statusRef.current !== "paused" &&
             res.clientFiles &&
