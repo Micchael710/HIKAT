@@ -39,9 +39,6 @@ export default function SettingsView({
   const [autoUpdates, setAutoUpdatesState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true),
   )
-  const [notifications, setNotificationsState] = useState<boolean>(() =>
-    getStoredBoolean(STORAGE_KEYS.NOTIFICATIONS, true),
-  )
   const isDark = theme === "dark"
 
   // Detect client system RAM with fallback to Node.js memory IPC
@@ -158,12 +155,6 @@ export default function SettingsView({
     setAutoUpdatesState(v)
     setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, v)
     window.electronAPI?.setAutoUpdates?.(v)
-  }
-
-  const setNotifications = (v: boolean) => {
-    setNotificationsState(v)
-    setStoredBoolean(STORAGE_KEYS.NOTIFICATIONS, v)
-    window.electronAPI?.setNotifications?.(v)
   }
 
   const setDedicatedGPU = (v: boolean) => {
@@ -797,38 +788,17 @@ export default function SettingsView({
                 </div>
 
                 {/* Actualizaciones automáticas */}
-                <div className="settings-row" style={{ opacity: 0.75 }}>
+                <div className="settings-row">
                   <div>
                     <div
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
+                        fontSize: 17,
+                        fontWeight: 700,
+                        color: isDark ? "white" : "#111822",
                         marginBottom: 2,
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: 17,
-                          fontWeight: 700,
-                          color: isDark ? "white" : "#111822",
-                        }}
-                      >
-                        {t("settings.autoUpdatesTitle")}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          padding: "2px 8px",
-                          borderRadius: 6,
-                          background: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
-                          color: isDark ? "#8899aa" : "#657788",
-                          letterSpacing: "0.03em",
-                        }}
-                      >
-                        {t("settings.comingSoon")}
-                      </span>
+                      {t("settings.autoUpdatesTitle")}
                     </div>
                     <div
                       style={{
@@ -840,54 +810,16 @@ export default function SettingsView({
                       {t("settings.autoUpdatesDesc")}
                     </div>
                   </div>
+                  <LauncherToggle
+                    checked={autoUpdates}
+                    theme={theme}
+                    onChange={(v) => {
+                      setAutoUpdates(v)
+                      notifySaved()
+                    }}
+                    label={t("settings.autoUpdatesTitle")}
+                  />
                 </div>
-
-                {/* Notificaciones */}
-                <div className="settings-row" style={{ opacity: 0.75 }}>
-                  <div>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 2,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 17,
-                          fontWeight: 700,
-                          color: isDark ? "white" : "#111822",
-                        }}
-                      >
-                        {t("settings.notificationsTitle")}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          padding: "2px 8px",
-                          borderRadius: 6,
-                          background: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
-                          color: isDark ? "#8899aa" : "#657788",
-                          letterSpacing: "0.03em",
-                        }}
-                      >
-                        {t("settings.comingSoon")}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 14.5,
-                        color: isDark ? "#8899aa" : "#556677",
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      {t("settings.notificationsDesc")}
-                    </div>
-                  </div>
-                </div>
-
               </div>
             </div>
           ) : (

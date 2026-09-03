@@ -22,6 +22,7 @@ describe("Launcher SettingsView Suite (Main-Authoritative Settings & Safe Persis
       setStartWithSystem: vi.fn().mockResolvedValue(false),
       getMinimizeToTray: vi.fn().mockResolvedValue(false),
       setMinimizeToTray: vi.fn().mockResolvedValue(true),
+      setAutoUpdates: vi.fn(),
       getDedicatedGpu: vi.fn().mockResolvedValue(false),
       setDedicatedGpu: vi.fn().mockResolvedValue(true),
       getRamAllocation: vi.fn().mockResolvedValue(10),
@@ -65,12 +66,40 @@ describe("Launcher SettingsView Suite (Main-Authoritative Settings & Safe Persis
     expect(mockElectronAPI.getRamAllocation).toHaveBeenCalled()
   })
 
-  it("2. Displays Próximamente badges for unimplemented Auto Updates and Notifications", async () => {
+  it("2. Auto updates toggle renders functional LauncherToggle and persists to localStorage and IPC", async () => {
     const container = await renderComponent(
       <SettingsView theme="dark" setTheme={vi.fn()} />,
     )
 
-    expect(container.textContent).toContain("Próximamente")
+    // Auto updates row is present and has a toggle button
+    expect(container.textContent).toContain("Actualizaciones automáticas")
+    expect(container.textContent).not.toContain("Notificaciones de eventos y servidor")
+
+    // Find the toggle for auto updates
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    expect(toggles.length).toBeGreaterThan(0)
+
+    // Toggle auto updates off
+    const autoUpdatesToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("Actualizaciones automáticas") ||
+      btn.closest(".settings-row")?.textContent?.includes("Actualizaciones automáticas")
+    ) as HTMLElement
+
+    expect(autoUpdatesToggle).toBeDefined()
+    await act(async () => {
+      autoUpdatesToggle.click()
+    })
+
+    expect(localStorage.getItem("hikat_auto_updates")).toBe("false")
+    expect(mockElectronAPI.setAutoUpdates).toHaveBeenCalledWith(false)
   })
 
+  it("3. Completely removes notifications row from General tab", async () => {
+    const container = await renderComponent(
+      <SettingsView theme="dark" setTheme={vi.fn()} />,
+    )
+
+    expect(container.textContent).not.toContain("Notificaciones de eventos y servidor")
+    expect(container.textContent).not.toContain("Recibe avisos sobre eventos especiales")
+  })
 })

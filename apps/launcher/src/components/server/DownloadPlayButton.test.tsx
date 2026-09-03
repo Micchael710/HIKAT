@@ -18,6 +18,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
   beforeEach(() => {
     localStorage.clear()
     localStorage.setItem("hikat_language", "es")
+    localStorage.setItem("hikat_auto_updates", "false")
     vi.restoreAllMocks()
 
     window.electronAPI = {
@@ -2539,6 +2540,393 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       card = container.querySelector(".dl-progress-card") as HTMLElement
       expect(card.textContent).toContain("45%")
       expect(card.textContent).not.toContain("0%")
+    })
+
+    it("18. Launcher opens with update available + autoUpdates ON + game closed -> starts update automatically", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+
+      // Automatically starts downloading 1.1.0
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        expect.any(Array),
+        "1.1.0",
+        "1.21.1",
+        "NEOFORGE",
+        undefined,
+        "21.1.65",
+        false,
+      )
+      const card = container.querySelector(".dl-progress-card")
+      expect(card).not.toBeNull()
+      expect(card?.textContent).toContain("ACTUALIZANDO")
+    })
+
+    it("19. Launcher opens with update available + autoUpdates OFF -> shows ACTUALIZAR button but does NOT auto-start sync", async () => {
+      localStorage.setItem("hikat_auto_updates", "false")
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      const btn = container.querySelector("button")
+      expect(btn?.textContent).toContain("ACTUALIZAR")
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+    })
+
+    it("20. WebSocket receives new release with game closed + autoUpdates ON -> starts auto-update", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+      let releaseCallback: any = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/example2.jar",
+            sha256: "def",
+            sizeBytes: 2048,
+            downloadUrl: "/game/2",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+        directoryPolicies: [],
+      } as any)
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      const { container } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+      expect(startSyncSpy).not.toHaveBeenCalled()
+
+      // WebSocket triggers release activation for 1.1.0
+      await act(async () => {
+        await releaseCallback?.({ version: "1.1.0" })
+      })
+
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        expect.any(Array),
+        "1.1.0",
+        "1.21.1",
+        "NEOFORGE",
+        null,
+        "21.1.65",
+        false,
+        [],
+      )
+      const card = container.querySelector(".dl-progress-card")
+      expect(card?.textContent).toContain("ACTUALIZANDO")
+    })
+
+    it("21. WebSocket receives new release while game is running -> does NOT sync while game is running", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+      let releaseCallback: any = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      let launchStatusCallback: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/example2.jar",
+            sha256: "def",
+            sizeBytes: 2048,
+            downloadUrl: "/game/2",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+        directoryPolicies: [],
+      } as any)
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      const { container } = await mountButton()
+
+      // Game starts running
+      await act(async () => {
+        launchStatusCallback?.("running")
+      })
+      expect(container.textContent).toContain("EN EJECUCIÓN")
+
+      // WebSocket receives release 1.1.0 while running
+      await act(async () => {
+        await releaseCallback?.({ version: "1.1.0" })
+      })
+
+      // Must NOT start sync while game is running
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      expect(container.textContent).toContain("EN EJECUCIÓN")
+    })
+
+    it("22. Game transitions from running -> idle with pending update -> starts auto-update automatically", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+      let releaseCallback: any = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      let launchStatusCallback: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/example2.jar",
+            sha256: "def",
+            sizeBytes: 2048,
+            downloadUrl: "/game/2",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+        directoryPolicies: [],
+      } as any)
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      const { container } = await mountButton()
+
+      // 1. Game is running
+      await act(async () => {
+        launchStatusCallback?.("running")
+      })
+
+      // 2. New release arrives while running
+      await act(async () => {
+        await releaseCallback?.({ version: "1.1.0" })
+      })
+      expect(startSyncSpy).not.toHaveBeenCalled()
+
+      // 3. Game closes: transitions to idle
+      await act(async () => {
+        launchStatusCallback?.("idle")
+      })
+
+      // 4. Auto-update immediately triggers
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        expect.any(Array),
+        "1.1.0",
+        "1.21.1",
+        "NEOFORGE",
+        null,
+        "21.1.65",
+        false,
+        [],
+      )
+      const card = container.querySelector(".dl-progress-card")
+      expect(card?.textContent).toContain("ACTUALIZANDO")
+    })
+
+    it("23. Does not trigger double sync of the same release", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+      let releaseCallback: any = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+        directoryPolicies: [],
+      } as any)
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      await mountButton()
+
+      // First sync started on mount
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+
+      // Another event arrives for the same version 1.1.0 while sync is in flight
+      await act(async () => {
+        await releaseCallback?.({ version: "1.1.0" })
+      })
+
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
     })
   })
 })

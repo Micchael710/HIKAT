@@ -13,6 +13,7 @@ import {
   GameButtonState,
   GameManifest,
 } from "../../services/gameService"
+import { STORAGE_KEYS, getStoredBoolean } from "../../utils/settingsStorage"
 import LiveToast from "../common/LiveToast"
 
 interface DownloadPlayButtonProps {
@@ -87,6 +88,9 @@ export default function DownloadPlayButton({
   }, [status])
 
   const [manifest, setManifest] = useState<GameManifest | null>(null)
+  const manifestRef = useRef<GameManifest | null>(null)
+  manifestRef.current = manifest
+
   const [progress, setProgress] = useState(0)
   const [speed, setSpeed] = useState(0)
   const [totalBytes, setTotalBytes] = useState(0)
@@ -107,6 +111,7 @@ export default function DownloadPlayButton({
   const isCancellingRef = useRef(false)
   const latestManifestVersionRef = useRef<string | null>(null)
   const isIntegrityBlockedRef = useRef(false)
+  const pendingAutoUpdateRef = useRef(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const isDark = theme === "dark"
 
@@ -123,7 +128,7 @@ export default function DownloadPlayButton({
     return () => unsubscribe?.()
   }, [])
 
-  const showToast = (
+  const showToast = useCallback((
     msg: string,
     type: "success" | "error" | "info" = "success",
   ) => {
@@ -132,9 +137,9 @@ export default function DownloadPlayButton({
     toastTimeoutRef.current = setTimeout(() => {
       setToastState({ message: null, type: "success" })
     }, 2800)
-  }
+  }, [])
 
-  const markSyncedVersionInstalled = (syncingVersion: string) => {
+  const markSyncedVersionInstalled = useCallback((syncingVersion: string) => {
     setManifest((current) => {
       if (!current || current.version !== syncingVersion) {
         return current
@@ -149,7 +154,72 @@ export default function DownloadPlayButton({
         hasIntegrityIssue: false,
       }
     })
-  }
+  }, [])
+
+  const triggerSync = useCallback((targetManifest?: GameManifest | null) => {
+    const currentManifest = targetManifest || manifestRef.current
+    if (!currentManifest?.clientFiles || currentManifest.clientFiles.length === 0) {
+      showToast(t("playButton.noClientFiles"), "error")
+      return
+    }
+    if (isStartingSyncRef.current) return
+    isStartingSyncRef.current = true
+    setDownloadedBytes(0)
+    setProgress(0)
+    setSpeed(0)
+    setTimeRemainingMin(0)
+    setStatus("downloading")
+
+    const syncingVersion = currentManifest.version
+
+    gameService
+      .startSync(
+        currentManifest.clientFiles,
+        currentManifest.version,
+        currentManifest.minecraftVersion,
+        currentManifest.modLoader,
+        currentManifest.modLoaderVersion,
+        currentManifest.neoForgeVersion,
+        false,
+        ...(currentManifest.directoryPolicies ? [currentManifest.directoryPolicies] : []),
+      )
+      .then((res: any) => {
+        if (res?.paused) {
+          setStatus("paused")
+          return
+        }
+        if (res?.success) {
+          isStartingSyncRef.current = false
+          isIntegrityBlockedRef.current = false
+          gameService.setGameInstalled(true)
+          markSyncedVersionInstalled(syncingVersion)
+
+          if (
+            latestManifestVersionRef.current &&
+            latestManifestVersionRef.current !== syncingVersion
+          ) {
+            setStatus("update")
+          } else {
+            setStatus("play")
+          }
+
+          showToast(t("playButton.syncSuccess"), "success")
+        }
+      })
+      .catch((err: any) => {
+        const msg = String(err?.message || err || "").toLowerCase()
+        if (isCancellingRef.current || msg.includes("cancel") || msg.includes("abort")) {
+          return
+        }
+        console.error("Sync error:", err)
+        gameService.setGameInstalled(false)
+        setStatus(resolveIdleGameButtonState(currentManifest))
+        showToast(t("playButton.syncError"), "error")
+      })
+      .finally(() => {
+        isStartingSyncRef.current = false
+      })
+  }, [markSyncedVersionInstalled, setStatus, showToast, t])
 
   // Close options menu on click outside
   useEffect(() => {
@@ -190,7 +260,26 @@ export default function DownloadPlayButton({
           setProgress(pct)
           setStatus("paused")
         } else {
-          setStatus(resolveIdleGameButtonState(res))
+          const idleState = resolveIdleGameButtonState(res)
+          setStatus(idleState)
+
+          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+          const hasUpdate = Boolean(
+            res.installedModpackVersion && res.installedModpackVersion !== res.version
+          )
+          const isGameBusy = statusRef.current === "launching" || statusRef.current === "running"
+
+          if (
+            autoUpdatesEnabled &&
+            hasUpdate &&
+            !isGameBusy &&
+            !isStartingSyncRef.current &&
+            statusRef.current !== "paused" &&
+            res.clientFiles &&
+            res.clientFiles.length > 0
+          ) {
+            triggerSync(res)
+          }
         }
       } else {
         setStatus(resolveIdleGameButtonState(null))
@@ -199,7 +288,7 @@ export default function DownloadPlayButton({
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [triggerSync])
 
   // Real-time WebSocket subscription for release activation events
   useEffect(() => {
@@ -243,6 +332,16 @@ export default function DownloadPlayButton({
       setManifest(freshManifest)
       setTotalBytes(totalBytes)
 
+      const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+      const isGameBusy = statusRef.current === "launching" || statusRef.current === "running"
+
+      if (isGameBusy) {
+        if (autoUpdatesEnabled) {
+          pendingAutoUpdateRef.current = true
+        }
+        return
+      }
+
       setStatus((prevStatus: GameButtonState) => {
         if (
           prevStatus === "downloading" ||
@@ -257,12 +356,30 @@ export default function DownloadPlayButton({
 
         return resolveIdleGameButtonState(freshManifest)
       })
+
+      const hasUpdate = Boolean(
+        freshManifest.installedModpackVersion &&
+        freshManifest.installedModpackVersion !== freshManifest.version
+      )
+
+      if (
+        autoUpdatesEnabled &&
+        hasUpdate &&
+        !isStartingSyncRef.current &&
+        statusRef.current !== "downloading" &&
+        statusRef.current !== "installing" &&
+        statusRef.current !== "verifying" &&
+        statusRef.current !== "paused" &&
+        clientFiles.length > 0
+      ) {
+        triggerSync(freshManifest)
+      }
     })
 
     return () => {
       unsubscribe()
     }
-  }, [manifest])
+  }, [manifest, triggerSync])
 
   // Listen to game launch lifecycle status from Electron Main
   useEffect(() => {
@@ -282,14 +399,35 @@ export default function DownloadPlayButton({
           statusRef.current === "launching" || statusRef.current === "running"
 
         if (wasRunningOrLaunching) {
-          const idleState = resolveIdleGameButtonState(manifest)
+          const currentManifest = manifestRef.current
+          const idleState = resolveIdleGameButtonState(currentManifest)
           setStatus(idleState)
+
+          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+          const hasUpdate = Boolean(
+            currentManifest?.installedModpackVersion &&
+            currentManifest?.installedModpackVersion !== currentManifest?.version
+          )
+
+          if (
+            autoUpdatesEnabled &&
+            (pendingAutoUpdateRef.current || hasUpdate) &&
+            !isStartingSyncRef.current &&
+            statusRef.current !== "paused" &&
+            currentManifest?.clientFiles &&
+            currentManifest.clientFiles.length > 0
+          ) {
+            pendingAutoUpdateRef.current = false
+            triggerSync(currentManifest)
+          } else {
+            pendingAutoUpdateRef.current = false
+          }
         }
       }
     })
 
     return () => unsubscribe?.()
-  }, [manifest, setStatus])
+  }, [setStatus, triggerSync])
 
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
@@ -458,66 +596,7 @@ export default function DownloadPlayButton({
       return
     }
     if (status === "download" || status === "update") {
-      if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
-        showToast(t("playButton.noClientFiles"), "error")
-        return
-      }
-      setDownloadedBytes(0)
-      setProgress(0)
-      setSpeed(0)
-      setTimeRemainingMin(0)
-      isStartingSyncRef.current = true
-      setStatus("downloading")
-
-      const syncingVersion = manifest.version
-
-      gameService
-        .startSync(
-          manifest.clientFiles,
-          manifest.version,
-          manifest.minecraftVersion,
-          manifest.modLoader,
-          manifest.modLoaderVersion,
-          manifest.neoForgeVersion,
-          false,
-          ...(manifest.directoryPolicies ? [manifest.directoryPolicies] : []),
-        )
-        .then((res: any) => {
-          if (res?.paused) {
-            setStatus("paused")
-            return
-          }
-          if (res?.success) {
-            isStartingSyncRef.current = false
-            isIntegrityBlockedRef.current = false
-            gameService.setGameInstalled(true)
-            markSyncedVersionInstalled(syncingVersion)
-
-            if (
-              latestManifestVersionRef.current &&
-              latestManifestVersionRef.current !== syncingVersion
-            ) {
-              setStatus("update")
-            } else {
-              setStatus("play")
-            }
-
-            showToast(t("playButton.syncSuccess"), "success")
-          }
-        })
-        .catch((err: any) => {
-          const msg = String(err?.message || err || "").toLowerCase()
-          if (isCancellingRef.current || msg.includes("cancel") || msg.includes("abort")) {
-            return
-          }
-          console.error("Sync error:", err)
-          gameService.setGameInstalled(false)
-          setStatus(resolveIdleGameButtonState(manifest))
-          showToast(t("playButton.syncError"), "error")
-        })
-        .finally(() => {
-          isStartingSyncRef.current = false
-        })
+      triggerSync(manifest)
     } else if (status === "play") {
       if (isIntegrityBlockedRef.current) {
         showToast(t("playButton.launchVerifyHint"), "error")
