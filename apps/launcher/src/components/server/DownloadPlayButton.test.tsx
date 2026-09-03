@@ -4183,7 +4183,6 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         neoForgeVersion: "21.1.65",
         modLoader: "NEOFORGE",
         mandatory: true,
-        totalSizeGB: 1,
         clientFiles: [
           {
             path: "mods/b.jar",
@@ -4275,7 +4274,6 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         neoForgeVersion: "21.1.65",
         modLoader: "NEOFORGE",
         mandatory: true,
-        totalSizeGB: 1,
         clientFiles: [
           {
             path: "mods/a.jar",

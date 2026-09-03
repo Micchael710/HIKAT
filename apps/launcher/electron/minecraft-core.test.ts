@@ -453,6 +453,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(fs.existsSync(pidFile)).toBe(true)
     const saved = JSON.parse(fs.readFileSync(pidFile, "utf8"))
     expect(saved.pid).toBe(54321)
+    expect(saved.javaPath).toBe("/mock/javaw.exe")
     expect(launcher.getLaunchStatus()).toEqual({ status: "running", pid: 54321 })
 
     // When process closes, PID file is cleaned
@@ -464,7 +465,15 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
   it("10.2. GameLauncher detects existing alive process on startup and tracks until exit", async () => {
     const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
     fs.mkdirSync(path.dirname(pidFile), { recursive: true })
-    fs.writeFileSync(pidFile, JSON.stringify({ pid: 99999, launchedAt: new Date().toISOString() }))
+    const now = new Date()
+    fs.writeFileSync(
+      pidFile,
+      JSON.stringify({
+        pid: 99999,
+        launchedAt: now.toISOString(),
+        javaPath: "/mock/javaw.exe",
+      }),
+    )
 
     let isAlive = true
     const statusChanges: string[] = []
@@ -472,6 +481,10 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     const launcher = new GameLauncher(null, {
       instanceRoot,
       processChecker: (pid) => pid === 99999 && isAlive,
+      processInfoFetcher: () => ({
+        path: "/mock/javaw.exe",
+        startTime: new Date(now.getTime() - 200).toISOString(),
+      }),
       pollIntervalMs: 20,
     })
     launcher.onStatusChangeCallback = (st) => statusChanges.push(st)
@@ -492,7 +505,14 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
   it("10.3. GameLauncher with stale PID on startup cleans PID file and initializes as idle", async () => {
     const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
     fs.mkdirSync(path.dirname(pidFile), { recursive: true })
-    fs.writeFileSync(pidFile, JSON.stringify({ pid: 88888, launchedAt: new Date().toISOString() }))
+    fs.writeFileSync(
+      pidFile,
+      JSON.stringify({
+        pid: 88888,
+        launchedAt: new Date().toISOString(),
+        javaPath: "/mock/javaw.exe",
+      }),
+    )
 
     const launcher = new GameLauncher(null, {
       instanceRoot,
@@ -534,7 +554,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
           detached: true,
           stdio: "ignore",
         },
-      })
+      }),
     )
     expect(mockChildProcess.unref).toHaveBeenCalledTimes(1)
 
@@ -543,11 +563,16 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(fs.existsSync(pidFile)).toBe(true)
     const saved = JSON.parse(fs.readFileSync(pidFile, "utf8"))
     expect(saved.pid).toBe(67890)
+    expect(saved.javaPath).toBe("/mock/javaw.exe")
 
-    // Simulate reopening new GameLauncher while process is still alive
+    // Simulate reopening new GameLauncher while process is still alive with matching identity
     const reopenedLauncher = new GameLauncher(null, {
       instanceRoot,
       processChecker: (pid) => pid === 67890,
+      processInfoFetcher: () => ({
+        path: "/mock/javaw.exe",
+        startTime: saved.launchedAt,
+      }),
     })
     expect(reopenedLauncher.getLaunchStatus()).toEqual({ status: "running", pid: 67890 })
     reopenedLauncher.stopProcessPoll()
@@ -556,6 +581,111 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     mockChildProcess.emit("close", 0)
     expect(fs.existsSync(pidFile)).toBe(false)
     expect(launcher.getLaunchStatus()).toEqual({ status: "idle", pid: null })
+  })
+
+  it("10.5. GameLauncher startup: PID exists but executable path differs -> treated as stale, deletes PID file, initializes as idle", async () => {
+    const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true })
+    const now = new Date()
+    fs.writeFileSync(
+      pidFile,
+      JSON.stringify({
+        pid: 33333,
+        launchedAt: now.toISOString(),
+        javaPath: "C:\\HiKAT\\runtime\\bin\\javaw.exe",
+      }),
+    )
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      processChecker: (pid) => pid === 33333, // Reused PID is alive in OS
+      processInfoFetcher: () => ({
+        path: "C:\\Program Files\\Google\\Chrome\\chrome.exe", // Different executable!
+        startTime: now.toISOString(),
+      }),
+    })
+
+    expect(launcher.getLaunchStatus()).toEqual({ status: "idle", pid: null })
+    expect(fs.existsSync(pidFile)).toBe(false)
+  })
+
+  it("10.6. GameLauncher startup: PID exists and executable matches but creation StartTime differs outside tolerance -> treated as stale, deletes PID file, initializes as idle", async () => {
+    const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true })
+    const oldLaunchedAt = new Date("2026-09-01T12:00:00.000Z")
+    fs.writeFileSync(
+      pidFile,
+      JSON.stringify({
+        pid: 44444,
+        launchedAt: oldLaunchedAt.toISOString(),
+        javaPath: "C:\\HiKAT\\runtime\\bin\\javaw.exe",
+      }),
+    )
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      processChecker: (pid) => pid === 44444, // Reused PID is alive in OS
+      processInfoFetcher: () => ({
+        path: "C:\\HiKAT\\runtime\\bin\\javaw.exe",
+        startTime: new Date("2026-09-03T18:00:00.000Z").toISOString(), // Started days later!
+      }),
+      launchToleranceMs: 30000,
+    })
+
+    expect(launcher.getLaunchStatus()).toEqual({ status: "idle", pid: null })
+    expect(fs.existsSync(pidFile)).toBe(false)
+  })
+
+  it("10.7. GameLauncher startup: PID exists and identity matches (executable + StartTime within tolerance) -> recognized as Minecraft running", async () => {
+    const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true })
+    const launchTime = new Date("2026-09-03T19:00:05.000Z")
+    fs.writeFileSync(
+      pidFile,
+      JSON.stringify({
+        pid: 55555,
+        launchedAt: launchTime.toISOString(),
+        javaPath: "C:\\HiKAT\\runtime\\bin\\javaw.exe",
+      }),
+    )
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      processChecker: (pid) => pid === 55555,
+      processInfoFetcher: () => ({
+        path: "C:/HiKAT/runtime/bin/JAVAW.EXE", // Case & slash variations
+        startTime: new Date("2026-09-03T19:00:04.200Z").toISOString(), // 800ms difference
+      }),
+      launchToleranceMs: 30000,
+    })
+
+    expect(launcher.getLaunchStatus()).toEqual({ status: "running", pid: 55555 })
+    expect(fs.existsSync(pidFile)).toBe(true)
+    launcher.stopProcessPoll()
+  })
+
+  it("10.8. GameLauncher startup: error/exception during process identity query -> fails safe, does not produce false positive, cleans PID file, initializes as idle", async () => {
+    const pidFile = path.join(instanceRoot, ".hikat", "game-process.json")
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true })
+    fs.writeFileSync(
+      pidFile,
+      JSON.stringify({
+        pid: 66666,
+        launchedAt: new Date().toISOString(),
+        javaPath: "C:\\HiKAT\\runtime\\bin\\javaw.exe",
+      }),
+    )
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      processChecker: (pid) => pid === 66666,
+      processInfoFetcher: () => {
+        throw new Error("PowerShell query timeout or Access Denied")
+      },
+    })
+
+    expect(launcher.getLaunchStatus()).toEqual({ status: "idle", pid: null })
+    expect(fs.existsSync(pidFile)).toBe(false)
   })
 
   // ─────────────────────────────────────────────────────────────

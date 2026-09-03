@@ -1,11 +1,22 @@
 const path = require("path")
 const fs = require("fs")
+const { execFileSync } = require("child_process")
 const { Version, launch: xmclLaunch } = require("@xmcl/core")
 const { setJavaGpuPreference } = require("./gpu-manager.cjs")
 const { resolveJavaRuntime, validateJavaBinary } = require("./java-runtime.cjs")
 const { checkCore } = require("./minecraft-core.cjs")
 
 const DEFAULT_RAM_GB = 4
+const DEFAULT_LAUNCH_TOLERANCE_MS = 30000 // 30 seconds
+
+function pathsMatch(pathA, pathB) {
+  if (!pathA || !pathB) return false
+  try {
+    return path.resolve(String(pathA).trim()).toLowerCase() === path.resolve(String(pathB).trim()).toLowerCase()
+  } catch (_) {
+    return false
+  }
+}
 
 function defaultProcessChecker(pid) {
   if (!pid || typeof pid !== "number" || pid <= 0) return false
@@ -14,6 +25,46 @@ function defaultProcessChecker(pid) {
     return true
   } catch (err) {
     return err.code === "EPERM"
+  }
+}
+
+function defaultProcessInfoFetcher(pid) {
+  if (process.platform !== "win32") {
+    return null
+  }
+  if (!pid || typeof pid !== "number" || pid <= 0) {
+    return null
+  }
+
+  try {
+    const psScript = `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue; if ($p -and $p.ExecutablePath) { [PSCustomObject]@{ Path = $p.ExecutablePath; StartTime = $p.CreationDate.ToUniversalTime().ToString("o") } | ConvertTo-Json -Compress } else { $gp = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($gp -and $gp.Path) { [PSCustomObject]@{ Path = $gp.Path; StartTime = $gp.StartTime.ToUniversalTime().ToString("o") } | ConvertTo-Json -Compress } }`
+
+    const stdout = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript],
+      {
+        encoding: "utf8",
+        timeout: 5000,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      }
+    )
+
+    if (!stdout || !stdout.trim()) {
+      return null
+    }
+
+    const parsed = JSON.parse(stdout.trim())
+    if (!parsed || !parsed.Path) {
+      return null
+    }
+
+    return {
+      path: parsed.Path,
+      startTime: parsed.StartTime ? new Date(parsed.StartTime).toISOString() : null,
+    }
+  } catch (_) {
+    return null
   }
 }
 
@@ -30,7 +81,10 @@ class GameLauncher {
     this.javaResolver = options.javaResolver || resolveJavaRuntime
     this.javaValidator = options.javaValidator || validateJavaBinary
     this.processChecker = options.processChecker || defaultProcessChecker
+    this.processInfoFetcher = options.processInfoFetcher || defaultProcessInfoFetcher
+    this.processIdentityVerifier = options.processIdentityVerifier || null
     this.pollIntervalMs = options.pollIntervalMs || 1000
+    this.launchToleranceMs = options.launchToleranceMs || DEFAULT_LAUNCH_TOLERANCE_MS
     this.trackedPid = null
     this.pollTimer = null
 
@@ -52,7 +106,7 @@ class GameLauncher {
         filePath,
         JSON.stringify({
           pid,
-          launchedAt: new Date().toISOString(),
+          launchedAt: metadata.launchedAt || new Date().toISOString(),
           ...metadata,
         }),
         "utf8"
@@ -73,32 +127,89 @@ class GameLauncher {
     }
   }
 
-  readSavedPid() {
+  readSavedProcessRecord() {
     try {
       const filePath = this.getPidFilePath()
       if (!fs.existsSync(filePath)) return null
       const content = fs.readFileSync(filePath, "utf8")
       const parsed = JSON.parse(content)
-      return typeof parsed.pid === "number" ? parsed.pid : null
+      if (!parsed || typeof parsed.pid !== "number" || parsed.pid <= 0) {
+        return null
+      }
+      return parsed
     } catch (_) {
       return null
     }
+  }
+
+  readSavedPid() {
+    const record = this.readSavedProcessRecord()
+    return record?.pid || null
   }
 
   isProcessRunning(pid) {
     return this.processChecker(pid)
   }
 
+  verifyProcessIdentity(savedRecord) {
+    if (typeof this.processIdentityVerifier === "function") {
+      return this.processIdentityVerifier(savedRecord)
+    }
+
+    if (!savedRecord || typeof savedRecord.pid !== "number" || savedRecord.pid <= 0) {
+      return false
+    }
+
+    if (process.platform !== "win32") {
+      return true
+    }
+
+    if (!savedRecord.javaPath || !savedRecord.launchedAt) {
+      return false
+    }
+
+    try {
+      const processInfo = this.processInfoFetcher(savedRecord.pid)
+      if (!processInfo || !processInfo.path || !processInfo.startTime) {
+        return false
+      }
+
+      if (!pathsMatch(processInfo.path, savedRecord.javaPath)) {
+        return false
+      }
+
+      const savedTime = new Date(savedRecord.launchedAt).getTime()
+      const osTime = new Date(processInfo.startTime).getTime()
+
+      if (Number.isNaN(savedTime) || Number.isNaN(osTime)) {
+        return false
+      }
+
+      const diffMs = Math.abs(savedTime - osTime)
+      if (diffMs > this.launchToleranceMs) {
+        return false
+      }
+
+      return true
+    } catch (_) {
+      return false
+    }
+  }
+
   initProcessMonitoring() {
-    const savedPid = this.readSavedPid()
-    if (savedPid) {
-      if (this.isProcessRunning(savedPid)) {
-        console.log(`[GameLauncher] Detected existing game process running with PID ${savedPid}`)
+    const savedRecord = this.readSavedProcessRecord()
+    if (savedRecord) {
+      const pid = savedRecord.pid
+      const isAlive = this.isProcessRunning(pid)
+      const isIdentityValid = isAlive && this.verifyProcessIdentity(savedRecord)
+
+      if (isIdentityValid) {
+        console.log(`[GameLauncher] Detected existing game process running with PID ${pid}`)
         this.launchStatus = "running"
-        this.trackedPid = savedPid
-        this.startProcessPoll(savedPid)
+        this.trackedPid = pid
+        this.startProcessPoll(pid)
       } else {
-        console.log(`[GameLauncher] Cleaned stale PID file for inactive process ${savedPid}`)
+        console.log(`[GameLauncher] Cleaned stale PID file for inactive/mismatched process ${pid}`)
         this.clearProcessPid()
         this.launchStatus = "idle"
         this.trackedPid = null
@@ -284,6 +395,7 @@ class GameLauncher {
       this.saveProcessPid(child.pid, {
         minecraftVersion: cleanMc,
         modLoader: resolvedLoader,
+        javaPath: javawPath,
       })
       this.setStatus("running")
 
@@ -319,4 +431,7 @@ class GameLauncher {
 
 module.exports = {
   GameLauncher,
+  pathsMatch,
+  defaultProcessChecker,
+  defaultProcessInfoFetcher,
 }

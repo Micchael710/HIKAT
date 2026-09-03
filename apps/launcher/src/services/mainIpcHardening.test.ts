@@ -1121,11 +1121,15 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
       isVerify: true,
     })
 
-    // 2. Wait 50ms for initial session write and first chunk (part1) to be written
-    await new Promise((r) => setTimeout(r, 50))
+    // 2. Wait for initial session write and first chunk (part1) to be written
+    let sessionDuringDl = null
+    for (let i = 0; i < 50; i++) {
+      sessionDuringDl = await loadDownloadSession(instanceRoot)
+      if (sessionDuringDl) break
+      await new Promise((r) => setTimeout(r, 20))
+    }
 
     // 3. Verify session was ALREADY written before first file finished
-    const sessionDuringDl = await loadDownloadSession(instanceRoot)
     expect(sessionDuringDl).not.toBeNull()
     expect(sessionDuringDl.operationKind).toBe("VERIFY")
     expect(sessionDuringDl.status).toBe("DOWNLOADING")
