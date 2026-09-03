@@ -2978,6 +2978,12 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         }
       )
 
+      let progressCallback: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCallback = cb
+        return () => {}
+      })
+
       const { container } = await mountButton()
 
       // 1. Sync for 1.1 starts automatically on mount
@@ -3022,7 +3028,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         resolveSync1_1?.({ success: true })
       })
 
-      // 4. Automatically chains and starts 1.2
+      // 4. Automatically chains and starts 1.2 (isStartingSyncRef is kept active)
       expect(startSyncSpy).toHaveBeenCalledTimes(2)
       expect(startSyncSpy).toHaveBeenLastCalledWith(
         expect.any(Array),
@@ -3037,6 +3043,31 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       const card = container.querySelector(".dl-progress-card")
       expect(card).not.toBeNull()
       expect(card?.textContent).toContain("ACTUALIZANDO")
+
+      // 5. While 1.2 is active, progress events are processed normally
+      await act(async () => {
+        progressCallback?.({
+          progress: 55,
+          downloadedBytes: 1024,
+          totalBytes: 2048,
+          speedMBs: 2.5,
+          remainingMinutes: 2,
+        })
+      })
+      expect(container.textContent).toContain("55%")
+
+      // 6. Duplicate release event does not start concurrent 3rd sync while 1.2 is active
+      await act(async () => {
+        await releaseCallback?.({ version: "1.2.0" })
+      })
+      expect(startSyncSpy).toHaveBeenCalledTimes(2)
+
+      // 7. When 1.2 completes, state cleanly finishes and transitions to JUGAR
+      await act(async () => {
+        resolveSync1_2?.({ success: true })
+      })
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
     })
 
     it("25. Release 1.2 arrives while 1.1 is syncing; upon 1.1 completion with Auto Updates OFF -> remains in manual ACTUALIZAR state", async () => {

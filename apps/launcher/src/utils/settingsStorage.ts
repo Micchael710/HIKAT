@@ -4,7 +4,6 @@ export const STORAGE_KEYS = {
   START_WITH_SYSTEM: "hikat_start_with_system",
   MINIMIZE_TO_TRAY: "hikat_minimize_to_tray",
   AUTO_UPDATES: "hikat_auto_updates",
-  NOTIFICATIONS: "hikat_notifications",
   RAM_GB: "hikat_ram_gb",
   DEDICATED_GPU: "hikat_dedicated_gpu",
 } as const

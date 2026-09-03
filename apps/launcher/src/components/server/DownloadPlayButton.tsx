@@ -108,6 +108,7 @@ export default function DownloadPlayButton({
   const menuRef = useRef<HTMLDivElement>(null)
   const toastTimeoutRef = useRef<any>(null)
   const isStartingSyncRef = useRef(false)
+  const syncOpIdRef = useRef(0)
   const isCancellingRef = useRef(false)
   const latestManifestVersionRef = useRef<string | null>(null)
   const isIntegrityBlockedRef = useRef(false)
@@ -165,6 +166,7 @@ export default function DownloadPlayButton({
       return
     }
     if (isStartingSyncRef.current) return
+    const syncOpId = ++syncOpIdRef.current
     isStartingSyncRef.current = true
     setDownloadedBytes(0)
     setProgress(0)
@@ -191,7 +193,6 @@ export default function DownloadPlayButton({
           return
         }
         if (res?.success) {
-          isStartingSyncRef.current = false
           isIntegrityBlockedRef.current = false
           gameService.setGameInstalled(true)
           markSyncedVersionInstalled(syncingVersion)
@@ -221,12 +222,19 @@ export default function DownloadPlayButton({
                 hasExistingInstall: true,
               }
               setManifest(nextManifest)
+              isStartingSyncRef.current = false
               triggerSync(nextManifest)
               return
             } else {
+              if (syncOpIdRef.current === syncOpId) {
+                isStartingSyncRef.current = false
+              }
               setStatus("update")
             }
           } else {
+            if (syncOpIdRef.current === syncOpId) {
+              isStartingSyncRef.current = false
+            }
             setStatus("play")
           }
 
@@ -244,7 +252,9 @@ export default function DownloadPlayButton({
         showToast(t("playButton.syncError"), "error")
       })
       .finally(() => {
-        isStartingSyncRef.current = false
+        if (syncOpIdRef.current === syncOpId) {
+          isStartingSyncRef.current = false
+        }
       })
   }, [markSyncedVersionInstalled, setStatus, showToast, t])
 
@@ -510,6 +520,7 @@ export default function DownloadPlayButton({
     try {
       const res: any = await gameService.cancelSync()
       if (res?.success || res === true) {
+        syncOpIdRef.current++
         isStartingSyncRef.current = false
         const freshManifest = await gameService.checkGameManifest()
         setManifest(freshManifest)
@@ -539,6 +550,7 @@ export default function DownloadPlayButton({
         const res: any = await gameService.pauseSync()
         if (res?.paused || res?.success || res === true) {
           setStatus("paused")
+          syncOpIdRef.current++
           isStartingSyncRef.current = false
         } else {
           showToast(t("playButton.syncError"), "error")
@@ -555,6 +567,7 @@ export default function DownloadPlayButton({
         showToast(t("playButton.noClientFiles"), "error")
         return
       }
+      const syncOpId = ++syncOpIdRef.current
       isStartingSyncRef.current = true
       setStatus("downloading")
 
@@ -577,7 +590,9 @@ export default function DownloadPlayButton({
             return
           }
           if (res?.success) {
-            isStartingSyncRef.current = false
+            if (syncOpIdRef.current === syncOpId) {
+              isStartingSyncRef.current = false
+            }
             gameService.setGameInstalled(true)
             markSyncedVersionInstalled(syncingVersion)
 
@@ -604,7 +619,9 @@ export default function DownloadPlayButton({
           showToast(t("playButton.syncError"), "error")
         })
         .finally(() => {
-          isStartingSyncRef.current = false
+          if (syncOpIdRef.current === syncOpId) {
+            isStartingSyncRef.current = false
+          }
         })
     }
   }
@@ -669,6 +686,7 @@ export default function DownloadPlayButton({
     setProgress(0)
     setSpeed(0)
     setTimeRemainingMin(0)
+    const syncOpId = ++syncOpIdRef.current
     isStartingSyncRef.current = true
     setStatus("verifying")
 
@@ -713,7 +731,9 @@ export default function DownloadPlayButton({
         setStatus(resolveIdleGameButtonState(manifest))
       })
       .finally(() => {
-        isStartingSyncRef.current = false
+        if (syncOpIdRef.current === syncOpId) {
+          isStartingSyncRef.current = false
+        }
       })
   }
 
