@@ -447,6 +447,52 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       expect(fs.existsSync(oversizedStagingFile)).toBe(false)
     })
 
+    it("9.1. reconcileStagingFiles across releases (1.1 -> 1.2): reuses matching path+SHA, prunes files with changed SHA or removed files", async () => {
+      const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
+      await fsp.mkdir(filesDir, { recursive: true })
+
+      // 1. File identical in both releases
+      const contentSame = "same mod content in 1.1 and 1.2"
+      const shaSame = computeSha(contentSame)
+      const taskSameIn12 = {
+        path: "mods/same.jar",
+        sha256: shaSame,
+        sizeBytes: Buffer.byteLength(contentSame),
+      }
+      const sameStagingFile = path.join(filesDir, getDeterministicStagingFileName(taskSameIn12))
+      await fsp.writeFile(sameStagingFile, contentSame, "utf8")
+
+      // 2. File in 1.1 whose SHA changed in 1.2
+      const oldShaChanged = computeSha("old 1.1 content")
+      const newShaChanged = computeSha("new 1.2 content")
+      const taskChangedIn12 = {
+        path: "mods/changed.jar",
+        sha256: newShaChanged,
+        sizeBytes: Buffer.byteLength("new 1.2 content"),
+      }
+      // Staging currently contains the 1.1 file
+      const oldStagingFile = path.join(filesDir, getDeterministicStagingFileName({ path: "mods/changed.jar", sha256: oldShaChanged }))
+      await fsp.writeFile(oldStagingFile, "old 1.1 content", "utf8")
+
+      // 3. File in 1.1 that was removed completely from 1.2
+      const removedStagingFile = path.join(filesDir, getDeterministicStagingFileName({ path: "mods/deleted.jar", sha256: "999" }))
+      await fsp.writeFile(removedStagingFile, "deleted file content", "utf8")
+
+      // Reconcile against 1.2 tasks
+      const { validStagedMap, alreadyStagedBytes } = await reconcileStagingFiles(
+        instanceRoot,
+        [taskSameIn12, taskChangedIn12],
+      )
+
+      expect(validStagedMap.has("mods/same.jar")).toBe(true)
+      expect(validStagedMap.has("mods/changed.jar")).toBe(false)
+      expect(alreadyStagedBytes).toBe(Buffer.byteLength(contentSame))
+
+      expect(fs.existsSync(sameStagingFile)).toBe(true)
+      expect(fs.existsSync(oldStagingFile)).toBe(false)
+      expect(fs.existsSync(removedStagingFile)).toBe(false)
+    })
+
     it("10. Pause retains completed files and partial downloads in staging", async () => {
       const filesDir = path.join(instanceRoot, ".hikat", "staging", "files")
       await fsp.mkdir(filesDir, { recursive: true })

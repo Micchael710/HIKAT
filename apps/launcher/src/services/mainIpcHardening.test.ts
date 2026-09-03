@@ -1199,4 +1199,126 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(fs.existsSync(appliedPath)).toBe(true)
     expect(await fsp.readFile(appliedPath, "utf8")).toBe(fastContent)
   })
+
+  it("40. checkPlan with interrupted session for same release 1.1.0 returns hasInterruptedDownload=true and hasPausedSession=true", async () => {
+    const { filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+
+    const content1 = "same version content"
+    const sha1 = computeSha(content1)
+    const stagingName1 = getDeterministicStagingFileName({ path: "mods/file.jar", sha256: sha1 })
+    await fsp.writeFile(path.join(filesDir, stagingName1), content1)
+
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.1.0",
+      status: "PAUSED",
+      operationKind: "SYNC",
+      updatedAt: new Date().toISOString(),
+      files: { "mods/file.jar": { bytes: content1.length, sha256: sha1 } },
+    })
+
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [
+        { path: "mods/file.jar", sha256: sha1, downloadUrl: `${serverBaseUrl}/fast/file.jar`, sizeBytes: content1.length, policy: "NO_MODIFICABLE" },
+        { path: "mods/other.jar", sha256: computeSha("other"), downloadUrl: `${serverBaseUrl}/fast/other.jar`, sizeBytes: 500, policy: "NO_MODIFICABLE" },
+      ],
+      modpackVersion: "1.1.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.success).toBe(true)
+    expect(plan.hasInterruptedDownload).toBe(true)
+    expect(plan.hasPausedSession).toBe(true)
+    expect(plan.stagedBytes).toBe(content1.length)
+  })
+
+  it("41. checkPlan with interrupted session for obsolete release 1.1.0 when published is 1.2.0 returns hasInterruptedDownload=false, reuses matching files, and deletes obsolete/changed staging files", async () => {
+    const { filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+
+    // 1. Staged file that remains identical in 1.2.0
+    const reusedContent = "reused content across releases"
+    const reusedSha = computeSha(reusedContent)
+    const reusedName = getDeterministicStagingFileName({ path: "mods/reused.jar", sha256: reusedSha })
+    await fsp.writeFile(path.join(filesDir, reusedName), reusedContent)
+
+    // 2. Staged file whose sha changed in 1.2.0
+    const oldChangedContent = "old content for changed mod"
+    const oldChangedSha = computeSha(oldChangedContent)
+    const oldChangedName = getDeterministicStagingFileName({ path: "mods/changed.jar", sha256: oldChangedSha })
+    await fsp.writeFile(path.join(filesDir, oldChangedName), oldChangedContent)
+
+    // 3. Staged file removed in 1.2.0
+    const removedContent = "file that no longer exists in 1.2.0"
+    const removedSha = computeSha(removedContent)
+    const removedName = getDeterministicStagingFileName({ path: "mods/removed.jar", sha256: removedSha })
+    await fsp.writeFile(path.join(filesDir, removedName), removedContent)
+
+    // Old session was for 1.1.0
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.1.0",
+      status: "PAUSED",
+      operationKind: "SYNC",
+      updatedAt: new Date().toISOString(),
+      files: {
+        "mods/reused.jar": { bytes: reusedContent.length, sha256: reusedSha },
+        "mods/changed.jar": { bytes: oldChangedContent.length, sha256: oldChangedSha },
+        "mods/removed.jar": { bytes: removedContent.length, sha256: removedSha },
+      },
+    })
+
+    const newChangedSha = computeSha("brand new content for changed mod in 1.2.0")
+
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    // checkPlan for 1.2.0
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [
+        { path: "mods/reused.jar", sha256: reusedSha, downloadUrl: `${serverBaseUrl}/fast/reused.jar`, sizeBytes: reusedContent.length, policy: "NO_MODIFICABLE" },
+        { path: "mods/changed.jar", sha256: newChangedSha, downloadUrl: `${serverBaseUrl}/fast/changed.jar`, sizeBytes: 100, policy: "NO_MODIFICABLE" },
+      ],
+      modpackVersion: "1.2.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    // Must NOT report paused or interrupted download for the obsolete session
+    expect(plan.success).toBe(true)
+    expect(plan.hasInterruptedDownload).toBe(false)
+    expect(plan.hasPausedSession).toBe(false)
+
+    // Staging reconciliation results:
+    // Reused file stays
+    expect(fs.existsSync(path.join(filesDir, reusedName))).toBe(true)
+    expect(plan.stagedBytes).toBe(reusedContent.length)
+
+    // Changed file with old SHA and removed file are pruned from staging
+    expect(fs.existsSync(path.join(filesDir, oldChangedName))).toBe(false)
+    expect(fs.existsSync(path.join(filesDir, removedName))).toBe(false)
+  })
 })

@@ -172,6 +172,9 @@ class GameOperationManager {
     const isSessionInstalling =
       session && (session.status === "INSTALLING" || session.status === "VERIFYING")
     const isVerifySession = Boolean(session && session.operationKind === "VERIFY")
+    const isObsoleteSession = Boolean(
+      session && session.modpackVersion && session.modpackVersion !== modpackVersion,
+    )
 
     let hasInterruptedDownload = false
     let hasPausedSession = false
@@ -182,10 +185,10 @@ class GameOperationManager {
       const reconciled = await reconcileStagingFiles(instanceRoot, clientPlan.toDownload)
       stagedBytes = reconciled.alreadyStagedBytes
       stagedFilesCount =
-        (session?.files ? Object.keys(session.files).length : 0) ||
+        (session?.files && !isObsoleteSession ? Object.keys(session.files).length : 0) ||
         reconciled.validStagedMap.size
 
-      if (!isVerifySession) {
+      if (!isVerifySession && !isObsoleteSession) {
         if (stagedBytes > 0) {
           hasInterruptedDownload = true
           hasPausedSession = true
@@ -193,7 +196,13 @@ class GameOperationManager {
           hasPausedSession = true
         }
       }
-    } else if (session && session.status === "PAUSED" && !isFullyInstalled && !isVerifySession) {
+    } else if (
+      session &&
+      session.status === "PAUSED" &&
+      !isFullyInstalled &&
+      !isVerifySession &&
+      !isObsoleteSession
+    ) {
       hasPausedSession = true
     }
 

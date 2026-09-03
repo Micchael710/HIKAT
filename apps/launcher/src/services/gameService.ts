@@ -31,6 +31,7 @@ export interface GameManifest {
   installed: boolean
   hasExistingInstall?: boolean
   hasInterruptedDownload?: boolean
+  hasPausedSession?: boolean
   stagedBytes?: number
   totalDownloadBytes?: number
 }

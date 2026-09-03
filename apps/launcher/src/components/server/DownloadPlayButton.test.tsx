@@ -3657,6 +3657,131 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(btn?.textContent).toContain("ACTUALIZAR")
       expect(container.querySelector(".dl-progress-card")).toBeNull()
     })
+
+    it("33. Interrupted session for 1.1 with published 1.1 -> shows PAUSADO and does not trigger auto-sync even if auto-updates is ON", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+
+      const pausedManifest: GameManifest = {
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        hasInterruptedDownload: true,
+        hasPausedSession: true,
+        stagedBytes: 2048,
+        totalDownloadBytes: 4096,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 4096,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(pausedManifest)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      const card = container.querySelector(".dl-progress-card")
+      expect(card?.textContent).toContain("PAUSADO")
+    })
+
+    it("34. Interrupted session for 1.1 when published is 1.2 + Auto Updates ON -> NOT PAUSED and triggers 1.2 sync automatically", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+
+      const newReleaseManifest: GameManifest = {
+        version: "1.2.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        hasInterruptedDownload: false,
+        hasPausedSession: false,
+        stagedBytes: 1024,
+        totalDownloadBytes: 4096,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 4096,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(newReleaseManifest)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        newReleaseManifest.clientFiles,
+        "1.2.0",
+        "1.21.1",
+        "NEOFORGE",
+        undefined,
+        "21.1.65",
+        false
+      )
+    })
+
+    it("35. Interrupted session for 1.1 when published is 1.2 + Auto Updates OFF -> NOT PAUSED and shows ACTUALIZAR without starting sync", async () => {
+      localStorage.setItem("hikat_auto_updates", "false")
+
+      const newReleaseManifest: GameManifest = {
+        version: "1.2.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        hasInterruptedDownload: false,
+        hasPausedSession: false,
+        stagedBytes: 1024,
+        totalDownloadBytes: 4096,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 4096,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(newReleaseManifest)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      const btn = container.querySelector("button")
+      expect(btn?.textContent).toContain("ACTUALIZAR")
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+    })
   })
 })
 
