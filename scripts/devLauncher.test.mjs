@@ -1,10 +1,10 @@
-import { describe, it, expect, afterEach, beforeAll } from "vitest"
+import { describe, it, expect, afterEach, beforeAll, vi } from "vitest"
 import http from "node:http"
 import fs from "node:fs"
 import path from "node:path"
 import url from "node:url"
 
-let waitForUrl, LAUNCHER_DEV_URL, pnpmCmd
+let waitForUrl, LAUNCHER_DEV_URL, pnpmCmd, terminateProcess, killProcessTree
 
 describe("devLauncher Orchestration Script", () => {
   let server
@@ -16,6 +16,8 @@ describe("devLauncher Orchestration Script", () => {
     waitForUrl = mod.waitForUrl
     LAUNCHER_DEV_URL = mod.LAUNCHER_DEV_URL
     pnpmCmd = mod.pnpmCmd
+    terminateProcess = mod.terminateProcess
+    killProcessTree = mod.killProcessTree
   })
 
   afterEach(() => {
@@ -28,6 +30,8 @@ describe("devLauncher Orchestration Script", () => {
   it("1. Exports expected constants and commands", () => {
     expect(LAUNCHER_DEV_URL).toBe("http://127.0.0.1:8443")
     expect(pnpmCmd).toBe(process.platform === "win32" ? "pnpm.cmd" : "pnpm")
+    expect(typeof terminateProcess).toBe("function")
+    expect(typeof killProcessTree).toBe("function")
   })
 
   it("2. waitForUrl resolves successfully when HTTP server responds", async () => {
@@ -46,5 +50,24 @@ describe("devLauncher Orchestration Script", () => {
     await expect(waitForUrl("http://127.0.0.1:18443", 300)).rejects.toThrow(
       /Timeout \(300ms\) waiting for Vite server/i,
     )
+  })
+
+  it("4. terminateProcess safely handles null, invalid, or mock process without throwing", () => {
+    expect(() => terminateProcess(null)).not.toThrow()
+    expect(() => terminateProcess({})).not.toThrow()
+    const mockProc = { pid: 9999999, kill: vi.fn() }
+    expect(() => terminateProcess(mockProc)).not.toThrow()
+  })
+
+  it("5. devLauncher script uses terminateProcess without /T for Electron cleanup", () => {
+    const filePath = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "devLauncher.mjs")
+    const code = fs.readFileSync(filePath, "utf8")
+    // Ensure terminateProcess does not contain /T
+    const terminateProcessBody = code.match(/function terminateProcess\([\s\S]*?^}/m)?.[0] || ""
+    expect(terminateProcessBody).not.toContain("/T")
+    // Ensure cleanup calls terminateProcess on electronProcess
+    const cleanupBody = code.match(/function cleanup\([\s\S]*?^}/m)?.[0] || ""
+    expect(cleanupBody).toContain("terminateProcess(electronProcess)")
+    expect(cleanupBody).toContain("killProcessTree(viteProcess)")
   })
 })

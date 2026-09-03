@@ -69,6 +69,19 @@ export function killProcessTree(proc) {
   } catch (_) {}
 }
 
+export function terminateProcess(proc) {
+  if (!proc || !proc.pid) return
+  try {
+    if (process.platform === "win32") {
+      try {
+        execSync(`taskkill /pid ${proc.pid} /F`, { stdio: "ignore" })
+      } catch (_) {}
+    } else {
+      proc.kill("SIGTERM")
+    }
+  } catch (_) {}
+}
+
 export function cleanup() {
   if (isShuttingDown) return
   isShuttingDown = true
@@ -76,7 +89,7 @@ export function cleanup() {
   console.log("\n[dev:launcher] Stopping Launcher development processes...")
 
   if (electronProcess) {
-    killProcessTree(electronProcess)
+    terminateProcess(electronProcess)
     electronProcess = null
   }
 
