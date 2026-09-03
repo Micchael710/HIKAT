@@ -293,12 +293,26 @@ class GameOperationManager {
 
         let downloadResult = null
         if (syncPlan.toDownload.length > 0 || isVerify) {
+          const downloadProgressHandler = isVerify
+            ? (data) => {
+                if (!data) return
+                const rawProgress = typeof data.progress === "number" ? data.progress : 0
+                // Convert 0–100 download progress to 35–50 verification progress
+                const mappedProgress = Math.min(50, Math.max(35, Math.round(35 + (rawProgress / 100) * 15)))
+                safeProgress({
+                  ...data,
+                  phase: "VERIFYING",
+                  progress: mappedProgress,
+                })
+              }
+            : safeProgress
+
           downloadResult = await downloadClientFilesToStaging({
             instanceRoot,
             clientFiles,
             directoryPolicies,
             modpackVersion,
-            onProgress: safeProgress,
+            onProgress: downloadProgressHandler,
             onPhaseChange: isVerify ? undefined : onPhaseChange,
             cancelSignal,
             apiBaseUrl,

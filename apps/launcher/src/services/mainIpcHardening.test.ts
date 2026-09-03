@@ -746,4 +746,140 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(planWithoutPolicy.success).toBe(true)
     expect(planWithoutPolicy.filesToPrune).toBe(1)
   })
+
+  it("30. Verification without damaged files: progress strictly non-decreasing, all in VERIFYING, reaches 100", async () => {
+    // Write valid file and installed manifest
+    const modPath = path.join(instanceRoot, "mods", "valid.jar")
+    await fsp.mkdir(path.dirname(modPath), { recursive: true })
+    const content = "valid mod content"
+    await fsp.writeFile(modPath, content)
+    const sha = computeSha(content)
+
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/valid.jar", sha256: sha, policy: "NO_MODIFICABLE" }],
+    })
+
+    const progressReports: Array<{ phase: string; progress: number }> = []
+
+    const res = await manager.startSync({
+      instanceRoot,
+      clientFiles: [{ path: "mods/valid.jar", sha256: sha, downloadUrl: `${serverBaseUrl}/fast/valid.jar`, sizeBytes: content.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      isVerify: true,
+      onProgress: (p: any) => {
+        progressReports.push({ phase: p.phase, progress: p.progress })
+      },
+    })
+
+    expect(res.success).toBe(true)
+    expect(progressReports.length).toBeGreaterThan(0)
+
+    // Every report during verification is VERIFYING
+    for (const report of progressReports) {
+      expect(report.phase).toBe("VERIFYING")
+    }
+
+    // Progress is strictly non-decreasing
+    for (let i = 1; i < progressReports.length; i++) {
+      expect(progressReports[i].progress).toBeGreaterThanOrEqual(progressReports[i - 1].progress)
+    }
+
+    expect(progressReports[progressReports.length - 1].progress).toBe(100)
+  })
+
+  it("31. Verification with file needing repair: maps repair download into 35-50 and stays strictly non-decreasing across 0-35 -> 35-50 -> 50-90 -> 95 -> 100", async () => {
+    // Write corrupted file
+    const modPath = path.join(instanceRoot, "mods", "repair.jar")
+    await fsp.mkdir(path.dirname(modPath), { recursive: true })
+    await fsp.writeFile(modPath, "corrupted content")
+
+    const correctContent = "fast content"
+    const correctSha = computeSha(correctContent)
+
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/repair.jar", sha256: correctSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    const progressReports: Array<{ phase: string; progress: number }> = []
+
+    const res = await manager.startSync({
+      instanceRoot,
+      clientFiles: [{ path: "mods/repair.jar", sha256: correctSha, downloadUrl: `${serverBaseUrl}/fast/repair.jar`, sizeBytes: correctContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      isVerify: true,
+      onProgress: (p: any) => {
+        progressReports.push({ phase: p.phase, progress: p.progress })
+      },
+    })
+
+    expect(res.success).toBe(true)
+    expect(progressReports.length).toBeGreaterThan(0)
+
+    // All phases during verify are VERIFYING
+    for (const report of progressReports) {
+      expect(report.phase).toBe("VERIFYING")
+    }
+
+    // Progress never decreases
+    for (let i = 1; i < progressReports.length; i++) {
+      expect(progressReports[i].progress).toBeGreaterThanOrEqual(progressReports[i - 1].progress)
+    }
+
+    // Check presence of the stages
+    const values = progressReports.map((r) => r.progress)
+    expect(values.some((v) => v >= 0 && v <= 35)).toBe(true)
+    expect(values.some((v) => v >= 35 && v <= 50)).toBe(true)
+    expect(values.some((v) => v >= 50 && v <= 90)).toBe(true)
+    expect(values).toContain(95)
+    expect(values[values.length - 1]).toBe(100)
+  })
+
+  it("32. Repair download 0, 40, 100 progress maps to VERIFYING within 35-50", () => {
+    const rawEvents: number[] = [0, 40, 100]
+    const mappedEvents = rawEvents.map((raw) =>
+      Math.min(50, Math.max(35, Math.round(35 + (raw / 100) * 15)))
+    )
+
+    expect(mappedEvents).toEqual([35, 41, 50])
+  })
+
+  it("33. Normal download/update uses DOWNLOADING and INSTALLING phases without verify mapping", async () => {
+    const correctContent = "fast content"
+    const correctSha = computeSha(correctContent)
+
+    const progressReports: Array<{ phase: string; progress: number }> = []
+    const phaseChanges: string[] = []
+
+    const res = await manager.startSync({
+      instanceRoot,
+      clientFiles: [{ path: "mods/normal.jar", sha256: correctSha, downloadUrl: `${serverBaseUrl}/fast/normal.jar`, sizeBytes: correctContent.length, policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      isVerify: false,
+      onProgress: (p: any) => {
+        progressReports.push({ phase: p.phase, progress: p.progress })
+      },
+      onPhaseChange: (ph: string) => {
+        phaseChanges.push(ph)
+      },
+    })
+
+    expect(res.success).toBe(true)
+    const phases = new Set(progressReports.map((r) => r.phase))
+    expect(phases.has("DOWNLOADING")).toBe(true)
+    expect(phases.has("INSTALLING")).toBe(true)
+    expect(phases.has("VERIFYING")).toBe(false)
+  })
 })
