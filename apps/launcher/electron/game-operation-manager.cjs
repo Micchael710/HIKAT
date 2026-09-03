@@ -161,6 +161,10 @@ class GameOperationManager {
       clientPlan.toPrune.length === 0 &&
       releaseMatches
 
+    if (clientSynced && this.state === "IDLE") {
+      await cleanStaging(instanceRoot)
+    }
+
     const isFullyInstalled = clientSynced && Boolean(core.installed) && javaValid
     const hasUpdate = Boolean(
       installedManifest.modpackVersion && installedManifest.modpackVersion !== modpackVersion,

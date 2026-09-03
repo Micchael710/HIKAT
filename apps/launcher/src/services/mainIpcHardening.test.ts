@@ -1325,4 +1325,218 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(fs.existsSync(path.join(filesDir, oldChangedName))).toBe(false)
     expect(fs.existsSync(path.join(filesDir, removedName))).toBe(false)
   })
+
+  it("42. checkPlan: when installation is already synced and manager is IDLE, residual staging directory is cleaned", async () => {
+    const modContent = "installed mod content"
+    const modSha = computeSha(modContent)
+
+    // Save installed manifest
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/example.jar", sha256: modSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    // Put installed file on disk
+    const modDiskPath = path.join(instanceRoot, "mods", "example.jar")
+    await fsp.mkdir(path.dirname(modDiskPath), { recursive: true })
+    await fsp.writeFile(modDiskPath, modContent)
+
+    // Create residual staging directory and file
+    const { stagingDir, filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+    await fsp.writeFile(path.join(filesDir, "residual.tmp"), "residual bytes")
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "INSTALLING",
+      operationKind: "SYNC",
+      updatedAt: new Date().toISOString(),
+      files: {},
+    })
+
+    expect(fs.existsSync(stagingDir)).toBe(true)
+
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    expect(manager.getState()).toBe("IDLE")
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [
+        { path: "mods/example.jar", sha256: modSha, downloadUrl: `${serverBaseUrl}/fast/example.jar`, sizeBytes: modContent.length, policy: "NO_MODIFICABLE" },
+      ],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.isFullyInstalled).toBe(true)
+    expect(plan.filesToDownload).toBe(0)
+    expect(plan.filesToPrune).toBe(0)
+    // Residual staging must be cleaned
+    expect(fs.existsSync(stagingDir)).toBe(false)
+  })
+
+  it("43. checkPlan: when download is paused for current release, staging files are preserved", async () => {
+    const { stagingDir, filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+
+    const stagedContent = "partial staged data"
+    const stagedSha = computeSha(stagedContent)
+    const stagedName = getDeterministicStagingFileName({ path: "mods/mod1.jar", sha256: stagedSha })
+    await fsp.writeFile(path.join(filesDir, stagedName), stagedContent)
+
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "PAUSED",
+      operationKind: "SYNC",
+      updatedAt: new Date().toISOString(),
+      files: {
+        "mods/mod1.jar": { bytes: stagedContent.length, sha256: stagedSha },
+      },
+    })
+
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: false,
+          hasExistingInstall: false,
+          resolvedVersionId: null,
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [
+        { path: "mods/mod1.jar", sha256: stagedSha, downloadUrl: `${serverBaseUrl}/fast/mod1.jar`, sizeBytes: stagedContent.length, policy: "NO_MODIFICABLE" },
+        { path: "mods/mod2.jar", sha256: computeSha("mod2"), downloadUrl: `${serverBaseUrl}/fast/mod2.jar`, sizeBytes: 100, policy: "NO_MODIFICABLE" },
+      ],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.hasPausedSession).toBe(true)
+    // Staging directory and staged file must be preserved
+    expect(fs.existsSync(stagingDir)).toBe(true)
+    expect(fs.existsSync(path.join(filesDir, stagedName))).toBe(true)
+  })
+
+  it("44. checkPlan: when new release is pending (update available), staging is preserved", async () => {
+    // Current install is 1.0.0
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/mod1.jar", sha256: computeSha("v1"), policy: "NO_MODIFICABLE" }],
+    })
+    const modDiskPath = path.join(instanceRoot, "mods", "mod1.jar")
+    await fsp.mkdir(path.dirname(modDiskPath), { recursive: true })
+    await fsp.writeFile(modDiskPath, "v1")
+
+    // Staging contains staged download for 1.1.0
+    const { stagingDir, filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+    const v2Content = "v2"
+    const v2Sha = computeSha(v2Content)
+    const stagedName = getDeterministicStagingFileName({ path: "mods/mod2.jar", sha256: v2Sha })
+    await fsp.writeFile(path.join(filesDir, stagedName), v2Content)
+
+    await saveDownloadSession(instanceRoot, {
+      modpackVersion: "1.1.0",
+      status: "PAUSED",
+      operationKind: "SYNC",
+      updatedAt: new Date().toISOString(),
+      files: {
+        "mods/mod2.jar": { bytes: v2Content.length, sha256: v2Sha },
+      },
+    })
+
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [
+        { path: "mods/mod1.jar", sha256: computeSha("v1"), downloadUrl: `${serverBaseUrl}/fast/mod1.jar`, sizeBytes: 2, policy: "NO_MODIFICABLE" },
+        { path: "mods/mod2.jar", sha256: v2Sha, downloadUrl: `${serverBaseUrl}/fast/mod2.jar`, sizeBytes: v2Content.length, policy: "NO_MODIFICABLE" },
+      ],
+      modpackVersion: "1.1.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.hasUpdate).toBe(true)
+    expect(fs.existsSync(stagingDir)).toBe(true)
+    expect(fs.existsSync(path.join(filesDir, stagedName))).toBe(true)
+  })
+
+  it("45. checkPlan: when operation is active (state !== IDLE), staging is not cleaned", async () => {
+    const modContent = "installed mod content"
+    const modSha = computeSha(modContent)
+
+    await saveInstalledManifest(instanceRoot, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [],
+      clientFiles: [{ path: "mods/example.jar", sha256: modSha, policy: "NO_MODIFICABLE" }],
+    })
+
+    const modDiskPath = path.join(instanceRoot, "mods", "example.jar")
+    await fsp.mkdir(path.dirname(modDiskPath), { recursive: true })
+    await fsp.writeFile(modDiskPath, modContent)
+
+    const { stagingDir, filesDir } = getStagingPaths(instanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+    await fsp.writeFile(path.join(filesDir, "active.tmp"), "active data")
+
+    const manager = new GameOperationManager({
+      coreEngine: {
+        checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({
+          isCoreInstalled: true,
+          hasExistingInstall: true,
+          resolvedVersionId: "1.21.1-neoforge-21.1.65",
+          issues: [],
+        }),
+      },
+      javaValidator: () => ({ valid: true, major: 21 }),
+    })
+
+    // Simulate active state
+    manager.state = "SYNCING"
+
+    const plan = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [
+        { path: "mods/example.jar", sha256: modSha, downloadUrl: `${serverBaseUrl}/fast/example.jar`, sizeBytes: modContent.length, policy: "NO_MODIFICABLE" },
+      ],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(plan.isFullyInstalled).toBe(true)
+    // Staging must NOT be cleaned while state is active
+    expect(fs.existsSync(stagingDir)).toBe(true)
+  })
 })
