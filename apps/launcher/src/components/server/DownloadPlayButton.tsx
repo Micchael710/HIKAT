@@ -172,6 +172,9 @@ export default function DownloadPlayButton({
     setProgress(0)
     setSpeed(0)
     setTimeRemainingMin(0)
+    if (currentManifest.hasExistingInstall || currentManifest.hasUpdate) {
+      setTotalBytes(currentManifest.totalDownloadBytes && currentManifest.totalDownloadBytes > 0 ? currentManifest.totalDownloadBytes : 0)
+    }
     setStatus("downloading")
 
     const syncingVersion = currentManifest.version
@@ -357,7 +360,7 @@ export default function DownloadPlayButton({
         clientFiles,
         directoryPolicies,
         totalSizeGB,
-        totalDownloadBytes: totalBytes,
+        totalDownloadBytes: isInstalled ? 0 : totalBytes,
         hasUpdate: isInstalled,
         installed: false,
         hasExistingInstall: isInstalled,
@@ -367,7 +370,7 @@ export default function DownloadPlayButton({
       }
 
       setManifest(freshManifest)
-      setTotalBytes(totalBytes)
+      setTotalBytes(isInstalled ? 0 : totalBytes)
 
       const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
       const isGameBusy = statusRef.current === "launching" || statusRef.current === "running"
@@ -958,7 +961,11 @@ export default function DownloadPlayButton({
 
   /* ── DOWNLOADING / PAUSED / INSTALLING / VERIFYING (Progress card) ── */
   const currentDownloadedBytes =
-    downloadedBytes > 0 ? downloadedBytes : (totalBytes * progress) / 100
+    downloadedBytes > 0
+      ? downloadedBytes
+      : totalBytes > 0
+        ? (totalBytes * progress) / 100
+        : 0
   const isUpdating = Boolean(manifest?.hasExistingInstall)
   const isInstalling = status === "installing"
   const isVerifying = status === "verifying"
@@ -1158,7 +1165,7 @@ export default function DownloadPlayButton({
                 fontSize: 13,
               }}
             >
-              {formatDownloadSize(currentDownloadedBytes)} / {formatDownloadSize(totalBytes)} · {speed > 0 ? `${speed.toFixed(1)} MB/s` : `-- MB/s`}
+              {formatDownloadSize(currentDownloadedBytes)} / {totalBytes > 0 ? formatDownloadSize(totalBytes) : "--"} · {speed > 0 ? `${speed.toFixed(1)} MB/s` : `-- MB/s`}
             </span>
           )}
 

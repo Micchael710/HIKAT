@@ -3149,6 +3149,93 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(btn?.textContent).toContain("ACTUALIZAR")
       expect(container.querySelector(".dl-progress-card")).toBeNull()
     })
+
+    it("26. WebSocket detects new release -> does NOT show total modpack size as update download size; first progress event sets real download size", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+      let releaseCallback: any = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      let progressCallback: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      // Published release 1.1.0 has full modpack size of ~300 MB (300 * 1024 * 1024 bytes)
+      const fullModpackBytes = 300 * 1024 * 1024
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/example2.jar",
+            sha256: "def",
+            sizeBytes: fullModpackBytes,
+            downloadUrl: "/game/2",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+        directoryPolicies: [],
+      } as any)
+
+      vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      const { container } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+
+      // WebSocket receives release 1.1.0 -> triggers auto update
+      await act(async () => {
+        await releaseCallback?.({ version: "1.1.0" })
+      })
+
+      // 1. Initial UI state must NOT display the 300 MB full modpack size as the update size
+      expect(container.textContent).not.toContain("300.0 MB")
+      expect(container.textContent).toContain("0.00 MB / -- · -- MB/s")
+
+      // 2. First progress event from Sync Engine arrives with the real delta download size (e.g. 15.5 MB)
+      const realUpdateBytes = 15.5 * 1024 * 1024
+      await act(async () => {
+        progressCallback?.({
+          progress: 10,
+          downloadedBytes: 1.55 * 1024 * 1024,
+          totalBytes: realUpdateBytes,
+          speedMBs: 3.2,
+          remainingMinutes: 1,
+        })
+      })
+
+      // 3. UI now reflects the actual download size
+      expect(container.textContent).toContain("1.55 MB / 15.50 MB · 3.2 MB/s")
+    })
   })
 })
 
