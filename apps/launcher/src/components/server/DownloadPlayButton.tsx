@@ -141,14 +141,16 @@ export default function DownloadPlayButton({
 
   const markSyncedVersionInstalled = useCallback((syncingVersion: string) => {
     setManifest((current) => {
-      if (!current || current.version !== syncingVersion) {
+      if (!current) {
         return current
       }
 
+      const isCurrentVersion = current.version === syncingVersion
+
       return {
         ...current,
-        installed: true,
-        hasUpdate: false,
+        installed: isCurrentVersion,
+        hasUpdate: !isCurrentVersion,
         hasExistingInstall: true,
         installedModpackVersion: syncingVersion,
         hasIntegrityIssue: false,
@@ -194,11 +196,36 @@ export default function DownloadPlayButton({
           gameService.setGameInstalled(true)
           markSyncedVersionInstalled(syncingVersion)
 
-          if (
+          const hasNewerRelease = Boolean(
             latestManifestVersionRef.current &&
             latestManifestVersionRef.current !== syncingVersion
-          ) {
-            setStatus("update")
+          )
+          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+          const currentLatestManifest = manifestRef.current
+          const isGameBusy = statusRef.current === "launching" || statusRef.current === "running"
+
+          if (hasNewerRelease) {
+            if (
+              autoUpdatesEnabled &&
+              currentLatestManifest &&
+              currentLatestManifest.version === latestManifestVersionRef.current &&
+              currentLatestManifest.clientFiles &&
+              currentLatestManifest.clientFiles.length > 0 &&
+              !isGameBusy
+            ) {
+              showToast(t("playButton.syncSuccess"), "success")
+              const nextManifest: GameManifest = {
+                ...currentLatestManifest,
+                installedModpackVersion: syncingVersion,
+                hasUpdate: true,
+                hasExistingInstall: true,
+              }
+              setManifest(nextManifest)
+              triggerSync(nextManifest)
+              return
+            } else {
+              setStatus("update")
+            }
           } else {
             setStatus("play")
           }

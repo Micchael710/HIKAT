@@ -22,7 +22,6 @@ describe("Launcher SettingsView Suite (Main-Authoritative Settings & Safe Persis
       setStartWithSystem: vi.fn().mockResolvedValue(false),
       getMinimizeToTray: vi.fn().mockResolvedValue(false),
       setMinimizeToTray: vi.fn().mockResolvedValue(true),
-      setAutoUpdates: vi.fn(),
       getDedicatedGpu: vi.fn().mockResolvedValue(false),
       setDedicatedGpu: vi.fn().mockResolvedValue(true),
       getRamAllocation: vi.fn().mockResolvedValue(10),
@@ -66,7 +65,7 @@ describe("Launcher SettingsView Suite (Main-Authoritative Settings & Safe Persis
     expect(mockElectronAPI.getRamAllocation).toHaveBeenCalled()
   })
 
-  it("2. Auto updates toggle renders functional LauncherToggle and persists to localStorage and IPC", async () => {
+  it("2. Auto updates toggle renders functional LauncherToggle and persists to localStorage only (without IPC)", async () => {
     const container = await renderComponent(
       <SettingsView theme="dark" setTheme={vi.fn()} />,
     )
@@ -91,7 +90,6 @@ describe("Launcher SettingsView Suite (Main-Authoritative Settings & Safe Persis
     })
 
     expect(localStorage.getItem("hikat_auto_updates")).toBe("false")
-    expect(mockElectronAPI.setAutoUpdates).toHaveBeenCalledWith(false)
   })
 
   it("3. Completely removes notifications row from General tab", async () => {

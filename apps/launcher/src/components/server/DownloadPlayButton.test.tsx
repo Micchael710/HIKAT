@@ -2928,6 +2928,196 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
       expect(startSyncSpy).toHaveBeenCalledTimes(1)
     })
+
+    it("24. Release 1.2 arrives while 1.1 is syncing -> does NOT start 1.2 immediately; upon 1.1 completion with Auto Updates ON -> starts 1.2 automatically", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+      let releaseCallback: any = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let resolveSync1_1: any = null
+      let resolveSync1_2: any = null
+      let syncCallCount = 0
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => {
+          syncCallCount++
+          if (syncCallCount === 1) {
+            return new Promise((resolve) => {
+              resolveSync1_1 = resolve
+            })
+          } else {
+            return new Promise((resolve) => {
+              resolveSync1_2 = resolve
+            })
+          }
+        }
+      )
+
+      const { container } = await mountButton()
+
+      // 1. Sync for 1.1 starts automatically on mount
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(startSyncSpy).toHaveBeenLastCalledWith(
+        expect.any(Array),
+        "1.1.0",
+        "1.21.1",
+        "NEOFORGE",
+        undefined,
+        "21.1.65",
+        false,
+      )
+
+      // 2. Release 1.2 is published while 1.1 is still syncing
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.2.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/example2.jar",
+            sha256: "def",
+            sizeBytes: 2048,
+            downloadUrl: "/game/2",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+        directoryPolicies: [],
+      } as any)
+
+      await act(async () => {
+        await releaseCallback?.({ version: "1.2.0" })
+      })
+
+      // Must NOT start 1.2 while 1.1 is in flight
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+
+      // 3. 1.1 completes successfully
+      await act(async () => {
+        resolveSync1_1?.({ success: true })
+      })
+
+      // 4. Automatically chains and starts 1.2
+      expect(startSyncSpy).toHaveBeenCalledTimes(2)
+      expect(startSyncSpy).toHaveBeenLastCalledWith(
+        expect.any(Array),
+        "1.2.0",
+        "1.21.1",
+        "NEOFORGE",
+        null,
+        "21.1.65",
+        false,
+        [],
+      )
+      const card = container.querySelector(".dl-progress-card")
+      expect(card).not.toBeNull()
+      expect(card?.textContent).toContain("ACTUALIZANDO")
+    })
+
+    it("25. Release 1.2 arrives while 1.1 is syncing; upon 1.1 completion with Auto Updates OFF -> remains in manual ACTUALIZAR state", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+      let releaseCallback: any = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let resolveSync1_1: any = null
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSync1_1 = resolve
+          })
+      )
+
+      const { container } = await mountButton()
+
+      // 1. Sync for 1.1 starts automatically on mount
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+
+      // 2. Release 1.2 arrives
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.2.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        clientFiles: [
+          {
+            path: "mods/example2.jar",
+            sha256: "def",
+            sizeBytes: 2048,
+            downloadUrl: "/game/2",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+        directoryPolicies: [],
+      } as any)
+
+      await act(async () => {
+        await releaseCallback?.({ version: "1.2.0" })
+      })
+
+      // 3. User disables auto-updates while 1.1 was syncing
+      localStorage.setItem("hikat_auto_updates", "false")
+
+      // 4. 1.1 completes successfully
+      await act(async () => {
+        resolveSync1_1?.({ success: true })
+      })
+
+      // Must NOT start 1.2 automatically; leaves button in ACTUALIZAR
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      const btn = container.querySelector("button")
+      expect(btn?.textContent).toContain("ACTUALIZAR")
+      expect(container.querySelector(".dl-progress-card")).toBeNull()
+    })
   })
 })
 

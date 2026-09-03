@@ -154,7 +154,6 @@ export default function SettingsView({
   const setAutoUpdates = (v: boolean) => {
     setAutoUpdatesState(v)
     setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, v)
-    window.electronAPI?.setAutoUpdates?.(v)
   }
 
   const setDedicatedGPU = (v: boolean) => {

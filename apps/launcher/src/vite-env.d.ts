@@ -87,8 +87,6 @@ interface ElectronAPI {
   setMinimizeToTray?: (enabled: boolean) => Promise<boolean> | void
   setDedicatedGpu?: (enabled: boolean) => Promise<boolean> | void
   setRamAllocation?: (ramGB: number) => void
-  setAutoUpdates?: (enabled: boolean) => void
-  setNotifications?: (enabled: boolean) => void
   openExternal?: (url: string) => void
 
   checkSyncPlan?: (payload: {
