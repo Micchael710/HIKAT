@@ -13,7 +13,11 @@ import {
   GameButtonState,
   GameManifest,
 } from "../../services/gameService"
-import { STORAGE_KEYS, getStoredBoolean } from "../../utils/settingsStorage"
+import {
+  STORAGE_KEYS,
+  SETTINGS_CHANGED_EVENT,
+  getStoredBoolean,
+} from "../../utils/settingsStorage"
 import LiveToast from "../common/LiveToast"
 
 interface DownloadPlayButtonProps {
@@ -436,6 +440,63 @@ export default function DownloadPlayButton({
       unsubscribe()
     }
   }, [manifest, triggerSync])
+
+  // Listen to renderer settings changes (e.g. AUTO_UPDATES toggled ON/OFF in SettingsView)
+  useEffect(() => {
+    const handleSettingsChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key: string; value: any }>
+      if (!customEvent.detail || customEvent.detail.key !== STORAGE_KEYS.AUTO_UPDATES) {
+        return
+      }
+
+      const isEnabled = Boolean(customEvent.detail.value)
+      if (!isEnabled) {
+        // Toggling OFF does not cancel or pause ongoing downloads/installations
+        return
+      }
+
+      const currentManifest = manifestRef.current
+      if (!currentManifest) return
+
+      const isGameBusy =
+        statusRef.current === "launching" || statusRef.current === "running"
+      const hasUpdate = Boolean(
+        currentManifest.installedModpackVersion &&
+        currentManifest.installedModpackVersion !== currentManifest.version
+      )
+
+      if (isGameBusy) {
+        if (hasUpdate) {
+          pendingAutoUpdateRef.current = true
+        }
+        return
+      }
+
+      const isOperationActive =
+        statusRef.current === "downloading" ||
+        statusRef.current === "installing" ||
+        statusRef.current === "verifying" ||
+        statusRef.current === "paused" ||
+        isStartingSyncRef.current
+
+      if (isOperationActive) {
+        return
+      }
+
+      if (
+        hasUpdate &&
+        currentManifest.clientFiles &&
+        currentManifest.clientFiles.length > 0
+      ) {
+        triggerSync(currentManifest)
+      }
+    }
+
+    window.addEventListener(SETTINGS_CHANGED_EVENT, handleSettingsChange)
+    return () => {
+      window.removeEventListener(SETTINGS_CHANGED_EVENT, handleSettingsChange)
+    }
+  }, [triggerSync])
 
   // Listen to game launch lifecycle status from Electron Main
   useEffect(() => {

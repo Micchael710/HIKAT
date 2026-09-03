@@ -8,6 +8,8 @@ export const STORAGE_KEYS = {
   DEDICATED_GPU: "hikat_dedicated_gpu",
 } as const
 
+export const SETTINGS_CHANGED_EVENT = "hikat:settings-changed"
+
 export function getStoredBoolean(key: string, defaultValue: boolean): boolean {
   if (typeof window === "undefined") return defaultValue
   try {
@@ -23,6 +25,11 @@ export function setStoredBoolean(key: string, value: boolean): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(key, String(value))
+    window.dispatchEvent(
+      new CustomEvent(SETTINGS_CHANGED_EVENT, {
+        detail: { key, value },
+      }),
+    )
   } catch (_) {}
 }
 

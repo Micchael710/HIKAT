@@ -11,6 +11,7 @@ import DownloadPlayButton, {
 } from "./DownloadPlayButton"
 import { LanguageProvider } from "../../context/LanguageContext"
 import { gameService, GameManifest } from "../../services/gameService"
+import { STORAGE_KEYS, setStoredBoolean } from "../../utils/settingsStorage"
 
 describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical State Suite", () => {
   let unmountCurrent: (() => void) | null = null
@@ -3822,6 +3823,235 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(card).not.toBeNull()
       expect(card?.textContent).toContain("PAUSADO")
       expect(card?.textContent).toContain("0%")
+    })
+
+    it("37. Update available + toggling AUTO_UPDATES OFF -> ON triggers auto-update immediately", async () => {
+      localStorage.setItem("hikat_auto_updates", "false")
+
+      const updateManifest: GameManifest = {
+        version: "1.2.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        totalDownloadBytes: 4096,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 4096,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(updateManifest)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      expect(container.querySelector("button")?.textContent).toContain("ACTUALIZAR")
+
+      // Toggle AUTO_UPDATES from OFF -> ON
+      await act(async () => {
+        setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+      })
+
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        updateManifest.clientFiles,
+        "1.2.0",
+        "1.21.1",
+        "NEOFORGE",
+        undefined,
+        "21.1.65",
+        false,
+      )
+    })
+
+    it("38. Toggling AUTO_UPDATES ON -> OFF during an active download does NOT pause or cancel the operation", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+
+      const updateManifest: GameManifest = {
+        version: "1.2.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        totalDownloadBytes: 4096,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 4096,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(updateManifest)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+      const pauseSyncSpy = vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true } as any)
+      const cancelSyncSpy = vi.spyOn(gameService, "cancelSync").mockResolvedValue({ success: true } as any)
+
+      await mountButton()
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+
+      // Toggle AUTO_UPDATES from ON -> OFF
+      await act(async () => {
+        setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, false)
+      })
+
+      expect(pauseSyncSpy).not.toHaveBeenCalled()
+      expect(cancelSyncSpy).not.toHaveBeenCalled()
+    })
+
+    it("39. Activating AUTO_UPDATES ON without update available does nothing", async () => {
+      localStorage.setItem("hikat_auto_updates", "false")
+
+      const upToDateManifest: GameManifest = {
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        totalDownloadBytes: 0,
+        clientFiles: [],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(upToDateManifest)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+
+      // Toggle AUTO_UPDATES ON
+      await act(async () => {
+        setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+      })
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+    })
+
+    it("40. Activating AUTO_UPDATES ON while Minecraft is running/launching does NOT start download immediately, but defers until game exits", async () => {
+      let launchStatusCallback: any = null
+      window.electronAPI = {
+        ...window.electronAPI,
+        onLaunchStatus: vi.fn((cb: any) => {
+          launchStatusCallback = cb
+          return () => {}
+        }),
+        getLaunchStatus: vi.fn().mockResolvedValue({ status: "running" }),
+      } as any
+
+      localStorage.setItem("hikat_auto_updates", "false")
+
+      const updateManifest: GameManifest = {
+        version: "1.2.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        totalDownloadBytes: 4096,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 4096,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(updateManifest)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("EN EJECUCIÓN")
+
+      // Toggle AUTO_UPDATES ON while game is running
+      await act(async () => {
+        setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+      })
+
+      // Must NOT start sync immediately while running
+      expect(startSyncSpy).not.toHaveBeenCalled()
+
+      // Game closes -> transitions to idle -> triggers deferred auto-update
+      await act(async () => {
+        launchStatusCallback?.("idle")
+      })
+
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it("41. Activating AUTO_UPDATES ON while in PAUSED state does NOT start another sync", async () => {
+      localStorage.setItem("hikat_auto_updates", "false")
+
+      const pausedManifest: GameManifest = {
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        hasInterruptedDownload: true,
+        hasPausedSession: true,
+        stagedBytes: 1024,
+        totalDownloadBytes: 4096,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 4096,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(pausedManifest)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      expect(container.querySelector(".dl-progress-card")?.textContent).toContain("PAUSADO")
+
+      // Toggle AUTO_UPDATES ON
+      await act(async () => {
+        setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+      })
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      expect(container.querySelector(".dl-progress-card")?.textContent).toContain("PAUSADO")
     })
   })
 })
