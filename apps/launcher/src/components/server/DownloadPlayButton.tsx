@@ -756,7 +756,21 @@ export default function DownloadPlayButton({
 
   const handleVerifyInstallation = async () => {
     setIsMenuOpen(false)
-    if (isTransitioning || isStartingSyncRef.current || status === "installing" || status === "verifying") return
+    if (
+      isTransitioning ||
+      isStartingSyncRef.current ||
+      status === "installing" ||
+      status === "verifying" ||
+      status === "update" ||
+      manifest?.hasUpdate ||
+      Boolean(
+        manifest?.installedModpackVersion &&
+          manifest?.version &&
+          manifest.installedModpackVersion !== manifest.version,
+      )
+    ) {
+      return
+    }
     if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
       showToast(t("playButton.verifyError"), "error")
       return
@@ -942,8 +956,8 @@ export default function DownloadPlayButton({
           </span>
         </button>
 
-        {/* ── Quick Action Options Button (When Ready to Play) ── */}
-        {isPlay && (
+        {/* ── Quick Action Options Button (When Ready to Play or Update) ── */}
+        {(isPlay || isUpdate) && (
           <div ref={menuRef} style={{ position: "relative" }}>
             <button
               type="button"
@@ -1013,13 +1027,22 @@ export default function DownloadPlayButton({
                 {/* Option 1: Verificar instalación */}
                 <button
                   type="button"
+                  disabled={isUpdate}
                   onClick={handleVerifyInstallation}
                   className="profile-menu-item"
                   style={{
                     padding: "9px 12px",
                     fontSize: 14.5,
                     fontWeight: 700,
-                    color: isDark ? "rgba(255,255,255,0.75)" : "#111822",
+                    color: isUpdate
+                      ? isDark
+                        ? "rgba(255,255,255,0.3)"
+                        : "rgba(17,24,34,0.35)"
+                      : isDark
+                        ? "rgba(255,255,255,0.75)"
+                        : "#111822",
+                    cursor: isUpdate ? "not-allowed" : "pointer",
+                    opacity: isUpdate ? 0.5 : 1,
                     textAlign: "left",
                     width: "100%",
                   }}

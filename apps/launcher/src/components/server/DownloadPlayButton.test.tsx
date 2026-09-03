@@ -4054,6 +4054,356 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(container.querySelector(".dl-progress-card")?.textContent).toContain("PAUSADO")
     })
   })
+
+  /* ─────────────────────────────────────────────────────────────
+   * Shard 8L: Options Menu on Play and Update States
+   * ───────────────────────────────────────────────────────────── */
+  describe("Shard 8L: Options Menu on Play and Update States", () => {
+    it("1. JUGAR state renders options button with Verify enabled and Uninstall enabled", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/a.jar",
+            sha256: "a",
+            sizeBytes: 100,
+            downloadUrl: "/a",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+
+      const buttons = container.querySelectorAll("button")
+      expect(buttons.length).toBe(2)
+      const optionsBtn = buttons[1]
+
+      await act(async () => {
+        optionsBtn.click()
+      })
+
+      const menuItems = Array.from(container.querySelectorAll<HTMLButtonElement>(".profile-menu-item"))
+      expect(menuItems.length).toBe(2)
+
+      const verifyItem = menuItems.find((btn) => btn.textContent?.includes("Verificar"))!
+      const uninstallItem = menuItems.find((btn) => btn.textContent?.includes("Desinstalar"))!
+
+      expect(verifyItem).toBeDefined()
+      expect(verifyItem.disabled).toBe(false)
+      expect(uninstallItem).toBeDefined()
+      expect(uninstallItem.disabled).toBe(false)
+    })
+
+    it("2. ACTUALIZAR state renders options button with Verify disabled and Uninstall enabled", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/a.jar",
+            sha256: "a",
+            sizeBytes: 100,
+            downloadUrl: "/a",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("ACTUALIZAR")
+
+      const buttons = container.querySelectorAll("button")
+      expect(buttons.length).toBe(2)
+      const optionsBtn = buttons[1]
+
+      await act(async () => {
+        optionsBtn.click()
+      })
+
+      const menuItems = Array.from(container.querySelectorAll<HTMLButtonElement>(".profile-menu-item"))
+      expect(menuItems.length).toBe(2)
+
+      const verifyItem = menuItems.find((btn) => btn.textContent?.includes("Verificar"))!
+      const uninstallItem = menuItems.find((btn) => btn.textContent?.includes("Desinstalar"))!
+
+      expect(verifyItem).toBeDefined()
+      expect(verifyItem.disabled).toBe(true)
+      expect(uninstallItem).toBeDefined()
+      expect(uninstallItem.disabled).toBe(false)
+    })
+
+    it("3. Menu open in JUGAR state remains open and Verify becomes disabled when new release arrives", async () => {
+      let releaseCallback: any
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/a.jar",
+            sha256: "a",
+            sizeBytes: 100,
+            downloadUrl: "/a",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        mandatory: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/b.jar",
+            sha256: "b",
+            sizeBytes: 200,
+            downloadUrl: "/b",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+
+      // Open options menu
+      const optionsBtn = container.querySelectorAll("button")[1]
+      await act(async () => {
+        optionsBtn.click()
+      })
+
+      let menuItems = Array.from(container.querySelectorAll<HTMLButtonElement>(".profile-menu-item"))
+      expect(menuItems.length).toBe(2)
+      let verifyItem = menuItems.find((btn) => btn.textContent?.includes("Verificar"))!
+      expect(verifyItem.disabled).toBe(false)
+
+      // WebSocket publishes new release 1.1.0
+      await act(async () => {
+        await releaseCallback?.({ type: "RELEASE_ACTIVATED", version: "1.1.0" })
+      })
+
+      // Main button is now ACTUALIZAR
+      expect(container.querySelector("button")?.textContent).toContain("ACTUALIZAR")
+
+      // Menu is STILL open
+      menuItems = Array.from(container.querySelectorAll<HTMLButtonElement>(".profile-menu-item"))
+      expect(menuItems.length).toBe(2)
+
+      verifyItem = menuItems.find((btn) => btn.textContent?.includes("Verificar"))!
+      const uninstallItem = menuItems.find((btn) => btn.textContent?.includes("Desinstalar"))!
+      expect(verifyItem.disabled).toBe(true)
+      expect(uninstallItem.disabled).toBe(false)
+    })
+
+    it("4. When update disappears and returns to JUGAR, Verify re-enables automatically", async () => {
+      let releaseCallback: any
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/a.jar",
+            sha256: "a",
+            sizeBytes: 100,
+            downloadUrl: "/a",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("ACTUALIZAR")
+
+      // Open menu
+      const optionsBtn = container.querySelectorAll("button")[1]
+      await act(async () => {
+        optionsBtn.click()
+      })
+
+      let menuItems = Array.from(container.querySelectorAll<HTMLButtonElement>(".profile-menu-item"))
+      let verifyItem = menuItems.find((btn) => btn.textContent?.includes("Verificar"))!
+      expect(verifyItem.disabled).toBe(true)
+
+      // Active release rolls back or matches installed 1.0.0
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        mandatory: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/a.jar",
+            sha256: "a",
+            sizeBytes: 100,
+            downloadUrl: "/a",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      await act(async () => {
+        await releaseCallback?.({ type: "RELEASE_ACTIVATED", version: "1.0.0" })
+      })
+
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+      menuItems = Array.from(container.querySelectorAll<HTMLButtonElement>(".profile-menu-item"))
+      verifyItem = menuItems.find((btn) => btn.textContent?.includes("Verificar"))!
+      expect(verifyItem.disabled).toBe(false)
+    })
+
+    it("5. Attempting to execute Verify while update is pending does not call startSync", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/a.jar",
+            sha256: "a",
+            sizeBytes: 100,
+            downloadUrl: "/a",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const optionsBtn = container.querySelectorAll("button")[1]
+      await act(async () => {
+        optionsBtn.click()
+      })
+
+      const verifyItem = Array.from(container.querySelectorAll<HTMLButtonElement>(".profile-menu-item"))
+        .find((btn) => btn.textContent?.includes("Verificar"))!
+
+      await act(async () => {
+        verifyItem.click()
+      })
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+    })
+
+    it("6. Uninstall from ACTUALIZAR state still works and calls uninstallGame", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/a.jar",
+            sha256: "a",
+            sizeBytes: 100,
+            downloadUrl: "/a",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { container } = await mountButton()
+      const optionsBtn = container.querySelectorAll("button")[1]
+      await act(async () => {
+        optionsBtn.click()
+      })
+
+      const uninstallItem = Array.from(container.querySelectorAll<HTMLButtonElement>(".profile-menu-item"))
+        .find((btn) => btn.textContent?.includes("Desinstalar"))!
+
+      await act(async () => {
+        uninstallItem.click()
+      })
+
+      expect(uninstallSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it("7. Options menu button is hidden during active states and fresh download", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasExistingInstall: false,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/a.jar",
+            sha256: "a",
+            sizeBytes: 100,
+            downloadUrl: "/a",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      const { container, unmount } = await mountButton()
+      expect(container.querySelector("button")?.textContent).toContain("DESCARGAR")
+      expect(container.querySelectorAll("button").length).toBe(1)
+      unmount()
+    })
+  })
 })
 
 
