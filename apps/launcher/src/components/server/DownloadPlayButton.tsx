@@ -288,15 +288,14 @@ export default function DownloadPlayButton({
 
         const total = res.totalDownloadBytes || manifestTotalBytes(res.clientFiles)
         setTotalBytes(total)
-        if (
-          res.hasInterruptedDownload &&
-          res.stagedBytes &&
-          res.stagedBytes > 0 &&
-          !res.installed
-        ) {
-          setDownloadedBytes(res.stagedBytes)
+        const isPausedSession = Boolean(
+          (res.hasPausedSession || res.hasInterruptedDownload) && !res.installed
+        )
+        if (isPausedSession) {
+          const staged = res.stagedBytes || 0
+          setDownloadedBytes(staged)
           const pct =
-            total > 0 ? Math.min(100, Math.round((res.stagedBytes / total) * 100)) : 0
+            total > 0 && staged > 0 ? Math.min(100, Math.round((staged / total) * 100)) : 0
           setProgress(pct)
           setStatus("paused")
         } else {

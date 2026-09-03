@@ -221,6 +221,7 @@ export const gameService = {
       let isInstalled = false
       let hasExistingInstall = false
       let hasInterruptedDownload = false
+      let hasPausedSession = false
       let hasIntegrityIssue = false
       let installedModpackVersion: string | null = null
       let stagedBytes = 0
@@ -246,6 +247,7 @@ export const gameService = {
             hasExistingInstall = Boolean(planCheck.hasExistingInstall)
             isInstalled = Boolean(planCheck.isFullyInstalled)
             hasInterruptedDownload = Boolean(planCheck.hasInterruptedDownload)
+            hasPausedSession = Boolean(planCheck.hasPausedSession)
             stagedBytes = planCheck.stagedBytes || 0
             if (Number.isFinite(planCheck.totalDownloadBytes) && planCheck.totalDownloadBytes > 0) {
               totalDownloadBytes = planCheck.totalDownloadBytes
@@ -272,6 +274,7 @@ export const gameService = {
         installed: isInstalled,
         hasExistingInstall,
         hasInterruptedDownload,
+        hasPausedSession,
         stagedBytes,
         totalDownloadBytes,
       }
@@ -292,6 +295,10 @@ export const gameService = {
           let offlineInstalledVersion: string | null = null
           let offlineHasUpdate = false
           let offlineHasExistingInstall = false
+          let offlineHasInterruptedDownload = false
+          let offlineHasPausedSession = false
+          let offlineStagedBytes = 0
+          let offlineTotalDownloadBytes = 0
 
           if (window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
             try {
@@ -312,6 +319,10 @@ export const gameService = {
                 offlineIntegrityIssue = Boolean(planCheck.hasIntegrityIssue)
                 offlineHasExistingInstall = Boolean(planCheck.hasExistingInstall)
                 offlineInstalled = Boolean(planCheck.isFullyInstalled)
+                offlineHasInterruptedDownload = Boolean(planCheck.hasInterruptedDownload)
+                offlineHasPausedSession = Boolean(planCheck.hasPausedSession)
+                offlineStagedBytes = planCheck.stagedBytes || 0
+                offlineTotalDownloadBytes = planCheck.totalDownloadBytes || 0
               }
             } catch (_) {}
           } else {
@@ -334,6 +345,10 @@ export const gameService = {
             directoryPolicies: cachedDirectoryPolicies,
             installed: offlineInstalled,
             hasExistingInstall: offlineHasExistingInstall,
+            hasInterruptedDownload: offlineHasInterruptedDownload,
+            hasPausedSession: offlineHasPausedSession,
+            stagedBytes: offlineStagedBytes,
+            totalDownloadBytes: offlineTotalDownloadBytes,
           }
         }
       }

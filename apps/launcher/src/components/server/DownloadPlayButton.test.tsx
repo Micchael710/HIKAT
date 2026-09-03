@@ -3782,6 +3782,47 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(btn?.textContent).toContain("ACTUALIZAR")
       expect(container.querySelector(".dl-progress-card")).toBeNull()
     })
+
+    it("36. Same release with hasPausedSession=true and stagedBytes=0 -> shows PAUSADO card with 0% and does not trigger auto-sync even if auto-updates is ON", async () => {
+      localStorage.setItem("hikat_auto_updates", "true")
+
+      const pausedManifestWithZeroBytes: GameManifest = {
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: true,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        hasInterruptedDownload: false,
+        hasPausedSession: true,
+        stagedBytes: 0,
+        totalDownloadBytes: 4096,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 4096,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      }
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(pausedManifestWithZeroBytes)
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      const card = container.querySelector(".dl-progress-card")
+      expect(card).not.toBeNull()
+      expect(card?.textContent).toContain("PAUSADO")
+      expect(card?.textContent).toContain("0%")
+    })
   })
 })
 
