@@ -2392,6 +2392,154 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         resolveSyncPromise?.({ success: true })
       })
     })
+
+    it("16. Previous operation at 100% -> clicking DESCARGAR/ACTUALIZAR starts visual progress cleanly at 0%", async () => {
+      let downloadProgressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        downloadProgressCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: null,
+        hasExistingInstall: false,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let resolveSyncPromise: any = null
+      vi.spyOn(gameService, "startSync").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSyncPromise = resolve
+          })
+      )
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("DESCARGAR")
+
+      // Click DESCARGAR
+      await act(async () => {
+        btn.click()
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card).not.toBeNull()
+      // Initial progress must be 0% immediately upon click
+      expect(card.textContent).toContain("0%")
+
+      // Complete sync with 100%
+      await act(async () => {
+        downloadProgressCb?.({
+          phase: "DOWNLOADING",
+          progress: 100,
+        })
+      })
+      expect(card.textContent).toContain("100%")
+
+      await act(async () => {
+        resolveSyncPromise?.({ success: true })
+      })
+    })
+
+    it("17. Resuming a paused download preserves current progress (does NOT reset to 0%)", async () => {
+      let downloadProgressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        downloadProgressCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: null,
+        hasExistingInstall: false,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let syncPromiseResolve: any = null
+      vi.spyOn(gameService, "startSync").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            syncPromiseResolve = resolve
+          })
+      )
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+
+      // 1. Start download
+      await act(async () => {
+        btn.click()
+      })
+
+      // 2. Download reaches 45%
+      await act(async () => {
+        downloadProgressCb?.({
+          phase: "DOWNLOADING",
+          progress: 45,
+          downloadedBytes: 450,
+          totalBytes: 1000,
+          speedMBs: 5,
+        })
+      })
+
+      let card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card.textContent).toContain("45%")
+
+      // 3. Pause
+      vi.spyOn(gameService, "pauseSync").mockResolvedValue(true)
+      await act(async () => {
+        card.click()
+      })
+      await act(async () => {
+        syncPromiseResolve?.({ paused: true })
+      })
+
+      // Card is paused at 45%
+      card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card.textContent).toContain("45%")
+
+      // 4. Resume
+      await act(async () => {
+        card.click()
+      })
+
+      // Card must still preserve 45% upon resume
+      card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card.textContent).toContain("45%")
+      expect(card.textContent).not.toContain("0%")
+    })
   })
 })
 

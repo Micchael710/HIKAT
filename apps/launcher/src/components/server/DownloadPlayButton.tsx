@@ -463,6 +463,9 @@ export default function DownloadPlayButton({
         return
       }
       setDownloadedBytes(0)
+      setProgress(0)
+      setSpeed(0)
+      setTimeRemainingMin(0)
       isStartingSyncRef.current = true
       setStatus("downloading")
 
@@ -557,6 +560,9 @@ export default function DownloadPlayButton({
     }
     showToast(t("playButton.verifying"), "info")
     setDownloadedBytes(0)
+    setProgress(0)
+    setSpeed(0)
+    setTimeRemainingMin(0)
     isStartingSyncRef.current = true
     setStatus("verifying")
 
