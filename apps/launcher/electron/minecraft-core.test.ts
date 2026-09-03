@@ -1179,4 +1179,169 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(emittedEvents.length).toBeGreaterThan(0)
     expect(emittedEvents.every((e) => e.phase === "VERIFYING")).toBe(true)
   })
+
+  it("43. DOWNLOADING 100 -> INSTALLING resets progress for the new phase (allows starting from 0/30%)", async () => {
+    const emittedProgressByPhase: { phase: string; progress: number }[] = []
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({
+        installed: false,
+        resolvedVersionId: null,
+      }),
+      coreInstaller: async ({ onProgress }: any) => {
+        onProgress?.({ phase: "INSTALLING", progress: 40 })
+        onProgress?.({ phase: "INSTALLING", progress: 80 })
+        return { success: true }
+      },
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "fresh-content")
+    const hash = crypto.createHash("sha256").update("fresh-content").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 13,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      onProgress: (data: any) => {
+        if (typeof data?.progress === "number" && data?.phase) {
+          emittedProgressByPhase.push({ phase: data.phase, progress: data.progress })
+        }
+      },
+    }
+
+    const result = await manager.startSync(payload)
+    expect(result.success).toBe(true)
+
+    const installingEvents = emittedProgressByPhase.filter((e) => e.phase === "INSTALLING")
+    expect(installingEvents.length).toBeGreaterThan(0)
+    // First installing event starts below 100 (e.g. 0 or 30) instead of being stuck at 100
+    expect(installingEvents[0].progress).toBeLessThanOrEqual(30)
+    // Ends at 100
+    expect(installingEvents[installingEvents.length - 1].progress).toBe(100)
+  })
+
+  it("44. Within INSTALLING, progress is strictly monotonic (70 -> 50 stays at 70) and finishes at 100", async () => {
+    const emittedInstallingProgress: number[] = []
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({
+        installed: false,
+        resolvedVersionId: null,
+      }),
+      coreInstaller: async ({ onProgress }: any) => {
+        onProgress?.({ phase: "INSTALLING", progress: 50 })
+        onProgress?.({ phase: "INSTALLING", progress: 70 })
+        // Underlying installer attempts to drop to 50
+        onProgress?.({ phase: "INSTALLING", progress: 50 })
+        onProgress?.({ phase: "INSTALLING", progress: 90 })
+        return { success: true }
+      },
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "fresh-content")
+    const hash = crypto.createHash("sha256").update("fresh-content").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 13,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      onProgress: (data: any) => {
+        if (data?.phase === "INSTALLING" && typeof data?.progress === "number") {
+          emittedInstallingProgress.push(data.progress)
+        }
+      },
+    }
+
+    const result = await manager.startSync(payload)
+    expect(result.success).toBe(true)
+
+    // Verify monotonicity within INSTALLING
+    for (let i = 1; i < emittedInstallingProgress.length; i++) {
+      expect(emittedInstallingProgress[i]).toBeGreaterThanOrEqual(emittedInstallingProgress[i - 1])
+    }
+    expect(emittedInstallingProgress).toContain(70)
+    expect(emittedInstallingProgress).toContain(90)
+    expect(emittedInstallingProgress[emittedInstallingProgress.length - 1]).toBe(100)
+  })
+
+  it("45. VERIFYING phase has independent monotonic progress without being blocked", async () => {
+    const emittedVerifyingProgress: number[] = []
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({
+        installed: true,
+        resolvedVersionId: "1.21.1-neoforge-21.1.65",
+      }),
+      coreInstaller: async () => ({ success: true }),
+      javaResolver: () => ({ cliJavaPath: "java" }),
+      javaValidator: () => ({ valid: true }),
+    })
+
+    const sampleFile = path.join(instanceRoot, "mods", "mod.jar")
+    await fsp.mkdir(path.dirname(sampleFile), { recursive: true })
+    await fsp.writeFile(sampleFile, "fresh-content")
+    const hash = crypto.createHash("sha256").update("fresh-content").digest("hex")
+
+    const payload = {
+      instanceRoot,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      isVerify: true,
+      clientFiles: [
+        {
+          path: "mods/mod.jar",
+          sha256: hash,
+          sizeBytes: 13,
+          downloadUrl: "/game/download/1",
+          policy: "NO_MODIFICABLE",
+        },
+      ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      onProgress: (data: any) => {
+        if (data?.phase === "VERIFYING" && typeof data?.progress === "number") {
+          emittedVerifyingProgress.push(data.progress)
+        }
+      },
+    }
+
+    const result = await manager.startSync(payload)
+    expect(result.success).toBe(true)
+
+    for (let i = 1; i < emittedVerifyingProgress.length; i++) {
+      expect(emittedVerifyingProgress[i]).toBeGreaterThanOrEqual(emittedVerifyingProgress[i - 1])
+    }
+    expect(emittedVerifyingProgress[0]).toBeLessThanOrEqual(35)
+    expect(emittedVerifyingProgress[emittedVerifyingProgress.length - 1]).toBe(100)
+  })
 })

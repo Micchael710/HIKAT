@@ -260,14 +260,21 @@ class GameOperationManager {
     }
 
     const runOperation = async () => {
+      let currentPhaseName = null
       let maxReportedProgress = 0
       const safeProgress = (data) => {
         if (typeof onProgress !== "function" || !data) return
+        const phase = data.phase || (isVerify ? "VERIFYING" : "DOWNLOADING")
+        if (phase !== currentPhaseName) {
+          currentPhaseName = phase
+          maxReportedProgress = 0
+        }
         const rawProgress = typeof data.progress === "number" ? data.progress : 0
         const progress = Math.max(maxReportedProgress, Math.min(100, Math.round(rawProgress)))
         maxReportedProgress = progress
         onProgress({
           ...data,
+          phase,
           progress,
         })
       }
