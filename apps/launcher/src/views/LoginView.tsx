@@ -121,7 +121,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         if (res.success) {
           setSuccessNotice(t("auth.emailVerifiedSuccess"))
         } else {
-          setErrorMessage(res.error || t("auth.invalidVerificationToken"))
+          setErrorMessage(t("auth.invalidVerificationToken"))
         }
         return
       }
@@ -348,11 +348,11 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         setTab("login")
         setSuccessNotice(t("auth.passwordResetSuccess"))
       } else {
-        setErrorMessage(res.error || t("auth.invalidResetToken"))
+        setErrorMessage(t("auth.invalidResetToken"))
       }
-    } catch (err: any) {
+    } catch {
       setIsResettingPassword(false)
-      setErrorMessage(err.message || t("auth.invalidResetToken"))
+      setErrorMessage(t("auth.invalidResetToken"))
     }
   }
 

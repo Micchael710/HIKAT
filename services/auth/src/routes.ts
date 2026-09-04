@@ -842,6 +842,9 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     if (errorString === AuthErrorCode.UNAUTHORIZED) {
       return errorResponse(AuthErrorCode.UNAUTHORIZED, "Unauthorized or session revoked", 401)
     }
+    if (errorString === "EMAIL_SERVICE_ERROR") {
+      return errorResponse("EMAIL_SERVICE_ERROR", "Unable to send verification email. Please try again later.", 500)
+    }
     if (errorString === AuthErrorCode.RATE_LIMITED) {
       return errorResponse(AuthErrorCode.RATE_LIMITED, "Rate limit exceeded. Please try again later.", 429)
     }

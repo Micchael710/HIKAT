@@ -620,7 +620,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
 
     vi.spyOn(authService, "verifyEmail").mockResolvedValue({
       success: false,
-      error: "El token de verificación es inválido o ha expirado",
+      error: "INVALID_TOKEN",
     })
 
     const container = await renderComponent(
@@ -633,7 +633,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       callbackTrigger!("hikat://auth/verify-email?token=invalid-token")
     })
 
-    expect(container.textContent).toContain("El token de verificación es inválido o ha expirado")
+    expect(container.textContent).toContain("El enlace de verificación es inválido o ha expirado.")
     expect(onLogin).not.toHaveBeenCalled()
   })
 
@@ -786,5 +786,82 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
 
     expect(container.textContent).toContain("Debes verificar tu correo electrónico antes de iniciar sesión.")
     expect(onLogin).not.toHaveBeenCalled()
+  })
+
+  it("25. Deep link verify-email maps internal technical error codes (INVALID_TOKEN, TOKEN_EXPIRED) to localized string without exposing raw codes", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+    }
+
+    vi.spyOn(authService, "verifyEmail").mockResolvedValue({
+      success: false,
+      error: "TOKEN_EXPIRED",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      callbackTrigger!("hikat://auth/verify-email?token=expired-token-123")
+    })
+
+    expect(container.textContent).toContain("El enlace de verificación es inválido o ha expirado.")
+    expect(container.textContent).not.toContain("TOKEN_EXPIRED")
+    expect(container.textContent).not.toContain("INVALID_TOKEN")
+  })
+
+  it("26. Reset password form maps internal codes (TOKEN_REUSE_DETECTED) to localized string without exposing raw code", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+    }
+
+    vi.spyOn(authService, "resetPassword").mockResolvedValue({
+      success: false,
+      error: "TOKEN_REUSE_DETECTED",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      callbackTrigger!("hikat://auth/reset-password?token=reused-reset-token")
+    })
+
+    const passwordInputs = container.querySelectorAll("input[type='password']")
+    const newPassInput = passwordInputs[0] as HTMLInputElement
+    const confirmPassInput = passwordInputs[1] as HTMLInputElement
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Cambiar contraseña"),
+    )
+
+    await act(async () => {
+      changeInput(newPassInput, "brandNewPassword123")
+      changeInput(confirmPassInput, "brandNewPassword123")
+      submitBtn?.click()
+    })
+
+    expect(container.textContent).toContain("El enlace de restablecimiento es inválido o ha expirado.")
+    expect(container.textContent).not.toContain("TOKEN_REUSE_DETECTED")
+    expect(container.textContent).not.toContain("INVALID_TOKEN")
   })
 })

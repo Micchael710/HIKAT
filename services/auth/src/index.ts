@@ -25,7 +25,21 @@ export interface Env {
 }
 
 let keyManagerCache: JwtKeyManager | null = null
-const defaultEmailService: EmailService = new MockEmailService()
+
+export function createEmailServiceFromEnv(env: Env): EmailService {
+  if (env.RESEND_API_KEY) {
+    return new ResendEmailService(
+      env.RESEND_API_KEY,
+      env.EMAIL_FROM || "HiKAT <noreply@mail.hikat.org>",
+    )
+  }
+
+  if (env.ENVIRONMENT === "production") {
+    throw new Error("Missing RESEND_API_KEY in production environment")
+  }
+
+  return new MockEmailService()
+}
 
 export {
   createDatabase,
@@ -53,12 +67,7 @@ export default {
       keyManagerCache = await initializeKeyManager(env)
     }
 
-    const emailService: EmailService = env.RESEND_API_KEY
-      ? new ResendEmailService(
-          env.RESEND_API_KEY,
-          env.EMAIL_FROM || "HiKAT <noreply@mail.hikat.org>",
-        )
-      : defaultEmailService
+    const emailService: EmailService = createEmailServiceFromEnv(env)
 
     return handleRequest({
       request,

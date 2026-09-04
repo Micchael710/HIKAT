@@ -33,6 +33,7 @@ import {
   getJwksResponse,
 } from "./crypto/jwt"
 import { MockEmailService, ResendEmailService, renderHikatEmail } from "./services/email"
+import { createEmailServiceFromEnv } from "./index"
 import { checkRateLimit, clearInMemoryRateLimits } from "./services/rateLimiter"
 import {
   createSession,
@@ -1580,6 +1581,259 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         expect(err.message).toContain("Resend email delivery failed: Domain not verified")
         expect(err.message).not.toContain("re_super_secret_key_xyz")
       }
+    })
+  })
+
+  // ==========================================
+  // 14. EMAIL VERIFICATION & RESET HARDENING
+  // ==========================================
+  describe("Email Verification & Password Reset Hardening", () => {
+    it("token Base64URL with '--' and '_' is validated and processed without error", async () => {
+      const complexToken = "tok_ABC--123__XYZ-456"
+      const tokenHash = await hashToken(complexToken)
+      const now = new Date().toISOString()
+      const expiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+
+      // 1. Verify complex token in verifyEmailToken
+      const userId = crypto.randomUUID()
+      await db.insert(schema.users).values({
+        id: userId,
+        role: "PLAYER",
+        displayName: "ComplexTokenUser",
+        createdAt: now,
+        updatedAt: now,
+      })
+      await db.insert(schema.passwordCredentials).values({
+        id: crypto.randomUUID(),
+        userId,
+        email: "complextoken@hikat.org",
+        passwordHash: await hashPassword("InitialPass123!"),
+        emailVerifiedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      await db.insert(schema.emailVerificationTokens).values({
+        id: crypto.randomUUID(),
+        userId,
+        tokenHash,
+        expiresAt,
+        createdAt: now,
+      })
+
+      const verifyRes = await verifyEmailToken(db, complexToken)
+      expect(verifyRes.success).toBe(true)
+
+      // 2. Verify complex token in resetPasswordWithToken
+      const resetTokenHash = await hashToken(complexToken)
+      await db.insert(schema.passwordResetTokens).values({
+        id: crypto.randomUUID(),
+        userId,
+        tokenHash: resetTokenHash,
+        expiresAt,
+        createdAt: now,
+      })
+
+      const resetRes = await resetPasswordWithToken(db, complexToken, "NewValidComplexPass123!")
+      expect(resetRes.success).toBe(true)
+    })
+
+    it("registration rollback on email service failure cleans up database so user can re-register cleanly", async () => {
+      const failingEmailService: typeof emailService = {
+        sendVerificationEmail: async () => {
+          throw new Error("Resend 429: Rate limit exceeded")
+        },
+        sendPasswordResetEmail: async () => {},
+        getLastEmailFor: () => undefined,
+        clear: () => {},
+        getSentEmails: () => [],
+      } as any
+
+      // 1. Direct service call fails and cleans up
+      await expect(
+        registerWithPassword(
+          db,
+          { email: "rollback@hikat.org", password: "Password123!" },
+          failingEmailService,
+        ),
+      ).rejects.toThrow("EMAIL_SERVICE_ERROR")
+
+      // Verify no leftover user or credential exists
+      const user = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.displayName, "rollback"))
+        .get()
+      expect(user).toBeUndefined()
+
+      const cred = await db
+        .select()
+        .from(schema.passwordCredentials)
+        .where(eq(schema.passwordCredentials.email, "rollback@hikat.org"))
+        .get()
+      expect(cred).toBeUndefined()
+
+      // 2. HTTP Endpoint returns generic 500 without leaking Resend internal details
+      const req = new Request("http://localhost:8788/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "rollback-http@hikat.org", password: "Password123!" }),
+      })
+      const res = await handleRequest({
+        request: req,
+        env: {},
+        db,
+        keyManager,
+        emailService: failingEmailService,
+      })
+      expect(res.status).toBe(500)
+      const data = (await res.json()) as any
+      expect(data.error).toBe("EMAIL_SERVICE_ERROR")
+      expect(data.message).toBe("Unable to send verification email. Please try again later.")
+      expect(JSON.stringify(data)).not.toContain("Resend 429")
+
+      // 3. User can immediately re-register with functioning email service
+      const successReg = await registerWithPassword(
+        db,
+        { email: "rollback-http@hikat.org", password: "Password123!" },
+        emailService,
+      )
+      expect(successReg.user.id).toBeDefined()
+    })
+
+    it("forgot password with failing email service logs server-side, does not leak Resend error, and returns generic success response to prevent user enumeration", async () => {
+      await registerAndVerify({ email: "registered-forgot@hikat.org", password: "Password123!" })
+
+      const failingEmailService: typeof emailService = {
+        sendVerificationEmail: async () => {},
+        sendPasswordResetEmail: async () => {
+          throw new Error("Resend 500: Internal service error")
+        },
+        getLastEmailFor: () => undefined,
+        clear: () => {},
+        getSentEmails: () => [],
+      } as any
+
+      // 1. Request for registered user with failing Resend
+      const reqRegistered = new Request("http://localhost:8788/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "registered-forgot@hikat.org" }),
+      })
+      const resRegistered = await handleRequest({
+        request: reqRegistered,
+        env: {},
+        db,
+        keyManager,
+        emailService: failingEmailService,
+      })
+      expect(resRegistered.status).toBe(200)
+      const dataRegistered = (await resRegistered.json()) as any
+
+      // 2. Request for non-existent user
+      const reqUnknown = new Request("http://localhost:8788/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "nonexistent-user-999@hikat.org" }),
+      })
+      const resUnknown = await handleRequest({
+        request: reqUnknown,
+        env: {},
+        db,
+        keyManager,
+        emailService: failingEmailService,
+      })
+      expect(resUnknown.status).toBe(200)
+      const dataUnknown = (await resUnknown.json()) as any
+
+      // Responses must be completely identical
+      expect(dataRegistered).toEqual(dataUnknown)
+      expect(dataRegistered.success).toBe(true)
+      expect(JSON.stringify(dataRegistered)).not.toContain("Resend 500")
+    })
+
+    it("production mode without RESEND_API_KEY throws missing configuration error and does not use MockEmailService", () => {
+      // Production without RESEND_API_KEY throws
+      expect(() => {
+        createEmailServiceFromEnv({ ENVIRONMENT: "production" })
+      }).toThrow("Missing RESEND_API_KEY in production environment")
+
+      // Production with RESEND_API_KEY returns ResendEmailService
+      const prodService = createEmailServiceFromEnv({
+        ENVIRONMENT: "production",
+        RESEND_API_KEY: "re_valid_key_123",
+      })
+      expect(prodService).toBeInstanceOf(ResendEmailService)
+
+      // Development / default environment without key uses MockEmailService
+      const devService = createEmailServiceFromEnv({
+        ENVIRONMENT: "development",
+      })
+      expect(devService).toBeInstanceOf(MockEmailService)
+    })
+
+    it("requesting a new password reset token invalidates any previous reset tokens for that user", async () => {
+      await registerAndVerify({ email: "multi-reset-tokens@hikat.org", password: "Password123!" })
+
+      // First reset request
+      await requestPasswordReset(db, "multi-reset-tokens@hikat.org", emailService)
+      const firstToken = emailService.getLastEmailFor("multi-reset-tokens@hikat.org")!.token
+
+      // Second reset request
+      await requestPasswordReset(db, "multi-reset-tokens@hikat.org", emailService)
+      const secondToken = emailService.getLastEmailFor("multi-reset-tokens@hikat.org")!.token
+
+      expect(firstToken).not.toBe(secondToken)
+
+      // First token is now invalidated
+      await expect(
+        resetPasswordWithToken(db, firstToken, "NewBrandPassword123!"),
+      ).rejects.toThrow(AuthErrorCode.TOKEN_REUSE_DETECTED)
+
+      // Second token succeeds
+      const res = await resetPasswordWithToken(db, secondToken, "NewBrandPassword123!")
+      expect(res.success).toBe(true)
+    })
+
+    it("atomic CAS consumption prevents token reuse during concurrent or repeated verification/reset requests", async () => {
+      // 1. Concurrent email verification
+      await registerWithPassword(
+        db,
+        { email: "cas-verify@hikat.org", password: "Password123!" },
+        emailService,
+      )
+      const verifyToken = emailService.getLastEmailFor("cas-verify@hikat.org")!.token
+
+      const verifyResults = await Promise.allSettled([
+        verifyEmailToken(db, verifyToken),
+        verifyEmailToken(db, verifyToken),
+      ])
+
+      const verifyFulfilled = verifyResults.filter((r) => r.status === "fulfilled")
+      const verifyRejected = verifyResults.filter((r) => r.status === "rejected")
+
+      expect(verifyFulfilled).toHaveLength(1)
+      expect(verifyRejected).toHaveLength(1)
+      expect((verifyRejected[0] as PromiseRejectedResult).reason.message).toBe(
+        AuthErrorCode.TOKEN_REUSE_DETECTED,
+      )
+
+      // 2. Concurrent password reset
+      await requestPasswordReset(db, "cas-verify@hikat.org", emailService)
+      const resetToken = emailService.getLastEmailFor("cas-verify@hikat.org")!.token
+
+      const resetResults = await Promise.allSettled([
+        resetPasswordWithToken(db, resetToken, "BrandNewPassword123!"),
+        resetPasswordWithToken(db, resetToken, "BrandNewPassword123!"),
+      ])
+
+      const resetFulfilled = resetResults.filter((r) => r.status === "fulfilled")
+      const resetRejected = resetResults.filter((r) => r.status === "rejected")
+
+      expect(resetFulfilled).toHaveLength(1)
+      expect(resetRejected).toHaveLength(1)
+      expect((resetRejected[0] as PromiseRejectedResult).reason.message).toBe(
+        AuthErrorCode.TOKEN_REUSE_DETECTED,
+      )
     })
   })
 })

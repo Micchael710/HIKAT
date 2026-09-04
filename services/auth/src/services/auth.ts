@@ -2,7 +2,7 @@
  * HiKAT Core Authentication Service
  */
 
-import { eq, and, sql } from "drizzle-orm"
+import { eq, and, sql, isNull } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   AppRole,
@@ -100,11 +100,23 @@ export async function registerWithPassword(
   })
 
   const verificationUrl = `hikat://auth/verify-email?token=${rawVerificationToken}`
-  await emailService.sendVerificationEmail(
-    normalizedEmail,
-    rawVerificationToken,
-    verificationUrl,
-  )
+  try {
+    await emailService.sendVerificationEmail(
+      normalizedEmail,
+      rawVerificationToken,
+      verificationUrl,
+    )
+  } catch (emailErr) {
+    console.error("[Auth] Failed to send verification email during registration:", emailErr)
+    try {
+      await db.delete(schema.emailVerificationTokens).where(eq(schema.emailVerificationTokens.userId, userId)).run()
+      await db.delete(schema.passwordCredentials).where(eq(schema.passwordCredentials.userId, userId)).run()
+      await db.delete(schema.users).where(eq(schema.users.id, userId)).run()
+    } catch (cleanupErr) {
+      console.error("[Auth] Failed to rollback user after email send failure:", cleanupErr)
+    }
+    throw new Error("EMAIL_SERVICE_ERROR")
+  }
 
   const createdUser = await db
     .select()
@@ -184,7 +196,7 @@ export async function verifyEmailToken(
   db: Database,
   rawToken: string,
 ): Promise<{ success: boolean; userId: string }> {
-  if (!rawToken) {
+  if (!rawToken || typeof rawToken !== "string" || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken)) {
     throw new Error(AuthErrorCode.INVALID_TOKEN)
   }
 
@@ -210,12 +222,22 @@ export async function verifyEmailToken(
     throw new Error(AuthErrorCode.TOKEN_EXPIRED)
   }
 
-  // 1. Mark token as used
-  await db
+  // 1. Mark token as used atomically (CAS)
+  const updateRes = await db
     .update(schema.emailVerificationTokens)
     .set({ usedAt: nowIso })
-    .where(eq(schema.emailVerificationTokens.id, tokenRecord.id))
+    .where(
+      and(
+        eq(schema.emailVerificationTokens.id, tokenRecord.id),
+        isNull(schema.emailVerificationTokens.usedAt),
+      ),
+    )
     .run()
+
+  const changes = (updateRes as any)?.meta?.changes ?? (updateRes as any)?.changes ?? 0
+  if (changes === 0) {
+    throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+  }
 
   // 2. Mark password credentials as verified
   await db
@@ -252,9 +274,22 @@ export async function requestPasswordReset(
     return
   }
 
+  const now = new Date().toISOString()
+
+  // Invalidate previous reset tokens for this user
+  await db
+    .update(schema.passwordResetTokens)
+    .set({ usedAt: now })
+    .where(
+      and(
+        eq(schema.passwordResetTokens.userId, cred.userId),
+        isNull(schema.passwordResetTokens.usedAt),
+      ),
+    )
+    .run()
+
   const rawResetToken = generateSecureToken(32)
   const tokenHash = await hashToken(rawResetToken)
-  const now = new Date().toISOString()
   const expiresAt = new Date(
     Date.now() + PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000,
   ).toISOString()
@@ -268,7 +303,12 @@ export async function requestPasswordReset(
   })
 
   const resetUrl = `hikat://auth/reset-password?token=${rawResetToken}`
-  await emailService.sendPasswordResetEmail(normalizedEmail, rawResetToken, resetUrl)
+  try {
+    await emailService.sendPasswordResetEmail(normalizedEmail, rawResetToken, resetUrl)
+  } catch (err) {
+    // Log failure server-side only to prevent user enumeration and avoid leaking Resend errors to client
+    console.error("[Auth] Failed to send password reset email:", err)
+  }
 }
 
 /**
@@ -279,7 +319,7 @@ export async function resetPasswordWithToken(
   rawToken: string,
   newPassword: string,
 ): Promise<{ success: boolean }> {
-  if (!rawToken || !newPassword || newPassword.length < 8) {
+  if (!rawToken || typeof rawToken !== "string" || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken) || !newPassword || newPassword.length < 8) {
     throw new Error(AuthErrorCode.INVALID_TOKEN)
   }
 
@@ -305,12 +345,22 @@ export async function resetPasswordWithToken(
     throw new Error(AuthErrorCode.TOKEN_EXPIRED)
   }
 
-  // 1. Mark reset token as used
-  await db
+  // 1. Mark reset token as used atomically (CAS)
+  const updateRes = await db
     .update(schema.passwordResetTokens)
     .set({ usedAt: nowIso })
-    .where(eq(schema.passwordResetTokens.id, tokenRecord.id))
+    .where(
+      and(
+        eq(schema.passwordResetTokens.id, tokenRecord.id),
+        isNull(schema.passwordResetTokens.usedAt),
+      ),
+    )
     .run()
+
+  const changes = (updateRes as any)?.meta?.changes ?? (updateRes as any)?.changes ?? 0
+  if (changes === 0) {
+    throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+  }
 
   // 2. Hash new password and update credentials
   const passwordHash = await hashPassword(newPassword)

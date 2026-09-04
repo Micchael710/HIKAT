@@ -826,6 +826,49 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(res.methods![0].type).toBe("PASSWORD")
     expect(res.methods![1].type).toBe("GOOGLE")
   })
+
+  it("22. verifyEmail validates and sends exact Base64URL token containing '--' and '_' without stripping characters", async () => {
+    let capturedBody: any = null
+    const complexToken = "tok_ABC--123__XYZ-456"
+
+    mockFetch.mockImplementation(async (url: string, opts: any) => {
+      if (url.includes("/auth/verify-email")) {
+        capturedBody = JSON.parse(opts.body)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, message: "Email verified" }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+
+    const res = await authService.verifyEmail(complexToken)
+    expect(res.success).toBe(true)
+    expect(capturedBody.token).toBe(complexToken)
+  })
+
+  it("23. resetPassword validates and sends exact Base64URL token containing '--' and '_' without stripping characters", async () => {
+    let capturedBody: any = null
+    const complexToken = "tok_RESET--999__000-XYZ"
+
+    mockFetch.mockImplementation(async (url: string, opts: any) => {
+      if (url.includes("/auth/reset-password")) {
+        capturedBody = JSON.parse(opts.body)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, message: "Password reset" }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+
+    const res = await authService.resetPassword(complexToken, "validPassword123")
+    expect(res.success).toBe(true)
+    expect(capturedBody.token).toBe(complexToken)
+    expect(capturedBody.newPassword).toBe("validPassword123")
+  })
 })
 
 

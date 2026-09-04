@@ -318,15 +318,15 @@ class LauncherAuthService {
   }
 
   public async verifyEmail(token: string): Promise<{ success: boolean; message?: string; error?: string }> {
-    const cleanToken = sanitizeInput(token, 128)
-    if (!cleanToken) {
+    const rawToken = typeof token === "string" ? token.trim() : ""
+    if (!rawToken || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken)) {
       return { success: false, error: "Token de verificación no proporcionado o inválido." }
     }
     try {
       const res = await fetch(`${AUTH_URL}/auth/verify-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: cleanToken }),
+        body: JSON.stringify({ token: rawToken }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -342,10 +342,10 @@ class LauncherAuthService {
     token: string,
     newPassword: string,
   ): Promise<{ success: boolean; message?: string; error?: string }> {
-    const cleanToken = sanitizeInput(token, 128)
+    const rawToken = typeof token === "string" ? token.trim() : ""
     const cleanPass = newPassword || ""
 
-    if (!cleanToken || !cleanPass) {
+    if (!rawToken || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken) || !cleanPass) {
       return { success: false, error: "Token y nueva contraseña requeridos." }
     }
     if (cleanPass.length < 8) {
@@ -356,7 +356,7 @@ class LauncherAuthService {
       const res = await fetch(`${AUTH_URL}/auth/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: cleanToken, newPassword: cleanPass }),
+        body: JSON.stringify({ token: rawToken, newPassword: cleanPass }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
