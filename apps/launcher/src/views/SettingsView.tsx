@@ -23,6 +23,7 @@ import {
   calculateAutomaticRam,
   formatModLoaderName,
 } from "../utils/gameSettings"
+import { useDynamicAccent } from "../utils/dynamicAccent"
 
 export { calculateAutomaticRam, formatModLoaderName }
 
@@ -95,6 +96,10 @@ export default function SettingsView({
   const [operationState, setOperationState] = useState<string>("IDLE")
   const [isVerifying, setIsVerifying] = useState<boolean>(false)
   const [isUninstalling, setIsUninstalling] = useState<boolean>(false)
+
+  // Extract dynamic accent color from selected game logo
+  const selectedGame = GAMES.find((g) => g.id === selectedGameId) || GAMES[0]
+  const gameAccent = useDynamicAccent(selectedGame?.logo, "#3ec4c0")
 
   // Sync settings with Electron process and OS on mount
   useEffect(() => {
@@ -395,12 +400,21 @@ export default function SettingsView({
         ? `${loaderFormatted} ${loaderVersion}`
         : loaderFormatted
 
+  const javaDisplay = runtimeInfo?.javaMajorVersion
+    ? `Java ${runtimeInfo.javaMajorVersion}`
+    : "—"
+
   const hasModpackVersion = Boolean(manifest?.version)
   const modpackDisplay = hasModpackVersion
     ? `Modpack ${manifest!.version}`
     : "—"
 
   const CONTENT_LEFT = 184
+
+  /* Dynamic ambient RGB channels based on tab and gameAccent */
+  const ambientR = activeTab === "game" ? gameAccent.r : 62
+  const ambientG = activeTab === "game" ? gameAccent.g : 196
+  const ambientB = activeTab === "game" ? gameAccent.b : 192
 
   /* Smooth delayed mouse-following parallax */
   const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
@@ -441,14 +455,14 @@ export default function SettingsView({
           pointerEvents: "none",
           zIndex: 0,
           background: isDark
-            ? `radial-gradient(1100px 700px at calc(38% + ${mouseOffset.x}px) calc(20% + ${mouseOffset.y}px), rgba(62, 196, 192, 0.08), transparent 75%),
+            ? `radial-gradient(1100px 700px at calc(38% + ${mouseOffset.x}px) calc(20% + ${mouseOffset.y}px), rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.08), transparent 75%),
                radial-gradient(850px 600px at calc(85% - ${mouseOffset.x * 0.8}px) calc(65% - ${mouseOffset.y * 0.8}px), rgba(77, 166, 255, 0.06), transparent 70%),
                radial-gradient(650px 500px at calc(20% + ${mouseOffset.x * 0.5}px) calc(80% + ${mouseOffset.y * 0.5}px), rgba(120, 80, 220, 0.04), transparent 65%),
                #090d12`
-            : `radial-gradient(1000px 600px at calc(40% + ${mouseOffset.x}px) calc(25% + ${mouseOffset.y}px), rgba(62, 196, 192, 0.12), transparent 70%),
+            : `radial-gradient(1000px 600px at calc(40% + ${mouseOffset.x}px) calc(25% + ${mouseOffset.y}px), rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.12), transparent 70%),
                radial-gradient(800px 500px at calc(80% - ${mouseOffset.x * 0.6}px) calc(70% - ${mouseOffset.y * 0.6}px), rgba(77, 166, 255, 0.09), transparent 65%),
                #f5f7fa`,
-          transition: "background 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+          transition: "background 0.55s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       />
 
@@ -462,12 +476,12 @@ export default function SettingsView({
           height: 680,
           borderRadius: "50%",
           background: isDark
-            ? "radial-gradient(circle, rgba(62, 196, 192, 0.06) 0%, rgba(62, 196, 192, 0.015) 50%, transparent 75%)"
-            : "radial-gradient(circle, rgba(62, 196, 192, 0.12) 0%, rgba(62, 196, 192, 0.03) 50%, transparent 75%)",
+            ? `radial-gradient(circle, rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.06) 0%, rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.015) 50%, transparent 75%)`
+            : `radial-gradient(circle, rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.12) 0%, rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.03) 50%, transparent 75%)`,
           filter: "blur(50px)",
           pointerEvents: "none",
           transform: `translate3d(${mouseOffset.x * 0.4}px, ${mouseOffset.y * 0.4}px, 0)`,
-          transition: "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+          transition: "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.55s ease",
           zIndex: 1,
         }}
       />
@@ -1044,7 +1058,7 @@ export default function SettingsView({
                 minHeight: 520,
               }}
             >
-              {/* ── Left Column: Internal Games Sidebar (Begins directly with games list) ── */}
+              {/* ── Left Column: Internal Games Sidebar (Begins directly with games list with dynamic accent) ── */}
               <div
                 style={{
                   width: 220,
@@ -1062,7 +1076,10 @@ export default function SettingsView({
                       key={game.id}
                       type="button"
                       onClick={() => setSelectedGameId(game.id)}
+                      className={`game-selector-item ${isSelected ? "is-selected" : ""}`}
                       style={{
+                        ["--game-border-color" as any]: `rgba(${gameAccent.css}, 0.85)`,
+                        ["--game-glow-color" as any]: `rgba(${gameAccent.css}, 0.22)`,
                         display: "flex",
                         alignItems: "center",
                         gap: 12,
@@ -1073,9 +1090,7 @@ export default function SettingsView({
                         fontWeight: 700,
                         cursor: "pointer",
                         border: isSelected
-                          ? isDark
-                            ? "1.5px solid rgba(62, 196, 192, 0.45)"
-                            : "1.5px solid rgba(62, 196, 192, 0.6)"
+                          ? `1.5px solid rgba(${gameAccent.css}, 0.85)`
                           : isDark
                             ? "1.5px solid rgba(255, 255, 255, 0.05)"
                             : "1.5px solid rgba(0, 0, 0, 0.05)",
@@ -1094,11 +1109,8 @@ export default function SettingsView({
                             ? "#8899aa"
                             : "#556677",
                         boxShadow: isSelected
-                          ? isDark
-                            ? "0 4px 14px rgba(0, 0, 0, 0.25)"
-                            : "0 4px 14px rgba(0, 0, 0, 0.06)"
+                          ? `0 4px 14px rgba(${gameAccent.css}, 0.2)`
                           : "none",
-                        transition: "all 0.16s ease",
                         textAlign: "left",
                       }}
                     >
@@ -1136,131 +1148,87 @@ export default function SettingsView({
                   gap: 14,
                 }}
               >
-                {/* 1. Game Header */}
+                {/* 1. Compact Horizontal Technical Overview Card (Unified single card) */}
                 <div
+                  className="settings-card"
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                    paddingBottom: 2,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(4, 1fr)",
+                    padding: "16px 20px",
+                    alignItems: "center",
+                    gap: 12,
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <img
-                      src={apparatiaLogo}
-                      alt="Apparatia"
-                      style={{
-                        width: 36,
-                        height: 36,
-                        objectFit: "contain",
-                        borderRadius: 8,
-                      }}
-                    />
-                    <h2
-                      style={{
-                        margin: 0,
-                        fontSize: 22,
-                        fontWeight: 800,
-                        color: isDark ? "#ffffff" : "#111822",
-                        fontFamily: BASE_FONT,
-                        letterSpacing: "-0.02em",
-                      }}
-                    >
-                      Apparatia
-                    </h2>
-                  </div>
-
-                  {/* Horizontal Technical Chips */}
+                  {/* Item 1: Minecraft */}
                   <div
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 8,
-                      flexWrap: "wrap",
+                      justifyContent: "center",
+                      fontSize: 14.5,
+                      fontWeight: 700,
+                      color: isDark ? "#ffffff" : "#111822",
+                      borderRight: isDark
+                        ? "1px solid rgba(255, 255, 255, 0.08)"
+                        : "1px solid rgba(0, 0, 0, 0.08)",
+                      paddingRight: 12,
+                      textAlign: "center",
                     }}
                   >
-                    {/* Minecraft Version */}
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "3px 10px",
-                        borderRadius: 7,
-                        fontSize: 12.5,
-                        fontWeight: 700,
-                        background: isDark
-                          ? "rgba(255, 255, 255, 0.05)"
-                          : "rgba(0, 0, 0, 0.04)",
-                        border: isDark
-                          ? "1px solid rgba(255, 255, 255, 0.08)"
-                          : "1px solid rgba(0, 0, 0, 0.08)",
-                        color: isDark ? "#94a3b8" : "#475569",
-                      }}
-                    >
-                      {minecraftDisplay}
-                    </span>
+                    <span>{minecraftDisplay}</span>
+                  </div>
 
-                    <span
-                      style={{
-                        color: isDark ? "#475569" : "#94a3b8",
-                        fontSize: 12,
-                        fontWeight: 700,
-                      }}
-                    >
-                      ·
-                    </span>
+                  {/* Item 2: Mod Loader */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14.5,
+                      fontWeight: 700,
+                      color: isDark ? "#ffffff" : "#111822",
+                      borderRight: isDark
+                        ? "1px solid rgba(255, 255, 255, 0.08)"
+                        : "1px solid rgba(0, 0, 0, 0.08)",
+                      paddingRight: 12,
+                      textAlign: "center",
+                    }}
+                  >
+                    <span>{loaderDisplay}</span>
+                  </div>
 
-                    {/* Mod Loader */}
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "3px 10px",
-                        borderRadius: 7,
-                        fontSize: 12.5,
-                        fontWeight: 700,
-                        background: isDark
-                          ? "rgba(255, 255, 255, 0.05)"
-                          : "rgba(0, 0, 0, 0.04)",
-                        border: isDark
-                          ? "1px solid rgba(255, 255, 255, 0.08)"
-                          : "1px solid rgba(0, 0, 0, 0.08)",
-                        color: isDark ? "#94a3b8" : "#475569",
-                      }}
-                    >
-                      {loaderDisplay}
-                    </span>
+                  {/* Item 3: Java Version */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14.5,
+                      fontWeight: 700,
+                      color: isDark ? "#ffffff" : "#111822",
+                      borderRight: isDark
+                        ? "1px solid rgba(255, 255, 255, 0.08)"
+                        : "1px solid rgba(0, 0, 0, 0.08)",
+                      paddingRight: 12,
+                      textAlign: "center",
+                    }}
+                  >
+                    <span>{javaDisplay}</span>
+                  </div>
 
-                    <span
-                      style={{
-                        color: isDark ? "#475569" : "#94a3b8",
-                        fontSize: 12,
-                        fontWeight: 700,
-                      }}
-                    >
-                      ·
-                    </span>
-
-                    {/* Modpack Version */}
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "3px 10px",
-                        borderRadius: 7,
-                        fontSize: 12.5,
-                        fontWeight: 700,
-                        background: isDark
-                          ? "rgba(255, 255, 255, 0.05)"
-                          : "rgba(0, 0, 0, 0.04)",
-                        border: isDark
-                          ? "1px solid rgba(255, 255, 255, 0.08)"
-                          : "1px solid rgba(0, 0, 0, 0.08)",
-                        color: isDark ? "#94a3b8" : "#475569",
-                      }}
-                    >
-                      {modpackDisplay}
-                    </span>
+                  {/* Item 4: Modpack Version */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14.5,
+                      fontWeight: 700,
+                      color: isDark ? "#ffffff" : "#111822",
+                      textAlign: "center",
+                    }}
+                  >
+                    <span>{modpackDisplay}</span>
                   </div>
                 </div>
 
@@ -1279,15 +1247,9 @@ export default function SettingsView({
                     {t("settings.performance")}
                   </div>
 
-                  {/* Row 1: RAM Slider */}
-                  <div
-                    style={{
-                      padding: "8px 0 16px",
-                      borderBottom: isDark
-                        ? "1px solid rgba(255, 255, 255, 0.05)"
-                        : "1px solid rgba(0, 0, 0, 0.06)",
-                    }}
-                  >
+                  {/* Section: RAM Manual & Automatic (Single contiguous block with no inner divider) */}
+                  <div style={{ padding: "8px 0 16px" }}>
+                    {/* Row 1: Title, description, RAM badge */}
                     <div
                       style={{
                         display: "flex",
@@ -1318,7 +1280,7 @@ export default function SettingsView({
                         </div>
                       </div>
 
-                      {/* Right: Only [ 8 GB ] badge */}
+                      {/* Right: [ 9 GB ] badge styled with gameAccent */}
                       <div
                         style={{
                           display: "flex",
@@ -1336,7 +1298,7 @@ export default function SettingsView({
                           style={{
                             fontSize: 15.5,
                             fontWeight: 800,
-                            color: "#3ec4c0",
+                            color: gameAccent.hex,
                           }}
                         >
                           {ramGB}
@@ -1359,6 +1321,7 @@ export default function SettingsView({
                     <div
                       style={{
                         marginTop: 12,
+                        marginBottom: 16,
                         display: "flex",
                         alignItems: "center",
                         gap: 14,
@@ -1387,7 +1350,7 @@ export default function SettingsView({
                         className="settings-ram-slider"
                         style={{
                           flex: 1,
-                          background: `linear-gradient(to right, #3ec4c0 0%, #3ec4c0 ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
+                          background: `linear-gradient(to right, ${gameAccent.hex} 0%, ${gameAccent.hex} ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
                             isDark
                               ? "rgba(255, 255, 255, 0.1)"
                               : "rgba(0, 0, 0, 0.1)"
@@ -1410,69 +1373,70 @@ export default function SettingsView({
                         {systemTotalRAM} GB
                       </span>
                     </div>
-                  </div>
 
-                  {/* Row 2: Asignación automática */}
-                  <div
-                    className="settings-row"
-                    style={{
-                      paddingTop: 14,
-                      paddingBottom: 14,
-                      borderBottom: isDark
-                        ? "1px solid rgba(255, 255, 255, 0.05)"
-                        : "1px solid rgba(0, 0, 0, 0.06)",
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 17,
-                          fontWeight: 700,
-                          color: isDark ? "white" : "#111822",
-                          marginBottom: 2,
-                        }}
-                      >
-                        {t("settings.automaticRam")}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 14.5,
-                          color: isDark ? "#8899aa" : "#556677",
-                          lineHeight: 1.45,
-                        }}
-                      >
-                        {t("settings.ramDesc")}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleAutoRam}
-                      className="launcher-btn-secondary"
+                    {/* Row 2: Automatic RAM selection (integrated directly under slider, no divider) */}
+                    <div
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 8,
-                        height: 44,
-                        padding: "0 22px",
-                        borderRadius: 14,
-                        fontSize: 15,
-                        fontWeight: 600,
-                        fontFamily: BASE_FONT,
-                        cursor: "pointer",
+                        justifyContent: "space-between",
+                        paddingTop: 4,
                       }}
                     >
-                      {t("settings.automaticRam")}
-                    </button>
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 17,
+                            fontWeight: 700,
+                            color: isDark ? "white" : "#111822",
+                            marginBottom: 2,
+                          }}
+                        >
+                          {`${t("settings.ramTitle")} · ${t("settings.automaticRam")}`}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 14.5,
+                            color: isDark ? "#8899aa" : "#556677",
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {t("settings.ramDesc")}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAutoRam}
+                        className="launcher-btn-secondary"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          height: 44,
+                          padding: "0 22px",
+                          borderRadius: 14,
+                          fontSize: 15,
+                          fontWeight: 600,
+                          fontFamily: BASE_FONT,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {t("settings.automaticRam")}
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Row 3: GPU de alto rendimiento */}
+                  {/* Divider line ONLY before GPU */}
                   <div
                     className="settings-row"
                     style={{
                       borderBottom: "none",
+                      borderTop: isDark
+                        ? "1px solid rgba(255, 255, 255, 0.05)"
+                        : "1px solid rgba(0, 0, 0, 0.06)",
                       paddingBottom: 0,
-                      paddingTop: 14,
+                      paddingTop: 16,
                     }}
                   >
                     <div>
@@ -1499,6 +1463,7 @@ export default function SettingsView({
                     <LauncherToggle
                       checked={dedicatedGPU}
                       theme={theme}
+                      accentColor={gameAccent.hex}
                       onChange={(v) => {
                         setDedicatedGPU(v)
                         notifySaved()
@@ -1508,62 +1473,7 @@ export default function SettingsView({
                   </div>
                 </div>
 
-                {/* 3. Card: INFORMACIÓN */}
-                <div className="settings-card">
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 800,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      color: isDark ? "#657788" : "#778899",
-                      marginBottom: 6,
-                    }}
-                  >
-                    {t("settings.information")}
-                  </div>
-
-                  <div
-                    className="settings-row"
-                    style={{ borderBottom: "none", paddingBottom: 0 }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 17,
-                          fontWeight: 700,
-                          color: isDark ? "white" : "#111822",
-                          marginBottom: 2,
-                        }}
-                      >
-                        {t("settings.javaVersion")}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 15,
-                        fontWeight: 700,
-                        color: runtimeInfo?.javaMajorVersion
-                          ? "#3ec4c0"
-                          : isDark
-                            ? "#7a8b9e"
-                            : "#8899aa",
-                        background: isDark ? "#0d1217" : "#f0f3f7",
-                        border: isDark
-                          ? "1.5px solid rgba(255, 255, 255, 0.1)"
-                          : "1.5px solid rgba(0, 0, 0, 0.08)",
-                        borderRadius: 10,
-                        padding: "5px 14px",
-                      }}
-                    >
-                      {runtimeInfo?.javaMajorVersion
-                        ? `Java ${runtimeInfo.javaMajorVersion}`
-                        : "—"}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 4. Card: ADMINISTRACIÓN */}
+                {/* 3. Card: ADMINISTRACIÓN */}
                 <div className="settings-card">
                   <div
                     style={{
@@ -1601,7 +1511,8 @@ export default function SettingsView({
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 8,
+                        justifyContent: "center",
+                        width: 160,
                         height: 44,
                         padding: "0 22px",
                         borderRadius: 14,
@@ -1647,7 +1558,8 @@ export default function SettingsView({
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 8,
+                        justifyContent: "center",
+                        width: 160,
                         height: 44,
                         padding: "0 22px",
                         borderRadius: 14,

@@ -6,6 +6,7 @@ interface LauncherToggleProps {
   onChange: (val: boolean) => void
   label?: string
   theme?: ThemeMode
+  accentColor?: string
 }
 
 export default function LauncherToggle({
@@ -13,6 +14,7 @@ export default function LauncherToggle({
   onChange,
   label,
   theme = "dark",
+  accentColor = "#3ec4c0",
 }: LauncherToggleProps) {
   const isDark = theme === "dark"
 
@@ -28,9 +30,9 @@ export default function LauncherToggle({
         height: 26,
         borderRadius: 13,
         padding: 3,
-        background: checked ? "#3ec4c0" : isDark ? "#1a242f" : "#cbd5e1",
+        background: checked ? accentColor : isDark ? "#1a242f" : "#cbd5e1",
         border: checked
-          ? "1.5px solid #3ec4c0"
+          ? `1.5px solid ${accentColor}`
           : isDark
             ? "1.5px solid rgba(255, 255, 255, 0.12)"
             : "1.5px solid rgba(0, 0, 0, 0.12)",
@@ -62,7 +64,7 @@ export default function LauncherToggle({
             height={10}
             viewBox="0 0 12 12"
             fill="none"
-            stroke="#3ec4c0"
+            stroke={accentColor}
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"

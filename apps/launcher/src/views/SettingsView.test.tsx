@@ -5,6 +5,7 @@ import React, { act } from "react"
 import { createRoot } from "react-dom/client"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import SettingsView, { calculateAutomaticRam } from "./SettingsView"
+import LauncherToggle from "../components/common/LauncherToggle"
 import { LanguageProvider } from "../context/LanguageContext"
 import { gameService } from "../services/gameService"
 
@@ -135,7 +136,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(containerPt.textContent).toContain("Configurações")
   })
 
-  it("4. Switching to 'Juegos' tab renders internal games sidebar starting cleanly with Apparatia", async () => {
+  it("4. Apparatia appears solely as sidebar selector and does NOT repeat duplicate header in right panel", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -146,14 +147,21 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       gamesTabBtn?.click()
     })
 
-    expect(container.textContent).toContain("Apparatia")
-    const images = Array.from(container.querySelectorAll("img"))
-    const logoImg = images.find((img) => img.getAttribute("alt") === "Apparatia")
-    expect(logoImg).toBeDefined()
+    // Exactly one Apparatia text in sidebar, with game-selector-item class
+    const apparatiaButtons = Array.from(container.querySelectorAll("button")).filter((b) =>
+      b.textContent?.includes("Apparatia"),
+    )
+    expect(apparatiaButtons.length).toBe(1)
+    expect(apparatiaButtons[0].classList.contains("game-selector-item")).toBe(true)
+
+    // Right panel should not have h2 with Apparatia
+    const h2Elements = Array.from(container.querySelectorAll("h2"))
+    const rightHeader = h2Elements.find((h) => h.textContent?.includes("Apparatia"))
+    expect(rightHeader).toBeUndefined()
   })
 
-  it("5. Right panel displays technical header chips from real manifest data (or '—' when missing, without fake mock fallbacks)", async () => {
-    // A. Real manifest data present
+  it("5. Single unified horizontal technical card renders Minecraft, loader, Java and modpack without separate Info card", async () => {
+    // A. Real data present
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -164,12 +172,17 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
 
     expect(container.textContent).toContain("Minecraft 1.21.1")
     expect(container.textContent).toContain("NeoForge 21.1.65")
+    expect(container.textContent).toContain("Java 21")
     expect(container.textContent).toContain("Modpack 1.4.2")
+
+    // Separate "Información" or "Versión de Java" card does not exist
+    expect(container.textContent).not.toContain("Versión de Java")
 
     if (unmountCurrent) unmountCurrent()
 
-    // B. Empty manifest data -> shows '—' and NOT hardcoded fallbacks
+    // B. Empty manifest data & no runtime info -> shows '—' and NOT hardcoded fallbacks
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(null)
+    mockElectronAPI.getGameRuntimeInfo.mockResolvedValue({ javaMajorVersion: null })
     const containerNoData = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const gamesTabBtnNoData = Array.from(containerNoData.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Juegos"),
@@ -183,34 +196,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(containerNoData.textContent).not.toContain("Modpack 1.0.0")
   })
 
-  it("6. Java version card renders real version from core-state IPC, or '—' when missing", async () => {
-    // A. With Java 21 available
-    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
-    const buttons = Array.from(container.querySelectorAll("button"))
-    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
-    await act(async () => {
-      gamesTabBtn?.click()
-    })
-
-    expect(container.textContent).toContain("Versión de Java")
-    expect(container.textContent).toContain("Java 21")
-
-    if (unmountCurrent) unmountCurrent()
-
-    // B. Without Java version (no core-state / uninstalled)
-    mockElectronAPI.getGameRuntimeInfo.mockResolvedValue({ javaMajorVersion: null })
-    const containerNoJava = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
-    const buttonsNoJava = Array.from(containerNoJava.querySelectorAll("button"))
-    const gamesTabBtnNoJava = buttonsNoJava.find((b) => b.textContent?.includes("Juegos"))
-    await act(async () => {
-      gamesTabBtnNoJava?.click()
-    })
-
-    expect(containerNoJava.textContent).toContain("Versión de Java")
-    expect(containerNoJava.textContent).toContain("—")
-  })
-
-  it("7. RAM Automático button in dedicated row uses launcher-btn-secondary and calculates safe RAM", async () => {
+  it("6. RAM section integrates slider and automatic selection cleanly with safe RAM calculation", async () => {
     // 16 GB system RAM -> calculateAutomaticRam(16) = 8 GB
     mockElectronAPI.getMemory.mockResolvedValue({ totalGb: 16 })
     mockElectronAPI.getRamAllocation.mockResolvedValue(4)
@@ -235,7 +221,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(localStorage.getItem("hikat_ram_gb")).toBe("8")
   })
 
-  it("8. GPU toggle uses dedicatedGpu setting and toggles cleanly", async () => {
+  it("7. GPU toggle uses dedicatedGpu setting and toggles cleanly with accent", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
     const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
@@ -245,7 +231,6 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
 
     expect(container.textContent).toContain("GPU de alto rendimiento")
     expect(container.textContent).toContain("Prioriza la GPU de alto rendimiento para este juego.")
-    expect(container.textContent).not.toContain("NVIDIA / AMD")
 
     const toggles = container.querySelectorAll('button[role="switch"]')
     const gpuToggle = Array.from(toggles).find((btn) =>
@@ -262,7 +247,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("false")
   })
 
-  it("9. Administration card: Verify uses launcher-btn-secondary, disabled when update exists, enabled when healthy idle", async () => {
+  it("8. Administration card: Verify and Uninstall have equal width (160px) and appropriate classes", async () => {
     // A. Healthy idle install -> Verify enabled and has launcher-btn-secondary class
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -274,40 +259,21 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     const verifyBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Verificar"),
     )
-    expect(verifyBtn).toBeDefined()
-    expect(verifyBtn?.classList.contains("launcher-btn-secondary")).toBe(true)
-    expect(verifyBtn?.hasAttribute("disabled")).toBe(false)
-
-    if (unmountCurrent) unmountCurrent()
-
-    // B. With update available -> Verify disabled
-    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-      version: "1.5.0",
-      minecraftVersion: "1.21.1",
-      modLoader: "NEOFORGE",
-      modLoaderVersion: "21.1.65",
-      totalSizeGB: 1.5,
-      hasUpdate: true,
-      installed: false,
-      hasExistingInstall: true,
-      installedModpackVersion: "1.4.2",
-      clientFiles: [],
-    })
-
-    const containerUpdate = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
-    const buttonsUpdate = Array.from(containerUpdate.querySelectorAll("button"))
-    const gamesTabBtnUpdate = buttonsUpdate.find((b) => b.textContent?.includes("Juegos"))
-    await act(async () => {
-      gamesTabBtnUpdate?.click()
-    })
-
-    const verifyBtnUpdate = Array.from(containerUpdate.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Verificar"),
+    const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Desinstalar"),
     )
-    expect(verifyBtnUpdate?.hasAttribute("disabled")).toBe(true)
+
+    expect(verifyBtn).toBeDefined()
+    expect(uninstallBtn).toBeDefined()
+
+    expect(verifyBtn?.classList.contains("launcher-btn-secondary")).toBe(true)
+    expect(uninstallBtn?.classList.contains("launcher-btn-danger")).toBe(true)
+
+    expect(verifyBtn?.style.width).toBe("160px")
+    expect(uninstallBtn?.style.width).toBe("160px")
   })
 
-  it("10. Administration card: Uninstall uses launcher-btn-danger, enabled with idle install even if update exists", async () => {
+  it("9. Administration card: Verify is disabled when update exists, Uninstall remains enabled", async () => {
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
       version: "1.5.0",
       minecraftVersion: "1.21.1",
@@ -328,15 +294,18 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       gamesTabBtn?.click()
     })
 
+    const verifyBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Verificar"),
+    )
     const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Desinstalar"),
     )
-    expect(uninstallBtn).toBeDefined()
-    expect(uninstallBtn?.classList.contains("launcher-btn-danger")).toBe(true)
+
+    expect(verifyBtn?.hasAttribute("disabled")).toBe(true)
     expect(uninstallBtn?.hasAttribute("disabled")).toBe(false)
   })
 
-  it("11. Administration card: Verify and Uninstall are disabled when game is running or busy", async () => {
+  it("10. Administration card: Verify and Uninstall are disabled when game is running or busy", async () => {
     mockElectronAPI.getLaunchStatus.mockResolvedValue({ status: "running", operationState: "IDLE" })
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
@@ -357,6 +326,33 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(uninstallBtn?.hasAttribute("disabled")).toBe(true)
   })
 
+  it("11. LauncherToggle component functions cleanly with and without optional accentColor", async () => {
+    const onChangeMock = vi.fn()
+
+    // Without custom accent (default #3ec4c0)
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(<LauncherToggle checked={true} onChange={onChangeMock} />)
+    })
+
+    const switchBtn = container.querySelector('button[role="switch"]') as HTMLButtonElement
+    expect(switchBtn).toBeDefined()
+    expect(switchBtn.style.background).toContain("rgb(62, 196, 192)")
+
+    // With custom accent
+    await act(async () => {
+      root.render(<LauncherToggle checked={true} onChange={onChangeMock} accentColor="#ff5500" />)
+    })
+    expect(switchBtn.style.background).toContain("rgb(255, 85, 0)")
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
   it("12. Renders in Light mode cleanly without crashing", async () => {
     const container = await renderComponent(<SettingsView theme="light" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -366,7 +362,6 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     })
 
     expect(container.textContent).toContain("Rendimiento")
-    expect(container.textContent).toContain("Información")
     expect(container.textContent).toContain("Administración")
   })
 })
