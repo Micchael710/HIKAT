@@ -33,33 +33,70 @@ export function renderHikatEmail(params: {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${params.title}</title>
 </head>
-<body style="margin: 0; padding: 24px; background-color: #090d12; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #ffffff;">
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; margin: 0 auto; background: linear-gradient(180deg, #141d26 0%, #0d1218 100%); border: 1.5px solid #233140; border-radius: 16px; padding: 32px 28px; box-shadow: 0 16px 40px rgba(0,0,0,0.6);">
+<body style="margin: 0; padding: 32px 16px; background-color: #090d12; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #ffffff; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; margin: 0 auto; background: linear-gradient(180deg, #131c24 0%, #0d1217 100%); border: 1.5px solid #233140; border-radius: 16px; padding: 36px 32px; box-shadow: 0 16px 48px rgba(0,0,0,0.65);">
+    <!-- Brand Header -->
     <tr>
       <td align="center" style="padding-bottom: 24px;">
-        <span style="font-size: 24px; font-weight: 800; letter-spacing: 0.05em; color: #ffffff;">HiKAT</span>
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="background: linear-gradient(135deg, #1c384e 0%, #0e1e2c 100%); border: 1.5px solid rgba(56, 189, 248, 0.4); border-radius: 12px; padding: 8px 20px;">
+              <span style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 20px; font-weight: 900; letter-spacing: 0.12em; color: #ffffff;">HiKAT</span>
+            </td>
+          </tr>
+        </table>
       </td>
     </tr>
+
+    <!-- Title -->
     <tr>
       <td style="padding-bottom: 12px;">
-        <h1 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff; text-align: center;">${params.title}</h1>
+        <h1 style="margin: 0; font-size: 21px; font-weight: 700; color: #ffffff; text-align: center; letter-spacing: -0.01em;">${params.title}</h1>
       </td>
     </tr>
+
+    <!-- Description -->
     <tr>
       <td style="padding-bottom: 28px; font-size: 14.5px; line-height: 1.6; color: #c2d0dd; text-align: center;">
         ${params.description}
       </td>
     </tr>
+
+    <!-- Bulletproof Button -->
     <tr>
-      <td align="center" style="padding-bottom: 28px;">
-        <a href="${params.buttonUrl}" style="display: inline-block; background: #0284c7; color: #ffffff; font-size: 14.5px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 10px; text-align: center;">
-          ${params.buttonText}
-        </a>
+      <td align="center" style="padding-bottom: 20px;">
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto;">
+          <tr>
+            <td align="center" style="border-radius: 12px; background: #1c384e; border: 2px solid #38bdf8;">
+              <a href="${params.buttonUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: linear-gradient(135deg, #1c384e 0%, #295372 100%); color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 34px; border-radius: 10px; text-align: center; letter-spacing: 0.02em; line-height: 1.2;">
+                ${params.buttonText}
+              </a>
+            </td>
+          </tr>
+        </table>
       </td>
     </tr>
+
+    <!-- Visible Fallback Link -->
     <tr>
-      <td style="padding-top: 16px; border-top: 1px solid #1f2b37; font-size: 12px; line-height: 1.5; color: #657788; text-align: center;">
-        ${params.expiryNotice}<br>
+      <td style="padding-bottom: 28px;">
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+          <tr>
+            <td style="padding: 12px 16px; background: rgba(13, 18, 24, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; font-size: 12px; line-height: 1.5; color: #8899aa; text-align: center; word-break: break-all;">
+              <span style="color: #c2d0dd;">Si el botón no funciona, abre este enlace:</span><br>
+              <a href="${params.buttonUrl}" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline; font-weight: 500; word-break: break-all;">
+                ${params.buttonUrl}
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- Expiry & Security Disclaimer -->
+    <tr>
+      <td style="padding-top: 20px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 12px; line-height: 1.6; color: #657788; text-align: center;">
+        <span style="color: #8899aa; font-weight: 600;">${params.expiryNotice}</span><br>
         Si no solicitaste esta acción, puedes ignorar este correo de forma segura.
       </td>
     </tr>
@@ -72,8 +109,8 @@ export class ResendEmailService implements EmailService {
   constructor(
     private readonly apiKey: string,
     private readonly from: string = "HiKAT <noreply@mail.hikat.org>",
-    private readonly fetcher: typeof fetch = fetch,
-  ) {}
+    private readonly fetcher: typeof fetch = (input, init) => fetch(input, init),
+  ) { }
 
   async sendVerificationEmail(to: string, token: string, verificationUrl: string): Promise<void> {
     const subject = "Verifica tu cuenta de HiKAT"

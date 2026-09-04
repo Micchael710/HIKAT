@@ -1540,6 +1540,9 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(html).toContain("Test Description")
       expect(html).toContain("Click Me")
       expect(html).toContain("hikat://auth/verify-email?token=xyz")
+      expect(html).toContain("target=\"_blank\"")
+      expect(html).toContain("rel=\"noopener noreferrer\"")
+      expect(html).toContain("Si el botón no funciona, abre este enlace:")
       expect(html).toContain("Expires in 24 hours.")
     })
 
