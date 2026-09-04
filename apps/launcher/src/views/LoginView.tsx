@@ -152,7 +152,19 @@ export default function LoginView({
       }
     } catch (err: any) {
       setIsEnteringWorld(false)
-      setErrorMessage(err.message || t("auth.genericAuthError"))
+      const msg = err?.message || ""
+      if (
+        msg.includes("Estado de autenticación inválido") ||
+        msg.includes("OAuth") ||
+        msg.includes("PKCE") ||
+        msg.includes("CSRF") ||
+        msg.includes("verifier") ||
+        msg.includes("state")
+      ) {
+        setErrorMessage(t("auth.invalidOAuthAttempt"))
+      } else {
+        setErrorMessage(msg || t("auth.genericAuthError"))
+      }
     }
   }
 

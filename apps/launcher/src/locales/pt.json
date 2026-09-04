@@ -56,6 +56,7 @@
     "emailConflictError": "Este e-mail já está cadastrado. Por favor, entre com sua senha.",
     "externalAuthError": "Erro durante a autenticação externa.",
     "genericAuthError": "Falha ao concluir a autenticação.",
+    "invalidOAuthAttempt": "Esta tentativa de login não é mais válida. Tente novamente.",
     "oauthInitError": "Falha ao iniciar o fluxo de autenticação.",
     "missingFields": "Por favor, preencha todos os campos obrigatórios.",
     "invalidEmail": "Por favor, insira um e-mail válido.",

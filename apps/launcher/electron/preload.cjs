@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   authSavePendingOAuth: (data) => ipcRenderer.invoke("auth:save-pending-oauth", data),
   authGetPendingOAuth: (state) => ipcRenderer.invoke("auth:get-pending-oauth", state),
   authClearPendingOAuth: () => ipcRenderer.invoke("auth:clear-pending-oauth"),
+  authMarkOAuthCompleted: (state) => ipcRenderer.invoke("auth:mark-oauth-completed", state),
 
   // OAuth Deep Link Callback Handler
   onOAuthCallback: (callback) => {

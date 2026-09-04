@@ -56,6 +56,7 @@
     "emailConflictError": "This email is already registered. Please sign in with your password.",
     "externalAuthError": "Error during external authentication.",
     "genericAuthError": "Failed to complete authentication.",
+    "invalidOAuthAttempt": "This sign-in attempt is no longer valid. Please try again.",
     "oauthInitError": "Failed to initiate authentication flow.",
     "missingFields": "Please fill in all required fields.",
     "invalidEmail": "Please enter a valid email address.",

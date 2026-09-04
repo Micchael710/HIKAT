@@ -56,6 +56,7 @@
     "emailConflictError": "Cet e-mail est déjà enregistré. Veuillez vous connecter avec votre mot de passe.",
     "externalAuthError": "Erreur lors de l'authentification externe.",
     "genericAuthError": "Échec de l'authentification.",
+    "invalidOAuthAttempt": "Cette tentative de connexion n'est plus valide. Veuillez réessayer.",
     "oauthInitError": "Impossible d'initier le flux d'authentification.",
     "missingFields": "Veuillez remplir tous les champs obligatoires.",
     "invalidEmail": "Veuillez saisir une adresse e-mail valide.",

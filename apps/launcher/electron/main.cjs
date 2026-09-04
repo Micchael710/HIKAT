@@ -454,20 +454,6 @@ function handleDeepLinkUrl(rawUrl) {
   const validUrl = parseValidOAuthCallbackUrl(rawUrl)
   if (!validUrl) return
 
-  try {
-    const parsed = new URL(validUrl)
-    const state = parsed.searchParams.get("state")
-    const code = parsed.searchParams.get("code")
-
-    if (state && code) {
-      completedOAuthStates.add(state)
-
-      setTimeout(() => {
-        completedOAuthStates.delete(state)
-      }, 60_000)
-    }
-  } catch (_) { }
-
   focusMainWindow()
 
   if (
@@ -540,10 +526,19 @@ function startOAuthLoopbackServer() {
     if (url.pathname === "/auth/status") {
       const state = url.searchParams.get("state")
 
-      const completed = Boolean(
+      let status = "invalid"
+      if (state && completedOAuthStates.has(state)) {
+        status = "completed"
+      } else if (
         state &&
-        completedOAuthStates.has(state),
-      )
+        authStore &&
+        typeof authStore.peekPendingOAuth === "function" &&
+        authStore.peekPendingOAuth(state)
+      ) {
+        status = "pending"
+      } else {
+        status = "invalid"
+      }
 
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
@@ -552,7 +547,8 @@ function startOAuthLoopbackServer() {
 
       res.end(
         JSON.stringify({
-          completed,
+          status,
+          completed: status === "completed",
         }),
       )
 
@@ -634,6 +630,13 @@ function startOAuthLoopbackServer() {
         successSecondary:
           "Puedes cerrar esta pestaña de forma segura.",
 
+        invalidStatus: "",
+        invalidTitle: "Intento no válido",
+        invalidDescription:
+          "Este intento de inicio de sesión ya no es válido.",
+        invalidSecondary:
+          "Vuelve a HiKAT Launcher e inténtalo de nuevo.",
+
         openErrorStatus: "",
         openErrorTitle: "No se pudo abrir el Launcher",
         openErrorDescription:
@@ -664,6 +667,13 @@ function startOAuthLoopbackServer() {
           "You can now continue in HiKAT Launcher.",
         successSecondary:
           "You can safely close this tab.",
+
+        invalidStatus: "",
+        invalidTitle: "Invalid sign-in",
+        invalidDescription:
+          "This sign-in attempt is no longer valid.",
+        invalidSecondary:
+          "Return to HiKAT Launcher and try again.",
 
         openErrorStatus: "",
         openErrorTitle: "Launcher could not be opened",
@@ -696,6 +706,13 @@ function startOAuthLoopbackServer() {
         successSecondary:
           "Você pode fechar esta aba com segurança.",
 
+        invalidStatus: "",
+        invalidTitle: "Tentativa inválida",
+        invalidDescription:
+          "Esta tentativa de login não é mais válida.",
+        invalidSecondary:
+          "Volte ao HiKAT Launcher e tente novamente.",
+
         openErrorStatus: "",
         openErrorTitle: "Não foi possível abrir o Launcher",
         openErrorDescription:
@@ -726,6 +743,13 @@ function startOAuthLoopbackServer() {
           "Vous pouvez maintenant continuer dans HiKAT Launcher.",
         successSecondary:
           "Vous pouvez fermer cet onglet en toute sécurité.",
+
+        invalidStatus: "",
+        invalidTitle: "Tentative non valide",
+        invalidDescription:
+          "Cette tentative de connexion n'est plus valide.",
+        invalidSecondary:
+          "Retournez dans HiKAT Launcher et réessayez.",
 
         openErrorStatus: "",
         openErrorTitle: "Impossible d’ouvrir le Launcher",
@@ -1130,6 +1154,31 @@ function startOAuthLoopbackServer() {
                 "none";
             }
 
+            function showInvalidState() {
+              completed = true;
+
+              clearTimeout(launchTimeout);
+              clearInterval(statusInterval);
+
+              status.textContent =
+                t.invalidStatus || "";
+
+              title.textContent =
+                t.invalidTitle || "Intento no válido";
+
+              description.textContent =
+                t.invalidDescription || "Este intento de inicio de sesión ya no es válido.";
+
+              secondary.textContent =
+                t.invalidSecondary || "Vuelve a HiKAT Launcher e inténtalo de nuevo.";
+
+              loader.style.display =
+                "none";
+
+              retry.style.display =
+                "none";
+            }
+
             async function checkLauncherStatus() {
               if (
                 completed ||
@@ -1154,8 +1203,10 @@ function startOAuthLoopbackServer() {
                 const result =
                   await response.json();
 
-                if (result.completed) {
+                if (result.status === "completed" || result.completed) {
                   showCompletedState();
+                } else if (result.status === "invalid") {
+                  showInvalidState();
                 }
               } catch (_) { }
             }
@@ -1202,14 +1253,48 @@ function startOAuthLoopbackServer() {
               },
             );
 
+            async function initPreflight() {
+              if (!callbackState) {
+                showInvalidState();
+                return;
+              }
+
+              try {
+                const response = await fetch(
+                  "/auth/status?state=" +
+                  encodeURIComponent(callbackState),
+                  {
+                    cache: "no-store",
+                  },
+                );
+
+                if (!response.ok) {
+                  showInvalidState();
+                  return;
+                }
+
+                const result =
+                  await response.json();
+
+                if (result.status === "completed" || result.completed) {
+                  showCompletedState();
+                } else if (result.status === "invalid") {
+                  showInvalidState();
+                } else if (result.status === "pending") {
+                  openLauncher();
+                } else {
+                  showInvalidState();
+                }
+              } catch (_) {
+                showInvalidState();
+              }
+            }
+
             if (providerError) {
               showProviderError();
             } else {
               showWaitingState();
-
-              setTimeout(() => {
-                openLauncher();
-              }, 150);
+              initPreflight();
             }
           </script>
 
@@ -1412,7 +1497,17 @@ ipcMain.handle("auth:save-pending-oauth", async (_event, data) => {
 })
 
 ipcMain.handle("auth:get-pending-oauth", async (_event, state) => {
-  return authStore.getPendingOAuth(state)
+  return authStore.peekPendingOAuth(state)
+})
+
+ipcMain.handle("auth:mark-oauth-completed", async (_event, state) => {
+  if (state && typeof state === "string") {
+    completedOAuthStates.add(state)
+    setTimeout(() => {
+      completedOAuthStates.delete(state)
+    }, 60_000)
+  }
+  return true
 })
 
 ipcMain.handle("auth:clear-pending-oauth", async () => {

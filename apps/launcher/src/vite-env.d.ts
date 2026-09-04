@@ -157,6 +157,7 @@ interface ElectronAPI {
   }) => Promise<void>
   authGetPendingOAuth?: (state: string) => Promise<any>
   authClearPendingOAuth?: () => Promise<void>
+  authMarkOAuthCompleted?: (state: string) => Promise<void>
 }
 
 interface Window {

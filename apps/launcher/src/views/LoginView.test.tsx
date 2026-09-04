@@ -1072,4 +1072,38 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     )
     expect(resendBtn).toBeDefined()
   })
+
+  it("30. Deep link OAuth callback error displays friendly invalidOAuthAttempt message without technical words", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "handleOAuthCallback").mockRejectedValue(
+      new Error("Estado de autenticación inválido o sesión OAuth expirada."),
+    )
+
+    let callbackListener: ((url: string) => void) | null = null
+    ;(window as any).electronAPI = {
+      onOAuthCallback: (cb: (url: string) => void) => {
+        callbackListener = cb
+        return () => {
+          callbackListener = null
+        }
+      },
+    }
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      callbackListener?.("hikat://auth/callback?code=fakecode&state=fakestate")
+    })
+
+    expect(container.textContent).toContain("Este intento de inicio de sesión ya no es válido. Inténtalo de nuevo.")
+    expect(container.textContent).not.toContain("OAuth")
+    expect(container.textContent).not.toContain("PKCE")
+    expect(container.textContent).not.toContain("CSRF")
+    expect(container.textContent).not.toContain("state")
+    expect(container.textContent).not.toContain("authorization code")
+  })
 })

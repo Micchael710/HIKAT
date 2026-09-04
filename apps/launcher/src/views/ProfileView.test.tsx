@@ -399,4 +399,50 @@ describe("Launcher ProfileView Component", () => {
     expect(onLogoutMock).toHaveBeenCalledTimes(1)
     expect(logoutSpy).not.toHaveBeenCalled()
   })
+
+  it("11. Clicking send reset email calls requestPasswordReset with email and current language", async () => {
+    localStorage.setItem("hikat_language", "pt")
+    const resetSpy = vi.spyOn(authService, "requestPasswordReset").mockResolvedValue({
+      success: true,
+      message: "Reset email sent",
+    })
+
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-11",
+      username: "ResetUser",
+      displayName: "ResetUser",
+      email: "resetuser@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "resetuser@hikat.org" }],
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="ResetUser"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const resetBtn = buttons.find((btn) => btn.textContent?.includes("Enviar e-mail de redefinição") || btn.textContent?.includes("Enviar"))
+    expect(resetBtn).toBeDefined()
+
+    await act(async () => {
+      resetBtn?.click()
+    })
+
+    expect(resetSpy).toHaveBeenCalledWith("resetuser@hikat.org", "pt")
+    localStorage.removeItem("hikat_language")
+  })
 })

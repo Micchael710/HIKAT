@@ -56,6 +56,7 @@
     "emailConflictError": "Este correo electrónico ya está registrado. Por favor inicia sesión con tu contraseña.",
     "externalAuthError": "Error durante la autenticación externa.",
     "genericAuthError": "Error al completar autenticación.",
+    "invalidOAuthAttempt": "Este intento de inicio de sesión ya no es válido. Inténtalo de nuevo.",
     "oauthInitError": "No se pudo iniciar el flujo de autenticación.",
     "missingFields": "Por favor completa todos los campos requeridos.",
     "invalidEmail": "Ingresa un correo electrónico válido.",

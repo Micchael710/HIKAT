@@ -482,10 +482,32 @@ class LauncherAuthService {
     }
 
     if (!verifier) {
+      if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {
+        try {
+          const p = window.electronAPI.authClearPendingOAuth()
+          if (p && typeof p.catch === "function") p.catch(() => { })
+        } catch (_) { }
+      }
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("hikat_launcher_oauth_verifier")
+        sessionStorage.removeItem("hikat_launcher_oauth_state")
+        sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
+      }
       throw new Error("Estado de autenticación inválido o sesión OAuth expirada.")
     }
 
     if (params.expectedState && params.state !== params.expectedState) {
+      if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {
+        try {
+          const p = window.electronAPI.authClearPendingOAuth()
+          if (p && typeof p.catch === "function") p.catch(() => { })
+        } catch (_) { }
+      }
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("hikat_launcher_oauth_verifier")
+        sessionStorage.removeItem("hikat_launcher_oauth_state")
+        sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
+      }
       throw new Error("Estado de autenticación inválido (posible ataque CSRF).")
     }
 
@@ -500,6 +522,14 @@ class LauncherAuthService {
         },
         finalKeepSession,
       )
+
+      // Mark OAuth completed in Electron Main so /auth/status endpoint knows it's completed
+      if (typeof window !== "undefined" && window.electronAPI?.authMarkOAuthCompleted && params.state) {
+        try {
+          const p = window.electronAPI.authMarkOAuthCompleted(params.state)
+          if (p && typeof p.catch === "function") p.catch(() => { })
+        } catch (_) { }
+      }
 
       // Clean pending state on success
       if (typeof window !== "undefined" && window.electronAPI?.authClearPendingOAuth) {

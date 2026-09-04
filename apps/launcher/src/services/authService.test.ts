@@ -909,6 +909,58 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
       }),
     )
   })
+
+  it("26. handleOAuthCallback calls authMarkOAuthCompleted and authClearPendingOAuth on success", async () => {
+    const markCompletedMock = vi.fn().mockResolvedValue(true)
+    const clearPendingMock = vi.fn().mockResolvedValue(true)
+    const getPendingMock = vi.fn().mockResolvedValue({
+      codeVerifier: "test-verifier-xyz-123456789012345678901234567890",
+      keepSession: true,
+    })
+
+    ;(window as any).electronAPI = {
+      authMarkOAuthCompleted: markCompletedMock,
+      authClearPendingOAuth: clearPendingMock,
+      authGetPendingOAuth: getPendingMock,
+    }
+
+    vi.spyOn((authService as any).client, "exchangeOAuthCode").mockResolvedValueOnce({
+      id: "u-oauth-1",
+      displayName: "OAuthPlayer",
+      email: "oauth@hikat.org",
+      role: "PLAYER",
+      createdAt: new Date().toISOString(),
+    })
+
+    const user = await authService.handleOAuthCallback({
+      code: "test-code",
+      state: "test-state-123",
+    })
+
+    expect(user.displayName).toBe("OAuthPlayer")
+    expect(getPendingMock).toHaveBeenCalledWith("test-state-123")
+    expect(markCompletedMock).toHaveBeenCalledWith("test-state-123")
+    expect(clearPendingMock).toHaveBeenCalled()
+  })
+
+  it("27. handleOAuthCallback cleans pending state when missing verifier / terminal error", async () => {
+    const clearPendingMock = vi.fn().mockResolvedValue(true)
+    const getPendingMock = vi.fn().mockResolvedValue(null)
+
+    ;(window as any).electronAPI = {
+      authClearPendingOAuth: clearPendingMock,
+      authGetPendingOAuth: getPendingMock,
+    }
+
+    await expect(
+      authService.handleOAuthCallback({
+        code: "test-code",
+        state: "missing-state",
+      }),
+    ).rejects.toThrow("Estado de autenticación inválido o sesión OAuth expirada.")
+
+    expect(clearPendingMock).toHaveBeenCalled()
+  })
 })
 
 

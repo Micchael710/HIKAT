@@ -112,7 +112,7 @@ export default function ProfileView({
     if (resetState === "sending") return
     setResetState("sending")
     try {
-      const res = await authService.requestPasswordReset(email)
+      const res = await authService.requestPasswordReset(email, language)
       if (res.success) {
         setResetState("sent")
         showToast(t("profile.emailSent"), "success")

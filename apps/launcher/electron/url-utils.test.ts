@@ -146,6 +146,69 @@ describe("Electron OAuth Deep Link URL Validation Suite (Shard 8F)", () => {
     expect(completedFnSnippet).toContain("clearInterval(statusInterval)")
     expect(completedFnSnippet).toContain("retry.style.display")
   })
+
+  it("12. Verifies loopback server in main.cjs differentiates pending, completed, and invalid states", () => {
+    const fs = require("fs")
+    const path = require("path")
+    const mainContent = fs.readFileSync(path.join(__dirname, "main.cjs"), "utf8")
+
+    expect(mainContent).toContain('if (url.pathname === "/auth/status")')
+    expect(mainContent).toContain('let status = "invalid"')
+    expect(mainContent).toContain('if (state && completedOAuthStates.has(state))')
+    expect(mainContent).toContain('status = "completed"')
+    expect(mainContent).toContain('authStore.peekPendingOAuth(state)')
+    expect(mainContent).toContain('status = "pending"')
+    expect(mainContent).toContain('JSON.stringify({')
+    expect(mainContent).toContain('status,')
+    expect(mainContent).toContain('completed: status === "completed"')
+  })
+
+  it("13. Verifies loopback HTML includes initPreflight and friendly translations in ES, EN, PT, FR without technical terms", () => {
+    const fs = require("fs")
+    const path = require("path")
+    const mainContent = fs.readFileSync(path.join(__dirname, "main.cjs"), "utf8")
+
+    expect(mainContent).toContain("async function initPreflight()")
+    expect(mainContent).toContain("function showInvalidState()")
+    expect(mainContent).toContain("Este intento de inicio de sesión ya no es válido.")
+    expect(mainContent).toContain("Vuelve a HiKAT Launcher e inténtalo de nuevo.")
+    expect(mainContent).toContain("This sign-in attempt is no longer valid.")
+    expect(mainContent).toContain("Return to HiKAT Launcher and try again.")
+    expect(mainContent).toContain("Esta tentativa de login não é mais válida.")
+    expect(mainContent).toContain("Volte ao HiKAT Launcher e tente novamente.")
+    expect(mainContent).toContain("Cette tentative de connexion n'est plus valide.")
+    expect(mainContent).toContain("Retournez dans HiKAT Launcher et réessayez.")
+
+    // Ensure no raw technical words are in the user-facing text
+    const invalidTextEs = "Este intento de inicio de sesión ya no es válido."
+    expect(invalidTextEs).not.toContain("OAuth")
+    expect(invalidTextEs).not.toContain("PKCE")
+    expect(invalidTextEs).not.toContain("state")
+    expect(invalidTextEs).not.toContain("authorization code")
+  })
+
+  it("14. Verifies handleDeepLinkUrl does NOT prematurely add state to completedOAuthStates", () => {
+    const fs = require("fs")
+    const path = require("path")
+    const mainContent = fs.readFileSync(path.join(__dirname, "main.cjs"), "utf8")
+
+    const handleDeepLinkStart = mainContent.indexOf("function handleDeepLinkUrl(rawUrl)")
+    const handleDeepLinkEnd = mainContent.indexOf("function startOAuthLoopbackServer()", handleDeepLinkStart)
+    const handleDeepLinkSnippet = mainContent.slice(handleDeepLinkStart, handleDeepLinkEnd)
+
+    expect(handleDeepLinkSnippet).not.toContain("completedOAuthStates.add(state)")
+  })
+
+  it("15. Verifies auth:get-pending-oauth calls peekPendingOAuth and auth:mark-oauth-completed exists", () => {
+    const fs = require("fs")
+    const path = require("path")
+    const mainContent = fs.readFileSync(path.join(__dirname, "main.cjs"), "utf8")
+
+    expect(mainContent).toContain('ipcMain.handle("auth:get-pending-oauth", async (_event, state) => {')
+    expect(mainContent).toContain("return authStore.peekPendingOAuth(state)")
+    expect(mainContent).toContain('ipcMain.handle("auth:mark-oauth-completed", async (_event, state) => {')
+    expect(mainContent).toContain("completedOAuthStates.add(state)")
+  })
 })
 
 
