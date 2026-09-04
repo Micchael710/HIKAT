@@ -10,6 +10,7 @@ interface LauncherSidebarProps {
   s: number
   theme: ThemeMode
   activeSkinAccent: { r: number; g: number; b: number; css: string }
+  settingsAccent?: { r: number; g: number; b: number; css: string }
 }
 
 export default function LauncherSidebar({
@@ -18,6 +19,7 @@ export default function LauncherSidebar({
   s,
   theme,
   activeSkinAccent,
+  settingsAccent,
 }: LauncherSidebarProps) {
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
@@ -107,7 +109,7 @@ export default function LauncherSidebar({
               ? { r: 239, g: 196, b: 54, css: "239, 196, 54" }
               : icon === "shirt"
                 ? activeSkinAccent
-                : { r: 62, g: 196, b: 192, css: "62, 196, 192" }
+                : (settingsAccent || { r: 62, g: 196, b: 192, css: "62, 196, 192" })
 
           return (
             <div

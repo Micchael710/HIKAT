@@ -789,6 +789,11 @@ export default function DownloadPlayButton({
       showToast(t("playButton.verifyError"), "error")
       return
     }
+    window.dispatchEvent(
+      new CustomEvent("hikat:game-action-status", {
+        detail: { action: "verify", state: "started" },
+      }),
+    )
     showToast(t("playButton.verifying"), "info")
     setDownloadedBytes(0)
     setProgress(0)
@@ -858,6 +863,11 @@ export default function DownloadPlayButton({
         if (syncOpIdRef.current === syncOpId) {
           isStartingSyncRef.current = false
         }
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-status", {
+            detail: { action: "verify", state: "finished" },
+          }),
+        )
       })
   }
 
@@ -865,6 +875,11 @@ export default function DownloadPlayButton({
     setIsMenuOpen(false)
     if (isTransitioning) return
     setIsTransitioning(true)
+    window.dispatchEvent(
+      new CustomEvent("hikat:game-action-status", {
+        detail: { action: "uninstall", state: "started" },
+      }),
+    )
     try {
       const success = await gameService.uninstallGame()
       if (success) {
@@ -881,8 +896,31 @@ export default function DownloadPlayButton({
       }
     } finally {
       setIsTransitioning(false)
+      window.dispatchEvent(
+        new CustomEvent("hikat:game-action-status", {
+          detail: { action: "uninstall", state: "finished" },
+        }),
+      )
     }
   }
+
+  // Listen for game action requests from SettingsView
+  useEffect(() => {
+    const handleGameActionRequest = (e: Event) => {
+      const customEvt = e as CustomEvent<{ action: "verify" | "uninstall" }>
+      const action = customEvt.detail?.action
+      if (action === "verify") {
+        handleVerifyInstallation()
+      } else if (action === "uninstall") {
+        handleUninstallGame()
+      }
+    }
+
+    window.addEventListener("hikat:game-action-request", handleGameActionRequest)
+    return () => {
+      window.removeEventListener("hikat:game-action-request", handleGameActionRequest)
+    }
+  }, [handleVerifyInstallation, handleUninstallGame])
 
   /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / PLAY ── */
   if (!isExpanded) {

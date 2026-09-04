@@ -30,6 +30,7 @@ export { calculateAutomaticRam, formatModLoaderName }
 interface SettingsViewProps {
   theme?: ThemeMode
   setTheme?: (t: ThemeMode) => void
+  onSidebarAccentChange?: (accent: { r: number; g: number; b: number; css: string }) => void
 }
 
 interface GameItem {
@@ -49,6 +50,7 @@ const GAMES: GameItem[] = [
 export default function SettingsView({
   theme = "dark",
   setTheme,
+  onSidebarAccentChange,
 }: SettingsViewProps) {
   const { t, language, setLanguage } = useTranslation()
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
@@ -132,9 +134,82 @@ export default function SettingsView({
   const gameAccent = useDynamicAccent(selectedGame?.logo, "#3ec4c0")
   const showGameSidebar = GAMES.length > 1
 
+  // Inform sidebar of current active accent for Settings (general vs selected game)
+  useEffect(() => {
+    if (onSidebarAccentChange) {
+      if (activeTab === "game") {
+        onSidebarAccentChange({
+          r: gameAccent.r,
+          g: gameAccent.g,
+          b: gameAccent.b,
+          css: gameAccent.css,
+        })
+      } else {
+        onSidebarAccentChange({
+          r: 62,
+          g: 196,
+          b: 192,
+          css: "62, 196, 192",
+        })
+      }
+    }
+  }, [activeTab, gameAccent.r, gameAccent.g, gameAccent.b, gameAccent.css, onSidebarAccentChange])
+
+  // Operative state resolved locally via checkSyncPlan (without GraphQL queries)
+  const [operativeState, setOperativeState] = useState<{
+    isInstalled: boolean
+    hasUpdate: boolean
+    installedModpackVersion: string | null
+    hasIntegrityIssue: boolean
+  }>({
+    isInstalled: gameService.isGameInstalled(),
+    hasUpdate: false,
+    installedModpackVersion: null,
+    hasIntegrityIssue: false,
+  })
+
+  const refreshOperationalState = async (targetManifest?: GameManifest | null) => {
+    const m = targetManifest !== undefined ? targetManifest : manifest
+    if (window.electronAPI?.checkSyncPlan && m?.clientFiles && m.clientFiles.length > 0) {
+      try {
+        const planCheck = await window.electronAPI.checkSyncPlan({
+          clientFiles: m.clientFiles,
+          directoryPolicies: m.directoryPolicies || [],
+          modpackVersion: m.version,
+          minecraftVersion: m.minecraftVersion,
+          modLoader: m.modLoader,
+          modLoaderVersion: m.modLoaderVersion ?? undefined,
+          neoForgeVersion: m.neoForgeVersion ?? undefined,
+        })
+        if (planCheck?.success) {
+          const isInst = Boolean(planCheck.isFullyInstalled)
+          const instVer = planCheck.installedModpackVersion || null
+          const hasUpd = Boolean(instVer && m.version && instVer !== m.version)
+          setOperativeState({
+            isInstalled: isInst,
+            hasUpdate: hasUpd,
+            installedModpackVersion: instVer,
+            hasIntegrityIssue: Boolean(planCheck.hasIntegrityIssue),
+          })
+          gameService.setGameInstalled(isInst)
+          return
+        }
+      } catch (_) {}
+    }
+    setOperativeState({
+      isInstalled: gameService.isGameInstalled(),
+      hasUpdate: false,
+      installedModpackVersion: null,
+      hasIntegrityIssue: false,
+    })
+  }
+
   // Sync settings with Electron process and OS on mount
   useEffect(() => {
     let isMounted = true
+
+    // Check operative state locally
+    refreshOperationalState()
 
     if (window.electronAPI?.getMemory) {
       window.electronAPI
@@ -233,6 +308,7 @@ export default function SettingsView({
         .then((m) => {
           if (isMounted && m) {
             setManifest(m)
+            refreshOperationalState(m)
           }
         })
         .catch(() => {})
@@ -282,9 +358,54 @@ export default function SettingsView({
         const fresh = await gameService.checkGameManifest()
         if (isMounted && fresh) {
           setManifest(fresh)
+          refreshOperationalState(fresh)
         }
       } catch (_) {}
     })
+
+    // Listen to game action status events from DownloadPlayButton
+    const handleActionStatus = (e: Event) => {
+      const customEvt = e as CustomEvent<{ action: "verify" | "uninstall"; state: "started" | "finished" }>
+      const { action, state } = customEvt.detail || {}
+      if (action === "verify") {
+        setIsVerifying(state === "started")
+        if (state === "finished") {
+          refreshOperationalState()
+          if (window.electronAPI?.getGameRuntimeInfo) {
+            window.electronAPI
+              .getGameRuntimeInfo()
+              .then((runtime: any) => {
+                if (
+                  isMounted &&
+                  runtime &&
+                  typeof runtime.javaMajorVersion === "number" &&
+                  runtime.javaMajorVersion > 0
+                ) {
+                  setRuntimeInfo(runtime)
+                  try {
+                    localStorage.setItem(
+                      STORAGE_KEYS.JAVA_MAJOR_VERSION,
+                      String(runtime.javaMajorVersion),
+                    )
+                  } catch (_) {}
+                }
+              })
+              .catch(() => {})
+          }
+        }
+      } else if (action === "uninstall") {
+        setIsUninstalling(state === "started")
+        if (state === "finished") {
+          refreshOperationalState()
+          setRuntimeInfo({ javaMajorVersion: null })
+          try {
+            localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
+          } catch (_) {}
+        }
+      }
+    }
+
+    window.addEventListener("hikat:game-action-status", handleActionStatus)
 
     return () => {
       isMounted = false
@@ -294,6 +415,7 @@ export default function SettingsView({
       unsubLaunch?.()
       unsubPhase?.()
       unsubRelease()
+      window.removeEventListener("hikat:game-action-status", handleActionStatus)
     }
   }, [])
 
@@ -374,16 +496,8 @@ export default function SettingsView({
     handleToggleAutoRam(true)
   }
 
-  const isInstalled = Boolean(
-    manifest?.installed || manifest?.hasExistingInstall || gameService.isGameInstalled(),
-  )
-
-  const hasUpdate = Boolean(
-    manifest?.hasUpdate ||
-      (manifest?.installedModpackVersion &&
-        manifest?.version &&
-        manifest.installedModpackVersion !== manifest.version),
-  )
+  const isInstalled = operativeState.isInstalled
+  const hasUpdate = operativeState.hasUpdate
 
   const isGameBusy =
     launchStatus === "running" ||
@@ -392,69 +506,25 @@ export default function SettingsView({
     isVerifying ||
     isUninstalling
 
-  const isVerifyDisabled = !manifest || !isInstalled || hasUpdate || isGameBusy
-  const isUninstallDisabled = !manifest || !isInstalled || isGameBusy
+  const isVerifyDisabled = !isInstalled || hasUpdate || isGameBusy
+  const isUninstallDisabled = !isInstalled || isGameBusy
 
-  const handleVerify = async () => {
-    if (isVerifyDisabled || !manifest?.clientFiles || manifest.clientFiles.length === 0) return
-    setIsVerifying(true)
-    notifySaved(t("settings.verifying") || "Verificando...", "info")
-    try {
-      const res: any = await gameService.startSync(
-        manifest.clientFiles,
-        manifest.version,
-        manifest.minecraftVersion,
-        manifest.modLoader,
-        manifest.modLoaderVersion,
-        manifest.neoForgeVersion,
-        true,
-        manifest.directoryPolicies,
-      )
-      const fresh = await gameService.checkGameManifest()
-      if (fresh) setManifest(fresh)
-      if (window.electronAPI?.getGameRuntimeInfo) {
-        const runtime = await window.electronAPI.getGameRuntimeInfo().catch(() => null)
-        if (runtime && typeof runtime.javaMajorVersion === "number" && runtime.javaMajorVersion > 0) {
-          setRuntimeInfo(runtime)
-          try {
-            localStorage.setItem(STORAGE_KEYS.JAVA_MAJOR_VERSION, String(runtime.javaMajorVersion))
-          } catch (_) {}
-        }
-      }
-      if (res?.success && fresh?.installed && !fresh?.hasUpdate) {
-        gameService.setGameInstalled(true)
-        notifySaved(t("settings.verifiedSuccess") || "Juego verificado con éxito", "success")
-      } else {
-        notifySaved(t("playButton.verifyError") || "Error en verificación", "error")
-      }
-    } catch (_) {
-      notifySaved(t("playButton.verifyError") || "Error en verificación", "error")
-    } finally {
-      setIsVerifying(false)
-    }
+  const handleVerify = () => {
+    if (isVerifyDisabled) return
+    window.dispatchEvent(
+      new CustomEvent("hikat:game-action-request", {
+        detail: { action: "verify" },
+      }),
+    )
   }
 
-  const handleUninstall = async () => {
+  const handleUninstall = () => {
     if (isUninstallDisabled) return
-    setIsUninstalling(true)
-    try {
-      const ok = await gameService.uninstallGame()
-      if (ok) {
-        const fresh = await gameService.checkGameManifest()
-        setManifest(fresh)
-        setRuntimeInfo({ javaMajorVersion: null })
-        try {
-          localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
-        } catch (_) {}
-        notifySaved(t("playButton.uninstallSuccess") || "Juego desinstalado", "success")
-      } else {
-        notifySaved(t("playButton.uninstallError") || "Error al desinstalar", "error")
-      }
-    } catch (_) {
-      notifySaved(t("playButton.uninstallError") || "Error al desinstalar", "error")
-    } finally {
-      setIsUninstalling(false)
-    }
+    window.dispatchEvent(
+      new CustomEvent("hikat:game-action-request", {
+        detail: { action: "uninstall" },
+      }),
+    )
   }
 
   const hasMinecraftVersion = Boolean(manifest?.minecraftVersion)
@@ -1507,6 +1577,15 @@ export default function SettingsView({
                       >
                         {t("settings.verifyInstallation")}
                       </div>
+                      <div
+                        style={{
+                          fontSize: 14.5,
+                          color: isDark ? "#8899aa" : "#556677",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {t("settings.verifyInstallationDesc")}
+                      </div>
                     </div>
 
                     <button
@@ -1553,6 +1632,15 @@ export default function SettingsView({
                         }}
                       >
                         {t("settings.uninstallGame")}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 14.5,
+                          color: isDark ? "#8899aa" : "#556677",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {t("settings.uninstallGameDesc")}
                       </div>
                     </div>
 

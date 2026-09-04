@@ -219,7 +219,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
   })
 
   it("7. Discrete technical details footer is placed at the end with real values and fallback '—'", async () => {
-    // 1. Initial cached values with installed status
+    // Initial cached values
     localStorage.setItem(
       "hikat_game_manifest",
       JSON.stringify({
@@ -227,8 +227,6 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
         modLoader: "NEOFORGE",
         modLoaderVersion: "21.1.65",
         version: "1.4.2",
-        installed: true,
-        hasExistingInstall: true,
       }),
     )
     localStorage.setItem("hikat_java_major_version", "21")
@@ -246,20 +244,6 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(container.textContent).toContain("Java 21")
     expect(container.textContent).toContain("Modpack 1.4.2")
     expect(container.textContent).toContain("·")
-
-    // 2. Uninstall clears Java cache
-    const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Desinstalar"),
-    )
-    expect(uninstallBtn).toBeDefined()
-    expect(uninstallBtn?.hasAttribute("disabled")).toBe(false)
-
-    await act(async () => {
-      uninstallBtn?.click()
-    })
-
-    expect(gameService.uninstallGame).toHaveBeenCalled()
-    expect(localStorage.getItem("hikat_java_major_version")).toBeNull()
   })
 
   it("8. When single game exists (GAMES.length === 1), sidebar is hidden and panel takes full width", async () => {
@@ -359,13 +343,20 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("false")
   })
 
-  it("11. Administration card: Verify and Uninstall have equal width (160px) and appropriate classes", async () => {
+  it("11. Administration card: Verify and Uninstall render descriptions and buttons have equal width (160px)", async () => {
+    localStorage.setItem("hikat_game_installed", "true")
+    vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
+
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
     const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
     await act(async () => {
       gamesTabBtn?.click()
     })
+
+    // Descriptions are rendered
+    expect(container.textContent).toContain("Comprueba la instalación y restaura archivos necesarios")
+    expect(container.textContent).toContain("Elimina este juego de este equipo.")
 
     const verifyBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Verificar"),
@@ -384,19 +375,13 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(uninstallBtn?.style.width).toBe("160px")
   })
 
-  it("12. Technical cache alone does not enable Verify when uninstalled", async () => {
-    // Cached manifest exists but game is NOT installed
-    localStorage.setItem(
-      "hikat_game_manifest",
-      JSON.stringify({
-        minecraftVersion: "1.21.1",
-        modLoader: "NEOFORGE",
-        modLoaderVersion: "21.1.65",
-        version: "1.4.2",
-      }),
-    )
-    localStorage.setItem("hikat_game_installed", "false")
-    vi.spyOn(gameService, "isGameInstalled").mockReturnValue(false)
+  it("12. Verify & Uninstall in Settings dispatch CustomEvents without duplicate gameService logic", async () => {
+    localStorage.setItem("hikat_game_installed", "true")
+    vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
+
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent")
+    const startSyncSpy = vi.spyOn(gameService, "startSync")
+    const uninstallSpy = vi.spyOn(gameService, "uninstallGame")
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -408,10 +393,87 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     const verifyBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Verificar"),
     )
-    expect(verifyBtn?.hasAttribute("disabled")).toBe(true)
+    const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Desinstalar"),
+    )
+
+    // Click Verify
+    await act(async () => {
+      verifyBtn?.click()
+    })
+
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "hikat:game-action-request",
+        detail: { action: "verify" },
+      }),
+    )
+
+    // Click Uninstall
+    await act(async () => {
+      uninstallBtn?.click()
+    })
+
+    expect(uninstallSpy).not.toHaveBeenCalled()
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "hikat:game-action-request",
+        detail: { action: "uninstall" },
+      }),
+    )
+
+    // Receiving hikat:game-action-status event updates button state
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("hikat:game-action-status", {
+          detail: { action: "verify", state: "started" },
+        }),
+      )
+    })
+
+    expect(container.textContent).toContain("Verificando...")
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("hikat:game-action-status", {
+          detail: { action: "verify", state: "finished" },
+        }),
+      )
+    })
   })
 
-  it("13. SettingsView layout maintains top: 145, right: 80, viewFadeIn animation, header structure matching SkinsView, and slider receives --settings-accent", async () => {
+  it("13. Sidebar dynamic accent notifies parent when tab switches between General and Juegos", async () => {
+    const onSidebarAccentChangeMock = vi.fn()
+    const container = await renderComponent(
+      <SettingsView theme="dark" setTheme={vi.fn()} onSidebarAccentChange={onSidebarAccentChangeMock} />,
+    )
+
+    // Initially in General tab -> reports turquoise
+    expect(onSidebarAccentChangeMock).toHaveBeenCalledWith({
+      r: 62,
+      g: 196,
+      b: 192,
+      css: "62, 196, 192",
+    })
+
+    // Switch to Juegos tab -> reports gameAccent
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    expect(onSidebarAccentChangeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        r: expect.any(Number),
+        g: expect.any(Number),
+        b: expect.any(Number),
+      }),
+    )
+  })
+
+  it("14. SettingsView layout maintains top: 145, right: 80, viewFadeIn animation, header structure matching SkinsView, and slider receives --settings-accent", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     // Check main panel container position & animation matching SkinsView
@@ -439,7 +501,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(slider?.style.getPropertyValue("--settings-accent")).toBeTruthy()
   })
 
-  it("14. LiveToast uses game accent in Juegos tab and standard styling in General tab, preserving red for errors", async () => {
+  it("15. LiveToast uses game accent in Juegos tab and standard styling in General tab, preserving red for errors", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     // In General tab, toggle a setting -> toast appears without custom game accent
@@ -474,7 +536,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(toast.style.borderColor || toast.style.boxShadow).toBeTruthy()
   })
 
-  it("15. Missing technical information displays fallback '—'", async () => {
+  it("16. Missing technical information displays fallback '—'", async () => {
     localStorage.removeItem("hikat_game_manifest")
     localStorage.removeItem("hikat_java_major_version")
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(null)

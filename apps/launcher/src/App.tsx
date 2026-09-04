@@ -37,6 +37,12 @@ export default function App() {
     handleLogout,
   } = useLauncherState()
 
+  const [settingsAccent, setSettingsAccent] = React.useState<{
+    r: number
+    g: number
+    b: number
+    css: string
+  }>({ r: 62, g: 196, b: 192, css: "62, 196, 192" })
 
   const tokens = getThemeTokens(theme)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -187,7 +193,11 @@ export default function App() {
             )}
 
             {view === "settings" && (
-              <SettingsView theme={theme} setTheme={setTheme} />
+              <SettingsView
+                theme={theme}
+                setTheme={setTheme}
+                onSidebarAccentChange={setSettingsAccent}
+              />
             )}
             {view === "profile" && (
               <ProfileView
@@ -239,6 +249,7 @@ export default function App() {
             s={scale}
             theme={theme}
             activeSkinAccent={activeSkinAccent}
+            settingsAccent={settingsAccent}
           />
 
           {/* Top-Right Profile Card / Menu (Positioned with clean breathing room beneath window controls) */}
