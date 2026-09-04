@@ -19,6 +19,7 @@ import {
 import { hashToken } from "./crypto/tokens"
 import { EmailService, EmailLocale, sanitizeEmailLocale } from "./services/email"
 import { HIKAT_LOGO_PNG_BASE64 } from "./assets/logo"
+import { HIKAT_BACKGROUND_PNG_BASE64 } from "./assets/background"
 import { checkRateLimit } from "./services/rateLimiter"
 import {
   registerWithPassword,
@@ -204,6 +205,22 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
   // 2b. Public HiKAT Logo Asset
   if (pathname === "/auth/logo.png" && method === "GET") {
     const binaryString = atob(HIKAT_LOGO_PNG_BASE64)
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=86400",
+      },
+    })
+  }
+
+  // 2c. Public HiKAT Background Asset
+  if (pathname === "/auth/background.png" && method === "GET") {
+    const binaryString = atob(HIKAT_BACKGROUND_PNG_BASE64)
     const bytes = new Uint8Array(binaryString.length)
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i)
@@ -410,7 +427,6 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
   <title>${copy.title} - HiKAT</title>
-  <meta http-equiv="refresh" content="0;url=${deepLink}">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -427,6 +443,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       justify-content: center;
       position: relative;
       overflow: hidden;
+    }
+    .bg-layer {
+      position: absolute;
+      inset: 0;
+      background-image: url("/auth/background.png");
+      background-size: cover;
+      background-position: center;
+      opacity: 0.35;
+      filter: blur(2px);
+      transform: scale(1.04);
+      z-index: 0;
     }
     .overlay-layer {
       position: absolute;
@@ -527,24 +554,33 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       line-height: 1.5;
     }
   </style>
-  <script>
-    window.location.href = "${deepLink}";
-  </script>
 </head>
 <body>
+  <div class="bg-layer"></div>
   <div class="overlay-layer"></div>
   <div class="page">
     <main class="card">
       <div class="brand">
-        <img src="data:image/png;base64,${HIKAT_LOGO_PNG_BASE64}" alt="HiKAT">
+        <img src="/auth/logo.png" alt="HiKAT">
       </div>
       <h1>${copy.title}</h1>
       <p class="description">${copy.description}</p>
       <div class="loader"></div>
-      <a href="${deepLink}" class="btn">${copy.button}</a>
+      <button id="open-btn" class="btn" type="button" onclick="openLauncher()">${copy.button}</button>
       <p class="secondary">${copy.secondary}</p>
     </main>
   </div>
+  <script>
+    const deepLink = ${JSON.stringify(deepLink)};
+    function openLauncher() {
+      window.location.href = deepLink;
+    }
+    const btn = document.getElementById("open-btn");
+    if (btn) {
+      btn.addEventListener("click", openLauncher);
+    }
+    setTimeout(openLauncher, 150);
+  </script>
 </body>
 </html>`
 

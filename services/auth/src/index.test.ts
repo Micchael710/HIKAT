@@ -1869,12 +1869,35 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(resVerify.headers.get("Cache-Control")).toBe("no-store")
       expect(resVerify.headers.get("Referrer-Policy")).toBe("no-referrer")
       const htmlVerify = await resVerify.text()
+
+      // Confirm no meta refresh and no script redirect in <head>
+      expect(htmlVerify).not.toContain("http-equiv=\"refresh\"")
+      const headEnd = htmlVerify.indexOf("</head>")
+      const headContent = htmlVerify.slice(0, headEnd)
+      expect(headContent).not.toContain("window.location.href")
+      expect(headContent).not.toContain("hikat://")
+
+      // Confirm card renders before openLauncher script
+      const cardPos = htmlVerify.indexOf("<main class=\"card\">")
+      const scriptPos = htmlVerify.indexOf("<script>")
+      expect(cardPos).toBeGreaterThan(-1)
+      expect(scriptPos).toBeGreaterThan(cardPos)
+
+      // Confirm delayed open attempt & button trigger
+      expect(htmlVerify).toContain("function openLauncher()")
+      expect(htmlVerify).toContain("setTimeout(openLauncher, 150)")
+      expect(htmlVerify).toContain("onclick=\"openLauncher()\"")
+
+      // Confirm background & logo asset references
+      expect(htmlVerify).toContain("/auth/background.png")
+      expect(htmlVerify).toContain("/auth/logo.png")
+      expect(htmlVerify).not.toContain("#efc436") // No yellow styling!
+
+      // Confirm copy & deep link
       expect(htmlVerify).toContain("hikat://auth/verify-email?token=validToken123")
       expect(htmlVerify).toContain("Verificar cuenta")
       expect(htmlVerify).toContain("Estamos abriendo HiKAT Launcher para verificar tu cuenta.")
       expect(htmlVerify).toContain("Abrir HiKAT Launcher")
-      expect(htmlVerify).toContain("data:image/png;base64,")
-      expect(htmlVerify).not.toContain("#efc436") // No yellow styling!
 
       // 2. Valid reset-password action with English language
       const reqReset = new Request("http://localhost:8788/auth/email-action?type=reset-password&token=resetToken456&lang=en", {
@@ -1889,10 +1912,12 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       })
       expect(resReset.status).toBe(200)
       const htmlReset = await resReset.text()
+      expect(htmlReset).not.toContain("http-equiv=\"refresh\"")
       expect(htmlReset).toContain("hikat://auth/reset-password?token=resetToken456")
       expect(htmlReset).toContain("Reset password")
       expect(htmlReset).toContain("Continue in HiKAT Launcher to set your new password.")
       expect(htmlReset).toContain("Open HiKAT Launcher")
+      expect(htmlReset).toContain("setTimeout(openLauncher, 150)")
 
       // 3. Fallback to Accept-Language (French)
       const reqFr = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=tokFrench789", {
@@ -1941,7 +1966,8 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(resInvalid.status).toBe(400)
     })
 
-    it("GET /auth/logo.png serves raw PNG image asset", async () => {
+    it("GET /auth/logo.png and GET /auth/background.png serve raw image assets", async () => {
+      // 1. Logo Asset
       const reqLogo = new Request("http://localhost:8788/auth/logo.png", {
         method: "GET",
       })
@@ -1954,8 +1980,24 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       })
       expect(resLogo.status).toBe(200)
       expect(resLogo.headers.get("Content-Type")).toBe("image/png")
-      const buffer = await resLogo.arrayBuffer()
-      expect(buffer.byteLength).toBeGreaterThan(100)
+      const logoBuffer = await resLogo.arrayBuffer()
+      expect(logoBuffer.byteLength).toBeGreaterThan(100)
+
+      // 2. Background Asset
+      const reqBg = new Request("http://localhost:8788/auth/background.png", {
+        method: "GET",
+      })
+      const resBg = await handleRequest({
+        request: reqBg,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resBg.status).toBe(200)
+      expect(resBg.headers.get("Content-Type")).toBe("image/png")
+      const bgBuffer = await resBg.arrayBuffer()
+      expect(bgBuffer.byteLength).toBeGreaterThan(1000)
     })
 
     it("registerWithPassword, resendVerification, and requestPasswordReset propagate locale into email URLs and templates", async () => {
