@@ -215,15 +215,28 @@ export default function SettingsView({
         .catch(() => {})
     }
 
-    // Load Game Manifest
-    gameService
-      .checkGameManifest()
-      .then((m) => {
-        if (isMounted && m) {
-          setManifest(m)
+    // Load Game Manifest ONLY if not already in cache
+    let hasCachedManifest = false
+    try {
+      const cached = localStorage.getItem("hikat_game_manifest")
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (parsed && typeof parsed === "object") {
+          hasCachedManifest = true
         }
-      })
-      .catch(() => {})
+      }
+    } catch (_) {}
+
+    if (!hasCachedManifest) {
+      gameService
+        .checkGameManifest()
+        .then((m) => {
+          if (isMounted && m) {
+            setManifest(m)
+          }
+        })
+        .catch(() => {})
+    }
 
     // Load Runtime Info
     if (window.electronAPI?.getGameRuntimeInfo) {
@@ -275,6 +288,9 @@ export default function SettingsView({
 
     return () => {
       isMounted = false
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current)
+      }
       unsubLaunch?.()
       unsubPhase?.()
       unsubRelease()
@@ -556,6 +572,7 @@ export default function SettingsView({
           flexDirection: "column",
           gap: 16,
           zIndex: 10,
+          animation: "viewFadeIn 0.24s ease",
         }}
       >
         {/* ── Top Header Row (Identical structure and metrics with SkinsView) ── */}
@@ -1200,91 +1217,38 @@ export default function SettingsView({
                       width: "100%",
                     }}
                   >
-                    {/* 1. Compact Horizontal Technical Overview Card (Unified single card) */}
+                    {/* Selected Game Identity Header: Logo + Name */}
                     <div
-                      className="settings-card"
                       style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(4, 1fr)",
-                        padding: "16px 20px",
+                        display: "flex",
                         alignItems: "center",
-                        gap: 12,
+                        gap: 14,
+                        padding: "2px 0 6px",
                       }}
                     >
-                      {/* Item 1: Minecraft */}
-                      <div
+                      <img
+                        src={selectedGame.logo}
+                        alt={selectedGame.name}
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 14.5,
-                          fontWeight: 700,
+                          width: 48,
+                          height: 48,
+                          objectFit: "contain",
+                          borderRadius: 12,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: 22,
+                          fontWeight: 800,
                           color: isDark ? "#ffffff" : "#111822",
-                          borderRight: isDark
-                            ? "1px solid rgba(255, 255, 255, 0.08)"
-                            : "1px solid rgba(0, 0, 0, 0.08)",
-                          paddingRight: 12,
-                          textAlign: "center",
+                          letterSpacing: "-0.01em",
                         }}
                       >
-                        <span>{minecraftDisplay}</span>
-                      </div>
-
-                      {/* Item 2: Mod Loader */}
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 14.5,
-                          fontWeight: 700,
-                          color: isDark ? "#ffffff" : "#111822",
-                          borderRight: isDark
-                            ? "1px solid rgba(255, 255, 255, 0.08)"
-                            : "1px solid rgba(0, 0, 0, 0.08)",
-                          paddingRight: 12,
-                          textAlign: "center",
-                        }}
-                      >
-                        <span>{loaderDisplay}</span>
-                      </div>
-
-                      {/* Item 3: Java Version */}
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 14.5,
-                          fontWeight: 700,
-                          color: isDark ? "#ffffff" : "#111822",
-                          borderRight: isDark
-                            ? "1px solid rgba(255, 255, 255, 0.08)"
-                            : "1px solid rgba(0, 0, 0, 0.08)",
-                          paddingRight: 12,
-                          textAlign: "center",
-                        }}
-                      >
-                        <span>{javaDisplay}</span>
-                      </div>
-
-                      {/* Item 4: Modpack Version */}
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 14.5,
-                          fontWeight: 700,
-                          color: isDark ? "#ffffff" : "#111822",
-                          textAlign: "center",
-                        }}
-                      >
-                        <span>{modpackDisplay}</span>
-                      </div>
+                        {selectedGame.name}
+                      </span>
                     </div>
 
-                    {/* 2. Card: RENDIMIENTO */}
+                    {/* 1. Card: RENDIMIENTO */}
                     <div className="settings-card">
                       <div
                         style={{
@@ -1616,16 +1580,45 @@ export default function SettingsView({
                         ? "..."
                         : (t("settings.uninstallButton") || t("settings.uninstallGame"))}
                     </button>
+                    </div>
+                  </div>
+
+                  {/* 3. Technical Details Discrete Metadata Footer */}
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "4px 4px 12px",
+                      fontSize: 12.5,
+                      fontWeight: 500,
+                      color: isDark
+                        ? "rgba(136, 153, 170, 0.65)"
+                        : "rgba(85, 102, 119, 0.75)",
+                      fontFamily: BASE_FONT,
+                    }}
+                  >
+                    <span>{minecraftDisplay}</span>
+                    <span>·</span>
+                    <span>{loaderDisplay}</span>
+                    <span>·</span>
+                    <span>{javaDisplay}</span>
+                    <span>·</span>
+                    <span>{modpackDisplay}</span>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
 
-        {/* ── Real-time Auto-Save Toast ── */}
-        <LiveToast message={toastState.message} type={toastState.type} />
+          {/* ── Real-time Auto-Save Toast ── */}
+          <LiveToast
+            message={toastState.message}
+            type={toastState.type}
+            accentColor={activeTab === "game" ? gameAccent.hex : undefined}
+          />
+        </div>
       </div>
-    </div>
-  )
-}
+    )
+  }

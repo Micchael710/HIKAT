@@ -130,7 +130,12 @@ export default function DownloadPlayButton({
       isIntegrityBlockedRef.current = true
     })
 
-    return () => unsubscribe?.()
+    return () => {
+      unsubscribe?.()
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current)
+      }
+    }
   }, [])
 
   const showToast = useCallback((

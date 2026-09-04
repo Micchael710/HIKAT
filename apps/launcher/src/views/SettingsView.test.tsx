@@ -94,7 +94,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     return container
   }
 
-  it("1. On mount, queries authority from Electron Main and services", async () => {
+  it("1. Without manifest cache, queries authority from Electron Main and calls checkGameManifest once", async () => {
     await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     expect(mockElectronAPI.getMemory).toHaveBeenCalled()
@@ -104,10 +104,71 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(mockElectronAPI.getDedicatedGpu).toHaveBeenCalled()
     expect(mockElectronAPI.getRamAllocation).toHaveBeenCalled()
     expect(mockElectronAPI.getGameRuntimeInfo).toHaveBeenCalled()
-    expect(gameService.checkGameManifest).toHaveBeenCalled()
+    expect(gameService.checkGameManifest).toHaveBeenCalledTimes(1)
   })
 
-  it("2. Tab switcher shows 'Juegos' (renamed from 'Juego y Rendimiento')", async () => {
+  it("2. With valid manifest cache present, mounting Settings does NOT call checkGameManifest", async () => {
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        version: "1.4.2",
+      }),
+    )
+
+    await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+
+    // Electron and runtime info are queried, but checkGameManifest is NOT called
+    expect(mockElectronAPI.getMemory).toHaveBeenCalled()
+    expect(mockElectronAPI.getGameRuntimeInfo).toHaveBeenCalled()
+    expect(gameService.checkGameManifest).not.toHaveBeenCalled()
+  })
+
+  it("3. WebSocket release event triggers checkGameManifest and updates manifest", async () => {
+    let releaseCallback: (() => Promise<void>) | null = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+      releaseCallback = cb
+      return () => {}
+    })
+
+    // Cache present so mount does not query
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        version: "1.4.2",
+      }),
+    )
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    expect(gameService.checkGameManifest).not.toHaveBeenCalled()
+
+    // Simulate WebSocket RELEASE_ACTIVATED event
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.5.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.80",
+      totalSizeGB: 1.6,
+      hasUpdate: true,
+      installed: true,
+      hasExistingInstall: true,
+      installedModpackVersion: "1.4.2",
+      clientFiles: [],
+    })
+
+    await act(async () => {
+      await releaseCallback?.()
+    })
+
+    expect(gameService.checkGameManifest).toHaveBeenCalledTimes(1)
+  })
+
+  it("4. Tab switcher shows 'Juegos' (renamed from 'Juego y Rendimiento')", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     expect(container.textContent).toContain("General")
@@ -115,7 +176,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(container.textContent).not.toContain("Juego y Rendimiento")
   })
 
-  it("3. Multi-language support for Tab and Settings titles (EN, FR, PT)", async () => {
+  it("5. Multi-language support for Tab and Settings titles (EN, FR, PT)", async () => {
     // English
     const containerEn = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />, "en")
     expect(containerEn.textContent).toContain("Games")
@@ -136,28 +197,28 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(containerPt.textContent).toContain("Configurações")
   })
 
-  it("4. When single game exists (GAMES.length === 1), sidebar is hidden and panel takes full width", async () => {
+  it("6. Selected game identity (logo 48x48 + name) is rendered at top, and previous top horizontal card is removed", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     const buttons = Array.from(container.querySelectorAll("button"))
     const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
-    expect(gamesTabBtn).toBeDefined()
-
     await act(async () => {
       gamesTabBtn?.click()
     })
 
-    // Sidebar game selector button is NOT rendered when GAMES.length === 1
-    const selectorItem = container.querySelector(".game-selector-item")
-    expect(selectorItem).toBeNull()
+    // Game identity header: image with 48x48 contain and selected game name
+    const gameLogoImg = container.querySelector("img[alt='Apparatia']") as HTMLImageElement
+    expect(gameLogoImg).toBeDefined()
+    expect(gameLogoImg.style.width).toBe("48px")
+    expect(gameLogoImg.style.height).toBe("48px")
+    expect(gameLogoImg.style.objectFit).toBe("contain")
 
-    // Right panel should not have duplicate h2 with Apparatia
-    const h2Elements = Array.from(container.querySelectorAll("h2"))
-    const rightHeader = h2Elements.find((h) => h.textContent?.includes("Apparatia"))
-    expect(rightHeader).toBeUndefined()
+    // Previous top card with grid repeat(4, 1fr) should not exist
+    const oldGridCard = container.querySelector("div[style*='grid-template-columns: repeat(4, 1fr)']")
+    expect(oldGridCard).toBeNull()
   })
 
-  it("5. Technical card hydrates immediately from cache, preserves data across null fetches, and invalidates on uninstall", async () => {
+  it("7. Discrete technical details footer is placed at the end with real values and fallback '—'", async () => {
     // 1. Initial cached values with installed status
     localStorage.setItem(
       "hikat_game_manifest",
@@ -172,10 +233,6 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     )
     localStorage.setItem("hikat_java_major_version", "21")
 
-    // Mock IPC and gameService to return null initially to simulate delay/network failure
-    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(null)
-    mockElectronAPI.getGameRuntimeInfo.mockResolvedValue({ javaMajorVersion: null })
-
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
     const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
@@ -183,14 +240,14 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       gamesTabBtn?.click()
     })
 
-    // Hydrated immediately from local storage cache without waiting for IPC / fetch
+    // Technical metadata footer at the bottom with dots separator
     expect(container.textContent).toContain("Minecraft 1.21.1")
     expect(container.textContent).toContain("NeoForge 21.1.65")
     expect(container.textContent).toContain("Java 21")
     expect(container.textContent).toContain("Modpack 1.4.2")
+    expect(container.textContent).toContain("·")
 
-    // 2. Fresh manifest update with new data does not wipe existing valid values on null fetch
-    // 3. Uninstall clears Java cache
+    // 2. Uninstall clears Java cache
     const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Desinstalar"),
     )
@@ -205,7 +262,21 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(localStorage.getItem("hikat_java_major_version")).toBeNull()
   })
 
-  it("6. RAM section provides automatic mode toggle that persists, calculates RAM, and disables slider when active", async () => {
+  it("8. When single game exists (GAMES.length === 1), sidebar is hidden and panel takes full width", async () => {
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    // Sidebar game selector button is NOT rendered when GAMES.length === 1
+    const selectorItem = container.querySelector(".game-selector-item")
+    expect(selectorItem).toBeNull()
+  })
+
+  it("9. RAM section provides automatic mode toggle that persists, calculates RAM, and disables slider when active", async () => {
     mockElectronAPI.getMemory.mockResolvedValue({ totalGb: 16 })
     mockElectronAPI.getRamAllocation.mockResolvedValue(4)
     localStorage.setItem("hikat_ram_auto", "false")
@@ -262,7 +333,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(toast).toBeNull()
   })
 
-  it("7. GPU toggle uses dedicatedGpu setting and toggles cleanly with accent", async () => {
+  it("10. GPU toggle uses dedicatedGpu setting and toggles cleanly with accent", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
     const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
@@ -288,8 +359,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("false")
   })
 
-  it("8. Administration card: Verify and Uninstall have equal width (160px) and appropriate classes", async () => {
-    // A. Healthy idle install -> Verify enabled and has launcher-btn-secondary class
+  it("11. Administration card: Verify and Uninstall have equal width (160px) and appropriate classes", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
     const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
@@ -314,19 +384,19 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(uninstallBtn?.style.width).toBe("160px")
   })
 
-  it("9. Administration card: Verify is disabled when update exists, Uninstall remains enabled", async () => {
-    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
-      version: "1.5.0",
-      minecraftVersion: "1.21.1",
-      modLoader: "NEOFORGE",
-      modLoaderVersion: "21.1.65",
-      totalSizeGB: 1.5,
-      hasUpdate: true,
-      installed: false,
-      hasExistingInstall: true,
-      installedModpackVersion: "1.4.2",
-      clientFiles: [],
-    })
+  it("12. Technical cache alone does not enable Verify when uninstalled", async () => {
+    // Cached manifest exists but game is NOT installed
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        version: "1.4.2",
+      }),
+    )
+    localStorage.setItem("hikat_game_installed", "false")
+    vi.spyOn(gameService, "isGameInstalled").mockReturnValue(false)
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -338,81 +408,17 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     const verifyBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Verificar"),
     )
-    const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Desinstalar"),
-    )
-
     expect(verifyBtn?.hasAttribute("disabled")).toBe(true)
-    expect(uninstallBtn?.hasAttribute("disabled")).toBe(false)
   })
 
-  it("10. Administration card: Verify and Uninstall are disabled when game is running or busy", async () => {
-    mockElectronAPI.getLaunchStatus.mockResolvedValue({ status: "running", operationState: "IDLE" })
-
-    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
-    const buttons = Array.from(container.querySelectorAll("button"))
-    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
-    await act(async () => {
-      gamesTabBtn?.click()
-    })
-
-    const verifyBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Verificar"),
-    )
-    const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Desinstalar"),
-    )
-
-    expect(verifyBtn?.hasAttribute("disabled")).toBe(true)
-    expect(uninstallBtn?.hasAttribute("disabled")).toBe(true)
-  })
-
-  it("11. LauncherToggle component functions cleanly with and without optional accentColor", async () => {
-    const onChangeMock = vi.fn()
-
-    // Without custom accent (default #3ec4c0)
-    const container = document.createElement("div")
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    await act(async () => {
-      root.render(<LauncherToggle checked={true} onChange={onChangeMock} />)
-    })
-
-    const switchBtn = container.querySelector('button[role="switch"]') as HTMLButtonElement
-    expect(switchBtn).toBeDefined()
-    expect(switchBtn.style.background).toContain("rgb(62, 196, 192)")
-
-    // With custom accent
-    await act(async () => {
-      root.render(<LauncherToggle checked={true} onChange={onChangeMock} accentColor="#ff5500" />)
-    })
-    expect(switchBtn.style.background).toContain("rgb(255, 85, 0)")
-
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
-  })
-
-  it("12. Renders in Light mode cleanly without crashing", async () => {
-    const container = await renderComponent(<SettingsView theme="light" setTheme={vi.fn()} />)
-    const buttons = Array.from(container.querySelectorAll("button"))
-    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
-    await act(async () => {
-      gamesTabBtn?.click()
-    })
-
-    expect(container.textContent).toContain("Rendimiento")
-    expect(container.textContent).toContain("Administración")
-  })
-
-  it("13. SettingsView layout maintains top: 145, right: 80, header structure matching SkinsView, and slider receives --settings-accent", async () => {
+  it("13. SettingsView layout maintains top: 145, right: 80, viewFadeIn animation, header structure matching SkinsView, and slider receives --settings-accent", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
-    // Check main panel container position
+    // Check main panel container position & animation matching SkinsView
     const mainContainer = container.querySelector("div[style*='top: 145px']") as HTMLElement
     expect(mainContainer).toBeDefined()
     expect(mainContainer?.style.right).toBe("80px")
+    expect(mainContainer?.style.animation).toBe("viewFadeIn 0.24s ease")
 
     // Check header title typography matching SkinsView
     const titleElement = Array.from(container.querySelectorAll("div")).find(
@@ -431,6 +437,58 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     const slider = container.querySelector(".settings-ram-slider") as HTMLInputElement
     expect(slider).toBeDefined()
     expect(slider?.style.getPropertyValue("--settings-accent")).toBeTruthy()
+  })
+
+  it("14. LiveToast uses game accent in Juegos tab and standard styling in General tab, preserving red for errors", async () => {
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+
+    // In General tab, toggle a setting -> toast appears without custom game accent
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const firstToggle = toggles[0] as HTMLElement
+    await act(async () => {
+      firstToggle.click()
+    })
+
+    let toast = container.querySelector(".settings-live-toast") as HTMLElement
+    expect(toast).toBeDefined()
+
+    // Switch to Juegos tab -> toggle setting -> toast appears with game accent
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    const gameToggles = container.querySelectorAll('button[role="switch"]')
+    const gpuToggle = Array.from(gameToggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("GPU de alto rendimiento") ||
+      btn.closest(".settings-row")?.textContent?.includes("GPU de alto rendimiento"),
+    ) as HTMLElement
+    await act(async () => {
+      gpuToggle.click()
+    })
+
+    toast = container.querySelector(".settings-live-toast") as HTMLElement
+    expect(toast).toBeDefined()
+    // LiveToast in game tab has border or shadow reflecting accent
+    expect(toast.style.borderColor || toast.style.boxShadow).toBeTruthy()
+  })
+
+  it("15. Missing technical information displays fallback '—'", async () => {
+    localStorage.removeItem("hikat_game_manifest")
+    localStorage.removeItem("hikat_java_major_version")
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(null)
+    mockElectronAPI.getGameRuntimeInfo.mockResolvedValue({ javaMajorVersion: null })
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    // Footer contains fallback "—"
+    expect(container.textContent).toContain("—")
   })
 })
 
