@@ -500,51 +500,60 @@ export default function DownloadPlayButton({
 
   // Listen to game launch lifecycle status from Electron Main
   useEffect(() => {
-    const unsubscribe = window.electronAPI?.onLaunchStatus?.((launchStatus: "idle" | "preparing" | "running") => {
-      if (launchStatus === "preparing") {
-        setStatus("launching")
-        return
-      }
+    const unsubscribe = window.electronAPI?.onLaunchStatus?.(
+      (
+        launchStatus: "idle" | "preparing" | "running",
+        details?: { unexpected?: boolean; code?: number | null; error?: any },
+      ) => {
+        if (launchStatus === "preparing") {
+          setStatus("launching")
+          return
+        }
 
-      if (launchStatus === "running") {
-        setStatus("running")
-        return
-      }
+        if (launchStatus === "running") {
+          setStatus("running")
+          return
+        }
 
-      if (launchStatus === "idle") {
-        const wasRunningOrLaunching =
-          statusRef.current === "launching" || statusRef.current === "running"
+        if (launchStatus === "idle") {
+          if (details?.unexpected) {
+            showToast(t("playButton.unexpectedGameExit"), "error")
+          }
 
-        if (wasRunningOrLaunching) {
-          const currentManifest = manifestRef.current
-          const idleState = resolveIdleGameButtonState(currentManifest)
-          setStatus(idleState)
+          const wasRunningOrLaunching =
+            statusRef.current === "launching" || statusRef.current === "running"
 
-          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
-          const hasUpdate = Boolean(
-            currentManifest?.installedModpackVersion &&
-            currentManifest?.installedModpackVersion !== currentManifest?.version
-          )
+          if (wasRunningOrLaunching) {
+            const currentManifest = manifestRef.current
+            const idleState = resolveIdleGameButtonState(currentManifest)
+            setStatus(idleState)
 
-          if (
-            autoUpdatesEnabled &&
-            (pendingAutoUpdateRef.current || hasUpdate) &&
-            !isStartingSyncRef.current &&
-            statusRef.current !== "paused" &&
-            currentManifest?.clientFiles &&
-            currentManifest.clientFiles.length > 0
-          ) {
-            pendingAutoUpdateRef.current = false
-            triggerSync(currentManifest)
-          } else {
-            pendingAutoUpdateRef.current = false
+            const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+            const hasUpdate = Boolean(
+              currentManifest?.installedModpackVersion &&
+              currentManifest?.installedModpackVersion !== currentManifest?.version
+            )
+
+            if (
+              autoUpdatesEnabled &&
+              (pendingAutoUpdateRef.current || hasUpdate) &&
+              !isStartingSyncRef.current &&
+              statusRef.current !== "paused" &&
+              currentManifest?.clientFiles &&
+              currentManifest.clientFiles.length > 0
+            ) {
+              pendingAutoUpdateRef.current = false
+              triggerSync(currentManifest)
+            } else {
+              pendingAutoUpdateRef.current = false
+            }
           }
         }
-      }
-    })
+      },
+    )
 
     return () => unsubscribe?.()
-  }, [setStatus, triggerSync])
+  }, [setStatus, showToast, t, triggerSync])
 
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {

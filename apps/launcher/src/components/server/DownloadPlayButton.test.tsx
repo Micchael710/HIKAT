@@ -4402,6 +4402,170 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       unmount()
     })
   })
+
+  describe("Shard 8G: Unexpected game exit LiveToast error notification", () => {
+    it("1. onLaunchStatus idle with close(0) does NOT show error LiveToast", async () => {
+      let launchStatusCb: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+
+      const { container, unmount } = await mountButton()
+
+      // Game starts running
+      await act(async () => {
+        launchStatusCb?.("running")
+      })
+      expect(container.querySelector("button")?.textContent).toContain("EN EJECUCIÓN")
+
+      // Normal exit code 0
+      await act(async () => {
+        launchStatusCb?.("idle", { unexpected: false, code: 0 })
+      })
+
+      expect(container.querySelector(".settings-live-toast")).toBeNull()
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+      unmount()
+    })
+
+    it("2. onLaunchStatus idle with unexpected exit (code !== 0) shows error LiveToast and returns to idle", async () => {
+      let launchStatusCb: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+
+      const { container, unmount } = await mountButton()
+
+      // Game is running
+      await act(async () => {
+        launchStatusCb?.("running")
+      })
+      expect(container.querySelector("button")?.textContent).toContain("EN EJECUCIÓN")
+
+      // Crash / unexpected exit with code 1
+      await act(async () => {
+        launchStatusCb?.("idle", { unexpected: true, code: 1 })
+      })
+
+      const toast = container.querySelector(".settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.classList.contains("is-error")).toBe(true)
+      expect(toast?.textContent).toContain("El juego se cerró inesperadamente.")
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+      unmount()
+    })
+
+    it("3. onLaunchStatus idle with child.error shows error LiveToast", async () => {
+      let launchStatusCb: any = null
+      window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+        launchStatusCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+
+      const { container, unmount } = await mountButton()
+
+      await act(async () => {
+        launchStatusCb?.("running")
+      })
+
+      // Child process emitted error
+      await act(async () => {
+        launchStatusCb?.("idle", { unexpected: true, error: new Error("JVM crash") })
+      })
+
+      const toast = container.querySelector(".settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.classList.contains("is-error")).toBe(true)
+      expect(toast?.textContent).toContain("El juego se cerró inesperadamente.")
+      expect(container.querySelector("button")?.textContent).toContain("JUGAR")
+      unmount()
+    })
+
+    it("4. Displays localized unexpected exit message in EN, FR, PT", async () => {
+      const locales = [
+        { lang: "en", expected: "The game closed unexpectedly." },
+        { lang: "fr", expected: "Le jeu s'est fermé de manière inattendue." },
+        { lang: "pt", expected: "O jogo fechou inesperadamente." },
+      ]
+
+      for (const { lang, expected } of locales) {
+        localStorage.setItem("hikat_language", lang)
+        let launchStatusCb: any = null
+        window.electronAPI!.onLaunchStatus = vi.fn((cb) => {
+          launchStatusCb = cb
+          return () => {}
+        })
+
+        vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          installed: true,
+          hasUpdate: false,
+          hasExistingInstall: true,
+          installedModpackVersion: "1.0.0",
+          totalSizeGB: 1,
+          clientFiles: [],
+        })
+
+        const { container, unmount } = await mountButton()
+
+        await act(async () => {
+          launchStatusCb?.("running")
+        })
+
+        await act(async () => {
+          launchStatusCb?.("idle", { unexpected: true, code: 1 })
+        })
+
+        const toast = container.querySelector(".settings-live-toast")
+        expect(toast?.textContent).toContain(expected)
+        unmount()
+      }
+    })
+  })
 })
 
 

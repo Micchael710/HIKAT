@@ -100,7 +100,8 @@
     "noClientFiles": "Les fichiers du jeu ne sont pas disponibles pour le moment.",
     "syncError": "Impossible de terminer le téléchargement. Veuillez vérifier votre connexion Internet.",
     "syncSuccess": "Téléchargement terminé avec succès",
-    "launchVerifyHint": "Impossible de lancer le jeu, vérifiez les fichiers du jeu et réessayez"
+    "launchVerifyHint": "Impossible de lancer le jeu, vérifiez les fichiers du jeu et réessayez",
+    "unexpectedGameExit": "Le jeu s'est fermé de manière inattendue."
   },
   "home": {
     "heroSubtitle": "Maîtrisez ce vaste monde grâce à l'ingénierie, sillonnez les cieux, naviguez sur les mers et créez une révolution industrielle.",

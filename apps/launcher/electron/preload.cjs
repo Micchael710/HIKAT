@@ -65,7 +65,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("game-phase-changed", handler)
   },
   onLaunchStatus: (callback) => {
-    const handler = (_event, status) => callback(status)
+    const handler = (_event, status, details) => callback(status, details)
     ipcRenderer.on("game-launch-status", handler)
     return () => ipcRenderer.removeListener("game-launch-status", handler)
   },

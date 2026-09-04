@@ -242,10 +242,10 @@ class GameLauncher {
     this.trackedPid = null
   }
 
-  setStatus(status) {
+  setStatus(status, details = null) {
     this.launchStatus = status
     if (typeof this.onStatusChangeCallback === "function") {
-      this.onStatusChangeCallback(status)
+      this.onStatusChangeCallback(status, details)
     }
   }
 
@@ -404,7 +404,11 @@ class GameLauncher {
         this.activeChildProcess = null
         this.clearProcessPid()
         this.stopProcessPoll()
-        this.setStatus("idle")
+        const isUnexpected = code !== 0
+        this.setStatus(
+          "idle",
+          isUnexpected ? { unexpected: true, code } : { unexpected: false, code: 0 },
+        )
       })
 
       child.on("error", (err) => {
@@ -412,7 +416,7 @@ class GameLauncher {
         this.activeChildProcess = null
         this.clearProcessPid()
         this.stopProcessPoll()
-        this.setStatus("idle")
+        this.setStatus("idle", { unexpected: true, error: err })
       })
 
       return {

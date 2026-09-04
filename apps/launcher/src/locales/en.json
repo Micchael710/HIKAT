@@ -100,7 +100,8 @@
     "noClientFiles": "Game files are not available at this moment.",
     "syncError": "Could not complete the download. Please check your internet connection.",
     "syncSuccess": "Download completed successfully",
-    "launchVerifyHint": "The game could not be launched, verify the game files and try again"
+    "launchVerifyHint": "The game could not be launched, verify the game files and try again",
+    "unexpectedGameExit": "The game closed unexpectedly."
   },
   "home": {
     "heroSubtitle": "Master this vast world through engineering, soar through the skies, sail the seas and create an industrial revolution.",

@@ -107,9 +107,9 @@ function setupInstanceWatcher() {
   }
 }
 
-gameLauncher.onStatusChangeCallback = (status) => {
+gameLauncher.onStatusChangeCallback = (status, details) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("game-launch-status", status)
+    mainWindow.webContents.send("game-launch-status", status, details)
   }
 }
 let tray = null

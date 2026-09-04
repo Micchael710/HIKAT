@@ -132,7 +132,10 @@ interface ElectronAPI {
   onDownloadProgress?: (callback: (data: DownloadProgressData) => void) => () => void
   onPhaseChange?: (callback: (phase: string) => void) => () => void
   onLaunchStatus?: (
-    callback: (status: "idle" | "preparing" | "running") => void
+    callback: (
+      status: "idle" | "preparing" | "running",
+      details?: { unexpected?: boolean; code?: number | null; error?: any }
+    ) => void
   ) => () => void
   onGameFileIntegrityChanged?: (callback: (data: { path: string }) => void) => () => void
 }

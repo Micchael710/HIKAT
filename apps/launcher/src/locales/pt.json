@@ -100,7 +100,8 @@
     "noClientFiles": "Os arquivos do jogo não estão disponíveis no momento.",
     "syncError": "Não foi possível concluir o download. Verifique sua conexão com a internet.",
     "syncSuccess": "Download concluído com sucesso",
-    "launchVerifyHint": "Não foi possível iniciar o jogo, verifique os arquivos e tente novamente"
+    "launchVerifyHint": "Não foi possível iniciar o jogo, verifique os arquivos e tente novamente",
+    "unexpectedGameExit": "O jogo fechou inesperadamente."
   },
   "home": {
     "heroSubtitle": "Domine este vasto mundo através da engenharia, cruze os céus, navegue pelos mares e crie uma revolução industrial.",

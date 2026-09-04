@@ -1606,4 +1606,148 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(emittedVerifyingProgress[0]).toBeLessThanOrEqual(35)
     expect(emittedVerifyingProgress[emittedVerifyingProgress.length - 1]).toBe(100)
   })
+
+  describe("46. GameLauncher exit status and unexpected error notification", () => {
+    it("close(0) sets status to idle with unexpected: false and code: 0, cleaning up PID", async () => {
+      const childEmitter = new EventEmitter() as any
+      childEmitter.pid = 9999
+      childEmitter.unref = vi.fn()
+
+      const statusEvents: Array<{ status: string; details?: any }> = []
+
+      const launcher = new GameLauncher(null, {
+        instanceRoot,
+        readinessChecker: vi.fn().mockResolvedValue({
+          installed: true,
+          resolvedVersionId: "1.21.1",
+          javaMajorVersion: 21,
+        }),
+        javaResolver: vi.fn().mockReturnValue({
+          javaPath: "C:\\Java\\javaw.exe",
+          cliJavaPath: "C:\\Java\\java.exe",
+        }),
+        javaValidator: vi.fn().mockReturnValue({ valid: true, majorVersion: 21 }),
+        versionParser: vi.fn().mockResolvedValue({ id: "1.21.1" }),
+        xmclLauncher: vi.fn().mockResolvedValue(childEmitter),
+      })
+
+      launcher.onStatusChangeCallback = (status: string, details: any) => {
+        statusEvents.push({ status, details })
+      }
+
+      await launcher.launch({
+        playerName: "PlayerOne",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+      })
+
+      expect(launcher.launchStatus).toBe("running")
+      expect(launcher.readSavedPid()).toBe(9999)
+
+      // Emit normal exit close(0)
+      childEmitter.emit("close", 0)
+
+      expect(launcher.launchStatus).toBe("idle")
+      expect(launcher.readSavedPid()).toBeNull()
+      expect(statusEvents).toContainEqual({
+        status: "idle",
+        details: { unexpected: false, code: 0 },
+      })
+    })
+
+    it("close(non-zero) sets status to idle with unexpected: true and error code, cleaning up PID", async () => {
+      const childEmitter = new EventEmitter() as any
+      childEmitter.pid = 9998
+      childEmitter.unref = vi.fn()
+
+      const statusEvents: Array<{ status: string; details?: any }> = []
+
+      const launcher = new GameLauncher(null, {
+        instanceRoot,
+        readinessChecker: vi.fn().mockResolvedValue({
+          installed: true,
+          resolvedVersionId: "1.21.1",
+          javaMajorVersion: 21,
+        }),
+        javaResolver: vi.fn().mockReturnValue({
+          javaPath: "C:\\Java\\javaw.exe",
+          cliJavaPath: "C:\\Java\\java.exe",
+        }),
+        javaValidator: vi.fn().mockReturnValue({ valid: true, majorVersion: 21 }),
+        versionParser: vi.fn().mockResolvedValue({ id: "1.21.1" }),
+        xmclLauncher: vi.fn().mockResolvedValue(childEmitter),
+      })
+
+      launcher.onStatusChangeCallback = (status: string, details: any) => {
+        statusEvents.push({ status, details })
+      }
+
+      await launcher.launch({
+        playerName: "PlayerOne",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+      })
+
+      expect(launcher.launchStatus).toBe("running")
+      expect(launcher.readSavedPid()).toBe(9998)
+
+      // Emit abnormal exit close(1)
+      childEmitter.emit("close", 1)
+
+      expect(launcher.launchStatus).toBe("idle")
+      expect(launcher.readSavedPid()).toBeNull()
+      expect(statusEvents).toContainEqual({
+        status: "idle",
+        details: { unexpected: true, code: 1 },
+      })
+    })
+
+    it("child.error sets status to idle with unexpected: true and error object, cleaning up PID", async () => {
+      const childEmitter = new EventEmitter() as any
+      childEmitter.pid = 9997
+      childEmitter.unref = vi.fn()
+
+      const statusEvents: Array<{ status: string; details?: any }> = []
+
+      const launcher = new GameLauncher(null, {
+        instanceRoot,
+        readinessChecker: vi.fn().mockResolvedValue({
+          installed: true,
+          resolvedVersionId: "1.21.1",
+          javaMajorVersion: 21,
+        }),
+        javaResolver: vi.fn().mockReturnValue({
+          javaPath: "C:\\Java\\javaw.exe",
+          cliJavaPath: "C:\\Java\\java.exe",
+        }),
+        javaValidator: vi.fn().mockReturnValue({ valid: true, majorVersion: 21 }),
+        versionParser: vi.fn().mockResolvedValue({ id: "1.21.1" }),
+        xmclLauncher: vi.fn().mockResolvedValue(childEmitter),
+      })
+
+      launcher.onStatusChangeCallback = (status: string, details: any) => {
+        statusEvents.push({ status, details })
+      }
+
+      await launcher.launch({
+        playerName: "PlayerOne",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+      })
+
+      expect(launcher.launchStatus).toBe("running")
+      expect(launcher.readSavedPid()).toBe(9997)
+
+      // Emit child error
+      const mockErr = new Error("Java VM crashed")
+      childEmitter.emit("error", mockErr)
+
+      expect(launcher.launchStatus).toBe("idle")
+      expect(launcher.readSavedPid()).toBeNull()
+      expect(statusEvents).toContainEqual({
+        status: "idle",
+        details: { unexpected: true, error: mockErr },
+      })
+    })
+  })
 })
