@@ -4696,6 +4696,62 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
       unmount()
     })
+
+    it("5. When verify completes and detects a new release (hasUpdate === true), finished event carries success: true", async () => {
+      let statusEvents: any[] = []
+      const listener = (e: Event) => {
+        const customEvt = e as CustomEvent
+        statusEvents.push(customEvt.detail)
+      }
+      window.addEventListener("hikat:game-action-status", listener)
+
+      vi.spyOn(gameService, "checkGameManifest")
+        // Initial state before verify: installed with 1.0.0
+        .mockResolvedValueOnce({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          installed: true,
+          hasUpdate: false,
+          hasExistingInstall: true,
+          installedModpackVersion: "1.0.0",
+          totalSizeGB: 1,
+          clientFiles: [{ path: "test.jar", sha256: "abc", sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+        })
+        // State returned after verify finishes: new release 2.0.0 exists (hasUpdate: true)
+        .mockResolvedValueOnce({
+          version: "2.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          installed: true,
+          hasUpdate: true,
+          hasExistingInstall: true,
+          installedModpackVersion: "1.0.0",
+          totalSizeGB: 1,
+          clientFiles: [{ path: "test2.jar", sha256: "def", sizeBytes: 200, downloadUrl: "/dl2", policy: "NO_MODIFICABLE" }],
+        })
+
+      vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      const { unmount } = await mountButton()
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "verify" },
+          }),
+        )
+      })
+
+      const finishedEvent = statusEvents.find((evt) => evt.action === "verify" && evt.state === "finished")
+      expect(finishedEvent).toBeDefined()
+      expect(finishedEvent.success).toBe(true)
+
+      window.removeEventListener("hikat:game-action-status", listener)
+      unmount()
+    })
   })
 })
 

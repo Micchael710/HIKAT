@@ -844,6 +844,7 @@ export default function DownloadPlayButton({
           showToast(t("playButton.verifySuccess"), "success")
         } else if (hasUpdate && verified?.clientFiles && verified.clientFiles.length > 0) {
           isIntegrityBlockedRef.current = false
+          verifySuccess = true
           if (autoUpdatesEnabled) {
             if (syncOpIdRef.current === syncOpId) {
               isStartingSyncRef.current = false
