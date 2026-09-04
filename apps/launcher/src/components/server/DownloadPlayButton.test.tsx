@@ -4566,6 +4566,137 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       }
     })
   })
+
+  describe("External Game Action Bridge & Hardened Guards Suite", () => {
+    it("1. External verify is blocked when button state is NOT 'play' (e.g., 'download' or 'update')", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasExistingInstall: false,
+        totalSizeGB: 10,
+        clientFiles: [{ path: "test.jar", sha256: "abc", sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+      })
+      const startSyncSpy = vi.spyOn(gameService, "startSync")
+
+      const { unmount } = await mountButton()
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "verify" },
+          }),
+        )
+      })
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+      unmount()
+    })
+
+    it("2. External uninstall is blocked when state is NOT 'play' and NOT 'update' (e.g., 'download')", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasExistingInstall: false,
+        totalSizeGB: 10,
+        clientFiles: [{ path: "test.jar", sha256: "abc", sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+      })
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame")
+
+      const { unmount } = await mountButton()
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "uninstall" },
+          }),
+        )
+      })
+
+      expect(uninstallSpy).not.toHaveBeenCalled()
+      unmount()
+    })
+
+    it("3. External uninstall is allowed when state is 'update'", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "2.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: true,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 10,
+        clientFiles: [{ path: "test.jar", sha256: "abc", sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+      })
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { unmount } = await mountButton()
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "uninstall" },
+          }),
+        )
+      })
+
+      expect(uninstallSpy).toHaveBeenCalledTimes(1)
+      unmount()
+    })
+
+    it("4. During verify, the external cancel button is NOT displayed", async () => {
+      let resolveSync: any = null
+      const syncPromise = new Promise((resolve) => {
+        resolveSync = resolve
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [{ path: "test.jar", sha256: "abc", sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+      })
+      vi.spyOn(gameService, "startSync").mockReturnValue(syncPromise as any)
+
+      const { container, unmount } = await mountButton()
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "verify" },
+          }),
+        )
+      })
+
+      // Verify is active -> progress bar / status is verifying
+      expect(container.textContent).toContain("VERIFICANDO")
+      // Cancel button should NOT be rendered
+      const cancelBtn = container.querySelector(".dl-cancel-btn")
+      expect(cancelBtn).toBeNull()
+
+      // Resolve verify
+      await act(async () => {
+        resolveSync?.({ success: true })
+      })
+
+      unmount()
+    })
+  })
 })
 
 

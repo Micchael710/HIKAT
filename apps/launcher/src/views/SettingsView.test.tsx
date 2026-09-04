@@ -552,5 +552,106 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     // Footer contains fallback "—"
     expect(container.textContent).toContain("—")
   })
+
+  it("17. Update available: uninstall button is enabled, verify button is disabled", async () => {
+    mockElectronAPI.checkSyncPlan = vi.fn().mockResolvedValue({
+      success: true,
+      hasExistingInstall: true,
+      isFullyInstalled: false,
+      installedModpackVersion: "1.4.0",
+      needsUpdate: true,
+    })
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    const verifyBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Verificar"),
+    ) as HTMLButtonElement
+    const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Desinstalar"),
+    ) as HTMLButtonElement
+
+    expect(verifyBtn).toBeDefined()
+    expect(uninstallBtn).toBeDefined()
+    expect(verifyBtn.disabled).toBe(true)
+    expect(uninstallBtn.disabled).toBe(false)
+  })
+
+  it("18. Damaged files without update: verify button is enabled (hasExistingInstall = true, isFullyInstalled = false, hasIntegrityIssue = true)", async () => {
+    mockElectronAPI.checkSyncPlan = vi.fn().mockResolvedValue({
+      success: true,
+      hasExistingInstall: true,
+      isFullyInstalled: false,
+      hasIntegrityIssue: true,
+      installedModpackVersion: "1.4.2", // same as manifest.version "1.4.2"
+    })
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    const verifyBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Verificar"),
+    ) as HTMLButtonElement
+    const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Desinstalar"),
+    ) as HTMLButtonElement
+
+    expect(verifyBtn).toBeDefined()
+    expect(uninstallBtn).toBeDefined()
+    expect(verifyBtn.disabled).toBe(false)
+    expect(uninstallBtn.disabled).toBe(false)
+  })
+
+  it("19. Action status: failed uninstall (success: false) does NOT clear Java cache", async () => {
+    localStorage.setItem("hikat_java_major_version", "21")
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("hikat:game-action-status", {
+          detail: { action: "uninstall", state: "finished", success: false },
+        }),
+      )
+    })
+
+    expect(localStorage.getItem("hikat_java_major_version")).toBe("21")
+    expect(container.textContent).toContain("Java 21")
+  })
+
+  it("20. Action status: successful uninstall (success: true) clears Java cache", async () => {
+    localStorage.setItem("hikat_java_major_version", "21")
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("hikat:game-action-status", {
+          detail: { action: "uninstall", state: "finished", success: true },
+        }),
+      )
+    })
+
+    expect(localStorage.getItem("hikat_java_major_version")).toBeNull()
+  })
 })
 

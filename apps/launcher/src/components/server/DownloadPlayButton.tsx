@@ -771,11 +771,9 @@ export default function DownloadPlayButton({
   const handleVerifyInstallation = async () => {
     setIsMenuOpen(false)
     if (
+      status !== "play" ||
       isTransitioning ||
       isStartingSyncRef.current ||
-      status === "installing" ||
-      status === "verifying" ||
-      status === "update" ||
       manifest?.hasUpdate ||
       Boolean(
         manifest?.installedModpackVersion &&
@@ -787,6 +785,11 @@ export default function DownloadPlayButton({
     }
     if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
       showToast(t("playButton.verifyError"), "error")
+      window.dispatchEvent(
+        new CustomEvent("hikat:game-action-status", {
+          detail: { action: "verify", state: "finished", success: false },
+        }),
+      )
       return
     }
     window.dispatchEvent(
@@ -803,6 +806,7 @@ export default function DownloadPlayButton({
     isStartingSyncRef.current = true
     setStatus("verifying")
 
+    let verifySuccess = false
     gameService
       .startSync(
         manifest.clientFiles,
@@ -836,6 +840,7 @@ export default function DownloadPlayButton({
           isIntegrityBlockedRef.current = false
           gameService.setGameInstalled(true)
           setStatus("play")
+          verifySuccess = true
           showToast(t("playButton.verifySuccess"), "success")
         } else if (hasUpdate && verified?.clientFiles && verified.clientFiles.length > 0) {
           isIntegrityBlockedRef.current = false
@@ -865,7 +870,7 @@ export default function DownloadPlayButton({
         }
         window.dispatchEvent(
           new CustomEvent("hikat:game-action-status", {
-            detail: { action: "verify", state: "finished" },
+            detail: { action: "verify", state: "finished", success: verifySuccess },
           }),
         )
       })
@@ -873,15 +878,16 @@ export default function DownloadPlayButton({
 
   const handleUninstallGame = async () => {
     setIsMenuOpen(false)
-    if (isTransitioning) return
+    if (isTransitioning || (status !== "play" && status !== "update")) return
     setIsTransitioning(true)
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-status", {
         detail: { action: "uninstall", state: "started" },
       }),
     )
+    let success = false
     try {
-      const success = await gameService.uninstallGame()
+      success = await gameService.uninstallGame()
       if (success) {
         const freshManifest = await gameService.checkGameManifest()
         setManifest(freshManifest)
@@ -898,7 +904,7 @@ export default function DownloadPlayButton({
       setIsTransitioning(false)
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "uninstall", state: "finished" },
+          detail: { action: "uninstall", state: "finished", success: Boolean(success) },
         }),
       )
     }
@@ -1353,43 +1359,45 @@ export default function DownloadPlayButton({
       </div>
 
       {/* ── External Cancel Button (76x76px matching Play Button) ── */}
-      <button
-        type="button"
-        onClick={cancel}
-        disabled={isInstalling || isVerifying}
-        title={t("playButton.cancel")}
-        className="dl-cancel-btn"
-        style={{
-          width: 76,
-          height: 76,
-          borderRadius: 24,
-          flexShrink: 0,
-          background: isDark ? "rgba(255, 255, 255, 0.05)" : "#ffffff",
-          border: isDark
-            ? "1px solid rgba(255, 255, 255, 0.12)"
-            : "1px solid rgba(0, 0, 0, 0.12)",
-          color: isDark ? "rgba(255, 255, 255, 0.45)" : "#556677",
-          boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
-          cursor: isInstalling || isVerifying ? "not-allowed" : "pointer",
-          opacity: isInstalling || isVerifying ? 0.35 : 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transition: "opacity 0.2s ease",
-        }}
-      >
-        <svg
-          width={20}
-          height={20}
-          viewBox="0 0 14 14"
-          stroke="currentColor"
-          strokeWidth={2.2}
-          strokeLinecap="round"
+      {!isVerifying && (
+        <button
+          type="button"
+          onClick={cancel}
+          disabled={isInstalling}
+          title={t("playButton.cancel")}
+          className="dl-cancel-btn"
+          style={{
+            width: 76,
+            height: 76,
+            borderRadius: 24,
+            flexShrink: 0,
+            background: isDark ? "rgba(255, 255, 255, 0.05)" : "#ffffff",
+            border: isDark
+              ? "1px solid rgba(255, 255, 255, 0.12)"
+              : "1px solid rgba(0, 0, 0, 0.12)",
+            color: isDark ? "rgba(255, 255, 255, 0.45)" : "#556677",
+            boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
+            cursor: isInstalling ? "not-allowed" : "pointer",
+            opacity: isInstalling ? 0.35 : 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "opacity 0.2s ease",
+          }}
         >
-          <line x1={2} y1={2} x2={12} y2={12} />
-          <line x1={12} y1={2} x2={2} y2={12} />
-        </svg>
-      </button>
+          <svg
+            width={20}
+            height={20}
+            viewBox="0 0 14 14"
+            stroke="currentColor"
+            strokeWidth={2.2}
+            strokeLinecap="round"
+          >
+            <line x1={2} y1={2} x2={12} y2={12} />
+            <line x1={12} y1={2} x2={2} y2={12} />
+          </svg>
+        </button>
+      )}
 
       <LiveToast message={toastState.message} type={toastState.type} />
     </div>

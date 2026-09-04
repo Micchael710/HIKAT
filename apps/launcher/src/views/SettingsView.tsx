@@ -110,6 +110,13 @@ export default function SettingsView({
     }
     return null
   })
+  const manifestRef = useRef<GameManifest | null>(manifest)
+  manifestRef.current = manifest
+
+  useEffect(() => {
+    manifestRef.current = manifest
+  }, [manifest])
+
   const [runtimeInfo, setRuntimeInfo] = useState<{ javaMajorVersion: number | null } | null>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -169,7 +176,7 @@ export default function SettingsView({
   })
 
   const refreshOperationalState = async (targetManifest?: GameManifest | null) => {
-    const m = targetManifest !== undefined ? targetManifest : manifest
+    const m = targetManifest !== undefined ? targetManifest : manifestRef.current
     if (window.electronAPI?.checkSyncPlan && m?.clientFiles && m.clientFiles.length > 0) {
       try {
         const planCheck = await window.electronAPI.checkSyncPlan({
@@ -182,7 +189,10 @@ export default function SettingsView({
           neoForgeVersion: m.neoForgeVersion ?? undefined,
         })
         if (planCheck?.success) {
-          const isInst = Boolean(planCheck.isFullyInstalled)
+          const isInst =
+            typeof planCheck.hasExistingInstall === "boolean"
+              ? planCheck.hasExistingInstall
+              : Boolean(planCheck.isFullyInstalled || gameService.isGameInstalled())
           const instVer = planCheck.installedModpackVersion || null
           const hasUpd = Boolean(instVer && m.version && instVer !== m.version)
           setOperativeState({
@@ -191,7 +201,9 @@ export default function SettingsView({
             installedModpackVersion: instVer,
             hasIntegrityIssue: Boolean(planCheck.hasIntegrityIssue),
           })
-          gameService.setGameInstalled(isInst)
+          if (typeof planCheck.hasExistingInstall === "boolean") {
+            gameService.setGameInstalled(planCheck.hasExistingInstall)
+          }
           return
         }
       } catch (_) {}
@@ -365,12 +377,23 @@ export default function SettingsView({
 
     // Listen to game action status events from DownloadPlayButton
     const handleActionStatus = (e: Event) => {
-      const customEvt = e as CustomEvent<{ action: "verify" | "uninstall"; state: "started" | "finished" }>
-      const { action, state } = customEvt.detail || {}
+      const customEvt = e as CustomEvent<{
+        action: "verify" | "uninstall"
+        state: "started" | "finished"
+        success?: boolean
+      }>
+      const { action, state, success } = customEvt.detail || {}
       if (action === "verify") {
         setIsVerifying(state === "started")
-        if (state === "finished") {
+        if (state === "started") {
+          notifySaved(t("settings.verifying") || "Verificando...", "info")
+        } else if (state === "finished") {
           refreshOperationalState()
+          if (success) {
+            notifySaved(t("settings.verifiedSuccess") || "Juego verificado con éxito", "success")
+          } else {
+            notifySaved(t("playButton.verifyError") || "Error en verificación", "error")
+          }
           if (window.electronAPI?.getGameRuntimeInfo) {
             window.electronAPI
               .getGameRuntimeInfo()
@@ -397,10 +420,15 @@ export default function SettingsView({
         setIsUninstalling(state === "started")
         if (state === "finished") {
           refreshOperationalState()
-          setRuntimeInfo({ javaMajorVersion: null })
-          try {
-            localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
-          } catch (_) {}
+          if (success) {
+            setRuntimeInfo({ javaMajorVersion: null })
+            try {
+              localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
+            } catch (_) {}
+            notifySaved(t("playButton.uninstallSuccess") || "Juego desinstalado", "success")
+          } else {
+            notifySaved(t("playButton.uninstallError") || "Error al desinstalar", "error")
+          }
         }
       }
     }
