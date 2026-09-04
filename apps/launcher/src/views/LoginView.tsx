@@ -13,11 +13,18 @@ import { authService } from "../services/authService"
 interface LoginViewProps {
   onLogin: (username: string) => void
   theme?: ThemeMode
+  initialDeepLinkUrl?: string | null
+  onConsumeInitialDeepLink?: () => void
 }
 
 type AuthMode = "auth" | "forgot-password" | "verify-email" | "reset-password"
 
-export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
+export default function LoginView({
+  onLogin,
+  theme = "dark",
+  initialDeepLinkUrl,
+  onConsumeInitialDeepLink,
+}: LoginViewProps) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<AuthMode>("auth")
   const [tab, setTab] = useState<"login" | "register">("login")
@@ -150,6 +157,11 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
 
   // Listen for deep link callbacks via Electron IPC & check cold-start pending callbacks
   useEffect(() => {
+    if (initialDeepLinkUrl) {
+      processDeepLinkUrl(initialDeepLinkUrl)
+      onConsumeInitialDeepLink?.()
+    }
+
     if (typeof window === "undefined" || !window.electronAPI) {
       return
     }
@@ -174,7 +186,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         removeListener?.()
       }
     }
-  }, [onLogin, keepSession])
+  }, [onLogin, keepSession, initialDeepLinkUrl, onConsumeInitialDeepLink])
 
   const handleOAuthClick = async (provider: "GOOGLE" | "DISCORD") => {
     setErrorMessage(null)
@@ -341,6 +353,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
       const res = await authService.resetPassword(resetToken, p1)
       setIsResettingPassword(false)
       if (res.success) {
+        authService.clearSession()
         setResetToken(null)
         setNewPassword("")
         setConfirmPassword("")

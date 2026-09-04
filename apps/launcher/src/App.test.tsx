@@ -17,6 +17,7 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
   beforeEach(() => {
     localStorage.clear()
     localStorage.setItem("hikat_auth_token", "fake-token")
+    localStorage.setItem("hikat_language", "es")
     vi.restoreAllMocks()
 
     vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
@@ -35,6 +36,13 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
     })
     vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
     vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-token")
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-1",
+      displayName: "Tester",
+      username: "Tester",
+      email: "tester@example.com",
+      role: "PLAYER",
+    } as any)
 
     vi.spyOn(skinServiceModule, "fetchGlobalSkins").mockResolvedValue([])
     vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue(null)
@@ -123,6 +131,139 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
 
     // checkGameManifest was NOT called again because HomeView remained mounted!
     expect(checkGameManifestSpy).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  it("Deep link /reset-password received while authenticated in Home/Profile switches to LoginView and opens reset password form", async () => {
+    let callbackTrigger: ((url: string) => void) | null = null
+    ;(window as any).electronAPI = {
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+      getPendingOAuthCallback: vi.fn().mockResolvedValue(null),
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <App />
+        </LanguageProvider>,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Initially in authenticated Home
+    expect(container.textContent).toContain("DESCARGAR")
+    expect(container.querySelector(".sidebar-nav-btn")).not.toBeNull()
+    expect(callbackTrigger).not.toBeNull()
+
+    // Trigger deep link while user is authenticated inside launcher
+    await act(async () => {
+      callbackTrigger!("hikat://auth/reset-password?token=deep-token-999")
+    })
+
+    // App switches to LoginView and renders the reset-password view
+    expect(container.textContent).toContain("Restablecer contraseña")
+    expect(container.textContent).toContain("Nueva contraseña")
+    expect(container.textContent).toContain("Confirmar contraseña")
+    expect(container.textContent).toContain("Cambiar contraseña")
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  it("Deep link /verify-email received while authenticated in Home/Profile switches to LoginView and verifies email", async () => {
+    let callbackTrigger: ((url: string) => void) | null = null
+    ;(window as any).electronAPI = {
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+      getPendingOAuthCallback: vi.fn().mockResolvedValue(null),
+    }
+
+    const verifySpy = vi.spyOn(authService, "verifyEmail").mockResolvedValue({
+      success: true,
+      message: "Email verified successfully",
+    })
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <App />
+        </LanguageProvider>,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Trigger deep link while user is authenticated inside launcher
+    await act(async () => {
+      callbackTrigger!("hikat://auth/verify-email?token=deep-verify-token-777")
+    })
+
+    expect(verifySpy).toHaveBeenCalledWith("deep-verify-token-777")
+    expect(container.textContent).toContain("Correo verificado correctamente. Ya puedes iniciar sesión.")
+    expect(container.textContent).toContain("Iniciar Sesión")
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  it("Deep link /callback (OAuth) received while authenticated does not switch to LoginView", async () => {
+    let callbackTrigger: ((url: string) => void) | null = null
+    ;(window as any).electronAPI = {
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+      getPendingOAuthCallback: vi.fn().mockResolvedValue(null),
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <App />
+        </LanguageProvider>,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Trigger standard OAuth callback
+    await act(async () => {
+      callbackTrigger!("hikat://auth/callback?code=oauth-code-123&state=oauth-state-456")
+    })
+
+    // Stays in Home view, not switching to LoginView
+    expect(container.textContent).toContain("DESCARGAR")
+    expect(container.querySelector(".sidebar-nav-btn")).not.toBeNull()
+    expect(container.textContent).not.toContain("Iniciar Sesión")
 
     act(() => {
       root.unmount()

@@ -729,6 +729,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       success: true,
       message: "Password reset successful",
     })
+    const clearSessionSpy = vi.spyOn(authService, "clearSession")
 
     const container = await renderComponent(
       <LanguageProvider>
@@ -754,6 +755,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     })
 
     expect(resetSpy).toHaveBeenCalledWith("reset-token-12345", "brandNewPassword123")
+    expect(clearSessionSpy).toHaveBeenCalled()
     expect(container.textContent).toContain("Contraseña actualizada correctamente. Inicia sesión con tu nueva contraseña.")
     expect(container.textContent).toContain("Iniciar Sesión")
     expect(onLogin).not.toHaveBeenCalled()

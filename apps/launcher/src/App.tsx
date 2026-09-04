@@ -13,6 +13,7 @@ import ProfileView from "./views/ProfileView"
 export default function App() {
   const {
     screen,
+    setScreen,
     username,
     view,
     setView,
@@ -37,6 +38,8 @@ export default function App() {
     handleLogout,
   } = useLauncherState()
 
+  const [pendingAuthDeepLink, setPendingAuthDeepLink] = React.useState<string | null>(null)
+
   const [settingsAccent, setSettingsAccent] = React.useState<{
     r: number
     g: number
@@ -53,6 +56,34 @@ export default function App() {
       scrollContainerRef.current.scrollTop = 0
     }
   }, [view])
+
+  // Listen for auth deep links (/verify-email, /reset-password) when user is authenticated inside launcher
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.electronAPI?.onOAuthCallback) {
+      return
+    }
+
+    const removeListener = window.electronAPI.onOAuthCallback((rawUrl: string) => {
+      try {
+        const urlObj = new URL(rawUrl)
+        if (urlObj.protocol !== "hikat:") return
+        const host = urlObj.hostname || urlObj.host
+        if (host !== "auth") return
+        const cleanPath = urlObj.pathname.replace(/\/+$/, "")
+
+        if (cleanPath === "/verify-email" || cleanPath === "/reset-password") {
+          if (screen !== "login") {
+            setPendingAuthDeepLink(rawUrl)
+            setScreen("login")
+          }
+        }
+      } catch (_) {}
+    })
+
+    return () => {
+      removeListener?.()
+    }
+  }, [screen, setScreen])
 
   // Desktop Application Protections (Prevent browser menu, accidental drag-drop, and web shortcuts)
   useEffect(() => {
@@ -113,7 +144,12 @@ export default function App() {
         }}
       >
         <LauncherTitlebar theme={theme} />
-        <LoginView onLogin={handleLogin} theme={theme} />
+        <LoginView
+          onLogin={handleLogin}
+          theme={theme}
+          initialDeepLinkUrl={pendingAuthDeepLink}
+          onConsumeInitialDeepLink={() => setPendingAuthDeepLink(null)}
+        />
       </div>
     )
   }
