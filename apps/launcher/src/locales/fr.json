@@ -281,6 +281,7 @@
     "linkedMethods": "Méthodes d'Accès Associées",
     "oauthManagedDesc": "Ce compte se connecte via des fournisseurs externes. La sécurité et l'accès sont gérés directement via votre fournisseur.",
     "providerGoogle": "Google",
-    "providerDiscord": "Discord"
+    "providerDiscord": "Discord",
+    "methodsError": "Impossible de charger les méthodes de connexion."
   }
 }

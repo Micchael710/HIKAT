@@ -139,7 +139,7 @@ describe("Launcher ProfileView Component", () => {
     expect(container.textContent).toContain("—")
   })
 
-  it("4. Account with PASSWORD method shows 'Restablecer contraseña' and action button", async () => {
+  it("4. Account with PASSWORD method shows 'Restablecer contraseña' and action button after resolving", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-4",
       username: "PassUser",
@@ -172,7 +172,7 @@ describe("Launcher ProfileView Component", () => {
     expect(container.textContent).toContain("Enviar correo de restablecimiento")
   })
 
-  it("5. Account with Google-only does NOT show reset password button and shows Google linked badge", async () => {
+  it("5. Account with Google-only does NOT show reset password button during loading or after resolving", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-5",
       username: "GoogleUser",
@@ -181,10 +181,12 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-03-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
-      success: true,
-      methods: [{ type: "GOOGLE", email: "google@gmail.com", displayName: "Google Player" }],
+
+    let resolveMethods: (val: any) => void = () => {}
+    const methodsPromise = new Promise((resolve) => {
+      resolveMethods = resolve
     })
+    vi.spyOn(authService, "getLinkedMethods").mockReturnValue(methodsPromise as any)
 
     const container = await renderComponent(
       <LanguageProvider>
@@ -196,8 +198,17 @@ describe("Launcher ProfileView Component", () => {
       </LanguageProvider>,
     )
 
-    // Flush async getLinkedMethods
+    // During loading: no reset password text or button
+    expect(container.textContent).not.toContain("Restablecer contraseña")
+    expect(container.textContent).not.toContain("Enviar correo de restablecimiento")
+    expect(container.textContent).toContain("Cargando...")
+
+    // Resolve as GOOGLE
     await act(async () => {
+      resolveMethods({
+        success: true,
+        methods: [{ type: "GOOGLE", email: "google@gmail.com", displayName: "Google Player" }],
+      })
       await new Promise((r) => setTimeout(r, 10))
     })
 
@@ -206,7 +217,7 @@ describe("Launcher ProfileView Component", () => {
     expect(container.textContent).toContain("Google")
   })
 
-  it("6. Account with Discord-only does NOT show reset password button and shows Discord linked badge", async () => {
+  it("6. Account with Discord-only does NOT show reset password button during loading or after resolving", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-6",
       username: "DiscordUser",
@@ -215,10 +226,12 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-04-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
-      success: true,
-      methods: [{ type: "DISCORD", email: "discord@discord.com", displayName: "Discord Pro" }],
+
+    let resolveMethods: (val: any) => void = () => {}
+    const methodsPromise = new Promise((resolve) => {
+      resolveMethods = resolve
     })
+    vi.spyOn(authService, "getLinkedMethods").mockReturnValue(methodsPromise as any)
 
     const container = await renderComponent(
       <LanguageProvider>
@@ -230,8 +243,16 @@ describe("Launcher ProfileView Component", () => {
       </LanguageProvider>,
     )
 
-    // Flush async getLinkedMethods
+    // During loading: no reset password text or button
+    expect(container.textContent).not.toContain("Restablecer contraseña")
+    expect(container.textContent).not.toContain("Enviar correo de restablecimiento")
+
+    // Resolve as DISCORD
     await act(async () => {
+      resolveMethods({
+        success: true,
+        methods: [{ type: "DISCORD", email: "discord@discord.com", displayName: "Discord Pro" }],
+      })
       await new Promise((r) => setTimeout(r, 10))
     })
 
@@ -240,7 +261,7 @@ describe("Launcher ProfileView Component", () => {
     expect(container.textContent).toContain("Discord")
   })
 
-  it("7. Account with PASSWORD + OAuth (Google/Discord) continues to show reset password button", async () => {
+  it("7. Account with PASSWORD + OAuth (Google/Discord) shows reset password button after resolving", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-7",
       username: "HybridUser",
@@ -274,5 +295,36 @@ describe("Launcher ProfileView Component", () => {
 
     expect(container.textContent).toContain("Restablecer contraseña")
     expect(container.textContent).toContain("Enviar correo de restablecimiento")
+  })
+
+  it("8. Failure of getLinkedMethods does not show reset password button by default", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-8",
+      username: "ErrorUser",
+      displayName: "ErrorUser",
+      email: "error@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-15T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getLinkedMethods").mockRejectedValue(new Error("Network failed"))
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="ErrorUser"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    // Flush async rejection
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    expect(container.textContent).not.toContain("Restablecer contraseña")
+    expect(container.textContent).not.toContain("Enviar correo de restablecimiento")
+    expect(container.textContent).toContain("No se pudieron cargar los métodos de acceso.")
   })
 })

@@ -281,6 +281,7 @@
     "linkedMethods": "Linked Sign-in Methods",
     "oauthManagedDesc": "This account logs in using external providers. Security and access are managed directly through your provider.",
     "providerGoogle": "Google",
-    "providerDiscord": "Discord"
+    "providerDiscord": "Discord",
+    "methodsError": "Could not load sign-in methods."
   }
 }
