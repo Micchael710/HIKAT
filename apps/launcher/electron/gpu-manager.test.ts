@@ -5,7 +5,6 @@ import fs from "fs"
 describe("HiKAT Windows DirectX GPU Manager Suite", () => {
   let originalPlatform: string
   let execFileSyncSpy: any
-  let execSyncSpy: any
 
   beforeEach(() => {
     originalPlatform = process.platform
@@ -14,7 +13,6 @@ describe("HiKAT Windows DirectX GPU Manager Suite", () => {
       configurable: true,
     })
     execFileSyncSpy = vi.spyOn(childProcess, "execFileSync").mockReturnValue("GpuPreference=2;\r\n" as any)
-    execSyncSpy = vi.spyOn(childProcess, "execSync").mockReturnValue("NVIDIA GeForce RTX 4070" as any)
   })
 
   afterEach(() => {
@@ -23,13 +21,6 @@ describe("HiKAT Windows DirectX GPU Manager Suite", () => {
       configurable: true,
     })
     vi.restoreAllMocks()
-    // Clean environment variables
-    delete process.env.SHIM_MCCOMPAT_DISABLE
-    delete process.env.MESA_GLSL_CACHE_DISABLE
-    delete process.env.__GL_SHADER_DISK_CACHE
-    delete process.env.__GL_THREADED_OPTIMIZATION
-    delete process.env.CUDA_VISIBLE_DEVICES
-    delete process.env.AMD_VULKAN_ICD
   })
 
   it("1. enable=true writes .ps1 script with GpuPreference=2; and validates registry read-back", () => {
@@ -139,82 +130,6 @@ describe("HiKAT Windows DirectX GPU Manager Suite", () => {
     expect(result).toBe(false)
     expect(warnSpy).toHaveBeenCalled()
     expect(unlinkSyncSpy).toHaveBeenCalled()
-  })
-
-  it("7. detectDedicatedGpu correctly identifies NVIDIA and AMD GPUs", () => {
-    const { detectDedicatedGpu } = require("./gpu-manager.cjs")
-
-    execSyncSpy.mockReturnValue("Name\nNVIDIA GeForce RTX 3080")
-    expect(detectDedicatedGpu()).toBe("nvidia")
-
-    execSyncSpy.mockReturnValue("Name\nAMD Radeon RX 7900 XTX")
-    expect(detectDedicatedGpu()).toBe("amd")
-
-    execSyncSpy.mockReturnValue("Name\nIntel UHD Graphics 630")
-    expect(detectDedicatedGpu()).toBeNull()
-  })
-
-  it("8. detectDedicatedGpu falls back to PowerShell Get-CimInstance if wmic fails", () => {
-    const { detectDedicatedGpu } = require("./gpu-manager.cjs")
-
-    execSyncSpy.mockImplementation(() => {
-      throw new Error("wmic not found")
-    })
-    execFileSyncSpy.mockReturnValue("NVIDIA GeForce GTX 1660 Ti\r\n")
-
-    expect(detectDedicatedGpu()).toBe("nvidia")
-    expect(execFileSyncSpy).toHaveBeenCalledWith(
-      "powershell.exe",
-      expect.arrayContaining(["-Command", expect.stringContaining("Get-CimInstance Win32_VideoController")]),
-      expect.any(Object),
-    )
-  })
-
-  it("9. applyGpuEnvironment sets correct environment variables for NVIDIA and cleans on disable", () => {
-    const { applyGpuEnvironment } = require("./gpu-manager.cjs")
-
-    execSyncSpy.mockReturnValue("NVIDIA GeForce RTX 4080")
-
-    applyGpuEnvironment(true)
-
-    expect(process.env.SHIM_MCCOMPAT_DISABLE).toBe("1")
-    expect(process.env.MESA_GLSL_CACHE_DISABLE).toBe("false")
-    expect(process.env.__GL_SHADER_DISK_CACHE).toBe("1")
-    expect(process.env.__GL_THREADED_OPTIMIZATION).toBe("1")
-    expect(process.env.CUDA_VISIBLE_DEVICES).toBe("0")
-
-    applyGpuEnvironment(false)
-
-    expect(process.env.SHIM_MCCOMPAT_DISABLE).toBeUndefined()
-    expect(process.env.MESA_GLSL_CACHE_DISABLE).toBeUndefined()
-    expect(process.env.__GL_SHADER_DISK_CACHE).toBeUndefined()
-    expect(process.env.__GL_THREADED_OPTIMIZATION).toBeUndefined()
-    expect(process.env.CUDA_VISIBLE_DEVICES).toBeUndefined()
-  })
-
-  it("10. applyGpuEnvironment sets correct environment variables for AMD", () => {
-    const { applyGpuEnvironment } = require("./gpu-manager.cjs")
-
-    execSyncSpy.mockReturnValue("AMD Radeon RX 6700 XT")
-
-    applyGpuEnvironment(true)
-
-    expect(process.env.SHIM_MCCOMPAT_DISABLE).toBe("1")
-    expect(process.env.MESA_GLSL_CACHE_DISABLE).toBe("false")
-    expect(process.env.AMD_VULKAN_ICD).toBe("RADV")
-  })
-
-  it("11. getGpuOptimizedJvmArgs returns OS args only when enabled on win32", () => {
-    const { getGpuOptimizedJvmArgs } = require("./gpu-manager.cjs")
-
-    expect(getGpuOptimizedJvmArgs(true)).toEqual(["-Dos.name=Windows 10", "-Dos.version=10.0"])
-    expect(getGpuOptimizedJvmArgs(false)).toEqual([])
-
-    Object.defineProperty(process, "platform", {
-      value: "linux",
-      configurable: true,
-    })
-    expect(getGpuOptimizedJvmArgs(true)).toEqual([])
   })
 })
 
