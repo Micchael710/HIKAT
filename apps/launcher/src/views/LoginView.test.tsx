@@ -125,7 +125,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       googleBtn?.click()
     })
 
-    expect(authService.initiateOAuth).toHaveBeenCalledWith("GOOGLE", true)
+    expect(authService.initiateOAuth).toHaveBeenCalledWith("GOOGLE", true, "es")
     expect(openExternalMock).toHaveBeenCalledWith(
       "http://localhost:8788/oauth/authorize?provider=google&state=test-state",
     )
@@ -267,7 +267,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       discordBtn?.click()
     })
 
-    expect(initiateSpy).toHaveBeenCalledWith("DISCORD", true)
+    expect(initiateSpy).toHaveBeenCalledWith("DISCORD", true, "es")
   })
 
   it("9. Callback processor rejects malicious spoofing urls like callback-evil", async () => {
@@ -423,7 +423,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       submitResetBtn?.click()
     })
 
-    expect(resetSpy).toHaveBeenCalledWith("steve@hikat.org")
+    expect(resetSpy).toHaveBeenCalledWith("steve@hikat.org", "es")
     expect(container.textContent).toContain("Revisa tu correo electrónico para continuar con el restablecimiento de tu contraseña.")
   })
 
@@ -949,7 +949,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       resendBtn?.click()
     })
 
-    expect(resendSpy).toHaveBeenCalledWith("resend@hikat.org")
+    expect(resendSpy).toHaveBeenCalledWith("resend@hikat.org", "es")
     expect(container.textContent).toContain("Correo de verificación reenviado. Revisa tu bandeja de entrada.")
   })
 

@@ -312,6 +312,7 @@ export class AuthClientCore {
     email: string,
     password: string,
     displayName?: string,
+    locale?: string,
   ): Promise<{ success: boolean; user: AuthUser; emailVerificationRequired: boolean }> {
     const res = await this.fetcher(`${this.authServiceUrl}/auth/register`, {
       method: "POST",
@@ -320,6 +321,7 @@ export class AuthClientCore {
         email: email.trim().toLowerCase(),
         password,
         displayName: displayName?.trim() || undefined,
+        locale: locale || undefined,
       }),
     })
 

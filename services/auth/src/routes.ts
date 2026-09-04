@@ -17,7 +17,8 @@ import {
   verifyAccessToken,
 } from "./crypto/jwt"
 import { hashToken } from "./crypto/tokens"
-import { EmailService } from "./services/email"
+import { EmailService, EmailLocale, sanitizeEmailLocale } from "./services/email"
+import { HIKAT_LOGO_PNG_BASE64 } from "./assets/logo"
 import { checkRateLimit } from "./services/rateLimiter"
 import {
   registerWithPassword,
@@ -200,6 +201,22 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     })
   }
 
+  // 2b. Public HiKAT Logo Asset
+  if (pathname === "/auth/logo.png" && method === "GET") {
+    const binaryString = atob(HIKAT_LOGO_PNG_BASE64)
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=86400",
+      },
+    })
+  }
+
   // Ensure DB is bound for database-backed endpoints
   if (!db) {
     return errorResponse("DATABASE_UNAVAILABLE", "Database connection is unavailable", 503)
@@ -217,6 +234,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         email?: string
         password?: string
         displayName?: string
+        locale?: string
       }
 
       if (!body.email || !body.password) {
@@ -229,6 +247,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
           email: body.email,
           password: body.password,
           displayName: body.displayName,
+          locale: body.locale,
         },
         emailService,
         authServiceUrl,
@@ -311,22 +330,118 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         })
       }
 
+      const rawLang = url.searchParams.get("lang")
+      const acceptLang = String(request.headers.get("accept-language") || "").toLowerCase()
+      let lang: EmailLocale = "en"
+      if (rawLang && ["es", "en", "pt", "fr"].includes(rawLang.toLowerCase())) {
+        lang = rawLang.toLowerCase() as EmailLocale
+      } else if (acceptLang.startsWith("es")) {
+        lang = "es"
+      } else if (acceptLang.startsWith("pt")) {
+        lang = "pt"
+      } else if (acceptLang.startsWith("fr")) {
+        lang = "fr"
+      } else {
+        lang = "en"
+      }
+
+      const emailActionTranslations = {
+        "verify-email": {
+          es: {
+            title: "Verificar cuenta",
+            description: "Estamos abriendo HiKAT Launcher para verificar tu cuenta.",
+            button: "Abrir HiKAT Launcher",
+            secondary: "Puedes volver a intentarlo si el Launcher no se abrió automáticamente.",
+          },
+          en: {
+            title: "Verify account",
+            description: "We're opening HiKAT Launcher to verify your account.",
+            button: "Open HiKAT Launcher",
+            secondary: "You can try again if the Launcher did not open automatically.",
+          },
+          pt: {
+            title: "Verificar conta",
+            description: "Estamos abrindo o HiKAT Launcher para verificar sua conta.",
+            button: "Abrir o HiKAT Launcher",
+            secondary: "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+          },
+          fr: {
+            title: "Vérifier le compte",
+            description: "Nous ouvrons HiKAT Launcher pour vérifier votre compte.",
+            button: "Ouvrir HiKAT Launcher",
+            secondary: "Vous pouvez réessayer si le Launcher ne s’est pas ouvert automatiquement.",
+          },
+        },
+        "reset-password": {
+          es: {
+            title: "Restablecer contraseña",
+            description: "Continúa en HiKAT Launcher para establecer tu nueva contraseña.",
+            button: "Abrir HiKAT Launcher",
+            secondary: "Puedes volver a intentarlo si el Launcher no se abrió automáticamente.",
+          },
+          en: {
+            title: "Reset password",
+            description: "Continue in HiKAT Launcher to set your new password.",
+            button: "Open HiKAT Launcher",
+            secondary: "You can try again if the Launcher did not open automatically.",
+          },
+          pt: {
+            title: "Redefinir senha",
+            description: "Continue no HiKAT Launcher para definir sua nova senha.",
+            button: "Abrir o HiKAT Launcher",
+            secondary: "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+          },
+          fr: {
+            title: "Réinitialiser le mot de passe",
+            description: "Continuez dans HiKAT Launcher pour définir votre nouveau mot de passe.",
+            button: "Ouvrir HiKAT Launcher",
+            secondary: "Vous pouvez réessayer si le Launcher ne s’est pas ouvert automatiquement.",
+          },
+        },
+      }
+
+      const copy = emailActionTranslations[type][lang]
       const deepLink = `hikat://auth/${type}?token=${encodeURIComponent(token)}`
-      const actionTitle = type === "verify-email" ? "Verificar cuenta" : "Restablecer contraseña"
 
       const html = `<!DOCTYPE html>
-<html lang="es">
+<html lang="${lang}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${actionTitle} - HiKAT</title>
+  <meta name="color-scheme" content="dark">
+  <title>${copy.title} - HiKAT</title>
   <meta http-equiv="refresh" content="0;url=${deepLink}">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
+    html, body {
+      width: 100%;
+      min-height: 100%;
       background-color: #090d12;
       color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .overlay-layer {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(
+        ellipse at center,
+        rgba(9, 13, 18, 0.7) 0%,
+        rgba(9, 13, 18, 0.95) 100%
+      );
+      z-index: 1;
+    }
+    .page {
+      position: relative;
+      z-index: 2;
+      width: 100%;
       min-height: 100vh;
       display: flex;
       align-items: center;
@@ -334,30 +449,82 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       padding: 24px;
     }
     .card {
-      width: 100%;
-      max-width: 440px;
-      background: linear-gradient(180deg, #141d26 0%, #0d1218 100%);
+      width: min(440px, calc(100vw - 32px));
+      padding: 36px 30px;
+      background: linear-gradient(
+        180deg,
+        rgba(20, 29, 38, 0.96) 0%,
+        rgba(13, 18, 24, 0.96) 100%
+      );
       border: 1.5px solid rgba(255, 255, 255, 0.1);
       border-radius: 20px;
-      padding: 36px 30px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(16px);
       text-align: center;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
     }
-    h1 { font-size: 20px; font-weight: 700; margin-bottom: 12px; color: #ffffff; }
-    p { font-size: 14px; color: #8899aa; line-height: 1.5; margin-bottom: 24px; }
+    .brand {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .brand img {
+      max-height: 48px;
+      max-width: 240px;
+      object-fit: contain;
+    }
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 20px;
+      line-height: 1.3;
+      font-weight: 700;
+      color: #ffffff;
+    }
+    .description {
+      margin: 0;
+      color: #8899aa;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .loader {
+      width: 32px;
+      height: 32px;
+      margin: 24px auto 0;
+      border: 3px solid rgba(255, 255, 255, 0.10);
+      border-top-color: rgba(130, 200, 230, 0.9);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
     .btn {
       display: inline-block;
       width: 100%;
-      background: linear-gradient(135deg, #1c384e 0%, #295372 100%);
+      margin-top: 24px;
+      padding: 13px 20px;
       border: 2px solid rgba(130, 200, 230, 0.5);
       border-radius: 12px;
+      background: linear-gradient(135deg, #1c384e 0%, #295372 100%);
       color: #ffffff;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 15px;
       font-weight: 700;
       text-decoration: none;
-      padding: 13px 20px;
-      cursor: pointer;
+      text-align: center;
       line-height: 1.2;
+      cursor: pointer;
+      transition: border-color 0.22s ease, background 0.22s ease, box-shadow 0.25s ease, transform 0.2s ease;
+    }
+    .btn:hover {
+      background: linear-gradient(135deg, #234764, #33678e);
+      border-color: rgba(160, 230, 255, 0.9);
+      box-shadow: 0 0 28px rgba(90, 180, 220, 0.45);
+    }
+    .secondary {
+      margin: 18px 0 0;
+      color: #718090;
+      font-size: 12.5px;
+      line-height: 1.5;
     }
   </style>
   <script>
@@ -365,10 +532,18 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
   </script>
 </head>
 <body>
-  <div class="card">
-    <h1>${actionTitle}</h1>
-    <p>Abriendo HiKAT Launcher para completar tu solicitud...</p>
-    <a href="${deepLink}" class="btn">Abrir HiKAT Launcher</a>
+  <div class="overlay-layer"></div>
+  <div class="page">
+    <main class="card">
+      <div class="brand">
+        <img src="data:image/png;base64,${HIKAT_LOGO_PNG_BASE64}" alt="HiKAT">
+      </div>
+      <h1>${copy.title}</h1>
+      <p class="description">${copy.description}</p>
+      <div class="loader"></div>
+      <a href="${deepLink}" class="btn">${copy.button}</a>
+      <p class="secondary">${copy.secondary}</p>
+    </main>
   </div>
 </body>
 </html>`
@@ -390,9 +565,9 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         return errorResponse(AuthErrorCode.RATE_LIMITED, "Too many verification requests", 429)
       }
 
-      const body = (await request.json().catch(() => ({}))) as { email?: string }
+      const body = (await request.json().catch(() => ({}))) as { email?: string; locale?: string }
       if (body.email) {
-        await resendVerificationEmail(db, body.email, emailService, authServiceUrl)
+        await resendVerificationEmail(db, body.email, emailService, authServiceUrl, body.locale)
       }
 
       return jsonResponse({
@@ -408,9 +583,9 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         return errorResponse(AuthErrorCode.RATE_LIMITED, "Too many reset requests", 429)
       }
 
-      const body = (await request.json().catch(() => ({}))) as { email?: string }
+      const body = (await request.json().catch(() => ({}))) as { email?: string; locale?: string }
       if (body.email) {
-        await requestPasswordReset(db, body.email, emailService, authServiceUrl)
+        await requestPasswordReset(db, body.email, emailService, authServiceUrl, body.locale)
       }
 
       return jsonResponse({

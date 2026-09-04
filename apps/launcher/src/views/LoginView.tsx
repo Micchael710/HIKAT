@@ -25,7 +25,7 @@ export default function LoginView({
   initialDeepLinkUrl,
   onConsumeInitialDeepLink,
 }: LoginViewProps) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const [mode, setMode] = useState<AuthMode>("auth")
   const [tab, setTab] = useState<"login" | "register">("login")
   const [username, setUsername] = useState("")
@@ -186,7 +186,7 @@ export default function LoginView({
     setErrorMessage(null)
     setSuccessNotice(null)
     try {
-      const { authUrl, codeVerifier, state } = await authService.initiateOAuth(provider, keepSession)
+      const { authUrl, codeVerifier, state } = await authService.initiateOAuth(provider, keepSession, language)
       pendingOAuthRef.current = { codeVerifier, state, keepSession }
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.setItem("hikat_launcher_oauth_verifier", codeVerifier)
@@ -263,6 +263,7 @@ export default function LoginView({
         username: cleanUsername,
         email: cleanEmail,
         password: cleanPassword,
+        locale: language,
       })
 
       if (res.success) {
@@ -308,7 +309,7 @@ export default function LoginView({
     setErrorMessage(null)
     setIsSendingReset(true)
     try {
-      const res = await authService.requestPasswordReset(cleanEmail)
+      const res = await authService.requestPasswordReset(cleanEmail, language)
       setIsSendingReset(false)
       if (res.success) {
         setForgotSuccess(true)
@@ -372,7 +373,7 @@ export default function LoginView({
     setSuccessNotice(null)
     setIsResendingVerification(true)
     try {
-      const res = await authService.requestEmailVerification(targetEmail)
+      const res = await authService.requestEmailVerification(targetEmail, language)
       setIsResendingVerification(false)
       if (res.success) {
         setSuccessNotice(t("auth.verificationResentSuccess"))

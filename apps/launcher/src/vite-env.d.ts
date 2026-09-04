@@ -142,6 +142,21 @@ interface ElectronAPI {
     ) => void
   ) => () => void
   onGameFileIntegrityChanged?: (callback: (data: { path: string }) => void) => () => void
+  onOAuthCallback?: (callback: (url: string) => void) => () => void
+  getPendingOAuthCallback?: () => Promise<string | null>
+  authSaveSession?: (session: any) => Promise<void>
+  authLoadSession?: () => Promise<any>
+  authClearSession?: () => Promise<void>
+  authSavePendingOAuth?: (data: {
+    provider: "GOOGLE" | "DISCORD"
+    codeVerifier: string
+    state: string
+    keepSession?: boolean
+    locale?: string
+    expiresAt?: number
+  }) => Promise<void>
+  authGetPendingOAuth?: (state: string) => Promise<any>
+  authClearPendingOAuth?: () => Promise<void>
 }
 
 interface Window {

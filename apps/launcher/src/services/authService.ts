@@ -44,6 +44,7 @@ export interface RegisterCredentials {
   username: string
   email: string
   password?: string
+  locale?: string
 }
 
 /**
@@ -208,18 +209,17 @@ class LauncherAuthService {
 
     try {
       const user = await this.client.login(cleanEmail, password, keepSession)
-      const token = this.client.getAccessToken() || ""
       return {
         success: true,
         user: {
           id: user.id,
-          username: user.displayName || user.email.split("@")[0] || "Jugador",
-          displayName: user.displayName || user.email.split("@")[0] || "Jugador",
+          username: user.displayName || cleanEmail.split("@")[0],
+          displayName: user.displayName || cleanEmail.split("@")[0],
           email: user.email,
           role: user.role,
           createdAt: user.createdAt,
         },
-        token,
+        token: this.client.getAccessToken() || undefined,
       }
     } catch (err: any) {
       return {
@@ -238,6 +238,7 @@ class LauncherAuthService {
     const cleanUsername = sanitizeUsername(credentials.username)
     const cleanEmail = sanitizeEmail(credentials.email)
     const password = credentials.password || ""
+    const locale = credentials.locale
 
     if (!cleanEmail || !password) {
       return {
@@ -254,7 +255,7 @@ class LauncherAuthService {
     }
 
     try {
-      const res = await this.client.register(cleanEmail, password, cleanUsername)
+      const res = await this.client.register(cleanEmail, password, cleanUsername, locale)
       return {
         success: true,
         user: {
@@ -303,12 +304,15 @@ class LauncherAuthService {
     return this.client.setSession(session, persist)
   }
 
-  public async requestPasswordReset(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  public async requestPasswordReset(
+    email: string,
+    locale?: string,
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
     try {
       const res = await fetch(`${AUTH_URL}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: sanitizeEmail(email) }),
+        body: JSON.stringify({ email: sanitizeEmail(email), locale: locale || undefined }),
       })
       const data = await res.json().catch(() => ({}))
       return { success: res.ok, message: data.message, error: data.error }
@@ -317,7 +321,10 @@ class LauncherAuthService {
     }
   }
 
-  public async requestEmailVerification(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  public async requestEmailVerification(
+    email: string,
+    locale?: string,
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
     const cleanEmail = sanitizeEmail(email)
     if (!cleanEmail) {
       return { success: false, error: "Correo electrónico no proporcionado." }
@@ -326,7 +333,7 @@ class LauncherAuthService {
       const res = await fetch(`${AUTH_URL}/auth/resend-verification`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: cleanEmail }),
+        body: JSON.stringify({ email: cleanEmail, locale: locale || undefined }),
       })
       const data = await res.json().catch(() => ({}))
       return { success: res.ok, message: data.message, error: data.error }
@@ -391,6 +398,7 @@ class LauncherAuthService {
   public async initiateOAuth(
     provider: "GOOGLE" | "DISCORD",
     keepSession = true,
+    locale?: string,
   ): Promise<{
     authUrl: string
     codeVerifier: string
@@ -416,6 +424,7 @@ class LauncherAuthService {
           codeVerifier,
           state,
           keepSession,
+          locale: locale || undefined,
           expiresAt: Date.now() + 10 * 60 * 1000,
         })
       } catch (_) { }

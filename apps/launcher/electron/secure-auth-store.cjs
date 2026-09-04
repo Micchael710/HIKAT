@@ -128,6 +128,7 @@ class SecureAuthStore {
         codeVerifier: data.codeVerifier,
         state: data.state,
         keepSession: typeof data.keepSession === "boolean" ? data.keepSession : true,
+        locale: data.locale,
         expiresAt: data.expiresAt || Date.now() + 10 * 60 * 1000, // 10 minutes max
       }
 
@@ -149,6 +150,34 @@ class SecureAuthStore {
       fs.writeFileSync(tempPath, bufferToWrite, { mode: 0o600 })
       fs.renameSync(tempPath, this.pendingOAuthFilePath)
     } catch (_) {}
+  }
+
+  peekPendingOAuth(state) {
+    try {
+      if (!this.pendingOAuth && fs.existsSync(this.pendingOAuthFilePath)) {
+        const fileData = fs.readFileSync(this.pendingOAuthFilePath)
+        let jsonStr = ""
+        if (this.isEncryptionAvailable()) {
+          jsonStr = electronSafeStorage.decryptString(fileData)
+        } else {
+          if (process.env.NODE_ENV === "test" || process.env.VITEST) {
+            jsonStr = fileData.toString("utf-8")
+          } else {
+            return null
+          }
+        }
+        this.pendingOAuth = JSON.parse(jsonStr)
+      }
+
+      if (this.pendingOAuth) {
+        if (this.pendingOAuth.state === state && Date.now() < this.pendingOAuth.expiresAt) {
+          return { ...this.pendingOAuth }
+        }
+      }
+      return null
+    } catch (_) {
+      return null
+    }
   }
 
   getPendingOAuth(state) {

@@ -146,7 +146,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(sentEmail).toBeDefined()
       expect(sentEmail?.type).toBe("verification")
       expect(sentEmail?.token).toBeDefined()
-      expect(sentEmail?.url).toBe(`https://auth.hikat.org/auth/email-action?type=verify-email&token=${sentEmail?.token}`)
+      expect(sentEmail?.url).toBe(`https://auth.hikat.org/auth/email-action?type=verify-email&token=${sentEmail?.token}&lang=en`)
     })
 
     it("rejects duplicate email registration", async () => {
@@ -295,7 +295,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       const resetEmail = emailService.getLastEmailFor("reset@hikat.org")
       expect(resetEmail).toBeDefined()
       expect(resetEmail?.type).toBe("password_reset")
-      expect(resetEmail?.url).toBe(`https://auth.hikat.org/auth/email-action?type=reset-password&token=${resetEmail?.token}`)
+      expect(resetEmail?.url).toBe(`https://auth.hikat.org/auth/email-action?type=reset-password&token=${resetEmail?.token}&lang=en`)
 
       // Reset password
       const resetRes = await resetPasswordWithToken(db, resetEmail!.token, "newBrandPassword123!")
@@ -1417,7 +1417,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       const sent = emailService.getLastEmailFor("forgot-canon@hikat.org")
       expect(sent).toBeDefined()
       expect(sent?.type).toBe("password_reset")
-      expect(sent?.url).toBe(`http://localhost:8788/auth/email-action?type=reset-password&token=${sent?.token}`)
+      expect(sent?.url).toBe(`http://localhost:8788/auth/email-action?type=reset-password&token=${sent?.token}&lang=en`)
     })
 
     it("OAuth PKCE /oauth/token exchange returns full AuthUser contract with email and integrates end-to-end with AuthClientCore", async () => {
@@ -1561,7 +1561,12 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       const resend = new ResendEmailService("re_secret_key_12345", "HiKAT <noreply@mail.hikat.org>", mockFetch)
 
-      await resend.sendVerificationEmail("tester@hikat.org", "token123", "https://auth.hikat.org/auth/email-action?type=verify-email&token=token123")
+      await resend.sendVerificationEmail(
+        "tester@hikat.org",
+        "token123",
+        "https://auth.hikat.org/auth/email-action?type=verify-email&token=token123&lang=es",
+        "es",
+      )
 
       expect(interceptedUrl).toBe("https://api.resend.com/emails")
       expect(interceptedAuth).toBe("Bearer re_secret_key_12345")
@@ -1848,8 +1853,8 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     })
 
     it("GET /auth/email-action validates token format and serves clean HTML deep link bridge with no-store headers", async () => {
-      // 1. Valid verify-email action
-      const reqVerify = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=validToken123", {
+      // 1. Valid verify-email action (Spanish default or explicit)
+      const reqVerify = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=validToken123&lang=es", {
         method: "GET",
       })
       const resVerify = await handleRequest({
@@ -1865,10 +1870,14 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(resVerify.headers.get("Referrer-Policy")).toBe("no-referrer")
       const htmlVerify = await resVerify.text()
       expect(htmlVerify).toContain("hikat://auth/verify-email?token=validToken123")
+      expect(htmlVerify).toContain("Verificar cuenta")
+      expect(htmlVerify).toContain("Estamos abriendo HiKAT Launcher para verificar tu cuenta.")
       expect(htmlVerify).toContain("Abrir HiKAT Launcher")
+      expect(htmlVerify).toContain("data:image/png;base64,")
+      expect(htmlVerify).not.toContain("#efc436") // No yellow styling!
 
-      // 2. Valid reset-password action
-      const reqReset = new Request("http://localhost:8788/auth/email-action?type=reset-password&token=resetToken456", {
+      // 2. Valid reset-password action with English language
+      const reqReset = new Request("http://localhost:8788/auth/email-action?type=reset-password&token=resetToken456&lang=en", {
         method: "GET",
       })
       const resReset = await handleRequest({
@@ -1881,8 +1890,44 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(resReset.status).toBe(200)
       const htmlReset = await resReset.text()
       expect(htmlReset).toContain("hikat://auth/reset-password?token=resetToken456")
+      expect(htmlReset).toContain("Reset password")
+      expect(htmlReset).toContain("Continue in HiKAT Launcher to set your new password.")
+      expect(htmlReset).toContain("Open HiKAT Launcher")
 
-      // 3. Invalid type rejected with 400
+      // 3. Fallback to Accept-Language (French)
+      const reqFr = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=tokFrench789", {
+        method: "GET",
+        headers: { "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8" },
+      })
+      const resFr = await handleRequest({
+        request: reqFr,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resFr.status).toBe(200)
+      const htmlFr = await resFr.text()
+      expect(htmlFr).toContain("Vérifier le compte")
+      expect(htmlFr).toContain("Nous ouvrons HiKAT Launcher pour vérifier votre compte.")
+      expect(htmlFr).toContain("Ouvrir HiKAT Launcher")
+
+      // 4. Invalid locale falls back to 'en'
+      const reqInvalidLang = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=tokInv999&lang=unknown_lang", {
+        method: "GET",
+      })
+      const resInvalidLang = await handleRequest({
+        request: reqInvalidLang,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resInvalidLang.status).toBe(200)
+      const htmlInvalidLang = await resInvalidLang.text()
+      expect(htmlInvalidLang).toContain("Verify account")
+
+      // 5. Invalid type rejected with 400
       const reqInvalid = new Request("http://localhost:8788/auth/email-action?type=malicious&token=tok123", {
         method: "GET",
       })
@@ -1894,6 +1939,69 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         emailService,
       })
       expect(resInvalid.status).toBe(400)
+    })
+
+    it("GET /auth/logo.png serves raw PNG image asset", async () => {
+      const reqLogo = new Request("http://localhost:8788/auth/logo.png", {
+        method: "GET",
+      })
+      const resLogo = await handleRequest({
+        request: reqLogo,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resLogo.status).toBe(200)
+      expect(resLogo.headers.get("Content-Type")).toBe("image/png")
+      const buffer = await resLogo.arrayBuffer()
+      expect(buffer.byteLength).toBeGreaterThan(100)
+    })
+
+    it("registerWithPassword, resendVerification, and requestPasswordReset propagate locale into email URLs and templates", async () => {
+      // 1. Register with Portuguese locale
+      await registerWithPassword(
+        db,
+        { email: "portuguese@hikat.org", password: "Password123!", locale: "pt" },
+        emailService,
+      )
+      const ptEmail = emailService.getLastEmailFor("portuguese@hikat.org")!
+      expect(ptEmail.url).toContain("&lang=pt")
+      expect(ptEmail.subject).toBe("Verifique sua conta do HiKAT")
+
+      // 2. Resend verification with French locale
+      const reqResendFr = new Request("http://localhost:8788/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "portuguese@hikat.org", locale: "fr" }),
+      })
+      await handleRequest({
+        request: reqResendFr,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      const frEmail = emailService.getLastEmailFor("portuguese@hikat.org")!
+      expect(frEmail.url).toContain("&lang=fr")
+      expect(frEmail.subject).toBe("Vérifiez votre compte HiKAT")
+
+      // 3. Password reset with English locale
+      const reqForgotEn = new Request("http://localhost:8788/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "portuguese@hikat.org", locale: "en" }),
+      })
+      await handleRequest({
+        request: reqForgotEn,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      const enResetEmail = emailService.getLastEmailFor("portuguese@hikat.org")!
+      expect(enResetEmail.url).toContain("&lang=en")
+      expect(enResetEmail.subject).toBe("Reset your HiKAT password")
     })
 
     it("POST /auth/resend-verification generates new token, invalidates prior tokens on success, and conserves valid tokens on email failure", async () => {

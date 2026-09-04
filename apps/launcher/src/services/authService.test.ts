@@ -869,6 +869,46 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(capturedBody.token).toBe(complexToken)
     expect(capturedBody.newPassword).toBe("validPassword123")
   })
+
+  it("24. requestPasswordReset and requestEmailVerification propagate locale payload", async () => {
+    let resetBody: any = null
+    let resendBody: any = null
+
+    mockFetch.mockImplementation(async (url: string, opts: any) => {
+      if (url.includes("/auth/forgot-password")) {
+        resetBody = JSON.parse(opts.body)
+        return { ok: true, status: 200, json: async () => ({ success: true }) }
+      }
+      if (url.includes("/auth/resend-verification")) {
+        resendBody = JSON.parse(opts.body)
+        return { ok: true, status: 200, json: async () => ({ success: true }) }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+
+    await authService.requestPasswordReset("player@hikat.org", "pt")
+    expect(resetBody.locale).toBe("pt")
+
+    await authService.requestEmailVerification("player@hikat.org", "fr")
+    expect(resendBody.locale).toBe("fr")
+  })
+
+  it("25. initiateOAuth saves locale in Electron pending OAuth store", async () => {
+    const savePendingMock = vi.fn()
+    ;(window as any).electronAPI = {
+      authSavePendingOAuth: savePendingMock,
+    }
+
+    const { state } = await authService.initiateOAuth("GOOGLE", true, "es")
+    expect(savePendingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "GOOGLE",
+        keepSession: true,
+        locale: "es",
+        state,
+      }),
+    )
+  })
 })
 
 

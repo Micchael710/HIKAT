@@ -150,6 +150,36 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
     expect(authStore2.getPendingOAuth("oauth-state-abcde")).toBeNull()
   })
 
+  it("7b. SecureAuthStore preserves locale and peekPendingOAuth reads without clearing PKCE token", () => {
+    const authStore = new SecureAuthStore(tempDir)
+    authStore.savePendingOAuth({
+      provider: "DISCORD",
+      codeVerifier: "pkce-discord-verifier",
+      state: "discord-state-xyz",
+      keepSession: true,
+      locale: "es",
+      expiresAt: Date.now() + 60000,
+    })
+
+    // peekPendingOAuth returns the item with locale without consuming or clearing it
+    const peeked1 = authStore.peekPendingOAuth("discord-state-xyz")
+    expect(peeked1).not.toBeNull()
+    expect(peeked1?.locale).toBe("es")
+    expect(peeked1?.codeVerifier).toBe("pkce-discord-verifier")
+
+    const peeked2 = authStore.peekPendingOAuth("discord-state-xyz")
+    expect(peeked2).not.toBeNull()
+
+    // getPendingOAuth retrieves and cleans up
+    const retrieved = authStore.getPendingOAuth("discord-state-xyz")
+    expect(retrieved).not.toBeNull()
+    expect(retrieved.locale).toBe("es")
+    expect(retrieved.codeVerifier).toBe("pkce-discord-verifier")
+
+    expect(authStore.peekPendingOAuth("discord-state-xyz")).toBeNull()
+    expect(authStore.getPendingOAuth("discord-state-xyz")).toBeNull()
+  })
+
   it("8. In production without safeStorage, savePendingOAuth never writes plaintext file and operates memory-only", () => {
     const originalNodeEnv = process.env.NODE_ENV
     const originalVitest = process.env.VITEST

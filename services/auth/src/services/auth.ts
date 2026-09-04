@@ -19,7 +19,7 @@ import {
   validateActiveSession,
   AuthSessionResult,
 } from "./session"
-import { EmailService } from "./email"
+import { EmailService, sanitizeEmailLocale } from "./email"
 import { OAuthProviderProfile } from "./oauth"
 
 export const EMAIL_VERIFICATION_EXPIRY_HOURS = 24
@@ -34,6 +34,7 @@ export async function registerWithPassword(
     email: string
     password: string
     displayName?: string | null
+    locale?: string
   },
   emailService: EmailService,
   authServiceUrl: string = "https://auth.hikat.org",
@@ -99,12 +100,14 @@ export async function registerWithPassword(
     createdAt: now,
   })
 
-  const verificationUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=verify-email&token=${rawVerificationToken}`
+  const normalizedLocale = sanitizeEmailLocale(params.locale)
+  const verificationUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=verify-email&token=${rawVerificationToken}&lang=${normalizedLocale}`
   try {
     await emailService.sendVerificationEmail(
       normalizedEmail,
       rawVerificationToken,
       verificationUrl,
+      normalizedLocale,
     )
   } catch (emailErr) {
     console.error("[Auth] Failed to send verification email during registration:", emailErr)
@@ -138,6 +141,7 @@ export async function resendVerificationEmail(
   email: string,
   emailService: EmailService,
   authServiceUrl: string = "https://auth.hikat.org",
+  locale?: string,
 ): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase()
   if (!normalizedEmail || !normalizedEmail.includes("@")) {
@@ -171,12 +175,14 @@ export async function resendVerificationEmail(
     createdAt: now,
   })
 
-  const verificationUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=verify-email&token=${rawVerificationToken}`
+  const normalizedLocale = sanitizeEmailLocale(locale)
+  const verificationUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=verify-email&token=${rawVerificationToken}&lang=${normalizedLocale}`
   try {
     await emailService.sendVerificationEmail(
       normalizedEmail,
       rawVerificationToken,
       verificationUrl,
+      normalizedLocale,
     )
   } catch (emailErr) {
     console.error("[Auth] Failed to send verification email during resend:", emailErr)
@@ -345,6 +351,7 @@ export async function requestPasswordReset(
   email: string,
   emailService: EmailService,
   authServiceUrl: string = "https://auth.hikat.org",
+  locale?: string,
 ): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase()
   if (!normalizedEmail) {
@@ -378,9 +385,10 @@ export async function requestPasswordReset(
     createdAt: now,
   })
 
-  const resetUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=reset-password&token=${rawResetToken}`
+  const normalizedLocale = sanitizeEmailLocale(locale)
+  const resetUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=reset-password&token=${rawResetToken}&lang=${normalizedLocale}`
   try {
-    await emailService.sendPasswordResetEmail(normalizedEmail, rawResetToken, resetUrl)
+    await emailService.sendPasswordResetEmail(normalizedEmail, rawResetToken, resetUrl, normalizedLocale)
   } catch (err) {
     // Log failure server-side only to prevent user enumeration and avoid leaking Resend errors to client
     console.error("[Auth] Failed to send password reset email:", err)

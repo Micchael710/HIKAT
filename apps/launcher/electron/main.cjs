@@ -592,141 +592,153 @@ function startOAuthLoopbackServer() {
         "\\u003c",
       )
 
-    // Idioma preferido del navegador
+    // Idioma: 1. Guardado por Launcher para este state; 2. Accept-Language; 3. en fallback
+    let savedLocale = null
+    if (callbackState && authStore && typeof authStore.peekPendingOAuth === "function") {
+      const pending = authStore.peekPendingOAuth(callbackState)
+      if (pending && pending.locale) {
+        savedLocale = pending.locale
+      }
+    }
+
     const acceptLanguage = String(
       req.headers["accept-language"] || "",
     ).toLowerCase()
 
-    const language =
-      acceptLanguage.startsWith("es")
-        ? "es"
-        : acceptLanguage.startsWith("pt")
-          ? "pt"
-          : acceptLanguage.startsWith("fr")
-            ? "fr"
-            : "en"
+    let language = "en"
+    if (savedLocale && ["es", "en", "pt", "fr"].includes(savedLocale.toLowerCase())) {
+      language = savedLocale.toLowerCase()
+    } else if (acceptLanguage.startsWith("es")) {
+      language = "es"
+    } else if (acceptLanguage.startsWith("pt")) {
+      language = "pt"
+    } else if (acceptLanguage.startsWith("fr")) {
+      language = "fr"
+    } else {
+      language = "en"
+    }
 
     const translations = {
       es: {
-        waitingStatus: "Cuenta autenticada",
+        waitingStatus: "",
         waitingTitle: "Continuando en HiKAT Launcher",
         waitingDescription:
-          "Estamos redirigiéndote al Launcher. Tu navegador te pedirá permiso para abrir HiKAT.",
+          "Estamos abriendo HiKAT para completar el inicio de sesión.",
         waitingSecondary:
           "Confirma el aviso del navegador para continuar.",
 
-        successStatus: "Inicio de sesión completado",
-        successTitle: "Todo listo",
+        successStatus: "",
+        successTitle: "Inicio de sesión completado",
         successDescription:
-          "HiKAT Launcher se abrió correctamente. Ya puedes continuar desde la aplicación.",
+          "Ya puedes continuar en HiKAT Launcher.",
         successSecondary:
           "Puedes cerrar esta pestaña de forma segura.",
 
-        openErrorStatus: "No se pudo abrir el Launcher",
-        openErrorTitle: "Algo salió mal",
+        openErrorStatus: "",
+        openErrorTitle: "No se pudo abrir el Launcher",
         openErrorDescription:
-          "HiKAT Launcher no respondió. Es posible que hayas cancelado el aviso del navegador.",
+          "HiKAT Launcher no respondió. Puedes volver a intentarlo.",
         openErrorSecondary:
-          "Puedes volver a intentarlo.",
-        retry: "Reintentar",
+          "Puedes volver a intentarlo si el Launcher no se abrió automáticamente.",
+        retry: "Abrir HiKAT Launcher",
 
-        providerErrorStatus: "Inicio de sesión cancelado",
-        providerErrorTitle: "No se completó el acceso",
+        providerErrorStatus: "",
+        providerErrorTitle: "Inicio de sesión cancelado",
         providerErrorDescription:
-          "El inicio de sesión con tu cuenta externa fue cancelado o no pudo completarse.",
+          "El inicio de sesión con tu cuenta externa no pudo completarse.",
         providerErrorSecondary:
           "Vuelve a HiKAT Launcher e inténtalo nuevamente.",
       },
 
       en: {
-        waitingStatus: "Account authenticated",
+        waitingStatus: "",
         waitingTitle: "Continuing to HiKAT Launcher",
         waitingDescription:
-          "We're redirecting you to the Launcher. Your browser will ask for permission to open HiKAT.",
+          "We're opening HiKAT to complete sign-in.",
         waitingSecondary:
           "Confirm the browser prompt to continue.",
 
-        successStatus: "Sign-in complete",
-        successTitle: "You're all set",
+        successStatus: "",
+        successTitle: "Sign-in complete",
         successDescription:
-          "HiKAT Launcher opened successfully. You can continue from the application.",
+          "You can now continue in HiKAT Launcher.",
         successSecondary:
           "You can safely close this tab.",
 
-        openErrorStatus: "Launcher could not be opened",
-        openErrorTitle: "Something went wrong",
+        openErrorStatus: "",
+        openErrorTitle: "Launcher could not be opened",
         openErrorDescription:
-          "HiKAT Launcher did not respond. You may have cancelled the browser prompt.",
+          "HiKAT Launcher did not respond. You can try again.",
         openErrorSecondary:
-          "You can try again.",
-        retry: "Try again",
+          "You can try again if the Launcher did not open automatically.",
+        retry: "Open HiKAT Launcher",
 
-        providerErrorStatus: "Sign-in cancelled",
-        providerErrorTitle: "Sign-in was not completed",
+        providerErrorStatus: "",
+        providerErrorTitle: "Sign-in cancelled",
         providerErrorDescription:
-          "Sign-in with your external account was cancelled or could not be completed.",
+          "Sign-in with your external account could not be completed.",
         providerErrorSecondary:
           "Return to HiKAT Launcher and try again.",
       },
 
       pt: {
-        waitingStatus: "Conta autenticada",
+        waitingStatus: "",
         waitingTitle: "Continuando no HiKAT Launcher",
         waitingDescription:
-          "Estamos redirecionando você para o Launcher. Seu navegador pedirá permissão para abrir o HiKAT.",
+          "Estamos abrindo o HiKAT para concluir o login.",
         waitingSecondary:
           "Confirme o aviso do navegador para continuar.",
 
-        successStatus: "Login concluído",
-        successTitle: "Tudo pronto",
+        successStatus: "",
+        successTitle: "Login concluído",
         successDescription:
-          "O HiKAT Launcher foi aberto corretamente. Agora você pode continuar pelo aplicativo.",
+          "Agora você pode continuar no HiKAT Launcher.",
         successSecondary:
           "Você pode fechar esta aba com segurança.",
 
-        openErrorStatus: "Não foi possível abrir o Launcher",
-        openErrorTitle: "Algo deu errado",
+        openErrorStatus: "",
+        openErrorTitle: "Não foi possível abrir o Launcher",
         openErrorDescription:
-          "O HiKAT Launcher não respondeu. Talvez você tenha cancelado o aviso do navegador.",
+          "O HiKAT Launcher não respondeu. Você pode tentar novamente.",
         openErrorSecondary:
-          "Você pode tentar novamente.",
-        retry: "Tentar novamente",
+          "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+        retry: "Abrir o HiKAT Launcher",
 
-        providerErrorStatus: "Login cancelado",
-        providerErrorTitle: "Não foi possível concluir o login",
+        providerErrorStatus: "",
+        providerErrorTitle: "Login cancelado",
         providerErrorDescription:
-          "O login com sua conta externa foi cancelado ou não pôde ser concluído.",
+          "O login com sua conta externa não pôde ser concluído.",
         providerErrorSecondary:
           "Volte ao HiKAT Launcher e tente novamente.",
       },
 
       fr: {
-        waitingStatus: "Compte authentifié",
+        waitingStatus: "",
         waitingTitle: "Redirection vers HiKAT Launcher",
         waitingDescription:
-          "Nous vous redirigeons vers le Launcher. Votre navigateur vous demandera l’autorisation d’ouvrir HiKAT.",
+          "Nous ouvrons HiKAT pour finaliser la connexion.",
         waitingSecondary:
           "Confirmez l’invite du navigateur pour continuer.",
 
-        successStatus: "Connexion terminée",
-        successTitle: "Tout est prêt",
+        successStatus: "",
+        successTitle: "Connexion terminée",
         successDescription:
-          "HiKAT Launcher s’est ouvert correctement. Vous pouvez maintenant continuer dans l’application.",
+          "Vous pouvez maintenant continuer dans HiKAT Launcher.",
         successSecondary:
           "Vous pouvez fermer cet onglet en toute sécurité.",
 
-        openErrorStatus: "Impossible d’ouvrir le Launcher",
-        openErrorTitle: "Un problème est survenu",
+        openErrorStatus: "",
+        openErrorTitle: "Impossible d’ouvrir le Launcher",
         openErrorDescription:
-          "HiKAT Launcher n’a pas répondu. Vous avez peut-être annulé l’invite du navigateur.",
+          "HiKAT Launcher n’a pas répondu. Vous pouvez réessayer.",
         openErrorSecondary:
-          "Vous pouvez réessayer.",
-        retry: "Réessayer",
+          "Vous pouvez réessayer si le Launcher ne s’est pas ouvert automatiquement.",
+        retry: "Ouvrir HiKAT Launcher",
 
-        providerErrorStatus: "Connexion annulée",
-        providerErrorTitle: "La connexion n’a pas été terminée",
+        providerErrorStatus: "",
+        providerErrorTitle: "Connexion annulée",
         providerErrorDescription:
-          "La connexion avec votre compte externe a été annulée ou n’a pas pu être terminée.",
+          "La connexion avec votre compte externe n’a pas pu être terminée.",
         providerErrorSecondary:
           "Retournez dans HiKAT Launcher et réessayez.",
       },
@@ -778,7 +790,8 @@ function startOAuthLoopbackServer() {
               margin: 0;
               width: 100%;
               min-height: 100%;
-
+              background-color: #090d12;
+              color: #ffffff;
               font-family:
                 Inter,
                 -apple-system,
@@ -789,127 +802,117 @@ function startOAuthLoopbackServer() {
 
             body {
               min-height: 100vh;
-
-              background:
-                linear-gradient(
-                  rgba(5, 8, 12, 0.72),
-                  rgba(5, 8, 12, 0.90)
-                ),
-                url("/auth/background.png")
-                center / cover no-repeat,
-                #090d12;
-
-              color: #ffffff;
-            }
-
-            .page {
-              min-height: 100vh;
-
-              display: flex;
-              flex-direction: column;
-
-              padding: 34px 42px;
-            }
-
-            .brand {
-              min-height: 64px;
-
-              display: flex;
-              align-items: center;
-            }
-
-            .brand img {
-              max-width: 180px;
-              max-height: 58px;
-
-              object-fit: contain;
-              object-position: left center;
-            }
-
-            .content {
-              flex: 1;
-
               display: flex;
               align-items: center;
               justify-content: center;
+              position: relative;
+              overflow: hidden;
+            }
+
+            .bg-layer {
+              position: absolute;
+              inset: 0;
+              background-image: url("/auth/background.png");
+              background-size: cover;
+              background-position: center;
+              opacity: 0.35;
+              filter: blur(2px);
+              transform: scale(1.04);
+              z-index: 0;
+            }
+
+            .overlay-layer {
+              position: absolute;
+              inset: 0;
+              background: radial-gradient(
+                ellipse at center,
+                rgba(9, 13, 18, 0.7) 0%,
+                rgba(9, 13, 18, 0.95) 100%
+              );
+              z-index: 1;
+            }
+
+            .page {
+              position: relative;
+              z-index: 2;
+              width: 100%;
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              padding: 24px;
             }
 
             .card {
               width: min(
-                480px,
-                calc(100vw - 48px)
+                440px,
+                calc(100vw - 32px)
               );
-
-              padding: 42px 40px;
-
+              padding: 36px 30px;
               background:
-                rgba(12, 18, 26, 0.96);
-
+                linear-gradient(
+                  180deg,
+                  rgba(20, 29, 38, 0.96) 0%,
+                  rgba(13, 18, 24, 0.96) 100%
+                );
               border:
-                1px solid
-                rgba(255, 255, 255, 0.09);
-
-              border-radius: 18px;
-
+                1.5px solid
+                rgba(255, 255, 255, 0.1);
+              border-radius: 20px;
               box-shadow:
-                0 32px 90px
-                rgba(0, 0, 0, 0.48);
-
+                0 24px 60px rgba(0, 0, 0, 0.65),
+                0 2px 8px rgba(0, 0, 0, 0.4);
+              backdrop-filter: blur(16px);
               text-align: center;
             }
 
-            .status {
+            .brand {
+              display: flex;
+              justify-content: center;
               margin-bottom: 20px;
+            }
 
-              color: #efc436;
+            .brand img {
+              max-height: 48px;
+              max-width: 240px;
+              object-fit: contain;
+            }
 
-              font-size: 13px;
-              font-weight: 700;
+            .status {
+              display: none;
             }
 
             h1 {
-              margin: 0 0 16px;
-
-              font-size: 30px;
-              line-height: 1.15;
-
-              font-weight: 800;
-
-              letter-spacing: -0.025em;
+              margin: 0 0 10px 0;
+              font-size: 20px;
+              line-height: 1.3;
+              font-weight: 700;
+              color: #ffffff;
             }
 
             .description {
               margin: 0;
-
-              color: #aab5c2;
-
-              font-size: 16px;
-              line-height: 1.65;
+              color: #8899aa;
+              font-size: 14px;
+              line-height: 1.5;
             }
 
             .secondary {
               margin: 18px 0 0;
-
               color: #718090;
-
-              font-size: 13px;
+              font-size: 12.5px;
               line-height: 1.5;
             }
 
             .loader {
-              width: 30px;
-              height: 30px;
-
-              margin: 28px auto 0;
-
+              width: 32px;
+              height: 32px;
+              margin: 24px auto 0;
               border:
                 3px solid
                 rgba(255, 255, 255, 0.10);
-
-              border-top-color: #efc436;
-
+              border-top-color: rgba(130, 200, 230, 0.9);
               border-radius: 50%;
-
               animation:
                 spin 0.8s linear infinite;
             }
@@ -922,87 +925,85 @@ function startOAuthLoopbackServer() {
 
             .retry {
               display: none;
-
               width: 100%;
-
-              margin-top: 26px;
-              padding: 13px 18px;
-
-              border: 0;
-              border-radius: 10px;
-
-              background: #efc436;
-              color: #10151c;
-
-              font-size: 14px;
-              font-weight: 800;
-
+              margin-top: 24px;
+              padding: 13px 20px;
+              border: 2px solid rgba(130, 200, 230, 0.5);
+              border-radius: 12px;
+              background: linear-gradient(135deg, #1c384e 0%, #295372 100%);
+              color: #ffffff;
+              font-family:
+                Inter,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+              font-size: 15px;
+              font-weight: 700;
               cursor: pointer;
+              transition:
+                border-color 0.22s ease,
+                background 0.22s ease,
+                box-shadow 0.25s ease,
+                transform 0.2s ease;
+              text-align: center;
+              text-decoration: none;
+              line-height: 1.2;
             }
 
             .retry:hover {
-              filter: brightness(1.06);
-            }
-
-            .footer {
-              color:
-                rgba(255, 255, 255, 0.42);
-
-              font-size: 11px;
+              background: linear-gradient(135deg, #234764, #33678e);
+              border-color: rgba(160, 230, 255, 0.9);
+              box-shadow: 0 0 28px rgba(90, 180, 220, 0.45);
             }
           </style>
         </head>
 
         <body>
 
+          <div class="bg-layer"></div>
+          <div class="overlay-layer"></div>
+
           <div class="page">
 
-            <header class="brand">
-              <img
-                src="/auth/logo.png"
-                alt="HiKAT"
-              >
-            </header>
+            <main class="card">
 
-            <main class="content">
+              <div class="brand">
+                <img
+                  src="/auth/logo.png"
+                  alt="HiKAT"
+                >
+              </div>
 
-              <section class="card">
+              <div
+                id="status"
+                class="status"
+              ></div>
 
-                <div
-                  id="status"
-                  class="status"
-                ></div>
+              <h1 id="title"></h1>
 
-                <h1 id="title"></h1>
+              <p
+                id="description"
+                class="description"
+              ></p>
 
-                <p
-                  id="description"
-                  class="description"
-                ></p>
+              <div
+                id="loader"
+                class="loader"
+              ></div>
 
-                <div
-                  id="loader"
-                  class="loader"
-                ></div>
+              <button
+                id="retry"
+                class="retry"
+                type="button"
+              ></button>
 
-                <button
-                  id="retry"
-                  class="retry"
-                  type="button"
-                ></button>
-
-                <p
-                  id="secondary"
-                  class="secondary"
-                ></p>
-
-              </section>
+              <p
+                id="secondary"
+                class="secondary"
+              ></p>
 
             </main>
-
-            <footer class="footer">
-              HiKAT Launcher
-            </footer>
 
           </div>
 
