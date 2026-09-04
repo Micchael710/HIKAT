@@ -63,6 +63,14 @@
     "loginFailed": "Impossible de se connecter. Veuillez vérifier vos identifiants.",
     "registrationSuccess": "Compte créé avec succès ! Vous pouvez maintenant vous connecter.",
     "registrationFailed": "Échec de la création du compte.",
+    "forgotPasswordLink": "Mot de passe oublié ?",
+    "forgotPasswordTitle": "Réinitialiser le mot de passe",
+    "forgotPasswordSubtitle": "Entrez votre e-mail pour recevoir un lien de récupération.",
+    "sendResetEmail": "Envoyer l'e-mail de réinitialisation",
+    "resetEmailSentNotice": "Vérifiez votre boîte e-mail pour continuer la réinitialisation de votre mot de passe.",
+    "backToLogin": "Retour à la connexion",
+    "verifyEmailTitle": "Vérifiez votre e-mail",
+    "verifyEmailDesc": "Nous avons envoyé un lien de vérification à votre adresse e-mail.",
     "secureAuth": "Authentification sécurisée"
   },
   "playButton": {

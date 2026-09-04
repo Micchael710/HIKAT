@@ -63,6 +63,14 @@
     "loginFailed": "Could not sign in. Please check your credentials.",
     "registrationSuccess": "Account created successfully! You can now sign in.",
     "registrationFailed": "Failed to create account.",
+    "forgotPasswordLink": "Forgot your password?",
+    "forgotPasswordTitle": "Reset password",
+    "forgotPasswordSubtitle": "Enter your email to receive a recovery link.",
+    "sendResetEmail": "Send reset email",
+    "resetEmailSentNotice": "Check your email to continue resetting your password.",
+    "backToLogin": "Back to sign in",
+    "verifyEmailTitle": "Verify your email",
+    "verifyEmailDesc": "We sent a verification link to your email address.",
     "secureAuth": "Secure authentication"
   },
   "playButton": {

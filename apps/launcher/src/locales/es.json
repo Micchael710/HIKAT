@@ -63,6 +63,14 @@
     "loginFailed": "No se pudo iniciar sesión. Verifica tus credenciales.",
     "registrationSuccess": "¡Cuenta creada con éxito! Ya puedes iniciar sesión.",
     "registrationFailed": "No se pudo crear la cuenta.",
+    "forgotPasswordLink": "¿Olvidaste tu contraseña?",
+    "forgotPasswordTitle": "Restablecer contraseña",
+    "forgotPasswordSubtitle": "Ingresa tu correo para recibir un enlace de recuperación.",
+    "sendResetEmail": "Enviar correo de restablecimiento",
+    "resetEmailSentNotice": "Revisa tu correo electrónico para continuar con el restablecimiento de tu contraseña.",
+    "backToLogin": "Volver a iniciar sesión",
+    "verifyEmailTitle": "Verifica tu correo",
+    "verifyEmailDesc": "Te enviamos un enlace de verificación a tu correo electrónico.",
     "secureAuth": "Autenticación segura"
   },
   "playButton": {

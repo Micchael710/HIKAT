@@ -63,6 +63,14 @@
     "loginFailed": "Não foi possível entrar. Verifique suas credenciais.",
     "registrationSuccess": "Conta criada com sucesso! Você já pode entrar.",
     "registrationFailed": "Falha ao criar a conta.",
+    "forgotPasswordLink": "Esqueceu sua senha?",
+    "forgotPasswordTitle": "Redefinir senha",
+    "forgotPasswordSubtitle": "Digite seu e-mail para receber um link de recuperação.",
+    "sendResetEmail": "Enviar e-mail de redefinição",
+    "resetEmailSentNotice": "Verifique seu e-mail para continuar com a redefinição de sua senha.",
+    "backToLogin": "Voltar ao login",
+    "verifyEmailTitle": "Verifique seu e-mail",
+    "verifyEmailDesc": "Enviamos um link de verificação para o seu e-mail.",
     "secureAuth": "Autenticação segura"
   },
   "playButton": {

@@ -80,7 +80,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     )
 
     const buttons = Array.from(container.querySelectorAll("button"))
-    const submitBtn = buttons.find((b) => b.textContent?.trim() === "Iniciar Sesión" && b.style.background.includes("linear-gradient"))
+    const submitBtn = buttons.find((b) => b.textContent?.trim() === "Iniciar Sesión" && (b.classList.contains("launcher-btn-primary") || b.style.background.includes("linear-gradient")))
     const googleBtn = buttons.find((b) => b.textContent?.includes("Google"))
     const discordBtn = buttons.find((b) => b.textContent?.includes("Discord"))
 
@@ -318,5 +318,186 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).toContain("or continue with")
     expect(container.textContent).toContain("Keep me signed in")
     expect(container.textContent).toContain("Secure authentication")
+  })
+
+  it("11. Switches between Login and Register tabs dynamically", async () => {
+    const onLogin = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const registerTabBtn = buttons.find((b) => b.textContent?.trim() === "Registrarse")
+    expect(registerTabBtn).toBeDefined()
+
+    await act(async () => {
+      registerTabBtn?.click()
+    })
+
+    expect(container.textContent).toContain("Nombre de usuario")
+    expect(container.textContent).toContain("Crear Cuenta")
+  })
+
+  it("12. Clicking '¿Olvidaste tu contraseña?' opens forgot password view and backToLogin returns", async () => {
+    const onLogin = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    expect(container.textContent).toContain("¿Olvidaste tu contraseña?")
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const forgotBtn = buttons.find((b) => b.textContent?.includes("¿Olvidaste tu contraseña?"))
+    expect(forgotBtn).toBeDefined()
+
+    // Open Forgot Password
+    await act(async () => {
+      forgotBtn?.click()
+    })
+
+    expect(container.textContent).toContain("Ingresa tu correo para recibir un enlace de recuperación.")
+    expect(container.textContent).toContain("Enviar correo de restablecimiento")
+
+    // Click back to login
+    const backBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Volver a iniciar sesión"),
+    )
+    expect(backBtn).toBeDefined()
+
+    await act(async () => {
+      backBtn?.click()
+    })
+
+    expect(container.textContent).toContain("Iniciar Sesión")
+    expect(container.textContent).toContain("o continúa con")
+  })
+
+  function changeInput(input: HTMLInputElement, value: string) {
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set
+    nativeInputValueSetter?.call(input, value)
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  }
+
+  it("13. Forgot password submits requestPasswordReset and displays confirmation notice", async () => {
+    const onLogin = vi.fn()
+    const resetSpy = vi.spyOn(authService, "requestPasswordReset").mockResolvedValue({
+      success: true,
+      message: "Reset email sent",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    // Navigate to forgot password
+    const forgotBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("¿Olvidaste tu contraseña?"),
+    )
+    await act(async () => {
+      forgotBtn?.click()
+    })
+
+    // Fill email and submit
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    expect(emailInput).toBeDefined()
+    await act(async () => {
+      changeInput(emailInput, "steve@hikat.org")
+    })
+
+    const submitResetBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Enviar correo de restablecimiento"),
+    )
+    expect(submitResetBtn).toBeDefined()
+
+    await act(async () => {
+      submitResetBtn?.click()
+    })
+
+    expect(resetSpy).toHaveBeenCalledWith("steve@hikat.org")
+    expect(container.textContent).toContain("Revisa tu correo electrónico para continuar con el restablecimiento de tu contraseña.")
+  })
+
+  it("14. Registering with emailVerificationRequired=true displays verify email view", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "register").mockResolvedValue({
+      success: true,
+      user: {
+        id: "u-verify",
+        username: "VerifyUser",
+        email: "verify@hikat.org",
+        role: "PLAYER",
+      },
+      emailVerificationRequired: true,
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    // Switch to Register
+    const registerTabBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Registrarse",
+    )
+    await act(async () => {
+      registerTabBtn?.click()
+    })
+
+    // Fill registration inputs
+    const usernameInput = container.querySelector("input[type='text']") as HTMLInputElement
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    const passwordInput = container.querySelector("input[type='password']") as HTMLInputElement
+
+    await act(async () => {
+      changeInput(usernameInput, "VerifyUser")
+      changeInput(emailInput, "verify@hikat.org")
+      changeInput(passwordInput, "password123")
+    })
+
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Crear Cuenta",
+    )
+    expect(submitBtn).toBeDefined()
+
+    await act(async () => {
+      submitBtn?.click()
+    })
+
+    // Should render verify-email screen
+    expect(container.textContent).toContain("Te enviamos un enlace de verificación a tu correo electrónico.")
+    expect(container.textContent).toContain("verify@hikat.org")
+    expect(container.textContent).toContain("Volver a iniciar sesión")
+
+    // Clicking back to login returns to login tab
+    const backToLoginBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Volver a iniciar sesión"),
+    )
+    await act(async () => {
+      backToLoginBtn?.click()
+    })
+
+    expect(container.textContent).toContain("Iniciar Sesión")
+  })
+
+  it("15. Renders properly in light mode using theme-appropriate card styles", async () => {
+    const onLogin = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="light" />
+      </LanguageProvider>,
+    )
+
+    const img = container.querySelector("img")
+    expect(img?.src).toContain("logo-black")
+    expect(container.textContent).toContain("Iniciar Sesión")
   })
 })

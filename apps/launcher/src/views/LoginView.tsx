@@ -17,12 +17,19 @@ interface LoginViewProps {
   theme?: ThemeMode
 }
 
+type AuthMode = "auth" | "forgot-password" | "verify-email"
+
 export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
   const { t } = useTranslation()
+  const [mode, setMode] = useState<AuthMode>("auth")
   const [tab, setTab] = useState<"login" | "register">("login")
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [email, setEmail] = useState("")
+  const [forgotEmail, setForgotEmail] = useState("")
+  const [registeredEmail, setRegisteredEmail] = useState("")
+  const [forgotSuccess, setForgotSuccess] = useState(false)
+  const [isSendingReset, setIsSendingReset] = useState(false)
   const [keepSession, setKeepSession] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successNotice, setSuccessNotice] = useState<string | null>(null)
@@ -201,6 +208,13 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
       })
 
       if (res.success) {
+        if (res.emailVerificationRequired) {
+          setIsEnteringWorld(false)
+          setRegisteredEmail(cleanEmail)
+          setMode("verify-email")
+          return
+        }
+
         // Automatically attempt login after registration
         const loginRes = await authService.login({
           email: cleanEmail,
@@ -222,6 +236,30 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         setIsEnteringWorld(false)
         setErrorMessage(res.error || t("auth.registrationFailed"))
       }
+    }
+  }
+
+  const handleForgotPasswordSubmit = async () => {
+    if (isSendingReset) return
+    const cleanEmail = sanitizeEmail(forgotEmail || email)
+    if (!cleanEmail) {
+      setErrorMessage(t("auth.missingFields"))
+      return
+    }
+
+    setErrorMessage(null)
+    setIsSendingReset(true)
+    try {
+      const res = await authService.requestPasswordReset(cleanEmail)
+      setIsSendingReset(false)
+      if (res.success) {
+        setForgotSuccess(true)
+      } else {
+        setErrorMessage(res.error || t("profile.emailError"))
+      }
+    } catch {
+      setIsSendingReset(false)
+      setErrorMessage(t("profile.emailError"))
     }
   }
 
@@ -250,6 +288,22 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
     fontFamily: BASE_FONT,
     marginBottom: 6,
     letterSpacing: "0.02em",
+  }
+
+  const handleInputFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    e.currentTarget.style.borderColor = isDark
+      ? "rgba(56, 189, 248, 0.65)"
+      : "rgba(14, 165, 233, 0.65)"
+    e.currentTarget.style.boxShadow = isDark
+      ? "0 0 0 3px rgba(56, 189, 248, 0.15)"
+      : "0 0 0 3px rgba(14, 165, 233, 0.12)"
+  }
+
+  const handleInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    e.currentTarget.style.borderColor = isDark
+      ? "rgba(255, 255, 255, 0.12)"
+      : "rgba(0, 0, 0, 0.12)"
+    e.currentTarget.style.boxShadow = "none"
   }
 
   return (
@@ -298,16 +352,16 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
           width: 440,
           maxWidth: "90vw",
           background: isDark
-            ? "linear-gradient(180deg, rgba(19, 28, 35, 0.96) 0%, rgba(13, 20, 26, 0.96) 100%)"
+            ? "linear-gradient(180deg, rgba(20, 29, 38, 0.96) 0%, rgba(13, 18, 24, 0.96) 100%)"
             : "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 248, 250, 0.98) 100%)",
           border: isDark
-            ? "1px solid rgba(255, 255, 255, 0.1)"
-            : "1px solid rgba(0, 0, 0, 0.08)",
+            ? "1.5px solid rgba(255, 255, 255, 0.1)"
+            : "1.5px solid rgba(0, 0, 0, 0.08)",
           borderRadius: 20,
           padding: "32px 30px",
           boxShadow: isDark
-            ? "0 24px 60px rgba(0, 0, 0, 0.65), 0 0 32px rgba(239, 196, 54, 0.12)"
-            : "0 24px 60px rgba(0, 0, 0, 0.1), 0 0 32px rgba(239, 196, 54, 0.08)",
+            ? "0 24px 60px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.4)"
+            : "0 24px 60px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04)",
           backdropFilter: "blur(16px)",
           display: "flex",
           flexDirection: "column",
@@ -331,11 +385,37 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               height: 48,
               maxWidth: 240,
               objectFit: "contain",
-              marginBottom: 12,
+              marginBottom: mode === "auth" ? 12 : 8,
               userSelect: "none",
             }}
             draggable={false}
           />
+          {mode === "forgot-password" && (
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: isDark ? "#ffffff" : "#0f172a",
+                fontFamily: BASE_FONT,
+                marginBottom: 4,
+              }}
+            >
+              {t("auth.forgotPasswordTitle")}
+            </div>
+          )}
+          {mode === "verify-email" && (
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: isDark ? "#ffffff" : "#0f172a",
+                fontFamily: BASE_FONT,
+                marginBottom: 4,
+              }}
+            >
+              {t("auth.verifyEmailTitle")}
+            </div>
+          )}
           <div
             style={{
               fontSize: 14,
@@ -344,9 +424,13 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               fontWeight: 500,
             }}
           >
-            {tab === "login"
-              ? t("auth.loginSubtitle")
-              : t("auth.registerSubtitle")}
+            {mode === "forgot-password"
+              ? t("auth.forgotPasswordSubtitle")
+              : mode === "verify-email"
+                ? t("auth.verifyEmailDesc")
+                : tab === "login"
+                  ? t("auth.loginSubtitle")
+                  : t("auth.registerSubtitle")}
           </div>
         </div>
 
@@ -358,7 +442,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               alignItems: "center",
               gap: 10,
               background: isDark ? "rgba(239, 68, 68, 0.14)" : "#fee2e2",
-              border: isDark ? "1px solid rgba(239, 68, 68, 0.35)" : "1px solid #fca5a5",
+              border: isDark ? "1.5px solid rgba(239, 68, 68, 0.35)" : "1.5px solid #fca5a5",
               borderRadius: 10,
               padding: "10px 14px",
               marginBottom: 14,
@@ -385,7 +469,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               alignItems: "center",
               gap: 10,
               background: isDark ? "rgba(16, 185, 129, 0.14)" : "#d1fae5",
-              border: isDark ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid #6ee7b7",
+              border: isDark ? "1.5px solid rgba(16, 185, 129, 0.35)" : "1.5px solid #6ee7b7",
               borderRadius: 10,
               padding: "10px 14px",
               marginBottom: 14,
@@ -402,339 +486,602 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
           </div>
         )}
 
-        {/* 2. Segmented Pill Switcher [ Sign In | Sign Up ] */}
-        <div
-          style={{
-            display: "flex",
-            background: isDark ? "#0d1217" : "#e6ebf0",
-            border: isDark
-              ? "1.5px solid rgba(255, 255, 255, 0.08)"
-              : "1.5px solid rgba(0, 0, 0, 0.08)",
-            borderRadius: 12,
-            padding: 3,
-            gap: 3,
-            marginBottom: 16,
-          }}
-        >
-          {(["login", "register"] as const).map((tCode) => {
-            const isCurrent = tab === tCode
-            return (
-              <button
-                key={tCode}
-                type="button"
-                onClick={() => {
-                  setTab(tCode)
-                  setErrorMessage(null)
-                  setSuccessNotice(null)
-                }}
+        {/* MODE: FORGOT PASSWORD */}
+        {mode === "forgot-password" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, animation: "fadeIn 0.2s ease" }}>
+            {forgotSuccess ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16, textAlign: "center", alignItems: "center", padding: "10px 0" }}>
+                <div
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: "50%",
+                    background: isDark ? "rgba(62, 196, 192, 0.15)" : "rgba(62, 196, 192, 0.2)",
+                    border: isDark ? "1.5px solid rgba(62, 196, 192, 0.35)" : "1.5px solid rgba(62, 196, 192, 0.5)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: isDark ? "#3ec4c0" : "#0284c7",
+                  }}
+                >
+                  <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+                <div style={{ fontSize: 14.5, color: isDark ? "#c2d0dd" : "#334455", fontWeight: 500, lineHeight: 1.5 }}>
+                  {t("auth.resetEmailSentNotice")}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("auth")
+                    setTab("login")
+                    setForgotSuccess(false)
+                    setErrorMessage(null)
+                    setSuccessNotice(null)
+                  }}
+                  className="launcher-btn-secondary"
+                  style={{
+                    width: "100%",
+                    height: 42,
+                    borderRadius: 12,
+                    fontSize: 14.5,
+                    fontWeight: 600,
+                    fontFamily: BASE_FONT,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginTop: 6,
+                  }}
+                >
+                  {t("auth.backToLogin")}
+                </button>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label style={labelCss}>{t("auth.emailLabel")}</label>
+                  <input
+                    type="email"
+                    value={forgotEmail || email}
+                    maxLength={254}
+                    autoComplete="email"
+                    spellCheck={false}
+                    placeholder={t("auth.emailPlaceholder")}
+                    onChange={(e) => setForgotEmail(sanitizeEmail(e.target.value))}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                    className="launcher-input"
+                    style={inputCss}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleForgotPasswordSubmit()
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleForgotPasswordSubmit}
+                  disabled={isSendingReset}
+                  className="launcher-btn-primary"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    width: "100%",
+                    height: 44,
+                    borderRadius: 12,
+                    fontSize: 15,
+                    fontWeight: 700,
+                    fontFamily: BASE_FONT,
+                    letterSpacing: "0.02em",
+                    cursor: isSendingReset ? "default" : "pointer",
+                    marginTop: 4,
+                    opacity: isSendingReset ? 0.75 : 1,
+                  }}
+                >
+                  {isSendingReset ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <svg
+                        width={16}
+                        height={16}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                        style={{ animation: "spin 0.75s linear infinite" }}
+                      >
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                      </svg>
+                      <span>{t("common.loading")}</span>
+                    </div>
+                  ) : (
+                    <span>{t("auth.sendResetEmail")}</span>
+                  )}
+                </button>
+
+                <div style={{ textAlign: "center", marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("auth")
+                      setErrorMessage(null)
+                      setSuccessNotice(null)
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: "6px 12px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: isDark ? "#8899aa" : "#556677",
+                      fontFamily: BASE_FONT,
+                      cursor: "pointer",
+                      transition: "color 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = isDark ? "#ffffff" : "#111822"
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = isDark ? "#8899aa" : "#556677"
+                    }}
+                  >
+                    {t("auth.backToLogin")}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* MODE: VERIFY EMAIL */}
+        {mode === "verify-email" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, animation: "fadeIn 0.2s ease" }}>
+            <div
+              style={{
+                background: isDark ? "#0d1217" : "#f0f3f7",
+                border: isDark
+                  ? "1.5px solid rgba(255, 255, 255, 0.08)"
+                  : "1.5px solid rgba(0, 0, 0, 0.08)",
+                borderRadius: 14,
+                padding: "16px 18px",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+              }}
+            >
+              <div
                 style={{
-                  flex: 1,
-                  padding: "7px 0",
-                  borderRadius: 9,
-                  background: isCurrent
-                    ? isDark
-                      ? "#1c2630"
-                      : "#ffffff"
-                    : "transparent",
-                  border: isCurrent
-                    ? isDark
-                      ? "1.5px solid rgba(255, 255, 255, 0.14)"
-                      : "1.5px solid rgba(0, 0, 0, 0.08)"
-                    : "1.5px solid transparent",
-                  color: isCurrent
-                    ? isDark
-                      ? "white"
-                      : "#111822"
-                    : isDark
-                      ? "#7a8b9e"
-                      : "#667788",
-                  boxShadow:
-                    isCurrent && !isDark
-                      ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                      : "none",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  fontFamily: BASE_FONT,
-                  cursor: "pointer",
+                  width: 42,
+                  height: 42,
+                  borderRadius: 12,
+                  background: isDark ? "rgba(56, 189, 248, 0.12)" : "rgba(2, 132, 199, 0.1)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 6,
-                  transition: "all 0.16s ease",
+                  color: isDark ? "#38bdf8" : "#0284c7",
+                  flexShrink: 0,
                 }}
               >
-                {tCode === "login"
-                  ? t("auth.loginTab")
-                  : t("auth.registerTab")}
-              </button>
-            )
-          })}
-        </div>
-
-        {/* 3. Form Fields (Username for register, Email, Password) */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-            marginBottom: 14,
-          }}
-        >
-          {tab === "register" && (
-            <div style={{ animation: "slideUpFade 0.18s ease" }}>
-              <label style={labelCss}>{t("auth.usernameRegisterLabel")}</label>
-              <input
-                type="text"
-                value={username}
-                maxLength={24}
-                autoComplete="username"
-                spellCheck={false}
-                placeholder={t("auth.usernamePlaceholderRegister")}
-                onChange={(e) => setUsername(sanitizeUsername(e.target.value))}
-                className="launcher-input"
-                style={inputCss}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSubmit()
-                }}
-              />
+                <svg
+                  width={20}
+                  height={20}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                  <polyline points="22,6 12,13 2,6" />
+                </svg>
+              </div>
+              <div style={{ overflow: "hidden" }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: isDark ? "#657788" : "#778899", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
+                  {t("auth.emailLabel")}
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: isDark ? "#ffffff" : "#111822", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {registeredEmail || email}
+                </div>
+              </div>
             </div>
-          )}
 
-          <div>
-            <label style={labelCss}>{t("auth.emailLabel")}</label>
-            <input
-              type="email"
-              value={email}
-              maxLength={254}
-              autoComplete="email"
-              spellCheck={false}
-              placeholder={t("auth.emailPlaceholder")}
-              onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
-              className="launcher-input"
-              style={inputCss}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSubmit()
+            <button
+              type="button"
+              onClick={() => {
+                setMode("auth")
+                setTab("login")
+                setErrorMessage(null)
+                setSuccessNotice(null)
               }}
-            />
-          </div>
-
-          <div>
-            <label style={labelCss}>{t("auth.passwordLabel")}</label>
-            <input
-              type="password"
-              value={password}
-              autoComplete={tab === "login" ? "current-password" : "new-password"}
-              placeholder={t("auth.passwordPlaceholder")}
-              onChange={(e) => setPassword(e.target.value)}
-              className="launcher-input"
-              style={inputCss}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSubmit()
+              className="launcher-btn-primary"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "100%",
+                height: 44,
+                borderRadius: 12,
+                fontSize: 15,
+                fontWeight: 700,
+                fontFamily: BASE_FONT,
+                cursor: "pointer",
+                marginTop: 4,
               }}
-            />
+            >
+              {t("auth.backToLogin")}
+            </button>
           </div>
+        )}
 
-          {/* 4. Keep me signed in (Login tab only) */}
-          {tab === "login" && (
+        {/* MODE: AUTH (LOGIN / REGISTER) */}
+        {mode === "auth" && (
+          <>
+            {/* 2. Segmented Switcher [ Sign In | Sign Up ] */}
+            <div
+              style={{
+                display: "flex",
+                background: isDark ? "#0d1217" : "#e6ebf0",
+                border: isDark
+                  ? "1.5px solid rgba(255, 255, 255, 0.08)"
+                  : "1.5px solid rgba(0, 0, 0, 0.08)",
+                borderRadius: 12,
+                padding: 3,
+                gap: 3,
+                marginBottom: 16,
+              }}
+            >
+              {(["login", "register"] as const).map((tCode) => {
+                const isCurrent = tab === tCode
+                return (
+                  <button
+                    key={tCode}
+                    type="button"
+                    onClick={() => {
+                      setTab(tCode)
+                      setErrorMessage(null)
+                      setSuccessNotice(null)
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "7px 0",
+                      borderRadius: 9,
+                      background: isCurrent
+                        ? isDark
+                          ? "#1c2630"
+                          : "#ffffff"
+                        : "transparent",
+                      border: isCurrent
+                        ? isDark
+                          ? "1.5px solid rgba(255, 255, 255, 0.14)"
+                          : "1.5px solid rgba(0, 0, 0, 0.08)"
+                        : "1.5px solid transparent",
+                      color: isCurrent
+                        ? isDark
+                          ? "white"
+                          : "#111822"
+                        : isDark
+                          ? "#7a8b9e"
+                          : "#667788",
+                      boxShadow:
+                        isCurrent && !isDark
+                          ? "0 2px 8px rgba(0, 0, 0, 0.08)"
+                          : "none",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      fontFamily: BASE_FONT,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      transition: "all 0.16s ease",
+                    }}
+                  >
+                    {tCode === "login"
+                      ? t("auth.loginTab")
+                      : t("auth.registerTab")}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* 3. Form Fields (Username for register, Email, Password) */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                marginBottom: 14,
+              }}
+            >
+              {tab === "register" && (
+                <div style={{ animation: "slideUpFade 0.18s ease" }}>
+                  <label style={labelCss}>{t("auth.usernameRegisterLabel")}</label>
+                  <input
+                    type="text"
+                    value={username}
+                    maxLength={24}
+                    autoComplete="username"
+                    spellCheck={false}
+                    placeholder={t("auth.usernamePlaceholderRegister")}
+                    onChange={(e) => setUsername(sanitizeUsername(e.target.value))}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                    className="launcher-input"
+                    style={inputCss}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSubmit()
+                    }}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label style={labelCss}>{t("auth.emailLabel")}</label>
+                <input
+                  type="email"
+                  value={email}
+                  maxLength={254}
+                  autoComplete="email"
+                  spellCheck={false}
+                  placeholder={t("auth.emailPlaceholder")}
+                  onChange={(e) => setEmail(sanitizeEmail(e.target.value))}
+                  onFocus={handleInputFocus}
+                  onBlur={handleInputBlur}
+                  className="launcher-input"
+                  style={inputCss}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSubmit()
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={labelCss}>{t("auth.passwordLabel")}</label>
+                <input
+                  type="password"
+                  value={password}
+                  autoComplete={tab === "login" ? "current-password" : "new-password"}
+                  placeholder={t("auth.passwordPlaceholder")}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onFocus={handleInputFocus}
+                  onBlur={handleInputBlur}
+                  className="launcher-input"
+                  style={inputCss}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSubmit()
+                  }}
+                />
+              </div>
+
+              {/* 4. Keep me signed in & Forgot Password link (Login tab only) */}
+              {tab === "login" && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    paddingTop: 2,
+                    marginBottom: 2,
+                  }}
+                >
+                  <label
+                    onClick={() => setKeepSession(!keepSession)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: 4,
+                        background: keepSession
+                          ? isDark
+                            ? "#38bdf8"
+                            : "#0284c7"
+                          : isDark
+                            ? "#0d1217"
+                            : "#e2e8f0",
+                        border: keepSession
+                          ? isDark
+                            ? "1.5px solid #38bdf8"
+                            : "1.5px solid #0284c7"
+                          : isDark
+                            ? "1.5px solid rgba(255, 255, 255, 0.16)"
+                            : "1.5px solid rgba(0, 0, 0, 0.16)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      {keepSession && (
+                        <svg
+                          width={11}
+                          height={11}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke={isDark ? "#090d12" : "#ffffff"}
+                          strokeWidth="3.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        color: isDark ? "#8899aa" : "#556677",
+                        fontFamily: BASE_FONT,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {t("auth.keepSession")}
+                    </span>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("forgot-password")
+                      setErrorMessage(null)
+                      setSuccessNotice(null)
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      color: isDark ? "#38bdf8" : "#0284c7",
+                      fontFamily: BASE_FONT,
+                      cursor: "pointer",
+                      textDecoration: "none",
+                      transition: "opacity 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.textDecoration = "underline"
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.textDecoration = "none"
+                    }}
+                  >
+                    {t("auth.forgotPasswordLink")}
+                  </button>
+                </div>
+              )}
+
+              {/* 5. Primary CTA Submit Button */}
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={isEnteringWorld}
+                className="launcher-btn-primary"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  width: "100%",
+                  height: 44,
+                  borderRadius: 12,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  fontFamily: BASE_FONT,
+                  letterSpacing: "0.02em",
+                  cursor: isEnteringWorld ? "default" : "pointer",
+                  marginTop: 6,
+                  marginBottom: 4,
+                  opacity: isEnteringWorld ? 0.75 : 1,
+                }}
+              >
+                {isEnteringWorld ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <svg
+                      width={16}
+                      height={16}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.8"
+                      strokeLinecap="round"
+                      style={{ animation: "spin 0.75s linear infinite" }}
+                    >
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                    <span>{t("auth.connecting")}</span>
+                  </div>
+                ) : (
+                  <span>
+                    {tab === "login"
+                      ? t("auth.submitLogin")
+                      : t("auth.submitRegister")}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* 6. Divider ("o continúa con" / "or continue with") */}
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
-                paddingTop: 2,
+                gap: 10,
+                marginBottom: 12,
+                marginTop: 4,
               }}
             >
-              <div
-                onClick={() => setKeepSession(!keepSession)}
+              <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
+              <span style={{ fontSize: 11.5, color: isDark ? "#657788" : "#8899aa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                {t("auth.orContinueWith")}
+              </span>
+              <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
+            </div>
+
+            {/* 7. OAuth Buttons (Google & Discord) */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+              <button
+                type="button"
+                disabled={isEnteringWorld}
+                onClick={() => handleOAuthClick("GOOGLE")}
+                className="launcher-btn-secondary"
                 style={{
+                  width: "100%",
+                  height: 42,
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  fontFamily: BASE_FONT,
                   display: "flex",
                   alignItems: "center",
-                  gap: 8,
-                  cursor: "pointer",
-                  userSelect: "none",
+                  justifyContent: "center",
+                  gap: 10,
+                  cursor: isEnteringWorld ? "default" : "pointer",
+                  opacity: isEnteringWorld ? 0.6 : 1,
                 }}
               >
-                <div
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: 4,
-                    background: keepSession
-                      ? "#efc436"
-                      : isDark
-                        ? "#151e28"
-                        : "#e2e8f0",
-                    border: keepSession
-                      ? "1px solid #efc436"
-                      : isDark
-                        ? "1px solid rgba(255, 255, 255, 0.2)"
-                        : "1px solid rgba(0, 0, 0, 0.2)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  {keepSession && (
-                    <svg
-                      width={11}
-                      height={11}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#090d12"
-                      strokeWidth="3.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  )}
-                </div>
-                <span
-                  style={{
-                    fontSize: 13,
-                    color: isDark ? "#8899aa" : "#556677",
-                    fontFamily: BASE_FONT,
-                    fontWeight: 500,
-                  }}
-                >
-                  {t("auth.keepSession")}
-                </span>
-              </div>
+                <IconGoogle size={18} />
+                <span>{t("auth.continueGoogle")}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isEnteringWorld}
+                onClick={() => handleOAuthClick("DISCORD")}
+                className="launcher-btn-secondary"
+                style={{
+                  width: "100%",
+                  height: 42,
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  fontFamily: BASE_FONT,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  cursor: isEnteringWorld ? "default" : "pointer",
+                  opacity: isEnteringWorld ? 0.6 : 1,
+                }}
+              >
+                <IconDiscord size={18} />
+                <span>{t("auth.continueDiscord")}</span>
+              </button>
             </div>
-          )}
-
-          {/* 5. Primary CTA Submit Button */}
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isEnteringWorld}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              width: "100%",
-              height: 44,
-              borderRadius: 12,
-              background: "linear-gradient(135deg, #efc436 0%, #ffd043 100%)",
-              border: "none",
-              color: "#090d12",
-              fontSize: 14.5,
-              fontWeight: 800,
-              fontFamily: BASE_FONT,
-              letterSpacing: "0.02em",
-              cursor: isEnteringWorld ? "default" : "pointer",
-              boxShadow: isEnteringWorld
-                ? "0 0 32px rgba(239, 196, 54, 0.65)"
-                : "0 0 20px rgba(239, 196, 54, 0.35)",
-              transition: "transform 0.18s ease, box-shadow 0.18s ease",
-              marginTop: 4,
-              marginBottom: 4,
-              transform: isEnteringWorld ? "scale(0.98)" : "none",
-            }}
-          >
-            {isEnteringWorld ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <svg
-                  width={16}
-                  height={16}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.8"
-                  strokeLinecap="round"
-                  style={{ animation: "spin 0.75s linear infinite" }}
-                >
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                </svg>
-                <span>{t("auth.connecting")}</span>
-              </div>
-            ) : (
-              <span>
-                {tab === "login"
-                  ? t("auth.submitLogin")
-                  : t("auth.submitRegister")}
-              </span>
-            )}
-          </button>
-        </div>
-
-        {/* 6. Divider ("o continúa con" / "or continue with") */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 12,
-            marginTop: 4,
-          }}
-        >
-          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
-          <span style={{ fontSize: 11.5, color: isDark ? "#657788" : "#8899aa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            {t("auth.orContinueWith")}
-          </span>
-          <div style={{ flex: 1, height: 1, background: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)" }} />
-        </div>
-
-        {/* 7. OAuth Buttons (Google & Discord) - Placed below credentials */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
-          <button
-            type="button"
-            disabled={isEnteringWorld}
-            onClick={() => handleOAuthClick("GOOGLE")}
-            style={{
-              width: "100%",
-              height: 40,
-              borderRadius: 11,
-              border: isDark
-                ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                : "1.5px solid rgba(0, 0, 0, 0.12)",
-              background: isDark ? "#0d1217" : "#ffffff",
-              color: isDark ? "#ffffff" : "#111822",
-              fontSize: 13.5,
-              fontWeight: 600,
-              fontFamily: BASE_FONT,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-              cursor: isEnteringWorld ? "default" : "pointer",
-              transition: "all 0.16s ease",
-            }}
-          >
-            <IconGoogle size={18} />
-            <span>{t("auth.continueGoogle")}</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={isEnteringWorld}
-            onClick={() => handleOAuthClick("DISCORD")}
-            style={{
-              width: "100%",
-              height: 40,
-              borderRadius: 11,
-              border: isDark
-                ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                : "1.5px solid rgba(0, 0, 0, 0.12)",
-              background: isDark ? "#0d1217" : "#ffffff",
-              color: isDark ? "#ffffff" : "#111822",
-              fontSize: 13.5,
-              fontWeight: 600,
-              fontFamily: BASE_FONT,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-              cursor: isEnteringWorld ? "default" : "pointer",
-              transition: "all 0.16s ease",
-            }}
-          >
-            <IconDiscord size={18} />
-            <span>{t("auth.continueDiscord")}</span>
-          </button>
-        </div>
+          </>
+        )}
 
         {/* 8. Bottom: Version tag & Security */}
         <div
