@@ -2,7 +2,7 @@
  * HiKAT Core Authentication Service
  */
 
-import { eq, and, ne, sql, isNull } from "drizzle-orm"
+import { eq, and, ne, sql, isNull, desc } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   AppRole,
@@ -24,6 +24,21 @@ import { OAuthProviderProfile } from "./oauth"
 
 export const EMAIL_VERIFICATION_EXPIRY_HOURS = 24
 export const PASSWORD_RESET_EXPIRY_MINUTES = 30
+
+let lastEffectiveTime = 0
+
+function generateMonotonicTokenMetadata(): { id: string; createdAt: string } {
+  const now = Date.now()
+  if (now > lastEffectiveTime) {
+    lastEffectiveTime = now
+  } else {
+    lastEffectiveTime = lastEffectiveTime + 1
+  }
+  const createdAt = new Date(lastEffectiveTime).toISOString()
+  const timeHex = lastEffectiveTime.toString(16).padStart(12, "0")
+  const id = `${timeHex}-${crypto.randomUUID()}`
+  return { id, createdAt }
+}
 
 /**
  * Register a new user using Email + Password
@@ -48,7 +63,7 @@ export async function registerWithPassword(
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
-  // 1. Check if email already registered
+  // Check if user already exists
   const existingCred = await db
     .select()
     .from(schema.passwordCredentials)
@@ -60,44 +75,43 @@ export async function registerWithPassword(
   }
 
   const userId = crypto.randomUUID()
-  const now = new Date().toISOString()
   const passwordHash = await hashPassword(params.password)
+  const now = new Date().toISOString()
 
-  // 2. Create User entity (default role PLAYER)
-  const newUser: schema.NewUser = {
+  // Create User
+  await db.insert(schema.users).values({
     id: userId,
     role: "PLAYER",
-    displayName: params.displayName?.trim() || normalizedEmail.split("@")[0],
+    displayName: params.displayName || normalizedEmail.split("@")[0],
     createdAt: now,
     updatedAt: now,
-  }
+  })
 
-  await db.insert(schema.users).values(newUser)
-
-  // 3. Create Password Credentials
+  // Create Password Credentials
   await db.insert(schema.passwordCredentials).values({
     id: crypto.randomUUID(),
     userId,
     email: normalizedEmail,
     passwordHash,
-    emailVerifiedAt: null,
+    emailVerifiedAt: null, // Requires verification
     createdAt: now,
     updatedAt: now,
   })
 
-  // 4. Create Email Verification Token & send email
+  // Create Email Verification Token
   const rawVerificationToken = generateSecureToken(32)
   const tokenHash = await hashToken(rawVerificationToken)
   const expiresAt = new Date(
     Date.now() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60 * 1000,
   ).toISOString()
+  const { id: newTokenId, createdAt: tokenCreatedAt } = generateMonotonicTokenMetadata()
 
   await db.insert(schema.emailVerificationTokens).values({
-    id: crypto.randomUUID(),
+    id: newTokenId,
     userId,
     tokenHash,
     expiresAt,
-    createdAt: now,
+    createdAt: tokenCreatedAt,
   })
 
   const normalizedLocale = sanitizeEmailLocale(params.locale)
@@ -164,15 +178,14 @@ export async function resendVerificationEmail(
   const expiresAt = new Date(
     Date.now() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60 * 1000,
   ).toISOString()
-  const newTokenId = crypto.randomUUID()
-  const now = new Date().toISOString()
+  const { id: newTokenId, createdAt: tokenCreatedAt } = generateMonotonicTokenMetadata()
 
   await db.insert(schema.emailVerificationTokens).values({
     id: newTokenId,
     userId: cred.userId,
     tokenHash,
     expiresAt,
-    createdAt: now,
+    createdAt: tokenCreatedAt,
   })
 
   const normalizedLocale = sanitizeEmailLocale(locale)
@@ -196,23 +209,6 @@ export async function resendVerificationEmail(
       console.error("[Auth] Failed to delete failed verification token:", cleanupErr)
     }
     return
-  }
-
-  // On successful send, invalidate previous unconsumed verification tokens for this user
-  try {
-    await db
-      .update(schema.emailVerificationTokens)
-      .set({ usedAt: now })
-      .where(
-        and(
-          eq(schema.emailVerificationTokens.userId, cred.userId),
-          isNull(schema.emailVerificationTokens.usedAt),
-          ne(schema.emailVerificationTokens.id, newTokenId),
-        ),
-      )
-      .run()
-  } catch (cleanupErr) {
-    console.error("[Auth] Failed to clean up prior verification tokens:", cleanupErr)
   }
 }
 
@@ -255,14 +251,14 @@ export async function loginWithPassword(
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
-  // 2. Verify password with timing-safe comparison
-  const isValid = await verifyPassword(params.password, credRecord.passwordHash)
-  if (!isValid) {
+  // 2. Constant-time password verification
+  const isMatch = await verifyPassword(params.password, credRecord.passwordHash)
+  if (!isMatch) {
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
-  // 3. Block login if email is not verified
-  if (!credRecord.emailVerifiedAt) {
+  // 3. Email verification check
+  if (credRecord.emailVerifiedAt === null) {
     throw new Error(AuthErrorCode.EMAIL_NOT_VERIFIED)
   }
 
@@ -281,7 +277,7 @@ export async function loginWithPassword(
 }
 
 /**
- * Verify Email using Token
+ * Verify Email with Token
  */
 export async function verifyEmailToken(
   db: Database,
@@ -305,6 +301,22 @@ export async function verifyEmailToken(
     throw new Error(AuthErrorCode.INVALID_TOKEN)
   }
 
+  // 1. Latest-token-wins check: token must be the newest token for this user
+  const latestTokenRecord = await db
+    .select()
+    .from(schema.emailVerificationTokens)
+    .where(eq(schema.emailVerificationTokens.userId, tokenRecord.userId))
+    .orderBy(
+      desc(schema.emailVerificationTokens.createdAt),
+      desc(schema.emailVerificationTokens.id),
+    )
+    .limit(1)
+    .get()
+
+  if (!latestTokenRecord || latestTokenRecord.id !== tokenRecord.id) {
+    throw new Error(AuthErrorCode.INVALID_TOKEN)
+  }
+
   if (tokenRecord.usedAt) {
     throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
   }
@@ -313,7 +325,7 @@ export async function verifyEmailToken(
     throw new Error(AuthErrorCode.TOKEN_EXPIRED)
   }
 
-  // 1. Mark token as used atomically (CAS)
+  // 2. Mark token as used atomically (CAS)
   const updateRes = await db
     .update(schema.emailVerificationTokens)
     .set({ usedAt: nowIso })
@@ -330,7 +342,7 @@ export async function verifyEmailToken(
     throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
   }
 
-  // 2. Mark password credentials as verified
+  // 3. Mark password credentials as verified
   await db
     .update(schema.passwordCredentials)
     .set({
@@ -369,20 +381,19 @@ export async function requestPasswordReset(
     return
   }
 
-  const now = new Date().toISOString()
   const rawResetToken = generateSecureToken(32)
   const tokenHash = await hashToken(rawResetToken)
   const expiresAt = new Date(
     Date.now() + PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000,
   ).toISOString()
-  const newTokenId = crypto.randomUUID()
+  const { id: newTokenId, createdAt: tokenCreatedAt } = generateMonotonicTokenMetadata()
 
   await db.insert(schema.passwordResetTokens).values({
     id: newTokenId,
     userId: cred.userId,
     tokenHash,
     expiresAt,
-    createdAt: now,
+    createdAt: tokenCreatedAt,
   })
 
   const normalizedLocale = sanitizeEmailLocale(locale)
@@ -402,23 +413,6 @@ export async function requestPasswordReset(
       console.error("[Auth] Failed to cleanup failed reset token:", cleanupErr)
     }
     return
-  }
-
-  // On successful send, invalidate previous unused reset tokens for this user
-  try {
-    await db
-      .update(schema.passwordResetTokens)
-      .set({ usedAt: now })
-      .where(
-        and(
-          eq(schema.passwordResetTokens.userId, cred.userId),
-          isNull(schema.passwordResetTokens.usedAt),
-          ne(schema.passwordResetTokens.id, newTokenId),
-        ),
-      )
-      .run()
-  } catch (cleanupErr) {
-    console.error("[Auth] Failed to invalidate prior password reset tokens:", cleanupErr)
   }
 }
 
@@ -448,6 +442,22 @@ export async function resetPasswordWithToken(
     throw new Error(AuthErrorCode.INVALID_TOKEN)
   }
 
+  // 1. Latest-token-wins check: token must be the newest token for this user
+  const latestTokenRecord = await db
+    .select()
+    .from(schema.passwordResetTokens)
+    .where(eq(schema.passwordResetTokens.userId, tokenRecord.userId))
+    .orderBy(
+      desc(schema.passwordResetTokens.createdAt),
+      desc(schema.passwordResetTokens.id),
+    )
+    .limit(1)
+    .get()
+
+  if (!latestTokenRecord || latestTokenRecord.id !== tokenRecord.id) {
+    throw new Error(AuthErrorCode.INVALID_TOKEN)
+  }
+
   if (tokenRecord.usedAt) {
     throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
   }
@@ -456,7 +466,10 @@ export async function resetPasswordWithToken(
     throw new Error(AuthErrorCode.TOKEN_EXPIRED)
   }
 
-  // 1. Mark reset token as used atomically (CAS)
+  // 2. Hash new password
+  const newPasswordHash = await hashPassword(newPassword)
+
+  // 3. Mark reset token as used atomically (CAS)
   const updateRes = await db
     .update(schema.passwordResetTokens)
     .set({ usedAt: nowIso })
@@ -473,15 +486,17 @@ export async function resetPasswordWithToken(
     throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
   }
 
-  // 2. Hash new password and update credentials
-  const passwordHash = await hashPassword(newPassword)
+  // 4. Update password credentials
   await db
     .update(schema.passwordCredentials)
-    .set({ passwordHash, updatedAt: nowIso })
+    .set({
+      passwordHash: newPasswordHash,
+      updatedAt: nowIso,
+    })
     .where(eq(schema.passwordCredentials.userId, tokenRecord.userId))
     .run()
 
-  // 3. Revoke all active sessions for security
+  // 5. Revoke all active sessions for security
   await revokeAllUserSessions(db, tokenRecord.userId)
 
   return { success: true }
@@ -520,6 +535,21 @@ export async function getEmailActionStatus(
       return "invalid"
     }
 
+    const latestTokenRecord = await db
+      .select()
+      .from(schema.emailVerificationTokens)
+      .where(eq(schema.emailVerificationTokens.userId, tokenRecord.userId))
+      .orderBy(
+        desc(schema.emailVerificationTokens.createdAt),
+        desc(schema.emailVerificationTokens.id),
+      )
+      .limit(1)
+      .get()
+
+    if (!latestTokenRecord || latestTokenRecord.id !== tokenRecord.id) {
+      return "invalid"
+    }
+
     if (tokenRecord.usedAt !== null) {
       const cred = await db
         .select()
@@ -548,6 +578,21 @@ export async function getEmailActionStatus(
       .get()
 
     if (!tokenRecord) {
+      return "invalid"
+    }
+
+    const latestTokenRecord = await db
+      .select()
+      .from(schema.passwordResetTokens)
+      .where(eq(schema.passwordResetTokens.userId, tokenRecord.userId))
+      .orderBy(
+        desc(schema.passwordResetTokens.createdAt),
+        desc(schema.passwordResetTokens.id),
+      )
+      .limit(1)
+      .get()
+
+    if (!latestTokenRecord || latestTokenRecord.id !== tokenRecord.id) {
       return "invalid"
     }
 

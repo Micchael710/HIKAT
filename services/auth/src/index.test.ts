@@ -49,6 +49,7 @@ import {
   verifyEmailToken,
   requestPasswordReset,
   resetPasswordWithToken,
+  getEmailActionStatus,
   changePassword,
   resolveOAuthUser,
   getLinkedAuthMethods,
@@ -1803,7 +1804,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // First token is now invalidated
       await expect(
         resetPasswordWithToken(db, firstToken, "NewBrandPassword123!"),
-      ).rejects.toThrow(AuthErrorCode.TOKEN_REUSE_DETECTED)
+      ).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
 
       // Second token succeeds
       const res = await resetPasswordWithToken(db, secondToken, "NewBrandPassword123!")
@@ -1887,8 +1888,10 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(htmlVerify).toContain("function showWaitingState()")
       expect(htmlVerify).toContain("function showCompletedState()")
       expect(htmlVerify).toContain("function showFallbackRetry()")
-      expect(htmlVerify).toContain("function showErrorState()")
-      expect(htmlVerify).toContain("setTimeout(openLauncher, 150)")
+      expect(htmlVerify).toContain("function showInvalidState()")
+      expect(htmlVerify).toContain("function showExpiredState()")
+      expect(htmlVerify).toContain("async function initPreflight()")
+      expect(htmlVerify).toContain("initPreflight()")
       expect(htmlVerify).toContain("3000") // 3-second retry timeout
       expect(htmlVerify).toContain("retryBtn.addEventListener(\"click\"")
 
@@ -2188,7 +2191,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(secondToken).not.toBe(firstToken)
 
       // First token was invalidated on successful resend
-      await expect(verifyEmailToken(db, firstToken)).rejects.toThrow(AuthErrorCode.TOKEN_REUSE_DETECTED)
+      await expect(verifyEmailToken(db, firstToken)).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
 
       // Second token succeeds
       const verifyRes = await verifyEmailToken(db, secondToken)
@@ -2250,6 +2253,317 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // Prior valid reset token is STILL valid and can reset password
       const resetSuccess = await resetPasswordWithToken(db, validResetToken, "BrandNewPassword999!")
       expect(resetSuccess.success).toBe(true)
+    })
+
+    describe("Authentication Email Flows: Preflight Browser & Latest-Token-Wins Hardening", () => {
+      it("HTML email action bridge includes preflight validation logic and does not open launcher for completed, invalid, or expired tokens", async () => {
+        const req = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=testToken123&lang=es", {
+          method: "GET",
+        })
+        const res = await handleRequest({
+          request: req,
+          env: {},
+          db,
+          keyManager,
+          emailService,
+        })
+        expect(res.status).toBe(200)
+        const html = await res.text()
+
+        // 1. Preflight function exists and is called on startup
+        expect(html).toContain("async function initPreflight()")
+        expect(html).toContain("initPreflight();")
+        // 2. Unconditional immediate launcher open is NOT present
+        expect(html).not.toContain("setTimeout(openLauncher, 150)")
+        // 3. Preflight routes based on /auth/email-action/status:
+        expect(html).toContain('if (result.status === "completed")')
+        expect(html).toContain("showCompletedState();")
+        expect(html).toContain('else if (result.status === "invalid")')
+        expect(html).toContain("showInvalidState();")
+        expect(html).toContain('else if (result.status === "expired")')
+        expect(html).toContain("showExpiredState();")
+        expect(html).toContain('else if (result.status === "pending")')
+        expect(html).toContain("openLauncher();")
+        // 4. In openLauncher, deepLink is set, 500ms status polling starts, and 3000ms fallback retry is configured
+        expect(html).toContain("window.location.href = deepLink;")
+        expect(html).toContain("statusInterval = setInterval(checkActionStatus, 500);")
+        expect(html).toContain("3000")
+      })
+
+      it("HTML email action provides exact invalid and expired messages across ES, EN, PT, and FR for both verify-email and reset-password", async () => {
+        const testCases = [
+          {
+            type: "verify-email",
+            lang: "es",
+            invalidTitle: "Enlace no válido",
+            invalidDesc: "Este enlace ya no es válido.",
+            invalidSec: "Solicita un nuevo enlace desde HiKAT Launcher.",
+            expiredTitle: "Enlace expirado",
+            expiredDesc: "Este enlace ha expirado.",
+            expiredSec: "Solicita un nuevo enlace desde HiKAT Launcher.",
+          },
+          {
+            type: "verify-email",
+            lang: "en",
+            invalidTitle: "Invalid link",
+            invalidDesc: "This link is no longer valid.",
+            invalidSec: "Request a new link from HiKAT Launcher.",
+            expiredTitle: "Expired link",
+            expiredDesc: "This link has expired.",
+            expiredSec: "Request a new link from HiKAT Launcher.",
+          },
+          {
+            type: "verify-email",
+            lang: "pt",
+            invalidTitle: "Link inválido",
+            invalidDesc: "Este link não é mais válido.",
+            invalidSec: "Solicite um novo link no HiKAT Launcher.",
+            expiredTitle: "Link expirado",
+            expiredDesc: "Este link expirou.",
+            expiredSec: "Solicite um novo link no HiKAT Launcher.",
+          },
+          {
+            type: "verify-email",
+            lang: "fr",
+            invalidTitle: "Lien non valide",
+            invalidDesc: "Ce lien n'est plus valide.",
+            invalidSec: "Demandez un nouveau lien depuis HiKAT Launcher.",
+            expiredTitle: "Lien expiré",
+            expiredDesc: "Ce lien a expiré.",
+            expiredSec: "Demandez un nouveau lien depuis HiKAT Launcher.",
+          },
+          {
+            type: "reset-password",
+            lang: "es",
+            invalidTitle: "Enlace no válido",
+            invalidDesc: "Este enlace de restablecimiento ya no es válido.",
+            invalidSec: "Solicita uno nuevo desde HiKAT Launcher.",
+            expiredTitle: "Enlace expirado",
+            expiredDesc: "Este enlace de restablecimiento ha expirado.",
+            expiredSec: "Solicita uno nuevo desde HiKAT Launcher.",
+          },
+          {
+            type: "reset-password",
+            lang: "en",
+            invalidTitle: "Invalid link",
+            invalidDesc: "This reset link is no longer valid.",
+            invalidSec: "Request a new one from HiKAT Launcher.",
+            expiredTitle: "Expired link",
+            expiredDesc: "This reset link has expired.",
+            expiredSec: "Request a new one from HiKAT Launcher.",
+          },
+          {
+            type: "reset-password",
+            lang: "pt",
+            invalidTitle: "Link inválido",
+            invalidDesc: "Este link de redefinição não é mais válido.",
+            invalidSec: "Solicite um novo no HiKAT Launcher.",
+            expiredTitle: "Link expirado",
+            expiredDesc: "Este link de redefinição expirou.",
+            expiredSec: "Solicite um novo no HiKAT Launcher.",
+          },
+          {
+            type: "reset-password",
+            lang: "fr",
+            invalidTitle: "Lien non valide",
+            invalidDesc: "Ce lien de réinitialisation n'est plus valide.",
+            invalidSec: "Demandez-en un nouveau depuis HiKAT Launcher.",
+            expiredTitle: "Lien expiré",
+            expiredDesc: "Ce lien de réinitialisation a expiré.",
+            expiredSec: "Demandez-en un nouveau depuis HiKAT Launcher.",
+          },
+        ]
+
+        for (const tc of testCases) {
+          const req = new Request(`http://localhost:8788/auth/email-action?type=${tc.type}&token=tok&lang=${tc.lang}`, {
+            method: "GET",
+          })
+          const res = await handleRequest({
+            request: req,
+            env: {},
+            db,
+            keyManager,
+            emailService,
+          })
+          expect(res.status).toBe(200)
+          const html = await res.text()
+          expect(html).toContain(tc.invalidTitle)
+          expect(html).toContain(tc.invalidDesc)
+          expect(html).toContain(tc.invalidSec)
+          expect(html).toContain(tc.expiredTitle)
+          expect(html).toContain(tc.expiredDesc)
+          expect(html).toContain(tc.expiredSec)
+        }
+      })
+
+      it("Latest token wins for email verification: older token returns invalid and cannot verify; newest token returns pending and completes successfully", async () => {
+        // 1. Initial registration generates Token A
+        await registerWithPassword(
+          db,
+          { email: "latest-verify@hikat.org", password: "Password123!" },
+          emailService,
+        )
+        const tokenA = emailService.getLastEmailFor("latest-verify@hikat.org")!.token
+
+        // Token A is currently latest: status is pending
+        expect(await getEmailActionStatus(db, "verify-email", tokenA)).toBe("pending")
+
+        // 2. Resend verification generates Token B
+        await resendVerificationEmail(db, "latest-verify@hikat.org", emailService)
+        const tokenB = emailService.getLastEmailFor("latest-verify@hikat.org")!.token
+        expect(tokenB).not.toBe(tokenA)
+
+        // Token A is now superseded: status is invalid, cannot verify
+        expect(await getEmailActionStatus(db, "verify-email", tokenA)).toBe("invalid")
+        await expect(verifyEmailToken(db, tokenA)).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+
+        // Token B is latest: status is pending
+        expect(await getEmailActionStatus(db, "verify-email", tokenB)).toBe("pending")
+
+        // 3. Resend verification generates Token C
+        await resendVerificationEmail(db, "latest-verify@hikat.org", emailService)
+        const tokenC = emailService.getLastEmailFor("latest-verify@hikat.org")!.token
+        expect(tokenC).not.toBe(tokenB)
+
+        // Tokens A and B are now invalid
+        expect(await getEmailActionStatus(db, "verify-email", tokenA)).toBe("invalid")
+        expect(await getEmailActionStatus(db, "verify-email", tokenB)).toBe("invalid")
+        await expect(verifyEmailToken(db, tokenB)).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+
+        // Token C is latest: status is pending
+        expect(await getEmailActionStatus(db, "verify-email", tokenC)).toBe("pending")
+
+        // 4. Verify Token C successfully
+        const verifyRes = await verifyEmailToken(db, tokenC)
+        expect(verifyRes.success).toBe(true)
+
+        // Token C is now completed
+        expect(await getEmailActionStatus(db, "verify-email", tokenC)).toBe("completed")
+
+        // Opening completed token C in status endpoint returns completed
+        const reqStatus = new Request(
+          `http://localhost:8788/auth/email-action/status?type=verify-email&token=${tokenC}`,
+          { method: "GET" },
+        )
+        const resStatus = await handleRequest({
+          request: reqStatus,
+          env: {},
+          db,
+          keyManager,
+          emailService,
+        })
+        expect(resStatus.status).toBe(200)
+        const data = (await resStatus.json()) as any
+        expect(data.status).toBe("completed")
+      })
+
+      it("Latest token wins for password reset: older token returns invalid and cannot reset; newest token returns pending and completes successfully", async () => {
+        await registerAndVerify({ email: "latest-reset@hikat.org", password: "InitialPassword123!" })
+
+        // 1. Request Reset Token A
+        await requestPasswordReset(db, "latest-reset@hikat.org", emailService)
+        const tokenA = emailService.getLastEmailFor("latest-reset@hikat.org")!.token
+        expect(await getEmailActionStatus(db, "reset-password", tokenA)).toBe("pending")
+
+        // 2. Request Reset Token B
+        await requestPasswordReset(db, "latest-reset@hikat.org", emailService)
+        const tokenB = emailService.getLastEmailFor("latest-reset@hikat.org")!.token
+        expect(tokenB).not.toBe(tokenA)
+
+        // Token A is now superseded: status is invalid, cannot reset password
+        expect(await getEmailActionStatus(db, "reset-password", tokenA)).toBe("invalid")
+        await expect(resetPasswordWithToken(db, tokenA, "NewPassA123!")).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+
+        // Token B is latest: status is pending
+        expect(await getEmailActionStatus(db, "reset-password", tokenB)).toBe("pending")
+
+        // 3. Request Reset Token C
+        await requestPasswordReset(db, "latest-reset@hikat.org", emailService)
+        const tokenC = emailService.getLastEmailFor("latest-reset@hikat.org")!.token
+        expect(tokenC).not.toBe(tokenB)
+
+        // Both A and B are now invalid
+        expect(await getEmailActionStatus(db, "reset-password", tokenA)).toBe("invalid")
+        expect(await getEmailActionStatus(db, "reset-password", tokenB)).toBe("invalid")
+        await expect(resetPasswordWithToken(db, tokenB, "NewPassB123!")).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+
+        // Token C is latest: status is pending
+        expect(await getEmailActionStatus(db, "reset-password", tokenC)).toBe("pending")
+
+        // 4. Reset password with Token C
+        const resetRes = await resetPasswordWithToken(db, tokenC, "NewPassC12345!")
+        expect(resetRes.success).toBe(true)
+
+        // Token C status is now completed
+        expect(await getEmailActionStatus(db, "reset-password", tokenC)).toBe("completed")
+
+        // User can now log in with the new password
+        const loginRes = await loginWithPassword(
+          db,
+          { email: "latest-reset@hikat.org", password: "NewPassC12345!" },
+          keyManager,
+        )
+        expect(loginRes.accessToken).toBeDefined()
+      })
+
+      it("Expired token returns expired status and is rejected by verification/reset", async () => {
+        await registerWithPassword(
+          db,
+          { email: "expired-test@hikat.org", password: "Password123!" },
+          emailService,
+        )
+        const token = emailService.getLastEmailFor("expired-test@hikat.org")!.token
+
+        // Manually expire the token in database
+        const pastDate = new Date(Date.now() - 3600 * 1000).toISOString()
+        await db
+          .update(schema.emailVerificationTokens)
+          .set({ expiresAt: pastDate })
+          .run()
+
+        // Status is expired
+        expect(await getEmailActionStatus(db, "verify-email", token)).toBe("expired")
+        await expect(verifyEmailToken(db, token)).rejects.toThrow(AuthErrorCode.TOKEN_EXPIRED)
+      })
+
+      it("Concurrent/interleaved requests never leave two tokens valid and never leave all tokens invalid", async () => {
+        await registerWithPassword(
+          db,
+          { email: "concurrent-tokens@hikat.org", password: "Password123!" },
+          emailService,
+        )
+
+        // Simulate 4 rapid resend requests
+        await Promise.all([
+          resendVerificationEmail(db, "concurrent-tokens@hikat.org", emailService),
+          resendVerificationEmail(db, "concurrent-tokens@hikat.org", emailService),
+          resendVerificationEmail(db, "concurrent-tokens@hikat.org", emailService),
+          resendVerificationEmail(db, "concurrent-tokens@hikat.org", emailService),
+        ])
+
+        const allEmails = emailService.getSentEmails().filter((e) => e.to === "concurrent-tokens@hikat.org")
+        expect(allEmails.length).toBeGreaterThanOrEqual(4)
+
+        const allTokens = allEmails.map((e) => e.token)
+
+        // Check statuses of all tokens
+        const statuses = await Promise.all(
+          allTokens.map((t) => getEmailActionStatus(db, "verify-email", t)),
+        )
+
+        // Exactly ONE token must be 'pending', all others must be 'invalid'
+        const pendingCount = statuses.filter((s) => s === "pending").length
+        const invalidCount = statuses.filter((s) => s === "invalid").length
+
+        expect(pendingCount).toBe(1)
+        expect(invalidCount).toBe(allTokens.length - 1)
+
+        // Finding the pending token and verifying it succeeds
+        const pendingToken = allTokens[statuses.indexOf("pending")]!
+        const verifyRes = await verifyEmailToken(db, pendingToken)
+        expect(verifyRes.success).toBe(true)
+        expect(await getEmailActionStatus(db, "verify-email", pendingToken)).toBe("completed")
+      })
     })
   })
 })

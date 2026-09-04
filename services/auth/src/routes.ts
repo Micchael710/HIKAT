@@ -390,9 +390,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
             successDescription: "Tu cuenta de HiKAT fue verificada correctamente.",
             successSecondary: "Puedes cerrar esta pestaña de forma segura.",
 
+            invalidTitle: "Enlace no válido",
+            invalidDescription: "Este enlace ya no es válido.",
+            invalidSecondary: "Solicita un nuevo enlace desde HiKAT Launcher.",
+
+            expiredTitle: "Enlace expirado",
+            expiredDescription: "Este enlace ha expirado.",
+            expiredSecondary: "Solicita un nuevo enlace desde HiKAT Launcher.",
+
             errorTitle: "Enlace no válido",
-            errorDescription: "Este enlace de verificación ya no es válido o ha expirado.",
-            errorSecondary: "Vuelve a HiKAT Launcher e inténtalo nuevamente.",
+            errorDescription: "Este enlace ya no es válido.",
+            errorSecondary: "Solicita un nuevo enlace desde HiKAT Launcher.",
           },
           en: {
             waitingTitle: "Verify account",
@@ -408,9 +416,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
             successDescription: "Your HiKAT account was verified successfully.",
             successSecondary: "You can safely close this tab.",
 
+            invalidTitle: "Invalid link",
+            invalidDescription: "This link is no longer valid.",
+            invalidSecondary: "Request a new link from HiKAT Launcher.",
+
+            expiredTitle: "Expired link",
+            expiredDescription: "This link has expired.",
+            expiredSecondary: "Request a new link from HiKAT Launcher.",
+
             errorTitle: "Invalid link",
-            errorDescription: "This verification link is no longer valid or has expired.",
-            errorSecondary: "Return to HiKAT Launcher and try again.",
+            errorDescription: "This link is no longer valid.",
+            errorSecondary: "Request a new link from HiKAT Launcher.",
           },
           pt: {
             waitingTitle: "Verificar conta",
@@ -419,16 +435,24 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
             openErrorTitle: "Não foi possível abrir o Launcher",
             openErrorDescription: "O HiKAT Launcher não respondeu. Você pode tentar novamente.",
-            openErrorSecondary: "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+            openErrorSecondary: "Você pode tentar nuevamente se o Launcher não abrir automaticamente.",
             retry: "Abrir o HiKAT Launcher",
 
             successTitle: "Conta verificada",
             successDescription: "Sua conta do HiKAT foi verificada com sucesso.",
             successSecondary: "Você pode fechar esta aba com segurança.",
 
+            invalidTitle: "Link inválido",
+            invalidDescription: "Este link não é mais válido.",
+            invalidSecondary: "Solicite um novo link no HiKAT Launcher.",
+
+            expiredTitle: "Link expirado",
+            expiredDescription: "Este link expirou.",
+            expiredSecondary: "Solicite um novo link no HiKAT Launcher.",
+
             errorTitle: "Link inválido",
-            errorDescription: "Este link de verificação não é mais válido ou expirou.",
-            errorSecondary: "Volte ao HiKAT Launcher e tente novamente.",
+            errorDescription: "Este link não é mais válido.",
+            errorSecondary: "Solicite um novo link no HiKAT Launcher.",
           },
           fr: {
             waitingTitle: "Vérifier le compte",
@@ -444,9 +468,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
             successDescription: "Votre compte HiKAT a été vérifié avec succès.",
             successSecondary: "Vous pouvez fermer cet onglet en toute sécurité.",
 
+            invalidTitle: "Lien non valide",
+            invalidDescription: "Ce lien n'est plus valide.",
+            invalidSecondary: "Demandez un nouveau lien depuis HiKAT Launcher.",
+
+            expiredTitle: "Lien expiré",
+            expiredDescription: "Ce lien a expiré.",
+            expiredSecondary: "Demandez un nouveau lien depuis HiKAT Launcher.",
+
             errorTitle: "Lien non valide",
-            errorDescription: "Ce lien de vérification n'est plus valide ou a expiré.",
-            errorSecondary: "Retournez dans HiKAT Launcher et réessayez.",
+            errorDescription: "Ce lien n'est plus valide.",
+            errorSecondary: "Demandez un nouveau lien depuis HiKAT Launcher.",
           },
         },
         "reset-password": {
@@ -464,9 +496,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
             successDescription: "Tu contraseña fue actualizada y tus sesiones anteriores fueron cerradas.",
             successSecondary: "Vuelve a HiKAT Launcher para iniciar sesión.",
 
+            invalidTitle: "Enlace no válido",
+            invalidDescription: "Este enlace de restablecimiento ya no es válido.",
+            invalidSecondary: "Solicita uno nuevo desde HiKAT Launcher.",
+
+            expiredTitle: "Enlace expirado",
+            expiredDescription: "Este enlace de restablecimiento ha expirado.",
+            expiredSecondary: "Solicita uno nuevo desde HiKAT Launcher.",
+
             errorTitle: "Enlace no válido",
-            errorDescription: "Este enlace para restablecer tu contraseña ya no es válido o ha expirado.",
-            errorSecondary: "Vuelve a HiKAT Launcher e inténtalo nuevamente.",
+            errorDescription: "Este enlace de restablecimiento ya no es válido.",
+            errorSecondary: "Solicita uno nuevo desde HiKAT Launcher.",
           },
           en: {
             waitingTitle: "Reset password",
@@ -482,9 +522,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
             successDescription: "Your password was updated and your previous sessions were closed.",
             successSecondary: "Return to HiKAT Launcher to sign in.",
 
+            invalidTitle: "Invalid link",
+            invalidDescription: "This reset link is no longer valid.",
+            invalidSecondary: "Request a new one from HiKAT Launcher.",
+
+            expiredTitle: "Expired link",
+            expiredDescription: "This reset link has expired.",
+            expiredSecondary: "Request a new one from HiKAT Launcher.",
+
             errorTitle: "Invalid link",
-            errorDescription: "This password reset link is no longer valid or has expired.",
-            errorSecondary: "Return to HiKAT Launcher and try again.",
+            errorDescription: "This reset link is no longer valid.",
+            errorSecondary: "Request a new one from HiKAT Launcher.",
           },
           pt: {
             waitingTitle: "Redefinir senha",
@@ -493,16 +541,24 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
             openErrorTitle: "Não foi possível abrir o Launcher",
             openErrorDescription: "O HiKAT Launcher não respondeu. Você pode tentar novamente.",
-            openErrorSecondary: "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+            openErrorSecondary: "Você pode tentar nuevamente se o Launcher não abrir automaticamente.",
             retry: "Abrir o HiKAT Launcher",
 
             successTitle: "Senha redefinida",
             successDescription: "Sua senha foi atualizada e suas sessões anteriores foram encerradas.",
             successSecondary: "Volte ao HiKAT Launcher para entrar.",
 
+            invalidTitle: "Link inválido",
+            invalidDescription: "Este link de redefinição não é mais válido.",
+            invalidSecondary: "Solicite um novo no HiKAT Launcher.",
+
+            expiredTitle: "Link expirado",
+            expiredDescription: "Este link de redefinição expirou.",
+            expiredSecondary: "Solicite um novo no HiKAT Launcher.",
+
             errorTitle: "Link inválido",
-            errorDescription: "Este link de redefinição de senha não é mais válido ou expirou.",
-            errorSecondary: "Volte ao HiKAT Launcher e tente novamente.",
+            errorDescription: "Este link de redefinição não é mais válido.",
+            errorSecondary: "Solicite um novo no HiKAT Launcher.",
           },
           fr: {
             waitingTitle: "Réinitialiser le mot de passe",
@@ -518,9 +574,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
             successDescription: "Votre mot de passe a été mis à jour et vos sessions précédentes ont été fermées.",
             successSecondary: "Retournez dans HiKAT Launcher pour vous connecter.",
 
+            invalidTitle: "Lien non valide",
+            invalidDescription: "Ce lien de réinitialisation n'est plus valide.",
+            invalidSecondary: "Demandez-en un nouveau depuis HiKAT Launcher.",
+
+            expiredTitle: "Lien expiré",
+            expiredDescription: "Ce lien de réinitialisation a expiré.",
+            expiredSecondary: "Demandez-en un nouveau depuis HiKAT Launcher.",
+
             errorTitle: "Lien non valide",
-            errorDescription: "Ce lien de réinitialisation de mot de passe n'est plus valide ou a expiré.",
-            errorSecondary: "Retournez dans HiKAT Launcher et réessayez.",
+            errorDescription: "Ce lien de réinitialisation n'est plus valide.",
+            errorSecondary: "Demandez-en un nouveau depuis HiKAT Launcher.",
           },
         },
       }
@@ -727,14 +791,26 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       retryBtn.style.display = "block";
     }
 
-    function showErrorState() {
+    function showInvalidState() {
       completed = true;
       clearTimeout(launchTimeout);
       clearInterval(statusInterval);
 
-      titleEl.textContent = t.errorTitle;
-      descEl.textContent = t.errorDescription;
-      secEl.textContent = t.errorSecondary;
+      titleEl.textContent = t.invalidTitle || t.errorTitle;
+      descEl.textContent = t.invalidDescription || t.errorDescription;
+      secEl.textContent = t.invalidSecondary || t.errorSecondary;
+      loaderEl.style.display = "none";
+      retryBtn.style.display = "none";
+    }
+
+    function showExpiredState() {
+      completed = true;
+      clearTimeout(launchTimeout);
+      clearInterval(statusInterval);
+
+      titleEl.textContent = t.expiredTitle || t.errorTitle;
+      descEl.textContent = t.expiredDescription || t.errorDescription;
+      secEl.textContent = t.expiredSecondary || t.errorSecondary;
       loaderEl.style.display = "none";
       retryBtn.style.display = "none";
     }
@@ -756,8 +832,10 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         const result = await response.json();
         if (result.status === "completed") {
           showCompletedState();
-        } else if (result.status === "invalid" || result.status === "expired") {
-          showErrorState();
+        } else if (result.status === "invalid") {
+          showInvalidState();
+        } else if (result.status === "expired") {
+          showExpiredState();
         }
       } catch (_) {}
     }
@@ -791,7 +869,45 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     });
 
     showWaitingState();
-    setTimeout(openLauncher, 150);
+
+    async function initPreflight() {
+      if (!actionToken) {
+        showInvalidState();
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          "/auth/email-action/status?type=" +
+            encodeURIComponent(actionType) +
+            "&token=" +
+            encodeURIComponent(actionToken),
+          { cache: "no-store" }
+        );
+
+        if (!response.ok) {
+          showInvalidState();
+          return;
+        }
+
+        const result = await response.json();
+        if (result.status === "completed") {
+          showCompletedState();
+        } else if (result.status === "invalid") {
+          showInvalidState();
+        } else if (result.status === "expired") {
+          showExpiredState();
+        } else if (result.status === "pending") {
+          openLauncher();
+        } else {
+          showInvalidState();
+        }
+      } catch (_) {
+        showInvalidState();
+      }
+    }
+
+    initPreflight();
   </script>
 </body>
 </html>`
