@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   ThemeMode,
   LauncherScreen,
@@ -75,13 +75,51 @@ export function useLauncherState() {
   const [capesLoading, setCapesLoading] = useState<boolean>(false)
   const [capesError, setCapesError] = useState<string | null>(null)
 
+  const [pendingAuthDeepLink, setPendingAuthDeepLink] = useState<string | null>(null)
+  const pendingAuthActionRef = useRef<boolean>(false)
+
   /**
    * Authoritative Auth Session Lifecycle Subscription & Bootstrap
    */
   useEffect(() => {
+    let isMounted = true
+
+    const checkColdStartAndBootstrap = async () => {
+      if (typeof window !== "undefined" && window.electronAPI?.getPendingOAuthCallback) {
+        try {
+          const pendingUrl = await window.electronAPI.getPendingOAuthCallback()
+          if (pendingUrl && isMounted) {
+            try {
+              const urlObj = new URL(pendingUrl)
+              if (urlObj.protocol === "hikat:") {
+                const host = urlObj.hostname || urlObj.host
+                if (host === "auth") {
+                  const cleanPath = urlObj.pathname.replace(/\/+$/, "")
+                  if (cleanPath === "/verify-email" || cleanPath === "/reset-password") {
+                    pendingAuthActionRef.current = true
+                    setPendingAuthDeepLink(pendingUrl)
+                    setScreen("login")
+                  } else {
+                    setPendingAuthDeepLink(pendingUrl)
+                  }
+                }
+              }
+            } catch (_) {
+              setPendingAuthDeepLink(pendingUrl)
+            }
+          }
+        } catch (_) {}
+      }
+
+      await authService.bootstrap().catch(() => {})
+    }
+
     const unsubscribe = authService.subscribe((session, status) => {
+      if (!isMounted) return
       if (status === "AUTHENTICATED" && session?.user?.role === "PLAYER") {
-        setScreen("home")
+        if (!pendingAuthActionRef.current) {
+          setScreen("home")
+        }
         setUsername(session.user.displayName || session.user.email.split("@")[0] || "Jugador")
       } else if (status === "UNAUTHENTICATED") {
         setScreen("login")
@@ -90,9 +128,10 @@ export function useLauncherState() {
       }
     })
 
-    authService.bootstrap().catch(() => {})
+    checkColdStartAndBootstrap()
 
     return () => {
+      isMounted = false
       unsubscribe()
     }
   }, [])
@@ -514,6 +553,8 @@ export function useLauncherState() {
   return {
     screen,
     setScreen,
+    pendingAuthDeepLink,
+    setPendingAuthDeepLink,
     username,
     setUsername,
     view,

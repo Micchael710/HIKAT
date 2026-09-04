@@ -270,4 +270,83 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
     })
     container.remove()
   })
+
+  it("Cold-start with pending /reset-password deep link and existing stored session stays on reset password form instead of switching to Home", async () => {
+    ;(window as any).electronAPI = {
+      onOAuthCallback: vi.fn(() => () => {}),
+      getPendingOAuthCallback: vi.fn().mockResolvedValue("hikat://auth/reset-password?token=cold-reset-token-555"),
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <App />
+        </LanguageProvider>,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Assert it does NOT finish in Home
+    expect(container.querySelector(".sidebar-nav-btn")).toBeNull()
+    expect(container.textContent).not.toContain("DESCARGAR")
+
+    // Assert it remains on the reset password form
+    expect(container.textContent).toContain("Restablecer contraseña")
+    expect(container.textContent).toContain("Nueva contraseña")
+    expect(container.textContent).toContain("Confirmar contraseña")
+    expect(container.textContent).toContain("Cambiar contraseña")
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  it("Cold-start with pending /verify-email deep link and existing stored session verifies email and stays on Login instead of switching to Home", async () => {
+    const verifySpy = vi.spyOn(authService, "verifyEmail").mockResolvedValue({
+      success: true,
+      message: "Email verified successfully",
+    })
+
+    ;(window as any).electronAPI = {
+      onOAuthCallback: vi.fn(() => () => {}),
+      getPendingOAuthCallback: vi.fn().mockResolvedValue("hikat://auth/verify-email?token=cold-verify-token-888"),
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <App />
+        </LanguageProvider>,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(verifySpy).toHaveBeenCalledWith("cold-verify-token-888")
+
+    // Assert it does NOT finish in Home
+    expect(container.querySelector(".sidebar-nav-btn")).toBeNull()
+    expect(container.textContent).not.toContain("DESCARGAR")
+
+    // Assert it stays in Login with the verified banner
+    expect(container.textContent).toContain("Correo verificado correctamente. Ya puedes iniciar sesión.")
+    expect(container.textContent).toContain("Iniciar Sesión")
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
 })

@@ -14,6 +14,8 @@ export default function App() {
   const {
     screen,
     setScreen,
+    pendingAuthDeepLink,
+    setPendingAuthDeepLink,
     username,
     view,
     setView,
@@ -37,8 +39,6 @@ export default function App() {
     handleLogin,
     handleLogout,
   } = useLauncherState()
-
-  const [pendingAuthDeepLink, setPendingAuthDeepLink] = React.useState<string | null>(null)
 
   const [settingsAccent, setSettingsAccent] = React.useState<{
     r: number
