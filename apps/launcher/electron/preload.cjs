@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getMinimizeToTray: () => ipcRenderer.invoke("get-minimize-to-tray"),
   setMinimizeToTray: (enabled) =>
     ipcRenderer.invoke("setting-minimize-to-tray", enabled),
+  getMinimizeOnGameLaunch: () => ipcRenderer.invoke("get-minimize-on-game-launch"),
+  setMinimizeOnGameLaunch: (enabled) =>
+    ipcRenderer.invoke("setting-minimize-on-game-launch", enabled),
   getDedicatedGpu: () => ipcRenderer.invoke("get-dedicated-gpu"),
   setDedicatedGpu: (enabled) =>
     ipcRenderer.invoke("setting-dedicated-gpu", enabled),

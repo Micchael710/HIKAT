@@ -22,6 +22,8 @@ describe("Launcher SettingsView Suite (Main-Authoritative Settings & Safe Persis
       setStartWithSystem: vi.fn().mockResolvedValue(false),
       getMinimizeToTray: vi.fn().mockResolvedValue(false),
       setMinimizeToTray: vi.fn().mockResolvedValue(true),
+      getMinimizeOnGameLaunch: vi.fn().mockResolvedValue(true),
+      setMinimizeOnGameLaunch: vi.fn().mockResolvedValue(false),
       getDedicatedGpu: vi.fn().mockResolvedValue(false),
       setDedicatedGpu: vi.fn().mockResolvedValue(true),
       getRamAllocation: vi.fn().mockResolvedValue(10),
@@ -61,8 +63,31 @@ describe("Launcher SettingsView Suite (Main-Authoritative Settings & Safe Persis
     expect(mockElectronAPI.getMemory).toHaveBeenCalled()
     expect(mockElectronAPI.getStartWithSystem).toHaveBeenCalled()
     expect(mockElectronAPI.getMinimizeToTray).toHaveBeenCalled()
+    expect(mockElectronAPI.getMinimizeOnGameLaunch).toHaveBeenCalled()
     expect(mockElectronAPI.getDedicatedGpu).toHaveBeenCalled()
     expect(mockElectronAPI.getRamAllocation).toHaveBeenCalled()
+  })
+
+  it("1b. minimizeOnGameLaunch toggle renders functional LauncherToggle and invokes setMinimizeOnGameLaunch", async () => {
+    const container = await renderComponent(
+      <SettingsView theme="dark" setTheme={vi.fn()} />,
+    )
+
+    expect(container.textContent).toContain("Minimizar al iniciar el juego")
+
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const minimizeOnGameLaunchToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("Minimizar al iniciar el juego") ||
+      btn.closest(".settings-row")?.textContent?.includes("Minimizar al iniciar el juego")
+    ) as HTMLElement
+
+    expect(minimizeOnGameLaunchToggle).toBeDefined()
+    await act(async () => {
+      minimizeOnGameLaunchToggle.click()
+    })
+
+    expect(mockElectronAPI.setMinimizeOnGameLaunch).toHaveBeenCalledWith(false)
+    expect(localStorage.getItem("hikat_minimize_on_game_launch")).toBe("false")
   })
 
   it("2. Auto updates toggle renders functional LauncherToggle and persists to localStorage only (without IPC)", async () => {

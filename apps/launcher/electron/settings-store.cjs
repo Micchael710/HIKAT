@@ -3,6 +3,7 @@ const path = require("path")
 
 const DEFAULT_SETTINGS = {
   minimizeToTray: true,
+  minimizeOnGameLaunch: true,
   dedicatedGpu: true,
   ramGB: 8,
 }
@@ -22,6 +23,9 @@ class SettingsStore {
         if (parsed && typeof parsed === "object") {
           if (typeof parsed.minimizeToTray === "boolean") {
             this.settings.minimizeToTray = parsed.minimizeToTray
+          }
+          if (typeof parsed.minimizeOnGameLaunch === "boolean") {
+            this.settings.minimizeOnGameLaunch = parsed.minimizeOnGameLaunch
           }
           if (typeof parsed.dedicatedGpu === "boolean") {
             this.settings.dedicatedGpu = parsed.dedicatedGpu
@@ -60,6 +64,8 @@ class SettingsStore {
   set(key, value) {
     if (key === "minimizeToTray") {
       this.settings.minimizeToTray = Boolean(value)
+    } else if (key === "minimizeOnGameLaunch") {
+      this.settings.minimizeOnGameLaunch = Boolean(value)
     } else if (key === "dedicatedGpu") {
       this.settings.dedicatedGpu = Boolean(value)
     } else if (key === "ramGB") {

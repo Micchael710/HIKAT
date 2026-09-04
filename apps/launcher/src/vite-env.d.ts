@@ -85,6 +85,9 @@ interface ElectronAPI {
   setStartWithSystem?: (enabled: boolean) => Promise<boolean> | void
   getMinimizeToTray?: () => Promise<boolean>
   setMinimizeToTray?: (enabled: boolean) => Promise<boolean> | void
+  getMinimizeOnGameLaunch?: () => Promise<boolean>
+  setMinimizeOnGameLaunch?: (enabled: boolean) => Promise<boolean> | void
+  getDedicatedGpu?: () => Promise<boolean>
   setDedicatedGpu?: (enabled: boolean) => Promise<boolean> | void
   setRamAllocation?: (ramGB: number) => void
   openExternal?: (url: string) => void

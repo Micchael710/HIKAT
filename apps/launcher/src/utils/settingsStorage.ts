@@ -3,6 +3,7 @@ export const STORAGE_KEYS = {
   LANGUAGE: "hikat_language",
   START_WITH_SYSTEM: "hikat_start_with_system",
   MINIMIZE_TO_TRAY: "hikat_minimize_to_tray",
+  MINIMIZE_ON_GAME_LAUNCH: "hikat_minimize_on_game_launch",
   AUTO_UPDATES: "hikat_auto_updates",
   RAM_GB: "hikat_ram_gb",
   DEDICATED_GPU: "hikat_dedicated_gpu",

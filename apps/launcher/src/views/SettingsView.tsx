@@ -36,6 +36,9 @@ export default function SettingsView({
   const [minimizeToTray, setMinimizeToTrayState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, true),
   )
+  const [minimizeOnGameLaunch, setMinimizeOnGameLaunchState] = useState<boolean>(() =>
+    getStoredBoolean(STORAGE_KEYS.MINIMIZE_ON_GAME_LAUNCH, true),
+  )
   const [autoUpdates, setAutoUpdatesState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true),
   )
@@ -101,6 +104,18 @@ export default function SettingsView({
         .catch(() => {})
     }
 
+    if (window.electronAPI?.getMinimizeOnGameLaunch) {
+      window.electronAPI
+        .getMinimizeOnGameLaunch()
+        .then((realState: any) => {
+          if (isMounted && typeof realState === "boolean") {
+            setMinimizeOnGameLaunchState(realState)
+            setStoredBoolean(STORAGE_KEYS.MINIMIZE_ON_GAME_LAUNCH, realState)
+          }
+        })
+        .catch(() => {})
+    }
+
     if (window.electronAPI?.getDedicatedGpu) {
       window.electronAPI
         .getDedicatedGpu()
@@ -148,6 +163,14 @@ export default function SettingsView({
     setStoredBoolean(STORAGE_KEYS.MINIMIZE_TO_TRAY, v)
     try {
       await window.electronAPI?.setMinimizeToTray?.(v)
+    } catch (_) {}
+  }
+
+  const setMinimizeOnGameLaunch = async (v: boolean) => {
+    setMinimizeOnGameLaunchState(v)
+    setStoredBoolean(STORAGE_KEYS.MINIMIZE_ON_GAME_LAUNCH, v)
+    try {
+      await window.electronAPI?.setMinimizeOnGameLaunch?.(v)
     } catch (_) {}
   }
 
@@ -767,6 +790,40 @@ export default function SettingsView({
                       notifySaved()
                     }}
                     label={t("settings.minimizeToTrayTitle")}
+                  />
+                </div>
+
+                {/* Minimizar al iniciar el juego */}
+                <div className="settings-row">
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 17,
+                        fontWeight: 700,
+                        color: isDark ? "white" : "#111822",
+                        marginBottom: 2,
+                      }}
+                    >
+                      {t("settings.minimizeOnGameLaunchTitle")}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 14.5,
+                        color: isDark ? "#8899aa" : "#556677",
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {t("settings.minimizeOnGameLaunchDesc")}
+                    </div>
+                  </div>
+                  <LauncherToggle
+                    checked={minimizeOnGameLaunch}
+                    theme={theme}
+                    onChange={(v) => {
+                      setMinimizeOnGameLaunch(v)
+                      notifySaved()
+                    }}
+                    label={t("settings.minimizeOnGameLaunchTitle")}
                   />
                 </div>
               </div>

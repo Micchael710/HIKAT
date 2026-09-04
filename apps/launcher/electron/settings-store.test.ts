@@ -22,6 +22,7 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
   it("1. SettingsStore initializes with safe defaults if file does not exist", () => {
     const store = new SettingsStore(tempDir)
     expect(store.get("minimizeToTray")).toBe(true)
+    expect(store.get("minimizeOnGameLaunch")).toBe(true)
     expect(store.get("dedicatedGpu")).toBe(true)
     expect(store.get("ramGB")).toBe(8)
   })
@@ -35,6 +36,18 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
     // Simulate process restart
     const store2 = new SettingsStore(tempDir)
     expect(store2.get("minimizeToTray")).toBe(false)
+  })
+
+  it("2b. minimizeOnGameLaunch false persists across restarts", () => {
+    const store1 = new SettingsStore(tempDir)
+    expect(store1.get("minimizeOnGameLaunch")).toBe(true)
+    store1.set("minimizeOnGameLaunch", false)
+
+    expect(store1.get("minimizeOnGameLaunch")).toBe(false)
+
+    // Simulate process restart
+    const store2 = new SettingsStore(tempDir)
+    expect(store2.get("minimizeOnGameLaunch")).toBe(false)
   })
 
   it("3. dedicatedGpu false persists across restarts", () => {
@@ -54,6 +67,7 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
 
     const store = new SettingsStore(tempDir)
     expect(store.get("minimizeToTray")).toBe(true)
+    expect(store.get("minimizeOnGameLaunch")).toBe(true)
     expect(store.get("dedicatedGpu")).toBe(true)
     expect(store.get("ramGB")).toBe(8)
   })
@@ -176,6 +190,133 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
         process.env.VITEST = originalVitest
       }
     }
+  })
+
+  describe("minimizeOnGameLaunch event handler logic", () => {
+    function simulateLaunchStatusHandler({
+      status,
+      details,
+      minimizeOnGameLaunchEnabled,
+      minimizeToTrayEnabled,
+      mainWindow,
+      ensureTray,
+    }: {
+      status: string
+      details?: any
+      minimizeOnGameLaunchEnabled: boolean
+      minimizeToTrayEnabled: boolean
+      mainWindow: any
+      ensureTray: () => void
+    }) {
+      if (status === "running") {
+        if (minimizeOnGameLaunchEnabled) {
+          ensureTray()
+          if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+            mainWindow.hide()
+          }
+        }
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("game-launch-status", status, details)
+      }
+    }
+
+    it("9. running + minimizeOnGameLaunch: true calls ensureTray and hides mainWindow even if minimizeToTray is false", () => {
+      const ensureTray = vi.fn()
+      const hide = vi.fn()
+      const send = vi.fn()
+      const mainWindow = {
+        isDestroyed: () => false,
+        isVisible: () => true,
+        hide,
+        webContents: { send },
+      }
+
+      simulateLaunchStatusHandler({
+        status: "running",
+        minimizeOnGameLaunchEnabled: true,
+        minimizeToTrayEnabled: false,
+        mainWindow,
+        ensureTray,
+      })
+
+      expect(ensureTray).toHaveBeenCalledTimes(1)
+      expect(hide).toHaveBeenCalledTimes(1)
+      expect(send).toHaveBeenCalledWith("game-launch-status", "running", undefined)
+    })
+
+    it("10. running + minimizeOnGameLaunch: false does not hide mainWindow and does not call ensureTray", () => {
+      const ensureTray = vi.fn()
+      const hide = vi.fn()
+      const send = vi.fn()
+      const mainWindow = {
+        isDestroyed: () => false,
+        isVisible: () => true,
+        hide,
+        webContents: { send },
+      }
+
+      simulateLaunchStatusHandler({
+        status: "running",
+        minimizeOnGameLaunchEnabled: false,
+        minimizeToTrayEnabled: false,
+        mainWindow,
+        ensureTray,
+      })
+
+      expect(ensureTray).not.toHaveBeenCalled()
+      expect(hide).not.toHaveBeenCalled()
+      expect(send).toHaveBeenCalledWith("game-launch-status", "running", undefined)
+    })
+
+    it("11. preparing status does not hide mainWindow", () => {
+      const ensureTray = vi.fn()
+      const hide = vi.fn()
+      const send = vi.fn()
+      const mainWindow = {
+        isDestroyed: () => false,
+        isVisible: () => true,
+        hide,
+        webContents: { send },
+      }
+
+      simulateLaunchStatusHandler({
+        status: "preparing",
+        minimizeOnGameLaunchEnabled: true,
+        minimizeToTrayEnabled: true,
+        mainWindow,
+        ensureTray,
+      })
+
+      expect(ensureTray).not.toHaveBeenCalled()
+      expect(hide).not.toHaveBeenCalled()
+      expect(send).toHaveBeenCalledWith("game-launch-status", "preparing", undefined)
+    })
+
+    it("12. launch failure / idle status with error does not hide mainWindow", () => {
+      const ensureTray = vi.fn()
+      const hide = vi.fn()
+      const send = vi.fn()
+      const mainWindow = {
+        isDestroyed: () => false,
+        isVisible: () => true,
+        hide,
+        webContents: { send },
+      }
+
+      simulateLaunchStatusHandler({
+        status: "idle",
+        details: { unexpected: true, code: 1 },
+        minimizeOnGameLaunchEnabled: true,
+        minimizeToTrayEnabled: true,
+        mainWindow,
+        ensureTray,
+      })
+
+      expect(ensureTray).not.toHaveBeenCalled()
+      expect(hide).not.toHaveBeenCalled()
+      expect(send).toHaveBeenCalledWith("game-launch-status", "idle", { unexpected: true, code: 1 })
+    })
   })
 })
 

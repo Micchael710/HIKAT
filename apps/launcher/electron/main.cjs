@@ -108,6 +108,14 @@ function setupInstanceWatcher() {
 }
 
 gameLauncher.onStatusChangeCallback = (status, details) => {
+  if (status === "running") {
+    if (minimizeOnGameLaunchEnabled) {
+      ensureTray()
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+        mainWindow.hide()
+      }
+    }
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("game-launch-status", status, details)
   }
@@ -115,6 +123,7 @@ gameLauncher.onStatusChangeCallback = (status, details) => {
 let tray = null
 let isQuitRequested = false
 let minimizeToTrayEnabled = settingsStore.get("minimizeToTray")
+let minimizeOnGameLaunchEnabled = settingsStore.get("minimizeOnGameLaunch")
 let dedicatedGpuEnabled = settingsStore.get("dedicatedGpu")
 
 
@@ -1321,6 +1330,23 @@ ipcMain.on("setting-minimize-to-tray", (_event, enabled) => {
       mainWindow.show()
     }
   }
+})
+
+ipcMain.handle("get-minimize-on-game-launch", async () => {
+  return settingsStore.get("minimizeOnGameLaunch")
+})
+
+ipcMain.handle("setting-minimize-on-game-launch", async (_event, enabled) => {
+  const safeVal = Boolean(enabled)
+  settingsStore.set("minimizeOnGameLaunch", safeVal)
+  minimizeOnGameLaunchEnabled = safeVal
+  return minimizeOnGameLaunchEnabled
+})
+
+ipcMain.on("setting-minimize-on-game-launch", (_event, enabled) => {
+  const safeVal = Boolean(enabled)
+  settingsStore.set("minimizeOnGameLaunch", safeVal)
+  minimizeOnGameLaunchEnabled = safeVal
 })
 
 ipcMain.handle("get-dedicated-gpu", async () => {

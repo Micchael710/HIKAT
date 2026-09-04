@@ -174,6 +174,8 @@
     "minimizeToTrayTitle": "Minimize to tray",
     "minimizeToTrayDesc": "When closing the window, keeps the launcher minimized in the notification area.",
     "minimizeToTray": "Minimize to tray",
+    "minimizeOnGameLaunchTitle": "Minimize when game starts",
+    "minimizeOnGameLaunchDesc": "Minimizes the launcher to the system tray when the game starts.",
     "updatesConnectivity": "Updates and Connectivity",
     "autoUpdatesTitle": "Automatic updates",
     "autoUpdatesDesc": "Download patches and mod assets in the background before launching the game.",
