@@ -378,14 +378,27 @@ export default function SettingsView({
     }
   }
 
-  const loaderFormatted = formatModLoaderName(manifest?.modLoader || "NEOFORGE")
+  const hasMinecraftVersion = Boolean(manifest?.minecraftVersion)
+  const minecraftDisplay = hasMinecraftVersion
+    ? `Minecraft ${manifest!.minecraftVersion}`
+    : "—"
+
+  const hasModLoader = Boolean(manifest?.modLoader)
+  const isVanilla = hasModLoader && manifest!.modLoader.toUpperCase() === "VANILLA"
+  const loaderFormatted = hasModLoader ? formatModLoaderName(manifest!.modLoader) : ""
   const loaderVersion = manifest?.modLoaderVersion || manifest?.neoForgeVersion || ""
-  const isVanilla = (manifest?.modLoader || "NEOFORGE").toUpperCase() === "VANILLA"
-  const loaderDisplay = isVanilla
-    ? "Vanilla"
-    : loaderVersion
-      ? `${loaderFormatted} ${loaderVersion}`
-      : loaderFormatted
+  const loaderDisplay = !hasModLoader
+    ? "—"
+    : isVanilla
+      ? "Vanilla"
+      : loaderVersion
+        ? `${loaderFormatted} ${loaderVersion}`
+        : loaderFormatted
+
+  const hasModpackVersion = Boolean(manifest?.version)
+  const modpackDisplay = hasModpackVersion
+    ? `Modpack ${manifest!.version}`
+    : "—"
 
   const CONTENT_LEFT = 184
 
@@ -459,12 +472,12 @@ export default function SettingsView({
         }}
       />
 
-      {/* ── Main Settings Panel Content ── */}
+      {/* ── Main Settings Panel Content (Restored to top: 145 aligned with SkinsView) ── */}
       <div
         style={{
           position: "absolute",
           left: CONTENT_LEFT,
-          top: 72,
+          top: 145,
           right: 48,
           bottom: 24,
           display: "flex",
@@ -648,7 +661,7 @@ export default function SettingsView({
           style={{
             flex: 1,
             overflowY: "auto",
-            maxHeight: 830,
+            maxHeight: 760,
             paddingRight: 6,
             paddingBottom: 4,
           }}
@@ -1028,10 +1041,10 @@ export default function SettingsView({
                 display: "flex",
                 gap: 20,
                 animation: "tabSlideUpFade 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
-                minHeight: 560,
+                minHeight: 520,
               }}
             >
-              {/* ── Left Column: Internal Games Sidebar ── */}
+              {/* ── Left Column: Internal Games Sidebar (Begins directly with games list) ── */}
               <div
                 style={{
                   width: 220,
@@ -1041,20 +1054,6 @@ export default function SettingsView({
                   gap: 8,
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 800,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    color: isDark ? "#657788" : "#778899",
-                    marginBottom: 4,
-                    paddingLeft: 4,
-                  }}
-                >
-                  {t("settings.sidebarGames") || t("settings.tabGame")}
-                </div>
-
                 {/* Games collection */}
                 {GAMES.map((game) => {
                   const isSelected = selectedGameId === game.id
@@ -1198,7 +1197,7 @@ export default function SettingsView({
                         color: isDark ? "#94a3b8" : "#475569",
                       }}
                     >
-                      Minecraft {manifest?.minecraftVersion || "1.21.1"}
+                      {minecraftDisplay}
                     </span>
 
                     <span
@@ -1260,7 +1259,7 @@ export default function SettingsView({
                         color: isDark ? "#94a3b8" : "#475569",
                       }}
                     >
-                      Modpack {manifest?.version || "1.0.0"}
+                      {modpackDisplay}
                     </span>
                   </div>
                 </div>
@@ -1283,7 +1282,7 @@ export default function SettingsView({
                   {/* Row 1: RAM Slider */}
                   <div
                     style={{
-                      padding: "8px 0 14px",
+                      padding: "8px 0 16px",
                       borderBottom: isDark
                         ? "1px solid rgba(255, 255, 255, 0.05)"
                         : "1px solid rgba(0, 0, 0, 0.06)",
@@ -1319,65 +1318,40 @@ export default function SettingsView({
                         </div>
                       </div>
 
-                      {/* Right: [ Automático ] + [ 8 GB ] */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <button
-                          type="button"
-                          onClick={handleAutoRam}
+                      {/* Right: Only [ 8 GB ] badge */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          background: isDark ? "#0d1217" : "#f0f3f7",
+                          border: isDark
+                            ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                            : "1.5px solid rgba(0, 0, 0, 0.1)",
+                          borderRadius: 10,
+                          padding: "5px 14px",
+                        }}
+                      >
+                        <span
                           style={{
-                            padding: "5px 12px",
-                            borderRadius: 8,
-                            fontFamily: BASE_FONT,
-                            fontSize: 13,
+                            fontSize: 15.5,
+                            fontWeight: 800,
+                            color: "#3ec4c0",
+                          }}
+                        >
+                          {ramGB}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 13.5,
                             fontWeight: 700,
-                            cursor: "pointer",
-                            border: isDark
-                              ? "1px solid rgba(62, 196, 192, 0.35)"
-                              : "1px solid rgba(62, 196, 192, 0.45)",
-                            background: isDark
-                              ? "rgba(62, 196, 192, 0.12)"
-                              : "rgba(62, 196, 192, 0.12)",
-                            color: isDark ? "#3ec4c0" : "#0d9488",
-                            transition: "all 0.15s ease",
+                            color: isDark
+                              ? "rgba(255, 255, 255, 0.7)"
+                              : "#556677",
                           }}
                         >
-                          {t("settings.automaticRam")}
-                        </button>
-
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            background: isDark ? "#0d1217" : "#f0f3f7",
-                            border: isDark
-                              ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                              : "1.5px solid rgba(0, 0, 0, 0.1)",
-                            borderRadius: 10,
-                            padding: "5px 14px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 15.5,
-                              fontWeight: 800,
-                              color: "#3ec4c0",
-                            }}
-                          >
-                            {ramGB}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 13.5,
-                              fontWeight: 700,
-                              color: isDark
-                                ? "rgba(255, 255, 255, 0.7)"
-                                : "#556677",
-                            }}
-                          >
-                            GB
-                          </span>
-                        </div>
+                          GB
+                        </span>
                       </div>
                     </div>
 
@@ -1438,7 +1412,61 @@ export default function SettingsView({
                     </div>
                   </div>
 
-                  {/* Row 2: GPU de alto rendimiento */}
+                  {/* Row 2: Asignación automática */}
+                  <div
+                    className="settings-row"
+                    style={{
+                      paddingTop: 14,
+                      paddingBottom: 14,
+                      borderBottom: isDark
+                        ? "1px solid rgba(255, 255, 255, 0.05)"
+                        : "1px solid rgba(0, 0, 0, 0.06)",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 17,
+                          fontWeight: 700,
+                          color: isDark ? "white" : "#111822",
+                          marginBottom: 2,
+                        }}
+                      >
+                        {t("settings.automaticRam")}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 14.5,
+                          color: isDark ? "#8899aa" : "#556677",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {t("settings.ramDesc")}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleAutoRam}
+                      className="launcher-btn-secondary"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        height: 44,
+                        padding: "0 22px",
+                        borderRadius: 14,
+                        fontSize: 15,
+                        fontWeight: 600,
+                        fontFamily: BASE_FONT,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {t("settings.automaticRam")}
+                    </button>
+                  </div>
+
+                  {/* Row 3: GPU de alto rendimiento */}
                   <div
                     className="settings-row"
                     style={{
@@ -1569,20 +1597,19 @@ export default function SettingsView({
                       type="button"
                       onClick={handleVerify}
                       disabled={isVerifyDisabled}
+                      className="launcher-btn-secondary"
                       style={{
-                        padding: "8px 20px",
-                        borderRadius: 10,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        height: 44,
+                        padding: "0 22px",
+                        borderRadius: 14,
+                        fontSize: 15,
+                        fontWeight: 600,
                         fontFamily: BASE_FONT,
-                        fontSize: 14,
-                        fontWeight: 700,
                         cursor: isVerifyDisabled ? "not-allowed" : "pointer",
                         opacity: isVerifyDisabled ? 0.45 : 1,
-                        border: isDark
-                          ? "1.5px solid rgba(255, 255, 255, 0.14)"
-                          : "1.5px solid rgba(0, 0, 0, 0.12)",
-                        background: isDark ? "#1c2630" : "#f0f3f7",
-                        color: isDark ? "#ffffff" : "#111822",
-                        transition: "all 0.15s ease",
                       }}
                     >
                       {isVerifying
@@ -1616,20 +1643,19 @@ export default function SettingsView({
                       type="button"
                       onClick={handleUninstall}
                       disabled={isUninstallDisabled}
+                      className="launcher-btn-danger"
                       style={{
-                        padding: "8px 20px",
-                        borderRadius: 10,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        height: 44,
+                        padding: "0 22px",
+                        borderRadius: 14,
+                        fontSize: 15,
+                        fontWeight: 600,
                         fontFamily: BASE_FONT,
-                        fontSize: 14,
-                        fontWeight: 700,
                         cursor: isUninstallDisabled ? "not-allowed" : "pointer",
                         opacity: isUninstallDisabled ? 0.45 : 1,
-                        border: "1.5px solid rgba(239, 68, 68, 0.3)",
-                        background: isDark
-                          ? "rgba(239, 68, 68, 0.1)"
-                          : "rgba(239, 68, 68, 0.08)",
-                        color: "#ef4444",
-                        transition: "all 0.15s ease",
                       }}
                     >
                       {isUninstalling

@@ -135,7 +135,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(containerPt.textContent).toContain("Configurações")
   })
 
-  it("4. Switching to 'Juegos' tab renders internal games sidebar with Apparatia", async () => {
+  it("4. Switching to 'Juegos' tab renders internal games sidebar starting cleanly with Apparatia", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -152,7 +152,8 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(logoImg).toBeDefined()
   })
 
-  it("5. Right panel displays technical header chips from real manifest data (not constants)", async () => {
+  it("5. Right panel displays technical header chips from real manifest data (or '—' when missing, without fake mock fallbacks)", async () => {
+    // A. Real manifest data present
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -164,6 +165,22 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(container.textContent).toContain("Minecraft 1.21.1")
     expect(container.textContent).toContain("NeoForge 21.1.65")
     expect(container.textContent).toContain("Modpack 1.4.2")
+
+    if (unmountCurrent) unmountCurrent()
+
+    // B. Empty manifest data -> shows '—' and NOT hardcoded fallbacks
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(null)
+    const containerNoData = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const gamesTabBtnNoData = Array.from(containerNoData.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Juegos"),
+    )
+    await act(async () => {
+      gamesTabBtnNoData?.click()
+    })
+
+    expect(containerNoData.textContent).toContain("—")
+    expect(containerNoData.textContent).not.toContain("Minecraft 1.21.1")
+    expect(containerNoData.textContent).not.toContain("Modpack 1.0.0")
   })
 
   it("6. Java version card renders real version from core-state IPC, or '—' when missing", async () => {
@@ -193,7 +210,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(containerNoJava.textContent).toContain("—")
   })
 
-  it("7. RAM Automático button calculates and applies safe RAM value", async () => {
+  it("7. RAM Automático button in dedicated row uses launcher-btn-secondary and calculates safe RAM", async () => {
     // 16 GB system RAM -> calculateAutomaticRam(16) = 8 GB
     mockElectronAPI.getMemory.mockResolvedValue({ totalGb: 16 })
     mockElectronAPI.getRamAllocation.mockResolvedValue(4)
@@ -205,8 +222,8 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       gamesTabBtn?.click()
     })
 
-    const autoBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Automático"),
+    const autoBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Automático") && b.classList.contains("launcher-btn-secondary"),
     )
     expect(autoBtn).toBeDefined()
 
@@ -245,8 +262,8 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("false")
   })
 
-  it("9. Administration card: Verify is disabled when update exists, enabled when healthy idle", async () => {
-    // A. Healthy idle install -> Verify enabled
+  it("9. Administration card: Verify uses launcher-btn-secondary, disabled when update exists, enabled when healthy idle", async () => {
+    // A. Healthy idle install -> Verify enabled and has launcher-btn-secondary class
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
     const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
@@ -258,6 +275,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       b.textContent?.includes("Verificar"),
     )
     expect(verifyBtn).toBeDefined()
+    expect(verifyBtn?.classList.contains("launcher-btn-secondary")).toBe(true)
     expect(verifyBtn?.hasAttribute("disabled")).toBe(false)
 
     if (unmountCurrent) unmountCurrent()
@@ -289,7 +307,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(verifyBtnUpdate?.hasAttribute("disabled")).toBe(true)
   })
 
-  it("10. Administration card: Uninstall is enabled with idle install even if update exists", async () => {
+  it("10. Administration card: Uninstall uses launcher-btn-danger, enabled with idle install even if update exists", async () => {
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
       version: "1.5.0",
       minecraftVersion: "1.21.1",
@@ -314,6 +332,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       b.textContent?.includes("Desinstalar"),
     )
     expect(uninstallBtn).toBeDefined()
+    expect(uninstallBtn?.classList.contains("launcher-btn-danger")).toBe(true)
     expect(uninstallBtn?.hasAttribute("disabled")).toBe(false)
   })
 
