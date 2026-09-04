@@ -193,129 +193,211 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
   })
 
   describe("minimizeOnGameLaunch event handler logic", () => {
-    function simulateLaunchStatusHandler({
-      status,
-      details,
-      minimizeOnGameLaunchEnabled,
-      minimizeToTrayEnabled,
-      mainWindow,
-      ensureTray,
-    }: {
-      status: string
-      details?: any
-      minimizeOnGameLaunchEnabled: boolean
-      minimizeToTrayEnabled: boolean
-      mainWindow: any
-      ensureTray: () => void
-    }) {
-      if (status === "running") {
-        if (minimizeOnGameLaunchEnabled) {
-          ensureTray()
-          if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-            mainWindow.hide()
+    function createSimulatedMainContext({
+      minimizeOnGameLaunchEnabled = true,
+      minimizeToTrayEnabled = false,
+      isWindowVisible = true,
+    } = {}) {
+      let hiddenByGameLaunch = false
+      const ensureTray = vi.fn()
+      const destroyTray = vi.fn()
+      const hide = vi.fn(() => {
+        isWindowVisible = false
+      })
+      const show = vi.fn(() => {
+        isWindowVisible = true
+      })
+      const focus = vi.fn()
+      const send = vi.fn()
+
+      const mainWindow = {
+        isDestroyed: () => false,
+        isVisible: () => isWindowVisible,
+        hide,
+        show,
+        focus,
+        isMinimized: () => false,
+        restore: vi.fn(),
+        webContents: { send },
+      }
+
+      function focusMainWindow() {
+        hiddenByGameLaunch = false
+        if (!mainWindow.isVisible()) {
+          mainWindow.show()
+        }
+        mainWindow.focus()
+      }
+
+      function onStatusChangeCallback(status: string, details?: any) {
+        if (status === "running") {
+          if (minimizeOnGameLaunchEnabled) {
+            ensureTray()
+            if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+              mainWindow.hide()
+              hiddenByGameLaunch = true
+            }
+          }
+        } else if (status === "idle") {
+          if (hiddenByGameLaunch) {
+            hiddenByGameLaunch = false
+            focusMainWindow()
+            if (!minimizeToTrayEnabled) {
+              destroyTray()
+            }
           }
         }
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("game-launch-status", status, details)
+        }
       }
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("game-launch-status", status, details)
+
+      return {
+        getHiddenByGameLaunch: () => hiddenByGameLaunch,
+        setHiddenByGameLaunch: (v: boolean) => {
+          hiddenByGameLaunch = v
+        },
+        focusMainWindow,
+        onStatusChangeCallback,
+        ensureTray,
+        destroyTray,
+        mainWindow,
+        hide,
+        show,
+        focus,
+        send,
       }
     }
 
-    it("9. running + minimizeOnGameLaunch: true calls ensureTray and hides mainWindow even if minimizeToTray is false", () => {
-      const ensureTray = vi.fn()
-      const hide = vi.fn()
-      const send = vi.fn()
-      const mainWindow = {
-        isDestroyed: () => false,
-        isVisible: () => true,
-        hide,
-        webContents: { send },
-      }
-
-      simulateLaunchStatusHandler({
-        status: "running",
+    it("9. running + minimizeOnGameLaunch: true calls ensureTray, hides window and sets hiddenByGameLaunch = true", () => {
+      const ctx = createSimulatedMainContext({
         minimizeOnGameLaunchEnabled: true,
         minimizeToTrayEnabled: false,
-        mainWindow,
-        ensureTray,
       })
 
-      expect(ensureTray).toHaveBeenCalledTimes(1)
-      expect(hide).toHaveBeenCalledTimes(1)
-      expect(send).toHaveBeenCalledWith("game-launch-status", "running", undefined)
+      ctx.onStatusChangeCallback("running")
+
+      expect(ctx.ensureTray).toHaveBeenCalledTimes(1)
+      expect(ctx.hide).toHaveBeenCalledTimes(1)
+      expect(ctx.getHiddenByGameLaunch()).toBe(true)
+      expect(ctx.send).toHaveBeenCalledWith("game-launch-status", "running", undefined)
     })
 
-    it("10. running + minimizeOnGameLaunch: false does not hide mainWindow and does not call ensureTray", () => {
-      const ensureTray = vi.fn()
-      const hide = vi.fn()
-      const send = vi.fn()
-      const mainWindow = {
-        isDestroyed: () => false,
-        isVisible: () => true,
-        hide,
-        webContents: { send },
-      }
-
-      simulateLaunchStatusHandler({
-        status: "running",
+    it("10. running + minimizeOnGameLaunch: false does not hide mainWindow and leaves hiddenByGameLaunch = false", () => {
+      const ctx = createSimulatedMainContext({
         minimizeOnGameLaunchEnabled: false,
         minimizeToTrayEnabled: false,
-        mainWindow,
-        ensureTray,
       })
 
-      expect(ensureTray).not.toHaveBeenCalled()
-      expect(hide).not.toHaveBeenCalled()
-      expect(send).toHaveBeenCalledWith("game-launch-status", "running", undefined)
+      ctx.onStatusChangeCallback("running")
+
+      expect(ctx.ensureTray).not.toHaveBeenCalled()
+      expect(ctx.hide).not.toHaveBeenCalled()
+      expect(ctx.getHiddenByGameLaunch()).toBe(false)
+      expect(ctx.send).toHaveBeenCalledWith("game-launch-status", "running", undefined)
     })
 
     it("11. preparing status does not hide mainWindow", () => {
-      const ensureTray = vi.fn()
-      const hide = vi.fn()
-      const send = vi.fn()
-      const mainWindow = {
-        isDestroyed: () => false,
-        isVisible: () => true,
-        hide,
-        webContents: { send },
-      }
-
-      simulateLaunchStatusHandler({
-        status: "preparing",
+      const ctx = createSimulatedMainContext({
         minimizeOnGameLaunchEnabled: true,
         minimizeToTrayEnabled: true,
-        mainWindow,
-        ensureTray,
       })
 
-      expect(ensureTray).not.toHaveBeenCalled()
-      expect(hide).not.toHaveBeenCalled()
-      expect(send).toHaveBeenCalledWith("game-launch-status", "preparing", undefined)
+      ctx.onStatusChangeCallback("preparing")
+
+      expect(ctx.ensureTray).not.toHaveBeenCalled()
+      expect(ctx.hide).not.toHaveBeenCalled()
+      expect(ctx.getHiddenByGameLaunch()).toBe(false)
+      expect(ctx.send).toHaveBeenCalledWith("game-launch-status", "preparing", undefined)
     })
 
     it("12. launch failure / idle status with error does not hide mainWindow", () => {
-      const ensureTray = vi.fn()
-      const hide = vi.fn()
-      const send = vi.fn()
-      const mainWindow = {
-        isDestroyed: () => false,
-        isVisible: () => true,
-        hide,
-        webContents: { send },
-      }
-
-      simulateLaunchStatusHandler({
-        status: "idle",
-        details: { unexpected: true, code: 1 },
+      const ctx = createSimulatedMainContext({
         minimizeOnGameLaunchEnabled: true,
         minimizeToTrayEnabled: true,
-        mainWindow,
-        ensureTray,
       })
 
-      expect(ensureTray).not.toHaveBeenCalled()
-      expect(hide).not.toHaveBeenCalled()
-      expect(send).toHaveBeenCalledWith("game-launch-status", "idle", { unexpected: true, code: 1 })
+      ctx.onStatusChangeCallback("idle", { unexpected: true, code: 1 })
+
+      expect(ctx.ensureTray).not.toHaveBeenCalled()
+      expect(ctx.hide).not.toHaveBeenCalled()
+      expect(ctx.getHiddenByGameLaunch()).toBe(false)
+      expect(ctx.send).toHaveBeenCalledWith("game-launch-status", "idle", { unexpected: true, code: 1 })
+    })
+
+    it("13. idle after auto-hiding restores window, clears hiddenByGameLaunch, and destroys temporary tray when minimizeToTray = false", () => {
+      const ctx = createSimulatedMainContext({
+        minimizeOnGameLaunchEnabled: true,
+        minimizeToTrayEnabled: false,
+      })
+
+      // Game runs -> auto hides
+      ctx.onStatusChangeCallback("running")
+      expect(ctx.getHiddenByGameLaunch()).toBe(true)
+      expect(ctx.hide).toHaveBeenCalledTimes(1)
+
+      // Game closes -> idle
+      ctx.onStatusChangeCallback("idle")
+
+      expect(ctx.show).toHaveBeenCalledTimes(1)
+      expect(ctx.focus).toHaveBeenCalledTimes(1)
+      expect(ctx.getHiddenByGameLaunch()).toBe(false)
+      expect(ctx.destroyTray).toHaveBeenCalledTimes(1)
+    })
+
+    it("14. idle after auto-hiding restores window and preserves tray when minimizeToTray = true", () => {
+      const ctx = createSimulatedMainContext({
+        minimizeOnGameLaunchEnabled: true,
+        minimizeToTrayEnabled: true,
+      })
+
+      ctx.onStatusChangeCallback("running")
+      expect(ctx.getHiddenByGameLaunch()).toBe(true)
+
+      ctx.onStatusChangeCallback("idle")
+
+      expect(ctx.show).toHaveBeenCalledTimes(1)
+      expect(ctx.focus).toHaveBeenCalledTimes(1)
+      expect(ctx.getHiddenByGameLaunch()).toBe(false)
+      expect(ctx.destroyTray).not.toHaveBeenCalled()
+    })
+
+    it("15. idle without being hidden by game launch does NOT steal focus", () => {
+      const ctx = createSimulatedMainContext({
+        minimizeOnGameLaunchEnabled: true,
+        minimizeToTrayEnabled: false,
+      })
+
+      // Normal idle without running
+      ctx.onStatusChangeCallback("idle")
+
+      expect(ctx.show).not.toHaveBeenCalled()
+      expect(ctx.focus).not.toHaveBeenCalled()
+      expect(ctx.destroyTray).not.toHaveBeenCalled()
+    })
+
+    it("16. user manually reopens launcher while game is running: clears hiddenByGameLaunch so game exit does not refocus", () => {
+      const ctx = createSimulatedMainContext({
+        minimizeOnGameLaunchEnabled: true,
+        minimizeToTrayEnabled: false,
+      })
+
+      // 1. Game launches and hides launcher
+      ctx.onStatusChangeCallback("running")
+      expect(ctx.getHiddenByGameLaunch()).toBe(true)
+
+      // 2. User manually clicks tray to reopen launcher while game is running
+      ctx.focusMainWindow()
+      expect(ctx.getHiddenByGameLaunch()).toBe(false)
+      expect(ctx.show).toHaveBeenCalledTimes(1)
+
+      // 3. Game subsequently exits to idle
+      ctx.onStatusChangeCallback("idle")
+
+      // Should not trigger secondary focus or destroy tray since user took manual control
+      expect(ctx.show).toHaveBeenCalledTimes(1) // Still 1 from manual reopen
+      expect(ctx.destroyTray).not.toHaveBeenCalled()
     })
   })
 })

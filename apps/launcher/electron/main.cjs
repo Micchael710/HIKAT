@@ -107,24 +107,36 @@ function setupInstanceWatcher() {
   }
 }
 
+let tray = null
+let isQuitRequested = false
+let minimizeToTrayEnabled = settingsStore.get("minimizeToTray")
+let minimizeOnGameLaunchEnabled = settingsStore.get("minimizeOnGameLaunch")
+let dedicatedGpuEnabled = settingsStore.get("dedicatedGpu")
+let hiddenByGameLaunch = false
+
 gameLauncher.onStatusChangeCallback = (status, details) => {
   if (status === "running") {
     if (minimizeOnGameLaunchEnabled) {
       ensureTray()
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
         mainWindow.hide()
+        hiddenByGameLaunch = true
+      }
+    }
+  } else if (status === "idle") {
+    if (hiddenByGameLaunch) {
+      hiddenByGameLaunch = false
+      focusMainWindow()
+      if (!minimizeToTrayEnabled) {
+        destroyTray()
       }
     }
   }
+
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("game-launch-status", status, details)
   }
 }
-let tray = null
-let isQuitRequested = false
-let minimizeToTrayEnabled = settingsStore.get("minimizeToTray")
-let minimizeOnGameLaunchEnabled = settingsStore.get("minimizeOnGameLaunch")
-let dedicatedGpuEnabled = settingsStore.get("dedicatedGpu")
 
 
 function getLauncherIcon() {
@@ -242,6 +254,7 @@ function createSplashWindow() {
 }
 
 function focusMainWindow() {
+  hiddenByGameLaunch = false
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
     return
