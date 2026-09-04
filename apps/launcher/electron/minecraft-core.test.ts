@@ -550,10 +550,10 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(result.success).toBe(true)
     expect(mockXmcl).toHaveBeenCalledWith(
       expect.objectContaining({
-        extraExecOption: {
+        extraExecOption: expect.objectContaining({
           detached: true,
           stdio: "ignore",
-        },
+        }),
       }),
     )
     expect(mockChildProcess.unref).toHaveBeenCalledTimes(1)

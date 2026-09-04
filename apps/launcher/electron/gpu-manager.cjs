@@ -68,6 +68,113 @@ Set-ItemProperty -Path $registryPath -Name '${escapedPath}' -Value '${expectedPr
   }
 }
 
+/**
+ * Detects the dedicated GPU vendor on Windows ('nvidia' | 'amd' | null).
+ */
+function detectDedicatedGpu() {
+  if (process.platform !== "win32") {
+    return null
+  }
+
+  try {
+    const output = child_process.execSync("wmic path win32_VideoController get name", {
+      encoding: "utf8",
+      timeout: 3000,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    const gpuList = output.toLowerCase()
+
+    if (
+      gpuList.includes("nvidia") ||
+      gpuList.includes("geforce") ||
+      gpuList.includes("rtx") ||
+      gpuList.includes("gtx")
+    ) {
+      return "nvidia"
+    } else if (gpuList.includes("amd") || gpuList.includes("radeon")) {
+      return "amd"
+    }
+  } catch (_) {
+    try {
+      const psOutput = child_process.execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
+        ],
+        {
+          encoding: "utf8",
+          timeout: 3000,
+          windowsHide: true,
+          stdio: ["ignore", "pipe", "ignore"],
+        },
+      )
+      const gpuList = (psOutput || "").toLowerCase()
+      if (
+        gpuList.includes("nvidia") ||
+        gpuList.includes("geforce") ||
+        gpuList.includes("rtx") ||
+        gpuList.includes("gtx")
+      ) {
+        return "nvidia"
+      } else if (gpuList.includes("amd") || gpuList.includes("radeon")) {
+        return "amd"
+      }
+    } catch (_) {}
+  }
+
+  return null
+}
+
+/**
+ * Injects or clears process environment variables needed to bypass Windows
+ * AppCompat shims and enforce dedicated GPU rendering for Minecraft/Java OpenGL.
+ */
+function applyGpuEnvironment(enable = true) {
+  if (process.platform !== "win32") {
+    return
+  }
+
+  if (enable) {
+    const gpuVendor = detectDedicatedGpu()
+    process.env.SHIM_MCCOMPAT_DISABLE = "1"
+    process.env.MESA_GLSL_CACHE_DISABLE = "false"
+
+    if (gpuVendor === "nvidia") {
+      process.env.__GL_SHADER_DISK_CACHE = "1"
+      process.env.__GL_THREADED_OPTIMIZATION = "1"
+      process.env.CUDA_VISIBLE_DEVICES = "0"
+    } else if (gpuVendor === "amd") {
+      process.env.AMD_VULKAN_ICD = "RADV"
+    }
+  } else {
+    delete process.env.SHIM_MCCOMPAT_DISABLE
+    delete process.env.__GL_SHADER_DISK_CACHE
+    delete process.env.__GL_THREADED_OPTIMIZATION
+    delete process.env.CUDA_VISIBLE_DEVICES
+    delete process.env.AMD_VULKAN_ICD
+    delete process.env.MESA_GLSL_CACHE_DISABLE
+  }
+}
+
+/**
+ * Returns OS/display subsystem JVM flags when dedicated GPU is enabled.
+ */
+function getGpuOptimizedJvmArgs(enable = true) {
+  if (!enable || process.platform !== "win32") {
+    return []
+  }
+  return ["-Dos.name=Windows 10", "-Dos.version=10.0"]
+}
+
 module.exports = {
   setJavaGpuPreference,
+  detectDedicatedGpu,
+  applyGpuEnvironment,
+  getGpuOptimizedJvmArgs,
 }

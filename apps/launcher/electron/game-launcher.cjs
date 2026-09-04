@@ -1,8 +1,11 @@
 const path = require("path")
 const fs = require("fs")
-const { execFileSync } = require("child_process")
 const { Version, launch: xmclLaunch } = require("@xmcl/core")
-const { setJavaGpuPreference } = require("./gpu-manager.cjs")
+const {
+  setJavaGpuPreference,
+  applyGpuEnvironment,
+  getGpuOptimizedJvmArgs,
+} = require("./gpu-manager.cjs")
 const { resolveJavaRuntime, validateJavaBinary } = require("./java-runtime.cjs")
 const { checkCore } = require("./minecraft-core.cjs")
 
@@ -335,9 +338,12 @@ class GameLauncher {
         )
       }
 
-      // Apply dedicated GPU preference on Windows if enabled
-      if (process.platform === "win32" && javawPath && fs.existsSync(javawPath)) {
-        setJavaGpuPreference(javawPath, Boolean(dedicatedGpu))
+      // Apply dedicated GPU preference and environment on Windows
+      if (process.platform === "win32") {
+        if (javawPath && fs.existsSync(javawPath)) {
+          setJavaGpuPreference(javawPath, Boolean(dedicatedGpu))
+        }
+        applyGpuEnvironment(Boolean(dedicatedGpu))
       }
 
       // 3. Resolve Installed Version Profile
@@ -362,6 +368,8 @@ class GameLauncher {
         "-XX:InitiatingHeapOccupancyPercent=30",
       ]
 
+      const gpuJvmArgs = getGpuOptimizedJvmArgs(Boolean(dedicatedGpu))
+
       const launchOptions = {
         gamePath: this.instanceRoot,
         resourcePath: this.instanceRoot,
@@ -373,10 +381,11 @@ class GameLauncher {
         },
         minMemory: minMemoryMb,
         maxMemory: maxMemoryMb,
-        extraJVMArgs: [...jvmOptimizationArgs, ...customArgs],
+        extraJVMArgs: [...jvmOptimizationArgs, ...gpuJvmArgs, ...customArgs],
         extraExecOption: {
           detached: true,
           stdio: "ignore",
+          env: { ...process.env },
         },
       }
 
