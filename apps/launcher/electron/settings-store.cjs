@@ -52,8 +52,10 @@ class SettingsStore {
       const tempPath = `${this.filePath}.tmp.${Date.now()}`
       fs.writeFileSync(tempPath, data, "utf-8")
       fs.renameSync(tempPath, this.filePath)
+      return true
     } catch (err) {
       console.error("[SettingsStore] Failed to save settings atomically:", err)
+      return false
     }
   }
 
@@ -62,6 +64,8 @@ class SettingsStore {
   }
 
   set(key, value) {
+    const previousValue = this.settings[key]
+
     if (key === "minimizeToTray") {
       this.settings.minimizeToTray = Boolean(value)
     } else if (key === "minimizeOnGameLaunch") {
@@ -72,9 +76,19 @@ class SettingsStore {
       const num = Number(value)
       if (!isNaN(num) && num >= 1 && num <= 64) {
         this.settings.ramGB = Math.round(num)
+      } else {
+        return false
       }
+    } else {
+      return false
     }
-    this.save()
+
+    const saved = this.save()
+    if (!saved) {
+      this.settings[key] = previousValue
+      return false
+    }
+    return true
   }
 }
 

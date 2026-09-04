@@ -683,10 +683,11 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("false")
   })
 
-  it("22. GPU toggle reverts state and localStorage and shows error toast when IPC rejects", async () => {
+  it("22. GPU toggle reverts state and localStorage, does NOT show notice, and shows error toast when IPC rejects", async () => {
     localStorage.setItem("hikat_dedicated_gpu", "true")
     mockElectronAPI.getDedicatedGpu = vi.fn().mockResolvedValue(true)
     mockElectronAPI.setDedicatedGpu = vi.fn().mockRejectedValue(new Error("Registry access denied"))
+    mockElectronAPI.getLaunchStatus = vi.fn().mockResolvedValue({ status: "running", operationState: "IDLE" })
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -708,6 +709,8 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     // Reverted back to true
     expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("true")
     expect(container.textContent).toContain("Error al guardar cambios")
+    // Notice was NOT created
+    expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).toBeNull()
   })
 
   it("23. Changing GPU with game running shows inline pending restart notice", async () => {
@@ -828,6 +831,44 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(enLocale.settings.pendingRestartNotice).toBe("Some changes will apply after restarting the game.")
     expect(frLocale.settings.pendingRestartNotice).toBe("Certains changements s’appliqueront après le redémarrage du jeu.")
     expect(ptLocale.settings.pendingRestartNotice).toBe("Algumas alterações serão aplicadas após reiniciar o jogo.")
+  })
+
+  it("28. Pre-existing restart notice from RAM change is preserved if a subsequent GPU toggle fails", async () => {
+    mockElectronAPI.getLaunchStatus = vi.fn().mockResolvedValue({ status: "running", operationState: "IDLE" })
+    mockElectronAPI.setDedicatedGpu = vi.fn().mockRejectedValue(new Error("Disk full"))
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    // 1. Change RAM -> Notice appears
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const autoRamToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("Asignar automáticamente") ||
+      btn.closest("div")?.textContent?.includes("Asignar automáticamente"),
+    ) as HTMLElement
+
+    await act(async () => {
+      autoRamToggle.click()
+    })
+
+    expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).not.toBeNull()
+
+    // 2. Toggle GPU which fails -> Notice is NOT deleted
+    const gpuToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("GPU de alto rendimiento") ||
+      btn.closest(".settings-row")?.textContent?.includes("GPU de alto rendimiento"),
+    ) as HTMLElement
+
+    await act(async () => {
+      gpuToggle.click()
+    })
+
+    expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).not.toBeNull()
+    expect(container.textContent).toContain("Error al guardar cambios")
   })
 })
 

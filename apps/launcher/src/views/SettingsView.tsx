@@ -498,12 +498,16 @@ export default function SettingsView({
     const prev = dedicatedGPU
     setDedicatedGPUState(v)
     setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, v)
-    markPendingRestartChangeIfNeeded()
     try {
       const res = await window.electronAPI?.setDedicatedGpu?.(v)
       if (typeof res === "boolean") {
         setDedicatedGPUState(res)
         setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, res)
+        if (res !== prev) {
+          markPendingRestartChangeIfNeeded()
+        }
+      } else if (v !== prev) {
+        markPendingRestartChangeIfNeeded()
       }
     } catch (_) {
       setDedicatedGPUState(prev)

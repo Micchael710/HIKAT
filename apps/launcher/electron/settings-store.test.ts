@@ -425,6 +425,28 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
       expect(ctx.show).toHaveBeenCalledTimes(1)
       expect(ctx.destroyTray).not.toHaveBeenCalled()
     })
+
+    it("18. SettingsStore.set returns true and updates settings when save succeeds", () => {
+      const store = new SettingsStore(tempDir)
+      expect(store.get("dedicatedGpu")).toBe(true)
+
+      const setResult = store.set("dedicatedGpu", false)
+      expect(setResult).toBe(true)
+      expect(store.get("dedicatedGpu")).toBe(false)
+    })
+
+    it("19. SettingsStore.set restores previous value and returns false when save fails", () => {
+      const store = new SettingsStore(tempDir)
+      expect(store.get("dedicatedGpu")).toBe(true)
+
+      // Mock save to fail
+      vi.spyOn(store, "save").mockReturnValue(false)
+
+      const setResult = store.set("dedicatedGpu", false)
+      expect(setResult).toBe(false)
+      // Value rolled back
+      expect(store.get("dedicatedGpu")).toBe(true)
+    })
   })
 })
 

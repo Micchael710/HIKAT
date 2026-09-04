@@ -1370,15 +1370,20 @@ ipcMain.handle("get-dedicated-gpu", async () => {
 
 ipcMain.handle("setting-dedicated-gpu", async (_event, enabled) => {
   const safeVal = Boolean(enabled)
-  settingsStore.set("dedicatedGpu", safeVal)
+  const saved = settingsStore.set("dedicatedGpu", safeVal)
+  if (!saved) {
+    throw new Error("Failed to persist dedicated GPU preference")
+  }
   dedicatedGpuEnabled = safeVal
   return dedicatedGpuEnabled
 })
 
 ipcMain.on("setting-dedicated-gpu", (_event, enabled) => {
   const safeVal = Boolean(enabled)
-  settingsStore.set("dedicatedGpu", safeVal)
-  dedicatedGpuEnabled = safeVal
+  const saved = settingsStore.set("dedicatedGpu", safeVal)
+  if (saved) {
+    dedicatedGpuEnabled = safeVal
+  }
 })
 
 ipcMain.handle("get-ram-allocation", async () => {
