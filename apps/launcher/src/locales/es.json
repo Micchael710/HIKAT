@@ -32,7 +32,7 @@
   "auth": {
     "loginTab": "Iniciar Sesión",
     "registerTab": "Registrarse",
-    "loginSubtitle": "Ingresa con tu cuenta para acceder a la red de HiKAT.",
+    "loginSubtitle": "Inicia sesión para acceder a HiKAT.",
     "registerSubtitle": "Crea tu cuenta para comenzar a jugar y personalizar tu personaje.",
     "usernameLabel": "USUARIO O CORREO",
     "usernameRegisterLabel": "Nombre de usuario",
