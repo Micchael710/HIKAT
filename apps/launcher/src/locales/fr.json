@@ -71,7 +71,19 @@
     "backToLogin": "Retour à la connexion",
     "verifyEmailTitle": "Vérifiez votre e-mail",
     "verifyEmailDesc": "Nous avons envoyé un lien de vérification à votre adresse e-mail.",
-    "secureAuth": "Authentification sécurisée"
+    "emailNotVerifiedError": "Vous devez vérifier votre e-mail avant de vous connecter. Veuillez vérifier votre boîte de réception.",
+    "emailVerifiedSuccess": "E-mail vérifié avec succès. Vous pouvez maintenant vous connecter.",
+    "invalidVerificationToken": "Le lien de vérification est invalide ou a expiré.",
+    "invalidResetToken": "Le lien de réinitialisation est invalide ou a expiré.",
+    "resetPasswordTitle": "Réinitialiser le mot de passe",
+    "resetPasswordDesc": "Entrez votre nouveau mot de passe pour accéder à votre compte.",
+    "newPasswordLabel": "Nouveau mot de passe",
+    "newPasswordPlaceholder": "Minimum 8 caractères",
+    "confirmPasswordLabel": "Confirmer le mot de passe",
+    "confirmPasswordPlaceholder": "Répétez votre nouveau mot de passe",
+    "changePassword": "Changer le mot de passe",
+    "passwordsDoNotMatch": "Les mots de passe ne correspondent pas.",
+    "passwordResetSuccess": "Mot de passe mis à jour avec succès. Connectez-vous avec votre nouveau mot de passe."
   },
   "playButton": {
     "checkingUpdates": "RECHERCHE...",

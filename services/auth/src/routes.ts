@@ -819,7 +819,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       return errorResponse(AuthErrorCode.USER_ALREADY_EXISTS, "An account with this email already exists", 409)
     }
     if (errorString === AuthErrorCode.EMAIL_NOT_VERIFIED) {
-      return errorResponse(AuthErrorCode.EMAIL_NOT_VERIFIED, "Email verification is required before obtaining Game JWT", 403)
+      return errorResponse(AuthErrorCode.EMAIL_NOT_VERIFIED, "Email verification is required before signing in", 403)
     }
     if (errorString === AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED) {
       return errorResponse(AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED, "An account with this email exists. Please log in and link account explicitly.", 409)

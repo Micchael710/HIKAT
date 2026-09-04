@@ -570,4 +570,221 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).not.toContain("Autenticación segura")
     expect(container.textContent).not.toContain("Secure authentication")
   })
+
+  it("19. Deep link hikat://auth/verify-email calls verifyEmail, shows success notice and returns to login without auto-login", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+    }
+
+    const verifySpy = vi.spyOn(authService, "verifyEmail").mockResolvedValue({
+      success: true,
+      message: "Email verified successfully",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    expect(callbackTrigger).not.toBeNull()
+
+    await act(async () => {
+      callbackTrigger!("hikat://auth/verify-email?token=valid-verify-token-123")
+    })
+
+    expect(verifySpy).toHaveBeenCalledWith("valid-verify-token-123")
+    expect(container.textContent).toContain("Correo verificado correctamente. Ya puedes iniciar sesión.")
+    expect(container.textContent).toContain("Iniciar Sesión")
+    expect(onLogin).not.toHaveBeenCalled()
+  })
+
+  it("20. Deep link hikat://auth/verify-email with invalid token displays error banner", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+    }
+
+    vi.spyOn(authService, "verifyEmail").mockResolvedValue({
+      success: false,
+      error: "El token de verificación es inválido o ha expirado",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      callbackTrigger!("hikat://auth/verify-email?token=invalid-token")
+    })
+
+    expect(container.textContent).toContain("El token de verificación es inválido o ha expirado")
+    expect(onLogin).not.toHaveBeenCalled()
+  })
+
+  it("21. Deep link hikat://auth/reset-password opens reset-password mode with inputs and CTA", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+    }
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      callbackTrigger!("hikat://auth/reset-password?token=reset-token-abc")
+    })
+
+    expect(container.textContent).toContain("Restablecer contraseña")
+    expect(container.textContent).toContain("Nueva contraseña")
+    expect(container.textContent).toContain("Confirmar contraseña")
+    expect(container.textContent).toContain("Cambiar contraseña")
+  })
+
+  it("22. Reset password form validates password min length and mismatch", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+    }
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      callbackTrigger!("hikat://auth/reset-password?token=reset-token-xyz")
+    })
+
+    const passwordInputs = container.querySelectorAll("input[type='password']")
+    expect(passwordInputs.length).toBe(2)
+
+    const newPassInput = passwordInputs[0] as HTMLInputElement
+    const confirmPassInput = passwordInputs[1] as HTMLInputElement
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Cambiar contraseña"),
+    )
+
+    // 1. Min length check (< 8 chars)
+    await act(async () => {
+      changeInput(newPassInput, "short")
+      changeInput(confirmPassInput, "short")
+      submitBtn?.click()
+    })
+    expect(container.textContent).toContain("La contraseña debe tener al menos 8 caracteres.")
+
+    // 2. Mismatch check
+    await act(async () => {
+      changeInput(newPassInput, "validPassword123")
+      changeInput(confirmPassInput, "differentPassword456")
+      submitBtn?.click()
+    })
+    expect(container.textContent).toContain("Las contraseñas no coinciden.")
+  })
+
+  it("23. Reset password form submits authService.resetPassword and returns to login with notice without auto-login", async () => {
+    const onLogin = vi.fn()
+    let callbackTrigger: ((url: string) => void) | null = null
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      onOAuthCallback: vi.fn((cb) => {
+        callbackTrigger = cb
+        return () => {}
+      }),
+    }
+
+    const resetSpy = vi.spyOn(authService, "resetPassword").mockResolvedValue({
+      success: true,
+      message: "Password reset successful",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      callbackTrigger!("hikat://auth/reset-password?token=reset-token-12345")
+    })
+
+    const passwordInputs = container.querySelectorAll("input[type='password']")
+    const newPassInput = passwordInputs[0] as HTMLInputElement
+    const confirmPassInput = passwordInputs[1] as HTMLInputElement
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Cambiar contraseña"),
+    )
+
+    await act(async () => {
+      changeInput(newPassInput, "brandNewPassword123")
+      changeInput(confirmPassInput, "brandNewPassword123")
+      submitBtn?.click()
+    })
+
+    expect(resetSpy).toHaveBeenCalledWith("reset-token-12345", "brandNewPassword123")
+    expect(container.textContent).toContain("Contraseña actualizada correctamente. Inicia sesión con tu nueva contraseña.")
+    expect(container.textContent).toContain("Iniciar Sesión")
+    expect(onLogin).not.toHaveBeenCalled()
+  })
+
+  it("24. Login attempt with unverified account displays emailNotVerifiedError", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "login").mockResolvedValue({
+      success: false,
+      error: "EMAIL_NOT_VERIFIED",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    const passwordInput = container.querySelector("input[type='password']") as HTMLInputElement
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.classList.contains("launcher-btn-primary") && b.textContent?.trim() === "Iniciar Sesión",
+    )
+
+    await act(async () => {
+      changeInput(emailInput, "unverified@hikat.org")
+      changeInput(passwordInput, "password123")
+      submitBtn?.click()
+    })
+
+    expect(container.textContent).toContain("Debes verificar tu correo electrónico antes de iniciar sesión.")
+    expect(onLogin).not.toHaveBeenCalled()
+  })
 })

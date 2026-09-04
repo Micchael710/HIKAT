@@ -71,7 +71,19 @@
     "backToLogin": "Volver a iniciar sesión",
     "verifyEmailTitle": "Verifica tu correo",
     "verifyEmailDesc": "Te enviamos un enlace de verificación a tu correo electrónico.",
-    "secureAuth": "Autenticación segura"
+    "emailNotVerifiedError": "Debes verificar tu correo electrónico antes de iniciar sesión. Por favor revisa tu bandeja de entrada.",
+    "emailVerifiedSuccess": "Correo verificado correctamente. Ya puedes iniciar sesión.",
+    "invalidVerificationToken": "El enlace de verificación es inválido o ha expirado.",
+    "invalidResetToken": "El enlace de restablecimiento es inválido o ha expirado.",
+    "resetPasswordTitle": "Restablecer contraseña",
+    "resetPasswordDesc": "Ingresa tu nueva contraseña para acceder a tu cuenta.",
+    "newPasswordLabel": "Nueva contraseña",
+    "newPasswordPlaceholder": "Mínimo 8 caracteres",
+    "confirmPasswordLabel": "Confirmar contraseña",
+    "confirmPasswordPlaceholder": "Repite tu nueva contraseña",
+    "changePassword": "Cambiar contraseña",
+    "passwordsDoNotMatch": "Las contraseñas no coinciden.",
+    "passwordResetSuccess": "Contraseña actualizada correctamente. Inicia sesión con tu nueva contraseña."
   },
   "playButton": {
     "checkingUpdates": "BUSCANDO...",

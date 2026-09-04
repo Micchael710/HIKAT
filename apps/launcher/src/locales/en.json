@@ -71,7 +71,19 @@
     "backToLogin": "Back to sign in",
     "verifyEmailTitle": "Verify your email",
     "verifyEmailDesc": "We sent a verification link to your email address.",
-    "secureAuth": "Secure authentication"
+    "emailNotVerifiedError": "You must verify your email before signing in. Please check your inbox.",
+    "emailVerifiedSuccess": "Email verified successfully. You can now sign in.",
+    "invalidVerificationToken": "The verification link is invalid or has expired.",
+    "invalidResetToken": "The reset link is invalid or has expired.",
+    "resetPasswordTitle": "Reset password",
+    "resetPasswordDesc": "Enter your new password to access your account.",
+    "newPasswordLabel": "New password",
+    "newPasswordPlaceholder": "Minimum 8 characters",
+    "confirmPasswordLabel": "Confirm password",
+    "confirmPasswordPlaceholder": "Repeat your new password",
+    "changePassword": "Change password",
+    "passwordsDoNotMatch": "Passwords do not match.",
+    "passwordResetSuccess": "Password updated successfully. Sign in with your new password."
   },
   "playButton": {
     "checkingUpdates": "CHECKING...",

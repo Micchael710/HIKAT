@@ -99,7 +99,7 @@ export async function registerWithPassword(
     createdAt: now,
   })
 
-  const verificationUrl = `${authServiceUrl}/auth/verify-email?token=${rawVerificationToken}`
+  const verificationUrl = `hikat://auth/verify-email?token=${rawVerificationToken}`
   await emailService.sendVerificationEmail(
     normalizedEmail,
     rawVerificationToken,
@@ -160,6 +160,11 @@ export async function loginWithPassword(
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
+  // 3. Block login if email is not verified
+  if (credRecord.emailVerifiedAt === null) {
+    throw new Error(AuthErrorCode.EMAIL_NOT_VERIFIED)
+  }
+
   const user = {
     id: credRecord.userId,
     email: normalizedEmail,
@@ -168,7 +173,7 @@ export async function loginWithPassword(
     createdAt: credRecord.userCreatedAt,
   }
 
-  // 3. Create Session and return tokens
+  // 4. Create Session and return tokens
   return createSession(db, user, keyManager)
 }
 
@@ -262,7 +267,7 @@ export async function requestPasswordReset(
     createdAt: now,
   })
 
-  const resetUrl = `${authServiceUrl}/auth/reset-password?token=${rawResetToken}`
+  const resetUrl = `hikat://auth/reset-password?token=${rawResetToken}`
   await emailService.sendPasswordResetEmail(normalizedEmail, rawResetToken, resetUrl)
 }
 

@@ -317,6 +317,57 @@ class LauncherAuthService {
     }
   }
 
+  public async verifyEmail(token: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    const cleanToken = sanitizeInput(token, 128)
+    if (!cleanToken) {
+      return { success: false, error: "Token de verificación no proporcionado o inválido." }
+    }
+    try {
+      const res = await fetch(`${AUTH_URL}/auth/verify-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: cleanToken }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { success: false, error: data.error || data.message || "Error al verificar el correo." }
+      }
+      return { success: true, message: data.message }
+    } catch {
+      return { success: false, error: "Error de conexión al verificar el correo." }
+    }
+  }
+
+  public async resetPassword(
+    token: string,
+    newPassword: string,
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
+    const cleanToken = sanitizeInput(token, 128)
+    const cleanPass = newPassword || ""
+
+    if (!cleanToken || !cleanPass) {
+      return { success: false, error: "Token y nueva contraseña requeridos." }
+    }
+    if (cleanPass.length < 8) {
+      return { success: false, error: "La contraseña debe tener al menos 8 caracteres." }
+    }
+
+    try {
+      const res = await fetch(`${AUTH_URL}/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: cleanToken, newPassword: cleanPass }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return { success: false, error: data.error || data.message || "Error al restablecer la contraseña." }
+      }
+      return { success: true, message: data.message }
+    } catch {
+      return { success: false, error: "Error de conexión al restablecer la contraseña." }
+    }
+  }
+
   // --- OAuth PKCE Integration ---
 
   public async initiateOAuth(

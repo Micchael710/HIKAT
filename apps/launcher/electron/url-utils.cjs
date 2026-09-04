@@ -1,13 +1,13 @@
 /**
- * Validates and normalizes deep link OAuth callback URLs for HiKAT.
+ * Validates and normalizes deep link URLs for HiKAT.
  * Strictly accepts ONLY URLs with:
  *  - protocol: "hikat:"
  *  - host / hostname: "auth"
- *  - pathname: "/callback" (or "/callback/")
+ *  - pathname: "/callback", "/verify-email", or "/reset-password" (with optional trailing slashes)
  *
- * Any other scheme, hostname, or pathname prefix (e.g. callback-evil) is strictly rejected.
+ * Any other scheme, hostname, or pathname is strictly rejected.
  */
-function parseValidOAuthCallbackUrl(rawUrl) {
+function parseValidAuthDeepLinkUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== "string") return null
   try {
     const trimmed = rawUrl.trim()
@@ -23,7 +23,8 @@ function parseValidOAuthCallbackUrl(rawUrl) {
     }
 
     const cleanPath = parsed.pathname.replace(/\/+$/, "")
-    if (cleanPath !== "/callback") {
+    const ALLOWED_PATHS = new Set(["/callback", "/verify-email", "/reset-password"])
+    if (!ALLOWED_PATHS.has(cleanPath)) {
       return null
     }
 
@@ -33,4 +34,6 @@ function parseValidOAuthCallbackUrl(rawUrl) {
   }
 }
 
-module.exports = { parseValidOAuthCallbackUrl }
+const parseValidOAuthCallbackUrl = parseValidAuthDeepLinkUrl
+
+module.exports = { parseValidAuthDeepLinkUrl, parseValidOAuthCallbackUrl }

@@ -101,5 +101,22 @@ describe("Electron OAuth Deep Link URL Validation Suite (Shard 8F)", () => {
     // Strict guarantee: pending buffer is NOT left with old callback
     expect(pendingDeepLinkUrl).toBeNull()
   })
+
+  it("9. Accepts valid email verification and password reset deep link URLs", () => {
+    const verifyUrl = "hikat://auth/verify-email?token=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    expect(parseValidOAuthCallbackUrl(verifyUrl)).toBe(verifyUrl)
+
+    const resetUrl = "hikat://auth/reset-password?token=fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+    expect(parseValidOAuthCallbackUrl(resetUrl)).toBe(resetUrl)
+
+    const withTrailingSlash = "hikat://auth/verify-email/?token=test12345"
+    expect(parseValidOAuthCallbackUrl(withTrailingSlash)).toBe(withTrailingSlash)
+  })
+
+  it("10. Rejects unauthorized subpaths like verify-email-fake or reset-admin", () => {
+    expect(parseValidOAuthCallbackUrl("hikat://auth/verify-email-fake?token=123")).toBeNull()
+    expect(parseValidOAuthCallbackUrl("hikat://auth/reset-password-evil?token=123")).toBeNull()
+    expect(parseValidOAuthCallbackUrl("hikat://auth/admin?token=123")).toBeNull()
+  })
 })
 

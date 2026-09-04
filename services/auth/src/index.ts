@@ -4,7 +4,7 @@
 
 import { createDatabase, Database } from "@hikat/database"
 import { initializeKeyManager, JwtKeyManager } from "./crypto/jwt"
-import { MockEmailService, EmailService } from "./services/email"
+import { MockEmailService, ResendEmailService, EmailService } from "./services/email"
 import { handleRequest } from "./routes"
 import { handleOptionsRequest, getCorsHeaders } from "./cors"
 
@@ -20,12 +20,22 @@ export interface Env {
   AUTH_JWT_PUBLIC_KEY_PEM?: string
   AUTH_JWT_KID?: string
   DB?: D1Database
+  RESEND_API_KEY?: string
+  EMAIL_FROM?: string
 }
 
 let keyManagerCache: JwtKeyManager | null = null
 const defaultEmailService: EmailService = new MockEmailService()
 
-export { createDatabase, type Database, MockEmailService, type EmailService, handleOptionsRequest, getCorsHeaders }
+export {
+  createDatabase,
+  type Database,
+  MockEmailService,
+  ResendEmailService,
+  type EmailService,
+  handleOptionsRequest,
+  getCorsHeaders,
+}
 
 export default {
   async fetch(
@@ -43,12 +53,19 @@ export default {
       keyManagerCache = await initializeKeyManager(env)
     }
 
+    const emailService: EmailService = env.RESEND_API_KEY
+      ? new ResendEmailService(
+          env.RESEND_API_KEY,
+          env.EMAIL_FROM || "HiKAT <noreply@mail.hikat.org>",
+        )
+      : defaultEmailService
+
     return handleRequest({
       request,
       env,
       db,
       keyManager: keyManagerCache,
-      emailService: defaultEmailService,
+      emailService,
     })
   },
 }

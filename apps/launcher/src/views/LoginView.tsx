@@ -15,7 +15,7 @@ interface LoginViewProps {
   theme?: ThemeMode
 }
 
-type AuthMode = "auth" | "forgot-password" | "verify-email"
+type AuthMode = "auth" | "forgot-password" | "verify-email" | "reset-password"
 
 export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
   const { t } = useTranslation()
@@ -28,6 +28,10 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
   const [registeredEmail, setRegisteredEmail] = useState("")
   const [forgotSuccess, setForgotSuccess] = useState(false)
   const [isSendingReset, setIsSendingReset] = useState(false)
+  const [resetToken, setResetToken] = useState<string | null>(null)
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [isResettingPassword, setIsResettingPassword] = useState(false)
   const [keepSession, setKeepSession] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successNotice, setSuccessNotice] = useState<string | null>(null)
@@ -40,71 +44,111 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
     keepSession: boolean
   } | null>(null)
 
-  const processOAuthCallbackUrl = async (rawUrl: string) => {
+  const processDeepLinkUrl = async (rawUrl: string) => {
     try {
       const urlObj = new URL(rawUrl)
       if (urlObj.protocol !== "hikat:") return
       const host = urlObj.hostname || urlObj.host
       if (host !== "auth") return
       const cleanPath = urlObj.pathname.replace(/\/+$/, "")
-      if (cleanPath !== "/callback") return
 
-      const code = urlObj.searchParams.get("code")
-      const state = urlObj.searchParams.get("state")
-      const error = urlObj.searchParams.get("error")
+      if (cleanPath === "/callback") {
+        const code = urlObj.searchParams.get("code")
+        const state = urlObj.searchParams.get("state")
+        const error = urlObj.searchParams.get("error")
 
-      if (error) {
-        if (error === "EMAIL_CONFLICT_LINK_REQUIRED") {
-          setErrorMessage(t("auth.emailConflictError"))
-        } else {
-          setErrorMessage(t("auth.externalAuthError"))
+        if (error) {
+          if (error === "EMAIL_CONFLICT_LINK_REQUIRED") {
+            setErrorMessage(t("auth.emailConflictError"))
+          } else {
+            setErrorMessage(t("auth.externalAuthError"))
+          }
+          setIsEnteringWorld(false)
+          return
         }
-        setIsEnteringWorld(false)
+
+        if (!code || !state) {
+          return
+        }
+
+        const pendingVerifier =
+          pendingOAuthRef.current?.codeVerifier ||
+          (typeof sessionStorage !== "undefined"
+            ? sessionStorage.getItem("hikat_launcher_oauth_verifier") || undefined
+            : undefined)
+        const expectedState =
+          pendingOAuthRef.current?.state ||
+          (typeof sessionStorage !== "undefined"
+            ? sessionStorage.getItem("hikat_launcher_oauth_state") || undefined
+            : undefined)
+        const pendingKeepSession = pendingOAuthRef.current?.keepSession
+
+        setIsEnteringWorld(true)
+        const user = await authService.handleOAuthCallback({
+          code,
+          codeVerifier: pendingVerifier,
+          state,
+          expectedState,
+          keepSession: pendingKeepSession,
+        })
+
+        pendingOAuthRef.current = null
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.removeItem("hikat_launcher_oauth_verifier")
+          sessionStorage.removeItem("hikat_launcher_oauth_state")
+          sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
+        }
+
+        setTimeout(() => {
+          onLogin(user.displayName || user.username)
+        }, 350)
         return
       }
 
-      if (!code || !state) {
+      if (cleanPath === "/verify-email") {
+        const token = urlObj.searchParams.get("token")
+        if (!token) {
+          setErrorMessage(t("auth.invalidVerificationToken"))
+          setMode("auth")
+          setTab("login")
+          return
+        }
+        setErrorMessage(null)
+        setSuccessNotice(null)
+        const res = await authService.verifyEmail(token)
+        setMode("auth")
+        setTab("login")
+        if (res.success) {
+          setSuccessNotice(t("auth.emailVerifiedSuccess"))
+        } else {
+          setErrorMessage(res.error || t("auth.invalidVerificationToken"))
+        }
         return
       }
 
-      const pendingVerifier =
-        pendingOAuthRef.current?.codeVerifier ||
-        (typeof sessionStorage !== "undefined"
-          ? sessionStorage.getItem("hikat_launcher_oauth_verifier") || undefined
-          : undefined)
-      const expectedState =
-        pendingOAuthRef.current?.state ||
-        (typeof sessionStorage !== "undefined"
-          ? sessionStorage.getItem("hikat_launcher_oauth_state") || undefined
-          : undefined)
-      const pendingKeepSession = pendingOAuthRef.current?.keepSession
-
-      setIsEnteringWorld(true)
-      const user = await authService.handleOAuthCallback({
-        code,
-        codeVerifier: pendingVerifier,
-        state,
-        expectedState,
-        keepSession: pendingKeepSession,
-      })
-
-      pendingOAuthRef.current = null
-      if (typeof sessionStorage !== "undefined") {
-        sessionStorage.removeItem("hikat_launcher_oauth_verifier")
-        sessionStorage.removeItem("hikat_launcher_oauth_state")
-        sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
+      if (cleanPath === "/reset-password") {
+        const token = urlObj.searchParams.get("token")
+        if (!token) {
+          setErrorMessage(t("auth.invalidResetToken"))
+          setMode("auth")
+          setTab("login")
+          return
+        }
+        setResetToken(token)
+        setNewPassword("")
+        setConfirmPassword("")
+        setMode("reset-password")
+        setErrorMessage(null)
+        setSuccessNotice(null)
+        return
       }
-
-      setTimeout(() => {
-        onLogin(user.displayName || user.username)
-      }, 350)
     } catch (err: any) {
       setIsEnteringWorld(false)
       setErrorMessage(err.message || t("auth.genericAuthError"))
     }
   }
 
-  // Listen for OAuth deep link callbacks via Electron IPC & check cold-start pending callbacks
+  // Listen for deep link callbacks via Electron IPC & check cold-start pending callbacks
   useEffect(() => {
     if (typeof window === "undefined" || !window.electronAPI) {
       return
@@ -115,7 +159,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         .getPendingOAuthCallback()
         ?.then((pendingUrl: string | null) => {
           if (pendingUrl) {
-            processOAuthCallbackUrl(pendingUrl)
+            processDeepLinkUrl(pendingUrl)
           }
         })
         .catch(() => {})
@@ -123,7 +167,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
 
     if (window.electronAPI.onOAuthCallback) {
       const removeListener = window.electronAPI.onOAuthCallback((rawUrl: string) => {
-        processOAuthCallbackUrl(rawUrl)
+        processDeepLinkUrl(rawUrl)
       })
 
       return () => {
@@ -182,7 +226,15 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
         }, 350)
       } else {
         setIsEnteringWorld(false)
-        setErrorMessage(res.error || t("auth.loginFailed"))
+        if (
+          res.error === "EMAIL_NOT_VERIFIED" ||
+          res.error?.includes("EMAIL_NOT_VERIFIED") ||
+          res.error?.toLowerCase().includes("email verification is required")
+        ) {
+          setErrorMessage(t("auth.emailNotVerifiedError"))
+        } else {
+          setErrorMessage(res.error || t("auth.loginFailed"))
+        }
       }
     } else {
       const cleanUsername = sanitizeUsername(username)
@@ -258,6 +310,49 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
     } catch {
       setIsSendingReset(false)
       setErrorMessage(t("profile.emailError"))
+    }
+  }
+
+  const handleResetPasswordSubmit = async () => {
+    if (isResettingPassword) return
+    const p1 = newPassword.trim()
+    const p2 = confirmPassword.trim()
+
+    if (!p1 || !p2) {
+      setErrorMessage(t("auth.missingFields"))
+      return
+    }
+    if (p1.length < 8) {
+      setErrorMessage(t("auth.passwordMinLength"))
+      return
+    }
+    if (p1 !== p2) {
+      setErrorMessage(t("auth.passwordsDoNotMatch"))
+      return
+    }
+    if (!resetToken) {
+      setErrorMessage(t("auth.invalidResetToken"))
+      return
+    }
+
+    setErrorMessage(null)
+    setIsResettingPassword(true)
+    try {
+      const res = await authService.resetPassword(resetToken, p1)
+      setIsResettingPassword(false)
+      if (res.success) {
+        setResetToken(null)
+        setNewPassword("")
+        setConfirmPassword("")
+        setMode("auth")
+        setTab("login")
+        setSuccessNotice(t("auth.passwordResetSuccess"))
+      } else {
+        setErrorMessage(res.error || t("auth.invalidResetToken"))
+      }
+    } catch (err: any) {
+      setIsResettingPassword(false)
+      setErrorMessage(err.message || t("auth.invalidResetToken"))
     }
   }
 
@@ -414,6 +509,19 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               {t("auth.verifyEmailTitle")}
             </div>
           )}
+          {mode === "reset-password" && (
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: isDark ? "#ffffff" : "#0f172a",
+                fontFamily: BASE_FONT,
+                marginBottom: 4,
+              }}
+            >
+              {t("auth.resetPasswordTitle")}
+            </div>
+          )}
           <div
             style={{
               fontSize: 14,
@@ -426,9 +534,11 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               ? t("auth.forgotPasswordSubtitle")
               : mode === "verify-email"
                 ? t("auth.verifyEmailDesc")
-                : tab === "login"
-                  ? t("auth.loginSubtitle")
-                  : t("auth.registerSubtitle")}
+                : mode === "reset-password"
+                  ? t("auth.resetPasswordDesc")
+                  : tab === "login"
+                    ? t("auth.loginSubtitle")
+                    : t("auth.registerSubtitle")}
           </div>
         </div>
 
@@ -713,6 +823,120 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             >
               {t("auth.backToLogin")}
             </button>
+          </div>
+        )}
+
+        {/* MODE: RESET PASSWORD */}
+        {mode === "reset-password" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, animation: "fadeIn 0.2s ease" }}>
+            <div>
+              <label style={labelCss}>{t("auth.newPasswordLabel")}</label>
+              <input
+                type="password"
+                value={newPassword}
+                placeholder={t("auth.newPasswordPlaceholder")}
+                onChange={(e) => setNewPassword(e.target.value)}
+                onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
+                className="launcher-input"
+                style={inputCss}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleResetPasswordSubmit()
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={labelCss}>{t("auth.confirmPasswordLabel")}</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                placeholder={t("auth.confirmPasswordPlaceholder")}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
+                className="launcher-input"
+                style={inputCss}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleResetPasswordSubmit()
+                }}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleResetPasswordSubmit}
+              disabled={isResettingPassword}
+              className="launcher-btn-primary"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                width: "100%",
+                height: 44,
+                borderRadius: 12,
+                fontSize: 15,
+                fontWeight: 700,
+                fontFamily: BASE_FONT,
+                letterSpacing: "0.02em",
+                cursor: isResettingPassword ? "default" : "pointer",
+                marginTop: 4,
+                opacity: isResettingPassword ? 0.75 : 1,
+              }}
+            >
+              {isResettingPassword ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg
+                    width={16}
+                    height={16}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                    style={{ animation: "spin 0.75s linear infinite" }}
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  <span>{t("common.loading")}</span>
+                </div>
+              ) : (
+                <span>{t("auth.changePassword")}</span>
+              )}
+            </button>
+
+            <div style={{ textAlign: "center", marginTop: 4 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("auth")
+                  setTab("login")
+                  setResetToken(null)
+                  setErrorMessage(null)
+                  setSuccessNotice(null)
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "6px 12px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: isDark ? "#8899aa" : "#556677",
+                  fontFamily: BASE_FONT,
+                  cursor: "pointer",
+                  transition: "color 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = isDark ? "#ffffff" : "#111822"
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = isDark ? "#8899aa" : "#556677"
+                }}
+              >
+                {t("auth.backToLogin")}
+              </button>
+            </div>
           </div>
         )}
 
