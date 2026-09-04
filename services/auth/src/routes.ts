@@ -21,6 +21,7 @@ import { EmailService } from "./services/email"
 import { checkRateLimit } from "./services/rateLimiter"
 import {
   registerWithPassword,
+  resendVerificationEmail,
   loginWithPassword,
   verifyEmailToken,
   requestPasswordReset,
@@ -286,6 +287,118 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
       const res = await verifyEmailToken(db, token)
       return jsonResponse({ success: res.success, message: "Email verified successfully" })
+    }
+
+    // 5b. Email Action Intermediate Web Page (Deep Link Bridge)
+    if (pathname === "/auth/email-action" && method === "GET") {
+      const type = url.searchParams.get("type")
+      const token = url.searchParams.get("token")
+
+      if (
+        !type ||
+        (type !== "verify-email" && type !== "reset-password") ||
+        !token ||
+        token.length > 128 ||
+        !/^[A-Za-z0-9_-]+$/.test(token)
+      ) {
+        return new Response("Invalid or missing action parameters", {
+          status: 400,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+          },
+        })
+      }
+
+      const deepLink = `hikat://auth/${type}?token=${encodeURIComponent(token)}`
+      const actionTitle = type === "verify-email" ? "Verificar cuenta" : "Restablecer contraseña"
+
+      const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${actionTitle} - HiKAT</title>
+  <meta http-equiv="refresh" content="0;url=${deepLink}">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #090d12;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 440px;
+      background: linear-gradient(180deg, #141d26 0%, #0d1218 100%);
+      border: 1.5px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 36px 30px;
+      text-align: center;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+    }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 12px; color: #ffffff; }
+    p { font-size: 14px; color: #8899aa; line-height: 1.5; margin-bottom: 24px; }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      background: linear-gradient(135deg, #1c384e 0%, #295372 100%);
+      border: 2px solid rgba(130, 200, 230, 0.5);
+      border-radius: 12px;
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 700;
+      text-decoration: none;
+      padding: 13px 20px;
+      cursor: pointer;
+      line-height: 1.2;
+    }
+  </style>
+  <script>
+    window.location.href = "${deepLink}";
+  </script>
+</head>
+<body>
+  <div class="card">
+    <h1>${actionTitle}</h1>
+    <p>Abriendo HiKAT Launcher para completar tu solicitud...</p>
+    <a href="${deepLink}" class="btn">Abrir HiKAT Launcher</a>
+  </div>
+</body>
+</html>`
+
+      return new Response(html, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+        },
+      })
+    }
+
+    // 5c. Resend Email Verification
+    if (pathname === "/auth/resend-verification" && method === "POST") {
+      const rate = await checkRateLimit(db, `resend-verify:${clientIp}`, 5, 900, { isProduction })
+      if (!rate.allowed) {
+        return errorResponse(AuthErrorCode.RATE_LIMITED, "Too many verification requests", 429)
+      }
+
+      const body = (await request.json().catch(() => ({}))) as { email?: string }
+      if (body.email) {
+        await resendVerificationEmail(db, body.email, emailService, authServiceUrl)
+      }
+
+      return jsonResponse({
+        success: true,
+        message: "If the account requires verification, a verification email has been sent.",
+      })
     }
 
     // 6. Forgot Password

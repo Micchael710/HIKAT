@@ -895,4 +895,99 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).toContain("Confirmar contraseña")
     expect(container.textContent).toContain("Cambiar contraseña")
   })
+
+  it("28. Reenviar correo button calls requestEmailVerification and displays success feedback notice", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "register").mockResolvedValue({
+      success: true,
+      emailVerificationRequired: true,
+    } as any)
+    const resendSpy = vi.spyOn(authService, "requestEmailVerification").mockResolvedValue({
+      success: true,
+      message: "If the account requires verification, a verification email has been sent.",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    // Switch to Register tab
+    const tabs = container.querySelectorAll("button")
+    const registerTab = Array.from(tabs).find((b) => b.textContent?.trim() === "Registrarse")
+    await act(async () => {
+      registerTab?.click()
+    })
+
+    const usernameInput = container.querySelector("input[placeholder='Tu nombre de jugador']") as HTMLInputElement
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    const passwordInput = container.querySelector("input[type='password']") as HTMLInputElement
+
+    await act(async () => {
+      changeInput(usernameInput, "ResendPlayer")
+      changeInput(emailInput, "resend@hikat.org")
+      changeInput(passwordInput, "password123")
+    })
+
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Crear Cuenta",
+    )
+
+    await act(async () => {
+      submitBtn?.click()
+    })
+
+    // Now in verify-email mode
+    expect(container.textContent).toContain("resend@hikat.org")
+    const resendBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Reenviar correo"),
+    )
+    expect(resendBtn).toBeDefined()
+
+    await act(async () => {
+      resendBtn?.click()
+    })
+
+    expect(resendSpy).toHaveBeenCalledWith("resend@hikat.org")
+    expect(container.textContent).toContain("Correo de verificación reenviado. Revisa tu bandeja de entrada.")
+  })
+
+  it("29. Login with EMAIL_NOT_VERIFIED transitions to verify-email mode with pre-populated email and resend button", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "login").mockResolvedValue({
+      success: false,
+      error: "EMAIL_NOT_VERIFIED",
+    } as any)
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    const passwordInput = container.querySelector("input[type='password']") as HTMLInputElement
+
+    await act(async () => {
+      changeInput(emailInput, "unverified@hikat.org")
+      changeInput(passwordInput, "password123")
+    })
+
+    const loginBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Iniciar Sesión" && b.classList.contains("launcher-btn-primary"),
+    )
+
+    await act(async () => {
+      loginBtn?.click()
+    })
+
+    // Should transition to verify-email mode
+    expect(container.textContent).toContain("unverified@hikat.org")
+    expect(container.textContent).toContain("Debes verificar tu correo electrónico antes de iniciar sesión.")
+    const resendBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Reenviar correo"),
+    )
+    expect(resendBtn).toBeDefined()
+  })
 })

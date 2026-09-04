@@ -44,6 +44,7 @@ import {
 } from "./services/session"
 import {
   registerWithPassword,
+  resendVerificationEmail,
   loginWithPassword,
   verifyEmailToken,
   requestPasswordReset,
@@ -145,7 +146,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(sentEmail).toBeDefined()
       expect(sentEmail?.type).toBe("verification")
       expect(sentEmail?.token).toBeDefined()
-      expect(sentEmail?.url).toBe(`hikat://auth/verify-email?token=${sentEmail?.token}`)
+      expect(sentEmail?.url).toBe(`https://auth.hikat.org/auth/email-action?type=verify-email&token=${sentEmail?.token}`)
     })
 
     it("rejects duplicate email registration", async () => {
@@ -294,7 +295,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       const resetEmail = emailService.getLastEmailFor("reset@hikat.org")
       expect(resetEmail).toBeDefined()
       expect(resetEmail?.type).toBe("password_reset")
-      expect(resetEmail?.url).toBe(`hikat://auth/reset-password?token=${resetEmail?.token}`)
+      expect(resetEmail?.url).toBe(`https://auth.hikat.org/auth/email-action?type=reset-password&token=${resetEmail?.token}`)
 
       // Reset password
       const resetRes = await resetPasswordWithToken(db, resetEmail!.token, "newBrandPassword123!")
@@ -1416,7 +1417,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       const sent = emailService.getLastEmailFor("forgot-canon@hikat.org")
       expect(sent).toBeDefined()
       expect(sent?.type).toBe("password_reset")
-      expect(sent?.url).toBe(`hikat://auth/reset-password?token=${sent?.token}`)
+      expect(sent?.url).toBe(`http://localhost:8788/auth/email-action?type=reset-password&token=${sent?.token}`)
     })
 
     it("OAuth PKCE /oauth/token exchange returns full AuthUser contract with email and integrates end-to-end with AuthClientCore", async () => {
@@ -1526,27 +1527,27 @@ describe("HiKAT Authentication System (Shard 02)", () => {
   // 13. RESEND EMAIL SERVICE & TEMPLATES
   // ==========================================
   describe("ResendEmailService & Email Delivery", () => {
-    it("formats and renders clean HiKAT HTML email template", () => {
+    it("formats and renders clean HiKAT HTML email template copying Launcher Login card and logo CID", () => {
       const html = renderHikatEmail({
         title: "Test Email Title",
         description: "Test Description",
         buttonText: "Click Me",
-        buttonUrl: "hikat://auth/verify-email?token=xyz",
+        buttonUrl: "https://auth.hikat.org/auth/email-action?type=verify-email&token=xyz",
         expiryNotice: "Expires in 24 hours.",
       })
 
-      expect(html).toContain("HiKAT")
+      expect(html).toContain("cid:hikat-logo")
       expect(html).toContain("Test Email Title")
       expect(html).toContain("Test Description")
       expect(html).toContain("Click Me")
-      expect(html).toContain("hikat://auth/verify-email?token=xyz")
+      expect(html).toContain("https://auth.hikat.org/auth/email-action?type=verify-email&token=xyz")
       expect(html).toContain("target=\"_blank\"")
       expect(html).toContain("rel=\"noopener noreferrer\"")
-      expect(html).toContain("Si el botón no funciona, abre este enlace:")
+      expect(html).not.toContain("Si el botón no funciona")
       expect(html).toContain("Expires in 24 hours.")
     })
 
-    it("ResendEmailService dispatches correct HTTP request without leaking API key", async () => {
+    it("ResendEmailService dispatches correct HTTP request with inline logo attachment without leaking API key", async () => {
       let interceptedUrl = ""
       let interceptedAuth = ""
       let interceptedBody: any = null
@@ -1560,14 +1561,21 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       const resend = new ResendEmailService("re_secret_key_12345", "HiKAT <noreply@mail.hikat.org>", mockFetch)
 
-      await resend.sendVerificationEmail("tester@hikat.org", "token123", "hikat://auth/verify-email?token=token123")
+      await resend.sendVerificationEmail("tester@hikat.org", "token123", "https://auth.hikat.org/auth/email-action?type=verify-email&token=token123")
 
       expect(interceptedUrl).toBe("https://api.resend.com/emails")
       expect(interceptedAuth).toBe("Bearer re_secret_key_12345")
       expect(interceptedBody.from).toBe("HiKAT <noreply@mail.hikat.org>")
       expect(interceptedBody.to).toEqual(["tester@hikat.org"])
       expect(interceptedBody.subject).toBe("Verifica tu cuenta de HiKAT")
-      expect(interceptedBody.html).toContain("hikat://auth/verify-email?token=token123")
+      expect(interceptedBody.html).toContain("https://auth.hikat.org/auth/email-action?type=verify-email&token=token123")
+      expect(interceptedBody.html).toContain("cid:hikat-logo")
+      expect(interceptedBody.attachments).toBeDefined()
+      expect(interceptedBody.attachments).toHaveLength(1)
+      expect(interceptedBody.attachments[0].filename).toBe("logo-white.png")
+      expect(interceptedBody.attachments[0].content_id).toBe("hikat-logo")
+      expect(typeof interceptedBody.attachments[0].content).toBe("string")
+      expect(interceptedBody.attachments[0].content.length).toBeGreaterThan(100)
     })
 
     it("ResendEmailService handles error response safely without leaking API key in error message", async () => {
@@ -1578,7 +1586,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       const resend = new ResendEmailService("re_super_secret_key_xyz", "HiKAT <noreply@mail.hikat.org>", mockFetchError)
 
       try {
-        await resend.sendPasswordResetEmail("user@hikat.org", "resetToken", "hikat://auth/reset-password?token=resetToken")
+        await resend.sendPasswordResetEmail("user@hikat.org", "resetToken", "https://auth.hikat.org/auth/email-action?type=reset-password&token=resetToken")
         expect.fail("Should have thrown error")
       } catch (err: any) {
         expect(err.message).toContain("Resend email delivery failed: Domain not verified")
@@ -1837,6 +1845,149 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect((resetRejected[0] as PromiseRejectedResult).reason.message).toBe(
         AuthErrorCode.TOKEN_REUSE_DETECTED,
       )
+    })
+
+    it("GET /auth/email-action validates token format and serves clean HTML deep link bridge with no-store headers", async () => {
+      // 1. Valid verify-email action
+      const reqVerify = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=validToken123", {
+        method: "GET",
+      })
+      const resVerify = await handleRequest({
+        request: reqVerify,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resVerify.status).toBe(200)
+      expect(resVerify.headers.get("Content-Type")).toContain("text/html")
+      expect(resVerify.headers.get("Cache-Control")).toBe("no-store")
+      expect(resVerify.headers.get("Referrer-Policy")).toBe("no-referrer")
+      const htmlVerify = await resVerify.text()
+      expect(htmlVerify).toContain("hikat://auth/verify-email?token=validToken123")
+      expect(htmlVerify).toContain("Abrir HiKAT Launcher")
+
+      // 2. Valid reset-password action
+      const reqReset = new Request("http://localhost:8788/auth/email-action?type=reset-password&token=resetToken456", {
+        method: "GET",
+      })
+      const resReset = await handleRequest({
+        request: reqReset,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resReset.status).toBe(200)
+      const htmlReset = await resReset.text()
+      expect(htmlReset).toContain("hikat://auth/reset-password?token=resetToken456")
+
+      // 3. Invalid type rejected with 400
+      const reqInvalid = new Request("http://localhost:8788/auth/email-action?type=malicious&token=tok123", {
+        method: "GET",
+      })
+      const resInvalid = await handleRequest({
+        request: reqInvalid,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resInvalid.status).toBe(400)
+    })
+
+    it("POST /auth/resend-verification generates new token, invalidates prior tokens on success, and conserves valid tokens on email failure", async () => {
+      // Register user without verifying
+      await registerWithPassword(
+        db,
+        { email: "resend-test@hikat.org", password: "Password123!" },
+        emailService,
+      )
+      const firstToken = emailService.getLastEmailFor("resend-test@hikat.org")!.token
+
+      // 1. Resend verification email succeeds
+      const reqResend = new Request("http://localhost:8788/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "resend-test@hikat.org" }),
+      })
+      const resResend = await handleRequest({
+        request: reqResend,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resResend.status).toBe(200)
+      const data = (await resResend.json()) as any
+      expect(data.success).toBe(true)
+
+      const secondToken = emailService.getLastEmailFor("resend-test@hikat.org")!.token
+      expect(secondToken).not.toBe(firstToken)
+
+      // First token was invalidated on successful resend
+      await expect(verifyEmailToken(db, firstToken)).rejects.toThrow(AuthErrorCode.TOKEN_REUSE_DETECTED)
+
+      // Second token succeeds
+      const verifyRes = await verifyEmailToken(db, secondToken)
+      expect(verifyRes.success).toBe(true)
+
+      // 2. Resending for already verified user returns generic success without creating tokens
+      emailService.clear()
+      const reqAlreadyVerified = new Request("http://localhost:8788/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "resend-test@hikat.org" }),
+      })
+      const resAlreadyVerified = await handleRequest({
+        request: reqAlreadyVerified,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resAlreadyVerified.status).toBe(200)
+      expect(emailService.getSentEmails()).toHaveLength(0)
+    })
+
+    it("resend verification and password reset preserve prior valid tokens if email delivery fails", async () => {
+      // 1. Verification token preservation
+      await registerWithPassword(
+        db,
+        { email: "preserve-verify@hikat.org", password: "Password123!" },
+        emailService,
+      )
+      const validVerifyToken = emailService.getLastEmailFor("preserve-verify@hikat.org")!.token
+
+      const failingEmailService: typeof emailService = {
+        sendVerificationEmail: async () => {
+          throw new Error("Resend 500: Delivery failure")
+        },
+        sendPasswordResetEmail: async () => {
+          throw new Error("Resend 500: Delivery failure")
+        },
+        getLastEmailFor: () => undefined,
+        clear: () => {},
+        getSentEmails: () => [],
+      } as any
+
+      // Attempt resend with failing email service
+      await resendVerificationEmail(db, "preserve-verify@hikat.org", failingEmailService)
+
+      // Prior valid verification token is STILL valid and can be verified
+      const verifySuccess = await verifyEmailToken(db, validVerifyToken)
+      expect(verifySuccess.success).toBe(true)
+
+      // 2. Password reset token preservation
+      await requestPasswordReset(db, "preserve-verify@hikat.org", emailService)
+      const validResetToken = emailService.getLastEmailFor("preserve-verify@hikat.org")!.token
+
+      // Attempt second reset with failing email service
+      await requestPasswordReset(db, "preserve-verify@hikat.org", failingEmailService)
+
+      // Prior valid reset token is STILL valid and can reset password
+      const resetSuccess = await resetPasswordWithToken(db, validResetToken, "BrandNewPassword999!")
+      expect(resetSuccess.success).toBe(true)
     })
   })
 })

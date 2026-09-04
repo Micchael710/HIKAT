@@ -39,6 +39,7 @@ export default function LoginView({
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [isResettingPassword, setIsResettingPassword] = useState(false)
+  const [isResendingVerification, setIsResendingVerification] = useState(false)
   const [keepSession, setKeepSession] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successNotice, setSuccessNotice] = useState<string | null>(null)
@@ -236,6 +237,8 @@ export default function LoginView({
           res.error?.includes("EMAIL_NOT_VERIFIED") ||
           res.error?.toLowerCase().includes("email verification is required")
         ) {
+          setRegisteredEmail(cleanEmail)
+          setMode("verify-email")
           setErrorMessage(t("auth.emailNotVerifiedError"))
         } else {
           setErrorMessage(res.error || t("auth.loginFailed"))
@@ -359,6 +362,26 @@ export default function LoginView({
     } catch {
       setIsResettingPassword(false)
       setErrorMessage(t("auth.invalidResetToken"))
+    }
+  }
+
+  const handleResendVerification = async () => {
+    const targetEmail = registeredEmail || email
+    if (!targetEmail || isResendingVerification) return
+    setErrorMessage(null)
+    setSuccessNotice(null)
+    setIsResendingVerification(true)
+    try {
+      const res = await authService.requestEmailVerification(targetEmail)
+      setIsResendingVerification(false)
+      if (res.success) {
+        setSuccessNotice(t("auth.verificationResentSuccess"))
+      } else {
+        setErrorMessage(res.error || t("auth.genericAuthError"))
+      }
+    } catch {
+      setIsResendingVerification(false)
+      setErrorMessage(t("auth.genericAuthError"))
     }
   }
 
@@ -806,6 +829,29 @@ export default function LoginView({
 
             <button
               type="button"
+              onClick={handleResendVerification}
+              disabled={isResendingVerification}
+              className="launcher-btn-secondary"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                width: "100%",
+                height: 42,
+                borderRadius: 12,
+                fontSize: 14.5,
+                fontWeight: 600,
+                fontFamily: BASE_FONT,
+                cursor: isResendingVerification ? "default" : "pointer",
+                opacity: isResendingVerification ? 0.75 : 1,
+              }}
+            >
+              {isResendingVerification ? t("auth.resendingVerification") : t("auth.resendVerification")}
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 setMode("auth")
                 setTab("login")
@@ -824,7 +870,7 @@ export default function LoginView({
                 fontWeight: 700,
                 fontFamily: BASE_FONT,
                 cursor: "pointer",
-                marginTop: 4,
+                marginTop: 2,
               }}
             >
               {t("auth.backToLogin")}

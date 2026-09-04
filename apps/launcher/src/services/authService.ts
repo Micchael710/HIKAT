@@ -317,6 +317,24 @@ class LauncherAuthService {
     }
   }
 
+  public async requestEmailVerification(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    const cleanEmail = sanitizeEmail(email)
+    if (!cleanEmail) {
+      return { success: false, error: "Correo electrónico no proporcionado." }
+    }
+    try {
+      const res = await fetch(`${AUTH_URL}/auth/resend-verification`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail }),
+      })
+      const data = await res.json().catch(() => ({}))
+      return { success: res.ok, message: data.message, error: data.error }
+    } catch {
+      return { success: false, error: "Error al solicitar reenvío de verificación." }
+    }
+  }
+
   public async verifyEmail(token: string): Promise<{ success: boolean; message?: string; error?: string }> {
     const rawToken = typeof token === "string" ? token.trim() : ""
     if (!rawToken || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken)) {

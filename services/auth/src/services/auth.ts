@@ -2,7 +2,7 @@
  * HiKAT Core Authentication Service
  */
 
-import { eq, and, sql, isNull } from "drizzle-orm"
+import { eq, and, ne, sql, isNull } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   AppRole,
@@ -99,7 +99,7 @@ export async function registerWithPassword(
     createdAt: now,
   })
 
-  const verificationUrl = `hikat://auth/verify-email?token=${rawVerificationToken}`
+  const verificationUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=verify-email&token=${rawVerificationToken}`
   try {
     await emailService.sendVerificationEmail(
       normalizedEmail,
@@ -131,6 +131,86 @@ export async function registerWithPassword(
 }
 
 /**
+ * Resend Email Verification Token & Email
+ */
+export async function resendVerificationEmail(
+  db: Database,
+  email: string,
+  emailService: EmailService,
+  authServiceUrl: string = "https://auth.hikat.org",
+): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+    return
+  }
+
+  const cred = await db
+    .select()
+    .from(schema.passwordCredentials)
+    .where(eq(schema.passwordCredentials.email, normalizedEmail))
+    .get()
+
+  // Prevent user enumeration: silently return if user doesn't exist or is already verified
+  if (!cred || cred.emailVerifiedAt !== null) {
+    return
+  }
+
+  const rawVerificationToken = generateSecureToken(32)
+  const tokenHash = await hashToken(rawVerificationToken)
+  const expiresAt = new Date(
+    Date.now() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60 * 1000,
+  ).toISOString()
+  const newTokenId = crypto.randomUUID()
+  const now = new Date().toISOString()
+
+  await db.insert(schema.emailVerificationTokens).values({
+    id: newTokenId,
+    userId: cred.userId,
+    tokenHash,
+    expiresAt,
+    createdAt: now,
+  })
+
+  const verificationUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=verify-email&token=${rawVerificationToken}`
+  try {
+    await emailService.sendVerificationEmail(
+      normalizedEmail,
+      rawVerificationToken,
+      verificationUrl,
+    )
+  } catch (emailErr) {
+    console.error("[Auth] Failed to send verification email during resend:", emailErr)
+    // Delete ONLY the newly created token, preserving any prior valid tokens
+    try {
+      await db
+        .delete(schema.emailVerificationTokens)
+        .where(eq(schema.emailVerificationTokens.id, newTokenId))
+        .run()
+    } catch (cleanupErr) {
+      console.error("[Auth] Failed to delete failed verification token:", cleanupErr)
+    }
+    return
+  }
+
+  // On successful send, invalidate previous unconsumed verification tokens for this user
+  try {
+    await db
+      .update(schema.emailVerificationTokens)
+      .set({ usedAt: now })
+      .where(
+        and(
+          eq(schema.emailVerificationTokens.userId, cred.userId),
+          isNull(schema.emailVerificationTokens.usedAt),
+          ne(schema.emailVerificationTokens.id, newTokenId),
+        ),
+      )
+      .run()
+  } catch (cleanupErr) {
+    console.error("[Auth] Failed to clean up prior verification tokens:", cleanupErr)
+  }
+}
+
+/**
  * Login with Email + Password
  */
 export async function loginWithPassword(
@@ -146,19 +226,22 @@ export async function loginWithPassword(
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
-  // 1. Fetch credentials joined with user
+  // 1. Fetch user + password credentials in a single indexed query
   const credRecord = await db
     .select({
-      credId: schema.passwordCredentials.id,
-      userId: schema.passwordCredentials.userId,
+      id: schema.users.id,
+      role: schema.users.role,
+      displayName: schema.users.displayName,
+      createdAt: schema.users.createdAt,
       passwordHash: schema.passwordCredentials.passwordHash,
       emailVerifiedAt: schema.passwordCredentials.emailVerifiedAt,
-      userRole: schema.users.role,
-      userDisplayName: schema.users.displayName,
-      userCreatedAt: schema.users.createdAt,
+      credEmail: schema.passwordCredentials.email,
     })
-    .from(schema.passwordCredentials)
-    .innerJoin(schema.users, eq(schema.passwordCredentials.userId, schema.users.id))
+    .from(schema.users)
+    .innerJoin(
+      schema.passwordCredentials,
+      eq(schema.users.id, schema.passwordCredentials.userId),
+    )
     .where(eq(schema.passwordCredentials.email, normalizedEmail))
     .get()
 
@@ -166,36 +249,38 @@ export async function loginWithPassword(
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
-  // 2. Verify password in constant time
+  // 2. Verify password with timing-safe comparison
   const isValid = await verifyPassword(params.password, credRecord.passwordHash)
   if (!isValid) {
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
   // 3. Block login if email is not verified
-  if (credRecord.emailVerifiedAt === null) {
+  if (!credRecord.emailVerifiedAt) {
     throw new Error(AuthErrorCode.EMAIL_NOT_VERIFIED)
   }
 
-  const user = {
-    id: credRecord.userId,
-    email: normalizedEmail,
-    role: credRecord.userRole as AppRole,
-    displayName: credRecord.userDisplayName,
-    createdAt: credRecord.userCreatedAt,
-  }
-
-  // 4. Create Session and return tokens
-  return createSession(db, user, keyManager)
+  // 4. Create session and issue tokens
+  return createSession(
+    db,
+    {
+      id: credRecord.id,
+      email: credRecord.credEmail,
+      role: credRecord.role as AppRole,
+      displayName: credRecord.displayName,
+      createdAt: credRecord.createdAt,
+    },
+    keyManager,
+  )
 }
 
 /**
- * Verify Email using token
+ * Verify Email using Token
  */
 export async function verifyEmailToken(
   db: Database,
   rawToken: string,
-): Promise<{ success: boolean; userId: string }> {
+): Promise<{ success: boolean }> {
   if (!rawToken || typeof rawToken !== "string" || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken)) {
     throw new Error(AuthErrorCode.INVALID_TOKEN)
   }
@@ -242,11 +327,14 @@ export async function verifyEmailToken(
   // 2. Mark password credentials as verified
   await db
     .update(schema.passwordCredentials)
-    .set({ emailVerifiedAt: nowIso, updatedAt: nowIso })
+    .set({
+      emailVerifiedAt: nowIso,
+      updatedAt: nowIso,
+    })
     .where(eq(schema.passwordCredentials.userId, tokenRecord.userId))
     .run()
 
-  return { success: true, userId: tokenRecord.userId }
+  return { success: true }
 }
 
 /**
@@ -275,39 +363,54 @@ export async function requestPasswordReset(
   }
 
   const now = new Date().toISOString()
-
-  // Invalidate previous reset tokens for this user
-  await db
-    .update(schema.passwordResetTokens)
-    .set({ usedAt: now })
-    .where(
-      and(
-        eq(schema.passwordResetTokens.userId, cred.userId),
-        isNull(schema.passwordResetTokens.usedAt),
-      ),
-    )
-    .run()
-
   const rawResetToken = generateSecureToken(32)
   const tokenHash = await hashToken(rawResetToken)
   const expiresAt = new Date(
     Date.now() + PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000,
   ).toISOString()
+  const newTokenId = crypto.randomUUID()
 
   await db.insert(schema.passwordResetTokens).values({
-    id: crypto.randomUUID(),
+    id: newTokenId,
     userId: cred.userId,
     tokenHash,
     expiresAt,
     createdAt: now,
   })
 
-  const resetUrl = `hikat://auth/reset-password?token=${rawResetToken}`
+  const resetUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=reset-password&token=${rawResetToken}`
   try {
     await emailService.sendPasswordResetEmail(normalizedEmail, rawResetToken, resetUrl)
   } catch (err) {
     // Log failure server-side only to prevent user enumeration and avoid leaking Resend errors to client
     console.error("[Auth] Failed to send password reset email:", err)
+    // Delete ONLY the newly created token, preserving any prior valid tokens
+    try {
+      await db
+        .delete(schema.passwordResetTokens)
+        .where(eq(schema.passwordResetTokens.id, newTokenId))
+        .run()
+    } catch (cleanupErr) {
+      console.error("[Auth] Failed to cleanup failed reset token:", cleanupErr)
+    }
+    return
+  }
+
+  // On successful send, invalidate previous unused reset tokens for this user
+  try {
+    await db
+      .update(schema.passwordResetTokens)
+      .set({ usedAt: now })
+      .where(
+        and(
+          eq(schema.passwordResetTokens.userId, cred.userId),
+          isNull(schema.passwordResetTokens.usedAt),
+          ne(schema.passwordResetTokens.id, newTokenId),
+        ),
+      )
+      .run()
+  } catch (cleanupErr) {
+    console.error("[Auth] Failed to invalidate prior password reset tokens:", cleanupErr)
   }
 }
 
