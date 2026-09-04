@@ -187,7 +187,7 @@
     "performanceHardware": "Desempenho",
     "ramTitle": "Memória RAM",
     "ramDesc": "Quantidade de memória dedicada atribuída ao cliente do jogo.",
-    "automaticRam": "Automático",
+    "automaticRam": "Atribuir automaticamente",
     "ramMemory": "Memória RAM",
     "ramMemoryDesc": "Quantidade de memória dedicada atribuída ao cliente do jogo.",
     "gpuTitle": "GPU de alto desempenho",

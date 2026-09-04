@@ -187,7 +187,7 @@
     "performanceHardware": "Performance",
     "ramTitle": "Memory RAM",
     "ramDesc": "Amount of dedicated memory allocated to the game client.",
-    "automaticRam": "Automatic",
+    "automaticRam": "Assign automatically",
     "ramMemory": "Memory RAM",
     "ramMemoryDesc": "Amount of dedicated memory allocated to the game client.",
     "gpuTitle": "High-performance GPU",

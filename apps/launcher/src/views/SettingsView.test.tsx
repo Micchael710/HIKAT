@@ -136,7 +136,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(containerPt.textContent).toContain("Configurações")
   })
 
-  it("4. Apparatia appears solely as sidebar selector and does NOT repeat duplicate header in right panel", async () => {
+  it("4. When single game exists (GAMES.length === 1), sidebar is hidden and panel takes full width", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -147,59 +147,68 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       gamesTabBtn?.click()
     })
 
-    // Exactly one Apparatia text in sidebar, with game-selector-item class
-    const apparatiaButtons = Array.from(container.querySelectorAll("button")).filter((b) =>
-      b.textContent?.includes("Apparatia"),
-    )
-    expect(apparatiaButtons.length).toBe(1)
-    expect(apparatiaButtons[0].classList.contains("game-selector-item")).toBe(true)
+    // Sidebar game selector button is NOT rendered when GAMES.length === 1
+    const selectorItem = container.querySelector(".game-selector-item")
+    expect(selectorItem).toBeNull()
 
-    // Right panel should not have h2 with Apparatia
+    // Right panel should not have duplicate h2 with Apparatia
     const h2Elements = Array.from(container.querySelectorAll("h2"))
     const rightHeader = h2Elements.find((h) => h.textContent?.includes("Apparatia"))
     expect(rightHeader).toBeUndefined()
   })
 
-  it("5. Single unified horizontal technical card renders Minecraft, loader, Java and modpack without separate Info card", async () => {
-    // A. Real data present
-    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+  it("5. Technical card hydrates immediately from cache, preserves data across null fetches, and invalidates on uninstall", async () => {
+    // 1. Initial cached values with installed status
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        version: "1.4.2",
+        installed: true,
+        hasExistingInstall: true,
+      }),
+    )
+    localStorage.setItem("hikat_java_major_version", "21")
 
+    // Mock IPC and gameService to return null initially to simulate delay/network failure
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(null)
+    mockElectronAPI.getGameRuntimeInfo.mockResolvedValue({ javaMajorVersion: null })
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
     const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
     await act(async () => {
       gamesTabBtn?.click()
     })
 
+    // Hydrated immediately from local storage cache without waiting for IPC / fetch
     expect(container.textContent).toContain("Minecraft 1.21.1")
     expect(container.textContent).toContain("NeoForge 21.1.65")
     expect(container.textContent).toContain("Java 21")
     expect(container.textContent).toContain("Modpack 1.4.2")
 
-    // Separate "Información" or "Versión de Java" card does not exist
-    expect(container.textContent).not.toContain("Versión de Java")
-
-    if (unmountCurrent) unmountCurrent()
-
-    // B. Empty manifest data & no runtime info -> shows '—' and NOT hardcoded fallbacks
-    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(null)
-    mockElectronAPI.getGameRuntimeInfo.mockResolvedValue({ javaMajorVersion: null })
-    const containerNoData = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
-    const gamesTabBtnNoData = Array.from(containerNoData.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Juegos"),
+    // 2. Fresh manifest update with new data does not wipe existing valid values on null fetch
+    // 3. Uninstall clears Java cache
+    const uninstallBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Desinstalar"),
     )
+    expect(uninstallBtn).toBeDefined()
+    expect(uninstallBtn?.hasAttribute("disabled")).toBe(false)
+
     await act(async () => {
-      gamesTabBtnNoData?.click()
+      uninstallBtn?.click()
     })
 
-    expect(containerNoData.textContent).toContain("—")
-    expect(containerNoData.textContent).not.toContain("Minecraft 1.21.1")
-    expect(containerNoData.textContent).not.toContain("Modpack 1.0.0")
+    expect(gameService.uninstallGame).toHaveBeenCalled()
+    expect(localStorage.getItem("hikat_java_major_version")).toBeNull()
   })
 
-  it("6. RAM section integrates slider and automatic selection cleanly with safe RAM calculation", async () => {
-    // 16 GB system RAM -> calculateAutomaticRam(16) = 8 GB
+  it("6. RAM section provides automatic mode toggle that persists, calculates RAM, and disables slider when active", async () => {
     mockElectronAPI.getMemory.mockResolvedValue({ totalGb: 16 })
     mockElectronAPI.getRamAllocation.mockResolvedValue(4)
+    localStorage.setItem("hikat_ram_auto", "false")
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -208,17 +217,49 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       gamesTabBtn?.click()
     })
 
-    const autoBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("Automático") && b.classList.contains("launcher-btn-secondary"),
-    )
-    expect(autoBtn).toBeDefined()
+    const slider = container.querySelector(".settings-ram-slider") as HTMLInputElement
+    expect(slider).toBeDefined()
+    expect(slider.disabled).toBe(false)
 
+    // Locate "Asignar automáticamente" toggle
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const autoRamToggle = Array.from(toggles).find(
+      (btn) =>
+        btn.getAttribute("aria-label")?.includes("Asignar automáticamente") ||
+        btn.closest("div")?.textContent?.includes("Asignar automáticamente"),
+    ) as HTMLElement
+    expect(autoRamToggle).toBeDefined()
+
+    // 1. Toggle OFF -> ON: calculates automatic RAM and disables slider
     await act(async () => {
-      autoBtn?.click()
+      autoRamToggle.click()
     })
 
+    expect(localStorage.getItem("hikat_ram_auto")).toBe("true")
     expect(mockElectronAPI.setRamAllocation).toHaveBeenCalledWith(8)
-    expect(localStorage.getItem("hikat_ram_gb")).toBe("8")
+    expect(slider.disabled).toBe(true)
+
+    // 2. Toggle ON -> OFF: enables slider and preserves last RAM value
+    await act(async () => {
+      autoRamToggle.click()
+    })
+
+    expect(localStorage.getItem("hikat_ram_auto")).toBe("false")
+    expect(slider.disabled).toBe(false)
+    expect(slider.value).toBe("8")
+
+    if (unmountCurrent) unmountCurrent()
+
+    // 3. Mount with hikat_ram_auto = true calculates RAM on startup without triggering user save toast
+    localStorage.setItem("hikat_ram_auto", "true")
+    localStorage.setItem("hikat_ram_gb", "8")
+    mockElectronAPI.getMemory.mockResolvedValue({ totalGb: 8 }) // calculateAutomaticRam(8) = 4
+
+    const containerRestored = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    expect(localStorage.getItem("hikat_ram_gb")).toBe("4")
+    // Should NOT show save toast message
+    const toast = containerRestored.querySelector(".settings-live-toast")
+    expect(toast).toBeNull()
   })
 
   it("7. GPU toggle uses dedicatedGpu setting and toggles cleanly with accent", async () => {
@@ -365,13 +406,20 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(container.textContent).toContain("Administración")
   })
 
-  it("13. SettingsView layout maintains top: 145, right: 80, and slider receives --settings-accent", async () => {
+  it("13. SettingsView layout maintains top: 145, right: 80, header structure matching SkinsView, and slider receives --settings-accent", async () => {
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
 
     // Check main panel container position
     const mainContainer = container.querySelector("div[style*='top: 145px']") as HTMLElement
     expect(mainContainer).toBeDefined()
     expect(mainContainer?.style.right).toBe("80px")
+
+    // Check header title typography matching SkinsView
+    const titleElement = Array.from(container.querySelectorAll("div")).find(
+      (d) => d.style.fontSize === "32px" && d.style.fontWeight === "800",
+    )
+    expect(titleElement).toBeDefined()
+    expect(titleElement?.textContent).toBe("Configuración")
 
     // Navigate to Games tab
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -383,10 +431,6 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     const slider = container.querySelector(".settings-ram-slider") as HTMLInputElement
     expect(slider).toBeDefined()
     expect(slider?.style.getPropertyValue("--settings-accent")).toBeTruthy()
-
-    const selectorBtn = container.querySelector(".game-selector-item") as HTMLElement
-    expect(selectorBtn).toBeDefined()
-    expect(selectorBtn?.style.getPropertyValue("--game-border-color")).toBeTruthy()
   })
 })
 

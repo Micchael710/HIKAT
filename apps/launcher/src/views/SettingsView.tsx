@@ -84,14 +84,44 @@ export default function SettingsView({
     return getStoredNumber(STORAGE_KEYS.RAM_GB, defaultVal)
   })
 
+  const [ramAuto, setRamAutoState] = useState<boolean>(() =>
+    getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false),
+  )
+
   const [dedicatedGPU, setDedicatedGPUState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
   )
 
-  // Game & Runtime Info State
+  // Game & Runtime Info State (Hydrated from local cache to prevent flickering)
   const [selectedGameId, setSelectedGameId] = useState<string>("apparatia")
-  const [manifest, setManifest] = useState<GameManifest | null>(null)
-  const [runtimeInfo, setRuntimeInfo] = useState<{ javaMajorVersion: number | null } | null>(null)
+  const [manifest, setManifest] = useState<GameManifest | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem("hikat_game_manifest")
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (parsed && typeof parsed === "object") {
+            return parsed
+          }
+        }
+      } catch (_) {}
+    }
+    return null
+  })
+  const [runtimeInfo, setRuntimeInfo] = useState<{ javaMajorVersion: number | null } | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cachedJava = localStorage.getItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
+        if (cachedJava !== null) {
+          const parsedNum = parseInt(cachedJava, 10)
+          if (!isNaN(parsedNum) && parsedNum > 0) {
+            return { javaMajorVersion: parsedNum }
+          }
+        }
+      } catch (_) {}
+    }
+    return null
+  })
   const [launchStatus, setLaunchStatus] = useState<string>("idle")
   const [operationState, setOperationState] = useState<string>("IDLE")
   const [isVerifying, setIsVerifying] = useState<boolean>(false)
@@ -100,6 +130,7 @@ export default function SettingsView({
   // Extract dynamic accent color from selected game logo
   const selectedGame = GAMES.find((g) => g.id === selectedGameId) || GAMES[0]
   const gameAccent = useDynamicAccent(selectedGame?.logo, "#3ec4c0")
+  const showGameSidebar = GAMES.length > 1
 
   // Sync settings with Electron process and OS on mount
   useEffect(() => {
@@ -111,6 +142,13 @@ export default function SettingsView({
         .then((info: any) => {
           if (isMounted && info?.totalGb) {
             setSystemTotalRAM(info.totalGb)
+            const isAuto = getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false)
+            if (isAuto) {
+              const autoRam = calculateAutomaticRam(info.totalGb)
+              setRamGBState(autoRam)
+              setStoredNumber(STORAGE_KEYS.RAM_GB, autoRam)
+              window.electronAPI?.setRamAllocation?.(autoRam)
+            }
           }
         })
         .catch(() => {})
@@ -168,7 +206,8 @@ export default function SettingsView({
       window.electronAPI
         .getRamAllocation()
         .then((realRam: any) => {
-          if (isMounted && typeof realRam === "number" && realRam >= 1) {
+          const isAuto = getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false)
+          if (isMounted && typeof realRam === "number" && realRam >= 1 && !isAuto) {
             setRamGBState(realRam)
             setStoredNumber(STORAGE_KEYS.RAM_GB, realRam)
           }
@@ -191,8 +230,11 @@ export default function SettingsView({
       window.electronAPI
         .getGameRuntimeInfo()
         .then((info: any) => {
-          if (isMounted && info) {
+          if (isMounted && info && typeof info.javaMajorVersion === "number" && info.javaMajorVersion > 0) {
             setRuntimeInfo(info)
+            try {
+              localStorage.setItem(STORAGE_KEYS.JAVA_MAJOR_VERSION, String(info.javaMajorVersion))
+            } catch (_) {}
           }
         })
         .catch(() => {})
@@ -302,10 +344,18 @@ export default function SettingsView({
     }, 2800)
   }
 
-  const handleAutoRam = () => {
-    const autoRam = calculateAutomaticRam(systemTotalRAM)
-    setRamGB(autoRam)
+  const handleToggleAutoRam = (v: boolean) => {
+    setRamAutoState(v)
+    setStoredBoolean(STORAGE_KEYS.RAM_AUTO, v)
+    if (v) {
+      const autoRam = calculateAutomaticRam(systemTotalRAM)
+      setRamGB(autoRam)
+    }
     notifySaved()
+  }
+
+  const handleAutoRam = () => {
+    handleToggleAutoRam(true)
   }
 
   const isInstalled = Boolean(
@@ -348,7 +398,12 @@ export default function SettingsView({
       if (fresh) setManifest(fresh)
       if (window.electronAPI?.getGameRuntimeInfo) {
         const runtime = await window.electronAPI.getGameRuntimeInfo().catch(() => null)
-        if (runtime) setRuntimeInfo(runtime)
+        if (runtime && typeof runtime.javaMajorVersion === "number" && runtime.javaMajorVersion > 0) {
+          setRuntimeInfo(runtime)
+          try {
+            localStorage.setItem(STORAGE_KEYS.JAVA_MAJOR_VERSION, String(runtime.javaMajorVersion))
+          } catch (_) {}
+        }
       }
       if (res?.success && fresh?.installed && !fresh?.hasUpdate) {
         gameService.setGameInstalled(true)
@@ -372,6 +427,9 @@ export default function SettingsView({
         const fresh = await gameService.checkGameManifest()
         setManifest(fresh)
         setRuntimeInfo({ javaMajorVersion: null })
+        try {
+          localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
+        } catch (_) {}
         notifySaved(t("playButton.uninstallSuccess") || "Juego desinstalado", "success")
       } else {
         notifySaved(t("playButton.uninstallError") || "Error al desinstalar", "error")
@@ -500,45 +558,39 @@ export default function SettingsView({
           zIndex: 10,
         }}
       >
-        {/* ── Top Header Row (Metrics aligned with SkinsView) ── */}
+        {/* ── Top Header Row (Identical structure and metrics with SkinsView) ── */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            marginBottom: 22,
+            position: "relative",
             minHeight: 48,
-            marginBottom: 4,
           }}
         >
+          {/* Title & Subtitle */}
           <div>
-            <h1
+            <div
               style={{
-                fontFamily: BASE_FONT,
                 fontSize: 32,
                 fontWeight: 800,
+                color: isDark ? "white" : "#111822",
                 letterSpacing: "-0.02em",
-                color: isDark ? "#ffffff" : "#111822",
-                margin: 0,
                 marginBottom: 4,
-                lineHeight: 1.1,
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
               }}
             >
-              <span>{t("settings.title")}</span>
-            </h1>
-            <p
+              {t("settings.title")}
+            </div>
+            <div
               style={{
-                fontFamily: BASE_FONT,
                 fontSize: 16,
                 fontWeight: 400,
-                color: isDark ? "#7a8b9e" : "#556677",
-                margin: 0,
+                color: isDark ? "#8899aa" : "#556677",
               }}
             >
               {t("settings.subtitle")}
-            </p>
+            </div>
           </div>
 
           {/* ── Main Tab Navigation Switcher ── */}
@@ -1050,370 +1102,372 @@ export default function SettingsView({
               </div>
             </div>
           ) : (
-            /* ── JUEGOS TAB: Two-Column Structure ── */
+            /* ── JUEGOS TAB: Dynamic Structure based on available games ── */
             <div
               key="settings-tab-games"
               style={{
                 display: "flex",
-                gap: 20,
+                gap: showGameSidebar ? 20 : 0,
                 paddingTop: 6,
                 animation: "tabSlideUpFade 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
                 minHeight: 520,
               }}
             >
-              {/* ── Left Column: Internal Games Sidebar (Begins directly with games list with dynamic accent) ── */}
-              <div
-                style={{
-                  width: 220,
-                  flexShrink: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                }}
-              >
-                {/* Games collection */}
-                {GAMES.map((game) => {
-                  const isSelected = selectedGameId === game.id
-                  return (
-                    <button
-                      key={game.id}
-                      type="button"
-                      onClick={() => setSelectedGameId(game.id)}
-                      className={`game-selector-item ${isSelected ? "is-selected" : ""}`}
-                      style={{
-                        ["--game-border-color" as any]: `rgba(${gameAccent.css}, 0.88)`,
-                        ["--game-glow-color" as any]: `rgba(${gameAccent.css}, 0.28)`,
-                        ["--card-border-color" as any]: `rgba(${gameAccent.css}, 0.88)`,
-                        ["--card-glow-color" as any]: `rgba(${gameAccent.css}, 0.28)`,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                        padding: "10px 14px",
-                        borderRadius: 14,
-                        fontFamily: BASE_FONT,
-                        fontSize: 15,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        background: isSelected
-                          ? isDark
-                            ? "#161f28"
-                            : "#ffffff"
-                          : isDark
-                            ? "rgba(255, 255, 255, 0.02)"
-                            : "rgba(0, 0, 0, 0.02)",
-                        color: isSelected
-                          ? isDark
-                            ? "#ffffff"
-                            : "#111822"
-                          : isDark
-                            ? "#8899aa"
-                            : "#556677",
-                        textAlign: "left",
-                      }}
-                    >
-                      <img
-                        src={game.logo}
-                        alt={game.name}
-                        style={{
-                          width: 32,
-                          height: 32,
-                          objectFit: "contain",
-                          borderRadius: 8,
-                        }}
-                      />
-                      <span
-                        style={{
-                          flex: 1,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {game.name}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* ── Right Column: Selected Game Configuration Panel ── */}
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 14,
-                }}
-              >
-                {/* 1. Compact Horizontal Technical Overview Card (Unified single card) */}
-                <div
-                  className="settings-card"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(4, 1fr)",
-                    padding: "16px 20px",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  {/* Item 1: Minecraft */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14.5,
-                      fontWeight: 700,
-                      color: isDark ? "#ffffff" : "#111822",
-                      borderRight: isDark
-                        ? "1px solid rgba(255, 255, 255, 0.08)"
-                        : "1px solid rgba(0, 0, 0, 0.08)",
-                      paddingRight: 12,
-                      textAlign: "center",
-                    }}
-                  >
-                    <span>{minecraftDisplay}</span>
-                  </div>
-
-                  {/* Item 2: Mod Loader */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14.5,
-                      fontWeight: 700,
-                      color: isDark ? "#ffffff" : "#111822",
-                      borderRight: isDark
-                        ? "1px solid rgba(255, 255, 255, 0.08)"
-                        : "1px solid rgba(0, 0, 0, 0.08)",
-                      paddingRight: 12,
-                      textAlign: "center",
-                    }}
-                  >
-                    <span>{loaderDisplay}</span>
-                  </div>
-
-                  {/* Item 3: Java Version */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14.5,
-                      fontWeight: 700,
-                      color: isDark ? "#ffffff" : "#111822",
-                      borderRight: isDark
-                        ? "1px solid rgba(255, 255, 255, 0.08)"
-                        : "1px solid rgba(0, 0, 0, 0.08)",
-                      paddingRight: 12,
-                      textAlign: "center",
-                    }}
-                  >
-                    <span>{javaDisplay}</span>
-                  </div>
-
-                  {/* Item 4: Modpack Version */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14.5,
-                      fontWeight: 700,
-                      color: isDark ? "#ffffff" : "#111822",
-                      textAlign: "center",
-                    }}
-                  >
-                    <span>{modpackDisplay}</span>
-                  </div>
-                </div>
-
-                {/* 2. Card: RENDIMIENTO */}
-                <div className="settings-card">
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 800,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      color: isDark ? "#657788" : "#778899",
-                      marginBottom: 6,
-                    }}
-                  >
-                    {t("settings.performance")}
-                  </div>
-
-                  {/* Section: RAM Manual & Automatic (Single contiguous block with no inner divider) */}
-                  <div style={{ padding: "8px 0 16px" }}>
-                    {/* Row 1: Title, description, RAM badge */}
+                  {/* ── Left Column: Internal Games Sidebar (Rendered only when > 1 game exists) ── */}
+                  {showGameSidebar && (
                     <div
                       style={{
+                        width: 220,
+                        flexShrink: 0,
                         display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        marginBottom: 4,
+                        flexDirection: "column",
+                        gap: 8,
                       }}
                     >
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 17,
-                            fontWeight: 700,
-                            color: isDark ? "white" : "#111822",
-                            marginBottom: 2,
-                          }}
-                        >
-                          {t("settings.ramTitle")}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 14.5,
-                            color: isDark ? "#8899aa" : "#556677",
-                            lineHeight: 1.45,
-                          }}
-                        >
-                          {t("settings.ramDesc")}
-                        </div>
-                      </div>
+                      {/* Games collection */}
+                      {GAMES.map((game) => {
+                        const isSelected = selectedGameId === game.id
+                        return (
+                          <button
+                            key={game.id}
+                            type="button"
+                            onClick={() => setSelectedGameId(game.id)}
+                            className={`game-selector-item ${isSelected ? "is-selected" : ""}`}
+                            style={{
+                              ["--game-border-color" as any]: `rgba(${gameAccent.css}, 0.88)`,
+                              ["--game-glow-color" as any]: `rgba(${gameAccent.css}, 0.28)`,
+                              ["--card-border-color" as any]: `rgba(${gameAccent.css}, 0.88)`,
+                              ["--card-glow-color" as any]: `rgba(${gameAccent.css}, 0.28)`,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 12,
+                              padding: "10px 14px",
+                              borderRadius: 14,
+                              fontFamily: BASE_FONT,
+                              fontSize: 15,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              background: isSelected
+                                ? isDark
+                                  ? "#161f28"
+                                  : "#ffffff"
+                                : isDark
+                                  ? "rgba(255, 255, 255, 0.02)"
+                                  : "rgba(0, 0, 0, 0.02)",
+                              color: isSelected
+                                ? isDark
+                                  ? "#ffffff"
+                                  : "#111822"
+                                : isDark
+                                  ? "#8899aa"
+                                  : "#556677",
+                              textAlign: "left",
+                            }}
+                          >
+                            <img
+                              src={game.logo}
+                              alt={game.name}
+                              style={{
+                                width: 32,
+                                height: 32,
+                                objectFit: "contain",
+                                borderRadius: 8,
+                              }}
+                            />
+                            <span
+                              style={{
+                                flex: 1,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {game.name}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
 
-                      {/* Right: [ 9 GB ] badge styled with gameAccent */}
+                  {/* ── Main Game Configuration Panel ── */}
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                      width: "100%",
+                    }}
+                  >
+                    {/* 1. Compact Horizontal Technical Overview Card (Unified single card) */}
+                    <div
+                      className="settings-card"
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, 1fr)",
+                        padding: "16px 20px",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      {/* Item 1: Minecraft */}
                       <div
                         style={{
                           display: "flex",
                           alignItems: "center",
-                          gap: 6,
-                          background: isDark ? "#0d1217" : "#f0f3f7",
-                          border: isDark
-                            ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                            : "1.5px solid rgba(0, 0, 0, 0.1)",
-                          borderRadius: 10,
-                          padding: "5px 14px",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 15.5,
-                            fontWeight: 800,
-                            color: gameAccent.hex,
-                          }}
-                        >
-                          {ramGB}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 13.5,
-                            fontWeight: 700,
-                            color: isDark
-                              ? "rgba(255, 255, 255, 0.7)"
-                              : "#556677",
-                          }}
-                        >
-                          GB
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Slider bar */}
-                    <div
-                      style={{
-                        marginTop: 12,
-                        marginBottom: 16,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 14,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 13.5,
+                          justifyContent: "center",
+                          fontSize: 14.5,
                           fontWeight: 700,
-                          color: isDark ? "#7a8b9e" : "#778899",
-                          minWidth: 36,
+                          color: isDark ? "#ffffff" : "#111822",
+                          borderRight: isDark
+                            ? "1px solid rgba(255, 255, 255, 0.08)"
+                            : "1px solid rgba(0, 0, 0, 0.08)",
+                          paddingRight: 12,
+                          textAlign: "center",
                         }}
                       >
-                        2 GB
-                      </span>
-                      <input
-                        type="range"
-                        min={2}
-                        max={systemTotalRAM}
-                        step={1}
-                        value={ramGB}
-                        onChange={(e) => {
-                          setRamGB(Number(e.target.value))
-                          notifySaved()
-                        }}
-                        className="settings-ram-slider"
-                        style={{
-                          flex: 1,
-                          ["--settings-accent" as any]: gameAccent.hex,
-                          background: `linear-gradient(to right, ${gameAccent.hex} 0%, ${gameAccent.hex} ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
-                            isDark
-                              ? "rgba(255, 255, 255, 0.1)"
-                              : "rgba(0, 0, 0, 0.1)"
-                          } ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
-                            isDark
-                              ? "rgba(255, 255, 255, 0.1)"
-                              : "rgba(0, 0, 0, 0.1)"
-                          } 100%)`,
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontSize: 13.5,
-                          fontWeight: 700,
-                          color: isDark ? "#7a8b9e" : "#778899",
-                          minWidth: 44,
-                          textAlign: "right",
-                        }}
-                      >
-                        {systemTotalRAM} GB
-                      </span>
-                    </div>
-
-                    {/* Row 2: Automatic RAM selection (compact, clean, no duplicate description) */}
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        paddingTop: 4,
-                      }}
-                    >
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 16,
-                            fontWeight: 700,
-                            color: isDark ? "white" : "#111822",
-                          }}
-                        >
-                          {t("settings.automaticRam")}
-                        </div>
+                        <span>{minecraftDisplay}</span>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={handleAutoRam}
-                        className="launcher-btn-secondary"
+                      {/* Item 2: Mod Loader */}
+                      <div
                         style={{
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          height: 44,
-                          padding: "0 22px",
-                          borderRadius: 14,
-                          fontSize: 15,
-                          fontWeight: 600,
-                          fontFamily: BASE_FONT,
-                          cursor: "pointer",
+                          fontSize: 14.5,
+                          fontWeight: 700,
+                          color: isDark ? "#ffffff" : "#111822",
+                          borderRight: isDark
+                            ? "1px solid rgba(255, 255, 255, 0.08)"
+                            : "1px solid rgba(0, 0, 0, 0.08)",
+                          paddingRight: 12,
+                          textAlign: "center",
                         }}
                       >
-                        {t("settings.automaticRam")}
-                      </button>
+                        <span>{loaderDisplay}</span>
+                      </div>
+
+                      {/* Item 3: Java Version */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 14.5,
+                          fontWeight: 700,
+                          color: isDark ? "#ffffff" : "#111822",
+                          borderRight: isDark
+                            ? "1px solid rgba(255, 255, 255, 0.08)"
+                            : "1px solid rgba(0, 0, 0, 0.08)",
+                          paddingRight: 12,
+                          textAlign: "center",
+                        }}
+                      >
+                        <span>{javaDisplay}</span>
+                      </div>
+
+                      {/* Item 4: Modpack Version */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 14.5,
+                          fontWeight: 700,
+                          color: isDark ? "#ffffff" : "#111822",
+                          textAlign: "center",
+                        }}
+                      >
+                        <span>{modpackDisplay}</span>
+                      </div>
                     </div>
-                  </div>
+
+                    {/* 2. Card: RENDIMIENTO */}
+                    <div className="settings-card">
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 800,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: isDark ? "#657788" : "#778899",
+                          marginBottom: 6,
+                        }}
+                      >
+                        {t("settings.performance")}
+                      </div>
+
+                      {/* Section: RAM Manual & Automatic Mode */}
+                      <div style={{ padding: "8px 0 16px" }}>
+                        {/* Manual RAM Block (Dimmed and non-interactive when ramAuto is active) */}
+                        <div
+                          style={{
+                            opacity: ramAuto ? 0.55 : 1,
+                            pointerEvents: ramAuto ? "none" : "auto",
+                            transition: "opacity 0.2s ease",
+                          }}
+                        >
+                          {/* Row 1: Title, description, RAM badge */}
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              marginBottom: 4,
+                            }}
+                          >
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: 17,
+                                  fontWeight: 700,
+                                  color: isDark ? "white" : "#111822",
+                                  marginBottom: 2,
+                                }}
+                              >
+                                {t("settings.ramTitle")}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 14.5,
+                                  color: isDark ? "#8899aa" : "#556677",
+                                  lineHeight: 1.45,
+                                }}
+                              >
+                                {t("settings.ramDesc")}
+                              </div>
+                            </div>
+
+                            {/* Right: [ 9 GB ] badge styled with gameAccent */}
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                background: isDark ? "#0d1217" : "#f0f3f7",
+                                border: isDark
+                                  ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                                  : "1.5px solid rgba(0, 0, 0, 0.1)",
+                                borderRadius: 10,
+                                padding: "5px 14px",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: 15.5,
+                                  fontWeight: 800,
+                                  color: gameAccent.hex,
+                                }}
+                              >
+                                {ramGB}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 13.5,
+                                  fontWeight: 700,
+                                  color: isDark
+                                    ? "rgba(255, 255, 255, 0.7)"
+                                    : "#556677",
+                                }}
+                              >
+                                GB
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Slider bar */}
+                          <div
+                            style={{
+                              marginTop: 12,
+                              marginBottom: 16,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 14,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 13.5,
+                                fontWeight: 700,
+                                color: isDark ? "#7a8b9e" : "#778899",
+                                minWidth: 36,
+                              }}
+                            >
+                              2 GB
+                            </span>
+                            <input
+                              type="range"
+                              min={2}
+                              max={systemTotalRAM}
+                              step={1}
+                              value={ramGB}
+                              disabled={ramAuto}
+                              onChange={(e) => {
+                                setRamGB(Number(e.target.value))
+                                notifySaved()
+                              }}
+                              className="settings-ram-slider"
+                              style={{
+                                flex: 1,
+                                ["--settings-accent" as any]: gameAccent.hex,
+                                cursor: ramAuto ? "not-allowed" : "pointer",
+                                background: `linear-gradient(to right, ${gameAccent.hex} 0%, ${gameAccent.hex} ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
+                                  isDark
+                                    ? "rgba(255, 255, 255, 0.1)"
+                                    : "rgba(0, 0, 0, 0.1)"
+                                } ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
+                                  isDark
+                                    ? "rgba(255, 255, 255, 0.1)"
+                                    : "rgba(0, 0, 0, 0.1)"
+                                } 100%)`,
+                              }}
+                            />
+                            <span
+                              style={{
+                                fontSize: 13.5,
+                                fontWeight: 700,
+                                color: isDark ? "#7a8b9e" : "#778899",
+                                minWidth: 44,
+                                textAlign: "right",
+                              }}
+                            >
+                              {systemTotalRAM} GB
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Row 2: Automatic RAM Mode Toggle */}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            paddingTop: 4,
+                          }}
+                        >
+                          <div>
+                            <div
+                              style={{
+                                fontSize: 16,
+                                fontWeight: 700,
+                                color: isDark ? "white" : "#111822",
+                              }}
+                            >
+                              {t("settings.automaticRam")}
+                            </div>
+                          </div>
+
+                          <LauncherToggle
+                            checked={ramAuto}
+                            theme={theme}
+                            accentColor={gameAccent.hex}
+                            onChange={handleToggleAutoRam}
+                            label={t("settings.automaticRam")}
+                          />
+                        </div>
+                      </div>
 
                   {/* Divider line ONLY before GPU */}
                   <div

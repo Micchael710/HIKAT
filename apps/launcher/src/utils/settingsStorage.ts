@@ -6,7 +6,9 @@ export const STORAGE_KEYS = {
   MINIMIZE_ON_GAME_LAUNCH: "hikat_minimize_on_game_launch",
   AUTO_UPDATES: "hikat_auto_updates",
   RAM_GB: "hikat_ram_gb",
+  RAM_AUTO: "hikat_ram_auto",
   DEDICATED_GPU: "hikat_dedicated_gpu",
+  JAVA_MAJOR_VERSION: "hikat_java_major_version",
 } as const
 
 export const SETTINGS_CHANGED_EVENT = "hikat:settings-changed"
