@@ -205,7 +205,9 @@
     "uninstallButton": "Désinstaller",
     "verifying": "Vérification...",
     "verifiedSuccess": "Jeu vérifié avec succès",
+    "pendingRestartNotice": "Certains changements s’appliqueront après le redémarrage du jeu.",
     "toastSaved": "Modifications appliquées avec succès",
+    "toastSaveError": "Erreur lors de l'enregistrement des modifications",
     "toastDarkTheme": "Thème sombre activé",
     "toastLightTheme": "Thème clair activé"
   },

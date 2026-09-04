@@ -135,6 +135,20 @@ export default function SettingsView({
   const [operationState, setOperationState] = useState<string>("IDLE")
   const [isVerifying, setIsVerifying] = useState<boolean>(false)
   const [isUninstalling, setIsUninstalling] = useState<boolean>(false)
+  const [hasPendingRestartChanges, setHasPendingRestartChanges] = useState<boolean>(false)
+
+  // Clear pending restart notice automatically when game returns to idle
+  useEffect(() => {
+    if (launchStatus === "idle") {
+      setHasPendingRestartChanges(false)
+    }
+  }, [launchStatus])
+
+  const markPendingRestartChangeIfNeeded = () => {
+    if (launchStatus === "running" || launchStatus === "preparing") {
+      setHasPendingRestartChanges(true)
+    }
+  }
 
   // Extract dynamic accent color from selected game logo
   const selectedGame = GAMES.find((g) => g.id === selectedGameId) || GAMES[0]
@@ -480,15 +494,28 @@ export default function SettingsView({
     setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, v)
   }
 
-  const setDedicatedGPU = (v: boolean) => {
+  const setDedicatedGPU = async (v: boolean) => {
+    const prev = dedicatedGPU
     setDedicatedGPUState(v)
     setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, v)
-    window.electronAPI?.setDedicatedGpu?.(v)
+    markPendingRestartChangeIfNeeded()
+    try {
+      const res = await window.electronAPI?.setDedicatedGpu?.(v)
+      if (typeof res === "boolean") {
+        setDedicatedGPUState(res)
+        setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, res)
+      }
+    } catch (_) {
+      setDedicatedGPUState(prev)
+      setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, prev)
+      notifySaved(t("settings.toastSaveError") || "Error al guardar cambios", "error")
+    }
   }
 
   const setRamGB = (v: number) => {
     setRamGBState(v)
     setStoredNumber(STORAGE_KEYS.RAM_GB, v)
+    markPendingRestartChangeIfNeeded()
     window.electronAPI?.setRamAllocation?.(v)
   }
 
@@ -513,6 +540,7 @@ export default function SettingsView({
   const handleToggleAutoRam = (v: boolean) => {
     setRamAutoState(v)
     setStoredBoolean(STORAGE_KEYS.RAM_AUTO, v)
+    markPendingRestartChangeIfNeeded()
     if (v) {
       const autoRam = calculateAutomaticRam(systemTotalRAM)
       setRamGB(autoRam)
@@ -1345,6 +1373,48 @@ export default function SettingsView({
                         {selectedGame.name}
                       </span>
                     </div>
+
+                    {/* Inline Pending Restart Notice */}
+                    {hasPendingRestartChanges && (
+                      <div
+                        data-testid="settings-pending-restart-notice"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "10px 14px",
+                          borderRadius: 10,
+                          marginTop: 4,
+                          marginBottom: 4,
+                          background: isDark
+                            ? `rgba(${gameAccent.r}, ${gameAccent.g}, ${gameAccent.b}, 0.1)`
+                            : `rgba(${gameAccent.r}, ${gameAccent.g}, ${gameAccent.b}, 0.08)`,
+                          border: isDark
+                            ? `1px solid rgba(${gameAccent.r}, ${gameAccent.g}, ${gameAccent.b}, 0.25)`
+                            : `1px solid rgba(${gameAccent.r}, ${gameAccent.g}, ${gameAccent.b}, 0.2)`,
+                          color: isDark ? "#d0dce8" : "#2d3e50",
+                          fontSize: 13.5,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke={gameAccent.hex}
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          style={{ flexShrink: 0 }}
+                        >
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="16" x2="12" y2="12" />
+                          <line x1="12" y1="8" x2="12.01" y2="8" />
+                        </svg>
+                        <span>{t("settings.pendingRestartNotice")}</span>
+                      </div>
+                    )}
 
                     {/* 1. Card: RENDIMIENTO */}
                     <div className="settings-card">

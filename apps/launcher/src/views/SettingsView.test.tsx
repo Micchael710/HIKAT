@@ -8,6 +8,10 @@ import SettingsView, { calculateAutomaticRam } from "./SettingsView"
 import LauncherToggle from "../components/common/LauncherToggle"
 import { LanguageProvider } from "../context/LanguageContext"
 import { gameService } from "../services/gameService"
+import esLocale from "../locales/es.json"
+import enLocale from "../locales/en.json"
+import frLocale from "../locales/fr.json"
+import ptLocale from "../locales/pt.json"
 
 describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)", () => {
   let unmountCurrent: (() => void) | null = null
@@ -27,7 +31,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       getMinimizeOnGameLaunch: vi.fn().mockResolvedValue(true),
       setMinimizeOnGameLaunch: vi.fn().mockResolvedValue(false),
       getDedicatedGpu: vi.fn().mockResolvedValue(true),
-      setDedicatedGpu: vi.fn().mockResolvedValue(true),
+      setDedicatedGpu: vi.fn().mockImplementation((val: any) => Promise.resolve(val)),
       getRamAllocation: vi.fn().mockResolvedValue(8),
       setRamAllocation: vi.fn().mockResolvedValue(8),
       getGameRuntimeInfo: vi.fn().mockResolvedValue({ javaMajorVersion: 21 }),
@@ -652,6 +656,178 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     })
 
     expect(localStorage.getItem("hikat_java_major_version")).toBeNull()
+  })
+
+  it("21. GPU toggle reconciles state and localStorage with authoritative boolean response from IPC", async () => {
+    mockElectronAPI.setDedicatedGpu = vi.fn().mockResolvedValue(false)
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const gpuToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("GPU de alto rendimiento") ||
+      btn.closest(".settings-row")?.textContent?.includes("GPU de alto rendimiento"),
+    ) as HTMLElement
+
+    expect(gpuToggle).toBeDefined()
+    await act(async () => {
+      gpuToggle.click()
+    })
+
+    expect(mockElectronAPI.setDedicatedGpu).toHaveBeenCalledWith(false)
+    expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("false")
+  })
+
+  it("22. GPU toggle reverts state and localStorage and shows error toast when IPC rejects", async () => {
+    localStorage.setItem("hikat_dedicated_gpu", "true")
+    mockElectronAPI.getDedicatedGpu = vi.fn().mockResolvedValue(true)
+    mockElectronAPI.setDedicatedGpu = vi.fn().mockRejectedValue(new Error("Registry access denied"))
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const gpuToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("GPU de alto rendimiento") ||
+      btn.closest(".settings-row")?.textContent?.includes("GPU de alto rendimiento"),
+    ) as HTMLElement
+
+    await act(async () => {
+      gpuToggle.click()
+    })
+
+    // Reverted back to true
+    expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("true")
+    expect(container.textContent).toContain("Error al guardar cambios")
+  })
+
+  it("23. Changing GPU with game running shows inline pending restart notice", async () => {
+    mockElectronAPI.getLaunchStatus = vi.fn().mockResolvedValue({ status: "running", operationState: "IDLE" })
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).toBeNull()
+
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const gpuToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("GPU de alto rendimiento") ||
+      btn.closest(".settings-row")?.textContent?.includes("GPU de alto rendimiento"),
+    ) as HTMLElement
+
+    await act(async () => {
+      gpuToggle.click()
+    })
+
+    const notice = container.querySelector('[data-testid="settings-pending-restart-notice"]')
+    expect(notice).not.toBeNull()
+    expect(notice?.textContent).toContain("Algunos cambios se aplicarán al reiniciar el juego.")
+  })
+
+  it("24. Changing RAM with game running shows inline pending restart notice", async () => {
+    mockElectronAPI.getLaunchStatus = vi.fn().mockResolvedValue({ status: "running", operationState: "IDLE" })
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).toBeNull()
+
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const autoRamToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("Asignar automáticamente") ||
+      btn.closest("div")?.textContent?.includes("Asignar automáticamente"),
+    ) as HTMLElement
+    expect(autoRamToggle).toBeDefined()
+
+    await act(async () => {
+      autoRamToggle.click()
+    })
+
+    const notice = container.querySelector('[data-testid="settings-pending-restart-notice"]')
+    expect(notice).not.toBeNull()
+    expect(notice?.textContent).toContain("Algunos cambios se aplicarán al reiniciar el juego.")
+  })
+
+  it("25. Changing GPU or RAM with game idle does NOT show pending restart notice", async () => {
+    mockElectronAPI.getLaunchStatus = vi.fn().mockResolvedValue({ status: "idle", operationState: "IDLE" })
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const gpuToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("GPU de alto rendimiento") ||
+      btn.closest(".settings-row")?.textContent?.includes("GPU de alto rendimiento"),
+    ) as HTMLElement
+
+    await act(async () => {
+      gpuToggle.click()
+    })
+
+    expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).toBeNull()
+  })
+
+  it("26. When game transitions from running to idle, pending restart notice disappears automatically", async () => {
+    let launchStatusCallback: any = null
+    mockElectronAPI.getLaunchStatus = vi.fn().mockResolvedValue({ status: "running", operationState: "IDLE" })
+    mockElectronAPI.onLaunchStatus = vi.fn().mockImplementation((cb) => {
+      launchStatusCallback = cb
+      return () => {}
+    })
+
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    const toggles = container.querySelectorAll('button[role="switch"]')
+    const gpuToggle = Array.from(toggles).find((btn) =>
+      btn.getAttribute("aria-label")?.includes("GPU de alto rendimiento") ||
+      btn.closest(".settings-row")?.textContent?.includes("GPU de alto rendimiento"),
+    ) as HTMLElement
+
+    await act(async () => {
+      gpuToggle.click()
+    })
+
+    expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).not.toBeNull()
+
+    // Game process terminates and launchStatus goes to 'idle'
+    await act(async () => {
+      launchStatusCallback?.("idle")
+    })
+
+    expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).toBeNull()
+  })
+
+  it("27. i18n locales ES, EN, FR, PT contain the exact pendingRestartNotice text", () => {
+    expect(esLocale.settings.pendingRestartNotice).toBe("Algunos cambios se aplicarán al reiniciar el juego.")
+    expect(enLocale.settings.pendingRestartNotice).toBe("Some changes will apply after restarting the game.")
+    expect(frLocale.settings.pendingRestartNotice).toBe("Certains changements s’appliqueront après le redémarrage du jeu.")
+    expect(ptLocale.settings.pendingRestartNotice).toBe("Algumas alterações serão aplicadas após reiniciar o jogo.")
   })
 })
 
