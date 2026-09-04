@@ -630,37 +630,60 @@ export default function LoginView({
         {mode === "forgot-password" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, animation: "fadeIn 0.2s ease" }}>
             {forgotSuccess ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16, textAlign: "center", alignItems: "center", padding: "10px 0" }}>
+              <>
                 <div
                   style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 12,
-                    background: isDark ? "rgba(56, 189, 248, 0.12)" : "rgba(2, 132, 199, 0.1)",
+                    background: isDark ? "#0d1217" : "#f0f3f7",
+                    border: isDark
+                      ? "1.5px solid rgba(255, 255, 255, 0.08)"
+                      : "1.5px solid rgba(0, 0, 0, 0.08)",
+                    borderRadius: 14,
+                    padding: "16px 18px",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
-                    color: isDark ? "#38bdf8" : "#0284c7",
-                    flexShrink: 0,
+                    gap: 14,
                   }}
                 >
-                  <svg
-                    width={20}
-                    height={20}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                  <div
+                    style={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: 12,
+                      background: isDark ? "rgba(56, 189, 248, 0.12)" : "rgba(2, 132, 199, 0.1)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: isDark ? "#38bdf8" : "#0284c7",
+                      flexShrink: 0,
+                    }}
                   >
-                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                    <polyline points="22,6 12,13 2,6" />
-                  </svg>
+                    <svg
+                      width={20}
+                      height={20}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                      <polyline points="22,6 12,13 2,6" />
+                    </svg>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      color: isDark ? "#c2d0dd" : "#334455",
+                      fontWeight: 500,
+                      lineHeight: 1.45,
+                      textAlign: "left",
+                    }}
+                  >
+                    {t("auth.resetEmailSentNotice")}
+                  </div>
                 </div>
-                <div style={{ fontSize: 14.5, color: isDark ? "#c2d0dd" : "#334455", fontWeight: 500, lineHeight: 1.5 }}>
-                  {t("auth.resetEmailSentNotice")}
-                </div>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -682,12 +705,12 @@ export default function LoginView({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    marginTop: 6,
+                    marginTop: 2,
                   }}
                 >
                   {t("auth.backToLogin")}
                 </button>
-              </div>
+              </>
             ) : (
               <>
                 <div>

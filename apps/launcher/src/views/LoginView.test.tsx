@@ -439,6 +439,17 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(mailSvg).toBeDefined()
     const checkmarkSvg = svgs.find((s) => s.innerHTML.includes("20 6 9 17 4 12"))
     expect(checkmarkSvg).toBeUndefined()
+
+    // Verify card structure: flex row, 42x42 icon container, left-aligned message
+    const iconContainer = mailSvg!.parentElement as HTMLElement
+    expect(iconContainer.style.width).toBe("42px")
+    expect(iconContainer.style.height).toBe("42px")
+    expect(iconContainer.style.borderRadius).toBe("12px")
+
+    const infoCard = iconContainer.parentElement as HTMLElement
+    expect(infoCard.style.display).toBe("flex")
+    expect(infoCard.style.alignItems).toBe("center")
+    expect(infoCard.style.borderRadius).toBe("14px")
   })
 
   it("13b. Forgot password success and Verify Email reuse identical Mail SVG icon and container styling", async () => {
@@ -491,6 +502,11 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       s.innerHTML.includes("M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"),
     )
     expect(verifyMailSvg).toBeDefined()
+
+    const verifyIconContainer = verifyMailSvg!.parentElement as HTMLElement
+    expect(verifyIconContainer.style.width).toBe("42px")
+    expect(verifyIconContainer.style.height).toBe("42px")
+    expect(verifyIconContainer.style.borderRadius).toBe("12px")
   })
 
   it("14. Registering with emailVerificationRequired=true displays verify email view", async () => {
