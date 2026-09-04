@@ -10,8 +10,6 @@ import {
 } from "../utils/security"
 import { authService } from "../services/authService"
 
-const LAUNCHER_VERSION = "v1.0.0"
-
 interface LoginViewProps {
   onLogin: (username: string) => void
   theme?: ThemeMode
@@ -292,11 +290,11 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
 
   const handleInputFocus = (e: React.FocusEvent<HTMLInputElement>) => {
     e.currentTarget.style.borderColor = isDark
-      ? "rgba(56, 189, 248, 0.65)"
-      : "rgba(14, 165, 233, 0.65)"
+      ? "rgba(255, 255, 255, 0.35)"
+      : "rgba(0, 0, 0, 0.35)"
     e.currentTarget.style.boxShadow = isDark
-      ? "0 0 0 3px rgba(56, 189, 248, 0.15)"
-      : "0 0 0 3px rgba(14, 165, 233, 0.12)"
+      ? "0 0 0 3px rgba(255, 255, 255, 0.08)"
+      : "0 0 0 3px rgba(0, 0, 0, 0.06)"
   }
 
   const handleInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
@@ -878,6 +876,14 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                       gap: 8,
                       cursor: "pointer",
                       userSelect: "none",
+                      color: isDark ? "#8899aa" : "#556677",
+                      transition: "color 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = isDark ? "#ffffff" : "#0f172a"
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = isDark ? "#8899aa" : "#556677"
                     }}
                   >
                     <div
@@ -887,18 +893,18 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                         borderRadius: 4,
                         background: keepSession
                           ? isDark
-                            ? "#38bdf8"
-                            : "#0284c7"
+                            ? "rgba(255, 255, 255, 0.15)"
+                            : "rgba(0, 0, 0, 0.1)"
                           : isDark
-                            ? "#0d1217"
+                            ? "rgba(255, 255, 255, 0.04)"
                             : "#e2e8f0",
                         border: keepSession
                           ? isDark
-                            ? "1.5px solid #38bdf8"
-                            : "1.5px solid #0284c7"
+                            ? "1.5px solid rgba(255, 255, 255, 0.7)"
+                            : "1.5px solid rgba(0, 0, 0, 0.7)"
                           : isDark
-                            ? "1.5px solid rgba(255, 255, 255, 0.16)"
-                            : "1.5px solid rgba(0, 0, 0, 0.16)",
+                            ? "1.5px solid rgba(255, 255, 255, 0.2)"
+                            : "1.5px solid rgba(0, 0, 0, 0.2)",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -911,7 +917,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                           height={11}
                           viewBox="0 0 24 24"
                           fill="none"
-                          stroke={isDark ? "#090d12" : "#ffffff"}
+                          stroke={isDark ? "#ffffff" : "#0f172a"}
                           strokeWidth="3.5"
                           strokeLinecap="round"
                           strokeLinejoin="round"
@@ -923,9 +929,9 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                     <span
                       style={{
                         fontSize: 13,
-                        color: isDark ? "#8899aa" : "#556677",
                         fontFamily: BASE_FONT,
                         fontWeight: 500,
+                        color: "inherit",
                       }}
                     >
                       {t("auth.keepSession")}
@@ -945,16 +951,18 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
                       padding: 0,
                       fontSize: 12.5,
                       fontWeight: 600,
-                      color: isDark ? "#38bdf8" : "#0284c7",
+                      color: isDark ? "#8899aa" : "#556677",
                       fontFamily: BASE_FONT,
                       cursor: "pointer",
                       textDecoration: "none",
-                      transition: "opacity 0.15s ease",
+                      transition: "color 0.15s ease",
                     }}
                     onMouseEnter={(e) => {
+                      e.currentTarget.style.color = isDark ? "#ffffff" : "#0f172a"
                       e.currentTarget.style.textDecoration = "underline"
                     }}
                     onMouseLeave={(e) => {
+                      e.currentTarget.style.color = isDark ? "#8899aa" : "#556677"
                       e.currentTarget.style.textDecoration = "none"
                     }}
                   >
@@ -1013,7 +1021,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
               </button>
             </div>
 
-            {/* 6. Divider ("o continúa con" / "or continue with") */}
+            {/* 6. Divider */}
             <div
               style={{
                 display: "flex",
@@ -1031,7 +1039,7 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             </div>
 
             {/* 7. OAuth Buttons (Google & Discord) */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 4 }}>
               <button
                 type="button"
                 disabled={isEnteringWorld}
@@ -1082,19 +1090,6 @@ export default function LoginView({ onLogin, theme = "dark" }: LoginViewProps) {
             </div>
           </>
         )}
-
-        {/* 8. Bottom: Version tag & Security */}
-        <div
-          style={{
-            fontSize: 11,
-            color: isDark ? "#4b5563" : "#9ca3af",
-            fontFamily: BASE_FONT,
-            textAlign: "center",
-            paddingTop: 4,
-          }}
-        >
-          HiKAT Launcher {LAUNCHER_VERSION} • {t("auth.secureAuth")}
-        </div>
       </div>
     </div>
   )

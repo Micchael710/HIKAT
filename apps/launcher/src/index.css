@@ -202,8 +202,14 @@ img, svg, a {
 
 /* Clean glowing focus on form inputs */
 .launcher-input:focus {
-  border-color: rgba(239, 196, 54, 0.7) !important;
-  box-shadow: 0 0 0 3px rgba(239, 196, 54, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08) !important;
+  outline: none !important;
+}
+
+[data-theme="light"] .launcher-input:focus {
+  border-color: rgba(0, 0, 0, 0.35) !important;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06) !important;
   outline: none !important;
 }
 

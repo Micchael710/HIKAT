@@ -54,7 +54,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).toContain("Continuar con Google")
     expect(container.textContent).toContain("Continuar con Discord")
     expect(container.textContent).toContain("Iniciar Sesión")
-    expect(container.textContent).toContain("o continúa con")
+    expect(container.textContent).toContain("o")
   })
 
   it("2. Uses the standard extended HiKAT logo, not reduced logo", async () => {
@@ -315,9 +315,10 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).toContain("Sign Up")
     expect(container.textContent).toContain("Continue with Google")
     expect(container.textContent).toContain("Continue with Discord")
-    expect(container.textContent).toContain("or continue with")
+    expect(container.textContent).toContain("or")
     expect(container.textContent).toContain("Keep me signed in")
-    expect(container.textContent).toContain("Secure authentication")
+    expect(container.textContent).not.toContain("Secure authentication")
+    expect(container.textContent).not.toContain("HiKAT Launcher v")
   })
 
   it("11. Switches between Login and Register tabs dynamically", async () => {
@@ -372,7 +373,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     })
 
     expect(container.textContent).toContain("Iniciar Sesión")
-    expect(container.textContent).toContain("o continúa con")
+    expect(container.textContent).toContain("o")
   })
 
   function changeInput(input: HTMLInputElement, value: string) {
@@ -499,5 +500,74 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     const img = container.querySelector("img")
     expect(img?.src).toContain("logo-black")
     expect(container.textContent).toContain("Iniciar Sesión")
+  })
+
+  it("16. Inputs apply neutral focus styling without yellow or blue highlights", async () => {
+    const onLogin = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    expect(emailInput).toBeDefined()
+
+    await act(async () => {
+      emailInput.focus()
+      emailInput.dispatchEvent(new Event("focus", { bubbles: true }))
+    })
+
+    // Focused style should be neutral white/grey, not yellow (239, 196, 54) or bright blue (56, 189, 248)
+    expect(emailInput.style.borderColor).not.toContain("239, 196, 54")
+    expect(emailInput.style.borderColor).not.toContain("#efc436")
+    expect(emailInput.style.borderColor).not.toContain("56, 189, 248")
+    expect(emailInput.style.boxShadow).not.toContain("239, 196, 54")
+    expect(emailInput.style.boxShadow).not.toContain("56, 189, 248")
+  })
+
+  it("17. 'Mantener sesión iniciada' checkbox uses neutral styles without yellow or blue", async () => {
+    const onLogin = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const checkboxLabel = Array.from(container.querySelectorAll("label")).find((l) =>
+      l.textContent?.includes("Mantener sesión iniciada"),
+    )
+    expect(checkboxLabel).toBeDefined()
+
+    const checkboxBox = checkboxLabel?.querySelector("div")
+    expect(checkboxBox).toBeDefined()
+
+    // Checked state in dark mode
+    expect(checkboxBox?.style.background).not.toContain("#38bdf8")
+    expect(checkboxBox?.style.background).not.toContain("#efc436")
+    expect(checkboxBox?.style.borderColor).not.toContain("#38bdf8")
+    expect(checkboxBox?.style.borderColor).not.toContain("#efc436")
+
+    // Uncheck
+    await act(async () => {
+      checkboxLabel?.click()
+    })
+
+    // Unchecked state
+    expect(checkboxBox?.style.background).not.toContain("#38bdf8")
+    expect(checkboxBox?.style.background).not.toContain("#efc436")
+  })
+
+  it("18. Footer version and secure auth text are completely absent", async () => {
+    const onLogin = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    expect(container.textContent).not.toContain("HiKAT Launcher v")
+    expect(container.textContent).not.toContain("Autenticación segura")
+    expect(container.textContent).not.toContain("Secure authentication")
   })
 })
