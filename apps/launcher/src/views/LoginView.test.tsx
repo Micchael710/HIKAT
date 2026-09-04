@@ -407,6 +407,10 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       forgotBtn?.click()
     })
 
+    // Verify before submit
+    expect(container.textContent).toContain("Restablecer contraseña")
+    expect(container.textContent).toContain("Ingresa tu correo para recibir un enlace de recuperación.")
+
     // Fill email and submit
     const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
     expect(emailInput).toBeDefined()
@@ -424,7 +428,69 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     })
 
     expect(resetSpy).toHaveBeenCalledWith("steve@hikat.org", "es")
+    // Verify after submit: initial subtitle is GONE, only notice is shown
+    expect(container.textContent).not.toContain("Ingresa tu correo para recibir un enlace de recuperación.")
     expect(container.textContent).toContain("Revisa tu correo electrónico para continuar con el restablecimiento de tu contraseña.")
+    expect(container.textContent).toContain("Volver a iniciar sesión")
+
+    // Verify Mail icon SVG is used instead of checkmark
+    const svgs = Array.from(container.querySelectorAll("svg"))
+    const mailSvg = svgs.find((s) => s.innerHTML.includes("M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"))
+    expect(mailSvg).toBeDefined()
+    const checkmarkSvg = svgs.find((s) => s.innerHTML.includes("20 6 9 17 4 12"))
+    expect(checkmarkSvg).toBeUndefined()
+  })
+
+  it("13b. Forgot password success and Verify Email reuse identical Mail SVG icon and container styling", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "register").mockResolvedValue({
+      success: true,
+      user: {
+        id: "u-v1",
+        username: "UserV1",
+        email: "userv1@hikat.org",
+        role: "PLAYER",
+      },
+      emailVerificationRequired: true,
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    // Go to register -> submit -> get verify-email view
+    const registerTabBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Registrarse",
+    )
+    await act(async () => {
+      registerTabBtn?.click()
+    })
+
+    const usernameInput = container.querySelector("input[type='text']") as HTMLInputElement
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    const passwordInput = container.querySelector("input[type='password']") as HTMLInputElement
+
+    await act(async () => {
+      changeInput(usernameInput, "UserV1")
+      changeInput(emailInput, "userv1@hikat.org")
+      changeInput(passwordInput, "password123")
+    })
+
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Crear Cuenta",
+    )
+    await act(async () => {
+      submitBtn?.click()
+    })
+
+    // Find verify-email icon SVG
+    const verifySvgs = Array.from(container.querySelectorAll("svg"))
+    const verifyMailSvg = verifySvgs.find((s) =>
+      s.innerHTML.includes("M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"),
+    )
+    expect(verifyMailSvg).toBeDefined()
   })
 
   it("14. Registering with emailVerificationRequired=true displays verify email view", async () => {

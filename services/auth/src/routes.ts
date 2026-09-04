@@ -721,14 +721,8 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       retryBtn.style.display = "none";
     }
 
-    function showLauncherError() {
+    function showFallbackRetry() {
       if (completed) return;
-      clearInterval(statusInterval);
-
-      titleEl.textContent = t.openErrorTitle;
-      descEl.textContent = t.openErrorDescription;
-      secEl.textContent = t.openErrorSecondary;
-      loaderEl.style.display = "none";
       retryBtn.textContent = t.retry;
       retryBtn.style.display = "block";
     }
@@ -780,11 +774,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       launchTimeout = setTimeout(() => {
         checkActionStatus().finally(() => {
           if (!completed) {
-            showLauncherError();
+            showFallbackRetry();
           }
         });
       }, 3000);
     }
+
+    window.addEventListener("focus", () => {
+      if (!completed) {
+        showFallbackRetry();
+      }
+    });
 
     retryBtn.addEventListener("click", () => {
       openLauncher();

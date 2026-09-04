@@ -1093,27 +1093,10 @@ function startOAuthLoopbackServer() {
                 "none";
             }
 
-            function showLauncherError() {
+            function showFallbackRetry() {
               if (completed) {
                 return;
               }
-
-              clearInterval(statusInterval);
-
-              status.textContent =
-                t.openErrorStatus;
-
-              title.textContent =
-                t.openErrorTitle;
-
-              description.textContent =
-                t.openErrorDescription;
-
-              secondary.textContent =
-                t.openErrorSecondary;
-
-              loader.style.display =
-                "none";
 
               retry.textContent =
                 t.retry;
@@ -1124,6 +1107,9 @@ function startOAuthLoopbackServer() {
 
             function showProviderError() {
               completed = true;
+
+              clearTimeout(launchTimeout);
+              clearInterval(statusInterval);
 
               status.textContent =
                 t.providerErrorStatus;
@@ -1189,20 +1175,25 @@ function startOAuthLoopbackServer() {
                   500,
                 );
 
-              // Chrome no informa directamente
-              // si el usuario pulsó Cancel.
-              // Si Electron no responde,
-              // asumimos que no se abrió.
               launchTimeout =
                 setTimeout(() => {
                   checkLauncherStatus()
                     .finally(() => {
                       if (!completed) {
-                        showLauncherError();
+                        showFallbackRetry();
                       }
                     });
                 }, 3000);
             }
+
+            window.addEventListener(
+              "focus",
+              () => {
+                if (!completed) {
+                  showFallbackRetry();
+                }
+              },
+            );
 
             retry.addEventListener(
               "click",

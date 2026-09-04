@@ -552,24 +552,26 @@ export default function LoginView({
               {t("auth.resetPasswordTitle")}
             </div>
           )}
-          <div
-            style={{
-              fontSize: 14,
-              color: isDark ? "#8899aa" : "#657788",
-              fontFamily: BASE_FONT,
-              fontWeight: 500,
-            }}
-          >
-            {mode === "forgot-password"
-              ? t("auth.forgotPasswordSubtitle")
-              : mode === "verify-email"
-                ? t("auth.verifyEmailDesc")
-                : mode === "reset-password"
-                  ? t("auth.resetPasswordDesc")
-                  : tab === "login"
-                    ? t("auth.loginSubtitle")
-                    : t("auth.registerSubtitle")}
-          </div>
+          {!(mode === "forgot-password" && forgotSuccess) && (
+            <div
+              style={{
+                fontSize: 14,
+                color: isDark ? "#8899aa" : "#657788",
+                fontFamily: BASE_FONT,
+                fontWeight: 500,
+              }}
+            >
+              {mode === "forgot-password"
+                ? t("auth.forgotPasswordSubtitle")
+                : mode === "verify-email"
+                  ? t("auth.verifyEmailDesc")
+                  : mode === "reset-password"
+                    ? t("auth.resetPasswordDesc")
+                    : tab === "login"
+                      ? t("auth.loginSubtitle")
+                      : t("auth.registerSubtitle")}
+            </div>
+          )}
         </div>
 
         {/* Error Banner */}
@@ -631,19 +633,29 @@ export default function LoginView({
               <div style={{ display: "flex", flexDirection: "column", gap: 16, textAlign: "center", alignItems: "center", padding: "10px 0" }}>
                 <div
                   style={{
-                    width: 52,
-                    height: 52,
-                    borderRadius: "50%",
-                    background: isDark ? "rgba(62, 196, 192, 0.15)" : "rgba(62, 196, 192, 0.2)",
-                    border: isDark ? "1.5px solid rgba(62, 196, 192, 0.35)" : "1.5px solid rgba(62, 196, 192, 0.5)",
+                    width: 42,
+                    height: 42,
+                    borderRadius: 12,
+                    background: isDark ? "rgba(56, 189, 248, 0.12)" : "rgba(2, 132, 199, 0.1)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: isDark ? "#3ec4c0" : "#0284c7",
+                    color: isDark ? "#38bdf8" : "#0284c7",
+                    flexShrink: 0,
                   }}
                 >
-                  <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
+                  <svg
+                    width={20}
+                    height={20}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                    <polyline points="22,6 12,13 2,6" />
                   </svg>
                 </div>
                 <div style={{ fontSize: 14.5, color: isDark ? "#c2d0dd" : "#334455", fontWeight: 500, lineHeight: 1.5 }}>

@@ -1886,7 +1886,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // Confirm waiting state hides button, shows loader, and configures delayed 3s retry
       expect(htmlVerify).toContain("function showWaitingState()")
       expect(htmlVerify).toContain("function showCompletedState()")
-      expect(htmlVerify).toContain("function showLauncherError()")
+      expect(htmlVerify).toContain("function showFallbackRetry()")
       expect(htmlVerify).toContain("function showErrorState()")
       expect(htmlVerify).toContain("setTimeout(openLauncher, 150)")
       expect(htmlVerify).toContain("3000") // 3-second retry timeout
@@ -1904,6 +1904,11 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(htmlVerify).toContain("Abrir HiKAT Launcher")
       expect(htmlVerify).toContain("Cuenta verificada")
       expect(htmlVerify).toContain("Tu cuenta de HiKAT fue verificada correctamente.")
+      // Verify non-destructive fallback: showFallbackRetry does NOT clearInterval or change title to error
+      expect(htmlVerify).toContain("function showFallbackRetry()")
+      expect(htmlVerify).not.toContain("showLauncherError")
+      expect(htmlVerify).toContain("window.addEventListener(\"focus\"")
+      expect(htmlVerify).toContain("retryBtn.addEventListener(\"click\"")
 
       // 2. Valid reset-password action with English language
       const reqReset = new Request("http://localhost:8788/auth/email-action?type=reset-password&token=resetToken456&lang=en", {

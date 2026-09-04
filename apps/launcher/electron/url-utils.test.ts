@@ -118,5 +118,34 @@ describe("Electron OAuth Deep Link URL Validation Suite (Shard 8F)", () => {
     expect(parseValidOAuthCallbackUrl("hikat://auth/reset-password-evil?token=123")).toBeNull()
     expect(parseValidOAuthCallbackUrl("hikat://auth/admin?token=123")).toBeNull()
   })
+
+  it("11. Verifies OAuth browser bridge in main.cjs uses non-destructive fallback and keeps polling active", () => {
+    const fs = require("fs")
+    const path = require("path")
+    const mainContent = fs.readFileSync(path.join(__dirname, "main.cjs"), "utf8")
+
+    // Must use showFallbackRetry and not showLauncherError
+    expect(mainContent).toContain("function showFallbackRetry()")
+    expect(mainContent).not.toContain("function showLauncherError()")
+
+    // Polling must stay active without clearing interval in showFallbackRetry
+    const fallbackFnStart = mainContent.indexOf("function showFallbackRetry()")
+    const fallbackFnEnd = mainContent.indexOf("function showProviderError()", fallbackFnStart)
+    const fallbackFnSnippet = mainContent.slice(fallbackFnStart, fallbackFnEnd)
+    expect(fallbackFnSnippet).not.toContain("clearInterval")
+    expect(fallbackFnSnippet).toContain("retry.style.display")
+
+    // Event listeners: focus listener and single retry listener
+    expect(mainContent).toContain("window.addEventListener")
+    expect(mainContent).toContain("retry.addEventListener")
+
+    // Completed state stops polling and hides retry
+    const completedFnStart = mainContent.indexOf("function showCompletedState()")
+    const completedFnEnd = mainContent.indexOf("function showFallbackRetry()", completedFnStart)
+    const completedFnSnippet = mainContent.slice(completedFnStart, completedFnEnd)
+    expect(completedFnSnippet).toContain("clearInterval(statusInterval)")
+    expect(completedFnSnippet).toContain("retry.style.display")
+  })
 })
+
 
