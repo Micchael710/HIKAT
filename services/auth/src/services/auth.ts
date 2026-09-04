@@ -487,6 +487,93 @@ export async function resetPasswordWithToken(
   return { success: true }
 }
 
+export type EmailActionStatus = "pending" | "completed" | "invalid" | "expired"
+
+/**
+ * Query status of an email verification or password reset action without modifying/consuming tokens.
+ */
+export async function getEmailActionStatus(
+  db: Database,
+  type: string,
+  rawToken: string,
+): Promise<EmailActionStatus> {
+  if (
+    !rawToken ||
+    typeof rawToken !== "string" ||
+    rawToken.length > 128 ||
+    !/^[A-Za-z0-9_-]+$/.test(rawToken)
+  ) {
+    return "invalid"
+  }
+
+  const tokenHash = await hashToken(rawToken)
+  const now = new Date()
+
+  if (type === "verify-email") {
+    const tokenRecord = await db
+      .select()
+      .from(schema.emailVerificationTokens)
+      .where(eq(schema.emailVerificationTokens.tokenHash, tokenHash))
+      .get()
+
+    if (!tokenRecord) {
+      return "invalid"
+    }
+
+    if (tokenRecord.usedAt !== null) {
+      const cred = await db
+        .select()
+        .from(schema.passwordCredentials)
+        .where(eq(schema.passwordCredentials.userId, tokenRecord.userId))
+        .get()
+
+      if (cred && cred.emailVerifiedAt && cred.emailVerifiedAt === tokenRecord.usedAt) {
+        return "completed"
+      }
+      return "invalid"
+    }
+
+    if (new Date(tokenRecord.expiresAt) <= now) {
+      return "expired"
+    }
+
+    return "pending"
+  }
+
+  if (type === "reset-password") {
+    const tokenRecord = await db
+      .select()
+      .from(schema.passwordResetTokens)
+      .where(eq(schema.passwordResetTokens.tokenHash, tokenHash))
+      .get()
+
+    if (!tokenRecord) {
+      return "invalid"
+    }
+
+    if (tokenRecord.usedAt !== null) {
+      const cred = await db
+        .select()
+        .from(schema.passwordCredentials)
+        .where(eq(schema.passwordCredentials.userId, tokenRecord.userId))
+        .get()
+
+      if (cred && cred.updatedAt === tokenRecord.usedAt) {
+        return "completed"
+      }
+      return "invalid"
+    }
+
+    if (new Date(tokenRecord.expiresAt) <= now) {
+      return "expired"
+    }
+
+    return "pending"
+  }
+
+  return "invalid"
+}
+
 /**
  * Change Password (for authenticated user with active session)
  */

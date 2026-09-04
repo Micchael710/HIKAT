@@ -1883,10 +1883,14 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(cardPos).toBeGreaterThan(-1)
       expect(scriptPos).toBeGreaterThan(cardPos)
 
-      // Confirm delayed open attempt & button trigger
-      expect(htmlVerify).toContain("function openLauncher()")
+      // Confirm waiting state hides button, shows loader, and configures delayed 3s retry
+      expect(htmlVerify).toContain("function showWaitingState()")
+      expect(htmlVerify).toContain("function showCompletedState()")
+      expect(htmlVerify).toContain("function showLauncherError()")
+      expect(htmlVerify).toContain("function showErrorState()")
       expect(htmlVerify).toContain("setTimeout(openLauncher, 150)")
-      expect(htmlVerify).toContain("onclick=\"openLauncher()\"")
+      expect(htmlVerify).toContain("3000") // 3-second retry timeout
+      expect(htmlVerify).toContain("retryBtn.addEventListener(\"click\"")
 
       // Confirm background & logo asset references
       expect(htmlVerify).toContain("/auth/background.png")
@@ -1898,6 +1902,8 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(htmlVerify).toContain("Verificar cuenta")
       expect(htmlVerify).toContain("Estamos abriendo HiKAT Launcher para verificar tu cuenta.")
       expect(htmlVerify).toContain("Abrir HiKAT Launcher")
+      expect(htmlVerify).toContain("Cuenta verificada")
+      expect(htmlVerify).toContain("Tu cuenta de HiKAT fue verificada correctamente.")
 
       // 2. Valid reset-password action with English language
       const reqReset = new Request("http://localhost:8788/auth/email-action?type=reset-password&token=resetToken456&lang=en", {
@@ -1917,7 +1923,9 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(htmlReset).toContain("Reset password")
       expect(htmlReset).toContain("Continue in HiKAT Launcher to set your new password.")
       expect(htmlReset).toContain("Open HiKAT Launcher")
-      expect(htmlReset).toContain("setTimeout(openLauncher, 150)")
+      expect(htmlReset).toContain("Password reset")
+      expect(htmlReset).toContain("Your password was updated and your previous sessions were closed.")
+      expect(htmlReset).toContain("Return to HiKAT Launcher to sign in.")
 
       // 3. Fallback to Accept-Language (French)
       const reqFr = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=tokFrench789", {
@@ -1936,6 +1944,8 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(htmlFr).toContain("Vérifier le compte")
       expect(htmlFr).toContain("Nous ouvrons HiKAT Launcher pour vérifier votre compte.")
       expect(htmlFr).toContain("Ouvrir HiKAT Launcher")
+      expect(htmlFr).toContain("Compte vérifié")
+      expect(htmlFr).toContain("Votre compte HiKAT a été vérifié avec succès.")
 
       // 4. Invalid locale falls back to 'en'
       const reqInvalidLang = new Request("http://localhost:8788/auth/email-action?type=verify-email&token=tokInv999&lang=unknown_lang", {
@@ -1964,6 +1974,103 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         emailService,
       })
       expect(resInvalid.status).toBe(400)
+    })
+
+    it("GET /auth/email-action/status accurately reports pending, completed, invalid, and expired states", async () => {
+      // 1. Setup user with pending email verification token
+      await registerWithPassword(
+        db,
+        { email: "status-check@hikat.org", password: "Password123!" },
+        emailService,
+      )
+      const verifyToken = emailService.getLastEmailFor("status-check@hikat.org")!.token
+
+      // Check status: pending
+      const reqStatusPending = new Request(
+        `http://localhost:8788/auth/email-action/status?type=verify-email&token=${verifyToken}`,
+        { method: "GET" },
+      )
+      const resStatusPending = await handleRequest({
+        request: reqStatusPending,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resStatusPending.status).toBe(200)
+      const dataPending = (await resStatusPending.json()) as any
+      expect(dataPending.status).toBe("pending")
+
+      // Complete email verification
+      await verifyEmailToken(db, verifyToken)
+
+      // Check status: completed
+      const reqStatusCompleted = new Request(
+        `http://localhost:8788/auth/email-action/status?type=verify-email&token=${verifyToken}`,
+        { method: "GET" },
+      )
+      const resStatusCompleted = await handleRequest({
+        request: reqStatusCompleted,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(resStatusCompleted.status).toBe(200)
+      const dataCompleted = (await resStatusCompleted.json()) as any
+      expect(dataCompleted.status).toBe("completed")
+
+      // 2. Setup password reset token
+      await requestPasswordReset(db, "status-check@hikat.org", emailService)
+      const resetToken = emailService.getLastEmailFor("status-check@hikat.org")!.token
+
+      // Check status: pending
+      const reqResetPending = new Request(
+        `http://localhost:8788/auth/email-action/status?type=reset-password&token=${resetToken}`,
+        { method: "GET" },
+      )
+      const resResetPending = await handleRequest({
+        request: reqResetPending,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      const dataResetPending = (await resResetPending.json()) as any
+      expect(dataResetPending.status).toBe("pending")
+
+      // Complete password reset
+      await resetPasswordWithToken(db, resetToken, "BrandNewPassword123!")
+
+      // Check status: completed
+      const reqResetCompleted = new Request(
+        `http://localhost:8788/auth/email-action/status?type=reset-password&token=${resetToken}`,
+        { method: "GET" },
+      )
+      const resResetCompleted = await handleRequest({
+        request: reqResetCompleted,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      const dataResetCompleted = (await resResetCompleted.json()) as any
+      expect(dataResetCompleted.status).toBe("completed")
+
+      // 3. Invalid token
+      const reqInvalid = new Request(
+        `http://localhost:8788/auth/email-action/status?type=verify-email&token=nonexistentToken123`,
+        { method: "GET" },
+      )
+      const resInvalid = await handleRequest({
+        request: reqInvalid,
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      const dataInvalid = (await resInvalid.json()) as any
+      expect(dataInvalid.status).toBe("invalid")
     })
 
     it("GET /auth/logo.png and GET /auth/background.png serve raw image assets", async () => {

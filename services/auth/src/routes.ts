@@ -35,6 +35,7 @@ import {
   linkOAuthAccount,
   unlinkAuthMethod,
   issueGameToken,
+  getEmailActionStatus,
 } from "./services/auth"
 import {
   createSession,
@@ -325,6 +326,17 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       return jsonResponse({ success: res.success, message: "Email verified successfully" })
     }
 
+    // 5b-status. Email Action Status Polling Endpoint
+    if (pathname === "/auth/email-action/status" && method === "GET") {
+      const type = url.searchParams.get("type") || ""
+      const token = url.searchParams.get("token") || ""
+
+      const status = await getEmailActionStatus(db, type, token)
+      return jsonResponse({ status }, 200, {
+        "Cache-Control": "no-store",
+      })
+    }
+
     // 5b. Email Action Intermediate Web Page (Deep Link Bridge)
     if (pathname === "/auth/email-action" && method === "GET") {
       const type = url.searchParams.get("type")
@@ -365,59 +377,156 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       const emailActionTranslations = {
         "verify-email": {
           es: {
-            title: "Verificar cuenta",
-            description: "Estamos abriendo HiKAT Launcher para verificar tu cuenta.",
-            button: "Abrir HiKAT Launcher",
-            secondary: "Puedes volver a intentarlo si el Launcher no se abrió automáticamente.",
+            waitingTitle: "Verificar cuenta",
+            waitingDescription: "Estamos abriendo HiKAT Launcher para verificar tu cuenta.",
+            waitingSecondary: "Confirma el aviso del navegador para continuar.",
+
+            openErrorTitle: "No se pudo abrir el Launcher",
+            openErrorDescription: "HiKAT Launcher no respondió. Puedes volver a intentarlo.",
+            openErrorSecondary: "Puedes volver a intentarlo si el Launcher no se abrió automáticamente.",
+            retry: "Abrir HiKAT Launcher",
+
+            successTitle: "Cuenta verificada",
+            successDescription: "Tu cuenta de HiKAT fue verificada correctamente.",
+            successSecondary: "Puedes cerrar esta pestaña de forma segura.",
+
+            errorTitle: "Enlace no válido",
+            errorDescription: "Este enlace de verificación ya no es válido o ha expirado.",
+            errorSecondary: "Vuelve a HiKAT Launcher e inténtalo nuevamente.",
           },
           en: {
-            title: "Verify account",
-            description: "We're opening HiKAT Launcher to verify your account.",
-            button: "Open HiKAT Launcher",
-            secondary: "You can try again if the Launcher did not open automatically.",
+            waitingTitle: "Verify account",
+            waitingDescription: "We're opening HiKAT Launcher to verify your account.",
+            waitingSecondary: "Confirm the browser prompt to continue.",
+
+            openErrorTitle: "Launcher could not be opened",
+            openErrorDescription: "HiKAT Launcher did not respond. You can try again.",
+            openErrorSecondary: "You can try again if the Launcher did not open automatically.",
+            retry: "Open HiKAT Launcher",
+
+            successTitle: "Account verified",
+            successDescription: "Your HiKAT account was verified successfully.",
+            successSecondary: "You can safely close this tab.",
+
+            errorTitle: "Invalid link",
+            errorDescription: "This verification link is no longer valid or has expired.",
+            errorSecondary: "Return to HiKAT Launcher and try again.",
           },
           pt: {
-            title: "Verificar conta",
-            description: "Estamos abrindo o HiKAT Launcher para verificar sua conta.",
-            button: "Abrir o HiKAT Launcher",
-            secondary: "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+            waitingTitle: "Verificar conta",
+            waitingDescription: "Estamos abrindo o HiKAT Launcher para verificar sua conta.",
+            waitingSecondary: "Confirme o aviso do navegador para continuar.",
+
+            openErrorTitle: "Não foi possível abrir o Launcher",
+            openErrorDescription: "O HiKAT Launcher não respondeu. Você pode tentar novamente.",
+            openErrorSecondary: "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+            retry: "Abrir o HiKAT Launcher",
+
+            successTitle: "Conta verificada",
+            successDescription: "Sua conta do HiKAT foi verificada com sucesso.",
+            successSecondary: "Você pode fechar esta aba com segurança.",
+
+            errorTitle: "Link inválido",
+            errorDescription: "Este link de verificação não é mais válido ou expirou.",
+            errorSecondary: "Volte ao HiKAT Launcher e tente novamente.",
           },
           fr: {
-            title: "Vérifier le compte",
-            description: "Nous ouvrons HiKAT Launcher pour vérifier votre compte.",
-            button: "Ouvrir HiKAT Launcher",
-            secondary: "Vous pouvez réessayer si le Launcher ne s’est pas ouvert automatiquement.",
+            waitingTitle: "Vérifier le compte",
+            waitingDescription: "Nous ouvrons HiKAT Launcher pour vérifier votre compte.",
+            waitingSecondary: "Confirmez l’invite du navigateur pour continuer.",
+
+            openErrorTitle: "Impossible d’ouvrir le Launcher",
+            openErrorDescription: "HiKAT Launcher n’a pas répondu. Vous pouvez réessayer.",
+            openErrorSecondary: "Vous pouvez réessayer si le Launcher ne s’est pas ouvert automatiquement.",
+            retry: "Ouvrir HiKAT Launcher",
+
+            successTitle: "Compte vérifié",
+            successDescription: "Votre compte HiKAT a été vérifié avec succès.",
+            successSecondary: "Vous pouvez fermer cet onglet en toute sécurité.",
+
+            errorTitle: "Lien non valide",
+            errorDescription: "Ce lien de vérification n'est plus valide ou a expiré.",
+            errorSecondary: "Retournez dans HiKAT Launcher et réessayez.",
           },
         },
         "reset-password": {
           es: {
-            title: "Restablecer contraseña",
-            description: "Continúa en HiKAT Launcher para establecer tu nueva contraseña.",
-            button: "Abrir HiKAT Launcher",
-            secondary: "Puedes volver a intentarlo si el Launcher no se abrió automáticamente.",
+            waitingTitle: "Restablecer contraseña",
+            waitingDescription: "Continúa en HiKAT Launcher para establecer tu nueva contraseña.",
+            waitingSecondary: "Confirma el aviso del navegador para continuar.",
+
+            openErrorTitle: "No se pudo abrir el Launcher",
+            openErrorDescription: "HiKAT Launcher no respondió. Puedes volver a intentarlo.",
+            openErrorSecondary: "Puedes volver a intentarlo si el Launcher no se abrió automáticamente.",
+            retry: "Abrir HiKAT Launcher",
+
+            successTitle: "Contraseña restablecida",
+            successDescription: "Tu contraseña fue actualizada y tus sesiones anteriores fueron cerradas.",
+            successSecondary: "Vuelve a HiKAT Launcher para iniciar sesión.",
+
+            errorTitle: "Enlace no válido",
+            errorDescription: "Este enlace para restablecer tu contraseña ya no es válido o ha expirado.",
+            errorSecondary: "Vuelve a HiKAT Launcher e inténtalo nuevamente.",
           },
           en: {
-            title: "Reset password",
-            description: "Continue in HiKAT Launcher to set your new password.",
-            button: "Open HiKAT Launcher",
-            secondary: "You can try again if the Launcher did not open automatically.",
+            waitingTitle: "Reset password",
+            waitingDescription: "Continue in HiKAT Launcher to set your new password.",
+            waitingSecondary: "Confirm the browser prompt to continue.",
+
+            openErrorTitle: "Launcher could not be opened",
+            openErrorDescription: "HiKAT Launcher did not respond. You can try again.",
+            openErrorSecondary: "You can try again if the Launcher did not open automatically.",
+            retry: "Open HiKAT Launcher",
+
+            successTitle: "Password reset",
+            successDescription: "Your password was updated and your previous sessions were closed.",
+            successSecondary: "Return to HiKAT Launcher to sign in.",
+
+            errorTitle: "Invalid link",
+            errorDescription: "This password reset link is no longer valid or has expired.",
+            errorSecondary: "Return to HiKAT Launcher and try again.",
           },
           pt: {
-            title: "Redefinir senha",
-            description: "Continue no HiKAT Launcher para definir sua nova senha.",
-            button: "Abrir o HiKAT Launcher",
-            secondary: "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+            waitingTitle: "Redefinir senha",
+            waitingDescription: "Continue no HiKAT Launcher para definir sua nova senha.",
+            waitingSecondary: "Confirme o aviso do navegador para continuar.",
+
+            openErrorTitle: "Não foi possível abrir o Launcher",
+            openErrorDescription: "O HiKAT Launcher não respondeu. Você pode tentar novamente.",
+            openErrorSecondary: "Você pode tentar novamente se o Launcher não abrir automaticamente.",
+            retry: "Abrir o HiKAT Launcher",
+
+            successTitle: "Senha redefinida",
+            successDescription: "Sua senha foi atualizada e suas sessões anteriores foram encerradas.",
+            successSecondary: "Volte ao HiKAT Launcher para entrar.",
+
+            errorTitle: "Link inválido",
+            errorDescription: "Este link de redefinição de senha não é mais válido ou expirou.",
+            errorSecondary: "Volte ao HiKAT Launcher e tente novamente.",
           },
           fr: {
-            title: "Réinitialiser le mot de passe",
-            description: "Continuez dans HiKAT Launcher pour définir votre nouveau mot de passe.",
-            button: "Ouvrir HiKAT Launcher",
-            secondary: "Vous pouvez réessayer si le Launcher ne s’est pas ouvert automatiquement.",
+            waitingTitle: "Réinitialiser le mot de passe",
+            waitingDescription: "Continuez dans HiKAT Launcher pour définir votre nouveau mot de passe.",
+            waitingSecondary: "Confirmez l’invite du navigateur pour continuer.",
+
+            openErrorTitle: "Impossible d’ouvrir le Launcher",
+            openErrorDescription: "HiKAT Launcher n’a pas répondu. Vous pouvez réessayer.",
+            openErrorSecondary: "Vous pouvez réessayer si le Launcher ne s’est pas ouvert automatiquement.",
+            retry: "Ouvrir HiKAT Launcher",
+
+            successTitle: "Mot de passe réinitialisé",
+            successDescription: "Votre mot de passe a été mis à jour et vos sessions précédentes ont été fermées.",
+            successSecondary: "Retournez dans HiKAT Launcher pour vous connecter.",
+
+            errorTitle: "Lien non valide",
+            errorDescription: "Ce lien de réinitialisation de mot de passe n'est plus valide ou a expiré.",
+            errorSecondary: "Retournez dans HiKAT Launcher et réessayez.",
           },
         },
       }
 
       const copy = emailActionTranslations[type][lang]
+      const serializedCopy = JSON.stringify(copy).replace(/</g, "\\u003c")
       const deepLink = `hikat://auth/${type}?token=${encodeURIComponent(token)}`
 
       const html = `<!DOCTYPE html>
@@ -426,7 +535,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>${copy.title} - HiKAT</title>
+  <title>${copy.waitingTitle} - HiKAT</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -499,6 +608,9 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       max-width: 240px;
       object-fit: contain;
     }
+    .status {
+      display: none;
+    }
     h1 {
       margin: 0 0 10px 0;
       font-size: 20px;
@@ -524,8 +636,8 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
-    .btn {
-      display: inline-block;
+    .retry {
+      display: none;
       width: 100%;
       margin-top: 24px;
       padding: 13px 20px;
@@ -542,7 +654,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       cursor: pointer;
       transition: border-color 0.22s ease, background 0.22s ease, box-shadow 0.25s ease, transform 0.2s ease;
     }
-    .btn:hover {
+    .retry:hover {
       background: linear-gradient(135deg, #234764, #33678e);
       border-color: rgba(160, 230, 255, 0.9);
       box-shadow: 0 0 28px rgba(90, 180, 220, 0.45);
@@ -563,22 +675,122 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       <div class="brand">
         <img src="/auth/logo.png" alt="HiKAT">
       </div>
-      <h1>${copy.title}</h1>
-      <p class="description">${copy.description}</p>
-      <div class="loader"></div>
-      <button id="open-btn" class="btn" type="button" onclick="openLauncher()">${copy.button}</button>
-      <p class="secondary">${copy.secondary}</p>
+      <div id="status" class="status"></div>
+      <h1 id="title"></h1>
+      <p id="description" class="description"></p>
+      <div id="loader" class="loader"></div>
+      <button id="retry" class="retry" type="button"></button>
+      <p id="secondary" class="secondary"></p>
     </main>
   </div>
   <script>
+    const actionType = ${JSON.stringify(type)};
+    const actionToken = ${JSON.stringify(token)};
     const deepLink = ${JSON.stringify(deepLink)};
+    const t = ${serializedCopy};
+
+    const titleEl = document.getElementById("title");
+    const descEl = document.getElementById("description");
+    const secEl = document.getElementById("secondary");
+    const loaderEl = document.getElementById("loader");
+    const retryBtn = document.getElementById("retry");
+
+    let completed = false;
+    let launchTimeout = null;
+    let statusInterval = null;
+
+    function showWaitingState() {
+      completed = false;
+      titleEl.textContent = t.waitingTitle;
+      descEl.textContent = t.waitingDescription;
+      secEl.textContent = t.waitingSecondary;
+      loaderEl.style.display = "block";
+      retryBtn.style.display = "none";
+    }
+
+    function showCompletedState() {
+      if (completed) return;
+      completed = true;
+      clearTimeout(launchTimeout);
+      clearInterval(statusInterval);
+
+      titleEl.textContent = t.successTitle;
+      descEl.textContent = t.successDescription;
+      secEl.textContent = t.successSecondary;
+      loaderEl.style.display = "none";
+      retryBtn.style.display = "none";
+    }
+
+    function showLauncherError() {
+      if (completed) return;
+      clearInterval(statusInterval);
+
+      titleEl.textContent = t.openErrorTitle;
+      descEl.textContent = t.openErrorDescription;
+      secEl.textContent = t.openErrorSecondary;
+      loaderEl.style.display = "none";
+      retryBtn.textContent = t.retry;
+      retryBtn.style.display = "block";
+    }
+
+    function showErrorState() {
+      completed = true;
+      clearTimeout(launchTimeout);
+      clearInterval(statusInterval);
+
+      titleEl.textContent = t.errorTitle;
+      descEl.textContent = t.errorDescription;
+      secEl.textContent = t.errorSecondary;
+      loaderEl.style.display = "none";
+      retryBtn.style.display = "none";
+    }
+
+    async function checkActionStatus() {
+      if (completed || !actionToken) return;
+
+      try {
+        const response = await fetch(
+          "/auth/email-action/status?type=" +
+            encodeURIComponent(actionType) +
+            "&token=" +
+            encodeURIComponent(actionToken),
+          { cache: "no-store" }
+        );
+
+        if (!response.ok) return;
+
+        const result = await response.json();
+        if (result.status === "completed") {
+          showCompletedState();
+        } else if (result.status === "invalid" || result.status === "expired") {
+          showErrorState();
+        }
+      } catch (_) {}
+    }
+
     function openLauncher() {
+      clearTimeout(launchTimeout);
+      clearInterval(statusInterval);
+
+      showWaitingState();
       window.location.href = deepLink;
+
+      statusInterval = setInterval(checkActionStatus, 500);
+
+      launchTimeout = setTimeout(() => {
+        checkActionStatus().finally(() => {
+          if (!completed) {
+            showLauncherError();
+          }
+        });
+      }, 3000);
     }
-    const btn = document.getElementById("open-btn");
-    if (btn) {
-      btn.addEventListener("click", openLauncher);
-    }
+
+    retryBtn.addEventListener("click", () => {
+      openLauncher();
+    });
+
+    showWaitingState();
     setTimeout(openLauncher, 150);
   </script>
 </body>

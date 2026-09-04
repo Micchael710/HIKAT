@@ -1201,7 +1201,7 @@ function startOAuthLoopbackServer() {
                         showLauncherError();
                       }
                     });
-                }, 10000);
+                }, 3000);
             }
 
             retry.addEventListener(
