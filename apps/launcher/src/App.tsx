@@ -204,6 +204,7 @@ export default function App() {
                 username={username}
                 activeSkinData={activeSkinData}
                 onBack={() => setView("home")}
+                onLogout={handleLogout}
                 theme={theme}
               />
             )}

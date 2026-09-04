@@ -282,6 +282,10 @@
     "oauthManagedDesc": "This account logs in using external providers. Security and access are managed directly through your provider.",
     "providerGoogle": "Google",
     "providerDiscord": "Discord",
-    "methodsError": "Could not load sign-in methods."
+    "methodsError": "Could not load sign-in methods.",
+    "session": "Session",
+    "logoutTitle": "Log out",
+    "logoutDesc": "Log out of your HiKAT session on this device.",
+    "logoutButton": "Log out"
   }
 }

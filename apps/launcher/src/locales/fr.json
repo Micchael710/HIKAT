@@ -282,6 +282,10 @@
     "oauthManagedDesc": "Ce compte se connecte via des fournisseurs externes. La sécurité et l'accès sont gérés directement via votre fournisseur.",
     "providerGoogle": "Google",
     "providerDiscord": "Discord",
-    "methodsError": "Impossible de charger les méthodes de connexion."
+    "methodsError": "Impossible de charger les méthodes de connexion.",
+    "session": "Session",
+    "logoutTitle": "Se déconnecter",
+    "logoutDesc": "Fermez votre session HiKAT sur cet appareil.",
+    "logoutButton": "Se déconnecter"
   }
 }

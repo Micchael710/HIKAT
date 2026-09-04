@@ -11,6 +11,7 @@ interface ProfileViewProps {
   username: string
   activeSkinData?: SkinItem | null
   onBack: () => void
+  onLogout?: () => void
   theme?: ThemeMode
 }
 
@@ -18,6 +19,7 @@ export default function ProfileView({
   username,
   activeSkinData,
   onBack,
+  onLogout,
   theme = "dark",
 }: ProfileViewProps) {
   const { t, language } = useTranslation()
@@ -883,6 +885,92 @@ export default function ProfileView({
                   )}
                 </>
               )}
+            </div>
+          </div>
+
+          {/* Card 3: Sesión & Cerrar Sesión */}
+          <div className="settings-card">
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: isDark ? "#657788" : "#778899",
+                marginBottom: 8,
+              }}
+            >
+              {t("profile.session")}
+            </div>
+
+            <div
+              className="settings-row"
+              style={{
+                borderBottom: "none",
+                paddingBottom: 0,
+                paddingTop: 6,
+                minHeight: 52,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: 17.5,
+                    fontWeight: 700,
+                    color: isDark ? "white" : "#111822",
+                    marginBottom: 3,
+                  }}
+                >
+                  {t("profile.logoutTitle")}
+                </div>
+                <div
+                  style={{
+                    fontSize: 15,
+                    color: isDark ? "#8899aa" : "#556677",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {t("profile.logoutDesc")}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={onLogout}
+                className="launcher-btn-danger"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  height: 44,
+                  padding: "0 22px",
+                  borderRadius: 14,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  fontFamily: BASE_FONT,
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  width={16}
+                  height={16}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>{t("profile.logoutButton")}</span>
+              </button>
             </div>
           </div>
         </div>

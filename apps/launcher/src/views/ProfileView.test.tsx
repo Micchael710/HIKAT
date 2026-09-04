@@ -327,4 +327,76 @@ describe("Launcher ProfileView Component", () => {
     expect(container.textContent).not.toContain("Enviar correo de restablecimiento")
     expect(container.textContent).toContain("No se pudieron cargar los métodos de acceso.")
   })
+
+  it("9. Logout card appears in Profile with localized title, description and button", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-9",
+      username: "LogoutUser",
+      displayName: "LogoutUser",
+      email: "logout@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "logout@hikat.org" }],
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="LogoutUser"
+          onBack={vi.fn()}
+          onLogout={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    expect(container.textContent).toContain("Sesión")
+    expect(container.textContent).toContain("Cerrar sesión")
+    expect(container.textContent).toContain("Cierra tu sesión de HiKAT en este dispositivo.")
+  })
+
+  it("10. Clicking logout button executes onLogout exactly once without calling alternative logout logic", async () => {
+    const onLogoutMock = vi.fn()
+    const logoutSpy = vi.spyOn(authService, "logout")
+
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-10",
+      username: "LogoutClickUser",
+      displayName: "LogoutClickUser",
+      email: "click@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "click@hikat.org" }],
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="LogoutClickUser"
+          onBack={vi.fn()}
+          onLogout={onLogoutMock}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    // Find the logout button by its text
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const logoutBtn = buttons.find((btn) => btn.textContent?.includes("Cerrar sesión"))
+    expect(logoutBtn).toBeDefined()
+    expect(logoutBtn?.classList.contains("launcher-btn-danger")).toBe(true)
+
+    await act(async () => {
+      logoutBtn?.click()
+    })
+
+    expect(onLogoutMock).toHaveBeenCalledTimes(1)
+    expect(logoutSpy).not.toHaveBeenCalled()
+  })
 })

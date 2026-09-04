@@ -282,6 +282,10 @@
     "oauthManagedDesc": "Esta conta faz login por meio de provedores externos. A segurança e o acesso são gerenciados diretamente pelo seu provedor.",
     "providerGoogle": "Google",
     "providerDiscord": "Discord",
-    "methodsError": "Não foi possível carregar os métodos de acesso."
+    "methodsError": "Não foi possível carregar os métodos de acesso.",
+    "session": "Sessão",
+    "logoutTitle": "Encerrar sessão",
+    "logoutDesc": "Encerre sua sessão do HiKAT neste dispositivo.",
+    "logoutButton": "Encerrar sessão"
   }
 }
