@@ -364,4 +364,29 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(container.textContent).toContain("Rendimiento")
     expect(container.textContent).toContain("Administración")
   })
+
+  it("13. SettingsView layout maintains top: 145, right: 80, and slider receives --settings-accent", async () => {
+    const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
+
+    // Check main panel container position
+    const mainContainer = container.querySelector("div[style*='top: 145px']") as HTMLElement
+    expect(mainContainer).toBeDefined()
+    expect(mainContainer?.style.right).toBe("80px")
+
+    // Navigate to Games tab
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos"))
+    await act(async () => {
+      gamesTabBtn?.click()
+    })
+
+    const slider = container.querySelector(".settings-ram-slider") as HTMLInputElement
+    expect(slider).toBeDefined()
+    expect(slider?.style.getPropertyValue("--settings-accent")).toBeTruthy()
+
+    const selectorBtn = container.querySelector(".game-selector-item") as HTMLElement
+    expect(selectorBtn).toBeDefined()
+    expect(selectorBtn?.style.getPropertyValue("--game-border-color")).toBeTruthy()
+  })
 })
+

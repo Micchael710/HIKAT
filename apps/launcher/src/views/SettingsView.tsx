@@ -486,13 +486,13 @@ export default function SettingsView({
         }}
       />
 
-      {/* ── Main Settings Panel Content (Restored to top: 145 aligned with SkinsView) ── */}
+      {/* ── Main Settings Panel Content (Aligned to top: 145, right: 80 matching SkinsView) ── */}
       <div
         style={{
           position: "absolute",
           left: CONTENT_LEFT,
           top: 145,
-          right: 48,
+          right: 80,
           bottom: 24,
           display: "flex",
           flexDirection: "column",
@@ -500,24 +500,26 @@ export default function SettingsView({
           zIndex: 10,
         }}
       >
-        {/* ── Header Area ── */}
+        {/* ── Top Header Row (Metrics aligned with SkinsView) ── */}
         <div
           style={{
             display: "flex",
-            alignItems: "flex-end",
+            alignItems: "center",
             justifyContent: "space-between",
-            paddingBottom: 2,
+            minHeight: 48,
+            marginBottom: 4,
           }}
         >
           <div>
             <h1
               style={{
                 fontFamily: BASE_FONT,
-                fontSize: 34,
-                fontWeight: 900,
-                letterSpacing: "-0.03em",
+                fontSize: 32,
+                fontWeight: 800,
+                letterSpacing: "-0.02em",
                 color: isDark ? "#ffffff" : "#111822",
                 margin: 0,
+                marginBottom: 4,
                 lineHeight: 1.1,
                 display: "flex",
                 alignItems: "center",
@@ -529,10 +531,10 @@ export default function SettingsView({
             <p
               style={{
                 fontFamily: BASE_FONT,
-                fontSize: 14.5,
+                fontSize: 16,
+                fontWeight: 400,
                 color: isDark ? "#7a8b9e" : "#556677",
-                margin: "4px 0 0 0",
-                fontWeight: 500,
+                margin: 0,
               }}
             >
               {t("settings.subtitle")}
@@ -1054,6 +1056,7 @@ export default function SettingsView({
               style={{
                 display: "flex",
                 gap: 20,
+                paddingTop: 6,
                 animation: "tabSlideUpFade 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
                 minHeight: 520,
               }}
@@ -1078,8 +1081,10 @@ export default function SettingsView({
                       onClick={() => setSelectedGameId(game.id)}
                       className={`game-selector-item ${isSelected ? "is-selected" : ""}`}
                       style={{
-                        ["--game-border-color" as any]: `rgba(${gameAccent.css}, 0.85)`,
-                        ["--game-glow-color" as any]: `rgba(${gameAccent.css}, 0.22)`,
+                        ["--game-border-color" as any]: `rgba(${gameAccent.css}, 0.88)`,
+                        ["--game-glow-color" as any]: `rgba(${gameAccent.css}, 0.28)`,
+                        ["--card-border-color" as any]: `rgba(${gameAccent.css}, 0.88)`,
+                        ["--card-glow-color" as any]: `rgba(${gameAccent.css}, 0.28)`,
                         display: "flex",
                         alignItems: "center",
                         gap: 12,
@@ -1089,11 +1094,6 @@ export default function SettingsView({
                         fontSize: 15,
                         fontWeight: 700,
                         cursor: "pointer",
-                        border: isSelected
-                          ? `1.5px solid rgba(${gameAccent.css}, 0.85)`
-                          : isDark
-                            ? "1.5px solid rgba(255, 255, 255, 0.05)"
-                            : "1.5px solid rgba(0, 0, 0, 0.05)",
                         background: isSelected
                           ? isDark
                             ? "#161f28"
@@ -1108,9 +1108,6 @@ export default function SettingsView({
                           : isDark
                             ? "#8899aa"
                             : "#556677",
-                        boxShadow: isSelected
-                          ? `0 4px 14px rgba(${gameAccent.css}, 0.2)`
-                          : "none",
                         textAlign: "left",
                       }}
                     >
@@ -1350,6 +1347,7 @@ export default function SettingsView({
                         className="settings-ram-slider"
                         style={{
                           flex: 1,
+                          ["--settings-accent" as any]: gameAccent.hex,
                           background: `linear-gradient(to right, ${gameAccent.hex} 0%, ${gameAccent.hex} ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
                             isDark
                               ? "rgba(255, 255, 255, 0.1)"
@@ -1374,7 +1372,7 @@ export default function SettingsView({
                       </span>
                     </div>
 
-                    {/* Row 2: Automatic RAM selection (integrated directly under slider, no divider) */}
+                    {/* Row 2: Automatic RAM selection (compact, clean, no duplicate description) */}
                     <div
                       style={{
                         display: "flex",
@@ -1386,22 +1384,12 @@ export default function SettingsView({
                       <div>
                         <div
                           style={{
-                            fontSize: 17,
+                            fontSize: 16,
                             fontWeight: 700,
                             color: isDark ? "white" : "#111822",
-                            marginBottom: 2,
                           }}
                         >
-                          {`${t("settings.ramTitle")} · ${t("settings.automaticRam")}`}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 14.5,
-                            color: isDark ? "#8899aa" : "#556677",
-                            lineHeight: 1.45,
-                          }}
-                        >
-                          {t("settings.ramDesc")}
+                          {t("settings.automaticRam")}
                         </div>
                       </div>
 
