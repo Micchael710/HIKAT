@@ -272,9 +272,16 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
   })
 
   it("Cold-start with pending /reset-password deep link and existing stored session stays on reset password form instead of switching to Home", async () => {
+    let pendingUrl: string | null = "hikat://auth/reset-password?token=cold-reset-token-555"
+    const getPendingOAuthCallbackMock = vi.fn().mockImplementation(async () => {
+      const url = pendingUrl
+      pendingUrl = null
+      return url
+    })
+
     ;(window as any).electronAPI = {
       onOAuthCallback: vi.fn(() => () => {}),
-      getPendingOAuthCallback: vi.fn().mockResolvedValue("hikat://auth/reset-password?token=cold-reset-token-555"),
+      getPendingOAuthCallback: getPendingOAuthCallbackMock,
     }
 
     const container = document.createElement("div")
@@ -291,6 +298,9 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
     await act(async () => {
       await Promise.resolve()
     })
+
+    // Assert getPendingOAuthCallback is called exactly once (single consumer in useLauncherState)
+    expect(getPendingOAuthCallbackMock).toHaveBeenCalledTimes(1)
 
     // Assert it does NOT finish in Home
     expect(container.querySelector(".sidebar-nav-btn")).toBeNull()
@@ -314,9 +324,16 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
       message: "Email verified successfully",
     })
 
+    let pendingUrl: string | null = "hikat://auth/verify-email?token=cold-verify-token-888"
+    const getPendingOAuthCallbackMock = vi.fn().mockImplementation(async () => {
+      const url = pendingUrl
+      pendingUrl = null
+      return url
+    })
+
     ;(window as any).electronAPI = {
       onOAuthCallback: vi.fn(() => () => {}),
-      getPendingOAuthCallback: vi.fn().mockResolvedValue("hikat://auth/verify-email?token=cold-verify-token-888"),
+      getPendingOAuthCallback: getPendingOAuthCallbackMock,
     }
 
     const container = document.createElement("div")
@@ -334,6 +351,8 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
       await Promise.resolve()
     })
 
+    // Assert getPendingOAuthCallback is called exactly once (single consumer in useLauncherState)
+    expect(getPendingOAuthCallbackMock).toHaveBeenCalledTimes(1)
     expect(verifySpy).toHaveBeenCalledWith("cold-verify-token-888")
 
     // Assert it does NOT finish in Home

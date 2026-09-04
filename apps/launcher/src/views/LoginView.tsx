@@ -166,31 +166,18 @@ export default function LoginView({
     }
   }, [initialDeepLinkUrl])
 
-  // Listen for deep link callbacks via Electron IPC & check cold-start pending callbacks
+  // Listen for deep link callbacks via Electron IPC while launcher is open
   useEffect(() => {
-    if (typeof window === "undefined" || !window.electronAPI) {
+    if (typeof window === "undefined" || !window.electronAPI?.onOAuthCallback) {
       return
     }
 
-    if (window.electronAPI.getPendingOAuthCallback) {
-      window.electronAPI
-        .getPendingOAuthCallback()
-        ?.then((pendingUrl: string | null) => {
-          if (pendingUrl) {
-            processDeepLinkUrl(pendingUrl)
-          }
-        })
-        .catch(() => {})
-    }
+    const removeListener = window.electronAPI.onOAuthCallback((rawUrl: string) => {
+      processDeepLinkUrl(rawUrl)
+    })
 
-    if (window.electronAPI.onOAuthCallback) {
-      const removeListener = window.electronAPI.onOAuthCallback((rawUrl: string) => {
-        processDeepLinkUrl(rawUrl)
-      })
-
-      return () => {
-        removeListener?.()
-      }
+    return () => {
+      removeListener?.()
     }
   }, [onLogin, keepSession])
 

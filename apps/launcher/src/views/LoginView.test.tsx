@@ -176,14 +176,11 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     })
   })
 
-  it("6. Cold start retrieves pending OAuth deep link on mount and processes login", async () => {
+  it("6. Passes initialDeepLinkUrl on mount and processes login", async () => {
     const onLogin = vi.fn()
     ;(window as any).electronAPI = {
       openExternal: vi.fn(),
       onOAuthCallback: vi.fn(() => () => {}),
-      getPendingOAuthCallback: vi
-        .fn()
-        .mockResolvedValue("hikat://auth/callback?code=coldcode&state=coldstate"),
     }
 
     vi.spyOn(authService, "handleOAuthCallback").mockResolvedValueOnce({
@@ -196,7 +193,11 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
 
     await renderComponent(
       <LanguageProvider>
-        <LoginView onLogin={onLogin} theme="dark" />
+        <LoginView
+          onLogin={onLogin}
+          theme="dark"
+          initialDeepLinkUrl="hikat://auth/callback?code=coldcode&state=coldstate"
+        />
       </LanguageProvider>,
     )
 
@@ -867,18 +868,21 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).not.toContain("INVALID_TOKEN")
   })
 
-  it("27. Pending cold-start deep link for reset-password (getPendingOAuthCallback) opens reset-password view correctly", async () => {
+  it("27. Passes initialDeepLinkUrl with reset-password and opens reset-password view correctly", async () => {
     const onLogin = vi.fn()
 
     ;(window as any).electronAPI = {
       openExternal: vi.fn(),
-      getPendingOAuthCallback: vi.fn().mockResolvedValue("hikat://auth/reset-password?token=cold-start-token-999"),
       onOAuthCallback: vi.fn(() => () => {}),
     }
 
     const container = await renderComponent(
       <LanguageProvider>
-        <LoginView onLogin={onLogin} theme="dark" />
+        <LoginView
+          onLogin={onLogin}
+          theme="dark"
+          initialDeepLinkUrl="hikat://auth/reset-password?token=cold-start-token-999"
+        />
       </LanguageProvider>,
     )
 
