@@ -26,6 +26,14 @@ export interface UserProfile {
   createdAt?: string
 }
 
+export interface LinkedAuthMethod {
+  type: "PASSWORD" | "GOOGLE" | "DISCORD"
+  email?: string
+  displayName?: string
+  verified?: boolean
+  linkedAt?: string
+}
+
 export interface LoginCredentials {
   email: string
   password?: string
@@ -86,6 +94,7 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
               displayName: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
               email: session.user.email,
               role: session.user.role,
+              createdAt: session.user.createdAt,
             }),
           )
         }
@@ -154,6 +163,7 @@ class LauncherAuthService {
       displayName: u.displayName || u.email.split("@")[0] || "Jugador",
       email: u.email,
       role: u.role,
+      createdAt: u.createdAt,
     }
   }
 
@@ -170,6 +180,7 @@ class LauncherAuthService {
           displayName: sanitizeUsername(parsed.displayName || parsed.username || parsed.email?.split("@")[0]) || "Jugador",
           email: sanitizeEmail(parsed.email || ""),
           role: parsed.role || "PLAYER",
+          createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : undefined,
         }
       }
       return null
@@ -206,6 +217,7 @@ class LauncherAuthService {
           displayName: user.displayName || user.email.split("@")[0] || "Jugador",
           email: user.email,
           role: user.role,
+          createdAt: user.createdAt,
         },
         token,
       }
@@ -251,6 +263,7 @@ class LauncherAuthService {
           displayName: res.user.displayName || cleanUsername || cleanEmail.split("@")[0],
           email: res.user.email,
           role: res.user.role,
+          createdAt: res.user.createdAt,
         },
         emailVerificationRequired: res.emailVerificationRequired,
       }
@@ -429,6 +442,7 @@ class LauncherAuthService {
         displayName: user.displayName || user.email.split("@")[0] || "Jugador",
         email: user.email,
         role: user.role,
+        createdAt: user.createdAt,
       }
     } catch (err) {
       // Clean pending state on error
@@ -445,9 +459,31 @@ class LauncherAuthService {
       }
       throw err
     }
-
   }
 
+  public async getLinkedMethods(): Promise<{ success: boolean; methods?: LinkedAuthMethod[]; error?: string }> {
+    try {
+      const token = await this.ensureValidAccessToken()
+      if (!token) {
+        return { success: false, error: "No se encontró sesión activa." }
+      }
+      const res = await fetch(`${AUTH_URL}/auth/me/methods`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        return { success: false, error: data.error || data.message || `HTTP ${res.status}` }
+      }
+      const data = await res.json()
+      return { success: true, methods: data.methods || [] }
+    } catch (err: any) {
+      return { success: false, error: err?.message || "Error al consultar métodos de autenticación." }
+    }
+  }
 }
 
 export const authService = new LauncherAuthService()

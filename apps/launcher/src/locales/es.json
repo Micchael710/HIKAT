@@ -277,6 +277,10 @@
     "resetPasswordDesc": "Envía un enlace seguro de recuperación a tu correo electrónico para cambiar la clave.",
     "sendResetEmail": "Enviar correo de restablecimiento",
     "emailSent": "Correo enviado",
-    "emailError": "No se pudo enviar el correo de recuperación. Reintenta más tarde."
+    "emailError": "No se pudo enviar el correo de recuperación. Reintenta más tarde.",
+    "linkedMethods": "Métodos de Acceso Vinculados",
+    "oauthManagedDesc": "Esta cuenta inicia sesión mediante proveedores externos. La seguridad y el acceso se gestionan directamente a través de tu proveedor.",
+    "providerGoogle": "Google",
+    "providerDiscord": "Discord"
   }
 }

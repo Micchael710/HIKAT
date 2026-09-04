@@ -793,6 +793,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
           id: user.id,
           role: user.role,
           displayName: user.displayName,
+          createdAt: user.createdAt,
         },
         keyManager,
       )

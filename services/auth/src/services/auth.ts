@@ -143,6 +143,7 @@ export async function loginWithPassword(
       emailVerifiedAt: schema.passwordCredentials.emailVerifiedAt,
       userRole: schema.users.role,
       userDisplayName: schema.users.displayName,
+      userCreatedAt: schema.users.createdAt,
     })
     .from(schema.passwordCredentials)
     .innerJoin(schema.users, eq(schema.passwordCredentials.userId, schema.users.id))
@@ -164,6 +165,7 @@ export async function loginWithPassword(
     email: normalizedEmail,
     role: credRecord.userRole as AppRole,
     displayName: credRecord.userDisplayName,
+    createdAt: credRecord.userCreatedAt,
   }
 
   // 3. Create Session and return tokens
@@ -374,7 +376,7 @@ export async function changePassword(
 export async function getOrCreateOAuthUser(
   db: Database,
   profile: OAuthProviderProfile,
-): Promise<{ id: string; email: string; role: AppRole; displayName: string | null }> {
+): Promise<{ id: string; email: string; role: AppRole; displayName: string | null; createdAt?: string }> {
   // 1. Check if external account is already linked
   const linkedAccount = await db
     .select({
@@ -383,6 +385,7 @@ export async function getOrCreateOAuthUser(
       email: schema.externalAccounts.email,
       role: schema.users.role,
       displayName: schema.users.displayName,
+      createdAt: schema.users.createdAt,
     })
     .from(schema.externalAccounts)
     .innerJoin(schema.users, eq(schema.externalAccounts.userId, schema.users.id))
@@ -400,6 +403,7 @@ export async function getOrCreateOAuthUser(
       email: linkedAccount.email || profile.email || "",
       role: linkedAccount.role as AppRole,
       displayName: linkedAccount.displayName,
+      createdAt: linkedAccount.createdAt,
     }
   }
 
@@ -454,6 +458,7 @@ export async function getOrCreateOAuthUser(
     email: profile.email || "",
     role: "PLAYER" as AppRole,
     displayName: newUser.displayName ?? null,
+    createdAt: now,
   }
 }
 

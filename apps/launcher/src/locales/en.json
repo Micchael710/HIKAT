@@ -277,6 +277,10 @@
     "resetPasswordDesc": "Send a secure recovery link to your email address to change the password.",
     "sendResetEmail": "Send reset email",
     "emailSent": "Email sent",
-    "emailError": "Could not send password reset email. Please try again later."
+    "emailError": "Could not send password reset email. Please try again later.",
+    "linkedMethods": "Linked Sign-in Methods",
+    "oauthManagedDesc": "This account logs in using external providers. Security and access are managed directly through your provider.",
+    "providerGoogle": "Google",
+    "providerDiscord": "Discord"
   }
 }

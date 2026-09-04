@@ -11,6 +11,7 @@ export interface AuthUser {
   email: string
   displayName?: string | null
   role: AppRole
+  createdAt?: string
 }
 
 export interface SessionState {

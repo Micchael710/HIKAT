@@ -22,6 +22,7 @@ export interface AuthSessionResult {
     email: string
     role: AppRole
     displayName: string | null
+    createdAt?: string
   }
 }
 
@@ -58,7 +59,7 @@ export async function getUserEmail(db: Database, userId: string): Promise<string
  */
 export async function createSession(
   db: Database,
-  user: { id: string; email?: string; role: AppRole; displayName: string | null },
+  user: { id: string; email?: string; role: AppRole; displayName: string | null; createdAt?: string },
   keyManager: JwtKeyManager,
   options?: { sessionExpiryDays?: number },
 ): Promise<AuthSessionResult> {
@@ -71,6 +72,16 @@ export async function createSession(
     user.email && typeof user.email === "string" && user.email.trim() !== ""
       ? user.email.trim().toLowerCase()
       : await getUserEmail(db, user.id)
+
+  let createdAt = user.createdAt
+  if (!createdAt) {
+    const userRec = await db
+      .select({ createdAt: schema.users.createdAt })
+      .from(schema.users)
+      .where(eq(schema.users.id, user.id))
+      .get()
+    createdAt = userRec?.createdAt
+  }
 
   // 1. Insert session record
   await db.insert(schema.sessions).values({
@@ -115,6 +126,7 @@ export async function createSession(
       email,
       role: user.role,
       displayName: user.displayName,
+      createdAt,
     },
   }
 }
@@ -168,7 +180,7 @@ export async function rotateRefreshToken(
     throw new Error(AuthErrorCode.TOKEN_EXPIRED)
   }
 
-  // 5. Look up user
+  // 5. Fetch user record
   const userRecord = await db
     .select()
     .from(schema.users)
@@ -179,6 +191,7 @@ export async function rotateRefreshToken(
     throw new Error(AuthErrorCode.UNAUTHORIZED)
   }
 
+  // Fetch canonical user email
   const userEmail = await getUserEmail(db, userRecord.id)
 
   // 6. Atomic conditional update to mark token as consumed
@@ -240,6 +253,7 @@ export async function rotateRefreshToken(
     email: userEmail,
     role: userRecord.role as AppRole,
     displayName: userRecord.displayName,
+    createdAt: userRecord.createdAt,
   }
 
   const { token: accessToken, expiresIn } = await signAccessToken(

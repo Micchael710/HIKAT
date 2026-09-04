@@ -878,9 +878,11 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       })
       const loginRes = await handleRequest({ request: loginReq, env: {}, db, keyManager, emailService })
       expect(loginRes.status).toBe(200)
-      const loginData = (await loginRes.json()) as { accessToken: string; refreshToken: string }
+      const loginData = (await loginRes.json()) as { accessToken: string; refreshToken: string; user: { id: string; email: string; createdAt?: string } }
       expect(loginData.accessToken).toBeDefined()
       expect(loginData.refreshToken).toBeDefined()
+      expect(loginData.user.createdAt).toBeDefined()
+      expect(typeof loginData.user.createdAt).toBe("string")
 
       // 4. POST /auth/game-token
       const gameReq = new Request("http://localhost:8788/auth/game-token", {
@@ -901,9 +903,11 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       })
       const refreshRes = await handleRequest({ request: refreshReq, env: {}, db, keyManager, emailService })
       expect(refreshRes.status).toBe(200)
-      const refreshData = (await refreshRes.json()) as { accessToken: string; refreshToken: string }
+      const refreshData = (await refreshRes.json()) as { accessToken: string; refreshToken: string; user: { id: string; email: string; createdAt?: string } }
       expect(refreshData.accessToken).toBeDefined()
       expect(refreshData.refreshToken).not.toBe(loginData.refreshToken)
+      expect(refreshData.user.createdAt).toBeDefined()
+      expect(typeof refreshData.user.createdAt).toBe("string")
 
       // 6. POST /auth/logout
       const logoutReq = new Request("http://localhost:8788/auth/logout", {

@@ -5,6 +5,9 @@ interface MinecraftHeadProps {
   skinColor?: string
   customImgUrl?: string
   size?: number
+  borderRadius?: string | number
+  shape?: "circle" | "square"
+  style?: React.CSSProperties
 }
 
 /**
@@ -14,9 +17,15 @@ interface MinecraftHeadProps {
 export default function MinecraftHead({
   customImgUrl,
   size = 38,
+  borderRadius,
+  shape,
+  style,
 }: MinecraftHeadProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [hasCanvasLoaded, setHasCanvasLoaded] = useState(false)
+
+  const resolvedBorderRadius =
+    borderRadius !== undefined ? borderRadius : shape === "square" ? 0 : "50%"
 
   useEffect(() => {
     if (!customImgUrl) {
@@ -65,7 +74,8 @@ export default function MinecraftHead({
           height: size,
           display: hasCanvasLoaded ? "block" : "none",
           imageRendering: "pixelated",
-          borderRadius: "50%",
+          borderRadius: resolvedBorderRadius,
+          ...style,
         }}
       />
     )
@@ -87,6 +97,8 @@ export default function MinecraftHead({
         height: size,
         color: "rgba(255, 255, 255, 0.6)",
         padding: 4,
+        borderRadius: resolvedBorderRadius,
+        ...style,
       }}
     >
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />

@@ -277,6 +277,10 @@
     "resetPasswordDesc": "Envoyer un lien de récupération sécurisé à votre adresse e-mail pour modifier le mot de passe.",
     "sendResetEmail": "Envoyer l'e-mail de réinitialisation",
     "emailSent": "E-mail envoyé",
-    "emailError": "Impossible d'envoyer l'e-mail de réinitialisation du mot de passe. Veuillez réessayer plus tard."
+    "emailError": "Impossible d'envoyer l'e-mail de réinitialisation du mot de passe. Veuillez réessayer plus tard.",
+    "linkedMethods": "Méthodes d'Accès Associées",
+    "oauthManagedDesc": "Ce compte se connecte via des fournisseurs externes. La sécurité et l'accès sont gérés directement via votre fournisseur.",
+    "providerGoogle": "Google",
+    "providerDiscord": "Discord"
   }
 }

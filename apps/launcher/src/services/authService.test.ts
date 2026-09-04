@@ -740,6 +740,92 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(putFetchCount).toBe(0)
     expect(lastAuthHeader).toBeUndefined()
   })
+
+  it("20. User profile preserves real createdAt across session storage, getCachedUser, and getUser", async () => {
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))
+    const validToken = `${header}.${payload}.sig`
+    const testCreatedAt = "2024-06-15T08:30:00.000Z"
+
+    const mockSave = vi.fn()
+    ;(window as any).electronAPI = {
+      authLoadSession: vi.fn().mockResolvedValue({
+        accessToken: validToken,
+        refreshToken: "valid-ref-created",
+        user: {
+          id: "u-created-1",
+          email: "created@hikat.org",
+          role: "PLAYER",
+          displayName: "CreatedUser",
+          createdAt: testCreatedAt,
+        },
+      }),
+      authSaveSession: mockSave,
+      authClearSession: vi.fn(),
+    }
+
+    const session = await authService.bootstrap()
+    expect(session).not.toBeNull()
+    expect(session?.user.createdAt).toBe(testCreatedAt)
+
+    const user = authService.getUser()
+    expect(user?.createdAt).toBe(testCreatedAt)
+
+    // Verify setSession saves createdAt into renderer localStorage
+    await authService.setSession(session!)
+    const cachedRaw = localStorage.getItem("hikat_last_user")
+    expect(cachedRaw).not.toBeNull()
+    const parsed = JSON.parse(cachedRaw!)
+    expect(parsed.createdAt).toBe(testCreatedAt)
+
+    const cached = authService.getCachedUser()
+    expect(cached?.createdAt).toBe(testCreatedAt)
+  })
+
+  it("21. getLinkedMethods fetches /auth/me/methods with valid Bearer token and returns linked auth methods", async () => {
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))
+    const validToken = `${header}.${payload}.sig`
+
+    ;(window as any).electronAPI = {
+      authLoadSession: vi.fn().mockResolvedValue({
+        accessToken: validToken,
+        refreshToken: "valid-ref-methods",
+        user: {
+          id: "u-methods-1",
+          email: "methods@hikat.org",
+          role: "PLAYER",
+        },
+      }),
+      authSaveSession: vi.fn(),
+      authClearSession: vi.fn(),
+    }
+
+    await authService.bootstrap()
+
+    mockFetch.mockImplementation(async (url: string, opts: any) => {
+      if (url.includes("/auth/me/methods") && opts?.method === "GET") {
+        expect(opts.headers.Authorization).toBe(`Bearer ${validToken}`)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            methods: [
+              { type: "PASSWORD", email: "methods@hikat.org", verified: true },
+              { type: "GOOGLE", email: "methods@gmail.com", displayName: "Google Account" },
+            ],
+          }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+
+    const res = await authService.getLinkedMethods()
+    expect(res.success).toBe(true)
+    expect(res.methods).toHaveLength(2)
+    expect(res.methods![0].type).toBe("PASSWORD")
+    expect(res.methods![1].type).toBe("GOOGLE")
+  })
 })
 
 
