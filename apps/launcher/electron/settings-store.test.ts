@@ -222,11 +222,15 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
       }
 
       function focusMainWindow() {
+        const wasHiddenByGameLaunch = hiddenByGameLaunch
         hiddenByGameLaunch = false
         if (!mainWindow.isVisible()) {
           mainWindow.show()
         }
         mainWindow.focus()
+        if (wasHiddenByGameLaunch && !minimizeToTrayEnabled) {
+          destroyTray()
+        }
       }
 
       function onStatusChangeCallback(status: string, details?: any) {
@@ -240,11 +244,7 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
           }
         } else if (status === "idle") {
           if (hiddenByGameLaunch) {
-            hiddenByGameLaunch = false
             focusMainWindow()
-            if (!minimizeToTrayEnabled) {
-              destroyTray()
-            }
           }
         }
 
@@ -377,7 +377,7 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
       expect(ctx.destroyTray).not.toHaveBeenCalled()
     })
 
-    it("16. user manually reopens launcher while game is running: clears hiddenByGameLaunch so game exit does not refocus", () => {
+    it("16. user manually reopens launcher when minimizeToTray = false: destroys temporary tray immediately and subsequent idle does not refocus", () => {
       const ctx = createSimulatedMainContext({
         minimizeOnGameLaunchEnabled: true,
         minimizeToTrayEnabled: false,
@@ -386,17 +386,43 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
       // 1. Game launches and hides launcher
       ctx.onStatusChangeCallback("running")
       expect(ctx.getHiddenByGameLaunch()).toBe(true)
+      expect(ctx.destroyTray).not.toHaveBeenCalled()
 
-      // 2. User manually clicks tray to reopen launcher while game is running
+      // 2. User manually clicks tray / focuses window while game is running
       ctx.focusMainWindow()
       expect(ctx.getHiddenByGameLaunch()).toBe(false)
       expect(ctx.show).toHaveBeenCalledTimes(1)
+      expect(ctx.destroyTray).toHaveBeenCalledTimes(1) // Temporary tray destroyed immediately!
 
       // 3. Game subsequently exits to idle
       ctx.onStatusChangeCallback("idle")
 
-      // Should not trigger secondary focus or destroy tray since user took manual control
+      // Should not trigger secondary focus or destroy tray again
       expect(ctx.show).toHaveBeenCalledTimes(1) // Still 1 from manual reopen
+      expect(ctx.destroyTray).toHaveBeenCalledTimes(1) // Still 1 from manual reopen
+    })
+
+    it("17. user manually reopens launcher when minimizeToTray = true: preserves tray and subsequent idle does not refocus", () => {
+      const ctx = createSimulatedMainContext({
+        minimizeOnGameLaunchEnabled: true,
+        minimizeToTrayEnabled: true,
+      })
+
+      // 1. Game launches and hides launcher
+      ctx.onStatusChangeCallback("running")
+      expect(ctx.getHiddenByGameLaunch()).toBe(true)
+
+      // 2. User manually reopens window while game is running
+      ctx.focusMainWindow()
+      expect(ctx.getHiddenByGameLaunch()).toBe(false)
+      expect(ctx.show).toHaveBeenCalledTimes(1)
+      expect(ctx.destroyTray).not.toHaveBeenCalled() // Persistent tray preserved!
+
+      // 3. Game subsequently exits to idle
+      ctx.onStatusChangeCallback("idle")
+
+      // Should not trigger secondary focus
+      expect(ctx.show).toHaveBeenCalledTimes(1)
       expect(ctx.destroyTray).not.toHaveBeenCalled()
     })
   })

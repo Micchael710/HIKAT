@@ -125,11 +125,7 @@ gameLauncher.onStatusChangeCallback = (status, details) => {
     }
   } else if (status === "idle") {
     if (hiddenByGameLaunch) {
-      hiddenByGameLaunch = false
       focusMainWindow()
-      if (!minimizeToTrayEnabled) {
-        destroyTray()
-      }
     }
   }
 
@@ -254,6 +250,7 @@ function createSplashWindow() {
 }
 
 function focusMainWindow() {
+  const wasHiddenByGameLaunch = hiddenByGameLaunch
   hiddenByGameLaunch = false
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
@@ -266,6 +263,10 @@ function focusMainWindow() {
     mainWindow.restore()
   }
   mainWindow.focus()
+
+  if (wasHiddenByGameLaunch && !minimizeToTrayEnabled) {
+    destroyTray()
+  }
 }
 
 function ensureTray() {
