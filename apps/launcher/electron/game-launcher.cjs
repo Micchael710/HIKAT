@@ -399,7 +399,12 @@ class GameLauncher {
       })
       this.setStatus("running")
 
+      let terminationHandled = false
+
       child.on("close", (code) => {
+        if (terminationHandled) return
+        terminationHandled = true
+
         console.log(`[GameLauncher] Game process exited with code ${code}`)
         this.activeChildProcess = null
         this.clearProcessPid()
@@ -412,6 +417,9 @@ class GameLauncher {
       })
 
       child.on("error", (err) => {
+        if (terminationHandled) return
+        terminationHandled = true
+
         console.error("[GameLauncher] Game process encountered an error:", err)
         this.activeChildProcess = null
         this.clearProcessPid()

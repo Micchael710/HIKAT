@@ -1749,5 +1749,60 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
         details: { unexpected: true, error: mockErr },
       })
     })
+
+    it("emitting child.error followed by child.close processes termination only once and emits only one unexpected notification", async () => {
+      const childEmitter = new EventEmitter() as any
+      childEmitter.pid = 9996
+      childEmitter.unref = vi.fn()
+
+      const statusEvents: Array<{ status: string; details?: any }> = []
+
+      const launcher = new GameLauncher(null, {
+        instanceRoot,
+        readinessChecker: vi.fn().mockResolvedValue({
+          installed: true,
+          resolvedVersionId: "1.21.1",
+          javaMajorVersion: 21,
+        }),
+        javaResolver: vi.fn().mockReturnValue({
+          javaPath: "C:\\Java\\javaw.exe",
+          cliJavaPath: "C:\\Java\\java.exe",
+        }),
+        javaValidator: vi.fn().mockReturnValue({ valid: true, majorVersion: 21 }),
+        versionParser: vi.fn().mockResolvedValue({ id: "1.21.1" }),
+        xmclLauncher: vi.fn().mockResolvedValue(childEmitter),
+      })
+
+      launcher.onStatusChangeCallback = (status: string, details: any) => {
+        statusEvents.push({ status, details })
+      }
+
+      await launcher.launch({
+        playerName: "PlayerOne",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+      })
+
+      expect(launcher.launchStatus).toBe("running")
+      expect(launcher.readSavedPid()).toBe(9996)
+
+      // 1. Emit child.error
+      const mockErr = new Error("Java VM crashed")
+      childEmitter.emit("error", mockErr)
+
+      // 2. Emit subsequent child.close (standard Node ChildProcess behavior)
+      childEmitter.emit("close", 1)
+
+      expect(launcher.launchStatus).toBe("idle")
+      expect(launcher.readSavedPid()).toBeNull()
+
+      // Should contain exactly ONE idle event
+      const idleEvents = statusEvents.filter((ev) => ev.status === "idle")
+      expect(idleEvents.length).toBe(1)
+      expect(idleEvents[0]).toEqual({
+        status: "idle",
+        details: { unexpected: true, error: mockErr },
+      })
+    })
   })
 })
