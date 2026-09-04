@@ -866,4 +866,29 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).not.toContain("TOKEN_REUSE_DETECTED")
     expect(container.textContent).not.toContain("INVALID_TOKEN")
   })
+
+  it("27. Pending cold-start deep link for reset-password (getPendingOAuthCallback) opens reset-password view correctly", async () => {
+    const onLogin = vi.fn()
+
+    ;(window as any).electronAPI = {
+      openExternal: vi.fn(),
+      getPendingOAuthCallback: vi.fn().mockResolvedValue("hikat://auth/reset-password?token=cold-start-token-999"),
+      onOAuthCallback: vi.fn(() => () => {}),
+    }
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain("Restablecer contraseña")
+    expect(container.textContent).toContain("Nueva contraseña")
+    expect(container.textContent).toContain("Confirmar contraseña")
+    expect(container.textContent).toContain("Cambiar contraseña")
+  })
 })

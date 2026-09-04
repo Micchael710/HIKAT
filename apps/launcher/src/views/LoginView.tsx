@@ -155,13 +155,19 @@ export default function LoginView({
     }
   }
 
-  // Listen for deep link callbacks via Electron IPC & check cold-start pending callbacks
+  const onConsumeRef = useRef(onConsumeInitialDeepLink)
+  onConsumeRef.current = onConsumeInitialDeepLink
+
+  // Process initial deep link forwarded from parent (e.g. when authenticated screen changed to login)
   useEffect(() => {
     if (initialDeepLinkUrl) {
       processDeepLinkUrl(initialDeepLinkUrl)
-      onConsumeInitialDeepLink?.()
+      onConsumeRef.current?.()
     }
+  }, [initialDeepLinkUrl])
 
+  // Listen for deep link callbacks via Electron IPC & check cold-start pending callbacks
+  useEffect(() => {
     if (typeof window === "undefined" || !window.electronAPI) {
       return
     }
@@ -186,7 +192,7 @@ export default function LoginView({
         removeListener?.()
       }
     }
-  }, [onLogin, keepSession, initialDeepLinkUrl, onConsumeInitialDeepLink])
+  }, [onLogin, keepSession])
 
   const handleOAuthClick = async (provider: "GOOGLE" | "DISCORD") => {
     setErrorMessage(null)

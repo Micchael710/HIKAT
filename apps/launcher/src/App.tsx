@@ -59,6 +59,9 @@ export default function App() {
 
   // Listen for auth deep links (/verify-email, /reset-password) when user is authenticated inside launcher
   useEffect(() => {
+    if (screen === "login") {
+      return
+    }
     if (typeof window === "undefined" || !window.electronAPI?.onOAuthCallback) {
       return
     }
@@ -72,10 +75,8 @@ export default function App() {
         const cleanPath = urlObj.pathname.replace(/\/+$/, "")
 
         if (cleanPath === "/verify-email" || cleanPath === "/reset-password") {
-          if (screen !== "login") {
-            setPendingAuthDeepLink(rawUrl)
-            setScreen("login")
-          }
+          setPendingAuthDeepLink(rawUrl)
+          setScreen("login")
         }
       } catch (_) {}
     })
