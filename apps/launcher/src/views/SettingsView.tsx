@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react"
 import { ThemeMode, SettingsTab } from "../types"
 import { IconMoon, IconSun } from "../theme/icons"
 import { CANVAS_W, BASE_FONT } from "../theme/tokens"
+import { apparatiaLogo } from "../assets"
 import LauncherToggle from "../components/common/LauncherToggle"
 import LauncherSelect from "../components/common/LauncherSelect"
 import LiveToast from "../components/common/LiveToast"
@@ -17,11 +18,32 @@ import {
   getStoredNumber,
   setStoredNumber,
 } from "../utils/settingsStorage"
+import { gameService, GameManifest } from "../services/gameService"
+import {
+  calculateAutomaticRam,
+  formatModLoaderName,
+} from "../utils/gameSettings"
+
+export { calculateAutomaticRam, formatModLoaderName }
 
 interface SettingsViewProps {
   theme?: ThemeMode
   setTheme?: (t: ThemeMode) => void
 }
+
+interface GameItem {
+  id: string
+  name: string
+  logo: string
+}
+
+const GAMES: GameItem[] = [
+  {
+    id: "apparatia",
+    name: "Apparatia",
+    logo: apparatiaLogo,
+  },
+]
 
 export default function SettingsView({
   theme = "dark",
@@ -64,6 +86,15 @@ export default function SettingsView({
   const [dedicatedGPU, setDedicatedGPUState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
   )
+
+  // Game & Runtime Info State
+  const [selectedGameId, setSelectedGameId] = useState<string>("apparatia")
+  const [manifest, setManifest] = useState<GameManifest | null>(null)
+  const [runtimeInfo, setRuntimeInfo] = useState<{ javaMajorVersion: number | null } | null>(null)
+  const [launchStatus, setLaunchStatus] = useState<string>("idle")
+  const [operationState, setOperationState] = useState<string>("IDLE")
+  const [isVerifying, setIsVerifying] = useState<boolean>(false)
+  const [isUninstalling, setIsUninstalling] = useState<boolean>(false)
 
   // Sync settings with Electron process and OS on mount
   useEffect(() => {
@@ -140,11 +171,68 @@ export default function SettingsView({
         .catch(() => {})
     }
 
+    // Load Game Manifest
+    gameService
+      .checkGameManifest()
+      .then((m) => {
+        if (isMounted && m) {
+          setManifest(m)
+        }
+      })
+      .catch(() => {})
+
+    // Load Runtime Info
+    if (window.electronAPI?.getGameRuntimeInfo) {
+      window.electronAPI
+        .getGameRuntimeInfo()
+        .then((info: any) => {
+          if (isMounted && info) {
+            setRuntimeInfo(info)
+          }
+        })
+        .catch(() => {})
+    }
+
+    // Load Launch & Operation Status
+    if (window.electronAPI?.getLaunchStatus) {
+      window.electronAPI
+        .getLaunchStatus()
+        .then((st: any) => {
+          if (isMounted && st) {
+            if (st.status) setLaunchStatus(st.status)
+            if (st.operationState) setOperationState(st.operationState)
+          }
+        })
+        .catch(() => {})
+    }
+
+    // Subscribe to Launch Status changes
+    const unsubLaunch = window.electronAPI?.onLaunchStatus?.((status: any) => {
+      if (isMounted) setLaunchStatus(status)
+    })
+
+    // Subscribe to Phase Changes
+    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: any) => {
+      if (isMounted) setOperationState(phase)
+    })
+
+    // Subscribe to WebSocket Release Events
+    const unsubRelease = gameService.subscribeReleaseEvents(async () => {
+      try {
+        const fresh = await gameService.checkGameManifest()
+        if (isMounted && fresh) {
+          setManifest(fresh)
+        }
+      } catch (_) {}
+    })
+
     return () => {
       isMounted = false
+      unsubLaunch?.()
+      unsubPhase?.()
+      unsubRelease()
     }
   }, [])
-
 
   const setStartWithSystem = async (v: boolean) => {
     setStartWithSystemState(v)
@@ -209,6 +297,96 @@ export default function SettingsView({
     }, 2800)
   }
 
+  const handleAutoRam = () => {
+    const autoRam = calculateAutomaticRam(systemTotalRAM)
+    setRamGB(autoRam)
+    notifySaved()
+  }
+
+  const isInstalled = Boolean(
+    manifest?.installed || manifest?.hasExistingInstall || gameService.isGameInstalled(),
+  )
+
+  const hasUpdate = Boolean(
+    manifest?.hasUpdate ||
+      (manifest?.installedModpackVersion &&
+        manifest?.version &&
+        manifest.installedModpackVersion !== manifest.version),
+  )
+
+  const isGameBusy =
+    launchStatus === "running" ||
+    launchStatus === "preparing" ||
+    (operationState !== "IDLE" && operationState !== "") ||
+    isVerifying ||
+    isUninstalling
+
+  const isVerifyDisabled = !manifest || !isInstalled || hasUpdate || isGameBusy
+  const isUninstallDisabled = !manifest || !isInstalled || isGameBusy
+
+  const handleVerify = async () => {
+    if (isVerifyDisabled || !manifest?.clientFiles || manifest.clientFiles.length === 0) return
+    setIsVerifying(true)
+    notifySaved(t("settings.verifying") || "Verificando...", "info")
+    try {
+      const res: any = await gameService.startSync(
+        manifest.clientFiles,
+        manifest.version,
+        manifest.minecraftVersion,
+        manifest.modLoader,
+        manifest.modLoaderVersion,
+        manifest.neoForgeVersion,
+        true,
+        manifest.directoryPolicies,
+      )
+      const fresh = await gameService.checkGameManifest()
+      if (fresh) setManifest(fresh)
+      if (window.electronAPI?.getGameRuntimeInfo) {
+        const runtime = await window.electronAPI.getGameRuntimeInfo().catch(() => null)
+        if (runtime) setRuntimeInfo(runtime)
+      }
+      if (res?.success && fresh?.installed && !fresh?.hasUpdate) {
+        gameService.setGameInstalled(true)
+        notifySaved(t("settings.verifiedSuccess") || "Juego verificado con éxito", "success")
+      } else {
+        notifySaved(t("playButton.verifyError") || "Error en verificación", "error")
+      }
+    } catch (_) {
+      notifySaved(t("playButton.verifyError") || "Error en verificación", "error")
+    } finally {
+      setIsVerifying(false)
+    }
+  }
+
+  const handleUninstall = async () => {
+    if (isUninstallDisabled) return
+    setIsUninstalling(true)
+    try {
+      const ok = await gameService.uninstallGame()
+      if (ok) {
+        const fresh = await gameService.checkGameManifest()
+        setManifest(fresh)
+        setRuntimeInfo({ javaMajorVersion: null })
+        notifySaved(t("playButton.uninstallSuccess") || "Juego desinstalado", "success")
+      } else {
+        notifySaved(t("playButton.uninstallError") || "Error al desinstalar", "error")
+      }
+    } catch (_) {
+      notifySaved(t("playButton.uninstallError") || "Error al desinstalar", "error")
+    } finally {
+      setIsUninstalling(false)
+    }
+  }
+
+  const loaderFormatted = formatModLoaderName(manifest?.modLoader || "NEOFORGE")
+  const loaderVersion = manifest?.modLoaderVersion || manifest?.neoForgeVersion || ""
+  const isVanilla = (manifest?.modLoader || "NEOFORGE").toUpperCase() === "VANILLA"
+  const loaderDisplay = isVanilla
+    ? "Vanilla"
+    : loaderVersion
+      ? `${loaderFormatted} ${loaderVersion}`
+      : loaderFormatted
+
   const CONTENT_LEFT = 184
 
   /* Smooth delayed mouse-following parallax */
@@ -248,147 +426,102 @@ export default function SettingsView({
           position: "absolute",
           inset: 0,
           pointerEvents: "none",
-          overflow: "hidden",
           zIndex: 0,
+          background: isDark
+            ? `radial-gradient(1100px 700px at calc(38% + ${mouseOffset.x}px) calc(20% + ${mouseOffset.y}px), rgba(62, 196, 192, 0.08), transparent 75%),
+               radial-gradient(850px 600px at calc(85% - ${mouseOffset.x * 0.8}px) calc(65% - ${mouseOffset.y * 0.8}px), rgba(77, 166, 255, 0.06), transparent 70%),
+               radial-gradient(650px 500px at calc(20% + ${mouseOffset.x * 0.5}px) calc(80% + ${mouseOffset.y * 0.5}px), rgba(120, 80, 220, 0.04), transparent 65%),
+               #090d12`
+            : `radial-gradient(1000px 600px at calc(40% + ${mouseOffset.x}px) calc(25% + ${mouseOffset.y}px), rgba(62, 196, 192, 0.12), transparent 70%),
+               radial-gradient(800px 500px at calc(80% - ${mouseOffset.x * 0.6}px) calc(70% - ${mouseOffset.y * 0.6}px), rgba(77, 166, 255, 0.09), transparent 65%),
+               #f5f7fa`,
+          transition: "background 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
-      >
-        {/* Orb 1 */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            transform: `translate3d(${mouseOffset.x}px, ${mouseOffset.y}px, 0)`,
-            transition: "transform 1.4s cubic-bezier(0.16, 1, 0.3, 1)",
-            willChange: "transform",
-          }}
-        >
-          <div
-            className="skins-bg-orb-1"
-            style={{
-              position: "absolute",
-              top: "-10%",
-              left: "15%",
-              width: 850,
-              height: 850,
-              background: `radial-gradient(circle, rgba(62, 196, 192, ${
-                isDark ? 0.22 : 0.12
-              }) 0%, transparent 68%)`,
-              filter: "blur(55px)",
-            }}
-          />
-        </div>
+      />
 
-        {/* Orb 2 */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            transform: `translate3d(${Math.round(mouseOffset.x * 0.45)}px, ${Math.round(mouseOffset.y * 0.45)}px, 0)`,
-            transition: "transform 1.8s cubic-bezier(0.16, 1, 0.3, 1)",
-            willChange: "transform",
-          }}
-        >
-          <div
-            className="skins-bg-orb-2"
-            style={{
-              position: "absolute",
-              top: "25%",
-              right: "5%",
-              width: 900,
-              height: 900,
-              background: `radial-gradient(circle, rgba(62, 196, 192, ${
-                isDark ? 0.15 : 0.08
-              }) 0%, transparent 68%)`,
-              filter: "blur(65px)",
-            }}
-          />
-        </div>
+      {/* ── Ambient Radial Atmosphere Overlay ── */}
+      <div
+        style={{
+          position: "absolute",
+          top: -120,
+          right: 80,
+          width: 680,
+          height: 680,
+          borderRadius: "50%",
+          background: isDark
+            ? "radial-gradient(circle, rgba(62, 196, 192, 0.06) 0%, rgba(62, 196, 192, 0.015) 50%, transparent 75%)"
+            : "radial-gradient(circle, rgba(62, 196, 192, 0.12) 0%, rgba(62, 196, 192, 0.03) 50%, transparent 75%)",
+          filter: "blur(50px)",
+          pointerEvents: "none",
+          transform: `translate3d(${mouseOffset.x * 0.4}px, ${mouseOffset.y * 0.4}px, 0)`,
+          transition: "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+          zIndex: 1,
+        }}
+      />
 
-        {/* Orb 3 */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            transform: `translate3d(${Math.round(mouseOffset.x * 0.25)}px, ${Math.round(mouseOffset.y * 0.25)}px, 0)`,
-            transition: "transform 2.2s cubic-bezier(0.16, 1, 0.3, 1)",
-            willChange: "transform",
-          }}
-        >
-          <div
-            className="skins-bg-orb-3"
-            style={{
-              position: "absolute",
-              bottom: "-15%",
-              left: "25%",
-              width: 800,
-              height: 800,
-              background: `radial-gradient(circle, rgba(62, 196, 192, ${
-                isDark ? 0.12 : 0.06
-              }) 0%, transparent 70%)`,
-              filter: "blur(55px)",
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Main Container */}
+      {/* ── Main Settings Panel Content ── */}
       <div
         style={{
           position: "absolute",
           left: CONTENT_LEFT,
-          top: 145,
-          width: CANVAS_W - CONTENT_LEFT - 120,
-          height: 880,
+          top: 72,
+          right: 48,
+          bottom: 24,
           display: "flex",
           flexDirection: "column",
-          fontFamily: BASE_FONT,
-          zIndex: 1,
-          animation: "viewFadeIn 0.24s ease",
+          gap: 16,
+          zIndex: 10,
         }}
       >
-        {/* Header Row: Title on Left, Dual Tab Pills on Right */}
+        {/* ── Header Area ── */}
         <div
           style={{
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-end",
             justifyContent: "space-between",
-            marginBottom: 24,
+            paddingBottom: 2,
           }}
         >
-          {/* Title & Subtitle */}
           <div>
-            <div
+            <h1
               style={{
-                fontSize: 32,
-                fontWeight: 800,
-                color: isDark ? "white" : "#111822",
-                letterSpacing: "-0.02em",
-                marginBottom: 4,
+                fontFamily: BASE_FONT,
+                fontSize: 34,
+                fontWeight: 900,
+                letterSpacing: "-0.03em",
+                color: isDark ? "#ffffff" : "#111822",
+                margin: 0,
+                lineHeight: 1.1,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
               }}
             >
-              {t("settings.title")}
-            </div>
-            <div
+              <span>{t("settings.title")}</span>
+            </h1>
+            <p
               style={{
-                fontSize: 16,
-                fontWeight: 400,
-                color: isDark ? "#8899aa" : "#556677",
+                fontFamily: BASE_FONT,
+                fontSize: 14.5,
+                color: isDark ? "#7a8b9e" : "#556677",
+                margin: "4px 0 0 0",
+                fontWeight: 500,
               }}
             >
               {t("settings.subtitle")}
-            </div>
+            </p>
           </div>
 
-          {/* ── Dual Tab Pills ── */}
+          {/* ── Main Tab Navigation Switcher ── */}
           <div
             style={{
-              display: "flex",
+              display: "inline-flex",
               background: isDark ? "#0d1217" : "#e6ebf0",
-              borderRadius: 14,
-              padding: 4,
               border: isDark
                 ? "1.5px solid rgba(255, 255, 255, 0.08)"
                 : "1.5px solid rgba(0, 0, 0, 0.08)",
+              borderRadius: 14,
+              padding: 4,
               gap: 4,
             }}
           >
@@ -599,21 +732,23 @@ export default function SettingsView({
                         border: isDark
                           ? "1.5px solid rgba(255, 255, 255, 0.14)"
                           : "1.5px solid transparent",
-                        color: isDark ? "#ffffff" : "#667788",
-                        fontSize: 14,
-                        fontWeight: 700,
+                        color: isDark ? "white" : "#667788",
+                        fontWeight: isDark ? 700 : 500,
                         fontFamily: BASE_FONT,
+                        fontSize: 14,
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
-                        gap: 7,
-                        transition: "all 0.16s ease",
+                        gap: 8,
+                        boxShadow: isDark
+                          ? "0 2px 8px rgba(0, 0, 0, 0.3)"
+                          : "none",
+                        transition: "all 0.15s ease",
                       }}
                     >
-                      <IconMoon size={16} />
+                      <IconMoon size={15} />
                       <span>{t("settings.themeDark")}</span>
                     </button>
-
                     <button
                       type="button"
                       onClick={() => {
@@ -628,27 +763,27 @@ export default function SettingsView({
                           ? "1.5px solid rgba(0, 0, 0, 0.08)"
                           : "1.5px solid transparent",
                         color: !isDark ? "#111822" : "#7a8b9e",
-                        boxShadow: !isDark
-                          ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                          : "none",
-                        fontSize: 14,
-                        fontWeight: 700,
+                        fontWeight: !isDark ? 700 : 500,
                         fontFamily: BASE_FONT,
+                        fontSize: 14,
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
-                        gap: 7,
-                        transition: "all 0.16s ease",
+                        gap: 8,
+                        boxShadow: !isDark
+                          ? "0 2px 8px rgba(0, 0, 0, 0.08)"
+                          : "none",
+                        transition: "all 0.15s ease",
                       }}
                     >
-                      <IconSun size={16} />
+                      <IconSun size={15} />
                       <span>{t("settings.themeLight")}</span>
                     </button>
                   </div>
                 </div>
               </div>
 
-              {/* Card 2: Idioma */}
+              {/* Card 2: Idioma de la interfaz */}
               <div className="settings-card">
                 <div
                   style={{
@@ -690,27 +825,28 @@ export default function SettingsView({
                       {t("settings.languageDesc")}
                     </div>
                   </div>
+
                   <LauncherSelect
                     value={language}
-                    theme={theme}
-                    onChange={(v) => {
-                      const newLang = v as LanguageCode
-                      setLanguage(newLang)
+                    onChange={(val) => {
+                      setLanguage(val as LanguageCode)
                       notifySaved(
-                        getTranslation(newLang, "settings.toastSaved"),
+                        getTranslation(val as LanguageCode, "settings.toastSaved"),
                       )
                     }}
                     options={[
-                      { value: "es", label: "Español (Latinoamérica)" },
-                      { value: "en", label: "English (United States)" },
-                      { value: "pt", label: "Português (Brasil)" },
-                      { value: "fr", label: "Français (France)" },
+                      { value: "es", label: "Español (ES)" },
+                      { value: "en", label: "English (US)" },
+                      { value: "fr", label: "Français (FR)" },
+                      { value: "pt", label: "Português (BR)" },
                     ]}
+                    theme={theme}
+                    width={210}
                   />
                 </div>
               </div>
 
-              {/* Card 3: Inicio y Comportamiento */}
+              {/* Card 3: Comportamiento de Inicio */}
               <div className="settings-card">
                 <div
                   style={{
@@ -794,7 +930,13 @@ export default function SettingsView({
                 </div>
 
                 {/* Minimizar al iniciar el juego */}
-                <div className="settings-row">
+                <div
+                  className="settings-row"
+                  style={{
+                    borderBottom: "none",
+                    paddingBottom: 0,
+                  }}
+                >
                   <div>
                     <div
                       style={{
@@ -879,45 +1021,430 @@ export default function SettingsView({
               </div>
             </div>
           ) : (
+            /* ── JUEGOS TAB: Two-Column Structure ── */
             <div
-              key="settings-tab-game"
+              key="settings-tab-games"
               style={{
                 display: "flex",
-                flexDirection: "column",
-                gap: 12,
+                gap: 20,
                 animation: "tabSlideUpFade 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
+                minHeight: 560,
               }}
             >
-              {/* Card 1: Rendimiento y Hardware */}
-              <div className="settings-card">
+              {/* ── Left Column: Internal Games Sidebar ── */}
+              <div
+                style={{
+                  width: 220,
+                  flexShrink: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
                 <div
                   style={{
-                    fontSize: 12.5,
+                    fontSize: 12,
                     fontWeight: 800,
                     letterSpacing: "0.08em",
                     textTransform: "uppercase",
                     color: isDark ? "#657788" : "#778899",
-                    marginBottom: 6,
+                    marginBottom: 4,
+                    paddingLeft: 4,
                   }}
                 >
-                  {t("settings.performanceHardware")}
+                  {t("settings.sidebarGames") || t("settings.tabGame")}
                 </div>
 
-                {/* Row 1: RAM Slider */}
+                {/* Games collection */}
+                {GAMES.map((game) => {
+                  const isSelected = selectedGameId === game.id
+                  return (
+                    <button
+                      key={game.id}
+                      type="button"
+                      onClick={() => setSelectedGameId(game.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "10px 14px",
+                        borderRadius: 14,
+                        fontFamily: BASE_FONT,
+                        fontSize: 15,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        border: isSelected
+                          ? isDark
+                            ? "1.5px solid rgba(62, 196, 192, 0.45)"
+                            : "1.5px solid rgba(62, 196, 192, 0.6)"
+                          : isDark
+                            ? "1.5px solid rgba(255, 255, 255, 0.05)"
+                            : "1.5px solid rgba(0, 0, 0, 0.05)",
+                        background: isSelected
+                          ? isDark
+                            ? "#161f28"
+                            : "#ffffff"
+                          : isDark
+                            ? "rgba(255, 255, 255, 0.02)"
+                            : "rgba(0, 0, 0, 0.02)",
+                        color: isSelected
+                          ? isDark
+                            ? "#ffffff"
+                            : "#111822"
+                          : isDark
+                            ? "#8899aa"
+                            : "#556677",
+                        boxShadow: isSelected
+                          ? isDark
+                            ? "0 4px 14px rgba(0, 0, 0, 0.25)"
+                            : "0 4px 14px rgba(0, 0, 0, 0.06)"
+                          : "none",
+                        transition: "all 0.16s ease",
+                        textAlign: "left",
+                      }}
+                    >
+                      <img
+                        src={game.logo}
+                        alt={game.name}
+                        style={{
+                          width: 32,
+                          height: 32,
+                          objectFit: "contain",
+                          borderRadius: 8,
+                        }}
+                      />
+                      <span
+                        style={{
+                          flex: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {game.name}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* ── Right Column: Selected Game Configuration Panel ── */}
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 14,
+                }}
+              >
+                {/* 1. Game Header */}
                 <div
                   style={{
-                    padding: "8px 0 14px",
-                    borderBottom: isDark
-                      ? "1px solid rgba(255, 255, 255, 0.05)"
-                      : "1px solid rgba(0, 0, 0, 0.06)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    paddingBottom: 2,
                   }}
                 >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <img
+                      src={apparatiaLogo}
+                      alt="Apparatia"
+                      style={{
+                        width: 36,
+                        height: 36,
+                        objectFit: "contain",
+                        borderRadius: 8,
+                      }}
+                    />
+                    <h2
+                      style={{
+                        margin: 0,
+                        fontSize: 22,
+                        fontWeight: 800,
+                        color: isDark ? "#ffffff" : "#111822",
+                        fontFamily: BASE_FONT,
+                        letterSpacing: "-0.02em",
+                      }}
+                    >
+                      Apparatia
+                    </h2>
+                  </div>
+
+                  {/* Horizontal Technical Chips */}
                   <div
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 4,
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {/* Minecraft Version */}
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "3px 10px",
+                        borderRadius: 7,
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        background: isDark
+                          ? "rgba(255, 255, 255, 0.05)"
+                          : "rgba(0, 0, 0, 0.04)",
+                        border: isDark
+                          ? "1px solid rgba(255, 255, 255, 0.08)"
+                          : "1px solid rgba(0, 0, 0, 0.08)",
+                        color: isDark ? "#94a3b8" : "#475569",
+                      }}
+                    >
+                      Minecraft {manifest?.minecraftVersion || "1.21.1"}
+                    </span>
+
+                    <span
+                      style={{
+                        color: isDark ? "#475569" : "#94a3b8",
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      ·
+                    </span>
+
+                    {/* Mod Loader */}
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "3px 10px",
+                        borderRadius: 7,
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        background: isDark
+                          ? "rgba(255, 255, 255, 0.05)"
+                          : "rgba(0, 0, 0, 0.04)",
+                        border: isDark
+                          ? "1px solid rgba(255, 255, 255, 0.08)"
+                          : "1px solid rgba(0, 0, 0, 0.08)",
+                        color: isDark ? "#94a3b8" : "#475569",
+                      }}
+                    >
+                      {loaderDisplay}
+                    </span>
+
+                    <span
+                      style={{
+                        color: isDark ? "#475569" : "#94a3b8",
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      ·
+                    </span>
+
+                    {/* Modpack Version */}
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "3px 10px",
+                        borderRadius: 7,
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        background: isDark
+                          ? "rgba(255, 255, 255, 0.05)"
+                          : "rgba(0, 0, 0, 0.04)",
+                        border: isDark
+                          ? "1px solid rgba(255, 255, 255, 0.08)"
+                          : "1px solid rgba(0, 0, 0, 0.08)",
+                        color: isDark ? "#94a3b8" : "#475569",
+                      }}
+                    >
+                      Modpack {manifest?.version || "1.0.0"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. Card: RENDIMIENTO */}
+                <div className="settings-card">
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 800,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      color: isDark ? "#657788" : "#778899",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {t("settings.performance")}
+                  </div>
+
+                  {/* Row 1: RAM Slider */}
+                  <div
+                    style={{
+                      padding: "8px 0 14px",
+                      borderBottom: isDark
+                        ? "1px solid rgba(255, 255, 255, 0.05)"
+                        : "1px solid rgba(0, 0, 0, 0.06)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 17,
+                            fontWeight: 700,
+                            color: isDark ? "white" : "#111822",
+                            marginBottom: 2,
+                          }}
+                        >
+                          {t("settings.ramTitle")}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 14.5,
+                            color: isDark ? "#8899aa" : "#556677",
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {t("settings.ramDesc")}
+                        </div>
+                      </div>
+
+                      {/* Right: [ Automático ] + [ 8 GB ] */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={handleAutoRam}
+                          style={{
+                            padding: "5px 12px",
+                            borderRadius: 8,
+                            fontFamily: BASE_FONT,
+                            fontSize: 13,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            border: isDark
+                              ? "1px solid rgba(62, 196, 192, 0.35)"
+                              : "1px solid rgba(62, 196, 192, 0.45)",
+                            background: isDark
+                              ? "rgba(62, 196, 192, 0.12)"
+                              : "rgba(62, 196, 192, 0.12)",
+                            color: isDark ? "#3ec4c0" : "#0d9488",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          {t("settings.automaticRam")}
+                        </button>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            background: isDark ? "#0d1217" : "#f0f3f7",
+                            border: isDark
+                              ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                              : "1.5px solid rgba(0, 0, 0, 0.1)",
+                            borderRadius: 10,
+                            padding: "5px 14px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 15.5,
+                              fontWeight: 800,
+                              color: "#3ec4c0",
+                            }}
+                          >
+                            {ramGB}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 13.5,
+                              fontWeight: 700,
+                              color: isDark
+                                ? "rgba(255, 255, 255, 0.7)"
+                                : "#556677",
+                            }}
+                          >
+                            GB
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Slider bar */}
+                    <div
+                      style={{
+                        marginTop: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 14,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 13.5,
+                          fontWeight: 700,
+                          color: isDark ? "#7a8b9e" : "#778899",
+                          minWidth: 36,
+                        }}
+                      >
+                        2 GB
+                      </span>
+                      <input
+                        type="range"
+                        min={2}
+                        max={systemTotalRAM}
+                        step={1}
+                        value={ramGB}
+                        onChange={(e) => {
+                          setRamGB(Number(e.target.value))
+                          notifySaved()
+                        }}
+                        className="settings-ram-slider"
+                        style={{
+                          flex: 1,
+                          background: `linear-gradient(to right, #3ec4c0 0%, #3ec4c0 ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
+                            isDark
+                              ? "rgba(255, 255, 255, 0.1)"
+                              : "rgba(0, 0, 0, 0.1)"
+                          } ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
+                            isDark
+                              ? "rgba(255, 255, 255, 0.1)"
+                              : "rgba(0, 0, 0, 0.1)"
+                          } 100%)`,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: 13.5,
+                          fontWeight: 700,
+                          color: isDark ? "#7a8b9e" : "#778899",
+                          minWidth: 44,
+                          textAlign: "right",
+                        }}
+                      >
+                        {systemTotalRAM} GB
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Row 2: GPU de alto rendimiento */}
+                  <div
+                    className="settings-row"
+                    style={{
+                      borderBottom: "none",
+                      paddingBottom: 0,
+                      paddingTop: 14,
                     }}
                   >
                     <div>
@@ -929,7 +1456,7 @@ export default function SettingsView({
                           marginBottom: 2,
                         }}
                       >
-                        {t("settings.ramTitle")}
+                        {t("settings.gpuTitle")}
                       </div>
                       <div
                         style={{
@@ -938,163 +1465,178 @@ export default function SettingsView({
                           lineHeight: 1.45,
                         }}
                       >
-                        {t("settings.ramDesc")}
+                        {t("settings.gpuDesc")}
                       </div>
                     </div>
-
-                    {/* RAM value badge */}
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        background: isDark ? "#0d1217" : "#f0f3f7",
-                        border: isDark
-                          ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                          : "1.5px solid rgba(0, 0, 0, 0.1)",
-                        borderRadius: 10,
-                        padding: "5px 14px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 15.5,
-                          fontWeight: 800,
-                          color: "#3ec4c0",
-                        }}
-                      >
-                        {ramGB}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 13.5,
-                          fontWeight: 700,
-                          color: isDark
-                            ? "rgba(255, 255, 255, 0.7)"
-                            : "#556677",
-                        }}
-                      >
-                        GB
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Slider bar */}
-                  <div
-                    style={{
-                      marginTop: 12,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 14,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 13.5,
-                        fontWeight: 700,
-                        color: isDark ? "#7a8b9e" : "#778899",
-                        minWidth: 36,
-                      }}
-                    >
-                      2 GB
-                    </span>
-                    <input
-                      type="range"
-                      min={2}
-                      max={systemTotalRAM}
-                      step={1}
-                      value={ramGB}
-                      onChange={(e) => {
-                        setRamGB(Number(e.target.value))
+                    <LauncherToggle
+                      checked={dedicatedGPU}
+                      theme={theme}
+                      onChange={(v) => {
+                        setDedicatedGPU(v)
                         notifySaved()
                       }}
-                      className="settings-ram-slider"
-                      style={{
-                        flex: 1,
-                        background: `linear-gradient(to right, #3ec4c0 0%, #3ec4c0 ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
-                          isDark
-                            ? "rgba(255, 255, 255, 0.1)"
-                            : "rgba(0, 0, 0, 0.1)"
-                        } ${((ramGB - 2) / Math.max(1, systemTotalRAM - 2)) * 100}%, ${
-                          isDark
-                            ? "rgba(255, 255, 255, 0.1)"
-                            : "rgba(0, 0, 0, 0.1)"
-                        } 100%)`,
-                      }}
+                      label={t("settings.gpuTitle")}
                     />
-                    <span
-                      style={{
-                        fontSize: 13.5,
-                        fontWeight: 700,
-                        color: isDark ? "#7a8b9e" : "#778899",
-                        minWidth: 44,
-                        textAlign: "right",
-                      }}
-                    >
-                      {systemTotalRAM} GB
-                    </span>
                   </div>
                 </div>
 
-                {/* Row 2: GPU Dedicada */}
-                <div
-                  className="settings-row"
-                  style={{
-                    borderBottom: "none",
-                    paddingBottom: 0,
-                    paddingTop: 14,
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 2,
-                      }}
-                    >
-                      <span
+                {/* 3. Card: INFORMACIÓN */}
+                <div className="settings-card">
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 800,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      color: isDark ? "#657788" : "#778899",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {t("settings.information")}
+                  </div>
+
+                  <div
+                    className="settings-row"
+                    style={{ borderBottom: "none", paddingBottom: 0 }}
+                  >
+                    <div>
+                      <div
                         style={{
                           fontSize: 17,
                           fontWeight: 700,
                           color: isDark ? "white" : "#111822",
+                          marginBottom: 2,
                         }}
                       >
-                        {t("settings.gpuTitle")}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11.5,
-                          fontWeight: 800,
-                          color: "#3ec4c0",
-                          background: "rgba(62, 196, 192, 0.12)",
-                          padding: "2px 8px",
-                          borderRadius: 6,
-                        }}
-                      >
-                        NVIDIA / AMD
-                      </span>
+                        {t("settings.javaVersion")}
+                      </div>
                     </div>
                     <div
                       style={{
-                        fontSize: 14.5,
-                        color: isDark ? "#8899aa" : "#556677",
-                        lineHeight: 1.45,
+                        fontSize: 15,
+                        fontWeight: 700,
+                        color: runtimeInfo?.javaMajorVersion
+                          ? "#3ec4c0"
+                          : isDark
+                            ? "#7a8b9e"
+                            : "#8899aa",
+                        background: isDark ? "#0d1217" : "#f0f3f7",
+                        border: isDark
+                          ? "1.5px solid rgba(255, 255, 255, 0.1)"
+                          : "1.5px solid rgba(0, 0, 0, 0.08)",
+                        borderRadius: 10,
+                        padding: "5px 14px",
                       }}
                     >
-                      {t("settings.gpuDesc")}
+                      {runtimeInfo?.javaMajorVersion
+                        ? `Java ${runtimeInfo.javaMajorVersion}`
+                        : "—"}
                     </div>
                   </div>
-                  <LauncherToggle
-                    checked={dedicatedGPU}
-                    theme={theme}
-                    onChange={(v) => {
-                      setDedicatedGPU(v)
-                      notifySaved()
+                </div>
+
+                {/* 4. Card: ADMINISTRACIÓN */}
+                <div className="settings-card">
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 800,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      color: isDark ? "#657788" : "#778899",
+                      marginBottom: 6,
                     }}
-                    label={t("settings.gpuTitle")}
-                  />
+                  >
+                    {t("settings.administration")}
+                  </div>
+
+                  {/* Row 1: Verificar instalación */}
+                  <div className="settings-row">
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 17,
+                          fontWeight: 700,
+                          color: isDark ? "white" : "#111822",
+                          marginBottom: 2,
+                        }}
+                      >
+                        {t("settings.verifyInstallation")}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleVerify}
+                      disabled={isVerifyDisabled}
+                      style={{
+                        padding: "8px 20px",
+                        borderRadius: 10,
+                        fontFamily: BASE_FONT,
+                        fontSize: 14,
+                        fontWeight: 700,
+                        cursor: isVerifyDisabled ? "not-allowed" : "pointer",
+                        opacity: isVerifyDisabled ? 0.45 : 1,
+                        border: isDark
+                          ? "1.5px solid rgba(255, 255, 255, 0.14)"
+                          : "1.5px solid rgba(0, 0, 0, 0.12)",
+                        background: isDark ? "#1c2630" : "#f0f3f7",
+                        color: isDark ? "#ffffff" : "#111822",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      {isVerifying
+                        ? t("settings.verifying")
+                        : (t("settings.verifyButton") || t("settings.verifyInstallation"))}
+                    </button>
+                  </div>
+
+                  {/* Row 2: Desinstalar */}
+                  <div
+                    className="settings-row"
+                    style={{
+                      borderBottom: "none",
+                      paddingBottom: 0,
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 17,
+                          fontWeight: 700,
+                          color: isDark ? "white" : "#111822",
+                          marginBottom: 2,
+                        }}
+                      >
+                        {t("settings.uninstallGame")}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleUninstall}
+                      disabled={isUninstallDisabled}
+                      style={{
+                        padding: "8px 20px",
+                        borderRadius: 10,
+                        fontFamily: BASE_FONT,
+                        fontSize: 14,
+                        fontWeight: 700,
+                        cursor: isUninstallDisabled ? "not-allowed" : "pointer",
+                        opacity: isUninstallDisabled ? 0.45 : 1,
+                        border: "1.5px solid rgba(239, 68, 68, 0.3)",
+                        background: isDark
+                          ? "rgba(239, 68, 68, 0.1)"
+                          : "rgba(239, 68, 68, 0.08)",
+                        color: "#ef4444",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      {isUninstalling
+                        ? "..."
+                        : (t("settings.uninstallButton") || t("settings.uninstallGame"))}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

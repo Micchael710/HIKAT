@@ -37,6 +37,7 @@ const {
   loadInstalledManifest,
   resolveWatcherDecision,
 } = require("./client-files-sync.cjs")
+const { loadCoreState } = require("./minecraft-core.cjs")
 
 const instanceRoot = path.join(appDataRoot, "game files")
 const gameLauncher = new GameLauncher(app, { instanceRoot })
@@ -1531,6 +1532,16 @@ ipcMain.handle("game-get-status", async () => {
     ...gameLauncher.getLaunchStatus(),
     operationState: operationManager.getState(),
   }
+})
+
+ipcMain.handle("game-get-runtime-info", async () => {
+  try {
+    const state = await loadCoreState(instanceRoot)
+    if (state && typeof state.javaMajorVersion === "number") {
+      return { javaMajorVersion: state.javaMajorVersion }
+    }
+  } catch (_) {}
+  return { javaMajorVersion: null }
 })
 
 app.whenReady().then(() => {

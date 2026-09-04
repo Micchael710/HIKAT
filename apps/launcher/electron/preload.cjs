@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   uninstallGame: () => ipcRenderer.invoke("game-uninstall"),
   launchGame: (options) => ipcRenderer.invoke("game-launch", options),
   getLaunchStatus: () => ipcRenderer.invoke("game-get-status"),
+  getGameRuntimeInfo: () => ipcRenderer.invoke("game-get-runtime-info"),
   onDownloadProgress: (callback) => {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on("game-download-progress", handler)

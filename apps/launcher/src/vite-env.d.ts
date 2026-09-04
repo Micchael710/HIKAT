@@ -132,6 +132,7 @@ interface ElectronAPI {
     customArgs?: string[]
   }) => Promise<{ success: boolean; pid?: number }>
   getLaunchStatus?: () => Promise<{ status: string; pid?: number | null; operationState?: string }>
+  getGameRuntimeInfo?: () => Promise<{ javaMajorVersion: number | null }>
   onDownloadProgress?: (callback: (data: DownloadProgressData) => void) => () => void
   onPhaseChange?: (callback: (phase: string) => void) => () => void
   onLaunchStatus?: (
