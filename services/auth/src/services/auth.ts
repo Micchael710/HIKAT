@@ -71,45 +71,73 @@ export async function registerWithPassword(
   }
 
   const userId = crypto.randomUUID()
+  const credentialId = crypto.randomUUID()
   const passwordHash = await hashPassword(params.password)
   const now = new Date().toISOString()
+  const displayName = params.displayName || normalizedEmail.split("@")[0] || "Player"
 
-  // Create User
-  await db.insert(schema.users).values({
-    id: userId,
-    role: "PLAYER",
-    displayName: params.displayName || normalizedEmail.split("@")[0],
-    createdAt: now,
-    updatedAt: now,
-  })
-
-  // Create Password Credentials
-  await db.insert(schema.passwordCredentials).values({
-    id: crypto.randomUUID(),
-    userId,
-    email: normalizedEmail,
-    passwordHash,
-    emailVerifiedAt: null, // Requires verification
-    createdAt: now,
-    updatedAt: now,
-  })
-
-  // Create Email Verification Token
+  // Prepare Email Verification Token before atomic batch
   const rawVerificationToken = generateSecureToken(32)
   const tokenHash = await hashToken(rawVerificationToken)
   const expiresAt = new Date(
     Date.now() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60 * 1000,
   ).toISOString()
   const newTokenId = crypto.randomUUID()
-  const tokenCreatedAt = now
 
-  await db.insert(schema.emailVerificationTokens).values({
-    id: newTokenId,
-    userId,
-    tokenHash,
-    expiresAt,
-    createdAt: tokenCreatedAt,
-  })
+  // 1. Atomic creation of user, password credentials, and email verification token in D1
+  const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
+
+  if (d1) {
+    const insertUserStmt = d1
+      .prepare(
+        `INSERT INTO users (id, role, display_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(userId, "PLAYER", displayName, now, now)
+
+    const insertCredStmt = d1
+      .prepare(
+        `INSERT INTO password_credentials (id, user_id, email, password_hash, email_verified_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+      )
+      .bind(credentialId, userId, normalizedEmail, passwordHash, now, now)
+
+    const insertTokenStmt = d1
+      .prepare(
+        `INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, used_at, created_at)
+         VALUES (?, ?, ?, ?, NULL, ?)`,
+      )
+      .bind(newTokenId, userId, tokenHash, expiresAt, now)
+
+    await d1.batch([insertUserStmt, insertCredStmt, insertTokenStmt])
+  } else {
+    // Fallback without raw D1
+    await db.insert(schema.users).values({
+      id: userId,
+      role: "PLAYER",
+      displayName,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.insert(schema.passwordCredentials).values({
+      id: credentialId,
+      userId,
+      email: normalizedEmail,
+      passwordHash,
+      emailVerifiedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.insert(schema.emailVerificationTokens).values({
+      id: newTokenId,
+      userId,
+      tokenHash,
+      expiresAt,
+      createdAt: now,
+    })
+  }
 
   const normalizedLocale = sanitizeEmailLocale(params.locale)
   const verificationUrl = `${authServiceUrl.replace(/\/+$/, "")}/auth/email-action?type=verify-email&token=${rawVerificationToken}&lang=${normalizedLocale}`
@@ -123,8 +151,7 @@ export async function registerWithPassword(
   } catch (emailErr) {
     console.error("[Auth] Failed to send verification email during registration:", emailErr)
     try {
-      await db.delete(schema.emailVerificationTokens).where(eq(schema.emailVerificationTokens.userId, userId)).run()
-      await db.delete(schema.passwordCredentials).where(eq(schema.passwordCredentials.userId, userId)).run()
+      // CASCADE in database foreign keys cleans up password_credentials and email_verification_tokens
       await db.delete(schema.users).where(eq(schema.users.id, userId)).run()
     } catch (cleanupErr) {
       console.error("[Auth] Failed to rollback user after email send failure:", cleanupErr)
@@ -326,32 +353,58 @@ export async function verifyEmailToken(
     throw new Error(AuthErrorCode.TOKEN_EXPIRED)
   }
 
-  // 2. Mark token as used atomically (CAS)
-  const updateRes = await db
-    .update(schema.emailVerificationTokens)
-    .set({ usedAt: nowIso })
-    .where(
-      and(
-        eq(schema.emailVerificationTokens.id, tokenRecord.id),
-        isNull(schema.emailVerificationTokens.usedAt),
-      ),
-    )
-    .run()
+  // 2. Atomic consumption and credential update in D1
+  const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
 
-  const changes = (updateRes as any)?.meta?.changes ?? (updateRes as any)?.changes ?? 0
-  if (changes === 0) {
-    throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+  if (d1) {
+    const updateTokenStmt = d1
+      .prepare(
+        `UPDATE email_verification_tokens
+         SET used_at = ?
+         WHERE id = ? AND used_at IS NULL AND expires_at > ?`,
+      )
+      .bind(nowIso, tokenRecord.id, nowIso)
+
+    const updateCredStmt = d1
+      .prepare(
+        `UPDATE password_credentials
+         SET email_verified_at = ?, updated_at = ?
+         WHERE user_id = ? AND (SELECT changes() = 1)`,
+      )
+      .bind(nowIso, nowIso, tokenRecord.userId)
+
+    const batchResults = await d1.batch([updateTokenStmt, updateCredStmt])
+    const tokenChanges = batchResults[0]?.meta?.changes ?? 0
+
+    if (tokenChanges === 0) {
+      throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+    }
+  } else {
+    const updateRes = await db
+      .update(schema.emailVerificationTokens)
+      .set({ usedAt: nowIso })
+      .where(
+        and(
+          eq(schema.emailVerificationTokens.id, tokenRecord.id),
+          isNull(schema.emailVerificationTokens.usedAt),
+        ),
+      )
+      .run()
+
+    const changes = (updateRes as any)?.meta?.changes ?? (updateRes as any)?.changes ?? 0
+    if (changes === 0) {
+      throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+    }
+
+    await db
+      .update(schema.passwordCredentials)
+      .set({
+        emailVerifiedAt: nowIso,
+        updatedAt: nowIso,
+      })
+      .where(eq(schema.passwordCredentials.userId, tokenRecord.userId))
+      .run()
   }
-
-  // 3. Mark password credentials as verified
-  await db
-    .update(schema.passwordCredentials)
-    .set({
-      emailVerifiedAt: nowIso,
-      updatedAt: nowIso,
-    })
-    .where(eq(schema.passwordCredentials.userId, tokenRecord.userId))
-    .run()
 
   return { success: true }
 }
@@ -476,35 +529,83 @@ export async function resetPasswordWithToken(
   // 2. Hash new password
   const newPasswordHash = await hashPassword(newPassword)
 
-  // 3. Mark reset token as used atomically (CAS)
-  const updateRes = await db
-    .update(schema.passwordResetTokens)
-    .set({ usedAt: nowIso })
-    .where(
-      and(
-        eq(schema.passwordResetTokens.id, tokenRecord.id),
-        isNull(schema.passwordResetTokens.usedAt),
-      ),
-    )
-    .run()
+  // 3. Atomic consumption, password update, and session revocations in D1
+  const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
 
-  const changes = (updateRes as any)?.meta?.changes ?? (updateRes as any)?.changes ?? 0
-  if (changes === 0) {
-    throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+  if (d1) {
+    const consumeTokenStmt = d1
+      .prepare(
+        `UPDATE password_reset_tokens
+         SET used_at = ?
+         WHERE id = ? AND used_at IS NULL AND expires_at > ?`,
+      )
+      .bind(nowIso, tokenRecord.id, nowIso)
+
+    const updateCredStmt = d1
+      .prepare(
+        `UPDATE password_credentials
+         SET password_hash = ?, updated_at = ?
+         WHERE user_id = ? AND (SELECT changes() = 1)`,
+      )
+      .bind(newPasswordHash, nowIso, tokenRecord.userId)
+
+    const revokeSessionsStmt = d1
+      .prepare(
+        `UPDATE sessions
+         SET revoked_at = ?
+         WHERE user_id = ? AND revoked_at IS NULL AND (SELECT changes() = 1)`,
+      )
+      .bind(nowIso, tokenRecord.userId)
+
+    const revokeRefreshTokensStmt = d1
+      .prepare(
+        `UPDATE session_refresh_tokens
+         SET revoked_at = ?
+         WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ?)
+           AND revoked_at IS NULL
+           AND (SELECT changes() = 1)`,
+      )
+      .bind(nowIso, tokenRecord.userId)
+
+    const batchResults = await d1.batch([
+      consumeTokenStmt,
+      updateCredStmt,
+      revokeSessionsStmt,
+      revokeRefreshTokensStmt,
+    ])
+
+    const tokenChanges = batchResults[0]?.meta?.changes ?? 0
+    if (tokenChanges === 0) {
+      throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+    }
+  } else {
+    const updateRes = await db
+      .update(schema.passwordResetTokens)
+      .set({ usedAt: nowIso })
+      .where(
+        and(
+          eq(schema.passwordResetTokens.id, tokenRecord.id),
+          isNull(schema.passwordResetTokens.usedAt),
+        ),
+      )
+      .run()
+
+    const changes = (updateRes as any)?.meta?.changes ?? (updateRes as any)?.changes ?? 0
+    if (changes === 0) {
+      throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+    }
+
+    await db
+      .update(schema.passwordCredentials)
+      .set({
+        passwordHash: newPasswordHash,
+        updatedAt: nowIso,
+      })
+      .where(eq(schema.passwordCredentials.userId, tokenRecord.userId))
+      .run()
+
+    await revokeAllUserSessions(db, tokenRecord.userId)
   }
-
-  // 4. Update password credentials
-  await db
-    .update(schema.passwordCredentials)
-    .set({
-      passwordHash: newPasswordHash,
-      updatedAt: nowIso,
-    })
-    .where(eq(schema.passwordCredentials.userId, tokenRecord.userId))
-    .run()
-
-  // 5. Revoke all active sessions for security
-  await revokeAllUserSessions(db, tokenRecord.userId)
 
   return { success: true }
 }
@@ -750,37 +851,67 @@ export async function getOrCreateOAuthUser(
     }
   }
 
-  // 3. Create fresh HiKAT user with role PLAYER and store external identity
+  // 3. Create fresh HiKAT user with role PLAYER and store external identity atomically in D1
   const userId = crypto.randomUUID()
+  const externalAccountId = crypto.randomUUID()
   const now = new Date().toISOString()
+  const displayName = profile.displayName || normalizedEmail?.split("@")[0] || "Player"
 
-  const newUser: schema.NewUser = {
-    id: userId,
-    role: "PLAYER",
-    displayName: profile.displayName || normalizedEmail?.split("@")[0] || "Player",
-    createdAt: now,
-    updatedAt: now,
+  const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
+
+  if (d1) {
+    const insertUserStmt = d1
+      .prepare(
+        `INSERT INTO users (id, role, display_name, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(userId, "PLAYER", displayName, now, now)
+
+    const insertExternalStmt = d1
+      .prepare(
+        `INSERT INTO external_accounts (id, user_id, provider, provider_subject, email, display_name, avatar_url, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        externalAccountId,
+        userId,
+        profile.provider,
+        profile.providerSubject,
+        normalizedEmail,
+        profile.displayName ?? null,
+        profile.avatarUrl ?? null,
+        now,
+        now,
+      )
+
+    await d1.batch([insertUserStmt, insertExternalStmt])
+  } else {
+    await db.insert(schema.users).values({
+      id: userId,
+      role: "PLAYER",
+      displayName,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.insert(schema.externalAccounts).values({
+      id: externalAccountId,
+      userId,
+      provider: profile.provider,
+      providerSubject: profile.providerSubject,
+      email: normalizedEmail,
+      displayName: profile.displayName,
+      avatarUrl: profile.avatarUrl,
+      createdAt: now,
+      updatedAt: now,
+    })
   }
-
-  await db.insert(schema.users).values(newUser)
-
-  await db.insert(schema.externalAccounts).values({
-    id: crypto.randomUUID(),
-    userId,
-    provider: profile.provider,
-    providerSubject: profile.providerSubject,
-    email: normalizedEmail,
-    displayName: profile.displayName,
-    avatarUrl: profile.avatarUrl,
-    createdAt: now,
-    updatedAt: now,
-  })
 
   return {
     id: userId,
     email: normalizedEmail || "",
     role: "PLAYER" as AppRole,
-    displayName: newUser.displayName ?? null,
+    displayName,
     createdAt: now,
   }
 }

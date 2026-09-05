@@ -51,6 +51,7 @@ import {
   resetPasswordWithToken,
   getEmailActionStatus,
   changePassword,
+  getOrCreateOAuthUser,
   resolveOAuthUser,
   getAuthMethods,
   issueGameToken,
@@ -3573,6 +3574,262 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
         expect(content).not.toContain("lastEffectiveTime")
         expect(content).not.toContain("generateMonotonicTokenMetadata")
+      })
+    })
+
+    // =========================================================================
+    // CRITICAL D1 ATOMIC OPERATIONS & ROLLBACK GUARANTEES (SHARD 02 HARDENING)
+    // =========================================================================
+    describe("Critical D1 Atomic Operations & Rollback Guarantees", () => {
+      it("REGISTRO: normal registration succeeds atomically and creates user, credential, and verification token in D1", async () => {
+        const email = "atomic-reg@hikat.org"
+        const regResult = await registerWithPassword(
+          db,
+          { email, password: "SecurePassword123!", displayName: "AtomicUser" },
+          emailService,
+        )
+
+        expect(regResult.user.id).toBeDefined()
+        expect(regResult.user.displayName).toBe("AtomicUser")
+
+        // Verify all 3 records exist in D1
+        const userRec = await db.select().from(schema.users).where(eq(schema.users.id, regResult.user.id)).get()
+        expect(userRec).toBeDefined()
+
+        const credRec = await db.select().from(schema.passwordCredentials).where(eq(schema.passwordCredentials.userId, regResult.user.id)).get()
+        expect(credRec).toBeDefined()
+        expect(credRec!.email).toBe(email)
+        expect(credRec!.emailVerifiedAt).toBeNull()
+
+        const tokenRec = await db.select().from(schema.emailVerificationTokens).where(eq(schema.emailVerificationTokens.userId, regResult.user.id)).get()
+        expect(tokenRec).toBeDefined()
+        expect(tokenRec!.usedAt).toBeNull()
+      })
+
+      it("REGISTRO: if D1 batch fails during registration, entire transaction rolls back with NO partial user, credential, or token", async () => {
+        const email = "atomic-fail-reg@hikat.org"
+        const d1 = (db as unknown as { session: { client: D1Database } }).session.client
+        const origBatch = d1.batch.bind(d1)
+
+        // Mock D1 batch to simulate a transient storage failure during the multi-statement batch
+        d1.batch = async () => {
+          throw new Error("D1_DATABASE_WRITE_FAILED")
+        }
+
+        try {
+          await expect(
+            registerWithPassword(
+              db,
+              { email, password: "SecurePassword123!", displayName: "FailUser" },
+              emailService,
+            ),
+          ).rejects.toThrow("D1_DATABASE_WRITE_FAILED")
+        } finally {
+          d1.batch = origBatch
+        }
+
+        // Verify 0 orphan records exist in database
+        const users = await db.select().from(schema.users).where(eq(schema.users.displayName, "FailUser")).all()
+        expect(users.length).toBe(0)
+
+        const creds = await db.select().from(schema.passwordCredentials).where(eq(schema.passwordCredentials.email, email)).all()
+        expect(creds.length).toBe(0)
+      })
+
+      it("VERIFY: normal email verification atomically consumes token and sets emailVerifiedAt", async () => {
+        const email = "atomic-verify@hikat.org"
+        await registerWithPassword(
+          db,
+          { email, password: "SecurePassword123!" },
+          emailService,
+        )
+        const rawToken = emailService.getLastEmailFor(email)!.token
+
+        const result = await verifyEmailToken(db, rawToken)
+        expect(result.success).toBe(true)
+
+        // Verify token is used and credential is verified
+        const tokenHash = await hashToken(rawToken)
+        const tokenRec = await db.select().from(schema.emailVerificationTokens).where(eq(schema.emailVerificationTokens.tokenHash, tokenHash)).get()
+        expect(tokenRec!.usedAt).not.toBeNull()
+
+        const credRec = await db.select().from(schema.passwordCredentials).where(eq(schema.passwordCredentials.email, email)).get()
+        expect(credRec!.emailVerifiedAt).not.toBeNull()
+      })
+
+      it("VERIFY: if D1 batch fails during verification, token remains unconsumed and usable", async () => {
+        const email = "atomic-verify-rollback@hikat.org"
+        await registerWithPassword(
+          db,
+          { email, password: "SecurePassword123!" },
+          emailService,
+        )
+        const rawToken = emailService.getLastEmailFor(email)!.token
+        const tokenHash = await hashToken(rawToken)
+
+        const d1 = (db as unknown as { session: { client: D1Database } }).session.client
+        const origBatch = d1.batch.bind(d1)
+
+        // Simulate failure on D1 batch
+        d1.batch = async () => {
+          throw new Error("D1_TRANSIENT_ERROR")
+        }
+
+        try {
+          await expect(verifyEmailToken(db, rawToken)).rejects.toThrow("D1_TRANSIENT_ERROR")
+        } finally {
+          d1.batch = origBatch
+        }
+
+        // Verify token is NOT consumed
+        const tokenRec = await db.select().from(schema.emailVerificationTokens).where(eq(schema.emailVerificationTokens.tokenHash, tokenHash)).get()
+        expect(tokenRec!.usedAt).toBeNull()
+
+        // Verify retry with working D1 succeeds cleanly
+        const retryResult = await verifyEmailToken(db, rawToken)
+        expect(retryResult.success).toBe(true)
+      })
+
+      it("RESET: normal password reset atomically consumes token, updates password, and revokes active sessions", async () => {
+        const email = "atomic-reset@hikat.org"
+        await registerWithPassword(db, { email, password: "OldPassword123!" }, emailService)
+        const verifyToken = emailService.getLastEmailFor(email)!.token
+        await verifyEmailToken(db, verifyToken)
+
+        // Create an active session
+        const session = await loginWithPassword(db, { email, password: "OldPassword123!" }, keyManager)
+        expect(session.sessionId).toBeDefined()
+
+        // Request reset
+        await requestPasswordReset(db, email, emailService)
+        const resetToken = emailService.getLastEmailFor(email)!.token
+
+        // Reset password
+        const resetResult = await resetPasswordWithToken(db, resetToken, "NewPassword456!")
+        expect(resetResult.success).toBe(true)
+
+        // Verify token consumed
+        const resetHash = await hashToken(resetToken)
+        const tokenRec = await db.select().from(schema.passwordResetTokens).where(eq(schema.passwordResetTokens.tokenHash, resetHash)).get()
+        expect(tokenRec!.usedAt).not.toBeNull()
+
+        // Verify previous session is revoked
+        const sessionRec = await db.select().from(schema.sessions).where(eq(schema.sessions.id, session.sessionId)).get()
+        expect(sessionRec!.revokedAt).not.toBeNull()
+
+        // Verify login with new password works and old password fails
+        await expect(loginWithPassword(db, { email, password: "OldPassword123!" }, keyManager)).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+        const newSession = await loginWithPassword(db, { email, password: "NewPassword456!" }, keyManager)
+        expect(newSession.sessionId).toBeDefined()
+      })
+
+      it("RESET: if D1 batch fails during password reset, token is NOT consumed and old password remains intact", async () => {
+        const email = "atomic-reset-rollback@hikat.org"
+        await registerWithPassword(db, { email, password: "OldPassword123!" }, emailService)
+        const verifyToken = emailService.getLastEmailFor(email)!.token
+        await verifyEmailToken(db, verifyToken)
+
+        const session = await loginWithPassword(db, { email, password: "OldPassword123!" }, keyManager)
+
+        await requestPasswordReset(db, email, emailService)
+        const resetToken = emailService.getLastEmailFor(email)!.token
+        const resetHash = await hashToken(resetToken)
+
+        const d1 = (db as unknown as { session: { client: D1Database } }).session.client
+        const origBatch = d1.batch.bind(d1)
+
+        d1.batch = async () => {
+          throw new Error("D1_RESET_BATCH_ERROR")
+        }
+
+        try {
+          await expect(resetPasswordWithToken(db, resetToken, "NewPassword456!")).rejects.toThrow("D1_RESET_BATCH_ERROR")
+        } finally {
+          d1.batch = origBatch
+        }
+
+        // Token must still be unused
+        const tokenRec = await db.select().from(schema.passwordResetTokens).where(eq(schema.passwordResetTokens.tokenHash, resetHash)).get()
+        expect(tokenRec!.usedAt).toBeNull()
+
+        // Old password must still work
+        const validSession = await loginWithPassword(db, { email, password: "OldPassword123!" }, keyManager)
+        expect(validSession.sessionId).toBeDefined()
+
+        // Session was NOT revoked
+        const sessionRec = await db.select().from(schema.sessions).where(eq(schema.sessions.id, session.sessionId)).get()
+        expect(sessionRec!.revokedAt).toBeNull()
+
+        // Token can still be used successfully once D1 is working
+        const retryResult = await resetPasswordWithToken(db, resetToken, "NewPassword456!")
+        expect(retryResult.success).toBe(true)
+
+        // Attempting to reuse the token now fails with TOKEN_REUSE_DETECTED
+        await expect(resetPasswordWithToken(db, resetToken, "AnotherPassword789!")).rejects.toThrow(AuthErrorCode.TOKEN_REUSE_DETECTED)
+      })
+
+      it("OAUTH: normal Google and Discord user creation is atomic in D1 and repeated login returns same user", async () => {
+        // 1. Google OAuth user creation
+        const googleProfile = {
+          provider: "GOOGLE" as const,
+          providerSubject: "atomic-g-sub-1",
+          email: "atomic-google@hikat.org",
+          emailVerified: true,
+          displayName: "Atomic Google",
+          avatarUrl: "https://avatar.google.com/1",
+        }
+        const googleUser1 = await getOrCreateOAuthUser(db, googleProfile)
+        expect(googleUser1.id).toBeDefined()
+        expect(googleUser1.email).toBe("atomic-google@hikat.org")
+
+        // Repeated login returns exact same user
+        const googleUser2 = await getOrCreateOAuthUser(db, googleProfile)
+        expect(googleUser2.id).toBe(googleUser1.id)
+
+        // 2. Discord OAuth user creation
+        const discordProfile = {
+          provider: "DISCORD" as const,
+          providerSubject: "atomic-d-sub-1",
+          email: "atomic-discord@hikat.org",
+          emailVerified: true,
+          displayName: "Atomic Discord",
+          avatarUrl: "https://avatar.discord.com/1",
+        }
+        const discordUser1 = await getOrCreateOAuthUser(db, discordProfile)
+        expect(discordUser1.id).toBeDefined()
+        expect(discordUser1.email).toBe("atomic-discord@hikat.org")
+
+        // Repeated login returns exact same user
+        const discordUser2 = await getOrCreateOAuthUser(db, discordProfile)
+        expect(discordUser2.id).toBe(discordUser1.id)
+      })
+
+      it("OAUTH: if D1 batch fails during OAuth user creation, no orphan user record is created", async () => {
+        const googleProfile = {
+          provider: "GOOGLE" as const,
+          providerSubject: "atomic-fail-g-sub",
+          email: "atomic-fail-google@hikat.org",
+          emailVerified: true,
+          displayName: "Atomic Fail Google",
+          avatarUrl: null,
+        }
+
+        const d1 = (db as unknown as { session: { client: D1Database } }).session.client
+        const origBatch = d1.batch.bind(d1)
+
+        d1.batch = async () => {
+          throw new Error("D1_OAUTH_INSERT_FAILED")
+        }
+
+        try {
+          await expect(getOrCreateOAuthUser(db, googleProfile)).rejects.toThrow("D1_OAUTH_INSERT_FAILED")
+        } finally {
+          d1.batch = origBatch
+        }
+
+        // Verify 0 orphan users exist with that display name
+        const users = await db.select().from(schema.users).where(eq(schema.users.displayName, "Atomic Fail Google")).all()
+        expect(users.length).toBe(0)
       })
     })
   })
