@@ -7,12 +7,17 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "vars": {
+    "AUTH_ISSUER": "https://auth.hikat.org",
+    "AUTH_JWKS_URL": "https://auth.hikat.org/.well-known/jwks.json"
+  },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "hikat-d1",
       "database_id": "a2410123-4e73-4c0f-9263-412fa06d7bdc",
-      "migrations_dir": "../../packages/database/migrations"
+      "migrations_dir": "../../packages/database/migrations",
+      "remote": true
     }
   ],
   "r2_buckets": [
