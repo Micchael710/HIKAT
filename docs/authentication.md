@@ -26,7 +26,7 @@ No se utiliza RBAC complejo ni permisos adicionales.
 
 ### Hashing de Contraseñas (PBKDF2-HMAC-SHA512)
 - **Algoritmo**: PBKDF2 utilizando HMAC-SHA512 implementado con `node:crypto` (`nodejs_compat`).
-- **Iteraciones mínimas**: 220,000 iteraciones (configurable y versionado por hash).
+- **Iteraciones mínimas**: 100,000 iteraciones (configurable y versionado por hash).
 - **Salt**: 32 bytes criptográficamente seguros por cada contraseña (`crypto.getRandomValues`).
 - **Longitud de clave derivada**: 64 bytes (512 bits).
 - **Formato persistido**: `$pbkdf2-sha512$i=<iterations>$<salt_b64url>$<hash_b64url>`

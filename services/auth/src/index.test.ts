@@ -99,7 +99,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
   // ==========================================
   // 1. PASSWORD CRYPTOGRAPHY
   // ==========================================
-  describe("Password Cryptography (PBKDF2-HMAC-SHA512 >= 220k iterations)", () => {
+  describe("Password Cryptography (PBKDF2-HMAC-SHA512 >= 100k iterations)", () => {
     it("1. hashes password and verifies successfully with PBKDF2-HMAC-SHA512", async () => {
       const hash = await hashPassword("superSecret123!")
       const isValid = await verifyPassword("superSecret123!", hash)
@@ -112,15 +112,15 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(isInvalid).toBe(false)
     })
 
-    it("3. produces hash maintaining 220000 iterations and exact format $pbkdf2-sha512$i=<iter>$<salt>$<hash>", async () => {
+    it("3. produces hash maintaining 100000 iterations and exact format $pbkdf2-sha512$i=<iter>$<salt>$<hash>", async () => {
       const hash = await hashPassword("superSecret123!")
-      expect(hash).toMatch(/^\$pbkdf2-sha512\$i=220000\$[A-Za-z0-9_-]{43}\$[A-Za-z0-9_-]{86}$/)
-      expect(DEFAULT_PBKDF2_ITERATIONS).toBe(220000)
+      expect(hash).toMatch(/^\$pbkdf2-sha512\$i=100000\$[A-Za-z0-9_-]{43}\$[A-Za-z0-9_-]{86}$/)
+      expect(DEFAULT_PBKDF2_ITERATIONS).toBe(100000)
     })
 
-    it("4. verifies legacy/existing hashes generated with the current format and 220000 iterations", async () => {
-      // Known test vector computed with PBKDF2-HMAC-SHA512 (220,000 iterations, 32-byte salt, 64-byte key)
-      const legacyHash = "$pbkdf2-sha512$i=220000$MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI$36AtSo2dEKwBnOgbQX-4fbvv8rAxwmNCvciEZGo67m1WJx5bYGQSiiVriIv4fQs-pKkKSdgjxVA6rls875Okfw"
+    it("4. verifies legacy/existing hashes generated with the current format and 100000 iterations", async () => {
+      // Known test vector computed with PBKDF2-HMAC-SHA512 (100,000 iterations, 32-byte salt, 64-byte key)
+      const legacyHash = "$pbkdf2-sha512$i=100000$MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI$m4zROVZgXHkhu_7kHKUjFPDZtkypbebKUrjNP9Cm_OjLew7F-3Mg4PAph2LJ3v_MbiTX24pkNr-sPoBjBYGDcA"
       
       const isValid = await verifyPassword("LegacyPassword123!", legacyHash)
       expect(isValid).toBe(true)
@@ -147,7 +147,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     })
 
     it("6. needsRehash detects lower iteration counts or mismatched format", async () => {
-      const oldHash = "$pbkdf2-sha512$i=100000$MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI$36AtSo2dEKwBnOgbQX-4fbvv8rAxwmNCvciEZGo67m1WJx5bYGQSiiVriIv4fQs-pKkKSdgjxVA6rls875Okfw"
+      const oldHash = "$pbkdf2-sha512$i=50000$MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI$m4zROVZgXHkhu_7kHKUjFPDZtkypbebKUrjNP9Cm_OjLew7F-3Mg4PAph2LJ3v_MbiTX24pkNr-sPoBjBYGDcA"
       expect(needsRehash(oldHash)).toBe(true)
       expect(needsRehash("invalid-format")).toBe(true)
 
@@ -170,7 +170,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       expect(cred).toBeDefined()
       expect(cred?.passwordHash).not.toContain("MyPassword999!")
-      expect(cred?.passwordHash.startsWith("$pbkdf2-sha512$i=220000$")).toBe(true)
+      expect(cred?.passwordHash.startsWith("$pbkdf2-sha512$i=100000$")).toBe(true)
     })
   })
 
@@ -3245,7 +3245,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
 
         const elapsed = performance.now() - start
-        // Immediate validation fast-fails in < 30ms without expensive 220k PBKDF2 hashing
+        // Immediate validation fast-fails in < 30ms without expensive 100k PBKDF2 hashing
         expect(elapsed).toBeLessThan(30)
       })
 

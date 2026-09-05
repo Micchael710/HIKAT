@@ -6,8 +6,8 @@
 
 import { pbkdf2, randomBytes, timingSafeEqual } from "node:crypto"
 
-export const DEFAULT_PBKDF2_ITERATIONS = 220000
-export const MIN_PBKDF2_ITERATIONS = 220000
+export const DEFAULT_PBKDF2_ITERATIONS = 100000
+export const MIN_PBKDF2_ITERATIONS = 100000
 const SALT_BYTE_LENGTH = 32
 const KEY_BYTE_LENGTH = 64 // 512 bits
 
@@ -81,7 +81,7 @@ export async function verifyPassword(
     return false
   }
 
-  // Format: $pbkdf2-sha512$i=220000$salt$hash
+  // Format: $pbkdf2-sha512$i=100000$salt$hash
   const parts = storedHash.split("$")
   if (parts.length !== 5 || parts[1] !== "pbkdf2-sha512") {
     return false

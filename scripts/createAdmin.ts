@@ -2,7 +2,7 @@
  * HiKAT Local Admin Account Provisioner (Local Development ONLY)
  *
  * Provisions or updates an ADMIN user in the shared local D1 database using Wrangler D1 CLI.
- * Uses the exact same PBKDF2-HMAC-SHA512 (220k iterations) hashing as Auth Worker.
+ * Uses the exact same PBKDF2-HMAC-SHA512 (100k iterations) hashing as Auth Worker.
  *
  * Safety:
  * - Refuses to execute in production environments.
@@ -19,7 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT_DIR = path.resolve(__dirname, "..")
 
 // --- Password Hashing (identical to services/auth/src/crypto/password.ts) ---
-const DEFAULT_PBKDF2_ITERATIONS = 220000
+const DEFAULT_PBKDF2_ITERATIONS = 100000
 const SALT_BYTE_LENGTH = 32
 const KEY_BYTE_LENGTH = 64
 
