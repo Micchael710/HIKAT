@@ -3768,6 +3768,59 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         await expect(resetPasswordWithToken(db, resetToken, "AnotherPassword789!")).rejects.toThrow(AuthErrorCode.TOKEN_REUSE_DETECTED)
       })
 
+      it("RESET (Multi-Session): password reset successfully revokes multiple active sessions and all their refresh tokens", async () => {
+        const email = "multi-session-reset@hikat.org"
+        await registerWithPassword(db, { email, password: "InitialPassword123!" }, emailService)
+        const verifyToken = emailService.getLastEmailFor(email)!.token
+        await verifyEmailToken(db, verifyToken)
+
+        // 1. Create 3 active sessions for the same user
+        const session1 = await loginWithPassword(db, { email, password: "InitialPassword123!" }, keyManager)
+        const session2 = await loginWithPassword(db, { email, password: "InitialPassword123!" }, keyManager)
+        const session3 = await loginWithPassword(db, { email, password: "InitialPassword123!" }, keyManager)
+
+        expect(session1.sessionId).not.toBe(session2.sessionId)
+        expect(session2.sessionId).not.toBe(session3.sessionId)
+
+        // 2. Request and execute password reset
+        await requestPasswordReset(db, email, emailService)
+        const resetToken = emailService.getLastEmailFor(email)!.token
+        const resetHash = await hashToken(resetToken)
+
+        const resetResult = await resetPasswordWithToken(db, resetToken, "BrandNewPassword456!")
+        expect(resetResult.success).toBe(true)
+
+        // 3. Verify password changed
+        await expect(loginWithPassword(db, { email, password: "InitialPassword123!" }, keyManager)).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+        const newSession = await loginWithPassword(db, { email, password: "BrandNewPassword456!" }, keyManager)
+        expect(newSession.sessionId).toBeDefined()
+
+        // 4. Verify token consumed
+        const tokenRec = await db.select().from(schema.passwordResetTokens).where(eq(schema.passwordResetTokens.tokenHash, resetHash)).get()
+        expect(tokenRec!.usedAt).not.toBeNull()
+
+        // 5. Verify ALL previous sessions are marked as revoked
+        const userSessions = await db.select().from(schema.sessions).where(eq(schema.sessions.userId, session1.user.id)).all()
+        const oldSessions = userSessions.filter((s) => s.id !== newSession.sessionId)
+        expect(oldSessions.length).toBe(3)
+        for (const s of oldSessions) {
+          expect(s.revokedAt).not.toBeNull()
+        }
+
+        // 6. Verify ALL associated refresh tokens for old sessions are revoked
+        const refreshTokens = await db.select().from(schema.sessionRefreshTokens).all()
+        const oldRefreshTokens = refreshTokens.filter((rt) => [session1.sessionId, session2.sessionId, session3.sessionId].includes(rt.sessionId))
+        expect(oldRefreshTokens.length).toBe(3)
+        for (const rt of oldRefreshTokens) {
+          expect(rt.revokedAt).not.toBeNull()
+        }
+
+        // 7. Attempting to rotate ANY of the old refresh tokens fails
+        await expect(rotateRefreshToken(db, session1.refreshToken, keyManager)).rejects.toThrow(AuthErrorCode.TOKEN_EXPIRED)
+        await expect(rotateRefreshToken(db, session2.refreshToken, keyManager)).rejects.toThrow(AuthErrorCode.TOKEN_EXPIRED)
+        await expect(rotateRefreshToken(db, session3.refreshToken, keyManager)).rejects.toThrow(AuthErrorCode.TOKEN_EXPIRED)
+      })
+
       it("OAUTH: normal Google and Discord user creation is atomic in D1 and repeated login returns same user", async () => {
         // 1. Google OAuth user creation
         const googleProfile = {

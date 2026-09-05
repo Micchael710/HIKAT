@@ -553,9 +553,14 @@ export async function resetPasswordWithToken(
       .prepare(
         `UPDATE sessions
          SET revoked_at = ?
-         WHERE user_id = ? AND revoked_at IS NULL AND (SELECT changes() = 1)`,
+         WHERE user_id = ?
+           AND revoked_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM password_credentials
+             WHERE user_id = ? AND password_hash = ?
+           )`,
       )
-      .bind(nowIso, tokenRecord.userId)
+      .bind(nowIso, tokenRecord.userId, tokenRecord.userId, newPasswordHash)
 
     const revokeRefreshTokensStmt = d1
       .prepare(
@@ -563,9 +568,12 @@ export async function resetPasswordWithToken(
          SET revoked_at = ?
          WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ?)
            AND revoked_at IS NULL
-           AND (SELECT changes() = 1)`,
+           AND EXISTS (
+             SELECT 1 FROM password_credentials
+             WHERE user_id = ? AND password_hash = ?
+           )`,
       )
-      .bind(nowIso, tokenRecord.userId)
+      .bind(nowIso, tokenRecord.userId, tokenRecord.userId, newPasswordHash)
 
     const batchResults = await d1.batch([
       consumeTokenStmt,
