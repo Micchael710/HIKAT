@@ -3,6 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
+import { readFileSync, existsSync } from "node:fs"
+import { join } from "node:path"
 import * as jose from "jose"
 import { eq } from "drizzle-orm"
 import { createDatabase, schema } from "@hikat/database"
@@ -1039,6 +1041,53 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(data.keys[0]?.kid).toBe(keyManager.kid)
     })
 
+    it("POST /auth/verify-email verifies email and GET /auth/verify-email returns 404 without consuming token", async () => {
+      // Register new user requiring verification
+      const regReq = new Request("http://localhost:8788/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "verify-method-test@hikat.org",
+          password: "password123!",
+        }),
+      })
+      const regRes = await handleRequest({ request: regReq, env: {}, db, keyManager, emailService })
+      expect(regRes.status).toBe(201)
+
+      const sentEmail = emailService.getLastEmailFor("verify-method-test@hikat.org")!
+      expect(sentEmail.token).toBeDefined()
+
+      // 1. GET /auth/verify-email must NOT consume or verify token and must return 404
+      const getReq = new Request(`http://localhost:8788/auth/verify-email?token=${sentEmail.token}`, {
+        method: "GET",
+      })
+      const getRes = await handleRequest({ request: getReq, env: {}, db, keyManager, emailService })
+      expect(getRes.status).toBe(404)
+
+      // Confirm user is still unverified
+      const credBefore = await db.query.passwordCredentials.findFirst({
+        where: eq(schema.passwordCredentials.email, "verify-method-test@hikat.org"),
+      })
+      expect(credBefore?.emailVerifiedAt).toBeNull()
+
+      // 2. POST /auth/verify-email verifies token successfully
+      const postReq = new Request("http://localhost:8788/auth/verify-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: sentEmail.token }),
+      })
+      const postRes = await handleRequest({ request: postReq, env: {}, db, keyManager, emailService })
+      expect(postRes.status).toBe(200)
+      const postData = (await postRes.json()) as { success: boolean }
+      expect(postData.success).toBe(true)
+
+      // Confirm user is now verified
+      const credAfter = await db.query.passwordCredentials.findFirst({
+        where: eq(schema.passwordCredentials.email, "verify-method-test@hikat.org"),
+      })
+      expect(credAfter?.emailVerifiedAt).not.toBeNull()
+    })
+
     it("handles full HTTP registration, login, game-token, and logout flow", async () => {
       // 1. POST /auth/register
       const regReq = new Request("http://localhost:8788/auth/register", {
@@ -1792,7 +1841,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
   // 13. RESEND EMAIL SERVICE & TEMPLATES
   // ==========================================
   describe("ResendEmailService & Email Delivery", () => {
-    it("formats and renders clean HiKAT HTML email template copying Launcher Login card and logo CID", () => {
+    it("formats and renders clean HiKAT HTML email template copying Launcher Login card and logo URL", () => {
       const html = renderHikatEmail({
         title: "Test Email Title",
         description: "Test Description",
@@ -1801,7 +1850,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         expiryNotice: "Expires in 24 hours.",
       })
 
-      expect(html).toContain("cid:hikat-logo")
+      expect(html).toContain("https://auth.hikat.org/auth/logo.png")
       expect(html).toContain("Test Email Title")
       expect(html).toContain("Test Description")
       expect(html).toContain("Click Me")
@@ -1812,7 +1861,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(html).toContain("Expires in 24 hours.")
     })
 
-    it("ResendEmailService dispatches correct HTTP request with inline logo attachment without leaking API key", async () => {
+    it("ResendEmailService dispatches correct HTTP request with hosted logo image without leaking API key", async () => {
       let interceptedUrl = ""
       let interceptedAuth = ""
       let interceptedBody: any = null
@@ -1839,13 +1888,8 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(interceptedBody.to).toEqual(["tester@hikat.org"])
       expect(interceptedBody.subject).toBe("Verifica tu cuenta de HiKAT")
       expect(interceptedBody.html).toContain("https://auth.hikat.org/auth/email-action?type=verify-email&token=token123")
-      expect(interceptedBody.html).toContain("cid:hikat-logo")
-      expect(interceptedBody.attachments).toBeDefined()
-      expect(interceptedBody.attachments).toHaveLength(1)
-      expect(interceptedBody.attachments[0].filename).toBe("logo-white.png")
-      expect(interceptedBody.attachments[0].content_id).toBe("hikat-logo")
-      expect(typeof interceptedBody.attachments[0].content).toBe("string")
-      expect(interceptedBody.attachments[0].content.length).toBeGreaterThan(100)
+      expect(interceptedBody.html).toContain("https://auth.hikat.org/auth/logo.png")
+      expect(interceptedBody.attachments).toBeUndefined()
     })
 
     it("ResendEmailService handles error response safely without leaking API key in error message", async () => {
@@ -2345,38 +2389,38 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(dataInvalid.status).toBe("invalid")
     })
 
-    it("GET /auth/logo.png and GET /auth/background.png serve raw image assets", async () => {
-      // 1. Logo Asset
-      const reqLogo = new Request("http://localhost:8788/auth/logo.png", {
-        method: "GET",
-      })
-      const resLogo = await handleRequest({
-        request: reqLogo,
-        env: {},
-        db,
-        keyManager,
-        emailService,
-      })
-      expect(resLogo.status).toBe(200)
-      expect(resLogo.headers.get("Content-Type")).toBe("image/png")
-      const logoBuffer = await resLogo.arrayBuffer()
-      expect(logoBuffer.byteLength).toBeGreaterThan(100)
+    it("Static assets /auth/logo.png and /auth/background.png exist as PNG files and bypass dynamic router", async () => {
+      const publicDir = join(__dirname, "../public/auth")
 
-      // 2. Background Asset
-      const reqBg = new Request("http://localhost:8788/auth/background.png", {
-        method: "GET",
-      })
-      const resBg = await handleRequest({
-        request: reqBg,
-        env: {},
-        db,
-        keyManager,
-        emailService,
-      })
-      expect(resBg.status).toBe(200)
-      expect(resBg.headers.get("Content-Type")).toBe("image/png")
-      const bgBuffer = await resBg.arrayBuffer()
-      expect(bgBuffer.byteLength).toBeGreaterThan(1000)
+      // 1. Logo Static Asset File
+      const logoPath = join(publicDir, "logo.png")
+      expect(existsSync(logoPath)).toBe(true)
+      const logoBytes = readFileSync(logoPath)
+      expect(logoBytes.length).toBeGreaterThan(100)
+      // Check PNG magic bytes: 0x89 50 4E 47 0D 0A 1A 0A
+      expect(logoBytes[0]).toBe(0x89)
+      expect(logoBytes[1]).toBe(0x50)
+      expect(logoBytes[2]).toBe(0x4e)
+      expect(logoBytes[3]).toBe(0x47)
+
+      // 2. Background Static Asset File
+      const bgPath = join(publicDir, "background.png")
+      expect(existsSync(bgPath)).toBe(true)
+      const bgBytes = readFileSync(bgPath)
+      expect(bgBytes.length).toBeGreaterThan(1000)
+      expect(bgBytes[0]).toBe(0x89)
+      expect(bgBytes[1]).toBe(0x50)
+      expect(bgBytes[2]).toBe(0x4e)
+      expect(bgBytes[3]).toBe(0x47)
+
+      // 3. Dynamic Router returns 404 because assets are served statically by Wrangler/Cloudflare layer
+      const reqLogo = new Request("http://localhost:8788/auth/logo.png", { method: "GET" })
+      const resLogo = await handleRequest({ request: reqLogo, env: {}, db, keyManager, emailService })
+      expect(resLogo.status).toBe(404)
+
+      const reqBg = new Request("http://localhost:8788/auth/background.png", { method: "GET" })
+      const resBg = await handleRequest({ request: reqBg, env: {}, db, keyManager, emailService })
+      expect(resBg.status).toBe(404)
     })
 
     it("registerWithPassword, resendVerification, and requestPasswordReset propagate locale into email URLs and templates", async () => {
@@ -2550,9 +2594,12 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         expect(html).toContain("showExpiredState();")
         expect(html).toContain('else if (result.status === "pending")')
         expect(html).toContain("openLauncher();")
-        // 4. In openLauncher, deepLink is set, 500ms status polling starts, and 3000ms fallback retry is configured
+        // 4. In openLauncher, deepLink is set, 2000ms status polling starts, 30s deadline, and 3000ms fallback retry is configured
         expect(html).toContain("window.location.href = deepLink;")
-        expect(html).toContain("statusInterval = setInterval(checkActionStatus, 500);")
+        expect(html).toContain("startPolling()")
+        expect(html).toContain("2000")
+        expect(html).toContain("pollingDeadline = Date.now() + 30000;")
+        expect(html).toContain("document.addEventListener(\"visibilitychange\"")
         expect(html).toContain("3000")
       })
 

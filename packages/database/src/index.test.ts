@@ -784,6 +784,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0020_game_file_upload_tokens_categories.sql",
       "0021_generic_mod_loader.sql",
       "0022_generic_mod_loader_columns.sql",
+      "0023_external_accounts_email_idx.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -807,6 +808,12 @@ describe("@hikat/database schema and D1 operations", () => {
     const fkErrors = sqlite.prepare("PRAGMA foreign_key_check;").all()
 
     expect(fkErrors).toEqual([])
+
+    // Verify external_accounts_email_idx exists and is non-unique
+    const indexList = sqlite.prepare("PRAGMA index_list('external_accounts');").all() as Array<{ name: string; unique: number }>
+    const emailIndex = indexList.find((idx) => idx.name === "external_accounts_email_idx")
+    expect(emailIndex).toBeDefined()
+    expect(emailIndex?.unique).toBe(0)
 
     // Verify expected tables exist
 

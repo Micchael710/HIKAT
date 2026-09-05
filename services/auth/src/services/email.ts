@@ -1,5 +1,3 @@
-import { HIKAT_LOGO_PNG_BASE64 } from "../assets/logo"
-
 /**
  * HiKAT Email Delivery Service Abstraction, Resend Implementation & Mock
  */
@@ -135,6 +133,15 @@ export function renderHikatEmail(params: {
   locale?: string
 }): string {
   const lang = sanitizeEmailLocale(params.locale)
+  let logoUrl = "/auth/logo.png"
+  if (params.buttonUrl) {
+    try {
+      logoUrl = `${new URL(params.buttonUrl).origin}/auth/logo.png`
+    } catch {
+      logoUrl = "/auth/logo.png"
+    }
+  }
+
   return `<!DOCTYPE html>
 <html lang="${lang}">
 <head>
@@ -150,9 +157,9 @@ export function renderHikatEmail(params: {
         <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 440px; margin: 0 auto; background: linear-gradient(180deg, #141d26 0%, #0d1218 100%); border: 1.5px solid rgba(255, 255, 255, 0.1); border-radius: 20px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);">
           <tr>
             <td style="padding: 36px 30px; text-align: center;">
-              <!-- Real HiKAT Logo via inline CID -->
+              <!-- Real HiKAT Logo -->
               <div style="margin-bottom: 20px; text-align: center;">
-                <img src="cid:hikat-logo" alt="HiKAT" width="160" style="display: block; margin: 0 auto; border: 0; outline: none; max-width: 160px; height: auto;" />
+                <img src="${logoUrl}" alt="HiKAT" width="160" style="display: block; margin: 0 auto; border: 0; outline: none; max-width: 160px; height: auto;" />
               </div>
 
               <!-- Title -->
@@ -237,13 +244,6 @@ export class ResendEmailService implements EmailService {
         to: [to],
         subject,
         html,
-        attachments: [
-          {
-            filename: "logo-white.png",
-            content: HIKAT_LOGO_PNG_BASE64,
-            content_id: "hikat-logo",
-          },
-        ],
       }),
     })
 

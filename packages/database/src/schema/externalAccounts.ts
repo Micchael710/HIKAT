@@ -28,6 +28,7 @@ export const externalAccounts = sqliteTable(
       table.providerSubject,
     ),
     index("external_accounts_user_id_idx").on(table.userId),
+    index("external_accounts_email_idx").on(table.email),
     check(
       "external_accounts_provider_check",
       sql`${table.provider} IN ('GOOGLE', 'DISCORD')`,

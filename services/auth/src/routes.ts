@@ -18,8 +18,6 @@ import {
 } from "./crypto/jwt"
 import { hashToken } from "./crypto/tokens"
 import { EmailService, EmailLocale, sanitizeEmailLocale } from "./services/email"
-import { HIKAT_LOGO_PNG_BASE64 } from "./assets/logo"
-import { HIKAT_BACKGROUND_PNG_BASE64 } from "./assets/background"
 import { checkRateLimit } from "./services/rateLimiter"
 import {
   registerWithPassword,
@@ -200,38 +198,6 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     })
   }
 
-  // 2b. Public HiKAT Logo Asset
-  if (pathname === "/auth/logo.png" && method === "GET") {
-    const binaryString = atob(HIKAT_LOGO_PNG_BASE64)
-    const bytes = new Uint8Array(binaryString.length)
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i)
-    }
-    return new Response(bytes, {
-      status: 200,
-      headers: {
-        "Content-Type": "image/png",
-        "Cache-Control": "public, max-age=86400",
-      },
-    })
-  }
-
-  // 2c. Public HiKAT Background Asset
-  if (pathname === "/auth/background.png" && method === "GET") {
-    const binaryString = atob(HIKAT_BACKGROUND_PNG_BASE64)
-    const bytes = new Uint8Array(binaryString.length)
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i)
-    }
-    return new Response(bytes, {
-      status: 200,
-      headers: {
-        "Content-Type": "image/png",
-        "Cache-Control": "public, max-age=86400",
-      },
-    })
-  }
-
   // Ensure DB is bound for database-backed endpoints
   if (!db) {
     return errorResponse("DATABASE_UNAVAILABLE", "Database connection is unavailable", 503)
@@ -317,10 +283,9 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     }
 
     // 5. Verify Email
-    if ((pathname === "/auth/verify-email" && method === "POST") || (pathname === "/auth/verify-email" && method === "GET")) {
-      const token = method === "GET"
-        ? url.searchParams.get("token")
-        : ((await request.json().catch(() => ({}))) as { token?: string }).token
+    if (pathname === "/auth/verify-email" && method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { token?: string }
+      const token = body.token
 
       if (!token) {
         return errorResponse(AuthErrorCode.INVALID_TOKEN, "Verification token is required", 400)
@@ -766,6 +731,18 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     let completed = false;
     let launchTimeout = null;
     let statusInterval = null;
+    let pollingDeadline = 0;
+
+    function stopTimers() {
+      if (launchTimeout) {
+        clearTimeout(launchTimeout);
+        launchTimeout = null;
+      }
+      if (statusInterval) {
+        clearInterval(statusInterval);
+        statusInterval = null;
+      }
+    }
 
     function showWaitingState() {
       completed = false;
@@ -779,8 +756,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     function showCompletedState() {
       if (completed) return;
       completed = true;
-      clearTimeout(launchTimeout);
-      clearInterval(statusInterval);
+      stopTimers();
 
       titleEl.textContent = t.successTitle;
       descEl.textContent = t.successDescription;
@@ -797,8 +773,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
     function showInvalidState() {
       completed = true;
-      clearTimeout(launchTimeout);
-      clearInterval(statusInterval);
+      stopTimers();
 
       titleEl.textContent = t.invalidTitle || t.errorTitle;
       descEl.textContent = t.invalidDescription || t.errorDescription;
@@ -809,8 +784,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
     function showExpiredState() {
       completed = true;
-      clearTimeout(launchTimeout);
-      clearInterval(statusInterval);
+      stopTimers();
 
       titleEl.textContent = t.expiredTitle || t.errorTitle;
       descEl.textContent = t.expiredDescription || t.errorDescription;
@@ -840,18 +814,49 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
           showInvalidState();
         } else if (result.status === "expired") {
           showExpiredState();
+        } else if (result.status === "pending") {
+          if (Date.now() >= pollingDeadline) {
+            stopTimers();
+            showFallbackRetry();
+          }
+        } else {
+          showInvalidState();
         }
       } catch (_) {}
     }
 
+    function startPolling() {
+      if (statusInterval) {
+        clearInterval(statusInterval);
+        statusInterval = null;
+      }
+      if (completed || document.hidden || Date.now() >= pollingDeadline) {
+        return;
+      }
+      statusInterval = setInterval(async () => {
+        if (completed || document.hidden) {
+          stopTimers();
+          return;
+        }
+        if (Date.now() >= pollingDeadline) {
+          stopTimers();
+          if (!completed) {
+            showFallbackRetry();
+          }
+          return;
+        }
+        await checkActionStatus();
+      }, 2000);
+    }
+
     function openLauncher() {
-      clearTimeout(launchTimeout);
-      clearInterval(statusInterval);
+      stopTimers();
 
       showWaitingState();
       window.location.href = deepLink;
 
-      statusInterval = setInterval(checkActionStatus, 500);
+      pollingDeadline = Date.now() + 30000;
+      startPolling();
 
       launchTimeout = setTimeout(() => {
         checkActionStatus().finally(() => {
@@ -861,6 +866,26 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         });
       }, 3000);
     }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (statusInterval) {
+          clearInterval(statusInterval);
+          statusInterval = null;
+        }
+      } else {
+        if (!completed && Date.now() < pollingDeadline) {
+          checkActionStatus().then(() => {
+            if (!completed && !document.hidden && Date.now() < pollingDeadline) {
+              startPolling();
+            }
+          });
+        } else if (!completed && Date.now() >= pollingDeadline) {
+          stopTimers();
+          showFallbackRetry();
+        }
+      }
+    });
 
     window.addEventListener("focus", () => {
       if (!completed) {
