@@ -351,6 +351,110 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       )
       expect(newSession.user.id).toBe(session.user.id)
     })
+
+    it("authenticated changePassword keeps current session active, revokes all other sessions and their refresh tokens of the same user, and does not affect other users", async () => {
+      // Setup User 1 with two sessions: A and B
+      const { user: user1 } = await registerAndVerify(
+        { email: "user1-sessions@hikat.org", password: "OriginalPassword123!" },
+      )
+      const sessionA = await loginWithPassword(
+        db,
+        { email: "user1-sessions@hikat.org", password: "OriginalPassword123!" },
+        keyManager,
+      )
+      const sessionB = await loginWithPassword(
+        db,
+        { email: "user1-sessions@hikat.org", password: "OriginalPassword123!" },
+        keyManager,
+      )
+
+      // Setup User 2 with session C
+      const { user: user2 } = await registerAndVerify(
+        { email: "user2-sessions@hikat.org", password: "User2Password123!" },
+      )
+      const sessionC = await loginWithPassword(
+        db,
+        { email: "user2-sessions@hikat.org", password: "User2Password123!" },
+        keyManager,
+      )
+
+      // Both user1 sessions and user2 session are initially active
+      expect(await validateActiveSession(db, sessionA.sessionId, user1.id)).toBe(true)
+      expect(await validateActiveSession(db, sessionB.sessionId, user1.id)).toBe(true)
+      expect(await validateActiveSession(db, sessionC.sessionId, user2.id)).toBe(true)
+
+      // User 1 changes password from Session A
+      const result = await changePassword(
+        db,
+        user1.id,
+        sessionA.sessionId,
+        "OriginalPassword123!",
+        "NewUser1Password456!",
+      )
+      expect(result.success).toBe(true)
+
+      // 1. Session A remains active
+      expect(await validateActiveSession(db, sessionA.sessionId, user1.id)).toBe(true)
+      const rotatedA = await rotateRefreshToken(db, sessionA.refreshToken, keyManager)
+      expect(rotatedA.sessionId).toBe(sessionA.sessionId)
+
+      // 2. Session B is revoked and its refresh tokens are revoked
+      expect(await validateActiveSession(db, sessionB.sessionId, user1.id)).toBe(false)
+      await expect(
+        rotateRefreshToken(db, sessionB.refreshToken, keyManager),
+      ).rejects.toThrow()
+
+      // 3. User 2's session C is untouched and remains active
+      expect(await validateActiveSession(db, sessionC.sessionId, user2.id)).toBe(true)
+      const rotatedC = await rotateRefreshToken(db, sessionC.refreshToken, keyManager)
+      expect(rotatedC.sessionId).toBe(sessionC.sessionId)
+    })
+
+    it("authenticated changePassword with incorrect current password does not change password and does not revoke any session", async () => {
+      const { user } = await registerAndVerify(
+        { email: "wrong-pass-test@hikat.org", password: "CorrectPassword123!" },
+      )
+      const sessionA = await loginWithPassword(
+        db,
+        { email: "wrong-pass-test@hikat.org", password: "CorrectPassword123!" },
+        keyManager,
+      )
+      const sessionB = await loginWithPassword(
+        db,
+        { email: "wrong-pass-test@hikat.org", password: "CorrectPassword123!" },
+        keyManager,
+      )
+
+      await expect(
+        changePassword(
+          db,
+          user.id,
+          sessionA.sessionId,
+          "WrongCurrentPassword!",
+          "AttemptedNewPassword123!",
+        ),
+      ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+
+      // Password remains unchanged
+      const loginOld = await loginWithPassword(
+        db,
+        { email: "wrong-pass-test@hikat.org", password: "CorrectPassword123!" },
+        keyManager,
+      )
+      expect(loginOld.user.id).toBe(user.id)
+
+      await expect(
+        loginWithPassword(
+          db,
+          { email: "wrong-pass-test@hikat.org", password: "AttemptedNewPassword123!" },
+          keyManager,
+        ),
+      ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+
+      // Both sessions A and B remain active
+      expect(await validateActiveSession(db, sessionA.sessionId, user.id)).toBe(true)
+      expect(await validateActiveSession(db, sessionB.sessionId, user.id)).toBe(true)
+    })
   })
 
   // ==========================================

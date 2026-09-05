@@ -16,6 +16,7 @@ import { JwtKeyManager, signGameToken } from "../crypto/jwt"
 import {
   createSession,
   revokeAllUserSessions,
+  revokeSession,
   validateActiveSession,
   AuthSessionResult,
 } from "./session"
@@ -664,6 +665,23 @@ export async function changePassword(
     .set({ passwordHash, updatedAt: now })
     .where(eq(schema.passwordCredentials.id, cred.id))
     .run()
+
+  // 5. Revoke all other active sessions of the same user (preserving current session)
+  const otherSessions = await db
+    .select({ id: schema.sessions.id })
+    .from(schema.sessions)
+    .where(
+      and(
+        eq(schema.sessions.userId, userId),
+        ne(schema.sessions.id, sessionId),
+        sql`${schema.sessions.revokedAt} IS NULL`,
+      ),
+    )
+    .all()
+
+  for (const s of otherSessions) {
+    await revokeSession(db, s.id)
+  }
 
   return { success: true }
 }
