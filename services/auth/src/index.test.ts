@@ -2965,5 +2965,156 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         expect(data2.retryAfterSeconds).toBeGreaterThan(0)
       })
     })
+
+    // ==========================================
+    // Server-Side Input Length Limits Hardening
+    // ==========================================
+    describe("Server-Side Input Length Limits Hardening", () => {
+      it("1. registerWithPassword rejects email > 254 characters", async () => {
+        const longEmail = `${"a".repeat(245)}@hikat.org`
+        expect(longEmail.length).toBeGreaterThan(254)
+
+        await expect(
+          registerWithPassword(db, { email: longEmail, password: "ValidPassword123!" }, emailService),
+        ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+
+        const req = new Request("http://localhost:8788/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: longEmail, password: "ValidPassword123!" }),
+        })
+        const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+        expect(res.status).toBe(401)
+        const data = (await res.json()) as any
+        expect(data.error).toBe(AuthErrorCode.INVALID_CREDENTIALS)
+      })
+
+      it("2. registerWithPassword rejects password > 128 characters", async () => {
+        const longPassword = "P".repeat(129)
+        await expect(
+          registerWithPassword(db, { email: "reg-long-pass@hikat.org", password: longPassword }, emailService),
+        ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+
+        const req = new Request("http://localhost:8788/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: "reg-long-pass@hikat.org", password: longPassword }),
+        })
+        const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+        expect(res.status).toBe(401)
+        const data = (await res.json()) as any
+        expect(data.error).toBe(AuthErrorCode.INVALID_CREDENTIALS)
+      })
+
+      it("3. registerWithPassword rejects displayName > 16 characters", async () => {
+        const longDisplayName = "DisplayNameTooLong17"
+        expect(longDisplayName.length).toBeGreaterThan(16)
+
+        await expect(
+          registerWithPassword(
+            db,
+            { email: "reg-long-name@hikat.org", password: "ValidPassword123!", displayName: longDisplayName },
+            emailService,
+          ),
+        ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+
+        const req = new Request("http://localhost:8788/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: "reg-long-name@hikat.org", password: "ValidPassword123!", displayName: longDisplayName }),
+        })
+        const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+        expect(res.status).toBe(401)
+        const data = (await res.json()) as any
+        expect(data.error).toBe(AuthErrorCode.INVALID_CREDENTIALS)
+      })
+
+      it("4. loginWithPassword rejects password > 128 without running hashing", async () => {
+        const deriveBitsSpy = vi.spyOn(crypto.subtle, "deriveBits")
+        const longPassword = "P".repeat(129)
+
+        await expect(
+          loginWithPassword(db, { email: "any-user@hikat.org", password: longPassword }, keyManager),
+        ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+
+        // Ensure crypto deriveBits (PBKDF2) was never invoked
+        expect(deriveBitsSpy).not.toHaveBeenCalled()
+        deriveBitsSpy.mockRestore()
+      })
+
+      it("5. changePassword rejects currentPassword > 128 or newPassword > 128", async () => {
+        const { user } = await registerAndVerify(
+          { email: "change-limit-test@hikat.org", password: "ValidPassword123!" },
+        )
+        const session = await loginWithPassword(
+          db,
+          { email: "change-limit-test@hikat.org", password: "ValidPassword123!" },
+          keyManager,
+        )
+
+        // currentPassword > 128
+        await expect(
+          changePassword(db, user.id, session.sessionId, "C".repeat(129), "NewValidPass123!"),
+        ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+
+        // newPassword > 128
+        await expect(
+          changePassword(db, user.id, session.sessionId, "ValidPassword123!", "N".repeat(129)),
+        ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+      })
+
+      it("6. resetPasswordWithToken rejects newPassword > 128", async () => {
+        const validToken = generateSecureToken(32)
+        await expect(
+          resetPasswordWithToken(db, validToken, "N".repeat(129)),
+        ).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+      })
+
+      it("7. forgot-password and resend-verification with email > 254 return safe anti-enumeration response and do not send email", async () => {
+        const longEmail = `${"a".repeat(245)}@hikat.org`
+        const emailCountBefore = emailService.getSentEmails().length
+
+        // resendVerificationEmail service call
+        await resendVerificationEmail(db, longEmail, emailService)
+        expect(emailService.getSentEmails().length).toBe(emailCountBefore)
+
+        // requestPasswordReset service call
+        await requestPasswordReset(db, longEmail, emailService)
+        expect(emailService.getSentEmails().length).toBe(emailCountBefore)
+
+        // HTTP endpoint resend-verification
+        const resendReq = new Request("http://localhost:8788/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: longEmail }),
+        })
+        const resendRes = await handleRequest({ request: resendReq, env: {}, db, keyManager, emailService })
+        expect(resendRes.status).toBe(200)
+        expect(emailService.getSentEmails().length).toBe(emailCountBefore)
+
+        // HTTP endpoint forgot-password
+        const forgotReq = new Request("http://localhost:8788/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: longEmail }),
+        })
+        const forgotRes = await handleRequest({ request: forgotReq, env: {}, db, keyManager, emailService })
+        expect(forgotRes.status).toBe(200)
+        expect(emailService.getSentEmails().length).toBe(emailCountBefore)
+      })
+
+      it("8. valid inputs continue to function normally", async () => {
+        const { user } = await registerAndVerify(
+          { email: "valid-input-tester@hikat.org", password: "Password123!", displayName: "ValidUser16" },
+        )
+        expect(user.displayName).toBe("ValidUser16")
+        const session = await loginWithPassword(
+          db,
+          { email: "valid-input-tester@hikat.org", password: "Password123!" },
+          keyManager,
+        )
+        expect(session.accessToken).toBeDefined()
+      })
+    })
   })
 })

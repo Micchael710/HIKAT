@@ -56,11 +56,15 @@ export async function registerWithPassword(
   authServiceUrl: string = "https://auth.hikat.org",
 ): Promise<{ user: schema.User; emailVerificationRequired: boolean }> {
   const normalizedEmail = params.email.trim().toLowerCase()
-  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+  if (!normalizedEmail || normalizedEmail.length > 254 || !normalizedEmail.includes("@")) {
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
-  if (!params.password || params.password.length < 8) {
+  if (!params.password || params.password.length < 8 || params.password.length > 128) {
+    throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
+  }
+
+  if (params.displayName && params.displayName.length > 16) {
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
@@ -159,7 +163,7 @@ export async function resendVerificationEmail(
   locale?: string,
 ): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase()
-  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+  if (!normalizedEmail || normalizedEmail.length > 254 || !normalizedEmail.includes("@")) {
     return
   }
 
@@ -225,7 +229,13 @@ export async function loginWithPassword(
   keyManager: JwtKeyManager,
 ): Promise<AuthSessionResult> {
   const normalizedEmail = params.email.trim().toLowerCase()
-  if (!normalizedEmail || !params.password) {
+  if (
+    !normalizedEmail ||
+    normalizedEmail.length > 254 ||
+    !params.password ||
+    params.password.length < 8 ||
+    params.password.length > 128
+  ) {
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
@@ -367,7 +377,7 @@ export async function requestPasswordReset(
   locale?: string,
 ): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase()
-  if (!normalizedEmail) {
+  if (!normalizedEmail || normalizedEmail.length > 254 || !normalizedEmail.includes("@")) {
     return
   }
 
@@ -425,7 +435,15 @@ export async function resetPasswordWithToken(
   rawToken: string,
   newPassword: string,
 ): Promise<{ success: boolean }> {
-  if (!rawToken || typeof rawToken !== "string" || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken) || !newPassword || newPassword.length < 8) {
+  if (
+    !rawToken ||
+    typeof rawToken !== "string" ||
+    rawToken.length > 128 ||
+    !/^[A-Za-z0-9_-]+$/.test(rawToken) ||
+    !newPassword ||
+    newPassword.length < 8 ||
+    newPassword.length > 128
+  ) {
     throw new Error(AuthErrorCode.INVALID_TOKEN)
   }
 
@@ -630,7 +648,13 @@ export async function changePassword(
   currentPassword: string,
   newPassword: string,
 ): Promise<{ success: boolean }> {
-  if (!currentPassword || !newPassword || newPassword.length < 8) {
+  if (
+    !currentPassword ||
+    currentPassword.length > 128 ||
+    !newPassword ||
+    newPassword.length < 8 ||
+    newPassword.length > 128
+  ) {
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
