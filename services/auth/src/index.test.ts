@@ -3223,5 +3223,352 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         expect(session.accessToken).toBeDefined()
       })
     })
+
+    // ==========================================
+    // D1 rowid Authority for Latest-Token-Wins
+    // ==========================================
+    describe("D1 rowid Authority for Latest-Token-Wins", () => {
+      it("1. two verification tokens with identical createdAt: second inserted is valid, first is invalid", async () => {
+        const userId = crypto.randomUUID()
+        const now = "2026-09-04T12:00:00.000Z"
+        const expiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+
+        await db.insert(schema.users).values({
+          id: userId,
+          role: "PLAYER",
+          displayName: "D1TokenUser1",
+          createdAt: now,
+          updatedAt: now,
+        })
+        await db.insert(schema.passwordCredentials).values({
+          id: crypto.randomUUID(),
+          userId,
+          email: "d1token1@hikat.org",
+          passwordHash: await hashPassword("Password123!"),
+          emailVerifiedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        const rawToken1 = generateSecureToken(32)
+        const rawToken2 = generateSecureToken(32)
+        const tokenHash1 = await hashToken(rawToken1)
+        const tokenHash2 = await hashToken(rawToken2)
+
+        // Insert token 1 first
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: tokenHash1,
+          expiresAt,
+          createdAt: now, // identical timestamp
+        })
+
+        // Insert token 2 second (higher rowid in D1)
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: tokenHash2,
+          expiresAt,
+          createdAt: now, // identical timestamp
+        })
+
+        // First token is superseded by D1 rowid order
+        await expect(verifyEmailToken(db, rawToken1)).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+
+        // Second token is the latest token and succeeds
+        const res = await verifyEmailToken(db, rawToken2)
+        expect(res.success).toBe(true)
+      })
+
+      it("2. two password reset tokens with identical createdAt: second inserted is valid, first is invalid", async () => {
+        const userId = crypto.randomUUID()
+        const now = "2026-09-04T12:00:00.000Z"
+        const expiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+
+        await db.insert(schema.users).values({
+          id: userId,
+          role: "PLAYER",
+          displayName: "D1TokenUser2",
+          createdAt: now,
+          updatedAt: now,
+        })
+        await db.insert(schema.passwordCredentials).values({
+          id: crypto.randomUUID(),
+          userId,
+          email: "d1token2@hikat.org",
+          passwordHash: await hashPassword("Password123!"),
+          emailVerifiedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        const rawToken1 = generateSecureToken(32)
+        const rawToken2 = generateSecureToken(32)
+        const tokenHash1 = await hashToken(rawToken1)
+        const tokenHash2 = await hashToken(rawToken2)
+
+        // Insert token 1 first
+        await db.insert(schema.passwordResetTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: tokenHash1,
+          expiresAt,
+          createdAt: now, // identical timestamp
+        })
+
+        // Insert token 2 second (higher rowid in D1)
+        await db.insert(schema.passwordResetTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: tokenHash2,
+          expiresAt,
+          createdAt: now, // identical timestamp
+        })
+
+        // First token is superseded
+        await expect(
+          resetPasswordWithToken(db, rawToken1, "NewPassword123!"),
+        ).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+
+        // Second token is the latest token and succeeds
+        const res = await resetPasswordWithToken(db, rawToken2, "NewPassword123!")
+        expect(res.success).toBe(true)
+      })
+
+      it("3. getEmailActionStatus with two tokens of equal timestamp: second -> pending, first -> invalid", async () => {
+        const userId = crypto.randomUUID()
+        const now = "2026-09-04T12:00:00.000Z"
+        const expiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+
+        await db.insert(schema.users).values({
+          id: userId,
+          role: "PLAYER",
+          displayName: "D1StatusUser",
+          createdAt: now,
+          updatedAt: now,
+        })
+        await db.insert(schema.passwordCredentials).values({
+          id: crypto.randomUUID(),
+          userId,
+          email: "d1status@hikat.org",
+          passwordHash: await hashPassword("Password123!"),
+          emailVerifiedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        // Verify-email action
+        const vToken1 = generateSecureToken(32)
+        const vToken2 = generateSecureToken(32)
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(vToken1),
+          expiresAt,
+          createdAt: now,
+        })
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(vToken2),
+          expiresAt,
+          createdAt: now,
+        })
+
+        expect(await getEmailActionStatus(db, "verify-email", vToken1)).toBe("invalid")
+        expect(await getEmailActionStatus(db, "verify-email", vToken2)).toBe("pending")
+
+        // Reset-password action
+        const rToken1 = generateSecureToken(32)
+        const rToken2 = generateSecureToken(32)
+        await db.insert(schema.passwordResetTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(rToken1),
+          expiresAt,
+          createdAt: now,
+        })
+        await db.insert(schema.passwordResetTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(rToken2),
+          expiresAt,
+          createdAt: now,
+        })
+
+        expect(await getEmailActionStatus(db, "reset-password", rToken1)).toBe("invalid")
+        expect(await getEmailActionStatus(db, "reset-password", rToken2)).toBe("pending")
+      })
+
+      it("4. if the newest token fails during sending and is deleted, previous remains valid/current", async () => {
+        const userId = crypto.randomUUID()
+        const now = "2026-09-04T12:00:00.000Z"
+        const expiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+
+        await db.insert(schema.users).values({
+          id: userId,
+          role: "PLAYER",
+          displayName: "D1DeleteUser",
+          createdAt: now,
+          updatedAt: now,
+        })
+        await db.insert(schema.passwordCredentials).values({
+          id: crypto.randomUUID(),
+          userId,
+          email: "d1delete@hikat.org",
+          passwordHash: await hashPassword("Password123!"),
+          emailVerifiedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        const rawToken1 = generateSecureToken(32)
+        const rawToken2 = generateSecureToken(32)
+        const token2Id = crypto.randomUUID()
+
+        // Insert token 1
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(rawToken1),
+          expiresAt,
+          createdAt: now,
+        })
+
+        // Insert token 2
+        await db.insert(schema.emailVerificationTokens).values({
+          id: token2Id,
+          userId,
+          tokenHash: await hashToken(rawToken2),
+          expiresAt,
+          createdAt: now,
+        })
+
+        // Simulate sending failure where token 2 is rolled back/deleted
+        await db
+          .delete(schema.emailVerificationTokens)
+          .where(eq(schema.emailVerificationTokens.id, token2Id))
+          .run()
+
+        // Token 1 is now the highest rowid and remains valid
+        expect(await getEmailActionStatus(db, "verify-email", rawToken1)).toBe("pending")
+        const res = await verifyEmailToken(db, rawToken1)
+        expect(res.success).toBe(true)
+      })
+
+      it("5. if the newest token was used, previous does not revive", async () => {
+        const userId = crypto.randomUUID()
+        const now = "2026-09-04T12:00:00.000Z"
+        const expiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+
+        await db.insert(schema.users).values({
+          id: userId,
+          role: "PLAYER",
+          displayName: "D1UsedUser",
+          createdAt: now,
+          updatedAt: now,
+        })
+        await db.insert(schema.passwordCredentials).values({
+          id: crypto.randomUUID(),
+          userId,
+          email: "d1used@hikat.org",
+          passwordHash: await hashPassword("Password123!"),
+          emailVerifiedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        const rawToken1 = generateSecureToken(32)
+        const rawToken2 = generateSecureToken(32)
+
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(rawToken1),
+          expiresAt,
+          createdAt: now,
+        })
+
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(rawToken2),
+          expiresAt,
+          createdAt: now,
+        })
+
+        // Use token 2
+        const res2 = await verifyEmailToken(db, rawToken2)
+        expect(res2.success).toBe(true)
+
+        // Token 1 does NOT revive
+        await expect(verifyEmailToken(db, rawToken1)).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+        expect(await getEmailActionStatus(db, "verify-email", rawToken1)).toBe("invalid")
+      })
+
+      it("6. if the newest token expired, previous does not revive", async () => {
+        const userId = crypto.randomUUID()
+        const now = "2026-09-04T12:00:00.000Z"
+        const futureExpiry = new Date(Date.now() + 3600 * 1000).toISOString()
+        const pastExpiry = new Date(Date.now() - 3600 * 1000).toISOString()
+
+        await db.insert(schema.users).values({
+          id: userId,
+          role: "PLAYER",
+          displayName: "D1ExpiredUser",
+          createdAt: now,
+          updatedAt: now,
+        })
+        await db.insert(schema.passwordCredentials).values({
+          id: crypto.randomUUID(),
+          userId,
+          email: "d1expired@hikat.org",
+          passwordHash: await hashPassword("Password123!"),
+          emailVerifiedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+
+        const rawToken1 = generateSecureToken(32)
+        const rawToken2 = generateSecureToken(32)
+
+        // Token 1 with future expiry
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(rawToken1),
+          expiresAt: futureExpiry,
+          createdAt: now,
+        })
+
+        // Token 2 inserted second with expired timestamp
+        await db.insert(schema.emailVerificationTokens).values({
+          id: crypto.randomUUID(),
+          userId,
+          tokenHash: await hashToken(rawToken2),
+          expiresAt: pastExpiry,
+          createdAt: now,
+        })
+
+        // Token 1 does NOT revive
+        await expect(verifyEmailToken(db, rawToken1)).rejects.toThrow(AuthErrorCode.INVALID_TOKEN)
+        expect(await getEmailActionStatus(db, "verify-email", rawToken1)).toBe("invalid")
+
+        // Token 2 throws TOKEN_EXPIRED and getEmailActionStatus returns "expired"
+        await expect(verifyEmailToken(db, rawToken2)).rejects.toThrow(AuthErrorCode.TOKEN_EXPIRED)
+        expect(await getEmailActionStatus(db, "verify-email", rawToken2)).toBe("expired")
+      })
+
+      it("7. confirms that no lastEffectiveTime or in-memory monotonic token counter exists", async () => {
+        const fs = await import("fs")
+        const path = await import("path")
+        const authSourcePath = path.resolve(__dirname, "services/auth.ts")
+        const content = fs.readFileSync(authSourcePath, "utf-8")
+
+        expect(content).not.toContain("lastEffectiveTime")
+        expect(content).not.toContain("generateMonotonicTokenMetadata")
+      })
+    })
   })
 })

@@ -2,7 +2,7 @@
  * HiKAT Core Authentication Service
  */
 
-import { eq, and, ne, sql, isNull, desc } from "drizzle-orm"
+import { eq, and, ne, sql, isNull } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   AppRole,
@@ -25,21 +25,6 @@ import { OAuthProviderProfile } from "./oauth"
 
 export const EMAIL_VERIFICATION_EXPIRY_HOURS = 24
 export const PASSWORD_RESET_EXPIRY_MINUTES = 30
-
-let lastEffectiveTime = 0
-
-function generateMonotonicTokenMetadata(): { id: string; createdAt: string } {
-  const now = Date.now()
-  if (now > lastEffectiveTime) {
-    lastEffectiveTime = now
-  } else {
-    lastEffectiveTime = lastEffectiveTime + 1
-  }
-  const createdAt = new Date(lastEffectiveTime).toISOString()
-  const timeHex = lastEffectiveTime.toString(16).padStart(12, "0")
-  const id = `${timeHex}-${crypto.randomUUID()}`
-  return { id, createdAt }
-}
 
 /**
  * Register a new user using Email + Password
@@ -109,7 +94,8 @@ export async function registerWithPassword(
   const expiresAt = new Date(
     Date.now() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60 * 1000,
   ).toISOString()
-  const { id: newTokenId, createdAt: tokenCreatedAt } = generateMonotonicTokenMetadata()
+  const newTokenId = crypto.randomUUID()
+  const tokenCreatedAt = now
 
   await db.insert(schema.emailVerificationTokens).values({
     id: newTokenId,
@@ -183,7 +169,8 @@ export async function resendVerificationEmail(
   const expiresAt = new Date(
     Date.now() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60 * 1000,
   ).toISOString()
-  const { id: newTokenId, createdAt: tokenCreatedAt } = generateMonotonicTokenMetadata()
+  const newTokenId = crypto.randomUUID()
+  const tokenCreatedAt = new Date().toISOString()
 
   await db.insert(schema.emailVerificationTokens).values({
     id: newTokenId,
@@ -317,10 +304,7 @@ export async function verifyEmailToken(
     .select()
     .from(schema.emailVerificationTokens)
     .where(eq(schema.emailVerificationTokens.userId, tokenRecord.userId))
-    .orderBy(
-      desc(schema.emailVerificationTokens.createdAt),
-      desc(schema.emailVerificationTokens.id),
-    )
+    .orderBy(sql`rowid DESC`)
     .limit(1)
     .get()
 
@@ -397,7 +381,8 @@ export async function requestPasswordReset(
   const expiresAt = new Date(
     Date.now() + PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000,
   ).toISOString()
-  const { id: newTokenId, createdAt: tokenCreatedAt } = generateMonotonicTokenMetadata()
+  const newTokenId = crypto.randomUUID()
+  const tokenCreatedAt = new Date().toISOString()
 
   await db.insert(schema.passwordResetTokens).values({
     id: newTokenId,
@@ -466,10 +451,7 @@ export async function resetPasswordWithToken(
     .select()
     .from(schema.passwordResetTokens)
     .where(eq(schema.passwordResetTokens.userId, tokenRecord.userId))
-    .orderBy(
-      desc(schema.passwordResetTokens.createdAt),
-      desc(schema.passwordResetTokens.id),
-    )
+    .orderBy(sql`rowid DESC`)
     .limit(1)
     .get()
 
@@ -558,10 +540,7 @@ export async function getEmailActionStatus(
       .select()
       .from(schema.emailVerificationTokens)
       .where(eq(schema.emailVerificationTokens.userId, tokenRecord.userId))
-      .orderBy(
-        desc(schema.emailVerificationTokens.createdAt),
-        desc(schema.emailVerificationTokens.id),
-      )
+      .orderBy(sql`rowid DESC`)
       .limit(1)
       .get()
 
@@ -604,10 +583,7 @@ export async function getEmailActionStatus(
       .select()
       .from(schema.passwordResetTokens)
       .where(eq(schema.passwordResetTokens.userId, tokenRecord.userId))
-      .orderBy(
-        desc(schema.passwordResetTokens.createdAt),
-        desc(schema.passwordResetTokens.id),
-      )
+      .orderBy(sql`rowid DESC`)
       .limit(1)
       .get()
 
