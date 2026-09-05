@@ -54,7 +54,7 @@ class SecureAuthStore {
         typeof parsed.accessToken === "string" &&
         typeof parsed.refreshToken === "string" &&
         parsed.user &&
-        parsed.user.role === "PLAYER"
+        (parsed.user.role === "PLAYER" || parsed.user.role === "ADMIN")
       ) {
         return parsed
       }
@@ -77,7 +77,7 @@ class SecureAuthStore {
         typeof session.accessToken !== "string" ||
         typeof session.refreshToken !== "string" ||
         !session.user ||
-        session.user.role !== "PLAYER"
+        (session.user.role !== "PLAYER" && session.user.role !== "ADMIN")
       ) {
         return
       }

@@ -230,7 +230,7 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(graphqlCalls).toBe(2)
   })
 
-  it("7. Launcher rejects ADMIN role silently attempting to enter Launcher", async () => {
+  it("7. Launcher accepts ADMIN role successfully", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -248,9 +248,10 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
       password: "Password123!",
     })
 
-    expect(res.success).toBe(false)
-    expect(res.error).toContain("Rol de cuenta no autorizado para el Launcher")
-    expect(authService.getStatus()).toBe("UNAUTHENTICATED")
+    expect(res.success).toBe(true)
+    expect(res.user?.role).toBe("ADMIN")
+    expect(authService.getStatus()).toBe("AUTHENTICATED")
+    expect(authService.getAccessToken()).toBe("admin-jwt")
   })
 
   it("8. keepSession=true persists to Electron Main; keepSession=false does not persist", async () => {

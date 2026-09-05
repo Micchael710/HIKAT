@@ -15,7 +15,7 @@
     "GOOGLE_CLIENT_ID": "83020174882-jsoh32a4n7ct9bn733ebor6r2mkkcpf3.apps.googleusercontent.com",
     "DISCORD_CLIENT_ID": "1544169716183080981",
     "EMAIL_FROM": "HiKAT <noreply@mail.hikat.org>",
-    "CORS_ALLOW_ORIGIN": "http://localhost:8443,http://127.0.0.1:8443"
+    "CORS_ALLOW_ORIGIN": "http://localhost:8443,http://127.0.0.1:8443,http://localhost:5174,http://127.0.0.1:5174"
   },
   "assets": {
     "directory": "./public"

@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { gameService } from "./gameService"
 import * as apiClientModule from "./apiClient"
+import { getApiBaseUrl } from "../config/api"
 
 describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suite", () => {
   beforeEach(() => {
@@ -228,16 +229,18 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     } as any
 
     await gameService.startSync([], "1.0.0", "1.21.1", "NEOFORGE", "21.1.65", "21.1.65")
-    expect(startSyncMock).toHaveBeenCalledWith({
-      clientFiles: [],
-      modpackVersion: "1.0.0",
-      minecraftVersion: "1.21.1",
-      modLoader: "NEOFORGE",
-      modLoaderVersion: "21.1.65",
-      neoForgeVersion: "21.1.65",
-      apiBaseUrl: "http://127.0.0.1:8787",
-      isVerify: undefined,
-    })
+    expect(startSyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientFiles: [],
+        modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        neoForgeVersion: "21.1.65",
+        apiBaseUrl: getApiBaseUrl(),
+        isVerify: undefined,
+      }),
+    )
 
 
     const pauseRes = await gameService.pauseSync()
@@ -399,8 +402,9 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
         receivedEvents.push(event)
       })
 
+      const expectedWsUrl = `${getApiBaseUrl().replace(/^http/, "ws")}/launcher/release-events`
       expect(mockWsInstance).not.toBeNull()
-      expect(mockWsInstance.url).toBe("ws://127.0.0.1:8787/launcher/release-events")
+      expect(mockWsInstance.url).toBe(expectedWsUrl)
 
       // Fire non-matching message -> ignored
       mockWsInstance.onmessage?.({

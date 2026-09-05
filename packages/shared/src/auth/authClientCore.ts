@@ -174,8 +174,17 @@ export class AuthClientCore {
     return this.session?.refreshToken || null
   }
 
-  public setSession(session: SessionState, persist = true): Promise<void> {
-    if (!session.user || session.user.role !== this.allowedRole) {
+  public isRoleAllowed(role?: string | null): boolean {
+    if (!role) return false
+    if (this.allowedRole === "ADMIN") {
+      return role === "ADMIN"
+    }
+    // allowedRole === "PLAYER" allows both PLAYER and ADMIN
+    return role === "PLAYER" || role === "ADMIN"
+  }
+
+  public async setSession(session: SessionState, persist = true): Promise<void> {
+    if (!session.user || !this.isRoleAllowed(session.user.role)) {
       const errorMsg =
         this.allowedRole === "ADMIN"
           ? "Acceso denegado: Se requiere cuenta con permisos de Administrador"
@@ -185,7 +194,7 @@ export class AuthClientCore {
       if (session.accessToken || session.refreshToken) {
         this.logoutWithToken(session.accessToken, session.refreshToken).catch(() => {})
       }
-      this.clearSession()
+      await this.clearSession()
       throw new Error(errorMsg)
     }
 
@@ -195,9 +204,9 @@ export class AuthClientCore {
     this.notify()
 
     if (persist) {
-      return Promise.resolve(this.storageAdapter.saveSession(session))
+      await this.storageAdapter.saveSession(session)
     } else {
-      return Promise.resolve(this.storageAdapter.clearSession())
+      await this.storageAdapter.clearSession()
     }
   }
 
@@ -219,7 +228,7 @@ export class AuthClientCore {
         return null
       }
 
-      if (stored.user.role !== this.allowedRole) {
+      if (!this.isRoleAllowed(stored.user.role)) {
         await this.clearSession()
         return null
       }
@@ -431,14 +440,15 @@ export class AuthClientCore {
           typeof data.user.id === "string" &&
           data.user.id.trim() !== "" &&
           typeof data.user.email === "string" &&
-          data.user.role === this.allowedRole
+          data.user.role &&
+          this.isRoleAllowed(data.user.role)
 
         if (!isValidPayload) {
           await this.clearSession()
           return {
             kind: "TERMINAL_FAILURE",
             error:
-              data.user?.role && data.user.role !== this.allowedRole
+              data.user?.role && !this.isRoleAllowed(data.user.role)
                 ? "Rol de cuenta incompatible con esta aplicación"
                 : "Respuesta de rotación incompleta o inválida del servidor",
           }

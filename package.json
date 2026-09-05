@@ -13,6 +13,7 @@
     "db:generate": "pnpm --filter @hikat/database db:generate",
     "db:migrate:local": "pnpm --filter @hikat/backend-service exec wrangler d1 migrations apply hikat-d1 --local --persist-to ../../.wrangler/state",
     "local:create-admin": "tsx scripts/createAdmin.ts",
+    "admin:promote": "tsx scripts/promoteAdmin.ts",
     "dev:auth": "pnpm --filter @hikat/auth-service dev",
     "dev:backend": "pnpm --filter @hikat/backend-service dev",
     "dev:backoffice": "pnpm --filter hikat-backoffice dev",

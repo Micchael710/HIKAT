@@ -61,7 +61,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
     )
   })
 
-  it("2. Wrong role for Launcher is strictly rejected and session is revoked", async () => {
+  it("2. ADMIN user is accepted by Launcher (allowedRole: PLAYER allows PLAYER and ADMIN)", async () => {
     const adminUser = {
       id: "u-admin",
       email: "admin@hikat.org",
@@ -81,26 +81,17 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
       }),
     })
 
-    // Mock logout revocation fetch
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true }),
-    })
-
     const launcherClient = new AuthClientCore({
       authServiceUrl: "http://localhost:8788",
       allowedRole: "PLAYER",
       fetcher: mockFetch,
     })
 
-    await expect(launcherClient.login("admin@hikat.org", "Pass123!")).rejects.toThrow(
-      /Rol de cuenta no autorizado para el Launcher/,
-    )
+    const user = await launcherClient.login("admin@hikat.org", "Pass123!")
 
-    expect(launcherClient.getStatus()).toBe("UNAUTHENTICATED")
-    expect(launcherClient.getAccessToken()).toBeNull()
-    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(user.role).toBe("ADMIN")
+    expect(launcherClient.getStatus()).toBe("AUTHENTICATED")
+    expect(launcherClient.getAccessToken()).toBe("admin-access")
   })
 
   it("3. Wrong role for Backoffice (PLAYER) is rejected and session revoked", async () => {
@@ -811,6 +802,186 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
     expect(persisted?.accessToken).toBe("access-B")
     expect(persisted?.refreshToken).toBe("refresh-B")
     expect(persisted?.user.email).toBe("a@hikat.org")
+  })
+
+  describe("Role Hierarchy & Multi-App Session Independence", () => {
+    it("24. PLAYER is accepted by Launcher (allowedRole: PLAYER)", async () => {
+      const storage = createMemoryStorageAdapter()
+      const client = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "PLAYER",
+        storageAdapter: storage,
+      })
+
+      await client.setSession({
+        accessToken: "player-access",
+        refreshToken: "player-refresh",
+        user: { id: "u-player", email: "player@hikat.org", role: "PLAYER" },
+      })
+
+      expect(client.getStatus()).toBe("AUTHENTICATED")
+      expect(client.getUser()?.role).toBe("PLAYER")
+    })
+
+    it("25. ADMIN is accepted by Launcher (allowedRole: PLAYER)", async () => {
+      const storage = createMemoryStorageAdapter()
+      const client = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "PLAYER",
+        storageAdapter: storage,
+      })
+
+      await client.setSession({
+        accessToken: "admin-access",
+        refreshToken: "admin-refresh",
+        user: { id: "u-admin", email: "admin@hikat.org", role: "ADMIN" },
+      })
+
+      expect(client.getStatus()).toBe("AUTHENTICATED")
+      expect(client.getUser()?.role).toBe("ADMIN")
+    })
+
+    it("26. ADMIN is accepted by Backoffice (allowedRole: ADMIN)", async () => {
+      const storage = createMemoryStorageAdapter()
+      const client = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "ADMIN",
+        storageAdapter: storage,
+      })
+
+      await client.setSession({
+        accessToken: "admin-access",
+        refreshToken: "admin-refresh",
+        user: { id: "u-admin", email: "admin@hikat.org", role: "ADMIN" },
+      })
+
+      expect(client.getStatus()).toBe("AUTHENTICATED")
+      expect(client.getUser()?.role).toBe("ADMIN")
+    })
+
+    it("27. PLAYER is strictly rejected by Backoffice (allowedRole: ADMIN)", async () => {
+      const storage = createMemoryStorageAdapter()
+      const client = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "ADMIN",
+        storageAdapter: storage,
+        fetcher: mockFetch,
+      })
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      })
+
+      await expect(
+        client.setSession({
+          accessToken: "player-access",
+          refreshToken: "player-refresh",
+          user: { id: "u-player", email: "player@hikat.org", role: "PLAYER" },
+        }),
+      ).rejects.toThrow(/Se requiere cuenta con permisos de Administrador/)
+
+      expect(client.getStatus()).toBe("UNAUTHENTICATED")
+    })
+
+    it("28. ADMIN remains accepted after bootstrap and refresh in Launcher", async () => {
+      const storage = createMemoryStorageAdapter()
+      const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
+      const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 600 }))
+      const validJwt = `${header}.${payload}.sig`
+
+      storage.saveSession({
+        accessToken: validJwt,
+        refreshToken: "admin-refresh-1",
+        user: { id: "u-admin", email: "admin@hikat.org", role: "ADMIN" },
+      })
+
+      const client = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "PLAYER",
+        storageAdapter: storage,
+        fetcher: mockFetch,
+      })
+
+      // Bootstrap restores ADMIN in Launcher
+      const restored = await client.bootstrap()
+      expect(restored?.user.role).toBe("ADMIN")
+      expect(client.getStatus()).toBe("AUTHENTICATED")
+
+      // Refresh rotates and keeps ADMIN in Launcher
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          accessToken: "admin-access-rotated",
+          refreshToken: "admin-refresh-2",
+          expiresIn: 900,
+          tokenType: "Bearer",
+          user: { id: "u-admin", email: "admin@hikat.org", role: "ADMIN" },
+        }),
+      })
+
+      const outcome = await client.refreshOutcome()
+      expect(outcome.kind).toBe("REFRESHED")
+      expect(client.getStatus()).toBe("AUTHENTICATED")
+      expect(client.getUser()?.role).toBe("ADMIN")
+      expect(client.getAccessToken()).toBe("admin-access-rotated")
+    })
+
+    it("29. Launcher and Backoffice sessions remain completely independent", async () => {
+      const launcherStorage = createMemoryStorageAdapter()
+      const backofficeStorage = createMemoryStorageAdapter()
+
+      const launcherClient = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "PLAYER",
+        storageAdapter: launcherStorage,
+        fetcher: mockFetch,
+      })
+
+      const backofficeClient = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "ADMIN",
+        storageAdapter: backofficeStorage,
+        fetcher: mockFetch,
+      })
+
+      // Login ADMIN into Launcher
+      await launcherClient.setSession({
+        accessToken: "launcher-access",
+        refreshToken: "launcher-refresh",
+        user: { id: "u-admin", email: "admin@hikat.org", role: "ADMIN" },
+      })
+
+      // Login ADMIN into Backoffice (separate session and refresh token)
+      await backofficeClient.setSession({
+        accessToken: "backoffice-access",
+        refreshToken: "backoffice-refresh",
+        user: { id: "u-admin", email: "admin@hikat.org", role: "ADMIN" },
+      })
+
+      expect(launcherClient.getStatus()).toBe("AUTHENTICATED")
+      expect(backofficeClient.getStatus()).toBe("AUTHENTICATED")
+      expect(launcherClient.getAccessToken()).toBe("launcher-access")
+      expect(backofficeClient.getAccessToken()).toBe("backoffice-access")
+
+      // Mock logout revocation for Launcher
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      })
+
+      // Logging out of Launcher does NOT affect Backoffice session
+      await launcherClient.logout()
+      expect(launcherClient.getStatus()).toBe("UNAUTHENTICATED")
+      expect(launcherClient.getSession()).toBeNull()
+
+      expect(backofficeClient.getStatus()).toBe("AUTHENTICATED")
+      expect(backofficeClient.getAccessToken()).toBe("backoffice-access")
+      expect(backofficeClient.getUser()?.email).toBe("admin@hikat.org")
+    })
   })
 })
 

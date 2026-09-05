@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { newsService } from "./newsService"
 import * as apiClientModule from "./apiClient"
+import { resolveApiAssetUrl } from "../config/api"
 
 describe("Launcher News Service (GraphQL newsFeed & Multimedia Caching)", () => {
   beforeEach(() => {
@@ -63,7 +64,7 @@ describe("Launcher News Service (GraphQL newsFeed & Multimedia Caching)", () => 
     const item1 = result.items[0]
     expect(item1.id).toBe("news-1")
     expect(item1.title).toBe("Nueva Actualización 1.1.0")
-    expect(item1.img).toBe("http://127.0.0.1:8787/media/content/news-banner-1.png")
+    expect(item1.img).toBe(resolveApiAssetUrl("/media/content/news-banner-1.png"))
     expect(item1.youtubeVideoId).toBe("dQw4w9WgXcQ")
     expect(item1.type).toBe("UPDATE")
 

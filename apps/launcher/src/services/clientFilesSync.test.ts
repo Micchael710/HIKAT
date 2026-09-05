@@ -957,8 +957,10 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       const origEnv = process.env.NODE_ENV
       const origHikatApi = process.env.HIKAT_API_URL
       const origViteApi = process.env.VITE_API_URL
+      const origViteBackendApi = process.env.VITE_BACKEND_API_URL
       delete process.env.HIKAT_API_URL
       delete process.env.VITE_API_URL
+      delete process.env.VITE_BACKEND_API_URL
 
       try {
         process.env.NODE_ENV = "development"
@@ -976,13 +978,19 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         else delete process.env.HIKAT_API_URL
         if (origViteApi) process.env.VITE_API_URL = origViteApi
         else delete process.env.VITE_API_URL
+        if (origViteBackendApi) process.env.VITE_BACKEND_API_URL = origViteBackendApi
+        else delete process.env.VITE_BACKEND_API_URL
       }
     })
 
     it("21. resolveAndValidateDownloadUrl resolves relative manifest paths to local backend in development", () => {
       const origEnv = process.env.NODE_ENV
+      const origHikatApi = process.env.HIKAT_API_URL
+      const origViteApi = process.env.VITE_API_URL
+      const origViteBackendApi = process.env.VITE_BACKEND_API_URL
       delete process.env.HIKAT_API_URL
       delete process.env.VITE_API_URL
+      delete process.env.VITE_BACKEND_API_URL
       process.env.NODE_ENV = "development"
 
       try {
@@ -990,6 +998,12 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         expect(resolved).toBe("http://127.0.0.1:8787/game/download/file-mod-123")
       } finally {
         process.env.NODE_ENV = origEnv
+        if (origHikatApi) process.env.HIKAT_API_URL = origHikatApi
+        else delete process.env.HIKAT_API_URL
+        if (origViteApi) process.env.VITE_API_URL = origViteApi
+        else delete process.env.VITE_API_URL
+        if (origViteBackendApi) process.env.VITE_BACKEND_API_URL = origViteBackendApi
+        else delete process.env.VITE_BACKEND_API_URL
       }
     })
 

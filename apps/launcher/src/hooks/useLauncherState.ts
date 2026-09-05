@@ -116,7 +116,7 @@ export function useLauncherState() {
 
     const unsubscribe = authService.subscribe((session, status) => {
       if (!isMounted) return
-      if (status === "AUTHENTICATED" && session?.user?.role === "PLAYER") {
+      if (status === "AUTHENTICATED" && session?.user && (session.user.role === "PLAYER" || session.user.role === "ADMIN")) {
         if (!pendingAuthActionRef.current) {
           setScreen("home")
         }
