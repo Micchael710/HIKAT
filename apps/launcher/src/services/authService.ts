@@ -122,6 +122,7 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
 
 class LauncherAuthService {
   private client: AuthClientCore
+  private cooldowns = new Map<string, number>()
 
   constructor(storageAdapter?: AuthStorageAdapter) {
     this.client = new AuthClientCore({
@@ -129,6 +130,28 @@ class LauncherAuthService {
       allowedRole: "PLAYER",
       storageAdapter: storageAdapter || createLauncherStorageAdapter(),
     })
+  }
+
+  public setCooldown(action: "verify" | "reset", email: string, seconds = 60): void {
+    const cleanEmail = sanitizeEmail(email).toLowerCase()
+    if (!cleanEmail) return
+    const key = `${action}:${cleanEmail}`
+    const expiresAt = Date.now() + seconds * 1000
+    this.cooldowns.set(key, expiresAt)
+  }
+
+  public getRemainingCooldown(action: "verify" | "reset", email: string): number {
+    const cleanEmail = sanitizeEmail(email).toLowerCase()
+    if (!cleanEmail) return 0
+    const key = `${action}:${cleanEmail}`
+    const expiresAt = this.cooldowns.get(key)
+    if (!expiresAt) return 0
+    const remaining = Math.ceil((expiresAt - Date.now()) / 1000)
+    if (remaining <= 0) {
+      this.cooldowns.delete(key)
+      return 0
+    }
+    return remaining
   }
 
   public subscribe(listener: (session: SessionState | null, status: AuthStatus) => void): () => void {
@@ -233,6 +256,7 @@ class LauncherAuthService {
     success: boolean
     user?: UserProfile
     emailVerificationRequired?: boolean
+    retryAfterSeconds?: number
     error?: string
   }> {
     const cleanUsername = sanitizeUsername(credentials.username)
@@ -256,6 +280,10 @@ class LauncherAuthService {
 
     try {
       const res = await this.client.register(cleanEmail, password, cleanUsername, locale)
+      if (res.emailVerificationRequired) {
+        const retryAfter = res.retryAfterSeconds ?? 60
+        this.setCooldown("verify", cleanEmail, retryAfter)
+      }
       return {
         success: true,
         user: {
@@ -267,6 +295,7 @@ class LauncherAuthService {
           createdAt: res.user.createdAt,
         },
         emailVerificationRequired: res.emailVerificationRequired,
+        retryAfterSeconds: res.retryAfterSeconds,
       }
     } catch (err: any) {
       return {
@@ -296,8 +325,13 @@ class LauncherAuthService {
     await this.client.logout()
   }
 
+  public clearCooldowns(): void {
+    this.cooldowns.clear()
+  }
+
   public clearSession(): void {
     this.client.clearSession()
+    this.clearCooldowns()
   }
 
   public setSession(session: SessionState, persist = true): Promise<void> {
@@ -307,15 +341,28 @@ class LauncherAuthService {
   public async requestPasswordReset(
     email: string,
     locale?: string,
-  ): Promise<{ success: boolean; message?: string; error?: string }> {
+  ): Promise<{ success: boolean; message?: string; error?: string; retryAfterSeconds?: number }> {
+    const cleanEmail = sanitizeEmail(email)
+    if (!cleanEmail) {
+      return { success: false, error: "Correo electrónico no proporcionado." }
+    }
     try {
       const res = await fetch(`${AUTH_URL}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: sanitizeEmail(email), locale: locale || undefined }),
+        body: JSON.stringify({ email: cleanEmail, locale: locale || undefined }),
       })
       const data = await res.json().catch(() => ({}))
-      return { success: res.ok, message: data.message, error: data.error }
+      const retryAfter = typeof data.retryAfterSeconds === "number" ? data.retryAfterSeconds : (res.ok ? 60 : undefined)
+      if (retryAfter !== undefined) {
+        this.setCooldown("reset", cleanEmail, retryAfter)
+      }
+      return {
+        success: res.ok,
+        message: data.message,
+        error: res.ok ? undefined : data.message || data.error,
+        retryAfterSeconds: retryAfter,
+      }
     } catch {
       return { success: false, error: "Error al solicitar restablecimiento de contraseña" }
     }
@@ -324,7 +371,7 @@ class LauncherAuthService {
   public async requestEmailVerification(
     email: string,
     locale?: string,
-  ): Promise<{ success: boolean; message?: string; error?: string }> {
+  ): Promise<{ success: boolean; message?: string; error?: string; retryAfterSeconds?: number }> {
     const cleanEmail = sanitizeEmail(email)
     if (!cleanEmail) {
       return { success: false, error: "Correo electrónico no proporcionado." }
@@ -336,7 +383,16 @@ class LauncherAuthService {
         body: JSON.stringify({ email: cleanEmail, locale: locale || undefined }),
       })
       const data = await res.json().catch(() => ({}))
-      return { success: res.ok, message: data.message, error: data.error }
+      const retryAfter = typeof data.retryAfterSeconds === "number" ? data.retryAfterSeconds : (res.ok ? 60 : undefined)
+      if (retryAfter !== undefined) {
+        this.setCooldown("verify", cleanEmail, retryAfter)
+      }
+      return {
+        success: res.ok,
+        message: data.message,
+        error: res.ok ? undefined : data.message || data.error,
+        retryAfterSeconds: retryAfter,
+      }
     } catch {
       return { success: false, error: "Error al solicitar reenvío de verificación." }
     }

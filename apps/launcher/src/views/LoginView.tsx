@@ -19,6 +19,12 @@ interface LoginViewProps {
 
 type AuthMode = "auth" | "forgot-password" | "verify-email" | "reset-password"
 
+function formatCountdown(seconds: number): string {
+  const m = Math.floor(Math.max(0, seconds) / 60)
+  const s = Math.max(0, seconds) % 60
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+}
+
 export default function LoginView({
   onLogin,
   theme = "dark",
@@ -45,6 +51,33 @@ export default function LoginView({
   const [successNotice, setSuccessNotice] = useState<string | null>(null)
   const [isEnteringWorld, setIsEnteringWorld] = useState(false)
   const isDark = theme === "dark"
+
+  const [verifyCooldown, setVerifyCooldown] = useState(() =>
+    authService.getRemainingCooldown("verify", registeredEmail || email),
+  )
+  const [forgotCooldown, setForgotCooldown] = useState(() =>
+    authService.getRemainingCooldown("reset", forgotEmail || email),
+  )
+
+  useEffect(() => {
+    const targetEmail = registeredEmail || email
+    const update = () => {
+      setVerifyCooldown(authService.getRemainingCooldown("verify", targetEmail))
+    }
+    update()
+    const timer = setInterval(update, 500)
+    return () => clearInterval(timer)
+  }, [mode, registeredEmail, email])
+
+  useEffect(() => {
+    const targetEmail = forgotEmail || email
+    const update = () => {
+      setForgotCooldown(authService.getRemainingCooldown("reset", targetEmail))
+    }
+    update()
+    const timer = setInterval(update, 500)
+    return () => clearInterval(timer)
+  }, [mode, forgotSuccess, forgotEmail, email])
 
   const pendingOAuthRef = useRef<{
     codeVerifier: string
@@ -311,7 +344,7 @@ export default function LoginView({
   }
 
   const handleForgotPasswordSubmit = async () => {
-    if (isSendingReset) return
+    if (isSendingReset || forgotCooldown > 0) return
     const cleanEmail = sanitizeEmail(forgotEmail || email)
     if (!cleanEmail) {
       setErrorMessage(t("auth.missingFields"))
@@ -325,8 +358,15 @@ export default function LoginView({
       setIsSendingReset(false)
       if (res.success) {
         setForgotSuccess(true)
+        setForgotCooldown(authService.getRemainingCooldown("reset", cleanEmail))
       } else {
-        setErrorMessage(res.error || t("profile.emailError"))
+        const remaining = authService.getRemainingCooldown("reset", cleanEmail)
+        if (remaining > 0) {
+          setForgotSuccess(true)
+          setForgotCooldown(remaining)
+        } else {
+          setErrorMessage(res.error || t("profile.emailError"))
+        }
       }
     } catch {
       setIsSendingReset(false)
@@ -380,7 +420,7 @@ export default function LoginView({
 
   const handleResendVerification = async () => {
     const targetEmail = registeredEmail || email
-    if (!targetEmail || isResendingVerification) return
+    if (!targetEmail || isResendingVerification || verifyCooldown > 0) return
     setErrorMessage(null)
     setSuccessNotice(null)
     setIsResendingVerification(true)
@@ -389,8 +429,14 @@ export default function LoginView({
       setIsResendingVerification(false)
       if (res.success) {
         setSuccessNotice(t("auth.verificationResentSuccess"))
+        setVerifyCooldown(authService.getRemainingCooldown("verify", targetEmail))
       } else {
-        setErrorMessage(res.error || t("auth.genericAuthError"))
+        const remaining = authService.getRemainingCooldown("verify", targetEmail)
+        if (remaining > 0) {
+          setVerifyCooldown(remaining)
+        } else {
+          setErrorMessage(res.error || t("auth.genericAuthError"))
+        }
       }
     } catch {
       setIsResendingVerification(false)
@@ -698,6 +744,50 @@ export default function LoginView({
 
                 <button
                   type="button"
+                  onClick={handleForgotPasswordSubmit}
+                  disabled={isSendingReset || forgotCooldown > 0}
+                  className="launcher-btn-secondary"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    width: "100%",
+                    height: 42,
+                    borderRadius: 12,
+                    fontSize: 14.5,
+                    fontWeight: 600,
+                    fontFamily: BASE_FONT,
+                    cursor: isSendingReset || forgotCooldown > 0 ? "default" : "pointer",
+                    opacity: isSendingReset || forgotCooldown > 0 ? 0.75 : 1,
+                    marginTop: 2,
+                  }}
+                >
+                  {isSendingReset ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <svg
+                        width={16}
+                        height={16}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                        style={{ animation: "spin 0.75s linear infinite" }}
+                      >
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                      </svg>
+                      <span>{t("common.loading")}</span>
+                    </div>
+                  ) : forgotCooldown > 0 ? (
+                    t("auth.resendCountdown", { time: formatCountdown(forgotCooldown) })
+                  ) : (
+                    t("auth.resendEmail")
+                  )}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
                     setMode("auth")
                     setTab("login")
@@ -878,7 +968,7 @@ export default function LoginView({
             <button
               type="button"
               onClick={handleResendVerification}
-              disabled={isResendingVerification}
+              disabled={isResendingVerification || verifyCooldown > 0}
               className="launcher-btn-secondary"
               style={{
                 display: "flex",
@@ -891,11 +981,17 @@ export default function LoginView({
                 fontSize: 14.5,
                 fontWeight: 600,
                 fontFamily: BASE_FONT,
-                cursor: isResendingVerification ? "default" : "pointer",
-                opacity: isResendingVerification ? 0.75 : 1,
+                cursor: isResendingVerification || verifyCooldown > 0 ? "default" : "pointer",
+                opacity: isResendingVerification || verifyCooldown > 0 ? 0.75 : 1,
               }}
             >
-              {isResendingVerification ? t("auth.resendingVerification") : t("auth.resendVerification")}
+              {isResendingVerification ? (
+                t("auth.resendingVerification")
+              ) : verifyCooldown > 0 ? (
+                t("auth.resendCountdown", { time: formatCountdown(verifyCooldown) })
+              ) : (
+                t("auth.resendVerification")
+              )}
             </button>
 
             <button

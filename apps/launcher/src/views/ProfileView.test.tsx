@@ -445,4 +445,139 @@ describe("Launcher ProfileView Component", () => {
     expect(resetSpy).toHaveBeenCalledWith("resetuser@hikat.org", "pt")
     localStorage.removeItem("hikat_language")
   })
+
+  it("12. Profile reset password button uses launcher-btn-secondary and shows countdown when cooldown is active", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-12",
+      username: "CooldownUser",
+      displayName: "CooldownUser",
+      email: "cooldown@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "cooldown@hikat.org" }],
+    })
+    vi.spyOn(authService, "getRemainingCooldown").mockReturnValue(59)
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="CooldownUser"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const resetBtn = buttons.find((btn) => btn.textContent?.includes("Reenviar en"))
+    expect(resetBtn).toBeDefined()
+    expect(resetBtn?.classList.contains("launcher-btn-secondary")).toBe(true)
+    expect(resetBtn?.disabled).toBe(true)
+    expect(resetBtn?.textContent).toContain("Reenviar en 00:59")
+    expect(container.textContent).not.toContain("✓ Correo enviado")
+  })
+
+  it("13. Success triggers LiveToast, activates cooldown countdown, and does NOT render inline '✓ Correo enviado'", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-13",
+      username: "ToastUser",
+      displayName: "ToastUser",
+      email: "toast@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "toast@hikat.org" }],
+    })
+
+    let cooldownRemaining = 0
+    vi.spyOn(authService, "getRemainingCooldown").mockImplementation(() => cooldownRemaining)
+    vi.spyOn(authService, "requestPasswordReset").mockImplementation(async () => {
+      cooldownRemaining = 60
+      return { success: true, retryAfterSeconds: 60 }
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="ToastUser"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const resetBtn = Array.from(container.querySelectorAll("button")).find((btn) =>
+      btn.textContent?.includes("Enviar correo de restablecimiento"),
+    )
+    expect(resetBtn).toBeDefined()
+
+    await act(async () => {
+      resetBtn?.click()
+    })
+
+    // Button transitions to countdown
+    expect(container.textContent).toContain("Reenviar en 01:00")
+    expect(container.textContent).not.toContain("✓ Correo enviado")
+    // LiveToast rendered
+    expect(container.textContent).toContain("Correo enviado")
+  })
+
+  it("14. 429 response synchronizes remaining cooldown", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-14",
+      username: "RateLimitedUser",
+      displayName: "RateLimitedUser",
+      email: "ratelimited@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "ratelimited@hikat.org" }],
+    })
+
+    let cooldownRemaining = 0
+    vi.spyOn(authService, "getRemainingCooldown").mockImplementation(() => cooldownRemaining)
+    vi.spyOn(authService, "requestPasswordReset").mockImplementation(async () => {
+      cooldownRemaining = 45
+      return { success: false, retryAfterSeconds: 45, error: "RATE_LIMITED" }
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="RateLimitedUser"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const resetBtn = Array.from(container.querySelectorAll("button")).find((btn) =>
+      btn.textContent?.includes("Enviar correo de restablecimiento"),
+    )
+
+    await act(async () => {
+      resetBtn?.click()
+    })
+
+    expect(container.textContent).toContain("Reenviar en 00:45")
+  })
 })

@@ -73,6 +73,8 @@
     "verifyEmailTitle": "Verify your email",
     "verifyEmailDesc": "We sent a verification link to your email address.",
     "resendVerification": "Resend email",
+    "resendEmail": "Resend email",
+    "resendCountdown": "Resend in {time}",
     "resendingVerification": "Resending...",
     "verificationResentSuccess": "Verification email resent. Please check your inbox.",
     "emailNotVerifiedError": "You must verify your email before signing in. Please check your inbox.",

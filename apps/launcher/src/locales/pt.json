@@ -73,6 +73,8 @@
     "verifyEmailTitle": "Verifique seu e-mail",
     "verifyEmailDesc": "Enviamos um link de verificação para o seu e-mail.",
     "resendVerification": "Reenviar e-mail",
+    "resendEmail": "Reenviar e-mail",
+    "resendCountdown": "Reenviar em {time}",
     "resendingVerification": "Reenviando...",
     "verificationResentSuccess": "E-mail de verificação reenviado. Por favor, verifique sua caixa de entrada.",
     "emailNotVerifiedError": "Você deve verificar seu e-mail antes de entrar. Por favor, verifique sua caixa de entrada.",

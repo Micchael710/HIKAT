@@ -313,7 +313,7 @@ export class AuthClientCore {
     password: string,
     displayName?: string,
     locale?: string,
-  ): Promise<{ success: boolean; user: AuthUser; emailVerificationRequired: boolean }> {
+  ): Promise<{ success: boolean; user: AuthUser; emailVerificationRequired: boolean; retryAfterSeconds?: number }> {
     const res = await this.fetcher(`${this.authServiceUrl}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -341,6 +341,7 @@ export class AuthClientCore {
       success: true,
       user: data.user,
       emailVerificationRequired: Boolean(data.emailVerificationRequired),
+      retryAfterSeconds: typeof data.retryAfterSeconds === "number" ? data.retryAfterSeconds : undefined,
     }
   }
 

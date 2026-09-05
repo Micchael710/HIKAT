@@ -15,6 +15,12 @@ interface ProfileViewProps {
   theme?: ThemeMode
 }
 
+function formatCountdown(seconds: number): string {
+  const m = Math.floor(Math.max(0, seconds) / 60)
+  const s = Math.max(0, seconds) % 60
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+}
+
 export default function ProfileView({
   username,
   activeSkinData,
@@ -84,9 +90,20 @@ export default function ProfileView({
     return authMethods.filter((m) => m.type === "GOOGLE" || m.type === "DISCORD")
   }, [loadingMethods, authMethods])
 
-  const [resetState, setResetState] = useState<"idle" | "sending" | "sent">(
-    "idle",
+  const [resetState, setResetState] = useState<"idle" | "sending">("idle")
+  const [resetCooldown, setResetCooldown] = useState(() =>
+    authService.getRemainingCooldown("reset", email),
   )
+
+  useEffect(() => {
+    const update = () => {
+      setResetCooldown(authService.getRemainingCooldown("reset", email))
+    }
+    update()
+    const timer = setInterval(update, 500)
+    return () => clearInterval(timer)
+  }, [email])
+
   const [toastState, setToastState] = useState<{
     message: string | null
     type: "success" | "error" | "info"
@@ -109,22 +126,26 @@ export default function ProfileView({
   }
 
   const handleSendResetEmail = async () => {
-    if (resetState === "sending") return
+    if (resetState === "sending" || resetCooldown > 0) return
     setResetState("sending")
     try {
       const res = await authService.requestPasswordReset(email, language)
+      setResetState("idle")
       if (res.success) {
-        setResetState("sent")
         showToast(t("profile.emailSent"), "success")
+        setResetCooldown(authService.getRemainingCooldown("reset", email))
       } else {
-        setResetState("idle")
-        showToast(res.error || t("profile.emailError"), "error")
+        const remaining = authService.getRemainingCooldown("reset", email)
+        if (remaining > 0) {
+          setResetCooldown(remaining)
+        } else {
+          showToast(res.error || t("profile.emailError"), "error")
+        }
       }
     } catch (_) {
       setResetState("idle")
       showToast(t("profile.emailError"), "error")
     }
-    setTimeout(() => setResetState("idle"), 3500)
   }
 
   const currentAccent = hexToRGB(
@@ -720,44 +741,21 @@ export default function ProfileView({
                     <button
                       type="button"
                       onClick={handleSendResetEmail}
-                      disabled={resetState === "sending"}
+                      disabled={resetState === "sending" || resetCooldown > 0}
+                      className="launcher-btn-secondary"
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 10,
-                        padding: "11px 24px",
-                        borderRadius: 12,
-                        background: isDark ? "#0d1217" : "#f0f3f7",
-                        border: isDark
-                          ? "1.5px solid rgba(255, 255, 255, 0.12)"
-                          : "1.5px solid rgba(0, 0, 0, 0.12)",
-                        cursor: resetState === "sending" ? "wait" : "pointer",
-                        color: isDark ? "white" : "#111822",
+                        gap: 8,
+                        height: 44,
+                        padding: "0 22px",
+                        borderRadius: 14,
+                        fontSize: 14.5,
+                        fontWeight: 600,
                         fontFamily: BASE_FONT,
-                        fontSize: 15,
-                        fontWeight: 700,
-                        transition: "all 0.16s ease",
+                        cursor: resetState === "sending" || resetCooldown > 0 ? "default" : "pointer",
+                        opacity: resetState === "sending" || resetCooldown > 0 ? 0.7 : 1,
                         flexShrink: 0,
-                      }}
-                      onMouseEnter={(e) => {
-                        if (resetState !== "sending") {
-                          e.currentTarget.style.borderColor = isDark
-                            ? "rgba(255, 255, 255, 0.28)"
-                            : "rgba(0, 0, 0, 0.25)"
-                          e.currentTarget.style.background = isDark
-                            ? "#151e26"
-                            : "#e4e8ee"
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (resetState !== "sending") {
-                          e.currentTarget.style.borderColor = isDark
-                            ? "rgba(255, 255, 255, 0.12)"
-                            : "rgba(0, 0, 0, 0.12)"
-                          e.currentTarget.style.background = isDark
-                            ? "#0d1217"
-                            : "#f0f3f7"
-                        }
                       }}
                     >
                       {resetState === "sending" ? (
@@ -776,29 +774,11 @@ export default function ProfileView({
                           </svg>
                           <span>{t("common.loading")}...</span>
                         </>
-                      ) : resetState === "sent" ? (
-                        <>
-                          <svg
-                            width={14}
-                            height={14}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#3ec4c0"
-                            strokeWidth="2.4"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <polyline points="20 6 9 17 4 12" />
-                          </svg>
-                          <span style={{ color: isDark ? "#ffffff" : "#111822" }}>
-                            {t("profile.emailSent")}
-                          </span>
-                        </>
                       ) : (
                         <>
                           <svg
-                            width={14}
-                            height={14}
+                            width={16}
+                            height={16}
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
@@ -809,7 +789,11 @@ export default function ProfileView({
                             <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
                             <polyline points="22,6 12,13 2,6" />
                           </svg>
-                          <span>{t("profile.sendResetEmail")}</span>
+                          <span>
+                            {resetCooldown > 0
+                              ? t("auth.resendCountdown", { time: formatCountdown(resetCooldown) })
+                              : t("profile.sendResetEmail")}
+                          </span>
                         </>
                       )}
                     </button>

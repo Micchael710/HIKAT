@@ -1002,6 +1002,91 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
       )
     }
   })
+
+  it("29. setCooldown and getRemainingCooldown manage cooldowns and return remaining seconds", () => {
+    expect(authService.getRemainingCooldown("verify", "player@hikat.org")).toBe(0)
+    authService.setCooldown("verify", "player@hikat.org", 60)
+    const remaining = authService.getRemainingCooldown("verify", "player@hikat.org")
+    expect(remaining).toBeGreaterThanOrEqual(59)
+    expect(remaining).toBeLessThanOrEqual(60)
+
+    authService.setCooldown("verify", "player@hikat.org", 0)
+    expect(authService.getRemainingCooldown("verify", "player@hikat.org")).toBe(0)
+  })
+
+  it("30. register with emailVerificationRequired starts verify cooldown", async () => {
+    vi.spyOn((authService as any).client, "register").mockResolvedValueOnce({
+      success: true,
+      user: { id: "u-reg", email: "regcooldown@hikat.org", role: "PLAYER" },
+      emailVerificationRequired: true,
+      retryAfterSeconds: 60,
+    })
+
+    const res = await authService.register({
+      username: "RegCooldownPlayer",
+      email: "regcooldown@hikat.org",
+      password: "password123",
+    })
+
+    expect(res.success).toBe(true)
+    expect(res.retryAfterSeconds).toBe(60)
+    expect(authService.getRemainingCooldown("verify", "regcooldown@hikat.org")).toBeGreaterThan(0)
+  })
+
+  it("31. requestPasswordReset sets reset cooldown on success and on 429 response", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, retryAfterSeconds: 60 }),
+    })
+
+    const res1 = await authService.requestPasswordReset("user-reset@hikat.org")
+    expect(res1.success).toBe(true)
+    expect(authService.getRemainingCooldown("reset", "user-reset@hikat.org")).toBeGreaterThan(0)
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: "RATE_LIMITED", retryAfterSeconds: 45 }),
+    })
+
+    const res2 = await authService.requestPasswordReset("user-reset-429@hikat.org")
+    expect(res2.success).toBe(false)
+    expect(res2.retryAfterSeconds).toBe(45)
+    expect(authService.getRemainingCooldown("reset", "user-reset-429@hikat.org")).toBeGreaterThan(0)
+  })
+
+  it("32. requestEmailVerification sets verify cooldown on success and on 429 response", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, retryAfterSeconds: 60 }),
+    })
+
+    const res1 = await authService.requestEmailVerification("user-verify@hikat.org")
+    expect(res1.success).toBe(true)
+    expect(authService.getRemainingCooldown("verify", "user-verify@hikat.org")).toBeGreaterThan(0)
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: "RATE_LIMITED", retryAfterSeconds: 30 }),
+    })
+
+    const res2 = await authService.requestEmailVerification("user-verify-429@hikat.org")
+    expect(res2.success).toBe(false)
+    expect(res2.retryAfterSeconds).toBe(30)
+    expect(authService.getRemainingCooldown("verify", "user-verify-429@hikat.org")).toBeGreaterThan(0)
+  })
+
+  it("33. verify and reset cooldowns are tracked independently in memory", () => {
+    authService.setCooldown("verify", "independent@hikat.org", 60)
+    expect(authService.getRemainingCooldown("verify", "independent@hikat.org")).toBeGreaterThan(0)
+    expect(authService.getRemainingCooldown("reset", "independent@hikat.org")).toBe(0)
+
+    authService.setCooldown("reset", "independent@hikat.org", 60)
+    expect(authService.getRemainingCooldown("reset", "independent@hikat.org")).toBeGreaterThan(0)
+  })
 })
 
 

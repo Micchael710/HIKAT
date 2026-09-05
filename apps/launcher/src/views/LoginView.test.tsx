@@ -978,16 +978,21 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).toContain("Cambiar contraseña")
   })
 
-  it("28. Reenviar correo button calls requestEmailVerification and displays success feedback notice", async () => {
+  it("28. Reenviar correo button calls requestEmailVerification when cooldown expires and displays success feedback notice", async () => {
     const onLogin = vi.fn()
     vi.spyOn(authService, "register").mockResolvedValue({
       success: true,
       emailVerificationRequired: true,
+      retryAfterSeconds: 60,
     } as any)
     const resendSpy = vi.spyOn(authService, "requestEmailVerification").mockResolvedValue({
       success: true,
       message: "If the account requires verification, a verification email has been sent.",
+      retryAfterSeconds: 60,
     })
+
+    let cooldownRemaining = 0
+    vi.spyOn(authService, "getRemainingCooldown").mockImplementation(() => cooldownRemaining)
 
     const container = await renderComponent(
       <LanguageProvider>
@@ -1068,7 +1073,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).toContain("unverified@hikat.org")
     expect(container.textContent).toContain("Debes verificar tu correo electrónico antes de iniciar sesión.")
     const resendBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Reenviar correo"),
+      b.textContent?.includes("Reenviar correo") || b.textContent?.includes("Reenviar en"),
     )
     expect(resendBtn).toBeDefined()
   })
@@ -1105,5 +1110,179 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(container.textContent).not.toContain("CSRF")
     expect(container.textContent).not.toContain("state")
     expect(container.textContent).not.toContain("authorization code")
+  })
+
+  it("31. verify-email mode displays disabled button with countdown when cooldown is active", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "login").mockResolvedValue({
+      success: false,
+      error: "EMAIL_NOT_VERIFIED",
+    } as any)
+    vi.spyOn(authService, "getRemainingCooldown").mockReturnValue(59)
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    const passwordInput = container.querySelector("input[type='password']") as HTMLInputElement
+
+    await act(async () => {
+      changeInput(emailInput, "cooldown@hikat.org")
+      changeInput(passwordInput, "password123")
+    })
+
+    const loginBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Iniciar Sesión" && b.classList.contains("launcher-btn-primary"),
+    )
+
+    await act(async () => {
+      loginBtn?.click()
+    })
+
+    const resendBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Reenviar en"),
+    )
+    expect(resendBtn).toBeDefined()
+    expect(resendBtn?.disabled).toBe(true)
+    expect(resendBtn?.textContent).toContain("Reenviar en 00:59")
+    expect(resendBtn?.classList.contains("launcher-btn-secondary")).toBe(true)
+  })
+
+  it("32. forgot-password success mode renders resend button with countdown using launcher-btn-secondary", async () => {
+    const onLogin = vi.fn()
+    let cooldownRemaining = 0
+    vi.spyOn(authService, "getRemainingCooldown").mockImplementation(() => cooldownRemaining)
+    vi.spyOn(authService, "requestPasswordReset").mockImplementation(async () => {
+      cooldownRemaining = 58
+      return {
+        success: true,
+        retryAfterSeconds: 58,
+      }
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    // Click forgot password link
+    const forgotLink = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("¿Olvidaste tu contraseña?"),
+    )
+    await act(async () => {
+      forgotLink?.click()
+    })
+
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    await act(async () => {
+      changeInput(emailInput, "reset@hikat.org")
+    })
+
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Enviar correo"),
+    )
+    await act(async () => {
+      submitBtn?.click()
+    })
+
+    // Expect check email card + resend button
+    expect(container.textContent).toContain("Revisa tu correo electrónico")
+    const resendBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Reenviar en 00:58"),
+    )
+    expect(resendBtn).toBeDefined()
+    expect(resendBtn?.disabled).toBe(true)
+    expect(resendBtn?.classList.contains("launcher-btn-secondary")).toBe(true)
+  })
+
+  it("33. 429 response from verify email or forgot password synchronizes remaining cooldown without showing generic error", async () => {
+    const onLogin = vi.fn()
+    let cooldownRemaining = 0
+    vi.spyOn(authService, "getRemainingCooldown").mockImplementation(() => cooldownRemaining)
+    vi.spyOn(authService, "login").mockResolvedValue({
+      success: false,
+      error: "EMAIL_NOT_VERIFIED",
+    } as any)
+    vi.spyOn(authService, "requestEmailVerification").mockImplementation(async () => {
+      cooldownRemaining = 42
+      return { success: false, retryAfterSeconds: 42, error: "RATE_LIMITED" }
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+    const passwordInput = container.querySelector("input[type='password']") as HTMLInputElement
+    await act(async () => {
+      changeInput(emailInput, "ratelimit@hikat.org")
+      changeInput(passwordInput, "password123")
+    })
+
+    const loginBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Iniciar Sesión" && b.classList.contains("launcher-btn-primary"),
+    )
+    await act(async () => {
+      loginBtn?.click()
+    })
+
+    const resendBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Reenviar correo"),
+    )
+    await act(async () => {
+      resendBtn?.click()
+    })
+
+    expect(container.textContent).toContain("Reenviar en 00:42")
+    expect(container.textContent).not.toContain("Error al completar autenticación")
+  })
+
+  it("34. ES, EN, PT, and FR render resend countdown format correctly", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "getRemainingCooldown").mockReturnValue(59)
+
+    const languages = [
+      { code: "es", expected: "Reenviar en 00:59" },
+      { code: "en", expected: "Resend in 00:59" },
+      { code: "pt", expected: "Reenviar em 00:59" },
+      { code: "fr", expected: "Renvoyer dans 00:59" },
+    ]
+
+    for (const { code, expected } of languages) {
+      localStorage.setItem("hikat_language", code)
+      const container = await renderComponent(
+        <LanguageProvider>
+          <LoginView onLogin={onLogin} theme="dark" />
+        </LanguageProvider>,
+      )
+
+      vi.spyOn(authService, "login").mockResolvedValue({
+        success: false,
+        error: "EMAIL_NOT_VERIFIED",
+      } as any)
+
+      const emailInput = container.querySelector("input[type='email']") as HTMLInputElement
+      const passwordInput = container.querySelector("input[type='password']") as HTMLInputElement
+      await act(async () => {
+        changeInput(emailInput, "lang@hikat.org")
+        changeInput(passwordInput, "password123")
+      })
+
+      const loginBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+        b.classList.contains("launcher-btn-primary"),
+      )
+      await act(async () => {
+        loginBtn?.click()
+      })
+
+      expect(container.textContent).toContain(expected)
+      localStorage.removeItem("hikat_language")
+    }
   })
 })

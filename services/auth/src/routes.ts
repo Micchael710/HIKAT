@@ -271,11 +271,18 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         authServiceUrl,
       )
 
+      if (result.emailVerificationRequired) {
+        const normalizedEmail = body.email.trim().toLowerCase()
+        const emailHash = await hashToken(normalizedEmail)
+        await checkRateLimit(db, `email-cooldown:verify:${emailHash}`, 1, 60, { isProduction })
+      }
+
       return jsonResponse(
         {
           success: true,
           user: result.user,
           emailVerificationRequired: result.emailVerificationRequired,
+          retryAfterSeconds: result.emailVerificationRequired ? 60 : undefined,
         },
         201,
       )
@@ -931,12 +938,27 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
       const body = (await request.json().catch(() => ({}))) as { email?: string; locale?: string }
       if (body.email) {
+        const normalizedEmail = body.email.trim().toLowerCase()
+        const emailHash = await hashToken(normalizedEmail)
+        const emailRate = await checkRateLimit(db, `email-cooldown:verify:${emailHash}`, 1, 60, { isProduction })
+        if (!emailRate.allowed) {
+          const retryAfterSeconds = Math.max(1, Math.ceil((emailRate.resetAt - Date.now()) / 1000))
+          return jsonResponse(
+            {
+              error: AuthErrorCode.RATE_LIMITED,
+              message: "Please wait before requesting another verification email.",
+              retryAfterSeconds,
+            },
+            429,
+          )
+        }
         await resendVerificationEmail(db, body.email, emailService, authServiceUrl, body.locale)
       }
 
       return jsonResponse({
         success: true,
         message: "If the account requires verification, a verification email has been sent.",
+        retryAfterSeconds: 60,
       })
     }
 
@@ -949,12 +971,27 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
       const body = (await request.json().catch(() => ({}))) as { email?: string; locale?: string }
       if (body.email) {
+        const normalizedEmail = body.email.trim().toLowerCase()
+        const emailHash = await hashToken(normalizedEmail)
+        const emailRate = await checkRateLimit(db, `email-cooldown:reset:${emailHash}`, 1, 60, { isProduction })
+        if (!emailRate.allowed) {
+          const retryAfterSeconds = Math.max(1, Math.ceil((emailRate.resetAt - Date.now()) / 1000))
+          return jsonResponse(
+            {
+              error: AuthErrorCode.RATE_LIMITED,
+              message: "Please wait before requesting another password reset email.",
+              retryAfterSeconds,
+            },
+            429,
+          )
+        }
         await requestPasswordReset(db, body.email, emailService, authServiceUrl, body.locale)
       }
 
       return jsonResponse({
         success: true,
         message: "If the email is registered, a password reset email has been sent.",
+        retryAfterSeconds: 60,
       })
     }
 

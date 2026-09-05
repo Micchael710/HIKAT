@@ -73,6 +73,8 @@
     "verifyEmailTitle": "Vérifiez votre e-mail",
     "verifyEmailDesc": "Nous avons envoyé un lien de vérification à votre adresse e-mail.",
     "resendVerification": "Renvoyer l'e-mail",
+    "resendEmail": "Renvoyer l'e-mail",
+    "resendCountdown": "Renvoyer dans {time}",
     "resendingVerification": "Renvoi en cours...",
     "verificationResentSuccess": "E-mail de vérification renvoyé. Veuillez vérifier votre boîte de réception.",
     "emailNotVerifiedError": "Vous devez vérifier votre e-mail avant de vous connecter. Veuillez vérifier votre boîte de réception.",

@@ -2198,6 +2198,8 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(verifyRes.success).toBe(true)
 
       // 2. Resending for already verified user returns generic success without creating tokens
+      await db.delete(schema.rateLimits).run()
+      clearInMemoryRateLimits()
       emailService.clear()
       const reqAlreadyVerified = new Request("http://localhost:8788/auth/resend-verification", {
         method: "POST",
@@ -2614,6 +2616,202 @@ describe("HiKAT Authentication System (Shard 02)", () => {
           expect(lastReset.html).toContain(EMAIL_TRANSLATIONS[loc].passwordReset.buttonText)
           expect(lastReset.html).toContain(EMAIL_TRANSLATIONS[loc].passwordReset.expiryNotice)
         }
+      })
+    })
+
+    describe("Email Cooldown & Rate Limiting Hardening (60s cooldown)", () => {
+      it("1. allows initial resend verification request and returns retryAfterSeconds: 60", async () => {
+        clearInMemoryRateLimits()
+        const userEmail = "cooldown-verify-1@hikat.org"
+        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+
+        const req = new Request("http://localhost:8788/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+        expect(res.status).toBe(200)
+        const data = (await res.json()) as any
+        expect(data.success).toBe(true)
+        expect(data.retryAfterSeconds).toBe(60)
+      })
+
+      it("2. blocks second resend verification for same email within 60s (429 + retryAfterSeconds) and does NOT invoke EmailService again", async () => {
+        clearInMemoryRateLimits()
+        const userEmail = "cooldown-verify-2@hikat.org"
+        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+
+        const req1 = new Request("http://localhost:8788/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const res1 = await handleRequest({ request: req1, env: {}, db, keyManager, emailService })
+        expect(res1.status).toBe(200)
+
+        const emailCountBefore = emailService.getSentEmails().filter((e) => e.to === userEmail).length
+
+        const req2 = new Request("http://localhost:8788/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const res2 = await handleRequest({ request: req2, env: {}, db, keyManager, emailService })
+        expect(res2.status).toBe(429)
+        const data2 = (await res2.json()) as any
+        expect(data2.error).toBe(AuthErrorCode.RATE_LIMITED)
+        expect(data2.retryAfterSeconds).toBeGreaterThan(0)
+        expect(data2.retryAfterSeconds).toBeLessThanOrEqual(60)
+
+        const emailCountAfter = emailService.getSentEmails().filter((e) => e.to === userEmail).length
+        expect(emailCountAfter).toBe(emailCountBefore)
+      })
+
+      it("3. allows initial forgot password request and returns retryAfterSeconds: 60", async () => {
+        clearInMemoryRateLimits()
+        const userEmail = "cooldown-reset-1@hikat.org"
+        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+
+        const req = new Request("http://localhost:8788/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+        expect(res.status).toBe(200)
+        const data = (await res.json()) as any
+        expect(data.success).toBe(true)
+        expect(data.retryAfterSeconds).toBe(60)
+      })
+
+      it("4. blocks second forgot password request for same email within 60s", async () => {
+        clearInMemoryRateLimits()
+        const userEmail = "cooldown-reset-2@hikat.org"
+        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+
+        const req1 = new Request("http://localhost:8788/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const res1 = await handleRequest({ request: req1, env: {}, db, keyManager, emailService })
+        expect(res1.status).toBe(200)
+
+        const req2 = new Request("http://localhost:8788/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const res2 = await handleRequest({ request: req2, env: {}, db, keyManager, emailService })
+        expect(res2.status).toBe(429)
+        const data2 = (await res2.json()) as any
+        expect(data2.error).toBe(AuthErrorCode.RATE_LIMITED)
+        expect(data2.retryAfterSeconds).toBeGreaterThan(0)
+      })
+
+      it("5. verify and reset cooldowns are independent for the same email", async () => {
+        clearInMemoryRateLimits()
+        const userEmail = "cooldown-independent@hikat.org"
+        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+
+        // Trigger verify cooldown
+        const verifyReq = new Request("http://localhost:8788/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const verifyRes = await handleRequest({ request: verifyReq, env: {}, db, keyManager, emailService })
+        expect(verifyRes.status).toBe(200)
+
+        // Reset request is NOT blocked by verify cooldown
+        const resetReq = new Request("http://localhost:8788/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const resetRes = await handleRequest({ request: resetReq, env: {}, db, keyManager, emailService })
+        expect(resetRes.status).toBe(200)
+      })
+
+      it("6. two different emails do not share cooldown", async () => {
+        clearInMemoryRateLimits()
+        const emailA = "user-a@hikat.org"
+        const emailB = "user-b@hikat.org"
+        await registerWithPassword(db, { email: emailA, password: "Password123!" }, emailService)
+        await registerWithPassword(db, { email: emailB, password: "Password123!" }, emailService)
+
+        const reqA = new Request("http://localhost:8788/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: emailA }),
+        })
+        const resA = await handleRequest({ request: reqA, env: {}, db, keyManager, emailService })
+        expect(resA.status).toBe(200)
+
+        const reqB = new Request("http://localhost:8788/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: emailB }),
+        })
+        const resB = await handleRequest({ request: reqB, env: {}, db, keyManager, emailService })
+        expect(resB.status).toBe(200)
+      })
+
+      it("7. registration initializes verify cooldown and returns retryAfterSeconds: 60", async () => {
+        clearInMemoryRateLimits()
+        const userEmail = "cooldown-reg-test@hikat.org"
+
+        const regReq = new Request("http://localhost:8788/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail, password: "Password123!", displayName: "CooldownTester" }),
+        })
+        const regRes = await handleRequest({ request: regReq, env: {}, db, keyManager, emailService })
+        expect(regRes.status).toBe(201)
+        const regData = (await regRes.json()) as any
+        expect(regData.success).toBe(true)
+        expect(regData.emailVerificationRequired).toBe(true)
+        expect(regData.retryAfterSeconds).toBe(60)
+
+        // Immediate resend verification within 60s is blocked
+        const resendReq = new Request("http://localhost:8788/auth/resend-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: userEmail }),
+        })
+        const resendRes = await handleRequest({ request: resendReq, env: {}, db, keyManager, emailService })
+        expect(resendRes.status).toBe(429)
+        const resendData = (await resendRes.json()) as any
+        expect(resendData.error).toBe(AuthErrorCode.RATE_LIMITED)
+        expect(resendData.retryAfterSeconds).toBeGreaterThan(0)
+      })
+
+      it("8. anti-enumeration: non-existent email receives same 200 response on first call and 429 on second call within 60s", async () => {
+        clearInMemoryRateLimits()
+        const nonExistentEmail = "nonexistent-cooldown@hikat.org"
+
+        const req1 = new Request("http://localhost:8788/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: nonExistentEmail }),
+        })
+        const res1 = await handleRequest({ request: req1, env: {}, db, keyManager, emailService })
+        expect(res1.status).toBe(200)
+        const data1 = (await res1.json()) as any
+        expect(data1.success).toBe(true)
+        expect(data1.retryAfterSeconds).toBe(60)
+
+        const req2 = new Request("http://localhost:8788/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "cf-connecting-ip": "1.2.3.4" },
+          body: JSON.stringify({ email: nonExistentEmail }),
+        })
+        const res2 = await handleRequest({ request: req2, env: {}, db, keyManager, emailService })
+        expect(res2.status).toBe(429)
+        const data2 = (await res2.json()) as any
+        expect(data2.error).toBe(AuthErrorCode.RATE_LIMITED)
+        expect(data2.retryAfterSeconds).toBeGreaterThan(0)
       })
     })
   })

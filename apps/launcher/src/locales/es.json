@@ -73,6 +73,8 @@
     "verifyEmailTitle": "Verifica tu correo",
     "verifyEmailDesc": "Te enviamos un enlace de verificación a tu correo electrónico.",
     "resendVerification": "Reenviar correo",
+    "resendEmail": "Reenviar correo",
+    "resendCountdown": "Reenviar en {time}",
     "resendingVerification": "Reenviando...",
     "verificationResentSuccess": "Correo de verificación reenviado. Revisa tu bandeja de entrada.",
     "emailNotVerifiedError": "Debes verificar tu correo electrónico antes de iniciar sesión. Por favor revisa tu bandeja de entrada.",
