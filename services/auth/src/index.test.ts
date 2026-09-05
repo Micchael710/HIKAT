@@ -2,7 +2,7 @@
  * HiKAT Authentication Service Comprehensive Test Suite
  */
 
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import * as jose from "jose"
 import { eq } from "drizzle-orm"
 import { createDatabase, schema } from "@hikat/database"
@@ -1380,6 +1380,53 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       })
       const validRes = await handleRequest({ request: validReq, env: {}, db, keyManager, emailService })
       expect(validRes.status).toBe(302)
+    })
+
+    it("known errors continue returning their expected error codes, messages, and statuses", async () => {
+      const loginReq = new Request("http://localhost:8788/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "unknown@hikat.org", password: "wrongpassword" }),
+      })
+      const loginRes = await handleRequest({ request: loginReq, env: {}, db, keyManager, emailService })
+      expect(loginRes.status).toBe(401)
+      const data = (await loginRes.json()) as { error: string; message: string }
+      expect(data.error).toBe(AuthErrorCode.INVALID_CREDENTIALS)
+      expect(data.message).toBe("Invalid email or password")
+    })
+
+    it("unhandled internal exceptions log to console.error and return generic INTERNAL_ERROR without leaking details", async () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+      const brokenDb = {
+        select: () => {
+          throw new Error("CRITICAL_INTERNAL_D1_SECRET_KEY_SQL_FAILURE: table users disk I/O")
+        },
+      } as any
+
+      const req = new Request("http://localhost:8788/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "user@hikat.org", password: "password123!" }),
+      })
+
+      const res = await handleRequest({ request: req, env: {}, db: brokenDb, keyManager, emailService })
+
+      expect(res.status).toBe(500)
+      const data = (await res.json()) as { error: string; message: string }
+      expect(data.error).toBe("INTERNAL_ERROR")
+      expect(data.message).toBe("Internal server error")
+
+      const rawJson = JSON.stringify(data)
+      expect(rawJson).not.toContain("CRITICAL_INTERNAL_D1_SECRET_KEY_SQL_FAILURE")
+      expect(rawJson).not.toContain("table users disk I/O")
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "[Auth] Unhandled internal error:",
+        expect.any(Error),
+      )
+
+      consoleErrorSpy.mockRestore()
     })
   })
 

@@ -1538,6 +1538,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       return errorResponse(AuthErrorCode.RATE_LIMITED, "Rate limit exceeded. Please try again later.", 429)
     }
 
-    return errorResponse("INTERNAL_ERROR", errorString || "Internal server error", 500)
+    console.error("[Auth] Unhandled internal error:", err)
+    return errorResponse("INTERNAL_ERROR", "Internal server error", 500)
   }
 }
