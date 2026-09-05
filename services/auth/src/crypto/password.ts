@@ -1,53 +1,56 @@
 /**
  * HiKAT Password Hashing & Verification Engine
- * Implements PBKDF2-HMAC-SHA512 using native WebCrypto (crypto.subtle)
+ * Implements PBKDF2-HMAC-SHA512 using node:crypto (compatible with Cloudflare Workers nodejs_compat)
  * Formats: $pbkdf2-sha512$i=<iterations>$<salt_b64url>$<hash_b64url>
  */
+
+import { pbkdf2, randomBytes, timingSafeEqual } from "node:crypto"
 
 export const DEFAULT_PBKDF2_ITERATIONS = 220000
 export const MIN_PBKDF2_ITERATIONS = 220000
 const SALT_BYTE_LENGTH = 32
 const KEY_BYTE_LENGTH = 64 // 512 bits
 
-function bufferToBase64Url(buffer: ArrayBuffer | Uint8Array): string {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
-  let binary = ""
-  for (let i = 0; i < bytes.byteLength; i++) {
-    const b = bytes[i]
-    if (b !== undefined) {
-      binary += String.fromCharCode(b)
-    }
-  }
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "")
+function bufferToBase64Url(buffer: Uint8Array | Buffer): string {
+  return Buffer.isBuffer(buffer)
+    ? buffer.toString("base64url")
+    : Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength).toString("base64url")
 }
 
-function base64UrlToBuffer(base64url: string): Uint8Array {
-  let base64 = base64url.replace(/-/g, "+").replace(/_/g, "/")
-  while (base64.length % 4) {
-    base64 += "="
-  }
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return bytes
+function base64UrlToBuffer(base64url: string): Buffer {
+  return Buffer.from(base64url, "base64url")
 }
 
-function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+function constantTimeEqual(a: Uint8Array | Buffer, b: Uint8Array | Buffer): boolean {
   if (a.length !== b.length) {
     return false
   }
-  let diff = 0
-  for (let i = 0; i < a.length; i++) {
-    const aVal = a[i] ?? 0
-    const bVal = b[i] ?? 0
-    diff |= aVal ^ bVal
-  }
-  return diff === 0
+  const bufA = Buffer.isBuffer(a) ? a : Buffer.from(a)
+  const bufB = Buffer.isBuffer(b) ? b : Buffer.from(b)
+  return timingSafeEqual(bufA, bufB)
+}
+
+function derivePbkdf2Key(
+  password: string,
+  salt: Uint8Array | Buffer,
+  iterations: number,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    pbkdf2(
+      password,
+      salt,
+      iterations,
+      KEY_BYTE_LENGTH,
+      "sha512",
+      (err, derivedKey) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(derivedKey)
+        }
+      },
+    )
+  })
 }
 
 /**
@@ -58,28 +61,11 @@ export async function hashPassword(
   iterations: number = DEFAULT_PBKDF2_ITERATIONS,
 ): Promise<string> {
   const effectiveIterations = Math.max(iterations, MIN_PBKDF2_ITERATIONS)
-  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTE_LENGTH))
-  const passwordKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  )
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: effectiveIterations,
-      hash: "SHA-512",
-    },
-    passwordKey,
-    KEY_BYTE_LENGTH * 8,
-  )
+  const salt = randomBytes(SALT_BYTE_LENGTH)
+  const derivedKey = await derivePbkdf2Key(password, salt, effectiveIterations)
 
   const saltB64 = bufferToBase64Url(salt)
-  const hashB64 = bufferToBase64Url(derivedBits)
+  const hashB64 = bufferToBase64Url(derivedKey)
 
   return `$pbkdf2-sha512$i=${effectiveIterations}$${saltB64}$${hashB64}`
 }
@@ -127,27 +113,9 @@ export async function verifyPassword(
     const salt = base64UrlToBuffer(saltB64)
     const expectedHash = base64UrlToBuffer(expectedHashB64)
 
-    const passwordKey = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(password),
-      { name: "PBKDF2" },
-      false,
-      ["deriveBits"],
-    )
+    const derivedKey = await derivePbkdf2Key(password, salt, iterations)
 
-    const derivedBits = await crypto.subtle.deriveBits(
-      {
-        name: "PBKDF2",
-        salt,
-        iterations,
-        hash: "SHA-512",
-      },
-      passwordKey,
-      KEY_BYTE_LENGTH * 8,
-    )
-
-    const derivedBytes = new Uint8Array(derivedBits)
-    return constantTimeEqual(derivedBytes, expectedHash)
+    return constantTimeEqual(derivedKey, expectedHash)
   } catch {
     return false
   }

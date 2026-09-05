@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
+import * as nodeCrypto from "node:crypto"
 import { readFileSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import * as jose from "jose"
@@ -19,6 +20,8 @@ import {
 import {
   hashPassword,
   verifyPassword,
+  needsRehash,
+  DEFAULT_PBKDF2_ITERATIONS,
 } from "./crypto/password"
 import {
   generateSecureToken,
@@ -97,18 +100,62 @@ describe("HiKAT Authentication System (Shard 02)", () => {
   // 1. PASSWORD CRYPTOGRAPHY
   // ==========================================
   describe("Password Cryptography (PBKDF2-HMAC-SHA512 >= 220k iterations)", () => {
-    it("hashes password with PBKDF2-HMAC-SHA512 and min 220,000 iterations", async () => {
+    it("1. hashes password and verifies successfully with PBKDF2-HMAC-SHA512", async () => {
       const hash = await hashPassword("superSecret123!")
-      expect(hash).toMatch(/^\$pbkdf2-sha512\$i=220000\$/)
-
       const isValid = await verifyPassword("superSecret123!", hash)
       expect(isValid).toBe(true)
+    })
 
+    it("2. rejects incorrect password during verification", async () => {
+      const hash = await hashPassword("superSecret123!")
       const isInvalid = await verifyPassword("wrongPassword", hash)
       expect(isInvalid).toBe(false)
     })
 
-    it("ensures password is never stored in plaintext", async () => {
+    it("3. produces hash maintaining 220000 iterations and exact format $pbkdf2-sha512$i=<iter>$<salt>$<hash>", async () => {
+      const hash = await hashPassword("superSecret123!")
+      expect(hash).toMatch(/^\$pbkdf2-sha512\$i=220000\$[A-Za-z0-9_-]{43}\$[A-Za-z0-9_-]{86}$/)
+      expect(DEFAULT_PBKDF2_ITERATIONS).toBe(220000)
+    })
+
+    it("4. verifies legacy/existing hashes generated with the current format and 220000 iterations", async () => {
+      // Known test vector computed with PBKDF2-HMAC-SHA512 (220,000 iterations, 32-byte salt, 64-byte key)
+      const legacyHash = "$pbkdf2-sha512$i=220000$MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI$36AtSo2dEKwBnOgbQX-4fbvv8rAxwmNCvciEZGo67m1WJx5bYGQSiiVriIv4fQs-pKkKSdgjxVA6rls875Okfw"
+      
+      const isValid = await verifyPassword("LegacyPassword123!", legacyHash)
+      expect(isValid).toBe(true)
+
+      const isInvalid = await verifyPassword("WrongPassword123!", legacyHash)
+      expect(isInvalid).toBe(false)
+
+      expect(needsRehash(legacyHash)).toBe(false)
+    })
+
+    it("5. does not depend on crypto.subtle for PBKDF2 password hashing or verification", async () => {
+      const subtleSpy = vi.spyOn(crypto.subtle, "deriveBits")
+      const subtleImportSpy = vi.spyOn(crypto.subtle, "importKey")
+
+      const hash = await hashPassword("TestSubtleIndependence123!")
+      const verified = await verifyPassword("TestSubtleIndependence123!", hash)
+
+      expect(verified).toBe(true)
+      expect(subtleSpy).not.toHaveBeenCalled()
+      expect(subtleImportSpy).not.toHaveBeenCalled()
+
+      subtleSpy.mockRestore()
+      subtleImportSpy.mockRestore()
+    })
+
+    it("6. needsRehash detects lower iteration counts or mismatched format", async () => {
+      const oldHash = "$pbkdf2-sha512$i=100000$MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI$36AtSo2dEKwBnOgbQX-4fbvv8rAxwmNCvciEZGo67m1WJx5bYGQSiiVriIv4fQs-pKkKSdgjxVA6rls875Okfw"
+      expect(needsRehash(oldHash)).toBe(true)
+      expect(needsRehash("invalid-format")).toBe(true)
+
+      const currentHash = await hashPassword("ValidPass123!")
+      expect(needsRehash(currentHash)).toBe(false)
+    })
+
+    it("7. ensures password is never stored in plaintext", async () => {
       const reg = await registerWithPassword(
         db,
         { email: "secure@hikat.org", password: "MyPassword999!" },
@@ -3190,16 +3237,16 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       })
 
       it("4. loginWithPassword rejects password > 128 without running hashing", async () => {
-        const deriveBitsSpy = vi.spyOn(crypto.subtle, "deriveBits")
+        const start = performance.now()
         const longPassword = "P".repeat(129)
 
         await expect(
           loginWithPassword(db, { email: "any-user@hikat.org", password: longPassword }, keyManager),
         ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
 
-        // Ensure crypto deriveBits (PBKDF2) was never invoked
-        expect(deriveBitsSpy).not.toHaveBeenCalled()
-        deriveBitsSpy.mockRestore()
+        const elapsed = performance.now() - start
+        // Immediate validation fast-fails in < 30ms without expensive 220k PBKDF2 hashing
+        expect(elapsed).toBeLessThan(30)
       })
 
       it("5. changePassword rejects currentPassword > 128 or newPassword > 128", async () => {

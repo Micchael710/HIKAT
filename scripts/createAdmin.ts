@@ -23,44 +23,22 @@ const DEFAULT_PBKDF2_ITERATIONS = 220000
 const SALT_BYTE_LENGTH = 32
 const KEY_BYTE_LENGTH = 64
 
-function bufferToBase64Url(buffer: ArrayBuffer | Uint8Array): string {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
-  let binary = ""
-  for (let i = 0; i < bytes.byteLength; i++) {
-    const b = bytes[i]
-    if (b !== undefined) {
-      binary += String.fromCharCode(b)
-    }
-  }
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "")
+function bufferToBase64Url(buffer: ArrayBuffer | Uint8Array | Buffer): string {
+  return Buffer.from(buffer).toString("base64url")
 }
 
 async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTE_LENGTH))
-  const passwordKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  )
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: DEFAULT_PBKDF2_ITERATIONS,
-      hash: "SHA-512",
-    },
-    passwordKey,
-    KEY_BYTE_LENGTH * 8,
+  const salt = crypto.randomBytes(SALT_BYTE_LENGTH)
+  const derivedKey = crypto.pbkdf2Sync(
+    password,
+    salt,
+    DEFAULT_PBKDF2_ITERATIONS,
+    KEY_BYTE_LENGTH,
+    "sha512",
   )
 
   const saltB64 = bufferToBase64Url(salt)
-  const hashB64 = bufferToBase64Url(derivedBits)
+  const hashB64 = bufferToBase64Url(derivedKey)
 
   return `$pbkdf2-sha512$i=${DEFAULT_PBKDF2_ITERATIONS}$${saltB64}$${hashB64}`
 }
