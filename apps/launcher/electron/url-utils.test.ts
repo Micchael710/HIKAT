@@ -199,7 +199,7 @@ describe("Electron OAuth Deep Link URL Validation Suite (Shard 8F)", () => {
     expect(handleDeepLinkSnippet).not.toContain("completedOAuthStates.add(state)")
   })
 
-  it("15. Verifies auth:get-pending-oauth calls peekPendingOAuth and auth:mark-oauth-completed exists", () => {
+  it("15. Verifies auth:get-pending-oauth calls peekPendingOAuth and auth:mark-oauth-completed preserves locale in Map", () => {
     const fs = require("fs")
     const path = require("path")
     const mainContent = fs.readFileSync(path.join(__dirname, "main.cjs"), "utf8")
@@ -207,7 +207,30 @@ describe("Electron OAuth Deep Link URL Validation Suite (Shard 8F)", () => {
     expect(mainContent).toContain('ipcMain.handle("auth:get-pending-oauth", async (_event, state) => {')
     expect(mainContent).toContain("return authStore.peekPendingOAuth(state)")
     expect(mainContent).toContain('ipcMain.handle("auth:mark-oauth-completed", async (_event, state) => {')
-    expect(mainContent).toContain("completedOAuthStates.add(state)")
+    expect(mainContent).toContain("completedOAuthStates.set(state, { locale })")
+  })
+
+  it("16. Verifies loopback server resolves locale with strict 5-tier priority (url lang -> completed -> pending -> accept-language -> en)", () => {
+    const fs = require("fs")
+    const path = require("path")
+    const mainContent = fs.readFileSync(path.join(__dirname, "main.cjs"), "utf8")
+
+    expect(mainContent).toContain('const VALID_LOCALES = ["es", "en", "pt", "fr"]')
+    expect(mainContent).toContain('const urlLang = String(url.searchParams.get("lang") || "").toLowerCase().trim()')
+    expect(mainContent).toContain("completedOAuthStates.has(callbackState)")
+    expect(mainContent).toContain("completedOAuthStates.get(callbackState)")
+    expect(mainContent).toContain("authStore.peekPendingOAuth(callbackState)")
+    expect(mainContent).toContain('req.headers["accept-language"]')
+  })
+
+  it("17. Verifies loopback script uses history.replaceState to retain ?lang= in browser URL", () => {
+    const fs = require("fs")
+    const path = require("path")
+    const mainContent = fs.readFileSync(path.join(__dirname, "main.cjs"), "utf8")
+
+    expect(mainContent).toContain("const resolvedLang =")
+    expect(mainContent).toContain('currentUrl.searchParams.set("lang", resolvedLang)')
+    expect(mainContent).toContain("window.history.replaceState")
   })
 })
 

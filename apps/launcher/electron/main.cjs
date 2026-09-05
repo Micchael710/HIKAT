@@ -434,7 +434,7 @@ async function createWindow() {
 }
 
 let pendingDeepLinkUrl = null
-const completedOAuthStates = new Set()
+const completedOAuthStates = new Map()
 
 function extractDeepLinkFromArgs(args) {
   if (!Array.isArray(args)) return null
@@ -588,31 +588,55 @@ function startOAuthLoopbackServer() {
         "\\u003c",
       )
 
-    // Idioma: 1. Guardado por Launcher para este state; 2. Accept-Language; 3. en fallback
-    let savedLocale = null
-    if (callbackState && authStore && typeof authStore.peekPendingOAuth === "function") {
-      const pending = authStore.peekPendingOAuth(callbackState)
-      if (pending && pending.locale) {
-        savedLocale = pending.locale
+    // Idioma: 1. lang explícito en URL; 2. OAuth completed guardado; 3. pending OAuth; 4. Accept-Language; 5. en fallback
+    const VALID_LOCALES = ["es", "en", "pt", "fr"]
+
+    const urlLang = String(url.searchParams.get("lang") || "").toLowerCase().trim()
+    let resolvedLanguage = null
+    if (VALID_LOCALES.includes(urlLang)) {
+      resolvedLanguage = urlLang
+    }
+
+    if (!resolvedLanguage && callbackState && completedOAuthStates.has(callbackState)) {
+      const completedData = completedOAuthStates.get(callbackState)
+      const completedLocale = completedData?.locale ? String(completedData.locale).toLowerCase().trim() : null
+      if (completedLocale && VALID_LOCALES.includes(completedLocale)) {
+        resolvedLanguage = completedLocale
       }
     }
 
-    const acceptLanguage = String(
-      req.headers["accept-language"] || "",
-    ).toLowerCase()
-
-    let language = "en"
-    if (savedLocale && ["es", "en", "pt", "fr"].includes(savedLocale.toLowerCase())) {
-      language = savedLocale.toLowerCase()
-    } else if (acceptLanguage.startsWith("es")) {
-      language = "es"
-    } else if (acceptLanguage.startsWith("pt")) {
-      language = "pt"
-    } else if (acceptLanguage.startsWith("fr")) {
-      language = "fr"
-    } else {
-      language = "en"
+    if (!resolvedLanguage && callbackState && authStore && typeof authStore.peekPendingOAuth === "function") {
+      const pending = authStore.peekPendingOAuth(callbackState)
+      const pendingLocale = pending?.locale ? String(pending.locale).toLowerCase().trim() : null
+      if (pendingLocale && VALID_LOCALES.includes(pendingLocale)) {
+        resolvedLanguage = pendingLocale
+      }
     }
+
+    if (!resolvedLanguage) {
+      const acceptLanguage = String(req.headers["accept-language"] || "").toLowerCase()
+      if (acceptLanguage.startsWith("es")) {
+        resolvedLanguage = "es"
+      } else if (acceptLanguage.startsWith("pt")) {
+        resolvedLanguage = "pt"
+      } else if (acceptLanguage.startsWith("fr")) {
+        resolvedLanguage = "fr"
+      } else if (acceptLanguage.startsWith("en")) {
+        resolvedLanguage = "en"
+      }
+    }
+
+    if (!resolvedLanguage) {
+      resolvedLanguage = "en"
+    }
+
+    const language = resolvedLanguage
+
+    const serializedLanguage =
+      JSON.stringify(language).replace(
+        /</g,
+        "\\u003c",
+      )
 
     const translations = {
       es: {
@@ -1043,6 +1067,17 @@ function startOAuthLoopbackServer() {
 
             const t =
               ${serializedCopy};
+
+            const resolvedLang =
+              ${serializedLanguage};
+
+            try {
+              const currentUrl = new URL(window.location.href);
+              if (currentUrl.searchParams.get("lang") !== resolvedLang) {
+                currentUrl.searchParams.set("lang", resolvedLang);
+                window.history.replaceState({}, "", currentUrl.toString());
+              }
+            } catch (_) { }
 
             const status =
               document.getElementById("status");
@@ -1502,7 +1537,14 @@ ipcMain.handle("auth:get-pending-oauth", async (_event, state) => {
 
 ipcMain.handle("auth:mark-oauth-completed", async (_event, state) => {
   if (state && typeof state === "string") {
-    completedOAuthStates.add(state)
+    let locale = undefined
+    if (authStore && typeof authStore.peekPendingOAuth === "function") {
+      const pending = authStore.peekPendingOAuth(state)
+      if (pending && pending.locale) {
+        locale = pending.locale
+      }
+    }
+    completedOAuthStates.set(state, { locale })
     setTimeout(() => {
       completedOAuthStates.delete(state)
     }, 60_000)

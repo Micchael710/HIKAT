@@ -961,6 +961,47 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
 
     expect(clearPendingMock).toHaveBeenCalled()
   })
+
+  it("28. Table-driven: register, forgot-password, resend-verification, and initiateOAuth propagate ES/EN/PT/FR", async () => {
+    const locales = ["es", "en", "pt", "fr"] as const
+
+    for (const loc of locales) {
+      // 1. requestPasswordReset
+      let resetPayload: any = null
+      let resendPayload: any = null
+      mockFetch.mockImplementation(async (url: string, opts: any) => {
+        if (url.includes("/auth/forgot-password")) {
+          resetPayload = JSON.parse(opts.body)
+          return { ok: true, status: 200, json: async () => ({ success: true }) }
+        }
+        if (url.includes("/auth/resend-verification")) {
+          resendPayload = JSON.parse(opts.body)
+          return { ok: true, status: 200, json: async () => ({ success: true }) }
+        }
+        return { ok: false, status: 404, json: async () => ({}) }
+      })
+
+      await authService.requestPasswordReset("test@hikat.org", loc)
+      expect(resetPayload.locale).toBe(loc)
+
+      await authService.requestEmailVerification("test@hikat.org", loc)
+      expect(resendPayload.locale).toBe(loc)
+
+      // 2. initiateOAuth
+      const savePendingMock = vi.fn()
+      ;(window as any).electronAPI = {
+        authSavePendingOAuth: savePendingMock,
+      }
+      const { state } = await authService.initiateOAuth("DISCORD", true, loc)
+      expect(savePendingMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "DISCORD",
+          locale: loc,
+          state,
+        }),
+      )
+    }
+  })
 })
 
 

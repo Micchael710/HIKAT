@@ -32,7 +32,7 @@ import {
   verifyGameToken,
   getJwksResponse,
 } from "./crypto/jwt"
-import { MockEmailService, ResendEmailService, renderHikatEmail } from "./services/email"
+import { MockEmailService, ResendEmailService, renderHikatEmail, EMAIL_TRANSLATIONS } from "./services/email"
 import { createEmailServiceFromEnv } from "./index"
 import { checkRateLimit, clearInMemoryRateLimits } from "./services/rateLimiter"
 import {
@@ -2563,6 +2563,57 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         const verifyRes = await verifyEmailToken(db, pendingToken)
         expect(verifyRes.success).toBe(true)
         expect(await getEmailActionStatus(db, "verify-email", pendingToken)).toBe("completed")
+      })
+
+      it("Table-driven: register, resend, and password reset propagate locale to Resend with exact subject, body, html lang, and &lang= URL", async () => {
+        const locales: ("es" | "en" | "pt" | "fr")[] = ["es", "en", "pt", "fr"]
+        const resendMock = {
+          sent: [] as Array<{ to: string; subject: string; html: string }>,
+        }
+        const customResend = new ResendEmailService("test-key", "HiKAT <noreply@mail.hikat.org>", (async (
+          _url: string,
+          init: any,
+        ) => {
+          const body = JSON.parse(init.body)
+          resendMock.sent.push({ to: body.to[0], subject: body.subject, html: body.html })
+          return { ok: true, status: 200, json: async () => ({ id: "msg_123" }) } as any
+        }) as any)
+
+        for (const loc of locales) {
+          // 1. Register with locale
+          const regEmail = `user-${loc}@hikat.org`
+          await registerWithPassword(
+            db,
+            { email: regEmail, password: "Password123!", locale: loc },
+            customResend,
+            "https://auth.hikat.org",
+          )
+          const lastVerify = resendMock.sent.find((e) => e.to === regEmail)!
+          expect(lastVerify).toBeDefined()
+          expect(lastVerify.html).toContain(`lang="${loc}"`)
+          expect(lastVerify.html).toContain(`&lang=${loc}`)
+          expect(lastVerify.subject).toBe(EMAIL_TRANSLATIONS[loc].verification.subject)
+          expect(lastVerify.html).toContain(EMAIL_TRANSLATIONS[loc].verification.buttonText)
+          expect(lastVerify.html).toContain(EMAIL_TRANSLATIONS[loc].verification.expiryNotice)
+
+          // 2. Resend verification with locale
+          await resendVerificationEmail(db, regEmail, customResend, "https://auth.hikat.org", loc)
+          const allVerify = resendMock.sent.filter((e) => e.to === regEmail)
+          const lastResend = allVerify[allVerify.length - 1]!
+          expect(lastResend.html).toContain(`lang="${loc}"`)
+          expect(lastResend.html).toContain(`&lang=${loc}`)
+          expect(lastResend.subject).toBe(EMAIL_TRANSLATIONS[loc].verification.subject)
+
+          // 3. Request password reset with locale
+          await requestPasswordReset(db, regEmail, customResend, "https://auth.hikat.org", loc)
+          const allForUser = resendMock.sent.filter((e) => e.to === regEmail)
+          const lastReset = allForUser[allForUser.length - 1]!
+          expect(lastReset.html).toContain(`lang="${loc}"`)
+          expect(lastReset.html).toContain(`&lang=${loc}`)
+          expect(lastReset.subject).toBe(EMAIL_TRANSLATIONS[loc].passwordReset.subject)
+          expect(lastReset.html).toContain(EMAIL_TRANSLATIONS[loc].passwordReset.buttonText)
+          expect(lastReset.html).toContain(EMAIL_TRANSLATIONS[loc].passwordReset.expiryNotice)
+        }
       })
     })
   })
