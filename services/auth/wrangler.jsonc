@@ -8,6 +8,16 @@
     "nodejs_compat"
   ],
   "workers_dev": false,
+  "vars": {
+    "ENVIRONMENT": "production",
+    "AUTH_SERVICE_ENDPOINT": "https://auth.hikat.org",
+    "AUTH_JWT_KID": "hikat-prod-key-1",
+    "GOOGLE_CLIENT_ID": "83020174882-jsoh32a4n7ct9bn733ebor6r2mkkcpf3.apps.googleusercontent.com",
+    "DISCORD_CLIENT_ID": "1544169716183080981",
+    "EMAIL_FROM": "HiKAT <noreply@mail.hikat.org>"
+  }
+
+
   "assets": {
     "directory": "./public"
   },
