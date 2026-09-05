@@ -194,60 +194,12 @@ export async function rotateRefreshToken(
   // Fetch canonical user email
   const userEmail = await getUserEmail(db, userRecord.id)
 
-  // 6. Atomic conditional update to mark token as consumed
-  // Ensures that two concurrent requests with the exact same token cannot both succeed.
-  const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
-
-  if (d1) {
-    const updateResult = await d1
-      .prepare(
-        `UPDATE session_refresh_tokens
-         SET consumed_at = ?
-         WHERE id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
-      )
-      .bind(nowIso, tokenRecord.id, nowIso)
-      .run()
-
-    if (updateResult.meta.changes === 0) {
-      // Race condition detected: another request consumed the token first.
-      await revokeSession(db, tokenRecord.sessionId)
-      throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
-    }
-  } else {
-    // Drizzle fallback
-    const res = await db
-      .update(schema.sessionRefreshTokens)
-      .set({ consumedAt: nowIso })
-      .where(
-        and(
-          eq(schema.sessionRefreshTokens.id, tokenRecord.id),
-          sql`${schema.sessionRefreshTokens.consumedAt} IS NULL`,
-          sql`${schema.sessionRefreshTokens.revokedAt} IS NULL`,
-          sql`${schema.sessionRefreshTokens.expiresAt} > ${nowIso}`,
-        ),
-      )
-      .run()
-
-    if (res.meta.changes === 0) {
-      await revokeSession(db, tokenRecord.sessionId)
-      throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
-    }
-  }
-
-  // 7. Generate new opaque refresh token for the same session
+  // 6. Prepare replacement tokens and signed Access JWT in memory BEFORE modifying D1
+  // If generation or crypto signing throws, the existing refresh token remains intact.
   const newRawRefreshToken = generateSecureToken(32)
   const newTokenHash = await hashToken(newRawRefreshToken)
   const newTokenId = crypto.randomUUID()
 
-  await db.insert(schema.sessionRefreshTokens).values({
-    id: newTokenId,
-    sessionId: tokenRecord.sessionId,
-    tokenHash: newTokenHash,
-    createdAt: nowIso,
-    expiresAt: session.expiresAt,
-  })
-
-  // 8. Sign new Access JWT
   const user = {
     id: userRecord.id,
     email: userEmail,
@@ -266,6 +218,65 @@ export async function rotateRefreshToken(
     keyManager,
     { expiresInSeconds: DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS },
   )
+
+  // 7. Atomic conditional rotation in D1
+  const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
+
+  if (d1) {
+    const updateStmt = d1
+      .prepare(
+        `UPDATE session_refresh_tokens
+         SET consumed_at = ?
+         WHERE id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+      )
+      .bind(nowIso, tokenRecord.id, nowIso)
+
+    const insertStmt = d1
+      .prepare(
+        `INSERT INTO session_refresh_tokens (id, session_id, token_hash, created_at, expires_at)
+         SELECT ?, ?, ?, ?, ?
+         WHERE (SELECT changes() = 1)`,
+      )
+      .bind(newTokenId, tokenRecord.sessionId, newTokenHash, nowIso, session.expiresAt)
+
+    const batchResults = await d1.batch([updateStmt, insertStmt])
+    const updateChanges = batchResults[0]?.meta?.changes ?? 0
+
+    if (updateChanges === 0) {
+      // Race condition detected: another request consumed or revoked the token first.
+      await revokeSession(db, tokenRecord.sessionId)
+      throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+    }
+  } else {
+    // Fallback without raw D1: insert replacement before consuming the previous token,
+    // then execute CAS on previous token.
+    await db.insert(schema.sessionRefreshTokens).values({
+      id: newTokenId,
+      sessionId: tokenRecord.sessionId,
+      tokenHash: newTokenHash,
+      createdAt: nowIso,
+      expiresAt: session.expiresAt,
+    })
+
+    const res = await db
+      .update(schema.sessionRefreshTokens)
+      .set({ consumedAt: nowIso })
+      .where(
+        and(
+          eq(schema.sessionRefreshTokens.id, tokenRecord.id),
+          sql`${schema.sessionRefreshTokens.consumedAt} IS NULL`,
+          sql`${schema.sessionRefreshTokens.revokedAt} IS NULL`,
+          sql`${schema.sessionRefreshTokens.expiresAt} > ${nowIso}`,
+        ),
+      )
+      .run()
+
+    const changes = (res as any)?.meta?.changes ?? (res as any)?.changes ?? 0
+    if (changes === 0) {
+      await revokeSession(db, tokenRecord.sessionId)
+      throw new Error(AuthErrorCode.TOKEN_REUSE_DETECTED)
+    }
+  }
 
   return {
     accessToken,

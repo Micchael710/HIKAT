@@ -1547,6 +1547,113 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(data.user.role).toBe("PLAYER")
     })
 
+    it("failure during token preparation/signing leaves old refresh token unconsumed and valid", async () => {
+      await registerAndVerify(
+        { email: "prep-fail@hikat.org", password: "Password123!" },
+      )
+      const session = await loginWithPassword(
+        db,
+        { email: "prep-fail@hikat.org", password: "Password123!" },
+        keyManager,
+      )
+
+      const brokenKeyManager = {
+        kid: "broken",
+        sign: () => {
+          throw new Error("JWT_SIGNING_FAILURE")
+        },
+      } as any
+
+      await expect(
+        rotateRefreshToken(db, session.refreshToken, brokenKeyManager),
+      ).rejects.toThrow()
+
+      // Verify that old token is NOT consumed in database
+      const oldHash = await hashToken(session.refreshToken)
+      const tokenRec = await db
+        .select()
+        .from(schema.sessionRefreshTokens)
+        .where(eq(schema.sessionRefreshTokens.tokenHash, oldHash))
+        .get()
+
+      expect(tokenRec?.consumedAt).toBeNull()
+      expect(tokenRec?.revokedAt).toBeNull()
+
+      // Subsequent rotation with working keyManager succeeds
+      const rotated = await rotateRefreshToken(db, session.refreshToken, keyManager)
+      expect(rotated.accessToken).toBeDefined()
+      expect(rotated.refreshToken).toBeDefined()
+    })
+
+    it("failure during D1 batch insertion transaction rolls back and leaves old token unconsumed", async () => {
+      await registerAndVerify(
+        { email: "batch-fail@hikat.org", password: "Password123!" },
+      )
+      const session = await loginWithPassword(
+        db,
+        { email: "batch-fail@hikat.org", password: "Password123!" },
+        keyManager,
+      )
+
+      const d1 = (db as unknown as { session: { client: any } }).session?.client
+      if (d1) {
+        const originalBatch = d1.batch
+        d1.batch = async () => {
+          throw new Error("D1_BATCH_EXECUTION_FAILURE")
+        }
+
+        await expect(
+          rotateRefreshToken(db, session.refreshToken, keyManager),
+        ).rejects.toThrow("D1_BATCH_EXECUTION_FAILURE")
+
+        d1.batch = originalBatch
+
+        // Verify that old token is NOT consumed in database
+        const oldHash = await hashToken(session.refreshToken)
+        const tokenRec = await db
+          .select()
+          .from(schema.sessionRefreshTokens)
+          .where(eq(schema.sessionRefreshTokens.tokenHash, oldHash))
+          .get()
+
+        expect(tokenRec?.consumedAt).toBeNull()
+        expect(tokenRec?.revokedAt).toBeNull()
+
+        // Rotating again succeeds
+        const rotated = await rotateRefreshToken(db, session.refreshToken, keyManager)
+        expect(rotated.refreshToken).toBeDefined()
+      }
+    })
+
+    it("reusing old refresh token after successful rotation triggers replay detection and revokes session", async () => {
+      await registerAndVerify(
+        { email: "replay-test@hikat.org", password: "Password123!" },
+      )
+      const initialSession = await loginWithPassword(
+        db,
+        { email: "replay-test@hikat.org", password: "Password123!" },
+        keyManager,
+      )
+
+      // Step 1: Rotate Token A -> Token B (success)
+      const sessionB = await rotateRefreshToken(db, initialSession.refreshToken, keyManager)
+      expect(sessionB.refreshToken).toBeDefined()
+      expect(sessionB.sessionId).toBe(initialSession.sessionId)
+
+      // Step 2: Attempt to reuse old Token A -> Triggers replay attack detection
+      await expect(
+        rotateRefreshToken(db, initialSession.refreshToken, keyManager),
+      ).rejects.toThrow(AuthErrorCode.TOKEN_REUSE_DETECTED)
+
+      // Step 3: Entire session is now revoked; attempting rotation with Token B fails
+      await expect(
+        rotateRefreshToken(db, sessionB.refreshToken, keyManager),
+      ).rejects.toThrow()
+
+      const isSessionActive = await validateActiveSession(db, initialSession.sessionId, initialSession.user.id)
+      expect(isSessionActive).toBe(false)
+    })
+
     it("handles canonical /auth/forgot-password HTTP endpoint", async () => {
       await registerWithPassword(
         db,

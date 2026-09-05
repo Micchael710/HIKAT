@@ -45,19 +45,37 @@ export function createTestD1(): D1Database & { _sqlite: DatabaseSync } {
         },
         async all<T = unknown>(): Promise<D1Result<T>> {
           const stmt = sqlite.prepare(query)
-          const results = (stmt as any).all(...boundParams) as T[]
+          let results: T[] = []
+          let changes = 0
+          let lastInsertRowid = 0
+          try {
+            results = (stmt as any).all(...boundParams) as T[]
+          } catch {
+            const res = (stmt as any).run(...boundParams)
+            changes = Number(res.changes)
+            lastInsertRowid = Number(res.lastInsertRowid)
+          }
+          if (changes === 0) {
+            try {
+              const cRow = (sqlite as any).prepare("SELECT changes() AS c, last_insert_rowid() AS id").get() as any
+              if (cRow) {
+                changes = Number(cRow.c)
+                lastInsertRowid = Number(cRow.id)
+              }
+            } catch (_) {}
+          }
           return {
             results,
             success: true,
             meta: {
               served_by: "test-d1",
               duration: 0,
-              changes: 0,
-              last_row_id: 0,
-              changed_db: false,
+              changes,
+              last_row_id: lastInsertRowid,
+              changed_db: changes > 0,
               size_after: 0,
               rows_read: results.length,
-              rows_written: 0,
+              rows_written: changes,
             },
           }
         },
