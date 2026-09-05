@@ -31,9 +31,7 @@ import {
   changePassword,
   getOrCreateOAuthUser,
   resolveOAuthUser,
-  getLinkedAuthMethods,
-  linkOAuthAccount,
-  unlinkAuthMethod,
+  getAuthMethods,
   issueGameToken,
   getEmailActionStatus,
 } from "./services/auth"
@@ -45,7 +43,6 @@ import {
 } from "./services/session"
 import {
   isAllowedRedirectUri,
-  isAllowedLinkRedirectUri,
   createOAuthState,
   consumeOAuthState,
   createAuthorizationCode,
@@ -1108,7 +1105,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       })
     }
 
-    // 12. Get Linked Auth Methods (authenticated)
+    // 12. Get Auth Methods (authenticated read-only)
     if (pathname === "/auth/me/methods" && method === "GET") {
       const session = await extractAuthenticatedSession(request, keyManager)
       const isSessionActive = await validateActiveSession(db, session.sessionId, session.userId)
@@ -1116,23 +1113,11 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         return errorResponse(AuthErrorCode.UNAUTHORIZED, "Session expired or revoked", 401)
       }
 
-      const methods = await getLinkedAuthMethods(db, session.userId)
+      const methods = await getAuthMethods(db, session.userId)
       return jsonResponse({ methods })
     }
 
-    // 13. Unlink Auth Provider (authenticated)
-    if (pathname.startsWith("/auth/me/methods/") && method === "DELETE") {
-      const provider = pathname.slice("/auth/me/methods/".length).toUpperCase() as ExternalAuthProvider
-      if (provider !== "GOOGLE" && provider !== "DISCORD") {
-        return errorResponse(AuthErrorCode.INVALID_CREDENTIALS, "Invalid auth provider", 400)
-      }
-
-      const session = await extractAuthenticatedSession(request, keyManager)
-      await unlinkAuthMethod(db, session.userId, session.sessionId, provider)
-      return jsonResponse({ success: true, message: `Unlinked ${provider} successfully` })
-    }
-
-    // 14. Launcher / Browser OAuth Authorization Initiation (PKCE Flow)
+    // 13. Launcher / Browser OAuth Authorization Initiation (PKCE Flow)
     if (pathname === "/oauth/authorize" && method === "GET") {
       const responseType = url.searchParams.get("response_type")
       const redirectUri = url.searchParams.get("redirect_uri")
@@ -1191,58 +1176,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       return errorResponse("INVALID_PROVIDER", "Invalid OAuth provider", 400)
     }
 
-    // 15. Start OAuth Account Link flow (authenticated)
-    if (pathname.startsWith("/oauth/link/") && method === "GET" && !pathname.includes("/callback")) {
-      const provider = pathname.slice("/oauth/link/".length).toUpperCase() as ExternalAuthProvider
-      if (provider !== "GOOGLE" && provider !== "DISCORD") {
-        return errorResponse("INVALID_PROVIDER", "Invalid OAuth provider", 400)
-      }
-
-      const session = await extractAuthenticatedSession(request, keyManager)
-      const isSessionActive = await validateActiveSession(db, session.sessionId, session.userId)
-      if (!isSessionActive) {
-        return errorResponse(AuthErrorCode.UNAUTHORIZED, "Session expired or revoked", 401)
-      }
-
-      const redirectUri = url.searchParams.get("redirect_uri")
-      if (!redirectUri || !isAllowedLinkRedirectUri(redirectUri)) {
-        return errorResponse(
-          AuthErrorCode.INVALID_REDIRECT_URI,
-          "A registered, valid redirect_uri is required for account linking",
-          400,
-        )
-      }
-
-      const clientState = url.searchParams.get("state") || undefined
-
-      const internalState = await createOAuthState(db, {
-        flowType: "LINK",
-        provider,
-        userId: session.userId,
-        sessionId: session.sessionId,
-        clientState,
-        redirectUri,
-      })
-
-      const callbackPath = provider === "GOOGLE" ? "/oauth/google/callback" : "/oauth/discord/callback"
-      const authUrl = provider === "GOOGLE"
-        ? new URL("https://accounts.google.com/o/oauth2/v2/auth")
-        : new URL("https://discord.com/api/oauth2/authorize")
-
-      const clientId = provider === "GOOGLE"
-        ? (env.GOOGLE_CLIENT_ID || "google-client-id-placeholder")
-        : (env.DISCORD_CLIENT_ID || "discord-client-id-placeholder")
-
-      authUrl.searchParams.set("client_id", clientId)
-      authUrl.searchParams.set("redirect_uri", `${authServiceUrl}${callbackPath}`)
-      authUrl.searchParams.set("response_type", "code")
-      authUrl.searchParams.set("scope", provider === "GOOGLE" ? "openid email profile" : "identify email")
-      authUrl.searchParams.set("state", internalState)
-
-      return redirectResponse(authUrl.toString())
-    }
-
-    // 16. Google OAuth Callback
+    // 14. Google OAuth Callback
     if (pathname === "/oauth/google/callback" && method === "GET") {
       const code = url.searchParams.get("code")
       const state = url.searchParams.get("state")
@@ -1264,30 +1198,6 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         },
         oauthFetcher,
       )
-
-      // Handle LINK flow with active session verification
-      if (oauthState.flowType === "LINK") {
-        if (!oauthState.userId || !oauthState.sessionId) {
-          return errorResponse(AuthErrorCode.UNAUTHORIZED, "Invalid linking state", 401)
-        }
-
-        const isSessionActive = await validateActiveSession(db, oauthState.sessionId, oauthState.userId)
-        if (!isSessionActive) {
-          return errorResponse(AuthErrorCode.UNAUTHORIZED, "Linking session expired or was revoked", 401)
-        }
-
-        await linkOAuthAccount(db, oauthState.userId, oauthState.sessionId, profile)
-        if (oauthState.redirectUri) {
-          const redirectUrl = new URL(oauthState.redirectUri)
-          redirectUrl.searchParams.set("linked", "google")
-          redirectUrl.searchParams.set("success", "true")
-          if (oauthState.clientState) {
-            redirectUrl.searchParams.set("state", oauthState.clientState)
-          }
-          return redirectResponse(redirectUrl.toString())
-        }
-        return jsonResponse({ success: true, provider: "GOOGLE", message: "Google account linked successfully" })
-      }
 
       // Handle LAUNCHER flow: generate short HiKAT authorization code bound to PKCE (NO intermediate session created!)
       if (oauthState.flowType === "LAUNCHER" && oauthState.redirectUri && oauthState.codeChallenge) {
@@ -1334,7 +1244,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       })
     }
 
-    // 17. Discord OAuth Callback
+    // 15. Discord OAuth Callback
     if (pathname === "/oauth/discord/callback" && method === "GET") {
       const code = url.searchParams.get("code")
       const state = url.searchParams.get("state")
@@ -1356,30 +1266,6 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         },
         oauthFetcher,
       )
-
-      // Handle LINK flow with active session verification
-      if (oauthState.flowType === "LINK") {
-        if (!oauthState.userId || !oauthState.sessionId) {
-          return errorResponse(AuthErrorCode.UNAUTHORIZED, "Invalid linking state", 401)
-        }
-
-        const isSessionActive = await validateActiveSession(db, oauthState.sessionId, oauthState.userId)
-        if (!isSessionActive) {
-          return errorResponse(AuthErrorCode.UNAUTHORIZED, "Linking session expired or was revoked", 401)
-        }
-
-        await linkOAuthAccount(db, oauthState.userId, oauthState.sessionId, profile)
-        if (oauthState.redirectUri) {
-          const redirectUrl = new URL(oauthState.redirectUri)
-          redirectUrl.searchParams.set("linked", "discord")
-          redirectUrl.searchParams.set("success", "true")
-          if (oauthState.clientState) {
-            redirectUrl.searchParams.set("state", oauthState.clientState)
-          }
-          return redirectResponse(redirectUrl.toString())
-        }
-        return jsonResponse({ success: true, provider: "DISCORD", message: "Discord account linked successfully" })
-      }
 
       // Handle LAUNCHER flow: generate short HiKAT authorization code bound to PKCE (NO intermediate session created!)
       if (oauthState.flowType === "LAUNCHER" && oauthState.redirectUri && oauthState.codeChallenge) {
@@ -1511,13 +1397,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       return errorResponse(AuthErrorCode.EMAIL_NOT_VERIFIED, "Email verification is required before signing in", 403)
     }
     if (errorString === AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED) {
-      return errorResponse(AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED, "An account with this email exists. Please log in and link account explicitly.", 409)
-    }
-    if (errorString === AuthErrorCode.LAST_AUTH_METHOD) {
-      return errorResponse(AuthErrorCode.LAST_AUTH_METHOD, "Cannot unlink the last remaining authentication method", 400)
-    }
-    if (errorString === AuthErrorCode.PROVIDER_ALREADY_LINKED) {
-      return errorResponse(AuthErrorCode.PROVIDER_ALREADY_LINKED, "This external account is already linked to another user", 409)
+      return errorResponse(AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED, "An account with this email exists. Please sign in using the method you used to create your account.", 409)
     }
     if (errorString === AuthErrorCode.TOKEN_REUSE_DETECTED) {
       return errorResponse(AuthErrorCode.TOKEN_REUSE_DETECTED, "Security alert: token reuse detected. Session has been revoked.", 401)

@@ -52,7 +52,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-05-10T12:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "steve@hikat.org" }],
     })
@@ -88,7 +88,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-02-18T10:30:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "alex@hikat.org" }],
     })
@@ -120,7 +120,7 @@ describe("Launcher ProfileView Component", () => {
       email: "nodate@hikat.org",
       role: "PLAYER",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "nodate@hikat.org" }],
     })
@@ -148,7 +148,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-01-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "pass@hikat.org" }],
     })
@@ -163,7 +163,7 @@ describe("Launcher ProfileView Component", () => {
       </LanguageProvider>,
     )
 
-    // Flush async getLinkedMethods
+    // Flush async getAuthMethods
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10))
     })
@@ -186,7 +186,7 @@ describe("Launcher ProfileView Component", () => {
     const methodsPromise = new Promise((resolve) => {
       resolveMethods = resolve
     })
-    vi.spyOn(authService, "getLinkedMethods").mockReturnValue(methodsPromise as any)
+    vi.spyOn(authService, "getAuthMethods").mockReturnValue(methodsPromise as any)
 
     const container = await renderComponent(
       <LanguageProvider>
@@ -213,7 +213,7 @@ describe("Launcher ProfileView Component", () => {
     })
 
     expect(container.textContent).not.toContain("Enviar correo de restablecimiento")
-    expect(container.textContent).toContain("Métodos de Acceso Vinculados")
+    expect(container.textContent).toContain("Método de Acceso")
     expect(container.textContent).toContain("Google")
   })
 
@@ -231,7 +231,7 @@ describe("Launcher ProfileView Component", () => {
     const methodsPromise = new Promise((resolve) => {
       resolveMethods = resolve
     })
-    vi.spyOn(authService, "getLinkedMethods").mockReturnValue(methodsPromise as any)
+    vi.spyOn(authService, "getAuthMethods").mockReturnValue(methodsPromise as any)
 
     const container = await renderComponent(
       <LanguageProvider>
@@ -257,38 +257,37 @@ describe("Launcher ProfileView Component", () => {
     })
 
     expect(container.textContent).not.toContain("Enviar correo de restablecimiento")
-    expect(container.textContent).toContain("Métodos de Acceso Vinculados")
+    expect(container.textContent).toContain("Método de Acceso")
     expect(container.textContent).toContain("Discord")
   })
 
-  it("7. Account with PASSWORD + OAuth (Google/Discord) shows reset password button after resolving", async () => {
+  it("7. Account with PASSWORD shows reset password button after resolving", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-7",
-      username: "HybridUser",
-      displayName: "HybridUser",
-      email: "hybrid@hikat.org",
+      username: "PassUser2",
+      displayName: "PassUser2",
+      email: "pass2@hikat.org",
       role: "PLAYER",
       createdAt: "2024-01-15T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [
-        { type: "PASSWORD", email: "hybrid@hikat.org" },
-        { type: "GOOGLE", email: "hybrid@gmail.com" },
+        { type: "PASSWORD", email: "pass2@hikat.org" },
       ],
     })
 
     const container = await renderComponent(
       <LanguageProvider>
         <ProfileView
-          username="HybridUser"
+          username="PassUser2"
           onBack={vi.fn()}
           theme="dark"
         />
       </LanguageProvider>,
     )
 
-    // Flush async getLinkedMethods
+    // Flush async getAuthMethods
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10))
     })
@@ -297,7 +296,7 @@ describe("Launcher ProfileView Component", () => {
     expect(container.textContent).toContain("Enviar correo de restablecimiento")
   })
 
-  it("8. Failure of getLinkedMethods does not show reset password button by default", async () => {
+  it("8. Failure of getAuthMethods does not show reset password button by default", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-8",
       username: "ErrorUser",
@@ -306,7 +305,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-01-15T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockRejectedValue(new Error("Network failed"))
+    vi.spyOn(authService, "getAuthMethods").mockRejectedValue(new Error("Network failed"))
 
     const container = await renderComponent(
       <LanguageProvider>
@@ -337,7 +336,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-01-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "logout@hikat.org" }],
     })
@@ -370,7 +369,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-01-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "click@hikat.org" }],
     })
@@ -415,7 +414,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-01-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "resetuser@hikat.org" }],
     })
@@ -455,7 +454,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-01-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "cooldown@hikat.org" }],
     })
@@ -493,7 +492,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-01-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "toast@hikat.org" }],
     })
@@ -544,7 +543,7 @@ describe("Launcher ProfileView Component", () => {
       role: "PLAYER",
       createdAt: "2024-01-01T00:00:00.000Z",
     })
-    vi.spyOn(authService, "getLinkedMethods").mockResolvedValue({
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
       methods: [{ type: "PASSWORD", email: "ratelimited@hikat.org" }],
     })

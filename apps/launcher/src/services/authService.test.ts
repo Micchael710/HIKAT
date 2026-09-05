@@ -782,7 +782,7 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(cached?.createdAt).toBe(testCreatedAt)
   })
 
-  it("21. getLinkedMethods fetches /auth/me/methods with valid Bearer token and returns linked auth methods", async () => {
+  it("21. getAuthMethods fetches /auth/me/methods with valid Bearer token and returns auth methods", async () => {
     const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }))
     const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))
     const validToken = `${header}.${payload}.sig`
@@ -812,7 +812,6 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
           json: async () => ({
             methods: [
               { type: "PASSWORD", email: "methods@hikat.org", verified: true },
-              { type: "GOOGLE", email: "methods@gmail.com", displayName: "Google Account" },
             ],
           }),
         }
@@ -820,11 +819,10 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
       return { ok: false, status: 404, json: async () => ({}) }
     })
 
-    const res = await authService.getLinkedMethods()
+    const res = await authService.getAuthMethods()
     expect(res.success).toBe(true)
-    expect(res.methods).toHaveLength(2)
+    expect(res.methods).toHaveLength(1)
     expect(res.methods![0].type).toBe("PASSWORD")
-    expect(res.methods![1].type).toBe("GOOGLE")
   })
 
   it("22. verifyEmail validates and sends exact Base64URL token containing '--' and '_' without stripping characters", async () => {

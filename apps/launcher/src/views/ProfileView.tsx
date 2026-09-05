@@ -5,7 +5,7 @@ import MinecraftHead from "../components/minecraft/MinecraftHead"
 import LiveToast from "../components/common/LiveToast"
 import { useTranslation } from "../context/LanguageContext"
 
-import { authService, LinkedAuthMethod } from "../services/authService"
+import { authService, AuthMethodSummary } from "../services/authService"
 
 interface ProfileViewProps {
   username: string
@@ -51,7 +51,7 @@ export default function ProfileView({
     }
   }, [user?.createdAt, language])
 
-  const [authMethods, setAuthMethods] = useState<LinkedAuthMethod[] | null>(null)
+  const [authMethods, setAuthMethods] = useState<AuthMethodSummary[] | null>(null)
   const [loadingMethods, setLoadingMethods] = useState(true)
   const [methodsError, setMethodsError] = useState(false)
 
@@ -60,7 +60,7 @@ export default function ProfileView({
     setLoadingMethods(true)
     setMethodsError(false)
     authService
-      .getLinkedMethods()
+      .getAuthMethods()
       .then((res) => {
         if (active) {
           if (res.success && res.methods) {
@@ -82,13 +82,12 @@ export default function ProfileView({
     }
   }, [])
 
-  const hasPassword = Boolean(
-    !loadingMethods && authMethods?.some((m) => m.type === "PASSWORD"),
-  )
-  const externalMethods = useMemo(() => {
-    if (loadingMethods || !authMethods) return []
-    return authMethods.filter((m) => m.type === "GOOGLE" || m.type === "DISCORD")
+  const activeMethod = useMemo(() => {
+    if (loadingMethods || !authMethods || authMethods.length === 0) return null
+    return authMethods[0]
   }, [loadingMethods, authMethods])
+
+  const hasPassword = Boolean(!loadingMethods && activeMethod?.type === "PASSWORD")
 
   const [resetState, setResetState] = useState<"idle" | "sending">("idle")
   const [resetCooldown, setResetCooldown] = useState(() =>
@@ -806,9 +805,9 @@ export default function ProfileView({
                         flexWrap: "wrap",
                       }}
                     >
-                      {externalMethods.map((m) => (
+                      {activeMethod && (
                         <div
-                          key={m.type}
+                          key={activeMethod.type}
                           style={{
                             display: "flex",
                             alignItems: "center",
@@ -826,7 +825,7 @@ export default function ProfileView({
                             flexShrink: 0,
                           }}
                         >
-                          {m.type === "GOOGLE" && (
+                          {activeMethod.type === "GOOGLE" && (
                             <svg width={16} height={16} viewBox="0 0 24 24">
                               <path
                                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -846,7 +845,7 @@ export default function ProfileView({
                               />
                             </svg>
                           )}
-                          {m.type === "DISCORD" && (
+                          {activeMethod.type === "DISCORD" && (
                             <svg
                               width={16}
                               height={16}
@@ -857,14 +856,14 @@ export default function ProfileView({
                             </svg>
                           )}
                           <span>
-                            {m.type === "GOOGLE"
+                            {activeMethod.type === "GOOGLE"
                               ? t("profile.providerGoogle")
-                              : m.type === "DISCORD"
+                              : activeMethod.type === "DISCORD"
                                 ? t("profile.providerDiscord")
-                                : m.type}
+                                : activeMethod.type}
                           </span>
                         </div>
-                      ))}
+                      )}
                     </div>
                   )}
                 </>

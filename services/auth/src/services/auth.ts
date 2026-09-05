@@ -53,14 +53,20 @@ export async function registerWithPassword(
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
-  // Check if user already exists
+  // Check if user already exists in password_credentials or external_accounts
   const existingCred = await db
-    .select()
+    .select({ id: schema.passwordCredentials.id })
     .from(schema.passwordCredentials)
     .where(eq(schema.passwordCredentials.email, normalizedEmail))
     .get()
 
-  if (existingCred) {
+  const existingExternal = await db
+    .select({ id: schema.externalAccounts.id })
+    .from(schema.externalAccounts)
+    .where(eq(schema.externalAccounts.email, normalizedEmail))
+    .get()
+
+  if (existingCred || existingExternal) {
     throw new Error(AuthErrorCode.USER_ALREADY_EXISTS)
   }
 
@@ -693,7 +699,7 @@ export async function getOrCreateOAuthUser(
   db: Database,
   profile: OAuthProviderProfile,
 ): Promise<{ id: string; email: string; role: AppRole; displayName: string | null; createdAt?: string }> {
-  // 1. Check if external account is already linked
+  // 1. Check if external identity already exists for this provider
   const linkedAccount = await db
     .select({
       extId: schema.externalAccounts.id,
@@ -723,34 +729,35 @@ export async function getOrCreateOAuthUser(
     }
   }
 
-  // 2. If not linked, check if the email belongs to an existing HiKAT account
-  if (profile.email) {
+  // 2. If not existing identity, check if email already belongs to a HiKAT account
+  const normalizedEmail = profile.email ? profile.email.trim().toLowerCase() : null
+  if (normalizedEmail) {
     const existingPasswordUser = await db
       .select({ userId: schema.passwordCredentials.userId })
       .from(schema.passwordCredentials)
-      .where(eq(schema.passwordCredentials.email, profile.email))
+      .where(eq(schema.passwordCredentials.email, normalizedEmail))
       .get()
 
     const existingExternalUser = await db
       .select({ userId: schema.externalAccounts.userId })
       .from(schema.externalAccounts)
-      .where(eq(schema.externalAccounts.email, profile.email))
+      .where(eq(schema.externalAccounts.email, normalizedEmail))
       .get()
 
     if (existingPasswordUser || existingExternalUser) {
-      // DO NOT AUTO-LINK! Require explicit authentication + linking to prevent account takeover.
+      // 1 user = 1 identity = 1 auth method. Reject conflicting registrations across different methods.
       throw new Error(AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED)
     }
   }
 
-  // 3. Create fresh HiKAT user with role PLAYER and link provider
+  // 3. Create fresh HiKAT user with role PLAYER and store external identity
   const userId = crypto.randomUUID()
   const now = new Date().toISOString()
 
   const newUser: schema.NewUser = {
     id: userId,
     role: "PLAYER",
-    displayName: profile.displayName || profile.email?.split("@")[0] || "Player",
+    displayName: profile.displayName || normalizedEmail?.split("@")[0] || "Player",
     createdAt: now,
     updatedAt: now,
   }
@@ -762,7 +769,7 @@ export async function getOrCreateOAuthUser(
     userId,
     provider: profile.provider,
     providerSubject: profile.providerSubject,
-    email: profile.email,
+    email: normalizedEmail,
     displayName: profile.displayName,
     avatarUrl: profile.avatarUrl,
     createdAt: now,
@@ -771,7 +778,7 @@ export async function getOrCreateOAuthUser(
 
   return {
     id: userId,
-    email: profile.email || "",
+    email: normalizedEmail || "",
     role: "PLAYER" as AppRole,
     displayName: newUser.displayName ?? null,
     createdAt: now,
@@ -791,9 +798,9 @@ export async function resolveOAuthUser(
 }
 
 /**
- * Get all linked authentication methods for a user
+ * Get active authentication method(s) for a user (Read-only)
  */
-export async function getLinkedAuthMethods(
+export async function getAuthMethods(
   db: Database,
   userId: string,
 ): Promise<AuthMethodSummary[]> {
@@ -811,6 +818,7 @@ export async function getLinkedAuthMethods(
       type: "PASSWORD",
       email: passwordCred.email,
       verified: passwordCred.emailVerifiedAt !== null,
+      createdAt: passwordCred.createdAt,
       linkedAt: passwordCred.createdAt,
     })
   }
@@ -828,94 +836,12 @@ export async function getLinkedAuthMethods(
       email: ext.email,
       displayName: ext.displayName,
       providerSubject: ext.providerSubject,
+      createdAt: ext.createdAt,
       linkedAt: ext.createdAt,
     })
   }
 
   return methods
-}
-
-/**
- * Explicitly link an OAuth provider to an existing authenticated user
- */
-export async function linkOAuthAccount(
-  db: Database,
-  userId: string,
-  sessionId: string,
-  profile: OAuthProviderProfile,
-): Promise<void> {
-  // 1. Verify active session in D1
-  const isSessionActive = await validateActiveSession(db, sessionId, userId)
-  if (!isSessionActive) {
-    throw new Error(AuthErrorCode.UNAUTHORIZED)
-  }
-
-  // 2. Check if provider account is already linked to anyone
-  const existing = await db
-    .select()
-    .from(schema.externalAccounts)
-    .where(
-      and(
-        eq(schema.externalAccounts.provider, profile.provider),
-        eq(schema.externalAccounts.providerSubject, profile.providerSubject),
-      ),
-    )
-    .get()
-
-  if (existing) {
-    throw new Error(AuthErrorCode.PROVIDER_ALREADY_LINKED)
-  }
-
-  // 3. Link account
-  const now = new Date().toISOString()
-  await db.insert(schema.externalAccounts).values({
-    id: crypto.randomUUID(),
-    userId,
-    provider: profile.provider,
-    providerSubject: profile.providerSubject,
-    email: profile.email,
-    displayName: profile.displayName,
-    avatarUrl: profile.avatarUrl,
-    createdAt: now,
-    updatedAt: now,
-  })
-}
-
-/**
- * Unlink an authentication provider (prevent removing last auth method)
- */
-export async function unlinkAuthMethod(
-  db: Database,
-  userId: string,
-  sessionId: string,
-  provider: ExternalAuthProvider,
-): Promise<void> {
-  // 1. Verify active session in D1
-  const isSessionActive = await validateActiveSession(db, sessionId, userId)
-  if (!isSessionActive) {
-    throw new Error(AuthErrorCode.UNAUTHORIZED)
-  }
-
-  // 2. Count total available auth methods
-  const methods = await getLinkedAuthMethods(db, userId)
-  if (methods.length <= 1) {
-    throw new Error(AuthErrorCode.LAST_AUTH_METHOD)
-  }
-
-  // 3. Delete the external account
-  const res = await db
-    .delete(schema.externalAccounts)
-    .where(
-      and(
-        eq(schema.externalAccounts.userId, userId),
-        eq(schema.externalAccounts.provider, provider),
-      ),
-    )
-    .run()
-
-  if (res.meta.changes === 0) {
-    throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
-  }
 }
 
 /**

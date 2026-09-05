@@ -237,7 +237,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       callbackTrigger!("hikat://auth/callback?error=EMAIL_CONFLICT_LINK_REQUIRED")
     })
 
-    expect(container.textContent).toContain("Este correo electrónico ya está registrado")
+    expect(container.textContent).toContain("Este correo ya pertenece a una cuenta de HiKAT")
     expect(onLogin).not.toHaveBeenCalled()
   })
 

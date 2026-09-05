@@ -29,7 +29,7 @@ export default function LoginView({ theme, setTheme }: LoginViewProps) {
 
     if (error) {
       if (error === "EMAIL_CONFLICT_LINK_REQUIRED") {
-        setErrorMessage("Este correo ya está registrado. Por favor inicia sesión con tu contraseña.")
+        setErrorMessage("Este correo ya pertenece a una cuenta de HiKAT. Inicia sesión usando el método con el que creaste la cuenta.")
       } else {
         setErrorMessage("Error de autenticación con el proveedor OAuth.")
       }

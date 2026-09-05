@@ -52,9 +52,7 @@ import {
   getEmailActionStatus,
   changePassword,
   resolveOAuthUser,
-  getLinkedAuthMethods,
-  linkOAuthAccount,
-  unlinkAuthMethod,
+  getAuthMethods,
   issueGameToken,
 } from "./services/auth"
 import {
@@ -533,7 +531,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(session1.sessionId).not.toBe(session2.sessionId)
     })
 
-    it("requires explicit account linking if OAuth email matches an existing password account", async () => {
+    it("blocks registration or login if email matches an existing account with another auth method", async () => {
       // 1. User registers with Password first
       await registerWithPassword(
         db,
@@ -542,7 +540,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       )
 
       // 2. Someone tries to authenticate via Google using the same email address
-      const maliciousGoogleProfile = {
+      const conflictingGoogleProfile = {
         provider: "GOOGLE" as const,
         providerSubject: "google-overlap-sub",
         email: "overlap@hikat.org",
@@ -551,95 +549,152 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         avatarUrl: null,
       }
 
-      // Must REJECT auto-link and require explicit login + linking
-      await expect(resolveOAuthUser(db, maliciousGoogleProfile, keyManager)).rejects.toThrow(
+      // Must REJECT and not create or auto-link
+      await expect(resolveOAuthUser(db, conflictingGoogleProfile, keyManager)).rejects.toThrow(
         AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED,
       )
-    })
 
-    it("allows explicit linking of Google and Discord to an authenticated account", async () => {
-      // 1. Register with password
-      await registerAndVerify(
-        { email: "linker@hikat.org", password: "password123" },
-      )
-      const session = await loginWithPassword(
-        db,
-        { email: "linker@hikat.org", password: "password123" },
-        keyManager,
-      )
-
-      // 2. Explicitly link Google
-      await linkOAuthAccount(db, session.user.id, session.sessionId, {
-        provider: "GOOGLE",
-        providerSubject: "google-sub-link-1",
-        email: "linker.google@gmail.com",
+      // 3. Someone tries to authenticate via Discord using the same email address
+      const conflictingDiscordProfile = {
+        provider: "DISCORD" as const,
+        providerSubject: "discord-overlap-sub",
+        email: "overlap@hikat.org",
         emailVerified: true,
-        displayName: "Linker Google",
-        avatarUrl: null,
-      })
-
-      // 3. Explicitly link Discord
-      await linkOAuthAccount(db, session.user.id, session.sessionId, {
-        provider: "DISCORD",
-        providerSubject: "discord-id-link-1",
-        email: "linker.discord@discord.gg",
-        emailVerified: true,
-        displayName: "Linker Discord",
-        avatarUrl: null,
-      })
-
-      // 4. Check linked methods
-      const methods = await getLinkedAuthMethods(db, session.user.id)
-      expect(methods.length).toBe(3)
-      expect(methods.map((m) => m.type).sort()).toEqual(["DISCORD", "GOOGLE", "PASSWORD"])
-    })
-
-    it("prevents unlinking the last remaining authentication method", async () => {
-      // Create user with ONLY Google OAuth
-      const profile = {
-        provider: "GOOGLE" as const,
-        providerSubject: "google-solo-user",
-        email: "solo@gmail.com",
-        emailVerified: true,
-        displayName: "Solo User",
+        displayName: "Overlap Discord",
         avatarUrl: null,
       }
-      const session = await resolveOAuthUser(db, profile, keyManager)
 
-      const methodsBefore = await getLinkedAuthMethods(db, session.user.id)
-      expect(methodsBefore.length).toBe(1)
+      await expect(resolveOAuthUser(db, conflictingDiscordProfile, keyManager)).rejects.toThrow(
+        AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED,
+      )
 
-      // Attempt to unlink Google -> MUST FAIL
-      await expect(
-        unlinkAuthMethod(db, session.user.id, session.sessionId, "GOOGLE"),
-      ).rejects.toThrow(AuthErrorCode.LAST_AUTH_METHOD)
+      // 4. Verify exactly 1 method exists (PASSWORD)
+      const users = await db.select().from(schema.users).all()
+      expect(users.length).toBe(1)
+      const primaryUser = users[0]!
+      const methods = await getAuthMethods(db, primaryUser.id)
+      expect(methods.length).toBe(1)
+      expect(methods[0]!.type).toBe("PASSWORD")
     })
 
-    it("allows unlinking an authentication method when multiple methods exist", async () => {
-      await registerAndVerify(
-        { email: "multi@hikat.org", password: "password123" },
-      )
-      const session = await loginWithPassword(
-        db,
-        { email: "multi@hikat.org", password: "password123" },
-        keyManager,
-      )
-
-      await linkOAuthAccount(db, session.user.id, session.sessionId, {
-        provider: "DISCORD",
-        providerSubject: "discord-multi-1",
-        email: "multi@discord.gg",
+    it("prevents creating a PASSWORD account if email is already used by an OAuth account (Google)", async () => {
+      // 1. Create Google OAuth account
+      const googleProfile = {
+        provider: "GOOGLE" as const,
+        providerSubject: "google-primary-sub",
+        email: "googleuser@hikat.org",
         emailVerified: true,
-        displayName: "Multi",
+        displayName: "Google User",
         avatarUrl: null,
-      })
+      }
+      const session = await resolveOAuthUser(db, googleProfile, keyManager)
+      expect(session.user.email).toBe("googleuser@hikat.org")
 
-      // Unlink Discord
-      await unlinkAuthMethod(db, session.user.id, session.sessionId, "DISCORD")
+      // 2. Attempt to register password account with same email -> MUST FAIL with USER_ALREADY_EXISTS
+      await expect(
+        registerWithPassword(
+          db,
+          { email: "googleuser@hikat.org", password: "Password123!", displayName: "Hacker" },
+          emailService,
+        ),
+      ).rejects.toThrow(AuthErrorCode.USER_ALREADY_EXISTS)
 
-      const methodsAfter = await getLinkedAuthMethods(db, session.user.id)
-      expect(methodsAfter.length).toBe(1)
-      expect(methodsAfter[0]?.type).toBe("PASSWORD")
+      // Verify no second user was created
+      const allUsers = await db.select().from(schema.users).all()
+      expect(allUsers.length).toBe(1)
+    })
+
+    it("prevents creating a Discord OAuth account if email is already used by a Google account", async () => {
+      // 1. Create Google account
+      const googleProfile = {
+        provider: "GOOGLE" as const,
+        providerSubject: "google-first-sub",
+        email: "cross-oauth@hikat.org",
+        emailVerified: true,
+        displayName: "Cross OAuth",
+        avatarUrl: null,
+      }
+      await resolveOAuthUser(db, googleProfile, keyManager)
+
+      // 2. Attempt Discord login with same email -> MUST FAIL with EMAIL_CONFLICT_LINK_REQUIRED
+      const discordProfile = {
+        provider: "DISCORD" as const,
+        providerSubject: "discord-second-sub",
+        email: "cross-oauth@hikat.org",
+        emailVerified: true,
+        displayName: "Discord Impostor",
+        avatarUrl: null,
+      }
+      await expect(resolveOAuthUser(db, discordProfile, keyManager)).rejects.toThrow(
+        AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED,
+      )
+
+      const allUsers = await db.select().from(schema.users).all()
+      expect(allUsers.length).toBe(1)
+    })
+
+    it("prevents creating a Google OAuth account if email is already used by a Discord account", async () => {
+      // 1. Create Discord account
+      const discordProfile = {
+        provider: "DISCORD" as const,
+        providerSubject: "discord-first-sub",
+        email: "discord-first@hikat.org",
+        emailVerified: true,
+        displayName: "Discord First",
+        avatarUrl: null,
+      }
+      await resolveOAuthUser(db, discordProfile, keyManager)
+
+      // 2. Attempt Google login with same email -> MUST FAIL with EMAIL_CONFLICT_LINK_REQUIRED
+      const googleProfile = {
+        provider: "GOOGLE" as const,
+        providerSubject: "google-second-sub",
+        email: "discord-first@hikat.org",
+        emailVerified: true,
+        displayName: "Google Second",
+        avatarUrl: null,
+      }
+      await expect(resolveOAuthUser(db, googleProfile, keyManager)).rejects.toThrow(
+        AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED,
+      )
+
+      const allUsers = await db.select().from(schema.users).all()
+      expect(allUsers.length).toBe(1)
+    })
+
+    it("GET /auth/me/methods is read-only and returns exactly one method for each account type", async () => {
+      // 1. Password account
+      await registerAndVerify({ email: "pass-only@hikat.org", password: "password123" })
+      const passSession = await loginWithPassword(db, { email: "pass-only@hikat.org", password: "password123" }, keyManager)
+      const passMethods = await getAuthMethods(db, passSession.user.id)
+      expect(passMethods.length).toBe(1)
+      expect(passMethods[0]!.type).toBe("PASSWORD")
+
+      // 2. Google account
+      const googleSession = await resolveOAuthUser(db, {
+        provider: "GOOGLE",
+        providerSubject: "g-sub-read",
+        email: "google-only@hikat.org",
+        emailVerified: true,
+        displayName: "Google Only",
+        avatarUrl: null,
+      }, keyManager)
+      const googleMethods = await getAuthMethods(db, googleSession.user.id)
+      expect(googleMethods.length).toBe(1)
+      expect(googleMethods[0]!.type).toBe("GOOGLE")
+
+      // 3. Discord account
+      const discordSession = await resolveOAuthUser(db, {
+        provider: "DISCORD",
+        providerSubject: "d-sub-read",
+        email: "discord-only@hikat.org",
+        emailVerified: true,
+        displayName: "Discord Only",
+        avatarUrl: null,
+      }, keyManager)
+      const discordMethods = await getAuthMethods(db, discordSession.user.id)
+      expect(discordMethods.length).toBe(1)
+      expect(discordMethods[0]!.type).toBe("DISCORD")
     })
   })
 
@@ -1085,42 +1140,19 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         },
       }
 
-      // 2. Start link flow
-      const linkReq = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://app.hikat.org/settings&state=client-link-state", {
+      // 2. Removed linking endpoints return 404
+      const linkReq = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://app.hikat.org/settings", {
         headers: { Authorization: `Bearer ${session.accessToken}` },
       })
       const linkRes = await handleRequest({ request: linkReq, env: {}, db, keyManager, emailService })
-      expect(linkRes.status).toBe(302)
-      const location = linkRes.headers.get("Location")!
-      const locationUrl = new URL(location)
-      const internalState = locationUrl.searchParams.get("state")!
-      expect(internalState).toBeDefined()
+      expect(linkRes.status).toBe(404)
 
-      // 3. Complete callback with active session -> success
-      const cbReq = new Request(`http://localhost:8788/oauth/google/callback?code=mock-google-code&state=${internalState}`)
-      const cbRes = await handleRequest({ request: cbReq, env: {}, db, keyManager, emailService, oauthFetcher: mockOAuthFetcher })
-      expect(cbRes.status).toBe(302)
-      const cbLocation = new URL(cbRes.headers.get("Location")!)
-      expect(cbLocation.searchParams.get("linked")).toBe("google")
-      expect(cbLocation.searchParams.get("success")).toBe("true")
-      expect(cbLocation.searchParams.get("state")).toBe("client-link-state")
-
-      // 4. Start second link flow, but revoke the session before callback
-      const linkReq2 = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://app.hikat.org/settings", {
+      const unlinkReq = new Request("http://localhost:8788/auth/me/methods/google", {
+        method: "DELETE",
         headers: { Authorization: `Bearer ${session.accessToken}` },
       })
-      const linkRes2 = await handleRequest({ request: linkReq2, env: {}, db, keyManager, emailService })
-      const internalState2 = new URL(linkRes2.headers.get("Location")!).searchParams.get("state")!
-
-      // Revoke session in D1
-      await revokeSession(db, session.sessionId)
-
-      // Callback should now be rejected because the linking session is revoked!
-      const cbReq2 = new Request(`http://localhost:8788/oauth/google/callback?code=mock-google-code&state=${internalState2}`)
-      const cbRes2 = await handleRequest({ request: cbReq2, env: {}, db, keyManager, emailService, oauthFetcher: mockOAuthFetcher })
-      expect(cbRes2.status).toBe(401)
-      const cbData2 = (await cbRes2.json()) as { error: string }
-      expect(cbData2.error).toBe(AuthErrorCode.UNAUTHORIZED)
+      const unlinkRes = await handleRequest({ request: unlinkReq, env: {}, db, keyManager, emailService })
+      expect(unlinkRes.status).toBe(404)
     })
 
     it("preserves client state parameter in Launcher PKCE flow and rejects tampered state", async () => {
@@ -1354,33 +1386,6 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(invalidRes.status).toBe(400)
     })
 
-    it("enforces strict allowlist for /oauth/link/:provider redirect_uri", async () => {
-      await registerAndVerify({ email: "link-allowlist@hikat.org", password: "password123" })
-      const session = await loginWithPassword(db, { email: "link-allowlist@hikat.org", password: "password123" }, keyManager)
-
-      // 1. Rejects unallowed redirect_uri
-      const invalidReq = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://malicious-phishing.com/steal", {
-        headers: { Authorization: `Bearer ${session.accessToken}` },
-      })
-      const invalidRes = await handleRequest({ request: invalidReq, env: {}, db, keyManager, emailService })
-      expect(invalidRes.status).toBe(400)
-      const invalidData = (await invalidRes.json()) as { error: string }
-      expect(invalidData.error).toBe(AuthErrorCode.INVALID_REDIRECT_URI)
-
-      // 2. Rejects missing redirect_uri
-      const missingReq = new Request("http://localhost:8788/oauth/link/google", {
-        headers: { Authorization: `Bearer ${session.accessToken}` },
-      })
-      const missingRes = await handleRequest({ request: missingReq, env: {}, db, keyManager, emailService })
-      expect(missingRes.status).toBe(400)
-
-      // 3. Accepts registered allowlisted redirect_uri
-      const validReq = new Request("http://localhost:8788/oauth/link/google?redirect_uri=https://app.hikat.org/settings", {
-        headers: { Authorization: `Bearer ${session.accessToken}` },
-      })
-      const validRes = await handleRequest({ request: validReq, env: {}, db, keyManager, emailService })
-      expect(validRes.status).toBe(302)
-    })
 
     it("known errors continue returning their expected error codes, messages, and statuses", async () => {
       const loginReq = new Request("http://localhost:8788/auth/login", {

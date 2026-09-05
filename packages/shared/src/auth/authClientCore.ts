@@ -575,7 +575,7 @@ export class AuthClientCore {
       const errCode = data.error || data.message
       if (errCode === "EMAIL_CONFLICT_LINK_REQUIRED") {
         throw new Error(
-          "Este correo electrónico ya está registrado con otro método de autenticación. Por favor inicia sesión con tu contraseña.",
+          "Este correo ya pertenece a una cuenta de HiKAT. Inicia sesión usando el método con el que creaste la cuenta.",
         )
       }
       if (errCode === "INVALID_STATE" || errCode === "INVALID_PKCE") {

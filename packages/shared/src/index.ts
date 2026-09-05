@@ -32,17 +32,6 @@ export const ALLOWED_REDIRECT_URIS = [
   "https://app.hikat.org/auth/callback",
 ] as const
 
-export const ALLOWED_LINK_REDIRECT_URIS = [
-  "https://app.hikat.org/settings",
-  "https://app.hikat.org/account",
-  "https://admin.hikat.org/settings",
-  "http://localhost:5173/settings",
-  "http://127.0.0.1:5173/settings",
-  "http://localhost:5174/settings",
-  "http://127.0.0.1:5174/settings",
-  "hikat://settings/accounts",
-] as const
-
 export * from "./auth/pkce"
 export * from "./auth/authClientCore"
 
@@ -77,7 +66,8 @@ export interface AuthMethodSummary {
   displayName?: string | null
   providerSubject?: string | null
   verified?: boolean
-  linkedAt: string
+  createdAt?: string
+  linkedAt?: string
 }
 
 export const AuthErrorCode = {
@@ -90,8 +80,6 @@ export const AuthErrorCode = {
   ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
   RATE_LIMITED: "RATE_LIMITED",
   EMAIL_CONFLICT_LINK_REQUIRED: "EMAIL_CONFLICT_LINK_REQUIRED",
-  LAST_AUTH_METHOD: "LAST_AUTH_METHOD",
-  PROVIDER_ALREADY_LINKED: "PROVIDER_ALREADY_LINKED",
   INVALID_PKCE: "INVALID_PKCE",
   INVALID_STATE: "INVALID_STATE",
   INVALID_REDIRECT_URI: "INVALID_REDIRECT_URI",

@@ -2,9 +2,9 @@
 
 ## 1. Identity Model & Accounts
 
-HiKAT cuenta con un sistema propio y unificado de cuentas internas. Cada persona posee exactamente un registro en la tabla `users` (con `id`, `displayName`, `role`, `createdAt`, `updatedAt`).
+HiKAT cuenta con un sistema propio y unificado de cuentas internas bajo el principio arquitectónico: **1 usuario = 1 identidad = 1 método de autenticación**. Cada persona posee exactamente un registro en la tabla `users` (con `id`, `displayName`, `role`, `createdAt`, `updatedAt`).
 
-Los métodos de autenticación soportados que resuelven a la misma entidad `User` son:
+Los métodos de autenticación soportados son mutuamente excluyentes por cuenta:
 1. **Email + Contraseña**: Registrado en `password_credentials` (`userId`, `email`, `passwordHash`, `isEmailVerified`, `verifiedAt`).
 2. **Google OAuth / OIDC**: Registrado en `external_accounts` (`userId`, `provider = 'GOOGLE'`, `providerSubject`, `email`, `emailVerified`, `displayName`, `avatarUrl`).
 3. **Discord OAuth2**: Registrado en `external_accounts` (`userId`, `provider = 'DISCORD'`, `providerSubject`, `email`, `emailVerified`, `displayName`, `avatarUrl`).
@@ -15,11 +15,10 @@ Los métodos de autenticación soportados que resuelven a la misma entidad `User
 
 No se utiliza RBAC complejo ni permisos adicionales.
 
-### Prevención de Account Takeover
-Si un proveedor OAuth (Google o Discord) reporta un correo electrónico que ya coincide con una cuenta existente, **NO** se vincula automáticamente la cuenta externa. El sistema rechaza el intento con `ACCOUNT_EXISTS` y requiere que el usuario inicie sesión con su credencial principal existente y realice la vinculación explícita (`/auth/me/methods`).
-
-### Regla de Último Método de Autenticación
-Un usuario nunca puede desvincular su último método de autenticación restante. Siempre debe conservarse al menos una credencial válida (contraseña o cuenta externa vinculada).
+### Prevención de Conflictos de Identidad y Exclusividad de Método
+- Una cuenta HiKAT solo puede tener un único método de autenticación a lo largo de su ciclo de vida. No se permite la vinculación ni combinación de métodos en una misma cuenta.
+- Si un usuario intenta registrarse con contraseña utilizando un correo electrónico que ya pertenece a una cuenta creada mediante Google o Discord, el registro es rechazado (`USER_ALREADY_EXISTS`).
+- Si un usuario intenta autenticarse mediante Google o Discord con un correo electrónico que ya pertenece a una cuenta existente creada con otro método (contraseña u otro proveedor OAuth), el sistema rechaza el intento (`EMAIL_CONFLICT_LINK_REQUIRED`) indicando que debe iniciar sesión utilizando el método con el que originalmente creó su cuenta.
 
 ---
 
@@ -117,8 +116,7 @@ Launcher (Electron)             HiKAT Auth Service            External Provider 
 | `POST` | `/auth/refresh` | Rotación de refresh token | Refresh Token |
 | `POST` | `/auth/logout` | Revocación de sesión en D1 | Bearer JWT |
 | `POST` | `/auth/game-token` | Emisión de Game JWT de corta duración (3 min) | Bearer JWT + D1 sid check |
-| `GET` | `/auth/me/methods` | Lista de métodos de autenticación vinculados | Bearer JWT + D1 sid check |
-| `DELETE` | `/auth/me/methods/:provider` | Desvinculación de método (con guard de último método) | Bearer JWT + D1 sid check |
+| `GET` | `/auth/me/methods` | Consulta de método de autenticación activo (read-only) | Bearer JWT + D1 sid check |
 | `GET` | `/oauth/authorize` | Inicio de flujo PKCE OAuth para clientes | Pública |
 | `GET` | `/oauth/google/callback` | Callback de Google OAuth2/OIDC | Pública |
 | `GET` | `/oauth/discord/callback` | Callback de Discord OAuth2 | Pública |
@@ -154,9 +152,3 @@ Para el despliegue final en producción de `services/auth`, se deben aprovisiona
   - `hikat://auth/callback`
   - `http://localhost:5173/auth/callback`
   - `http://127.0.0.1:5173/auth/callback`
-- **Account Linking / Portal (`ALLOWED_LINK_REDIRECT_URIS`)**:
-  - `https://app.hikat.org/settings`
-  - `https://app.hikat.org/account`
-  - `http://localhost:5173/settings`
-  - `http://127.0.0.1:5173/settings`
-  - `hikat://settings/accounts`

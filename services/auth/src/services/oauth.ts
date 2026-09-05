@@ -6,7 +6,6 @@ import { eq, and, sql } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   ALLOWED_REDIRECT_URIS,
-  ALLOWED_LINK_REDIRECT_URIS,
   AuthErrorCode,
   ExternalAuthProvider,
 } from "@hikat/shared"
@@ -47,30 +46,13 @@ export function isAllowedRedirectUri(
 }
 
 /**
- * Validate redirect URI against strict allowed list for Account Linking / Web Portal
- */
-export function isAllowedLinkRedirectUri(
-  uri: string,
-  customAllowedList?: readonly string[],
-): boolean {
-  if (!uri || typeof uri !== "string") {
-    return false
-  }
-
-  const allowedList = customAllowedList || ALLOWED_LINK_REDIRECT_URIS
-  return allowedList.includes(uri as (typeof ALLOWED_LINK_REDIRECT_URIS)[number])
-}
-
-/**
  * Create an OAuth State record in D1
  */
 export async function createOAuthState(
   db: Database,
   params: {
-    flowType: "LOGIN" | "LINK" | "LAUNCHER"
+    flowType: "LOGIN" | "LAUNCHER"
     provider?: ExternalAuthProvider
-    userId?: string
-    sessionId?: string
     clientState?: string
     redirectUri?: string
     codeChallenge?: string
@@ -86,10 +68,10 @@ export async function createOAuthState(
   await db.insert(schema.oauthStates).values({
     id: stateId,
     clientState: params.clientState || null,
-    sessionId: params.sessionId || null,
+    sessionId: null,
     flowType: params.flowType,
     provider: params.provider || null,
-    userId: params.userId || null,
+    userId: null,
     redirectUri: params.redirectUri || null,
     codeChallenge: params.codeChallenge || null,
     codeChallengeMethod: params.codeChallengeMethod || "S256",

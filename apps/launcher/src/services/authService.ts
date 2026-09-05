@@ -9,6 +9,7 @@ import {
   AuthStorageAdapter,
   SessionState,
   AuthStatus,
+  AuthMethodSummary,
   generateCodeVerifier,
   generateCodeChallenge,
   generateRandomState,
@@ -26,13 +27,7 @@ export interface UserProfile {
   createdAt?: string
 }
 
-export interface LinkedAuthMethod {
-  type: "PASSWORD" | "GOOGLE" | "DISCORD"
-  email?: string
-  displayName?: string
-  verified?: boolean
-  linkedAt?: string
-}
+export type { AuthMethodSummary }
 
 export interface LoginCredentials {
   email: string
@@ -625,7 +620,7 @@ class LauncherAuthService {
     }
   }
 
-  public async getLinkedMethods(): Promise<{ success: boolean; methods?: LinkedAuthMethod[]; error?: string }> {
+  public async getAuthMethods(): Promise<{ success: boolean; methods?: AuthMethodSummary[]; error?: string }> {
     try {
       const token = await this.ensureValidAccessToken()
       if (!token) {

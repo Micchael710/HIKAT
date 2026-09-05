@@ -47,10 +47,10 @@ export const oauthStates = sqliteTable(
   {
     id: text("id").primaryKey(), // Internal State token sent to Google/Discord
     clientState: text("client_state"), // Original client state sent by Launcher/Web
-    sessionId: text("session_id").references(() => sessions.id, { onDelete: "cascade" }), // Active session initiating a LINK flow
+    sessionId: text("session_id").references(() => sessions.id, { onDelete: "cascade" }),
     codeChallenge: text("code_challenge"),
     codeChallengeMethod: text("code_challenge_method"),
-    flowType: text("flow_type").notNull(), // 'LOGIN' | 'LINK' | 'LAUNCHER'
+    flowType: text("flow_type").notNull(), // 'LOGIN' | 'LAUNCHER'
     provider: text("provider"), // 'GOOGLE' | 'DISCORD'
     userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
     redirectUri: text("redirect_uri"),
