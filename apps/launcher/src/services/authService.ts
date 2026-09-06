@@ -13,6 +13,7 @@ import {
   generateCodeVerifier,
   generateCodeChallenge,
   generateRandomState,
+  isValidUsername,
 } from "@hikat/shared"
 import { sanitizeUsername, sanitizeEmail, sanitizeInput } from "../utils/security"
 
@@ -21,7 +22,8 @@ export const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || "http://localhost:8
 export interface UserProfile {
   id: string
   username: string
-  displayName?: string
+  displayName?: string | null
+  suggestedUsername?: string
   email: string
   role?: string
   createdAt?: string
@@ -254,15 +256,22 @@ class LauncherAuthService {
     retryAfterSeconds?: number
     error?: string
   }> {
-    const cleanUsername = sanitizeUsername(credentials.username)
+    const rawUsername = typeof credentials.username === "string" ? credentials.username.trim() : ""
     const cleanEmail = sanitizeEmail(credentials.email)
     const password = credentials.password || ""
     const locale = credentials.locale
 
-    if (!cleanEmail || !password) {
+    if (!rawUsername || !cleanEmail || !password) {
       return {
         success: false,
-        error: "El correo electrónico y la contraseña son obligatorios.",
+        error: "Todos los campos son obligatorios.",
+      }
+    }
+
+    if (!isValidUsername(rawUsername)) {
+      return {
+        success: false,
+        error: "El nombre de usuario debe tener entre 3 y 16 caracteres y solo contener letras, números y guion bajo.",
       }
     }
 
@@ -274,7 +283,7 @@ class LauncherAuthService {
     }
 
     try {
-      const res = await this.client.register(cleanEmail, password, cleanUsername, locale)
+      const res = await this.client.register(cleanEmail, password, rawUsername, locale)
       if (res.emailVerificationRequired) {
         const retryAfter = res.retryAfterSeconds ?? 60
         this.setCooldown("verify", cleanEmail, retryAfter)
@@ -283,8 +292,8 @@ class LauncherAuthService {
         success: true,
         user: {
           id: res.user.id,
-          username: res.user.displayName || cleanUsername || cleanEmail.split("@")[0],
-          displayName: res.user.displayName || cleanUsername || cleanEmail.split("@")[0],
+          username: res.user.displayName || rawUsername,
+          displayName: res.user.displayName || rawUsername,
           email: res.user.email,
           role: res.user.role,
           createdAt: res.user.createdAt,
@@ -598,7 +607,8 @@ class LauncherAuthService {
       return {
         id: user.id,
         username: user.displayName || user.email.split("@")[0] || "Jugador",
-        displayName: user.displayName || user.email.split("@")[0] || "Jugador",
+        displayName: user.displayName || null,
+        suggestedUsername: user.suggestedUsername,
         email: user.email,
         role: user.role,
         createdAt: user.createdAt,

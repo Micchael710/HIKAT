@@ -1022,7 +1022,7 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     })
 
     const res = await authService.register({
-      username: "RegCooldownPlayer",
+      username: "RegCooldown",
       email: "regcooldown@hikat.org",
       password: "password123",
     })

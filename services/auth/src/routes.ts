@@ -1436,12 +1436,28 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
         keyManager,
       )
 
+      // Look up external account to obtain visual suggestion for onboarding if user has no display_name yet
+      const extAccount = await db
+        .select({ displayName: schema.externalAccounts.displayName, email: schema.externalAccounts.email })
+        .from(schema.externalAccounts)
+        .where(eq(schema.externalAccounts.userId, user.id))
+        .get()
+
+      const rawSuggestion = extAccount?.displayName || (session.user.email ? session.user.email.split("@")[0] : "")
+      const suggestedUsername = rawSuggestion
+        ? rawSuggestion.replace(/[^A-Za-z0-9_]/g, "").slice(0, 16)
+        : undefined
+
       return jsonResponse({
         accessToken: session.accessToken,
         refreshToken: session.refreshToken,
         expiresIn: session.expiresIn,
         tokenType: "Bearer",
-        user: session.user,
+        user: {
+          ...session.user,
+          suggestedUsername,
+        },
+        suggestedUsername,
       })
     }
 

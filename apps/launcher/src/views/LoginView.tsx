@@ -7,6 +7,7 @@ import { useTranslation } from "../context/LanguageContext"
 import {
   sanitizeUsername,
   sanitizeEmail,
+  isValidUsername,
 } from "../utils/security"
 import { authService } from "../services/authService"
 
@@ -17,7 +18,7 @@ interface LoginViewProps {
   onConsumeInitialDeepLink?: () => void
 }
 
-type AuthMode = "auth" | "forgot-password" | "verify-email" | "reset-password"
+type AuthMode = "auth" | "forgot-password" | "verify-email" | "reset-password" | "choose-username"
 
 function formatCountdown(seconds: number): string {
   const m = Math.floor(Math.max(0, seconds) / 60)
@@ -46,6 +47,8 @@ export default function LoginView({
   const [confirmPassword, setConfirmPassword] = useState("")
   const [isResettingPassword, setIsResettingPassword] = useState(false)
   const [isResendingVerification, setIsResendingVerification] = useState(false)
+  const [onboardingUsername, setOnboardingUsername] = useState("")
+  const [isSubmittingUsername, setIsSubmittingUsername] = useState(false)
   const [keepSession, setKeepSession] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successNotice, setSuccessNotice] = useState<string | null>(null)
@@ -140,8 +143,19 @@ export default function LoginView({
           sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
         }
 
+        if (!user.displayName || user.displayName.trim() === "") {
+          setIsEnteringWorld(false)
+          const rawSuggestion = user.suggestedUsername || (user.email ? user.email.split("@")[0] : "")
+          const suggestion = sanitizeUsername(rawSuggestion)
+          setOnboardingUsername(suggestion)
+          setMode("choose-username")
+          setErrorMessage(null)
+          setSuccessNotice(null)
+          return
+        }
+
         setTimeout(() => {
-          onLogin(user.displayName || user.username)
+          onLogin(user.displayName!)
         }, 350)
         return
       }
@@ -290,12 +304,16 @@ export default function LoginView({
         }
       }
     } else {
-      const cleanUsername = sanitizeUsername(username)
+      const trimmedUsername = username.trim()
       const cleanEmail = sanitizeEmail(email)
       const cleanPassword = password.trim()
 
-      if (!cleanUsername || !cleanEmail || !cleanPassword) {
+      if (!trimmedUsername || !cleanEmail || !cleanPassword) {
         setErrorMessage(t("auth.missingFields"))
+        return
+      }
+      if (!isValidUsername(trimmedUsername)) {
+        setErrorMessage(t("profile.usernameInvalidError"))
         return
       }
       if (cleanPassword.length < 8) {
@@ -305,7 +323,7 @@ export default function LoginView({
 
       setIsEnteringWorld(true)
       const res = await authService.register({
-        username: cleanUsername,
+        username: trimmedUsername,
         email: cleanEmail,
         password: cleanPassword,
         locale: language,
@@ -327,7 +345,7 @@ export default function LoginView({
         })
 
         if (loginRes.success && loginRes.user) {
-          const displayName = loginRes.user.displayName || cleanUsername
+          const displayName = loginRes.user.displayName || trimmedUsername
           setTimeout(() => {
             onLogin(displayName)
           }, 350)
@@ -338,7 +356,22 @@ export default function LoginView({
         }
       } else {
         setIsEnteringWorld(false)
-        setErrorMessage(res.error || t("auth.registrationFailed"))
+        const errMsg = res.error || ""
+        if (
+          errMsg === "USERNAME_ALREADY_EXISTS" ||
+          errMsg.includes("USERNAME_ALREADY_EXISTS") ||
+          errMsg.toLowerCase().includes("taken")
+        ) {
+          setErrorMessage(t("profile.usernameTakenError"))
+        } else if (
+          errMsg === "INVALID_USERNAME" ||
+          errMsg.includes("INVALID_USERNAME") ||
+          errMsg.toLowerCase().includes("invalid username")
+        ) {
+          setErrorMessage(t("profile.usernameInvalidError"))
+        } else {
+          setErrorMessage(res.error || t("auth.registrationFailed"))
+        }
       }
     }
   }
@@ -415,6 +448,70 @@ export default function LoginView({
     } catch {
       setIsResettingPassword(false)
       setErrorMessage(t("auth.invalidResetToken"))
+    }
+  }
+
+  const handleChooseUsernameSubmit = async () => {
+    if (isSubmittingUsername) return
+    setErrorMessage(null)
+    setSuccessNotice(null)
+
+    const trimmed = onboardingUsername.trim()
+    if (!trimmed) {
+      setErrorMessage(t("profile.usernameInvalidError"))
+      return
+    }
+
+    if (!isValidUsername(trimmed)) {
+      setErrorMessage(t("profile.usernameInvalidError"))
+      return
+    }
+
+    setIsSubmittingUsername(true)
+    try {
+      const res = await authService.changeUsername(trimmed)
+      setIsSubmittingUsername(false)
+      if (!res.success) {
+        const errMsg = res.error || ""
+        if (
+          res.code === "USERNAME_ALREADY_EXISTS" ||
+          errMsg.includes("USERNAME_ALREADY_EXISTS") ||
+          errMsg.toLowerCase().includes("taken")
+        ) {
+          setErrorMessage(t("profile.usernameTakenError"))
+        } else if (
+          res.code === "INVALID_USERNAME" ||
+          errMsg.includes("INVALID_USERNAME") ||
+          errMsg.toLowerCase().includes("invalid username")
+        ) {
+          setErrorMessage(t("profile.usernameInvalidError"))
+        } else {
+          setErrorMessage(errMsg || t("profile.usernameChangeError"))
+        }
+        return
+      }
+      const chosenName = res.user?.displayName || res.user?.username || trimmed
+      setTimeout(() => {
+        onLogin(chosenName)
+      }, 350)
+    } catch (err: any) {
+      setIsSubmittingUsername(false)
+      const errMsg = err?.message || ""
+      if (
+        errMsg === "USERNAME_ALREADY_EXISTS" ||
+        errMsg.includes("USERNAME_ALREADY_EXISTS") ||
+        errMsg.toLowerCase().includes("taken")
+      ) {
+        setErrorMessage(t("profile.usernameTakenError"))
+      } else if (
+        errMsg === "INVALID_USERNAME" ||
+        errMsg.includes("INVALID_USERNAME") ||
+        errMsg.toLowerCase().includes("invalid username")
+      ) {
+        setErrorMessage(t("profile.usernameInvalidError"))
+      } else {
+        setErrorMessage(errMsg || t("profile.usernameChangeError"))
+      }
     }
   }
 
@@ -610,6 +707,19 @@ export default function LoginView({
               {t("auth.resetPasswordTitle")}
             </div>
           )}
+          {mode === "choose-username" && (
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: isDark ? "#ffffff" : "#0f172a",
+                fontFamily: BASE_FONT,
+                marginBottom: 4,
+              }}
+            >
+              {t("auth.chooseUsernameTitle")}
+            </div>
+          )}
           {!(mode === "forgot-password" && forgotSuccess) && (
             <div
               style={{
@@ -625,9 +735,11 @@ export default function LoginView({
                   ? t("auth.verifyEmailDesc")
                   : mode === "reset-password"
                     ? t("auth.resetPasswordDesc")
-                    : tab === "login"
-                      ? t("auth.loginSubtitle")
-                      : t("auth.registerSubtitle")}
+                    : mode === "choose-username"
+                      ? t("auth.chooseUsernameDesc")
+                      : tab === "login"
+                        ? t("auth.loginSubtitle")
+                        : t("auth.registerSubtitle")}
             </div>
           )}
         </div>
@@ -1133,6 +1245,85 @@ export default function LoginView({
                 {t("auth.backToLogin")}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* MODE: CHOOSE USERNAME (OAUTH ONBOARDING) */}
+        {mode === "choose-username" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, animation: "fadeIn 0.2s ease" }}>
+            <div>
+              <label style={labelCss}>{t("auth.usernameRegisterLabel")}</label>
+              <input
+                type="text"
+                value={onboardingUsername}
+                maxLength={16}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={t("auth.usernamePlaceholderRegister")}
+                onChange={(e) => setOnboardingUsername(e.target.value)}
+                onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
+                className="launcher-input"
+                style={inputCss}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleChooseUsernameSubmit()
+                }}
+              />
+              <div
+                style={{
+                  fontSize: 12,
+                  color: isDark ? "#8899aa" : "#657788",
+                  fontFamily: BASE_FONT,
+                  marginTop: 6,
+                  lineHeight: 1.4,
+                }}
+              >
+                {t("profile.usernameRulesHint")}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleChooseUsernameSubmit}
+              disabled={isSubmittingUsername}
+              className="launcher-btn-primary"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                width: "100%",
+                height: 44,
+                borderRadius: 12,
+                fontSize: 15,
+                fontWeight: 700,
+                fontFamily: BASE_FONT,
+                letterSpacing: "0.02em",
+                cursor: isSubmittingUsername ? "default" : "pointer",
+                marginTop: 4,
+                opacity: isSubmittingUsername ? 0.75 : 1,
+              }}
+            >
+              {isSubmittingUsername ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg
+                    width={16}
+                    height={16}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                    style={{ animation: "spin 0.75s linear infinite" }}
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  <span>{t("common.loading")}</span>
+                </div>
+              ) : (
+                <span>{t("auth.chooseUsernameSubmit")}</span>
+              )}
+            </button>
           </div>
         )}
 

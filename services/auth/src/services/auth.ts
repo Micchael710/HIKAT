@@ -49,8 +49,20 @@ export async function registerWithPassword(
     throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
   }
 
-  if (params.displayName && params.displayName.length > 16) {
-    throw new Error(AuthErrorCode.INVALID_CREDENTIALS)
+  const rawDisplayName = typeof params.displayName === "string" ? params.displayName.trim() : ""
+  if (!rawDisplayName || !/^[A-Za-z0-9_]{3,16}$/.test(rawDisplayName)) {
+    throw new Error(AuthErrorCode.INVALID_USERNAME)
+  }
+
+  // Check if username already exists (case-insensitive)
+  const existingUsername = await db
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(sql`lower(${schema.users.displayName}) = lower(${rawDisplayName})`)
+    .get()
+
+  if (existingUsername) {
+    throw new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
   }
 
   // Check if user already exists in password_credentials or external_accounts
@@ -74,7 +86,7 @@ export async function registerWithPassword(
   const credentialId = crypto.randomUUID()
   const passwordHash = await hashPassword(params.password)
   const now = new Date().toISOString()
-  const displayName = params.displayName || normalizedEmail.split("@")[0] || "Player"
+  const displayName = rawDisplayName
 
   // Prepare Email Verification Token before atomic batch
   const rawVerificationToken = generateSecureToken(32)
@@ -87,56 +99,67 @@ export async function registerWithPassword(
   // 1. Atomic creation of user, password credentials, and email verification token in D1
   const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
 
-  if (d1) {
-    const insertUserStmt = d1
-      .prepare(
-        `INSERT INTO users (id, role, display_name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(userId, "PLAYER", displayName, now, now)
+  try {
+    if (d1) {
+      const insertUserStmt = d1
+        .prepare(
+          `INSERT INTO users (id, role, display_name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(userId, "PLAYER", displayName, now, now)
 
-    const insertCredStmt = d1
-      .prepare(
-        `INSERT INTO password_credentials (id, user_id, email, password_hash, email_verified_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?)`,
-      )
-      .bind(credentialId, userId, normalizedEmail, passwordHash, now, now)
+      const insertCredStmt = d1
+        .prepare(
+          `INSERT INTO password_credentials (id, user_id, email, password_hash, email_verified_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+        )
+        .bind(credentialId, userId, normalizedEmail, passwordHash, now, now)
 
-    const insertTokenStmt = d1
-      .prepare(
-        `INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, used_at, created_at)
-         VALUES (?, ?, ?, ?, NULL, ?)`,
-      )
-      .bind(newTokenId, userId, tokenHash, expiresAt, now)
+      const insertTokenStmt = d1
+        .prepare(
+          `INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, used_at, created_at)
+           VALUES (?, ?, ?, ?, NULL, ?)`,
+        )
+        .bind(newTokenId, userId, tokenHash, expiresAt, now)
 
-    await d1.batch([insertUserStmt, insertCredStmt, insertTokenStmt])
-  } else {
-    // Fallback without raw D1
-    await db.insert(schema.users).values({
-      id: userId,
-      role: "PLAYER",
-      displayName,
-      createdAt: now,
-      updatedAt: now,
-    })
+      await d1.batch([insertUserStmt, insertCredStmt, insertTokenStmt])
+    } else {
+      // Fallback without raw D1
+      await db.insert(schema.users).values({
+        id: userId,
+        role: "PLAYER",
+        displayName,
+        createdAt: now,
+        updatedAt: now,
+      })
 
-    await db.insert(schema.passwordCredentials).values({
-      id: credentialId,
-      userId,
-      email: normalizedEmail,
-      passwordHash,
-      emailVerifiedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    })
+      await db.insert(schema.passwordCredentials).values({
+        id: credentialId,
+        userId,
+        email: normalizedEmail,
+        passwordHash,
+        emailVerifiedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      })
 
-    await db.insert(schema.emailVerificationTokens).values({
-      id: newTokenId,
-      userId,
-      tokenHash,
-      expiresAt,
-      createdAt: now,
-    })
+      await db.insert(schema.emailVerificationTokens).values({
+        id: newTokenId,
+        userId,
+        tokenHash,
+        expiresAt,
+        createdAt: now,
+      })
+    }
+  } catch (err: any) {
+    const errMsg = String(err?.message || err)
+    if (errMsg.includes("UNIQUE") || errMsg.includes("constraint")) {
+      if (errMsg.toLowerCase().includes("display_name") || errMsg.includes("users_display_name_unique_idx")) {
+        throw new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+      }
+      throw new Error(AuthErrorCode.USER_ALREADY_EXISTS)
+    }
+    throw err
   }
 
   const normalizedLocale = sanitizeEmailLocale(params.locale)
@@ -863,7 +886,6 @@ export async function getOrCreateOAuthUser(
   const userId = crypto.randomUUID()
   const externalAccountId = crypto.randomUUID()
   const now = new Date().toISOString()
-  const displayName = profile.displayName || normalizedEmail?.split("@")[0] || "Player"
 
   const d1 = (db as unknown as { session: { client: D1Database } }).session?.client
 
@@ -871,9 +893,9 @@ export async function getOrCreateOAuthUser(
     const insertUserStmt = d1
       .prepare(
         `INSERT INTO users (id, role, display_name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, NULL, ?, ?)`,
       )
-      .bind(userId, "PLAYER", displayName, now, now)
+      .bind(userId, "PLAYER", now, now)
 
     const insertExternalStmt = d1
       .prepare(
@@ -897,7 +919,7 @@ export async function getOrCreateOAuthUser(
     await db.insert(schema.users).values({
       id: userId,
       role: "PLAYER",
-      displayName,
+      displayName: null,
       createdAt: now,
       updatedAt: now,
     })
@@ -908,8 +930,8 @@ export async function getOrCreateOAuthUser(
       provider: profile.provider,
       providerSubject: profile.providerSubject,
       email: normalizedEmail,
-      displayName: profile.displayName,
-      avatarUrl: profile.avatarUrl,
+      displayName: profile.displayName ?? null,
+      avatarUrl: profile.avatarUrl ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -919,7 +941,7 @@ export async function getOrCreateOAuthUser(
     id: userId,
     email: normalizedEmail || "",
     role: "PLAYER" as AppRole,
-    displayName,
+    displayName: null,
     createdAt: now,
   }
 }
@@ -1021,7 +1043,12 @@ export async function issueGameToken(
     throw new Error(AuthErrorCode.EMAIL_NOT_VERIFIED)
   }
 
-  // 4. Sign and return Game JWT
+  // 4. Complete username gate: user must have selected a valid username
+  if (!user.displayName || user.displayName.trim() === "") {
+    throw new Error(AuthErrorCode.INVALID_USERNAME)
+  }
+
+  // 5. Sign and return Game JWT
   return signGameToken(
     {
       userId: user.id,

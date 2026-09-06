@@ -10,6 +10,7 @@ export interface AuthUser {
   id: string
   email: string
   displayName?: string | null
+  suggestedUsername?: string
   role: AppRole
   createdAt?: string
 }
@@ -609,18 +610,23 @@ export class AuthClientCore {
       throw new Error("Respuesta de autenticación OAuth incompleta.")
     }
 
+    const userPayload: AuthUser = {
+      ...payload.user,
+      suggestedUsername: (data as any).suggestedUsername || payload.user.suggestedUsername,
+    }
+
     await this.setSession(
       {
         accessToken: payload.accessToken,
         refreshToken: payload.refreshToken,
         expiresIn: payload.expiresIn,
         tokenType: payload.tokenType,
-        user: payload.user,
+        user: userPayload,
       },
       keepSession,
     )
 
-    return payload.user
+    return userPayload
   }
 
   public createOAuthAuthorizationUrl(params: {

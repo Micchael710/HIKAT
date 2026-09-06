@@ -81,7 +81,18 @@ describe("HiKAT Authentication System (Shard 02)", () => {
   const registerAndVerify = async (
     input: { email: string; password: string; displayName?: string },
   ) => {
-    const reg = await registerWithPassword(db, input, emailService)
+    const emailPrefix = input.email.split("@")[0] ?? "player"
+    const inputWithDisplay = {
+      ...input,
+      displayName:
+        input.displayName !== undefined
+          ? input.displayName
+          : emailPrefix
+              .replace(/[^A-Za-z0-9_]/g, "_")
+              .slice(0, 16)
+              .padEnd(3, "_"),
+    }
+    const reg = await registerWithPassword(db, inputWithDisplay, emailService)
     const sent = emailService.getLastEmailFor(input.email)
     if (sent) {
       await verifyEmailToken(db, sent.token)
@@ -159,7 +170,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     it("7. ensures password is never stored in plaintext", async () => {
       const reg = await registerWithPassword(
         db,
-        { email: "secure@hikat.org", password: "MyPassword999!" },
+        { email: "secure@hikat.org", password: "MyPassword999!", displayName: "SecureUser" },
         emailService,
       )
 
@@ -202,14 +213,14 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     it("rejects duplicate email registration", async () => {
       await registerWithPassword(
         db,
-        { email: "alex@hikat.org", password: "password123" },
+        { email: "alex@hikat.org", password: "password123", displayName: "Alex1" },
         emailService,
       )
 
       await expect(
         registerWithPassword(
           db,
-          { email: "ALEX@hikat.org", password: "anotherPassword" },
+          { email: "ALEX@hikat.org", password: "anotherPassword", displayName: "Alex2" },
           emailService,
         ),
       ).rejects.toThrow(AuthErrorCode.USER_ALREADY_EXISTS)
@@ -290,7 +301,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     it("successfully verifies email and marks password credentials as verified", async () => {
       const reg = await registerWithPassword(
         db,
-        { email: "verify@hikat.org", password: "password123" },
+        { email: "verify@hikat.org", password: "password123", displayName: "VerifyUser" },
         emailService,
       )
 
@@ -312,7 +323,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     it("rejects expired or reused email verification token", async () => {
       await registerWithPassword(
         db,
-        { email: "expired@hikat.org", password: "password123" },
+        { email: "expired@hikat.org", password: "password123", displayName: "ExpiredUser" },
         emailService,
       )
 
@@ -524,7 +535,14 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       expect(session.user.id).toBeDefined()
       expect(session.user.role).toBe("PLAYER")
-      expect(session.user.displayName).toBe("Google User")
+      expect(session.user.displayName).toBeNull()
+
+      const ext = await db
+        .select()
+        .from(schema.externalAccounts)
+        .where(eq(schema.externalAccounts.userId, session.user.id))
+        .get()
+      expect(ext?.displayName).toBe("Google User")
 
       // Verify Access JWT has correct user and role
       const payload = await verifyAccessToken(session.accessToken, keyManager)
@@ -546,7 +564,14 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       expect(session.user.id).toBeDefined()
       expect(session.user.role).toBe("PLAYER")
-      expect(session.user.displayName).toBe("DiscordPlayer")
+      expect(session.user.displayName).toBeNull()
+
+      const extDiscord = await db
+        .select()
+        .from(schema.externalAccounts)
+        .where(eq(schema.externalAccounts.userId, session.user.id))
+        .get()
+      expect(extDiscord?.displayName).toBe("DiscordPlayer")
     })
 
     it("authenticates existing linked OAuth account without creating a duplicate user", async () => {
@@ -764,7 +789,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // 2. User creates account and Auth issues HiKAT authorization code
       const reg = await registerWithPassword(
         db,
-        { email: "launcher@hikat.org", password: "password123" },
+        { email: "launcher@hikat.org", password: "password123", displayName: "LauncherUser" },
         emailService,
       )
 
@@ -792,7 +817,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       const reg = await registerWithPassword(
         db,
-        { email: "pkce.fail@hikat.org", password: "password123" },
+        { email: "pkce.fail@hikat.org", password: "password123", displayName: "PkceFail" },
         emailService,
       )
 
@@ -1012,7 +1037,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     it("REJECTS Game JWT issuance if email is not verified for password accounts", async () => {
       const reg = await registerWithPassword(
         db,
-        { email: "unverified@hikat.org", password: "password123" },
+        { email: "unverified@hikat.org", password: "password123", displayName: "Unverified" },
         emailService,
       )
 
@@ -1031,7 +1056,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     it("REJECTS Game JWT issuance if session was revoked", async () => {
       const reg = await registerWithPassword(
         db,
-        { email: "game.revoked@hikat.org", password: "password123" },
+        { email: "game.revoked@hikat.org", password: "password123", displayName: "GameRevoked" },
         emailService,
       )
       const verifyEmail = emailService.getLastEmailFor("game.revoked@hikat.org")
@@ -1097,6 +1122,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         body: JSON.stringify({
           email: "verify-method-test@hikat.org",
           password: "password123!",
+          displayName: "VerifyUser",
         }),
       })
       const regRes = await handleRequest({ request: regReq, env: {}, db, keyManager, emailService })
@@ -1760,7 +1786,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     it("handles canonical /auth/forgot-password HTTP endpoint", async () => {
       await registerWithPassword(
         db,
-        { email: "forgot-canon@hikat.org", password: "Password123!" },
+        { email: "forgot-canon@hikat.org", password: "Password123!", displayName: "ForgotCanon" },
         emailService,
       )
 
@@ -2025,7 +2051,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       await expect(
         registerWithPassword(
           db,
-          { email: "rollback@hikat.org", password: "Password123!" },
+          { email: "rollback@hikat.org", password: "Password123!", displayName: "rollback" },
           failingEmailService,
         ),
       ).rejects.toThrow("EMAIL_SERVICE_ERROR")
@@ -2049,7 +2075,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       const req = new Request("http://localhost:8788/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: "rollback-http@hikat.org", password: "Password123!" }),
+        body: JSON.stringify({ email: "rollback-http@hikat.org", password: "Password123!", displayName: "RollbackHttp" }),
       })
       const res = await handleRequest({
         request: req,
@@ -2067,7 +2093,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // 3. User can immediately re-register with functioning email service
       const successReg = await registerWithPassword(
         db,
-        { email: "rollback-http@hikat.org", password: "Password123!" },
+        { email: "rollback-http@hikat.org", password: "Password123!", displayName: "RollbackHttp" },
         emailService,
       )
       expect(successReg.user.id).toBeDefined()
@@ -2171,7 +2197,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // 1. Concurrent email verification
       await registerWithPassword(
         db,
-        { email: "cas-verify@hikat.org", password: "Password123!" },
+        { email: "cas-verify@hikat.org", password: "Password123!", displayName: "CasVerify" },
         emailService,
       )
       const verifyToken = emailService.getLastEmailFor("cas-verify@hikat.org")!.token
@@ -2344,7 +2370,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // 1. Setup user with pending email verification token
       await registerWithPassword(
         db,
-        { email: "status-check@hikat.org", password: "Password123!" },
+        { email: "status-check@hikat.org", password: "Password123!", displayName: "StatusCheck" },
         emailService,
       )
       const verifyToken = emailService.getLastEmailFor("status-check@hikat.org")!.token
@@ -2475,7 +2501,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // 1. Register with Portuguese locale
       await registerWithPassword(
         db,
-        { email: "portuguese@hikat.org", password: "Password123!", locale: "pt" },
+        { email: "portuguese@hikat.org", password: "Password123!", displayName: "Portuguese", locale: "pt" },
         emailService,
       )
       const ptEmail = emailService.getLastEmailFor("portuguese@hikat.org")!
@@ -2521,7 +2547,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // Register user without verifying
       await registerWithPassword(
         db,
-        { email: "resend-test@hikat.org", password: "Password123!" },
+        { email: "resend-test@hikat.org", password: "Password123!", displayName: "ResendTest" },
         emailService,
       )
       const firstToken = emailService.getLastEmailFor("resend-test@hikat.org")!.token
@@ -2577,7 +2603,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       // 1. Verification token preservation
       await registerWithPassword(
         db,
-        { email: "preserve-verify@hikat.org", password: "Password123!" },
+        { email: "preserve-verify@hikat.org", password: "Password123!", displayName: "PreserveVerify" },
         emailService,
       )
       const validVerifyToken = emailService.getLastEmailFor("preserve-verify@hikat.org")!.token
@@ -2761,7 +2787,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         // 1. Initial registration generates Token A
         await registerWithPassword(
           db,
-          { email: "latest-verify@hikat.org", password: "Password123!" },
+          { email: "latest-verify@hikat.org", password: "Password123!", displayName: "LatestVerify" },
           emailService,
         )
         const tokenA = emailService.getLastEmailFor("latest-verify@hikat.org")!.token
@@ -2870,7 +2896,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       it("Expired token returns expired status and is rejected by verification/reset", async () => {
         await registerWithPassword(
           db,
-          { email: "expired-test@hikat.org", password: "Password123!" },
+          { email: "expired-test@hikat.org", password: "Password123!", displayName: "ExpiredTest" },
           emailService,
         )
         const token = emailService.getLastEmailFor("expired-test@hikat.org")!.token
@@ -2890,7 +2916,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       it("Concurrent/interleaved requests never leave two tokens valid and never leave all tokens invalid", async () => {
         await registerWithPassword(
           db,
-          { email: "concurrent-tokens@hikat.org", password: "Password123!" },
+          { email: "concurrent-tokens@hikat.org", password: "Password123!", displayName: "ConcurrentTokens" },
           emailService,
         )
 
@@ -2945,7 +2971,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
           const regEmail = `user-${loc}@hikat.org`
           await registerWithPassword(
             db,
-            { email: regEmail, password: "Password123!", locale: loc },
+            { email: regEmail, password: "Password123!", displayName: `Table_${loc}`, locale: loc },
             customResend,
             "https://auth.hikat.org",
           )
@@ -2982,7 +3008,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       it("1. allows initial resend verification request and returns retryAfterSeconds: 60", async () => {
         clearInMemoryRateLimits()
         const userEmail = "cooldown-verify-1@hikat.org"
-        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+        await registerWithPassword(db, { email: userEmail, password: "Password123!", displayName: "CooldownUser1" }, emailService)
 
         const req = new Request("http://localhost:8788/auth/resend-verification", {
           method: "POST",
@@ -2999,7 +3025,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       it("2. blocks second resend verification for same email within 60s (429 + retryAfterSeconds) and does NOT invoke EmailService again", async () => {
         clearInMemoryRateLimits()
         const userEmail = "cooldown-verify-2@hikat.org"
-        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+        await registerWithPassword(db, { email: userEmail, password: "Password123!", displayName: "CooldownUser2" }, emailService)
 
         const req1 = new Request("http://localhost:8788/auth/resend-verification", {
           method: "POST",
@@ -3030,7 +3056,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       it("3. allows initial forgot password request and returns retryAfterSeconds: 60", async () => {
         clearInMemoryRateLimits()
         const userEmail = "cooldown-reset-1@hikat.org"
-        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+        await registerWithPassword(db, { email: userEmail, password: "Password123!", displayName: "CooldownReset1" }, emailService)
 
         const req = new Request("http://localhost:8788/auth/forgot-password", {
           method: "POST",
@@ -3047,7 +3073,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       it("4. blocks second forgot password request for same email within 60s", async () => {
         clearInMemoryRateLimits()
         const userEmail = "cooldown-reset-2@hikat.org"
-        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+        await registerWithPassword(db, { email: userEmail, password: "Password123!", displayName: "CooldownReset2" }, emailService)
 
         const req1 = new Request("http://localhost:8788/auth/forgot-password", {
           method: "POST",
@@ -3072,7 +3098,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       it("5. verify and reset cooldowns are independent for the same email", async () => {
         clearInMemoryRateLimits()
         const userEmail = "cooldown-independent@hikat.org"
-        await registerWithPassword(db, { email: userEmail, password: "Password123!" }, emailService)
+        await registerWithPassword(db, { email: userEmail, password: "Password123!", displayName: "CooldownInd" }, emailService)
 
         // Trigger verify cooldown
         const verifyReq = new Request("http://localhost:8788/auth/resend-verification", {
@@ -3097,8 +3123,8 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         clearInMemoryRateLimits()
         const emailA = "user-a@hikat.org"
         const emailB = "user-b@hikat.org"
-        await registerWithPassword(db, { email: emailA, password: "Password123!" }, emailService)
-        await registerWithPassword(db, { email: emailB, password: "Password123!" }, emailService)
+        await registerWithPassword(db, { email: emailA, password: "Password123!", displayName: "CooldownUserA" }, emailService)
+        await registerWithPassword(db, { email: emailB, password: "Password123!", displayName: "CooldownUserB" }, emailService)
 
         const reqA = new Request("http://localhost:8788/auth/resend-verification", {
           method: "POST",
@@ -3183,13 +3209,13 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         expect(longEmail.length).toBeGreaterThan(254)
 
         await expect(
-          registerWithPassword(db, { email: longEmail, password: "ValidPassword123!" }, emailService),
+          registerWithPassword(db, { email: longEmail, password: "ValidPassword123!", displayName: "ValidUser" }, emailService),
         ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
 
         const req = new Request("http://localhost:8788/auth/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: longEmail, password: "ValidPassword123!" }),
+          body: JSON.stringify({ email: longEmail, password: "ValidPassword123!", displayName: "ValidUser" }),
         })
         const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
         expect(res.status).toBe(401)
@@ -3200,13 +3226,13 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       it("2. registerWithPassword rejects password > 128 characters", async () => {
         const longPassword = "P".repeat(129)
         await expect(
-          registerWithPassword(db, { email: "reg-long-pass@hikat.org", password: longPassword }, emailService),
+          registerWithPassword(db, { email: "reg-long-pass@hikat.org", password: longPassword, displayName: "ValidUser" }, emailService),
         ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
 
         const req = new Request("http://localhost:8788/auth/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: "reg-long-pass@hikat.org", password: longPassword }),
+          body: JSON.stringify({ email: "reg-long-pass@hikat.org", password: longPassword, displayName: "ValidUser" }),
         })
         const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
         expect(res.status).toBe(401)
@@ -3224,7 +3250,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
             { email: "reg-long-name@hikat.org", password: "ValidPassword123!", displayName: longDisplayName },
             emailService,
           ),
-        ).rejects.toThrow(AuthErrorCode.INVALID_CREDENTIALS)
+        ).rejects.toThrow(AuthErrorCode.INVALID_USERNAME)
 
         const req = new Request("http://localhost:8788/auth/register", {
           method: "POST",
@@ -3232,9 +3258,9 @@ describe("HiKAT Authentication System (Shard 02)", () => {
           body: JSON.stringify({ email: "reg-long-name@hikat.org", password: "ValidPassword123!", displayName: longDisplayName }),
         })
         const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
-        expect(res.status).toBe(401)
+        expect(res.status).toBe(400)
         const data = (await res.json()) as any
-        expect(data.error).toBe(AuthErrorCode.INVALID_CREDENTIALS)
+        expect(data.error).toBe(AuthErrorCode.INVALID_USERNAME)
       })
 
       it("4. loginWithPassword rejects password > 128 without running hashing", async () => {
@@ -3735,7 +3761,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         const email = "atomic-verify@hikat.org"
         await registerWithPassword(
           db,
-          { email, password: "SecurePassword123!" },
+          { email, password: "SecurePassword123!", displayName: "AtomicVerify" },
           emailService,
         )
         const rawToken = emailService.getLastEmailFor(email)!.token
@@ -3756,7 +3782,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         const email = "atomic-verify-rollback@hikat.org"
         await registerWithPassword(
           db,
-          { email, password: "SecurePassword123!" },
+          { email, password: "SecurePassword123!", displayName: "AtomicVerifyRb" },
           emailService,
         )
         const rawToken = emailService.getLastEmailFor(email)!.token
@@ -3787,7 +3813,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       it("RESET: normal password reset atomically consumes token, updates password, and revokes active sessions", async () => {
         const email = "atomic-reset@hikat.org"
-        await registerWithPassword(db, { email, password: "OldPassword123!" }, emailService)
+        await registerWithPassword(db, { email, password: "OldPassword123!", displayName: "AtomicReset" }, emailService)
         const verifyToken = emailService.getLastEmailFor(email)!.token
         await verifyEmailToken(db, verifyToken)
 
@@ -3820,7 +3846,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       it("RESET: if D1 batch fails during password reset, token is NOT consumed and old password remains intact", async () => {
         const email = "atomic-reset-rollback@hikat.org"
-        await registerWithPassword(db, { email, password: "OldPassword123!" }, emailService)
+        await registerWithPassword(db, { email, password: "OldPassword123!", displayName: "AtomicResetRb" }, emailService)
         const verifyToken = emailService.getLastEmailFor(email)!.token
         await verifyEmailToken(db, verifyToken)
 
@@ -3865,7 +3891,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
 
       it("RESET (Multi-Session): password reset successfully revokes multiple active sessions and all their refresh tokens", async () => {
         const email = "multi-session-reset@hikat.org"
-        await registerWithPassword(db, { email, password: "InitialPassword123!" }, emailService)
+        await registerWithPassword(db, { email, password: "InitialPassword123!", displayName: "MultiSessUser" }, emailService)
         const verifyToken = emailService.getLastEmailFor(email)!.token
         await verifyEmailToken(db, verifyToken)
 
@@ -4300,6 +4326,137 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         expect(updatedUser.displayName).toBe("CoreAfter")
         expect(client.getUser()?.displayName).toBe("CoreAfter")
       })
+
+      it("PASSWORD: validates strict username rules on registration and rejects invalid formats and taken usernames", async () => {
+        // Valid usernames
+        const validUsers = ["Brayan", "vBrayan06", "Brayan_06"]
+        for (let i = 0; i < validUsers.length; i++) {
+          const name = validUsers[i]
+          const reg = await registerWithPassword(
+            db,
+            { email: `valid${i}@hikat.org`, password: "ValidPassword123!", displayName: name },
+            emailService,
+          )
+          expect(reg.user.displayName).toBe(name)
+        }
+
+        // Invalid usernames
+        const invalidVectors = [
+          "ab", // 2 chars
+          "A".repeat(17), // 17 chars
+          "Brayan Mateo", // space
+          "Brayan-06", // dash
+          "Brayan.06", // dot
+          "Brayán", // accent
+          "Brayan🔥", // emoji
+          "Brayan@06", // special char
+        ]
+
+        for (let i = 0; i < invalidVectors.length; i++) {
+          const badName = invalidVectors[i]
+          await expect(
+            registerWithPassword(
+              db,
+              { email: `invalid${i}@hikat.org`, password: "ValidPassword123!", displayName: badName },
+              emailService,
+            ),
+          ).rejects.toThrow(AuthErrorCode.INVALID_USERNAME)
+
+          const req = new Request("https://auth.hikat.org/auth/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: `httppass${i}@hikat.org`, password: "ValidPassword123!", displayName: badName }),
+          })
+          const res = await handleRequest({ request: req, env: {}, db, keyManager, emailService })
+          expect(res.status).toBe(400)
+          const body = (await res.json()) as any
+          expect(body.code).toBe(AuthErrorCode.INVALID_USERNAME)
+        }
+
+        // Case-insensitive taken username rejected on registration
+        await expect(
+          registerWithPassword(
+            db,
+            { email: "conflictreg@hikat.org", password: "ValidPassword123!", displayName: "brayan" },
+            emailService,
+          ),
+        ).rejects.toThrow(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+
+        const conflictReq = new Request("https://auth.hikat.org/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: "conflictreg@hikat.org", password: "ValidPassword123!", displayName: "BRAYAN" }),
+        })
+        const conflictRes = await handleRequest({ request: conflictReq, env: {}, db, keyManager, emailService })
+        expect(conflictRes.status).toBe(409)
+        const conflictBody = (await conflictRes.json()) as any
+        expect(conflictBody.code).toBe(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+      })
+
+      it("OAUTH: new OAuth account has display_name = null, visual suggestion generated, rejects Game JWT until onboarding, and completes via changeUsername", async () => {
+        // 1. Create fresh OAuth identity
+        const googleProfile = {
+          provider: "GOOGLE" as const,
+          providerSubject: "oauth-onboard-sub-1",
+          email: "brayan.mateo@gmail.com",
+          emailVerified: true,
+          displayName: "Brayan Mateo",
+          avatarUrl: "https://lh3.googleusercontent.com/photo.jpg",
+        }
+
+        const oauthUser = await getOrCreateOAuthUser(db, googleProfile)
+        expect(oauthUser.displayName).toBeNull()
+
+        // Verify users table display_name is NULL
+        const [dbUser] = await db.select().from(schema.users).where(eq(schema.users.id, oauthUser.id)).all()
+        expect(dbUser?.displayName).toBeNull()
+
+        // Verify external_accounts holds raw provider name
+        const [extAcc] = await db.select().from(schema.externalAccounts).where(eq(schema.externalAccounts.userId, oauthUser.id)).all()
+        expect(extAcc?.displayName).toBe("Brayan Mateo")
+
+        // 2. Establish session
+        const session = await createSession(db, oauthUser, keyManager)
+        expect(session.user.displayName).toBeNull()
+
+        // 3. Game JWT must be rejected because display_name is NULL
+        await expect(
+          issueGameToken(db, oauthUser.id, session.sessionId, keyManager),
+        ).rejects.toThrow(AuthErrorCode.INVALID_USERNAME)
+
+        const gameReq = new Request("https://auth.hikat.org/auth/game-token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+        })
+        const gameRes = await handleRequest({ request: gameReq, env: {}, db, keyManager, emailService })
+        expect(gameRes.status).toBe(400)
+        const gameBody = (await gameRes.json()) as any
+        expect(gameBody.code).toBe(AuthErrorCode.INVALID_USERNAME)
+
+        // 4. Complete onboarding via changeUsername (from NULL to chosen username)
+        const chosenUsername = "BrayanMateo"
+        const updated = await changeUsername(db, oauthUser.id, session.sessionId, chosenUsername)
+        expect(updated.user.displayName).toBe("BrayanMateo")
+        expect(updated.user.id).toBe(oauthUser.id)
+
+        // 5. Now Game JWT succeeds and contains chosen username
+        const gameToken = await issueGameToken(db, oauthUser.id, session.sessionId, keyManager)
+        const gameClaims = await verifyGameToken(gameToken.token, keyManager)
+        expect(gameClaims.displayName).toBe("BrayanMateo")
+        expect(gameClaims.sub).toBe(oauthUser.id)
+
+        // 6. Refresh session picks up updated username
+        const refreshed = await rotateRefreshToken(db, session.refreshToken, keyManager)
+        expect(refreshed.user.displayName).toBe("BrayanMateo")
+
+        // 7. Subsequent login with existing OAuth account returns chosen username directly
+        const subsequentUser = await getOrCreateOAuthUser(db, googleProfile)
+        expect(subsequentUser.displayName).toBe("BrayanMateo")
+      })
     })
   })
 })
+
