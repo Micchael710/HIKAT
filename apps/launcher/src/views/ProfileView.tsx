@@ -522,82 +522,137 @@ export default function ProfileView({
                 />
               </div>
 
-              {/* Username & Email / Inline Edit */}
-              {!isEditingUsername ? (
-                <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      marginBottom: 2,
-                    }}
-                  >
-                    <span
+              {/* Username & Email */}
+              <div>
+                <div
+                  style={{
+                    fontSize: 26,
+                    fontWeight: 800,
+                    color: isDark ? "white" : "#111822",
+                    letterSpacing: "-0.02em",
+                    marginBottom: 2,
+                  }}
+                >
+                  {currentUsername}
+                </div>
+                <div
+                  style={{
+                    fontSize: 15,
+                    color: isDark ? "#8899aa" : "#556677",
+                    fontWeight: 500,
+                  }}
+                >
+                  {email}
+                </div>
+              </div>
+            </div>
+
+            {/* 3 Information Tiles */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 14,
+                alignItems: "start",
+              }}
+            >
+              {/* Tile 1: Usuario */}
+              <div
+                style={{
+                  background: isDark ? "#0d1217" : "#f0f3f7",
+                  border: isDark
+                    ? isEditingUsername
+                      ? "1.5px solid rgba(56, 189, 248, 0.35)"
+                      : "1.5px solid rgba(255, 255, 255, 0.06)"
+                    : isEditingUsername
+                      ? "1.5px solid rgba(14, 165, 233, 0.35)"
+                      : "1.5px solid rgba(0, 0, 0, 0.06)",
+                  borderRadius: 14,
+                  padding: "14px 18px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: isEditingUsername ? 8 : 4,
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {!isEditingUsername ? (
+                  <>
+                    <div
                       style={{
-                        fontSize: 26,
-                        fontWeight: 800,
-                        color: isDark ? "white" : "#111822",
-                        letterSpacing: "-0.02em",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: isDark ? "#657788" : "#778899",
+                        }}
+                      >
+                        {t("profile.username")}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewUsernameInput(currentUsername)
+                          setUsernameError(null)
+                          setIsEditingUsername(true)
+                        }}
+                        title={t("profile.changeUsernameTitle")}
+                        aria-label={t("profile.changeUsernameTitle")}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: isDark
+                            ? "rgba(255, 255, 255, 0.05)"
+                            : "rgba(0, 0, 0, 0.04)",
+                          border: isDark
+                            ? "1px solid rgba(255, 255, 255, 0.08)"
+                            : "1px solid rgba(0, 0, 0, 0.08)",
+                          cursor: "pointer",
+                          width: 24,
+                          height: 24,
+                          borderRadius: 6,
+                          color: isDark ? "#a0aec0" : "#4a5568",
+                          transition: "all 0.15s ease",
+                          padding: 0,
+                        }}
+                        className="launcher-icon-btn"
+                      >
+                        <svg
+                          width={13}
+                          height={13}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                          <path d="m15 5 4 4" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 15.5,
+                        fontWeight: 600,
+                        color: isDark ? "#d6e0ea" : "#1e293b",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                       }}
                     >
                       {currentUsername}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewUsernameInput(currentUsername)
-                        setUsernameError(null)
-                        setIsEditingUsername(true)
-                      }}
-                      title={t("profile.changeUsernameTitle")}
-                      aria-label={t("profile.changeUsernameTitle")}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        background: isDark
-                          ? "rgba(255, 255, 255, 0.06)"
-                          : "rgba(0, 0, 0, 0.05)",
-                        border: isDark
-                          ? "1px solid rgba(255, 255, 255, 0.08)"
-                          : "1px solid rgba(0, 0, 0, 0.08)",
-                        cursor: "pointer",
-                        width: 28,
-                        height: 28,
-                        borderRadius: 8,
-                        color: isDark ? "#8899aa" : "#556677",
-                        transition: "all 0.15s ease",
-                      }}
-                      className="launcher-icon-btn"
-                    >
-                      <svg
-                        width={14}
-                        height={14}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                        <path d="m15 5 4 4" />
-                      </svg>
-                    </button>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 15,
-                      color: isDark ? "#8899aa" : "#556677",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {email}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ flex: 1, minWidth: 0 }}>
+                    </div>
+                  </>
+                ) : (
                   <form
                     onSubmit={(e) => {
                       e.preventDefault()
@@ -611,61 +666,108 @@ export default function ProfileView({
                   >
                     <div
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        flexWrap: "wrap",
+                        fontSize: 12,
+                        fontWeight: 800,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        color: isDark ? "#657788" : "#778899",
                       }}
                     >
-                      <input
-                        type="text"
-                        maxLength={16}
-                        spellCheck={false}
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        autoFocus
-                        placeholder={t("profile.newUsernamePlaceholder")}
-                        value={newUsernameInput}
-                        onChange={(e) => {
-                          setNewUsernameInput(e.target.value)
-                          if (usernameError) setUsernameError(null)
-                        }}
-                        className="launcher-input"
-                        style={{
-                          height: 38,
-                          width: 200,
-                          padding: "0 12px",
-                          borderRadius: 10,
-                          background: isDark ? "#0d1217" : "#ffffff",
-                          border: isDark
-                            ? usernameError
-                              ? "1.5px solid #ef4444"
-                              : "1.5px solid rgba(255, 255, 255, 0.14)"
-                            : usernameError
-                              ? "1.5px solid #ef4444"
-                              : "1.5px solid rgba(0, 0, 0, 0.14)",
-                          color: isDark ? "white" : "#111822",
-                          fontFamily: BASE_FONT,
-                          fontSize: 15,
-                          fontWeight: 600,
-                          transition: "all 0.16s ease",
-                          boxSizing: "border-box",
-                        }}
-                      />
+                      {t("profile.username")}
+                    </div>
 
+                    <input
+                      type="text"
+                      maxLength={16}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      autoFocus
+                      placeholder={t("profile.newUsernamePlaceholder")}
+                      value={newUsernameInput}
+                      onChange={(e) => {
+                        setNewUsernameInput(e.target.value)
+                        if (usernameError) setUsernameError(null)
+                      }}
+                      className="launcher-input"
+                      style={{
+                        width: "100%",
+                        height: 36,
+                        padding: "0 12px",
+                        borderRadius: 10,
+                        background: isDark ? "#0d1217" : "#ffffff",
+                        border: isDark
+                          ? usernameError
+                            ? "1.5px solid #ef4444"
+                            : "1.5px solid rgba(255, 255, 255, 0.14)"
+                          : usernameError
+                            ? "1.5px solid #ef4444"
+                            : "1.5px solid rgba(0, 0, 0, 0.14)",
+                        color: isDark ? "white" : "#111822",
+                        fontFamily: BASE_FONT,
+                        fontSize: 14.5,
+                        fontWeight: 600,
+                        transition: "all 0.16s ease",
+                        boxSizing: "border-box",
+                      }}
+                    />
+
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: isDark ? "#657788" : "#8899aa",
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {t("profile.usernameRulesHint")}
+                    </div>
+
+                    {usernameError && (
+                      <div
+                        style={{
+                          color: "#ef4444",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        <svg
+                          width={13}
+                          height={13}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          style={{ flexShrink: 0 }}
+                        >
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <span>{usernameError}</span>
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                       <button
                         type="submit"
                         disabled={isSavingUsername || !canSubmitUsername}
                         className="launcher-btn-secondary"
                         style={{
+                          flex: 1,
                           display: "inline-flex",
                           alignItems: "center",
                           justifyContent: "center",
                           gap: 6,
-                          height: 38,
-                          padding: "0 16px",
-                          borderRadius: 10,
-                          fontSize: 14,
+                          height: 34,
+                          padding: "0 12px",
+                          borderRadius: 8,
+                          fontSize: 13.5,
                           fontWeight: 700,
                           fontFamily: BASE_FONT,
                           cursor:
@@ -674,14 +776,13 @@ export default function ProfileView({
                               : "pointer",
                           opacity:
                             isSavingUsername || !canSubmitUsername ? 0.6 : 1,
-                          flexShrink: 0,
                         }}
                       >
                         {isSavingUsername ? (
                           <>
                             <svg
-                              width={13}
-                              height={13}
+                              width={12}
+                              height={12}
                               viewBox="0 0 24 24"
                               fill="none"
                               stroke="currentColor"
@@ -710,10 +811,10 @@ export default function ProfileView({
                           display: "inline-flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          height: 38,
-                          padding: "0 14px",
-                          borderRadius: 10,
-                          fontSize: 14,
+                          height: 34,
+                          padding: "0 12px",
+                          borderRadius: 8,
+                          fontSize: 13,
                           fontWeight: 600,
                           fontFamily: BASE_FONT,
                           background: "transparent",
@@ -729,97 +830,8 @@ export default function ProfileView({
                         {t("common.cancel")}
                       </button>
                     </div>
-
-                    {/* Validation hint */}
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        color: isDark ? "#657788" : "#8899aa",
-                        lineHeight: 1.3,
-                      }}
-                    >
-                      {t("profile.usernameRulesHint")}
-                    </div>
-
-                    {/* Inline error if any */}
-                    {usernameError && (
-                      <div
-                        style={{
-                          color: "#ef4444",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <svg
-                          width={14}
-                          height={14}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="12" cy="12" r="10" />
-                          <line x1="12" y1="8" x2="12" y2="12" />
-                          <line x1="12" y1="16" x2="12.01" y2="16" />
-                        </svg>
-                        <span>{usernameError}</span>
-                      </div>
-                    )}
                   </form>
-                </div>
-              )}
-            </div>
-
-            {/* 3 Read-Only Information Tiles */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: 14,
-              }}
-            >
-              {/* Tile 1: Usuario */}
-              <div
-                style={{
-                  background: isDark ? "#0d1217" : "#f0f3f7",
-                  border: isDark
-                    ? "1.5px solid rgba(255, 255, 255, 0.06)"
-                    : "1.5px solid rgba(0, 0, 0, 0.06)",
-                  borderRadius: 14,
-                  padding: "14px 18px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 800,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    color: isDark ? "#657788" : "#778899",
-                  }}
-                >
-                  {t("profile.username")}
-                </div>
-                <div
-                  style={{
-                    fontSize: 15.5,
-                    fontWeight: 600,
-                    color: isDark ? "#8899aa" : "#334455",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {currentUsername}
-                </div>
+                )}
               </div>
 
               {/* Tile 2: Correo */}

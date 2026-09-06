@@ -580,7 +580,7 @@ describe("Launcher ProfileView Component", () => {
     expect(container.textContent).toContain("Reenviar en 00:45")
   })
 
-  it("15. Displays pencil edit button next to username; clicking it opens inline edit mode with rules and actions without Minecraft mentions", async () => {
+  it("15. Displays pencil edit button strictly inside 'NOMBRE DE USUARIO' tile and NOT next to the top big name; clicking it opens inline edit with rules", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-15",
       username: "StevePlayer",
@@ -610,8 +610,16 @@ describe("Launcher ProfileView Component", () => {
 
     // Normal view before edit
     expect(container.textContent).toContain("StevePlayer")
+
+    // The pencil button is strictly inside the "NOMBRE DE USUARIO" tile
     const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
     expect(editBtn).not.toBeNull()
+
+    // Verify edit button is inside the tile that contains "Nombre de Usuario" label
+    const usernameTile = editBtn.closest("div")?.parentElement
+    expect(usernameTile?.textContent?.toLowerCase()).toContain("usuario")
+
+    // No edit input rendered initially
     expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).toBeNull()
 
     // Strict rule: No mentioning "Minecraft" in username change UI
