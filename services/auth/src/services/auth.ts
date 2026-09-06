@@ -1032,3 +1032,87 @@ export async function issueGameToken(
     keyManager,
   )
 }
+
+/**
+ * Change username (display_name) for authenticated user with active session
+ * Enforces:
+ * - Active session validation
+ * - Format: ^[A-Za-z0-9_]{3,16}$
+ * - Global case-insensitive uniqueness (excluding current user)
+ * - Same-user casing changes allowed (e.g. brayan06 -> Brayan06)
+ * - Race-condition safe via database constraint
+ * - Updates only display_name and updated_at
+ * - Preserves users.id and authentication method
+ */
+export async function changeUsername(
+  db: Database,
+  userId: string,
+  sessionId: string,
+  newUsername: string,
+): Promise<{ user: schema.User }> {
+  // 1. Verify active session in D1
+  const isSessionActive = await validateActiveSession(db, sessionId, userId)
+  if (!isSessionActive) {
+    throw new Error(AuthErrorCode.UNAUTHORIZED)
+  }
+
+  // 2. Validate format: ^[A-Za-z0-9_]{3,16}$
+  const trimmed = typeof newUsername === "string" ? newUsername.trim() : ""
+  if (!/^[A-Za-z0-9_]{3,16}$/.test(trimmed)) {
+    throw new Error(AuthErrorCode.INVALID_USERNAME)
+  }
+
+  // 3. Verify user exists
+  const currentUser = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get()
+
+  if (!currentUser) {
+    throw new Error(AuthErrorCode.UNAUTHORIZED)
+  }
+
+  // 4. Case-insensitive conflict check with OTHER users:
+  const conflictingUser = await db
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(
+      and(
+        sql`lower(${schema.users.displayName}) = lower(${trimmed})`,
+        ne(schema.users.id, userId),
+      ),
+    )
+    .get()
+
+  if (conflictingUser) {
+    throw new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+  }
+
+  // 5. Update users table with new username (casing preserved) and updated_at
+  const now = new Date().toISOString()
+  try {
+    await db
+      .update(schema.users)
+      .set({
+        displayName: trimmed,
+        updatedAt: now,
+      })
+      .where(eq(schema.users.id, userId))
+      .run()
+  } catch (err: any) {
+    const errMsg = String(err?.message || err)
+    if (errMsg.includes("UNIQUE") || errMsg.includes("constraint")) {
+      throw new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+    }
+    throw err
+  }
+
+  const updatedUser = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get()
+
+  return { user: updatedUser! }
+}

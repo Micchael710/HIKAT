@@ -785,6 +785,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0021_generic_mod_loader.sql",
       "0022_generic_mod_loader_columns.sql",
       "0023_external_accounts_email_idx.sql",
+      "0024_users_display_name_unique_idx.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -814,6 +815,12 @@ describe("@hikat/database schema and D1 operations", () => {
     const emailIndex = indexList.find((idx) => idx.name === "external_accounts_email_idx")
     expect(emailIndex).toBeDefined()
     expect(emailIndex?.unique).toBe(0)
+
+    // Verify users_display_name_unique_idx exists and is unique
+    const usersIndexList = sqlite.prepare("PRAGMA index_list('users');").all() as Array<{ name: string; unique: number }>
+    const usersDisplayNameIndex = usersIndexList.find((idx) => idx.name === "users_display_name_unique_idx")
+    expect(usersDisplayNameIndex).toBeDefined()
+    expect(usersDisplayNameIndex?.unique).toBe(1)
 
     // Verify expected tables exist
 

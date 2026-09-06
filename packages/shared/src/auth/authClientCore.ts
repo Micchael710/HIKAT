@@ -640,4 +640,59 @@ export class AuthClientCore {
 
     return `${this.authServiceUrl}/oauth/authorize?${query.toString()}`
   }
+
+  public async changeUsername(newUsername: string): Promise<AuthUser> {
+    if (!this.session) {
+      throw new Error("No active session")
+    }
+
+    const payload = parseJwtPayload(this.session.accessToken)
+    if (payload && typeof payload.exp === "number" && isJwtExpired(this.session.accessToken, 60)) {
+      await this.refresh()
+    }
+
+    const token = this.session?.accessToken
+    if (!token || !this.session) {
+      throw new Error("No active session")
+    }
+
+    const res = await this.fetcher(`${this.authServiceUrl}/auth/change-username`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ username: newUsername }),
+    })
+
+    const data = (await res.json().catch(() => ({}))) as Record<string, any>
+
+    if (!res.ok) {
+      const errCode = data.error || data.message
+      if (errCode === AuthErrorCode.INVALID_USERNAME) {
+        throw new Error(AuthErrorCode.INVALID_USERNAME)
+      }
+      if (errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
+        throw new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+      }
+      throw new Error(data.message || data.error || "Error al cambiar el nombre de usuario")
+    }
+
+    const updatedDisplayName = data.user?.displayName || newUsername
+
+    this.session = {
+      ...this.session,
+      user: {
+        ...this.session.user,
+        displayName: updatedDisplayName,
+      },
+    }
+    this.notify()
+
+    if (this.persistSession) {
+      await this.storageAdapter.saveSession(this.session)
+    }
+
+    return this.session.user
+  }
 }

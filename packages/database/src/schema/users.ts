@@ -1,4 +1,4 @@
-import { sqliteTable, text, check } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text, check, uniqueIndex } from "drizzle-orm/sqlite-core"
 import { sql } from "drizzle-orm"
 import { ALLOWED_ROLES } from "@hikat/shared"
 
@@ -17,6 +17,7 @@ export const users = sqliteTable(
   },
   (table) => [
     check("users_role_check", sql`${table.role} IN ('PLAYER', 'ADMIN')`),
+    uniqueIndex("users_display_name_unique_idx").on(sql`${table.displayName} COLLATE NOCASE`),
   ],
 )
 

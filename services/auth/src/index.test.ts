@@ -60,6 +60,7 @@ import {
   resolveOAuthUser,
   getAuthMethods,
   issueGameToken,
+  changeUsername,
 } from "./services/auth"
 import {
   createOAuthState,
@@ -3977,6 +3978,327 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         // Verify 0 orphan users exist with that display name
         const users = await db.select().from(schema.users).where(eq(schema.users.displayName, "Atomic Fail Google")).all()
         expect(users.length).toBe(0)
+      })
+    })
+
+    // ==========================================
+    // 25. USERNAME CHANGE (IDENTITY MANAGEMENT)
+    // ==========================================
+    describe("Username Change", () => {
+      it("allows authenticated user to change to a valid, available username", async () => {
+        const reg = await registerAndVerify({
+          email: "player1@hikat.org",
+          password: "Password123!",
+          displayName: "Player_One",
+        })
+        const login = await loginWithPassword(db, {
+          email: "player1@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        const updated = await changeUsername(db, reg.user.id, login.sessionId, "Player_Renamed")
+        expect(updated.user.id).toBe(reg.user.id)
+        expect(updated.user.displayName).toBe("Player_Renamed")
+
+        // Verify in database
+        const [dbUser] = await db.select().from(schema.users).where(eq(schema.users.id, reg.user.id)).all()
+        expect(dbUser?.displayName).toBe("Player_Renamed")
+      })
+
+      it("rejects username change if already taken (case-insensitive global uniqueness)", async () => {
+        const reg1 = await registerAndVerify({
+          email: "owner@hikat.org",
+          password: "Password123!",
+          displayName: "Brayan06",
+        })
+        const reg2 = await registerAndVerify({
+          email: "other@hikat.org",
+          password: "Password123!",
+          displayName: "OtherPlayer",
+        })
+        const login2 = await loginWithPassword(db, {
+          email: "other@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        // Exactly same casing
+        await expect(
+          changeUsername(db, reg2.user.id, login2.sessionId, "Brayan06"),
+        ).rejects.toThrow(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+
+        // Lowercase
+        await expect(
+          changeUsername(db, reg2.user.id, login2.sessionId, "brayan06"),
+        ).rejects.toThrow(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+
+        // Uppercase
+        await expect(
+          changeUsername(db, reg2.user.id, login2.sessionId, "BRAYAN06"),
+        ).rejects.toThrow(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+      })
+
+      it("allows casing-only username change for the same user (e.g. brayan06 -> Brayan06)", async () => {
+        const reg = await registerAndVerify({
+          email: "casechange@hikat.org",
+          password: "Password123!",
+          displayName: "brayan06",
+        })
+        const login = await loginWithPassword(db, {
+          email: "casechange@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        const updated = await changeUsername(db, reg.user.id, login.sessionId, "Brayan06")
+        expect(updated.user.id).toBe(reg.user.id)
+        expect(updated.user.displayName).toBe("Brayan06")
+
+        const [dbUser] = await db.select().from(schema.users).where(eq(schema.users.id, reg.user.id)).all()
+        expect(dbUser?.displayName).toBe("Brayan06")
+      })
+
+      it("rejects invalid usernames violating format rules (^[A-Za-z0-9_]{3,16}$)", async () => {
+        const reg = await registerAndVerify({
+          email: "validator@hikat.org",
+          password: "Password123!",
+          displayName: "ValidName",
+        })
+        const login = await loginWithPassword(db, {
+          email: "validator@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        const invalidNames = [
+          "ab", // < 3 chars
+          "a".repeat(17), // > 16 chars
+          "user name", // spaces
+          "user@name", // special character
+          "user-name", // dash not allowed
+          "user.name", // dot not allowed
+          "", // empty
+          "   ", // whitespace only
+        ]
+
+        for (const badName of invalidNames) {
+          await expect(
+            changeUsername(db, reg.user.id, login.sessionId, badName),
+          ).rejects.toThrow(AuthErrorCode.INVALID_USERNAME)
+        }
+      })
+
+      it("guarantees users.id and authentication method remain completely unchanged", async () => {
+        const reg = await registerAndVerify({
+          email: "persistent@hikat.org",
+          password: "OriginalPassword123!",
+          displayName: "OrigUsername",
+        })
+        const originalId = reg.user.id
+
+        const login = await loginWithPassword(db, {
+          email: "persistent@hikat.org",
+          password: "OriginalPassword123!",
+        }, keyManager)
+
+        const updated = await changeUsername(db, originalId, login.sessionId, "NewUsername")
+        expect(updated.user.id).toBe(originalId)
+
+        // Verify password authentication method still works with the exact original password
+        const loginAfter = await loginWithPassword(db, {
+          email: "persistent@hikat.org",
+          password: "OriginalPassword123!",
+        }, keyManager)
+        expect(loginAfter.user.id).toBe(originalId)
+        expect(loginAfter.user.displayName).toBe("NewUsername")
+
+        // Verify auth methods
+        const methods = await getAuthMethods(db, originalId)
+        expect(methods.some((m) => m.type === "PASSWORD")).toBe(true)
+        expect(methods.filter((m) => m.type !== "PASSWORD")).toEqual([])
+      })
+
+      it("returns updated username upon session refresh without revoking sessions", async () => {
+        const reg = await registerAndVerify({
+          email: "sessionrefresh@hikat.org",
+          password: "Password123!",
+          displayName: "BeforeRefresh",
+        })
+        const login = await loginWithPassword(db, {
+          email: "sessionrefresh@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        await changeUsername(db, reg.user.id, login.sessionId, "AfterRefresh")
+
+        // Perform refresh using existing refresh token
+        const refreshed = await rotateRefreshToken(db, login.refreshToken, keyManager)
+        expect(refreshed.user.displayName).toBe("AfterRefresh")
+
+        // Decode the new access token
+        const claims = await verifyAccessToken(refreshed.accessToken, keyManager)
+        expect(claims.displayName).toBe("AfterRefresh")
+      })
+
+      it("issues Game JWT containing the updated username", async () => {
+        const reg = await registerAndVerify({
+          email: "gametoken@hikat.org",
+          password: "Password123!",
+          displayName: "OldPlayerTag",
+        })
+        const login = await loginWithPassword(db, {
+          email: "gametoken@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        // Game token before change
+        const tokenBefore = await issueGameToken(db, reg.user.id, login.sessionId, keyManager)
+        const payloadBefore = await verifyGameToken(tokenBefore.token, keyManager)
+        expect(payloadBefore.displayName).toBe("OldPlayerTag")
+
+        // Change username
+        await changeUsername(db, reg.user.id, login.sessionId, "NewPlayerTag")
+
+        // Issue new Game token
+        const tokenAfter = await issueGameToken(db, reg.user.id, login.sessionId, keyManager)
+        const payloadAfter = await verifyGameToken(tokenAfter.token, keyManager)
+        expect(payloadAfter.displayName).toBe("NewPlayerTag")
+        // sub / user.id is unchanged
+        expect(payloadAfter.sub).toBe(reg.user.id)
+      })
+
+      it("allows another user to take the previous username after it is freed by change", async () => {
+        const reg1 = await registerAndVerify({
+          email: "p1@hikat.org",
+          password: "Password123!",
+          displayName: "OldCommonTag",
+        })
+        const reg2 = await registerAndVerify({
+          email: "p2@hikat.org",
+          password: "Password123!",
+          displayName: "TemporaryTag",
+        })
+
+        const login1 = await loginWithPassword(db, {
+          email: "p1@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+        const login2 = await loginWithPassword(db, {
+          email: "p2@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        // User 2 cannot take "oldcommontag" while User 1 has it
+        await expect(
+          changeUsername(db, reg2.user.id, login2.sessionId, "oldcommontag"),
+        ).rejects.toThrow(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+
+        // User 1 changes to "BrandNewTag"
+        await changeUsername(db, reg1.user.id, login1.sessionId, "BrandNewTag")
+
+        // Now User 2 CAN take "oldcommontag"
+        const updated2 = await changeUsername(db, reg2.user.id, login2.sessionId, "oldcommontag")
+        expect(updated2.user.displayName).toBe("oldcommontag")
+
+        // But User 2 cannot take User 1's new tag "brandnewtag"
+        await expect(
+          changeUsername(db, reg2.user.id, login2.sessionId, "brandnewtag"),
+        ).rejects.toThrow(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+      })
+
+      it("HTTP POST /auth/change-username: validates auth, errors, and successfully updates", async () => {
+        const reg = await registerAndVerify({
+          email: "httpuser@hikat.org",
+          password: "Password123!",
+          displayName: "HttpOriginal",
+        })
+        const login = await loginWithPassword(db, {
+          email: "httpuser@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        // 1. Unauthenticated request -> 401
+        const unauthReq = new Request("https://auth.hikat.org/auth/change-username", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newUsername: "HttpRenamed" }),
+        })
+        const unauthRes = await handleRequest({ request: unauthReq, env: {}, db, keyManager, emailService })
+        expect(unauthRes.status).toBe(401)
+
+        // 2. Invalid username format -> 400
+        const badReq = new Request("https://auth.hikat.org/auth/change-username", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${login.accessToken}`,
+          },
+          body: JSON.stringify({ newUsername: "ab" }),
+        })
+        const badRes = await handleRequest({ request: badReq, env: {}, db, keyManager, emailService })
+        expect(badRes.status).toBe(400)
+        const badBody = (await badRes.json()) as any
+        expect(badBody.code).toBe(AuthErrorCode.INVALID_USERNAME)
+
+        // 3. Username taken by another account -> 409
+        await registerAndVerify({
+          email: "httptarget@hikat.org",
+          password: "Password123!",
+          displayName: "TakenHttpName",
+        })
+        const conflictReq = new Request("https://auth.hikat.org/auth/change-username", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${login.accessToken}`,
+          },
+          body: JSON.stringify({ newUsername: "takenhttpname" }),
+        })
+        const conflictRes = await handleRequest({ request: conflictReq, env: {}, db, keyManager, emailService })
+        expect(conflictRes.status).toBe(409)
+        const conflictBody = (await conflictRes.json()) as any
+        expect(conflictBody.code).toBe(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+
+        // 4. Valid username change -> 200
+        const successReq = new Request("https://auth.hikat.org/auth/change-username", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${login.accessToken}`,
+          },
+          body: JSON.stringify({ newUsername: "HttpRenamed" }),
+        })
+        const successRes = await handleRequest({ request: successReq, env: {}, db, keyManager, emailService })
+        expect(successRes.status).toBe(200)
+        const successBody = (await successRes.json()) as any
+        expect(successBody.ok).toBe(true)
+        expect(successBody.user.displayName).toBe("HttpRenamed")
+        expect(successBody.user.id).toBe(reg.user.id)
+      })
+
+      it("AuthClientCore.changeUsername integration via HTTP", async () => {
+        const reg = await registerAndVerify({
+          email: "coreclient@hikat.org",
+          password: "Password123!",
+          displayName: "CoreBefore",
+        })
+        const login = await loginWithPassword(db, {
+          email: "coreclient@hikat.org",
+          password: "Password123!",
+        }, keyManager)
+
+        const client = new AuthClientCore({
+          authServiceUrl: "https://auth.hikat.org",
+          fetcher: async (url, opts) => {
+            const req = new Request(url, opts)
+            return handleRequest({ request: req, env: {}, db, keyManager, emailService })
+          },
+          allowedRole: "PLAYER",
+        })
+
+        await client.setSession(login)
+        expect(client.getUser()?.displayName).toBe("CoreBefore")
+
+        const updatedUser = await client.changeUsername("CoreAfter")
+        expect(updatedUser.displayName).toBe("CoreAfter")
+        expect(client.getUser()?.displayName).toBe("CoreAfter")
       })
     })
   })

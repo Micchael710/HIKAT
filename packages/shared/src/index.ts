@@ -73,6 +73,8 @@ export interface AuthMethodSummary {
 export const AuthErrorCode = {
   INVALID_CREDENTIALS: "INVALID_CREDENTIALS",
   USER_ALREADY_EXISTS: "USER_ALREADY_EXISTS",
+  USERNAME_ALREADY_EXISTS: "USERNAME_ALREADY_EXISTS",
+  INVALID_USERNAME: "INVALID_USERNAME",
   EMAIL_NOT_VERIFIED: "EMAIL_NOT_VERIFIED",
   INVALID_TOKEN: "INVALID_TOKEN",
   TOKEN_EXPIRED: "TOKEN_EXPIRED",
@@ -88,6 +90,12 @@ export const AuthErrorCode = {
 } as const
 
 export type AuthErrorCodeType = typeof AuthErrorCode[keyof typeof AuthErrorCode]
+
+export const USERNAME_REGEX = /^[A-Za-z0-9_]{3,16}$/
+
+export function isValidUsername(username: unknown): boolean {
+  return typeof username === "string" && USERNAME_REGEX.test(username.trim())
+}
 
 export interface ServiceHealth {
   status: "ok" | "degraded" | "error"

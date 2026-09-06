@@ -982,6 +982,93 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
       expect(backofficeClient.getAccessToken()).toBe("backoffice-access")
       expect(backofficeClient.getUser()?.email).toBe("admin@hikat.org")
     })
+
+    it("30. changeUsername updates session user displayName, saves to storage, and notifies listeners", async () => {
+      const storage = createMemoryStorageAdapter()
+      const client = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "PLAYER",
+        storageAdapter: storage,
+        fetcher: mockFetch,
+      })
+
+      await client.setSession({
+        accessToken: "access-token-123",
+        refreshToken: "refresh-token-123",
+        user: { id: "u-user", email: "user@hikat.org", role: "PLAYER", displayName: "OldName" },
+      })
+
+      const listener = vi.fn()
+      client.subscribe(listener)
+      listener.mockClear()
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          user: {
+            id: "u-user",
+            role: "PLAYER",
+            displayName: "NewName_99",
+            createdAt: "2024-01-01T00:00:00.000Z",
+          },
+        }),
+      })
+
+      const updatedUser = await client.changeUsername("NewName_99")
+
+      expect(updatedUser.displayName).toBe("NewName_99")
+      expect(client.getUser()?.displayName).toBe("NewName_99")
+      expect((await storage.loadSession())?.user.displayName).toBe("NewName_99")
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user: expect.objectContaining({ displayName: "NewName_99" }),
+        }),
+        "AUTHENTICATED",
+      )
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:8788/auth/change-username",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer access-token-123",
+          }),
+          body: JSON.stringify({ username: "NewName_99" }),
+        }),
+      )
+    })
+
+    it("31. changeUsername propagates USERNAME_ALREADY_EXISTS and INVALID_USERNAME errors", async () => {
+      const client = new AuthClientCore({
+        authServiceUrl: "http://localhost:8788",
+        allowedRole: "PLAYER",
+        fetcher: mockFetch,
+      })
+
+      await client.setSession({
+        accessToken: "access-token-123",
+        refreshToken: "refresh-token-123",
+        user: { id: "u-user", email: "user@hikat.org", role: "PLAYER", displayName: "Brayan" },
+      })
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "USERNAME_ALREADY_EXISTS", message: "This username is already taken" }),
+      })
+
+      await expect(client.changeUsername("TakenName")).rejects.toThrow("USERNAME_ALREADY_EXISTS")
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: "INVALID_USERNAME", message: "Invalid username format" }),
+      })
+
+      await expect(client.changeUsername("ab")).rejects.toThrow("INVALID_USERNAME")
+    })
   })
 })
 

@@ -579,4 +579,211 @@ describe("Launcher ProfileView Component", () => {
 
     expect(container.textContent).toContain("Reenviar en 00:45")
   })
+
+  it("15. Username change form displays current username, input, rules, and does not mention Minecraft", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-15",
+      username: "StevePlayer",
+      displayName: "StevePlayer",
+      email: "steve@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "steve@hikat.org" }],
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="StevePlayer"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    // Check title and labels
+    expect(container.textContent).toContain("Cambiar nombre de usuario")
+    expect(container.textContent).toContain("Nombre de usuario actual")
+    expect(container.textContent).toContain("Nuevo nombre de usuario")
+    expect(container.textContent).toContain("Guardar")
+    expect(container.textContent).toContain("Debe tener entre 3 y 16 caracteres (letras, números y guion bajo).")
+
+    // Strict rule: No mentioning "Minecraft" in username change UI
+    expect(container.textContent?.toLowerCase()).not.toContain("minecraft uuid")
+    expect(container.textContent?.toLowerCase()).not.toContain("mojang")
+  })
+
+  function changeInput(input: HTMLInputElement, value: string) {
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set
+    nativeInputValueSetter?.call(input, value)
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+  }
+
+  it("16. User can input new valid username and successfully save, updating UI and displaying toast", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-16",
+      username: "OldName",
+      displayName: "OldName",
+      email: "oldname@hikat.org",
+      role: "PLAYER",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "oldname@hikat.org" }],
+    })
+
+    const changeUsernameSpy = vi.spyOn(authService, "changeUsername").mockResolvedValue({
+      success: true,
+      user: {
+        id: "u-16",
+        username: "NewAwesomeName",
+        displayName: "NewAwesomeName",
+        email: "oldname@hikat.org",
+        role: "PLAYER",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="OldName"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
+    expect(input).not.toBeNull()
+
+    // Enter new valid username
+    await act(async () => {
+      changeInput(input, "NewAwesomeName")
+    })
+
+    const form = container.querySelector("form")
+    expect(form).not.toBeNull()
+
+    await act(async () => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+    })
+
+    expect(changeUsernameSpy).toHaveBeenCalledWith("NewAwesomeName")
+    expect(container.textContent).toContain("Nombre de usuario actualizado correctamente.")
+    expect(container.textContent).toContain("NewAwesomeName")
+  })
+
+  it("17. Handles taken username error by displaying inline error and error toast", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-17",
+      username: "PlayerA",
+      displayName: "PlayerA",
+      email: "a@hikat.org",
+      role: "PLAYER",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "a@hikat.org" }],
+    })
+    vi.spyOn(authService, "changeUsername").mockResolvedValue({
+      success: false,
+      code: "USERNAME_ALREADY_EXISTS",
+      error: "This username is already taken",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="PlayerA"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
+    await act(async () => {
+      changeInput(input, "TakenName")
+    })
+
+    const form = container.querySelector("form")
+    await act(async () => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+    })
+
+    expect(container.textContent).toContain("Este nombre de usuario ya está en uso.")
+  })
+
+  it("18. Allows casing-only change for same user (e.g. steve -> Steve)", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-18",
+      username: "steve",
+      displayName: "steve",
+      email: "steve@hikat.org",
+      role: "PLAYER",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "steve@hikat.org" }],
+    })
+
+    const changeUsernameSpy = vi.spyOn(authService, "changeUsername").mockResolvedValue({
+      success: true,
+      user: {
+        id: "u-18",
+        username: "Steve",
+        displayName: "Steve",
+        email: "steve@hikat.org",
+        role: "PLAYER",
+      },
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="steve"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
+    await act(async () => {
+      changeInput(input, "Steve")
+    })
+
+    const form = container.querySelector("form")
+    await act(async () => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+    })
+
+    expect(changeUsernameSpy).toHaveBeenCalledWith("Steve")
+    expect(container.textContent).toContain("Nombre de usuario actualizado correctamente.")
+  })
 })

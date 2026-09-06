@@ -4,6 +4,29 @@
 
 HiKAT cuenta con un sistema propio y unificado de cuentas internas bajo el principio arquitectónico: **1 usuario = 1 identidad = 1 método de autenticación**. Cada persona posee exactamente un registro en la tabla `users` (con `id`, `displayName`, `role`, `createdAt`, `updatedAt`).
 
+### Identidad Permanente (`users.id`) vs Nombre Visible (`username` / `displayName`)
+
+- **`users.id` (UUID permanente)**: Representa la identidad inmutable y permanente del jugador en todo el ecosistema HiKAT. Jamás cambia, independientemente de modificaciones en el nombre visible, método de inicio de sesión o contraseñas.
+- **`username` / `displayName` (Nombre visible modificable)**: Es el identificador visible del usuario en el Launcher, perfiles y servidores. Puede ser modificado por el usuario autenticado desde el Launcher.
+
+> [!IMPORTANT]
+> **Arquitectura de Identidad en Minecraft (Client-Mod / Server-Mod)**:
+> El objetivo arquitectónico de HiKAT es que el futuro mod cliente y servidor (`client-mod` / `server-mod`) enlace el GameProfile del jugador y su UUID de servidor directamente al `users.id` permanente de HiKAT, garantizando persistencia absoluta de inventarios y datos de jugador (`playerdata`) ante cambios de nombre visible.
+>
+> **Advertencia sobre servidores tradicionales en `online-mode=false`**:
+> Hasta que el sistema `client-mod`/`server-mod` esté desplegado en los servidores, un servidor de Minecraft vanilla o estándar en modo offline (`online-mode=false`) genera su UUID determinístico a partir del string del username (`UUID.nameUUIDFromBytes("OfflinePlayer:" + username)`). En consecuencia, cambiar el username en este tipo de servidores tradicionales puede separar el progreso del jugador hasta la llegada del mod de identidad.
+
+### Reglas para Cambio de Nombre de Usuario
+- **Autoservicio autenticado**: El usuario autenticado puede cambiar su propio nombre de usuario desde su perfil en el Launcher.
+- **Inmutabilidad de cuenta**: `users.id` y el método de autenticación asociado (Google, Discord o Contraseña) jamás se modifican al cambiar el nombre. No se crean cuentas adicionales.
+- **Validación de formato**: Expresión regular `^[A-Za-z0-9_]{3,16}$` (entre 3 y 16 caracteres, admitiendo letras mayúsculas, minúsculas, dígitos numéricos y guiones bajos).
+- **Unicidad global case-insensitive**: Nombres como `Brayan`, `brayan` y `BRAYAN` son considerados idénticos. La colisión con otro usuario es rechazada inmediatamente tanto a nivel aplicativo como en base de datos D1 mediante el índice único `users_display_name_unique_idx ON users (display_name COLLATE NOCASE)`.
+- **Cambio de casing para el mismo usuario**: Si un usuario solicita un cambio que difiere únicamente en mayúsculas/minúsculas de su propio nombre actual (ej. `brayan06` → `Brayan06`), el cambio es totalmente permitido y su casing es preservado.
+- **Propagación en Sesiones y JWTs**:
+  - Al completar el cambio, la sesión local del Launcher actualiza reactivamente el usuario en memoria y en almacenamiento seguro.
+  - La rotación de refresh tokens (`/auth/refresh`) consulta la fuente autoritativa en D1 y emite nuevos Access JWTs con el nombre actualizado.
+  - Los futuros Game JWTs (`/auth/game-token`) contienen inmediatamente el nombre actualizado en sus claims. No es necesario revocar otras sesiones activas del usuario.
+
 Los métodos de autenticación soportados son mutuamente excluyentes por cuenta:
 1. **Email + Contraseña**: Registrado en `password_credentials` (`userId`, `email`, `passwordHash`, `isEmailVerified`, `verifiedAt`).
 2. **Google OAuth / OIDC**: Registrado en `external_accounts` (`userId`, `provider = 'GOOGLE'`, `providerSubject`, `email`, `emailVerified`, `displayName`, `avatarUrl`).
@@ -113,6 +136,7 @@ Launcher (Electron)             HiKAT Auth Service            External Provider 
 | `POST` | `/auth/forgot-password` | Solicitud de token de recuperación de contraseña | Pública |
 | `POST` | `/auth/reset-password` | Restablecimiento de contraseña con token | Pública |
 | `POST` | `/auth/change-password` | Cambio de contraseña con sesión activa | Bearer JWT + D1 sid check |
+| `POST` | `/auth/change-username` | Cambio de nombre de usuario con sesión activa | Bearer JWT + D1 sid check |
 | `POST` | `/auth/refresh` | Rotación de refresh token | Refresh Token |
 | `POST` | `/auth/logout` | Revocación de sesión en D1 | Bearer JWT |
 | `POST` | `/auth/game-token` | Emisión de Game JWT de corta duración (3 min) | Bearer JWT + D1 sid check |

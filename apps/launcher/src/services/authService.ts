@@ -643,6 +643,33 @@ class LauncherAuthService {
       return { success: false, error: err?.message || "Error al consultar métodos de autenticación." }
     }
   }
+
+  public async changeUsername(newUsername: string): Promise<{ success: boolean; user?: UserProfile; error?: string; code?: string }> {
+    const cleanUsername = sanitizeUsername(newUsername)
+    if (!cleanUsername) {
+      return { success: false, error: "Nombre de usuario requerido." }
+    }
+    try {
+      const user = await this.client.changeUsername(cleanUsername)
+      return {
+        success: true,
+        user: {
+          id: user.id,
+          username: user.displayName || cleanUsername,
+          displayName: user.displayName || cleanUsername,
+          email: user.email,
+          role: user.role,
+          createdAt: user.createdAt,
+        },
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || "Error al cambiar el nombre de usuario.",
+        code: err.code || err.name,
+      }
+    }
+  }
 }
 
 export const authService = new LauncherAuthService()

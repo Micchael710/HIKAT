@@ -6,6 +6,7 @@ import LiveToast from "../components/common/LiveToast"
 import { useTranslation } from "../context/LanguageContext"
 
 import { authService, AuthMethodSummary } from "../services/authService"
+import { isValidUsername, AuthErrorCode } from "@hikat/shared"
 
 interface ProfileViewProps {
   username: string
@@ -30,6 +31,73 @@ export default function ProfileView({
 }: ProfileViewProps) {
   const { t, language } = useTranslation()
   const user = authService.getUser() || authService.getCachedUser()
+
+  const [currentUsername, setCurrentUsername] = useState(
+    user?.displayName || user?.username || username || "Jugador",
+  )
+  const [newUsernameInput, setNewUsernameInput] = useState(
+    user?.displayName || user?.username || username || "",
+  )
+  const [isSavingUsername, setIsSavingUsername] = useState(false)
+  const [usernameError, setUsernameError] = useState<string | null>(null)
+
+  // Listen to authService state updates
+  useEffect(() => {
+    const unsub = authService.subscribe((session) => {
+      if (session?.user?.displayName) {
+        setCurrentUsername(session.user.displayName)
+      }
+    })
+    return unsub
+  }, [])
+
+  const canSubmitUsername = useMemo(() => {
+    const trimmed = newUsernameInput.trim()
+    if (!trimmed) return false
+    if (trimmed === currentUsername) return false
+    return isValidUsername(trimmed)
+  }, [newUsernameInput, currentUsername])
+
+  const handleChangeUsername = async () => {
+    const trimmed = newUsernameInput.trim()
+    if (!trimmed || trimmed === currentUsername) return
+
+    if (!isValidUsername(trimmed)) {
+      setUsernameError(t("profile.usernameInvalidError"))
+      return
+    }
+
+    setIsSavingUsername(true)
+    setUsernameError(null)
+
+    try {
+      const res = await authService.changeUsername(trimmed)
+      setIsSavingUsername(false)
+      if (res.success && res.user) {
+        const updatedName = res.user.displayName || trimmed
+        setCurrentUsername(updatedName)
+        setNewUsernameInput(updatedName)
+        showToast(t("profile.usernameChangeSuccess"), "success")
+      } else {
+        if (res.code === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
+          setUsernameError(t("profile.usernameTakenError"))
+          showToast(t("profile.usernameTakenError"), "error")
+        } else if (res.code === AuthErrorCode.INVALID_USERNAME) {
+          setUsernameError(t("profile.usernameInvalidError"))
+          showToast(t("profile.usernameInvalidError"), "error")
+        } else {
+          const msg = res.error || t("profile.usernameChangeError")
+          setUsernameError(msg)
+          showToast(msg, "error")
+        }
+      }
+    } catch (err: any) {
+      setIsSavingUsername(false)
+      const msg = err?.message || t("profile.usernameChangeError")
+      setUsernameError(msg)
+      showToast(msg, "error")
+    }
+  }
 
   const [email] = useState(
     user?.email ||
@@ -460,7 +528,7 @@ export default function ProfileView({
                     marginBottom: 2,
                   }}
                 >
-                  {username}
+                  {currentUsername}
                 </div>
                 <div
                   style={{
@@ -517,7 +585,7 @@ export default function ProfileView({
                     textOverflow: "ellipsis",
                   }}
                 >
-                  {username}
+                  {currentUsername}
                 </div>
               </div>
 
@@ -601,7 +669,226 @@ export default function ProfileView({
             </div>
           </div>
 
-          {/* Card 2: Seguridad y Contraseña */}
+          {/* Card 2: Cambiar Nombre de Usuario */}
+          <div className="settings-card">
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: isDark ? "#657788" : "#778899",
+                marginBottom: 8,
+              }}
+            >
+              {t("profile.changeUsernameTitle")}
+            </div>
+
+            <div
+              style={{
+                fontSize: 15,
+                color: isDark ? "#8899aa" : "#556677",
+                lineHeight: 1.45,
+                marginBottom: 16,
+              }}
+            >
+              {t("profile.changeUsernameDesc")}
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                handleChangeUsername()
+              }}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 16,
+                }}
+              >
+                {/* Current Username Field */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      fontWeight: 800,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: isDark ? "#657788" : "#778899",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {t("profile.currentUsername")}
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    disabled
+                    value={currentUsername}
+                    style={{
+                      width: "100%",
+                      height: 44,
+                      padding: "0 14px",
+                      borderRadius: 12,
+                      background: isDark ? "#0d1217" : "#f0f3f7",
+                      border: isDark
+                        ? "1.5px solid rgba(255, 255, 255, 0.08)"
+                        : "1.5px solid rgba(0, 0, 0, 0.08)",
+                      color: isDark ? "#8899aa" : "#667788",
+                      fontFamily: BASE_FONT,
+                      fontSize: 15,
+                      fontWeight: 600,
+                      cursor: "not-allowed",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+
+                {/* New Username Field */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      fontWeight: 800,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: isDark ? "#8899aa" : "#445566",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {t("profile.newUsername")}
+                  </label>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <input
+                      type="text"
+                      maxLength={16}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      placeholder={t("profile.newUsernamePlaceholder")}
+                      value={newUsernameInput}
+                      onChange={(e) => {
+                        setNewUsernameInput(e.target.value)
+                        if (usernameError) setUsernameError(null)
+                      }}
+                      className="launcher-input"
+                      style={{
+                        flex: 1,
+                        height: 44,
+                        padding: "0 14px",
+                        borderRadius: 12,
+                        background: isDark ? "#0d1217" : "#ffffff",
+                        border: isDark
+                          ? (usernameError ? "1.5px solid #ef4444" : "1.5px solid rgba(255, 255, 255, 0.12)")
+                          : (usernameError ? "1.5px solid #ef4444" : "1.5px solid rgba(0, 0, 0, 0.12)"),
+                        color: isDark ? "white" : "#111822",
+                        fontFamily: BASE_FONT,
+                        fontSize: 15,
+                        fontWeight: 600,
+                        transition: "all 0.16s ease",
+                        boxSizing: "border-box",
+                      }}
+                    />
+
+                    <button
+                      type="submit"
+                      disabled={isSavingUsername || !canSubmitUsername}
+                      className="launcher-btn-secondary"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        height: 44,
+                        padding: "0 22px",
+                        borderRadius: 12,
+                        fontSize: 14.5,
+                        fontWeight: 700,
+                        fontFamily: BASE_FONT,
+                        cursor: isSavingUsername || !canSubmitUsername ? "default" : "pointer",
+                        opacity: isSavingUsername || !canSubmitUsername ? 0.6 : 1,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isSavingUsername ? (
+                        <>
+                          <svg
+                            width={14}
+                            height={14}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            style={{ animation: "spin 1s linear infinite" }}
+                          >
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                          </svg>
+                          <span>{t("profile.savingUsername")}</span>
+                        </>
+                      ) : (
+                        <span>{t("profile.saveUsername")}</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Rules Explanation & Inline Error */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                  marginTop: 2,
+                }}
+              >
+                <div style={{ color: isDark ? "#657788" : "#8899aa" }}>
+                  {t("profile.usernameRulesHint")}
+                </div>
+
+                {usernameError && (
+                  <div
+                    style={{
+                      color: "#ef4444",
+                      fontWeight: 600,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <svg
+                      width={14}
+                      height={14}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span>{usernameError}</span>
+                  </div>
+                )}
+              </div>
+            </form>
+          </div>
+
+          {/* Card 3: Seguridad y Contraseña */}
           <div className="settings-card">
             <div
               style={{

@@ -27,6 +27,7 @@ import {
   requestPasswordReset,
   resetPasswordWithToken,
   changePassword,
+  changeUsername,
   getOrCreateOAuthUser,
   resolveOAuthUser,
   getAuthMethods,
@@ -161,7 +162,7 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
   }
 
   function errorResponse(code: string, message: string, status: number = 400): Response {
-    return jsonResponse({ error: code, message }, status)
+    return jsonResponse({ error: code, code, message }, status)
   }
 
   function redirectResponse(url: string, status: number = 302): Response {
@@ -1065,6 +1066,43 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       return jsonResponse({ success: true, message: "Password updated successfully" })
     }
 
+    // 8b. Change Username (authenticated)
+    if (pathname === "/auth/change-username" && method === "POST") {
+      const session = await extractAuthenticatedSession(request, keyManager)
+      const isSessionActive = await validateActiveSession(db, session.sessionId, session.userId)
+      if (!isSessionActive) {
+        return errorResponse(AuthErrorCode.UNAUTHORIZED, "Session expired or revoked", 401)
+      }
+
+      const body = (await request.json().catch(() => ({}))) as {
+        username?: string
+        newUsername?: string
+      }
+
+      const targetUsername = body.username || body.newUsername
+      if (!targetUsername) {
+        return errorResponse(AuthErrorCode.INVALID_USERNAME, "username is required", 400)
+      }
+
+      const result = await changeUsername(
+        db,
+        session.userId,
+        session.sessionId,
+        targetUsername,
+      )
+
+      return jsonResponse({
+        ok: true,
+        success: true,
+        user: {
+          id: result.user.id,
+          role: result.user.role,
+          displayName: result.user.displayName,
+          createdAt: result.user.createdAt,
+        },
+      })
+    }
+
     // 9. Session Refresh Token Rotation (atomic & race-condition-safe)
     if (pathname === "/auth/refresh" && method === "POST") {
       const body = (await request.json().catch(() => ({}))) as { refreshToken?: string }
@@ -1417,6 +1455,12 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
     }
     if (errorString === AuthErrorCode.USER_ALREADY_EXISTS) {
       return errorResponse(AuthErrorCode.USER_ALREADY_EXISTS, "An account with this email already exists", 409)
+    }
+    if (errorString === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
+      return errorResponse(AuthErrorCode.USERNAME_ALREADY_EXISTS, "This username is already taken", 409)
+    }
+    if (errorString === AuthErrorCode.INVALID_USERNAME) {
+      return errorResponse(AuthErrorCode.INVALID_USERNAME, "Invalid username format. Must be 3-16 characters (letters, numbers, underscore).", 400)
     }
     if (errorString === AuthErrorCode.EMAIL_NOT_VERIFIED) {
       return errorResponse(AuthErrorCode.EMAIL_NOT_VERIFIED, "Email verification is required before signing in", 403)
