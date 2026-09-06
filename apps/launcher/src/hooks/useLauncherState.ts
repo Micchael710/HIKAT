@@ -38,9 +38,11 @@ export function useLauncherState() {
   const [username, setUsername] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const cached = authService.getCachedUser()
-      if (cached) return cached.displayName || cached.username || "Jugador"
+      if (cached?.displayName && cached.displayName.trim()) {
+        return cached.displayName.trim()
+      }
     }
-    return "Jugador"
+    return ""
   })
 
   const [view, setView] = useState<LauncherView>("home")
@@ -117,10 +119,17 @@ export function useLauncherState() {
     const unsubscribe = authService.subscribe((session, status) => {
       if (!isMounted) return
       if (status === "AUTHENTICATED" && session?.user && (session.user.role === "PLAYER" || session.user.role === "ADMIN")) {
-        if (!pendingAuthActionRef.current) {
-          setScreen("home")
+        const hasValidDisplayName = Boolean(session.user.displayName && session.user.displayName.trim())
+        if (hasValidDisplayName) {
+          if (!pendingAuthActionRef.current) {
+            setScreen("home")
+          }
+          setUsername(session.user.displayName!.trim())
+        } else {
+          // Incomplete OAuth account without chosen username must complete onboarding
+          setScreen("login")
+          setUsername("")
         }
-        setUsername(session.user.displayName || session.user.email.split("@")[0] || "Jugador")
       } else if (status === "UNAUTHENTICATED") {
         setScreen("login")
         setPlayerSkin(null)
@@ -541,7 +550,7 @@ export function useLauncherState() {
     authService.logout()
     setPlayerSkin(null)
     setPlayerCapes([])
-    setUsername("Jugador")
+    setUsername("")
     setScreen("login")
     setView("home")
     if (appliedSkin === "player-custom") {

@@ -1086,6 +1086,80 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     authService.setCooldown("reset", "independent@hikat.org", 60)
     expect(authService.getRemainingCooldown("reset", "independent@hikat.org")).toBeGreaterThan(0)
   })
+
+  it("34. changeUsername strictly validates input and rejects spaces or invalid formats without silent alteration", async () => {
+    const clientSpy = vi.spyOn((authService as any).client, "changeUsername")
+
+    // Space in username -> REJECTED without transforming to "BrayanMateo"
+    const resSpace = await authService.changeUsername("Brayan Mateo")
+    expect(resSpace.success).toBe(false)
+    expect(resSpace.code).toBe("INVALID_USERNAME")
+    expect(clientSpy).not.toHaveBeenCalled()
+
+    // 2 chars -> REJECTED
+    const resShort = await authService.changeUsername("ab")
+    expect(resShort.success).toBe(false)
+    expect(resShort.code).toBe("INVALID_USERNAME")
+
+    // 17 chars -> REJECTED
+    const resLong = await authService.changeUsername("a".repeat(17))
+    expect(resLong.success).toBe(false)
+    expect(resLong.code).toBe("INVALID_USERNAME")
+
+    // Invalid symbol -> REJECTED
+    const resSymbol = await authService.changeUsername("User-Name!")
+    expect(resSymbol.success).toBe(false)
+    expect(resSymbol.code).toBe("INVALID_USERNAME")
+  })
+
+  it("35. changeUsername passes trimmed valid username preserving exact casing to client", async () => {
+    const clientSpy = vi.spyOn((authService as any).client, "changeUsername").mockResolvedValueOnce({
+      id: "u-1",
+      displayName: "Brayan_06",
+      email: "brayan@hikat.org",
+      role: "PLAYER",
+    })
+
+    const res = await authService.changeUsername("  Brayan_06  ")
+    expect(clientSpy).toHaveBeenCalledWith("Brayan_06")
+    expect(res.success).toBe(true)
+    expect(res.user?.displayName).toBe("Brayan_06")
+    expect(res.user?.username).toBe("Brayan_06")
+  })
+
+  it("36. Storage adapter, getUser, and getCachedUser preserve null displayName without inventing fake email/Jugador usernames", async () => {
+    const mockSave = vi.fn()
+    ;(window as any).electronAPI = {
+      authLoadSession: vi.fn().mockResolvedValue({
+        accessToken: "token",
+        refreshToken: "ref",
+        user: {
+          id: "u-oauth-incomplete",
+          email: "oauthnew@gmail.com",
+          role: "PLAYER",
+          displayName: null,
+          suggestedUsername: "OauthNew",
+        },
+      }),
+      authSaveSession: mockSave,
+      authClearSession: vi.fn(),
+    }
+
+    const session = await authService.bootstrap()
+    expect(session?.user.displayName).toBeNull()
+
+    const user = authService.getUser()
+    expect(user?.displayName).toBeNull()
+    expect(user?.username).toBe("")
+    expect(user?.suggestedUsername).toBe("OauthNew")
+
+    // Verify localStorage cached user does NOT invent email or "Jugador"
+    await authService.setSession(session!)
+    const cached = authService.getCachedUser()
+    expect(cached?.displayName).toBeNull()
+    expect(cached?.username).toBe("")
+    expect(cached?.suggestedUsername).toBe("OauthNew")
+  })
 })
 
 

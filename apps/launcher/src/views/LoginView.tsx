@@ -9,7 +9,8 @@ import {
   sanitizeEmail,
   isValidUsername,
 } from "../utils/security"
-import { authService } from "../services/authService"
+import { authService, UserProfile } from "../services/authService"
+import { AuthStatus } from "@hikat/shared"
 
 interface LoginViewProps {
   onLogin: (username: string) => void
@@ -81,6 +82,41 @@ export default function LoginView({
     const timer = setInterval(update, 500)
     return () => clearInterval(timer)
   }, [mode, forgotSuccess, forgotEmail, email])
+
+  // Automatically activate choose-username onboarding if an authenticated session has no chosen username
+  useEffect(() => {
+    const checkOnboarding = (u: UserProfile | null, s: AuthStatus) => {
+      if (s === "AUTHENTICATED" && u && (!u.displayName || u.displayName.trim() === "")) {
+        const rawSuggestion = u.suggestedUsername || (u.email ? u.email.split("@")[0] : "")
+        const suggestion = sanitizeUsername(rawSuggestion)
+        setOnboardingUsername((prev) => prev || suggestion)
+        setMode("choose-username")
+      }
+    }
+
+    const currentUser = authService.getUser()
+    const currentStatus = authService.getStatus()
+    checkOnboarding(currentUser, currentStatus)
+
+    const unsubscribe = authService.subscribe((session, s) => {
+      if (s === "AUTHENTICATED" && session?.user) {
+        const u: UserProfile = {
+          id: session.user.id,
+          username: session.user.displayName || "",
+          displayName: session.user.displayName,
+          suggestedUsername: session.user.suggestedUsername,
+          email: session.user.email,
+          role: session.user.role,
+          createdAt: session.user.createdAt,
+        }
+        checkOnboarding(u, s)
+      }
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [])
 
   const pendingOAuthRef = useRef<{
     codeVerifier: string

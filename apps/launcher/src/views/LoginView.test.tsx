@@ -1285,4 +1285,125 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       localStorage.removeItem("hikat_language")
     }
   })
+
+  it("35. Onboarding survives launcher reopen: authenticated session with null displayName auto-switches to choose-username mode", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "getStatus").mockReturnValue("AUTHENTICATED")
+    vi.spyOn(authService, "getUser").mockReturnValue({
+      id: "u-oauth-1",
+      username: "",
+      displayName: null,
+      suggestedUsername: "BrayanMateo",
+      email: "brayan@gmail.com",
+      role: "PLAYER",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    // Displays choose username title and description
+    expect(container.textContent).toContain("Elige tu nombre de usuario")
+    expect(container.textContent).toContain("Elige el nombre visible con el que te identificarás en HiKAT.")
+    expect(container.textContent).toContain("Comenzar")
+
+    // Suggestion is prefilled in textbox
+    const input = container.querySelector("input[type='text']") as HTMLInputElement
+    expect(input).toBeDefined()
+    expect(input.value).toBe("BrayanMateo")
+    expect(onLogin).not.toHaveBeenCalled()
+  })
+
+  it("36. Confirming chosen username in choose-username mode calls authService.changeUsername and calls onLogin", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "getStatus").mockReturnValue("AUTHENTICATED")
+    vi.spyOn(authService, "getUser").mockReturnValue({
+      id: "u-oauth-1",
+      username: "",
+      displayName: null,
+      suggestedUsername: "BrayanMateo",
+      email: "brayan@gmail.com",
+      role: "PLAYER",
+    })
+
+    const changeUsernameSpy = vi.spyOn(authService, "changeUsername").mockResolvedValue({
+      success: true,
+      user: {
+        id: "u-oauth-1",
+        username: "CustomName_99",
+        displayName: "CustomName_99",
+        email: "brayan@gmail.com",
+        role: "PLAYER",
+      },
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const input = container.querySelector("input[type='text']") as HTMLInputElement
+    await act(async () => {
+      changeInput(input, "CustomName_99")
+    })
+
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Comenzar"),
+    )
+    expect(submitBtn).toBeDefined()
+
+    await act(async () => {
+      submitBtn?.click()
+    })
+
+    expect(changeUsernameSpy).toHaveBeenCalledWith("CustomName_99")
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400))
+    })
+
+    expect(onLogin).toHaveBeenCalledWith("CustomName_99")
+  })
+
+  it("37. Submitting invalid username in choose-username displays validation error without silent alteration or submission", async () => {
+    const onLogin = vi.fn()
+    vi.spyOn(authService, "getStatus").mockReturnValue("AUTHENTICATED")
+    vi.spyOn(authService, "getUser").mockReturnValue({
+      id: "u-oauth-1",
+      username: "",
+      displayName: null,
+      email: "brayan@gmail.com",
+      role: "PLAYER",
+    })
+
+    const changeUsernameSpy = vi.spyOn(authService, "changeUsername")
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <LoginView onLogin={onLogin} theme="dark" />
+      </LanguageProvider>,
+    )
+
+    const input = container.querySelector("input[type='text']") as HTMLInputElement
+    // Type username with space
+    await act(async () => {
+      changeInput(input, "Brayan Mateo")
+    })
+
+    const submitBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Comenzar"),
+    )
+    await act(async () => {
+      submitBtn?.click()
+    })
+
+    // Validation error displayed
+    expect(container.textContent).toContain("El nombre de usuario debe tener entre 3 y 16 caracteres y solo contener letras, números y guion bajo.")
+    expect(changeUsernameSpy).not.toHaveBeenCalled()
+    expect(onLogin).not.toHaveBeenCalled()
+    expect(input.value).toBe("Brayan Mateo") // NOT silently transformed to "BrayanMateo"
+  })
 })

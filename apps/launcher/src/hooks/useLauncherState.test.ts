@@ -534,6 +534,127 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     unmount()
   })
+
+  it("Test 12 — OAuth session with displayName = null keeps screen = 'login'", async () => {
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      authCallback(
+        {
+          user: {
+            id: "u-oauth-new",
+            displayName: null,
+            email: "oauthnew@gmail.com",
+            role: "PLAYER",
+          },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.screen).toBe("login")
+    expect(result.current.username).toBe("")
+
+    unmount()
+  })
+
+  it("Test 13 — When displayName is set via changeUsername notification, transitions screen from 'login' to 'home'", async () => {
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    // 1. Initial OAuth login with null displayName
+    await act(async () => {
+      authCallback(
+        {
+          user: {
+            id: "u-oauth-new",
+            displayName: null,
+            email: "oauthnew@gmail.com",
+            role: "PLAYER",
+          },
+        },
+        "AUTHENTICATED",
+      )
+    })
+    expect(result.current.screen).toBe("login")
+
+    // 2. User completes choose-username onboarding -> AuthClientCore notifies updated session
+    await act(async () => {
+      authCallback(
+        {
+          user: {
+            id: "u-oauth-new",
+            displayName: "ChosenPlayer",
+            email: "oauthnew@gmail.com",
+            role: "PLAYER",
+          },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.screen).toBe("home")
+    expect(result.current.username).toBe("ChosenPlayer")
+
+    unmount()
+  })
+
+  it("Test 14 — Existing account with valid displayName transitions to screen = 'home' immediately", async () => {
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      authCallback(
+        {
+          user: {
+            id: "u-existing",
+            displayName: "ExistingPlayer",
+            email: "existing@gmail.com",
+            role: "PLAYER",
+          },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.screen).toBe("home")
+    expect(result.current.username).toBe("ExistingPlayer")
+
+    unmount()
+  })
 })
 
 

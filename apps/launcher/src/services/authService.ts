@@ -84,12 +84,16 @@ export function createLauncherStorageAdapter(): AuthStorageAdapter {
           localStorage.removeItem("hikat_auth_session")
           localStorage.removeItem("hikat_auth_token")
           localStorage.removeItem("hikat_refresh_token")
+          const validDisplayName = session.user.displayName && session.user.displayName.trim()
+            ? session.user.displayName.trim()
+            : null
           localStorage.setItem(
             "hikat_last_user",
             JSON.stringify({
               id: session.user.id,
-              username: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
-              displayName: session.user.displayName || session.user.email.split("@")[0] || "Jugador",
+              username: validDisplayName || "",
+              displayName: validDisplayName,
+              suggestedUsername: session.user.suggestedUsername,
               email: session.user.email,
               role: session.user.role,
               createdAt: session.user.createdAt,
@@ -178,10 +182,12 @@ class LauncherAuthService {
   public getUser(): UserProfile | null {
     const u = this.client.getUser()
     if (!u) return this.getCachedUser()
+    const validDisplayName = u.displayName && u.displayName.trim() ? u.displayName.trim() : null
     return {
       id: u.id,
-      username: u.displayName || u.email.split("@")[0] || "Jugador",
-      displayName: u.displayName || u.email.split("@")[0] || "Jugador",
+      username: validDisplayName || "",
+      displayName: validDisplayName,
+      suggestedUsername: u.suggestedUsername,
       email: u.email,
       role: u.role,
       createdAt: u.createdAt,
@@ -194,11 +200,14 @@ class LauncherAuthService {
       const saved = localStorage.getItem("hikat_last_user")
       if (!saved) return null
       const parsed = JSON.parse(saved)
-      if (parsed && (typeof parsed.username === "string" || typeof parsed.email === "string")) {
+      if (parsed && (typeof parsed.username === "string" || typeof parsed.email === "string" || typeof parsed.id === "string")) {
+        const rawDisplayName = parsed.displayName ?? parsed.username ?? null
+        const validDisplayName = typeof rawDisplayName === "string" && rawDisplayName.trim() ? rawDisplayName.trim() : null
         return {
           id: parsed.id || "",
-          username: sanitizeUsername(parsed.username || parsed.displayName || parsed.email?.split("@")[0]) || "Jugador",
-          displayName: sanitizeUsername(parsed.displayName || parsed.username || parsed.email?.split("@")[0]) || "Jugador",
+          username: validDisplayName || "",
+          displayName: validDisplayName,
+          suggestedUsername: typeof parsed.suggestedUsername === "string" ? parsed.suggestedUsername : undefined,
           email: sanitizeEmail(parsed.email || ""),
           role: parsed.role || "PLAYER",
           createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : undefined,
@@ -604,10 +613,11 @@ class LauncherAuthService {
         sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
       }
 
+      const validDisplayName = user.displayName && user.displayName.trim() ? user.displayName.trim() : null
       return {
         id: user.id,
-        username: user.displayName || user.email.split("@")[0] || "Jugador",
-        displayName: user.displayName || null,
+        username: validDisplayName || "",
+        displayName: validDisplayName,
         suggestedUsername: user.suggestedUsername,
         email: user.email,
         role: user.role,
@@ -655,18 +665,25 @@ class LauncherAuthService {
   }
 
   public async changeUsername(newUsername: string): Promise<{ success: boolean; user?: UserProfile; error?: string; code?: string }> {
-    const cleanUsername = sanitizeUsername(newUsername)
-    if (!cleanUsername) {
-      return { success: false, error: "Nombre de usuario requerido." }
+    const trimmed = typeof newUsername === "string" ? newUsername.trim() : ""
+    if (!trimmed) {
+      return { success: false, error: "Nombre de usuario requerido.", code: "INVALID_USERNAME" }
+    }
+    if (!isValidUsername(trimmed)) {
+      return {
+        success: false,
+        error: "El nombre de usuario debe tener entre 3 y 16 caracteres y solo contener letras, números y guion bajo.",
+        code: "INVALID_USERNAME",
+      }
     }
     try {
-      const user = await this.client.changeUsername(cleanUsername)
+      const user = await this.client.changeUsername(trimmed)
       return {
         success: true,
         user: {
           id: user.id,
-          username: user.displayName || cleanUsername,
-          displayName: user.displayName || cleanUsername,
+          username: user.displayName || trimmed,
+          displayName: user.displayName || trimmed,
           email: user.email,
           role: user.role,
           createdAt: user.createdAt,
