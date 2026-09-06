@@ -580,7 +580,7 @@ describe("Launcher ProfileView Component", () => {
     expect(container.textContent).toContain("Reenviar en 00:45")
   })
 
-  it("15. Username change form displays current username, input, rules, and does not mention Minecraft", async () => {
+  it("15. Displays pencil edit button next to username; clicking it opens inline edit mode with rules and actions without Minecraft mentions", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-15",
       username: "StevePlayer",
@@ -608,16 +608,25 @@ describe("Launcher ProfileView Component", () => {
       await new Promise((r) => setTimeout(r, 10))
     })
 
-    // Check title and labels
-    expect(container.textContent).toContain("Cambiar nombre de usuario")
-    expect(container.textContent).toContain("Nombre de usuario actual")
-    expect(container.textContent).toContain("Nuevo nombre de usuario")
-    expect(container.textContent).toContain("Guardar")
-    expect(container.textContent).toContain("Debe tener entre 3 y 16 caracteres (letras, números y guion bajo).")
+    // Normal view before edit
+    expect(container.textContent).toContain("StevePlayer")
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    expect(editBtn).not.toBeNull()
+    expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).toBeNull()
 
     // Strict rule: No mentioning "Minecraft" in username change UI
     expect(container.textContent?.toLowerCase()).not.toContain("minecraft uuid")
     expect(container.textContent?.toLowerCase()).not.toContain("mojang")
+
+    // Click pencil to open inline edit mode
+    await act(async () => {
+      editBtn.click()
+    })
+
+    expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).not.toBeNull()
+    expect(container.textContent).toContain("Guardar")
+    expect(container.textContent).toContain("Cancelar")
+    expect(container.textContent).toContain("Debe tener entre 3 y 16 caracteres (letras, números y guion bajo).")
   })
 
   function changeInput(input: HTMLInputElement, value: string) {
@@ -630,7 +639,7 @@ describe("Launcher ProfileView Component", () => {
     input.dispatchEvent(new Event("change", { bubbles: true }))
   }
 
-  it("16. User can input new valid username and successfully save, updating UI and displaying toast", async () => {
+  it("16. User can open inline edit, input new valid username and successfully save, updating UI and displaying toast", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-16",
       username: "OldName",
@@ -670,6 +679,13 @@ describe("Launcher ProfileView Component", () => {
       await new Promise((r) => setTimeout(r, 10))
     })
 
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    expect(editBtn).not.toBeNull()
+
+    await act(async () => {
+      editBtn.click()
+    })
+
     const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
     expect(input).not.toBeNull()
 
@@ -688,9 +704,11 @@ describe("Launcher ProfileView Component", () => {
     expect(changeUsernameSpy).toHaveBeenCalledWith("NewAwesomeName")
     expect(container.textContent).toContain("Nombre de usuario actualizado correctamente.")
     expect(container.textContent).toContain("NewAwesomeName")
+    // Form is closed
+    expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).toBeNull()
   })
 
-  it("17. Handles taken username error by displaying inline error and error toast", async () => {
+  it("17. Handles taken username error by displaying inline error and error toast in inline edit mode", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-17",
       username: "PlayerA",
@@ -720,6 +738,11 @@ describe("Launcher ProfileView Component", () => {
 
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    await act(async () => {
+      editBtn.click()
     })
 
     const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
@@ -773,6 +796,11 @@ describe("Launcher ProfileView Component", () => {
       await new Promise((r) => setTimeout(r, 10))
     })
 
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    await act(async () => {
+      editBtn.click()
+    })
+
     const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
     await act(async () => {
       changeInput(input, "Steve")
@@ -785,5 +813,52 @@ describe("Launcher ProfileView Component", () => {
 
     expect(changeUsernameSpy).toHaveBeenCalledWith("Steve")
     expect(container.textContent).toContain("Nombre de usuario actualizado correctamente.")
+  })
+
+  it("19. Clicking cancel exits inline edit mode without calling changeUsername", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-19",
+      username: "CancelPlayer",
+      displayName: "CancelPlayer",
+      email: "cancel@hikat.org",
+      role: "PLAYER",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "cancel@hikat.org" }],
+    })
+    const changeUsernameSpy = vi.spyOn(authService, "changeUsername")
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="CancelPlayer"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    await act(async () => {
+      editBtn.click()
+    })
+
+    expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).not.toBeNull()
+
+    const cancelBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Cancelar")
+    expect(cancelBtn).toBeDefined()
+
+    await act(async () => {
+      cancelBtn?.click()
+    })
+
+    expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).toBeNull()
+    expect(container.textContent).toContain("CancelPlayer")
+    expect(changeUsernameSpy).not.toHaveBeenCalled()
   })
 })

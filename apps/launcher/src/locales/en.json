@@ -5,7 +5,8 @@
     "min": "MIN",
     "gb": "GB",
     "uploading": "Uploading...",
-    "deleting": "Deleting..."
+    "deleting": "Deleting...",
+    "cancel": "Cancel"
   },
   "nav": {
     "home": "Home",

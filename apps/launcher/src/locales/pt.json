@@ -5,7 +5,8 @@
     "min": "MIN",
     "gb": "GB",
     "uploading": "Enviando...",
-    "deleting": "Excluindo..."
+    "deleting": "Excluindo...",
+    "cancel": "Cancelar"
   },
   "nav": {
     "home": "Início",
