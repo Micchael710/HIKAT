@@ -27,7 +27,7 @@ import {
 
 interface ServerTasksViewProps {
   theme: ThemeMode
-  serverId?: string
+  serverId: string
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }
@@ -222,9 +222,7 @@ export default function ServerTasksView({
     if (manual) setIsRefreshing(true)
     setError(null)
     try {
-      const data = serverId
-        ? await serverApi.getServerAutomations(serverId)
-        : await serverApi.getServerAutomations()
+      const data = await serverApi.getServerAutomations(serverId)
       if (isMountedRef.current) {
         setTasks(data)
       }
@@ -369,18 +367,10 @@ export default function ServerTasksView({
       }
 
       if (editingId) {
-        if (serverId) {
-          await serverApi.updateServerAutomation(editingId, input, serverId)
-        } else {
-          await serverApi.updateServerAutomation(editingId, input)
-        }
+        await serverApi.updateServerAutomation(editingId, input, serverId)
         onToast("Tarea programada actualizada correctamente.", "success")
       } else {
-        if (serverId) {
-          await serverApi.createServerAutomation(input, serverId)
-        } else {
-          await serverApi.createServerAutomation(input)
-        }
+        await serverApi.createServerAutomation(input, serverId)
         onToast("Nueva tarea programada creada.", "success")
       }
 
@@ -420,11 +410,7 @@ export default function ServerTasksView({
         delaySeconds: task.delaySeconds,
         enabled: !task.enabled,
       }
-      if (serverId) {
-        await serverApi.updateServerAutomation(task.id, input, serverId)
-      } else {
-        await serverApi.updateServerAutomation(task.id, input)
-      }
+      await serverApi.updateServerAutomation(task.id, input, serverId)
       onToast(
         task.enabled ? "Tarea desactivada." : "Tarea activada.",
         "success",
@@ -443,11 +429,7 @@ export default function ServerTasksView({
   const handleRunNow = async (task: ServerAutomationItem) => {
     setActionLoadingMap((prev) => ({ ...prev, [`run-${task.id}`]: true }))
     try {
-      if (serverId) {
-        await serverApi.runServerAutomation(task.id, serverId)
-      } else {
-        await serverApi.runServerAutomation(task.id)
-      }
+      await serverApi.runServerAutomation(task.id, serverId)
       onToast(`Ejecutando "${task.name}" ahora...`, "success")
       fetchTasks()
     } catch (err: unknown) {
@@ -464,11 +446,7 @@ export default function ServerTasksView({
     if (!deleteTarget) return
     setIsDeleting(true)
     try {
-      if (serverId) {
-        await serverApi.deleteServerAutomation(deleteTarget.id, serverId)
-      } else {
-        await serverApi.deleteServerAutomation(deleteTarget.id)
-      }
+      await serverApi.deleteServerAutomation(deleteTarget.id, serverId)
       onToast(`Tarea "${deleteTarget.name}" eliminada.`, "success")
       setDeleteTarget(null)
       fetchTasks()

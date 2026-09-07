@@ -13,6 +13,7 @@ import { getThemeTokens } from "../../../theme/tokens"
 import { IconBox, IconSpinner } from "../../../theme/icons"
 
 interface ModDetailModalProps {
+  serverId: string
   provider: ModProvider
   projectId: string
   contentType?: ContentType
@@ -24,6 +25,7 @@ interface ModDetailModalProps {
 }
 
 export const ModDetailModal: React.FC<ModDetailModalProps> = ({
+  serverId,
   provider,
   projectId,
   contentType = "MOD",
@@ -60,7 +62,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     setError(null)
 
     graphqlClient
-      .getModProjectDetail(provider, projectId, contentType)
+      .getModProjectDetail(provider, projectId, contentType, serverId)
       .then((data) => {
         if (!active) return
         setDetail(data)
@@ -95,7 +97,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     return () => {
       active = false
     }
-  }, [provider, projectId, contentType, initialVersionId])
+  }, [provider, projectId, contentType, initialVersionId, serverId])
 
   // 2. Resolve installation plan whenever selected version, environment override, or manual overrides change
   useEffect(() => {
@@ -129,7 +131,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         contentType,
         manualOverrides: overridesList.length > 0 ? overridesList : null,
         environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride : undefined,
-      })
+      }, serverId)
       .then((resPlan) => {
         if (!active) return
         setPlan(resPlan)
@@ -144,7 +146,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     return () => {
       active = false
     }
-  }, [provider, projectId, selectedVersionId, manualOverrides, contentType, isCurseForgeModUnknown, selectedEnvironmentOverride])
+  }, [provider, projectId, selectedVersionId, manualOverrides, contentType, isCurseForgeModUnknown, selectedEnvironmentOverride, serverId])
 
   const handleInstall = async () => {
     if (!selectedVersionId || !plan || !plan.isValid) return
@@ -172,7 +174,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         contentType,
         manualOverrides: overridesList.length > 0 ? overridesList : null,
         environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride : undefined,
-      })
+      }, serverId)
 
       onSuccess()
     } catch (err: any) {

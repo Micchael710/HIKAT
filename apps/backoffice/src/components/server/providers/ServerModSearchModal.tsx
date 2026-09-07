@@ -23,6 +23,7 @@ import {
 } from "../../../theme/icons"
 
 interface ServerModSearchModalProps {
+  serverId: string
   theme?: ThemeMode
   onClose: () => void
   onSuccess: () => void
@@ -32,6 +33,7 @@ interface ServerModSearchModalProps {
 const PAGE_SIZE = 20
 
 export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
+  serverId,
   theme = "dark",
   onClose,
   onSuccess,
@@ -101,7 +103,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     const providerArg = providerTab === "ALL" ? null : providerTab
 
     graphqlClient
-      .searchServerContent(searchQuery, contentType, providerArg, PAGE_SIZE, currentOffset, searchCursor)
+      .searchServerContent(searchQuery, contentType, providerArg, PAGE_SIZE, currentOffset, searchCursor, serverId)
       .then((payload) => {
         if (currentReqId !== requestIdRef.current) return
 
@@ -207,6 +209,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         mod.provider,
         mod.projectId,
         mod.contentType || selectedContentType,
+        serverId,
       )
       setModDetail(detail)
 
@@ -241,7 +244,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         versionId,
         contentType,
         environmentOverride: environmentOverride || undefined,
-      })
+      }, serverId)
       setPlan(resolvedPlan)
     } catch (err: any) {
       setInstallError(err.message || "Error al calcular el plan de instalación.")
@@ -306,7 +309,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         versionId: selectedVersionId,
         contentType: selectedMod.contentType || selectedContentType,
         environmentOverride: selectedEnvironmentOverride || undefined,
-      })
+      }, serverId)
       onSuccess()
       onClose()
     } catch (err: any) {

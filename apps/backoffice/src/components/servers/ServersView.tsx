@@ -391,8 +391,8 @@ export default function ServersView({
                   style={{
                     height: 100,
                     width: "100%",
-                    background: server.sidebarLogo?.url
-                      ? `url(${server.sidebarLogo.url}) center/cover no-repeat`
+                    background: server.mainLogo?.url
+                      ? `url(${server.mainLogo.url}) center/cover no-repeat`
                       : `linear-gradient(135deg, ${accent}33 0%, ${accent}11 100%)`,
                     borderBottom: isDark
                       ? "1px solid rgba(255, 255, 255, 0.08)"
@@ -448,8 +448,8 @@ export default function ServersView({
                         width: 52,
                         height: 52,
                         borderRadius: 14,
-                        background: server.mainLogo?.url
-                          ? `url(${server.mainLogo.url}) center/cover no-repeat`
+                        background: server.sidebarLogo?.url
+                          ? `url(${server.sidebarLogo.url}) center/cover no-repeat`
                           : isDark
                           ? "#0d141a"
                           : "#f1f5f9",
@@ -463,7 +463,7 @@ export default function ServersView({
                         boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
                       }}
                     >
-                      {!server.mainLogo?.url && <IconServer size={24} />}
+                      {!server.sidebarLogo?.url && <IconServer size={24} />}
                     </div>
 
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -492,7 +492,7 @@ export default function ServersView({
                           fontFamily: "monospace",
                         }}
                       >
-                        HiKAT/games/{server.name.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}
+                        HiKAT/games/{server.name}
                       </p>
                     </div>
                   </div>

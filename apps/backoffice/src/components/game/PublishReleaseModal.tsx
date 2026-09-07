@@ -30,7 +30,7 @@ import {
 
 interface PublishReleaseModalProps {
   theme: ThemeMode
-  serverId?: string
+  serverId: string
   draftRelease: GameRelease
   publishedRelease?: GameRelease | null
   changes?: GameDraftChanges | null
@@ -314,16 +314,12 @@ export default function PublishReleaseModal({
         coverMediaId: coverMediaId || null,
         ...(currentFingerprint ? { expectedDraftFingerprint: currentFingerprint } : {}),
       }
-      const published = serverId
-        ? await gameApi.publishGameRelease(input, serverId)
-        : await gameApi.publishGameRelease(input)
+      const published = await gameApi.publishGameRelease(input, serverId)
 
       // 2. Post-publication verification
       setSubmitStatusText("Verificando publicación en vivo...")
       try {
-        const verifyOverview = serverId
-          ? await gameApi.getAdminGameOverview(serverId)
-          : await gameApi.getAdminGameOverview()
+        const verifyOverview = await gameApi.getAdminGameOverview(serverId)
         if (
           verifyOverview.publishedRelease?.version !== trimmedVersion ||
           verifyOverview.draftRelease?.id === currentDraft.id

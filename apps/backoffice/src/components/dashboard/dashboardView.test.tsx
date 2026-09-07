@@ -24,11 +24,11 @@ describe("Back Office Scoped Dashboard Component (Phase 2)", () => {
     })
 
     vi.spyOn(newsApi, "getAdminNews").mockResolvedValue({
-      items: [],
-      edges: [
-        { node: { id: "n1", title: "N1", content: "", type: "ANNOUNCEMENT", status: "PUBLISHED", createdAt: "", updatedAt: "" }, cursor: "c1" },
-        { node: { id: "n2", title: "N2", content: "", type: "UPDATE", status: "DRAFT", createdAt: "", updatedAt: "" }, cursor: "c2" },
+      items: [
+        { id: "n1", title: "N1", content: "", type: "ANNOUNCEMENT", status: "PUBLISHED", createdAt: "", updatedAt: "" },
+        { id: "n2", title: "N2", content: "", type: "UPDATE", status: "DRAFT", createdAt: "", updatedAt: "" },
       ],
+      edges: [],
       totalCount: 2,
     })
 

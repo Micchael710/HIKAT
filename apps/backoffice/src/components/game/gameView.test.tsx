@@ -57,7 +57,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue(mockOverview)
 
     await act(async () => {
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
     })
 
     expect(screen.getByText("Explorador de Archivos del Juego")).toBeDefined()
@@ -106,6 +106,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     render(
       <GameFilesExplorer
+        serverId="srv-1"
         theme="dark"
         files={[]}
         isDraft={true}
@@ -166,7 +167,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       minecraftVersion: "1.21.1",
       modLoader: "NEOFORGE",
       modLoaderVersion: "21.1.209",
-    })
+    }, "srv-1")
 
     expect(
       onRefresh,
@@ -261,7 +262,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue(mockOverview)
 
     await act(async () => {
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
     })
 
     expect(screen.getByText("Actualización en preparación (Borrador)")).toBeDefined()
@@ -307,6 +308,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     await act(async () => {
       render(
         <TextFileEditorModal
+          serverId="srv-1"
           theme="dark"
           logicalPath="config/settings.json"
           initialContent={'{\n  "valid": true\n}'}
@@ -331,7 +333,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       logicalPath: "config/settings.json",
       content: "{\n  \"valid\": true\n}",
       explicitPolicy: undefined,
-    })
+    }, "srv-1")
     expect(onSaveSuccess).toHaveBeenCalled()
   })
 
@@ -374,7 +376,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     ])
 
     await act(async () => {
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
     })
 
     const historyTabBtn = screen.getByText("Historial de versiones")
@@ -447,6 +449,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     await act(async () => {
       render(
         <GameFilesExplorer
+          serverId="srv-1"
           theme="dark"
           files={mockFiles}
           isDraft={true}
@@ -469,7 +472,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       fireEvent.click(restoreBtn)
     })
 
-    expect(restoreSpy).toHaveBeenCalledWith("removed-1")
+    expect(restoreSpy).toHaveBeenCalledWith("removed-1", "srv-1")
     expect(onToast).toHaveBeenCalledWith("Elemento restaurado exitosamente.", "success")
     expect(onRefresh).toHaveBeenCalled()
   })
@@ -512,6 +515,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     const { container } = render(
       <GameFilesExplorer
+        serverId="srv-1"
         theme="dark"
         files={[]}
         isDraft={true}
@@ -542,17 +546,21 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     // Assert that the common root 'MiActualizacion' was stripped!
     expect(createUploadSpy).toHaveBeenCalledWith(
       expect.objectContaining({ logicalPath: "mods/a.jar", originalFilename: "a.jar" }),
+      "srv-1",
     )
     expect(createUploadSpy).toHaveBeenCalledWith(
       expect.objectContaining({ logicalPath: "config/a.toml", originalFilename: "a.toml" }),
+      "srv-1",
     )
     expect(uploadDirectSpy).toHaveBeenCalledTimes(2)
     expect(completeUploadSpy).toHaveBeenCalledTimes(2)
     expect(addFileSpy).toHaveBeenCalledWith(
       expect.objectContaining({ logicalPath: "mods/a.jar", name: "a.jar" }),
+      "srv-1",
     )
     expect(addFileSpy).toHaveBeenCalledWith(
       expect.objectContaining({ logicalPath: "config/a.toml", name: "a.toml" }),
+      "srv-1",
     )
     expect(onToast).toHaveBeenCalledWith("2 archivo(s) subido(s) exitosamente.", "success")
   })
@@ -595,6 +603,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     const { container } = render(
       <GameFilesExplorer
+        serverId="srv-1"
         theme="dark"
         files={[]}
         isDraft={true}
@@ -720,11 +729,13 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     await vi.waitFor(() => {
       expect(addFileSpy).toHaveBeenCalledWith(
         expect.objectContaining({ logicalPath: "mods/a.jar" }),
+        "srv-1",
       )
     })
     await vi.waitFor(() => {
       expect(addFileSpy).toHaveBeenCalledWith(
         expect.objectContaining({ logicalPath: "config/sub/a.toml" }),
+        "srv-1",
       )
     })
 
@@ -742,6 +753,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     await vi.waitFor(() => {
       expect(addFileSpy).toHaveBeenCalledWith(
         expect.objectContaining({ logicalPath: "plain.txt" }),
+        "srv-1",
       )
     })
   })
@@ -790,6 +802,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     render(
       <GameFilesExplorer
+        serverId="srv-1"
         theme="dark"
         files={mockFiles}
         isDraft={true}
@@ -866,6 +879,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <GameFilesExplorer
+          serverId="srv-1"
           theme="dark"
           files={[]}
           isDraft={true}
@@ -1058,6 +1072,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <GameFilesExplorer
+          serverId="srv-1"
           theme="dark"
           files={[]}
           isDraft={true}
@@ -1085,7 +1100,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
       })
 
-      expect(getDetailSpy).toHaveBeenCalledWith("MODRINTH", "create-id", "MOD")
+      expect(getDetailSpy).toHaveBeenCalledWith("MODRINTH", "create-id", "MOD", "srv-1")
       expect(resolvePlanSpy).toHaveBeenCalled()
 
       // 4. Verify version selector preselected with latest release
@@ -1112,7 +1127,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         versionId: "ver-create-606",
         contentType: "MOD",
         manualOverrides: null,
-      })
+      }, "srv-1")
 
       await waitFor(() => {
         expect(onRefresh).toHaveBeenCalled()
@@ -1120,47 +1135,43 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     })
 
     it("cancels pending debounce and invalidates in-flight requests when switching content type tab", async () => {
-      vi.useFakeTimers()
-      try {
-        const searchSpy = vi.spyOn(graphqlClient, "searchMods").mockImplementation(async (query, contentType, provider, limit, offset) => {
-          return {
-            items: [],
-            totalCount: 0,
-            minecraftVersion: "1.21.1",
-            neoForgeVersion: "21.1.65",
-           modLoader: "NEOFORGE",
-            providersStatus: [],
-          }
-        })
+      const searchSpy = vi.spyOn(graphqlClient, "searchMods").mockImplementation(async () => {
+        return {
+          items: [],
+          totalCount: 0,
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          providersStatus: [],
+        }
+      })
 
-        render(
-          <ModSearchModal
-            onClose={vi.fn()}
-            onSuccess={vi.fn()}
-          />,
-        )
+      render(
+        <ModSearchModal
+          serverId="srv-1"
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />,
+      )
 
-        // 1. Type in search input to trigger debounce
-        const searchInput = screen.getByTestId("input-mod-search")
-        await act(async () => {
-          fireEvent.change(searchInput, { target: { value: "test query" } })
-        })
+      // 1. Type in search input to trigger debounce
+      const searchInput = screen.getByTestId("input-mod-search")
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: "test query" } })
+      })
 
-        // 2. Immediately switch to Resource Packs tab before debounce timer fires
-        await act(async () => {
-          fireEvent.click(screen.getByTestId("tab-content-resource_pack"))
-        })
+      // 2. Immediately switch to Resource Packs tab before debounce timer fires
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("tab-content-resource_pack"))
+      })
 
-        // 3. Advance fake timers
-        await act(async () => {
-          vi.advanceTimersByTime(500)
-        })
+      // 3. Wait for debounce to settle
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 450))
+      })
 
-        // 4. Verify the search request executed for RESOURCE_PACK and not for old MOD
-        expect(searchSpy).toHaveBeenCalledWith("test query", "RESOURCE_PACK", null, 20, 0)
-      } finally {
-        vi.useRealTimers()
-      }
+      // 4. Verify the search request executed for RESOURCE_PACK and not for old MOD
+      expect(searchSpy).toHaveBeenCalledWith("test query", "RESOURCE_PACK", null, 20, 0, "srv-1")
     })
 
     it("renders optional dependencies section with explicit notice and does not count them in install button", async () => {
@@ -1265,6 +1276,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <GameFilesExplorer
+          serverId="srv-1"
           theme="dark"
           files={[]}
           isDraft={true}
@@ -1389,6 +1401,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <GameFilesExplorer
+          serverId="srv-1"
           theme="dark"
           files={[]}
           isDraft={true}
@@ -1437,6 +1450,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             versionId: "cf-ver-100",
             environmentOverride: "CLIENT",
           }),
+          "srv-1",
         )
       })
 
@@ -1541,6 +1555,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <GameView
+          serverId="srv-1"
           theme="dark"
           handoff={{
             provider: "CURSEFORGE",
@@ -1569,6 +1584,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             versionId: "ver-both-99",
             environmentOverride: "BOTH",
           }),
+          "srv-1",
         )
       })
     })
@@ -1640,6 +1656,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <GameView
+          serverId="srv-1"
           theme="dark"
           handoff={{
             provider: "CURSEFORGE",
@@ -1803,6 +1820,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -1823,6 +1841,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -1849,6 +1868,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     it("3. notes se pueden escribir en textarea", async () => {
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -1867,6 +1887,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     it("4. Minecraft y NeoForge se muestran en modo solo lectura", async () => {
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -1895,6 +1916,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       const { container } = render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -1937,6 +1959,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       const { container } = render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -1976,6 +1999,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={draftWithCover}
           publishedRelease={mockPublishedRelease}
@@ -2005,6 +2029,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       const { container } = render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2048,6 +2073,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       const { container } = render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2090,6 +2116,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2181,6 +2208,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2218,7 +2246,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         version: "1.0.1",
         notes: "Notas iniciales del borrador",
         coverMediaId: null,
-      })
+      }, "srv-1")
       expect(onPublished).toHaveBeenCalledWith("1.0.1", 4)
       expect(screen.getByRole("heading", { name: "Actualización publicada", level: 2 })).toBeDefined()
     })
@@ -2262,6 +2290,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2340,6 +2369,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2421,7 +2451,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         },
       ])
 
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
 
       // Switch to history tab
       const historyTab = screen.getByText("Historial de versiones")
@@ -2459,6 +2489,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2504,6 +2535,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2556,6 +2588,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2597,6 +2630,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       const onClose = vi.fn()
       const { unmount } = render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2670,6 +2704,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2705,6 +2740,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2772,6 +2808,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       render(
         <PublishReleaseModal
+          serverId="srv-1"
           theme="dark"
           draftRelease={mockDraftRelease}
           publishedRelease={mockPublishedRelease}
@@ -2835,7 +2872,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(pendingPlan)
 
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
 
       // Click "Revisar y publicar" button in GameView
       const openPublishBtn = await screen.findByRole("button", { name: /Revisar y publicar/i })
@@ -2916,7 +2953,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         blockReason: null,
       })
 
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
 
       const openPublishBtn = await screen.findByRole("button", { name: /Revisar y publicar/i })
       await act(async () => {
@@ -2980,7 +3017,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(fsBlockedPlan)
 
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
 
       const banner = await screen.findByTestId("game-pending-server-changes-banner")
       expect(banner).toBeDefined()
@@ -3008,7 +3045,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       const syncSpy = vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue(onlinePlan)
 
-      const { unmount } = render(<GameView theme="dark" />)
+      const { unmount } = render(<GameView serverId="srv-1" theme="dark" />)
 
       const bannerOnline = await screen.findByTestId("game-pending-server-changes-banner")
       expect(bannerOnline).toBeDefined()
@@ -3029,7 +3066,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       syncSpy.mockResolvedValue(disconnectedPlan)
 
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
 
       const bannerDisc = await screen.findByTestId("game-pending-server-changes-banner")
       expect(bannerDisc).toBeDefined()
@@ -3086,7 +3123,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       const getOverviewSpy = vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue(initialOverview)
 
-      render(<GameView theme="dark" />)
+      render(<GameView serverId="srv-1" theme="dark" />)
 
       // Wait for initial load
       await screen.findByText("config")

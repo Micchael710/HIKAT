@@ -6,6 +6,7 @@ import { IconTrash, IconSpinner } from "../../theme/icons"
 
 interface DeleteGameFileModalProps {
   theme: ThemeMode
+  serverId: string
   file: AdminGameFile
   onClose: () => void
   onDeleted: () => void
@@ -13,6 +14,7 @@ interface DeleteGameFileModalProps {
 
 export default function DeleteGameFileModal({
   theme,
+  serverId,
   file,
   onClose,
   onDeleted,
@@ -26,7 +28,7 @@ export default function DeleteGameFileModal({
     setIsDeleting(true)
     setError(null)
     try {
-      await gameApi.removeGameFile(file.id)
+      await gameApi.removeGameFile(file.id, serverId)
       onDeleted()
       onClose()
     } catch (err: any) {

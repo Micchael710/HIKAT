@@ -9,6 +9,7 @@ import BackofficeSelect, { SelectOption } from "../common/BackofficeSelect"
 
 interface AddGameFileModalProps {
   theme: ThemeMode
+  serverId: string
   targetFile?: AdminGameFile | null
   onClose: () => void
   onSaved: () => void
@@ -24,6 +25,7 @@ const CATEGORY_OPTIONS: SelectOption[] = [
 
 export default function AddGameFileModal({
   theme,
+  serverId,
   targetFile,
   onClose,
   onSaved,
@@ -80,7 +82,7 @@ export default function AddGameFileModal({
           category,
           originalFilename: selectedFile.name,
           sizeBytes: selectedFile.size,
-        })
+        }, serverId)
 
         // 2. Direct multipart upload to R2
         const uploaded = await uploadGameFileDirect(selectedFile, ticket)
@@ -106,7 +108,7 @@ export default function AddGameFileModal({
           name: name.trim(),
           category,
           tokenHash: tokenHash!,
-        })
+        }, serverId)
       }
 
       onSaved()

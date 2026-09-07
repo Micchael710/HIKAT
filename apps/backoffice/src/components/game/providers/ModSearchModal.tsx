@@ -13,6 +13,7 @@ import { ModCard } from "./ModCard"
 import { ModDetailModal } from "./ModDetailModal"
 
 interface ModSearchModalProps {
+  serverId: string
   onClose: () => void
   onSuccess: () => void
   theme?: ThemeMode
@@ -23,6 +24,7 @@ interface ModSearchModalProps {
 const PAGE_SIZE = 20
 
 export const ModSearchModal: React.FC<ModSearchModalProps> = ({
+  serverId,
   onClose,
   onSuccess,
   theme = "dark",
@@ -78,7 +80,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     const providerArg = providerTab === "ALL" ? null : providerTab
 
     graphqlClient
-      .searchMods(searchQuery, contentType, providerArg, PAGE_SIZE, currentOffset)
+      .searchMods(searchQuery, contentType, providerArg, PAGE_SIZE, currentOffset, serverId)
       .then((payload) => {
         if (currentReqId !== requestIdRef.current) return
 
@@ -529,6 +531,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
       {/* Selected Mod Detail Modal (via search selection or handoff) */}
       {(selectedMod || handoffDetail) && (
         <ModDetailModal
+          serverId={serverId}
           provider={selectedMod?.provider || handoffDetail!.provider}
           projectId={selectedMod?.projectId || handoffDetail!.projectId}
           contentType={selectedMod ? (selectedMod.contentType || selectedContentType) : handoffDetail!.contentType}

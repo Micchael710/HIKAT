@@ -39,6 +39,7 @@ import GameEnvironmentModal from "./GameEnvironmentModal"
 
 interface GameFilesExplorerProps {
   theme: ThemeMode
+  serverId: string
   files: AdminGameFile[]
   isDraft: boolean
   minecraftVersion?: string
@@ -109,6 +110,7 @@ async function traverseFileSystemEntry(
 
 export default function GameFilesExplorer({
   theme,
+  serverId,
   files,
   isDraft,
   minecraftVersion = "1.21.1",
@@ -454,10 +456,10 @@ export default function GameFilesExplorer({
     if (!clipboard || !isDraft) return
     try {
       if (clipboard.action === "copy") {
-        await gameApi.copyGamePaths(clipboard.sources, currentPath)
+        await gameApi.copyGamePaths(clipboard.sources, currentPath, serverId)
         onToast("Elementos pegados correctamente.", "success")
       } else {
-        await gameApi.moveGamePaths(clipboard.sources, currentPath)
+        await gameApi.moveGamePaths(clipboard.sources, currentPath, serverId)
         onToast("Elementos movidos correctamente.", "success")
         setClipboard(null)
       }
@@ -573,7 +575,7 @@ export default function GameFilesExplorer({
           originalFilename: file.name,
           logicalPath: targetLogicalPath,
           sizeBytes: file.size,
-        })
+        }, serverId)
 
         // 2. Upload directly to R2 via S3 multipart + incremental SHA-256
         const uploaded = await uploadGameFileDirect(file, ticket)
@@ -591,7 +593,7 @@ export default function GameFilesExplorer({
           category,
           logicalPath: targetLogicalPath,
           tokenHash: completed.tokenHash,
-        })
+        }, serverId)
       }
 
       onToast(`${itemsToUpload.length} archivo(s) subido(s) exitosamente.`, "success")
@@ -1195,7 +1197,7 @@ export default function GameFilesExplorer({
                               onClick={async (e) => {
                                 e.stopPropagation()
                                 try {
-                                  await gameApi.restoreGameFile(item.id)
+                                  await gameApi.restoreGameFile(item.id, serverId)
                                   onToast("Elemento restaurado exitosamente.", "success")
                                   await onRefresh()
                                 } catch (err: unknown) {
@@ -1284,7 +1286,7 @@ export default function GameFilesExplorer({
                 onClick={async () => {
                   try {
                     if (contextMenu.target?.id) {
-                      await gameApi.restoreGameFile(contextMenu.target.id)
+                      await gameApi.restoreGameFile(contextMenu.target.id, serverId)
                       onToast("Elemento restaurado exitosamente.", "success")
                       await onRefresh()
                     }
@@ -1477,6 +1479,7 @@ export default function GameFilesExplorer({
       {editorModal?.isOpen && (
         <TextFileEditorModal
           theme={theme}
+          serverId={serverId}
           fileId={editorModal.file?.id}
           logicalPath={editorModal.initialPath || editorModal.logicalPath || editorModal.file?.logicalPath || "nuevo_archivo.txt"}
           isNew={editorModal.isNew}
@@ -1496,7 +1499,7 @@ export default function GameFilesExplorer({
           onClose={() => setIsNewFolderOpen(false)}
           onSubmit={async (name: string) => {
             const folderPath = currentPath ? `${currentPath}/${name}` : name
-            await gameApi.createGameFolder(folderPath)
+            await gameApi.createGameFolder(folderPath, serverId)
             onToast("Carpeta creada correctamente.", "success")
             await onRefresh()
           }}
@@ -1514,7 +1517,7 @@ export default function GameFilesExplorer({
               ? renameTarget.logicalPath.slice(0, renameTarget.logicalPath.lastIndexOf("/"))
               : ""
             const newLogical = parent ? `${parent}/${newName}` : newName
-            await gameApi.renameGamePath(renameTarget.logicalPath, newLogical)
+            await gameApi.renameGamePath(renameTarget.logicalPath, newLogical, serverId)
             onToast("Elemento renombrado exitosamente.", "success")
             await onRefresh()
           }}
@@ -1530,7 +1533,7 @@ export default function GameFilesExplorer({
           currentEffectivePolicy={policyTarget.effectivePolicy}
           onClose={() => setPolicyTarget(null)}
           onSubmit={async (policy: SyncPolicy | null) => {
-            await gameApi.setGamePathPolicy(policyTarget.logicalPath, policy)
+            await gameApi.setGamePathPolicy(policyTarget.logicalPath, policy, serverId)
             onToast("Política de sincronización actualizada.", "success")
             await onRefresh()
           }}
@@ -1543,7 +1546,7 @@ export default function GameFilesExplorer({
           paths={deleteTargets}
           onClose={() => setDeleteTargets(null)}
           onConfirm={async () => {
-            await gameApi.deleteGamePaths(deleteTargets)
+            await gameApi.deleteGamePaths(deleteTargets, serverId)
             onToast(`${deleteTargets.length} elemento(s) eliminado(s).`, "success")
             setSelectedPaths(new Set())
             await onRefresh()
@@ -1568,7 +1571,7 @@ export default function GameFilesExplorer({
             setIsEnvironmentModalOpen(false)
           }
           onSubmit={async (input) => {
-            await gameApi.updateGameDraftMetadata(input)
+            await gameApi.updateGameDraftMetadata(input, serverId)
 
             const formatLoader = (l: string) => {
               if (l === "NEOFORGE") return "NeoForge"
@@ -1594,6 +1597,7 @@ export default function GameFilesExplorer({
       {isModSearchOpen && (
         <ModSearchModal
           theme={theme}
+          serverId={serverId}
           handoff={handoff}
           onClearHandoff={onClearHandoff}
           onClose={() => setIsModSearchOpen(false)}

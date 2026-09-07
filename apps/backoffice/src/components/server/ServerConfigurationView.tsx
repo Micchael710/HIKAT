@@ -12,12 +12,14 @@ import {
 
 interface ServerConfigurationViewProps {
   theme: ThemeMode
+  serverId: string
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }
 
 export default function ServerConfigurationView({
   theme,
+  serverId,
   serverStatus,
   onToast,
 }: ServerConfigurationViewProps) {
@@ -48,7 +50,7 @@ export default function ServerConfigurationView({
     if (manual) setIsRefreshing(true)
     setError(null)
     try {
-      const data = await serverApi.getMinecraftServerSettings()
+      const data = await serverApi.getMinecraftServerSettings(serverId)
       if (isMountedRef.current) {
         setSettings(data)
         setFormData({
@@ -76,7 +78,7 @@ export default function ServerConfigurationView({
         setIsRefreshing(false)
       }
     }
-  }, [])
+  }, [serverId])
 
   useEffect(() => {
     isMountedRef.current = true
@@ -92,7 +94,7 @@ export default function ServerConfigurationView({
     setIsSaving(true)
     setSavedSuccess(false)
     try {
-      const updated = await serverApi.updateMinecraftServerSettings(formData)
+      const updated = await serverApi.updateMinecraftServerSettings(formData, serverId)
       setSettings(updated)
       setSavedSuccess(true)
       onToast("Configuración guardada exitosamente.", "success")

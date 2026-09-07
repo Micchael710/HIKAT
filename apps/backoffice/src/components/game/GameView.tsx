@@ -26,7 +26,7 @@ import LiveToast from "../common/LiveToast"
 
 interface GameViewProps {
   theme: ThemeMode
-  serverId?: string
+  serverId: string
   handoff?: import("../../types").GameHandoffPayload | null
   onClearHandoff?: () => void
 }
@@ -448,6 +448,7 @@ export default function GameView({ theme, serverId, handoff, onClearHandoff }: G
                         )}
                         <GameFilesExplorer
                           theme={theme}
+                          serverId={serverId}
                           files={rel.files}
                           isDraft={false}
                           onRefresh={fetchHistory}
@@ -689,6 +690,7 @@ export default function GameView({ theme, serverId, handoff, onClearHandoff }: G
           {/* Main Game Files Explorer */}
           <GameFilesExplorer
             theme={theme}
+            serverId={serverId}
             files={files}
             isDraft={hasDraft}
             minecraftVersion={
@@ -742,6 +744,7 @@ export default function GameView({ theme, serverId, handoff, onClearHandoff }: G
       {isServerChangesModalOpen && serverPlan && (
         <ServerReleaseSyncModal
           theme={theme}
+          serverId={serverId}
           plan={serverPlan}
           onClose={() => setIsServerChangesModalOpen(false)}
           onSuccess={() => {

@@ -7,6 +7,7 @@ import { IconAlertCircle, IconCheck, IconCross } from "../../theme/icons"
 
 interface ServerReleaseSyncModalProps {
   theme: ThemeMode
+  serverId: string
   plan: ServerReleaseSyncPlan
   onClose: () => void
   onSuccess: () => void
@@ -15,6 +16,7 @@ interface ServerReleaseSyncModalProps {
 
 export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
   theme,
+  serverId,
   plan,
   onClose,
   onSuccess,
@@ -38,7 +40,7 @@ export const ServerReleaseSyncModal: React.FC<ServerReleaseSyncModalProps> = ({
     setError(null)
 
     try {
-      const res = await graphqlClient.applyServerReleaseSync(createBackup)
+      const res = await graphqlClient.applyServerReleaseSync(createBackup, serverId)
       if (res.success) {
         onToast(res.message || "Cambios aplicados al servidor con éxito.", "success")
         onSuccess()

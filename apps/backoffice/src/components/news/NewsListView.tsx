@@ -16,7 +16,7 @@ import LiveToast from "../common/LiveToast"
 
 interface NewsListViewProps {
   theme: ThemeMode
-  serverId?: string
+  serverId: string
 }
 
 const TYPE_FILTER_OPTIONS: SelectOption[] = [

@@ -14,7 +14,7 @@ import LiveToast from "../common/LiveToast"
 interface ServerConsoleViewProps {
   serverStatus: ServerStatus
   theme: ThemeMode
-  serverId?: string
+  serverId: string
 }
 
 export default function ServerConsoleView({
@@ -92,11 +92,7 @@ export default function ServerConsoleView({
 
     setIsSending(true)
     try {
-      if (serverId) {
-        await consoleService.sendCommand(trimmed, serverId)
-      } else {
-        await consoleService.sendCommand(trimmed)
-      }
+      await consoleService.sendCommand(trimmed, serverId)
       // Add local echo log entry for immediate responsiveness
       const echoEntry: ConsoleLogEntry = {
         id: `${Date.now()}-echo`,

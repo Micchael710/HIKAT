@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, useCallback } from "react"
 import type {
   ThemeMode,
   ServerItem,
@@ -19,7 +19,7 @@ import {
   IconCpu,
   IconRam,
   IconDisk,
-  IconImage,
+  IconRefresh,
 } from "../../theme/icons"
 
 interface CreateServerModalProps {
@@ -52,18 +52,17 @@ export default function CreateServerModal({
 
   // Step 1: General
   const [name, setName] = useState("")
-  const [description, setDescription] = useState("")
-  const [isDefault, setIsDefault] = useState(false)
 
   // Step 2: Environment
   const [catalog, setCatalog] = useState<GameEnvironmentCatalog | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
   const [minecraftVersion, setMinecraftVersion] = useState("1.20.1")
   const [loader, setLoader] = useState("FABRIC")
   const [loaderVersions, setLoaderVersions] = useState<GameLoaderVersion[]>([])
   const [loaderVersionsLoading, setLoaderVersionsLoading] = useState(false)
+  const [loaderVersionsError, setLoaderVersionsError] = useState<string | null>(null)
   const [loaderVersion, setLoaderVersion] = useState("")
-  const [javaVersion, setJavaVersion] = useState<number>(17)
 
   // Step 3: Resources
   const [cpu, setCpu] = useState<number>(200)
@@ -71,10 +70,10 @@ export default function CreateServerModal({
   const [disk, setDisk] = useState<number>(10240)
 
   // Step 4: Appearance
-  const [logoSquareFile, setLogoSquareFile] = useState<File | null>(null)
-  const [logoSquarePreview, setLogoSquarePreview] = useState<string | null>(null)
   const [logoWideFile, setLogoWideFile] = useState<File | null>(null)
   const [logoWidePreview, setLogoWidePreview] = useState<string | null>(null)
+  const [logoSquareFile, setLogoSquareFile] = useState<File | null>(null)
+  const [logoSquarePreview, setLogoSquarePreview] = useState<string | null>(null)
   const [accentColor, setAccentColor] = useState("#3ec4c0")
 
   // Submission & Error states
@@ -91,6 +90,31 @@ export default function CreateServerModal({
     }
   }, [])
 
+  const fetchCatalog = useCallback(async () => {
+    setCatalogLoading(true)
+    setCatalogError(null)
+    try {
+      const cat = await gameApi.getGameEnvironmentCatalog()
+      if (!isMountedRef.current) return
+      setCatalog(cat)
+      if (cat.minecraftVersions && cat.minecraftVersions.length > 0) {
+        const firstVer = cat.minecraftVersions[0]
+        setMinecraftVersion(firstVer)
+      }
+    } catch (err: any) {
+      if (isMountedRef.current) {
+        setCatalog(null)
+        setCatalogError(
+          err?.message
+            ? `No se pudo cargar el catálogo de versiones (${err.message})`
+            : "No se pudo cargar el catálogo de versiones de Minecraft.",
+        )
+      }
+    } finally {
+      if (isMountedRef.current) setCatalogLoading(false)
+    }
+  }, [])
+
   // Load catalog when modal opens
   useEffect(() => {
     if (!isOpen) return
@@ -98,107 +122,65 @@ export default function CreateServerModal({
     // Reset fields on modal open
     setCurrentStep(1)
     setName("")
-    setDescription("")
-    setIsDefault(false)
     setCpu(200)
     setRam(4096)
     setDisk(10240)
     setAccentColor("#3ec4c0")
-    setLogoSquareFile(null)
-    setLogoSquarePreview(null)
     setLogoWideFile(null)
     setLogoWidePreview(null)
+    setLogoSquareFile(null)
+    setLogoSquarePreview(null)
     setError(null)
+    setCatalogError(null)
+    setLoaderVersionsError(null)
     setIsSubmitting(false)
     setSubmitStatusText(null)
 
-    setCatalogLoading(true)
-    gameApi
-      .getGameEnvironmentCatalog()
-      .then((cat) => {
-        if (!isMountedRef.current) return
-        setCatalog(cat)
-        if (cat.minecraftVersions && cat.minecraftVersions.length > 0) {
-          const firstVer = cat.minecraftVersions[0]
-          setMinecraftVersion(firstVer)
-          handleMinecraftVersionChange(firstVer)
-        }
-      })
-      .catch(() => {
-        // Fallback gracefully
-      })
-      .finally(() => {
-        if (isMountedRef.current) setCatalogLoading(false)
-      })
-  }, [isOpen])
+    fetchCatalog()
+  }, [isOpen, fetchCatalog])
 
-  // Fetch loader versions whenever loader or minecraftVersion changes
-  useEffect(() => {
-    if (!isOpen || loader === "VANILLA") {
+  const fetchLoaderVersions = useCallback(async (mcVer: string, modLdr: string) => {
+    if (modLdr === "VANILLA") {
       setLoaderVersions([])
       setLoaderVersion("")
+      setLoaderVersionsError(null)
       return
     }
 
     setLoaderVersionsLoading(true)
-    gameApi
-      .getGameLoaderVersions(minecraftVersion, loader as import("../../types").GameModLoader)
-      .then((versions) => {
-        if (!isMountedRef.current) return
-        setLoaderVersions(versions || [])
-        if (versions && versions.length > 0) {
-          const rec = versions.find((v) => v.stable) || versions[0]
-          setLoaderVersion(rec.version)
-        } else {
-          setLoaderVersion("")
-        }
-      })
-      .catch(() => {
-        if (isMountedRef.current) {
-          setLoaderVersions([])
-          setLoaderVersion("")
-        }
-      })
-      .finally(() => {
-        if (isMountedRef.current) setLoaderVersionsLoading(false)
-      })
-  }, [isOpen, loader, minecraftVersion])
-
-  // Update Java version recommendation when minecraftVersion changes
-  const handleMinecraftVersionChange = (ver: string) => {
-    setMinecraftVersion(ver)
-    if (ver.startsWith("1.21") || ver.startsWith("1.20.5")) {
-      setJavaVersion(21)
-    } else if (ver.startsWith("1.18") || ver.startsWith("1.19") || ver.startsWith("1.20")) {
-      setJavaVersion(17)
-    } else if (ver.startsWith("1.17")) {
-      setJavaVersion(16)
-    } else {
-      setJavaVersion(8)
+    setLoaderVersionsError(null)
+    try {
+      const versions = await gameApi.getGameLoaderVersions(mcVer, modLdr as import("../../types").GameModLoader)
+      if (!isMountedRef.current) return
+      setLoaderVersions(versions || [])
+      if (versions && versions.length > 0) {
+        const rec = versions.find((v) => v.stable) || versions[0]
+        setLoaderVersion(rec.version)
+      } else {
+        setLoaderVersion("")
+        setLoaderVersionsError(`No hay versiones compatibles de ${modLdr} para Minecraft ${mcVer}.`)
+      }
+    } catch (err: any) {
+      if (isMountedRef.current) {
+        setLoaderVersions([])
+        setLoaderVersion("")
+        setLoaderVersionsError(err?.message || `Error al cargar versiones de ${modLdr}.`)
+      }
+    } finally {
+      if (isMountedRef.current) setLoaderVersionsLoading(false)
     }
-  }
+  }, [])
 
-  // Handle Square Logo File
-  const handleSquareLogoSelected = (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      setError("El logo cuadrado debe ser una imagen (PNG, JPEG, WebP).")
-      return
-    }
-    setError(null)
-    setLogoSquareFile(file)
-    setLogoSquarePreview(URL.createObjectURL(file))
-  }
+  // Fetch loader versions whenever loader or minecraftVersion changes
+  useEffect(() => {
+    if (!isOpen || !minecraftVersion) return
+    fetchLoaderVersions(minecraftVersion, loader)
+  }, [isOpen, loader, minecraftVersion, fetchLoaderVersions])
 
-  const handleClearSquareLogo = () => {
-    if (logoSquarePreview) URL.revokeObjectURL(logoSquarePreview)
-    setLogoSquareFile(null)
-    setLogoSquarePreview(null)
-  }
-
-  // Handle Wide Logo File
+  // Handle Main / Wide Logo File (horizontal banner)
   const handleWideLogoSelected = (file: File) => {
     if (!file.type.startsWith("image/")) {
-      setError("El banner/logo ancho debe ser una imagen (PNG, JPEG, WebP).")
+      setError("El logo principal debe ser una imagen (PNG, JPEG, WebP).")
       return
     }
     setError(null)
@@ -210,6 +192,23 @@ export default function CreateServerModal({
     if (logoWidePreview) URL.revokeObjectURL(logoWidePreview)
     setLogoWideFile(null)
     setLogoWidePreview(null)
+  }
+
+  // Handle Sidebar / Square Logo File (1:1 square icon)
+  const handleSquareLogoSelected = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setError("El logo lateral debe ser una imagen (PNG, JPEG, WebP).")
+      return
+    }
+    setError(null)
+    setLogoSquareFile(file)
+    setLogoSquarePreview(URL.createObjectURL(file))
+  }
+
+  const handleClearSquareLogo = () => {
+    if (logoSquarePreview) URL.revokeObjectURL(logoSquarePreview)
+    setLogoSquareFile(null)
+    setLogoSquarePreview(null)
   }
 
   // Step Navigations
@@ -226,13 +225,19 @@ export default function CreateServerModal({
   const handleNextFromStep2 = (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    if (catalogError || !catalog?.minecraftVersions?.length) {
+      setError("No se puede continuar sin cargar el catálogo oficial de versiones.")
+      return
+    }
     if (!minecraftVersion) {
       setError("Debes seleccionar una versión de Minecraft.")
       return
     }
-    if (loader !== "VANILLA" && !loaderVersion.trim()) {
-      setError(`Debes especificar o seleccionar la versión de ${loader}.`)
-      return
+    if (loader !== "VANILLA") {
+      if (loaderVersionsError || !loaderVersion.trim()) {
+        setError(`Debes seleccionar una versión válida de ${loader} del catálogo.`)
+        return
+      }
     }
     setCurrentStep(3)
   }
@@ -275,17 +280,17 @@ export default function CreateServerModal({
       let mainLogoMediaId: string | undefined = undefined
       let sidebarLogoMediaId: string | undefined = undefined
 
-      // 1. Upload Square Logo if provided
-      if (logoSquareFile) {
-        setSubmitStatusText("Subiendo logo cuadrado...")
-        const media = await uploadMediaFile(logoSquareFile, "IMAGE")
+      // 1. Upload Wide/Main Logo (horizontal) if provided -> mainLogoMediaId
+      if (logoWideFile) {
+        setSubmitStatusText("Subiendo logo principal...")
+        const media = await uploadMediaFile(logoWideFile, "IMAGE")
         mainLogoMediaId = media.id
       }
 
-      // 2. Upload Wide Logo if provided
-      if (logoWideFile) {
-        setSubmitStatusText("Subiendo banner...")
-        const media = await uploadMediaFile(logoWideFile, "IMAGE")
+      // 2. Upload Square/Sidebar Logo (square) if provided -> sidebarLogoMediaId
+      if (logoSquareFile) {
+        setSubmitStatusText("Subiendo logo lateral...")
+        const media = await uploadMediaFile(logoSquareFile, "IMAGE")
         sidebarLogoMediaId = media.id
       }
 
@@ -543,69 +548,13 @@ export default function CreateServerModal({
                   }}
                 >
                   <div>
-                    <strong style={{ color: "#3ec4c0" }}>Importante:</strong> El nombre del servidor será permanente y también se utilizará como nombre de la carpeta local.
+                    <strong style={{ color: "#3ec4c0" }}>Importante:</strong> El nombre del servidor será permanente y se utilizará exactamente como nombre de la carpeta local.
                   </div>
                   <div style={{ marginTop: 4, fontFamily: "monospace", fontSize: 11.5, color: isDark ? "#94a3b8" : "#64748b" }}>
-                    Ruta local: HiKAT/games/{name.trim() ? name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-") : "<nombre-servidor>"}
+                    Ruta local: HiKAT/games/{name.trim() || "<nombre-servidor>"}
                   </div>
                 </div>
               </div>
-
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: isDark ? "#cbd5e1" : "#334155",
-                    marginBottom: 6,
-                  }}
-                >
-                  Descripción (Opcional)
-                </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Breve descripción del servidor o características principales..."
-                  rows={3}
-                  style={{
-                    width: "100%",
-                    padding: "10px 14px",
-                    borderRadius: 10,
-                    border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-                    background: isDark ? "#0d141a" : "#ffffff",
-                    color: isDark ? "#ffffff" : "#111822",
-                    fontSize: 13.5,
-                    fontFamily: "inherit",
-                    resize: "vertical",
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
-
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  cursor: "pointer",
-                  userSelect: "none",
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  background: isDark ? "rgba(255, 255, 255, 0.03)" : "rgba(0, 0, 0, 0.02)",
-                  border: isDark ? "1px solid rgba(255, 255, 255, 0.06)" : "1px solid rgba(0, 0, 0, 0.06)",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={isDefault}
-                  onChange={(e) => setIsDefault(e.target.checked)}
-                  style={{ width: 16, height: 16, accentColor: "#3ec4c0" }}
-                />
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: isDark ? "#ffffff" : "#111822" }}>
-                  Establecer como servidor por defecto de la comunidad
-                </span>
-              </label>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
                 <button
@@ -644,13 +593,43 @@ export default function CreateServerModal({
                   Versión de Minecraft <span style={{ color: "#ef4444" }}>*</span>
                 </label>
                 {catalogLoading ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#64748b", fontSize: 13 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#64748b", fontSize: 13, height: 42 }}>
                     <IconSpinner size={16} /> Cargando catálogo de versiones...
+                  </div>
+                ) : catalogError ? (
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: "rgba(239, 68, 68, 0.12)",
+                      border: "1px solid rgba(239, 68, 68, 0.25)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "#ef4444" }}>{catalogError}</span>
+                    <button
+                      type="button"
+                      onClick={fetchCatalog}
+                      className="launcher-btn-secondary"
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <IconRefresh size={14} />
+                      <span>Reintentar cargar catálogo</span>
+                    </button>
                   </div>
                 ) : catalog?.minecraftVersions && catalog.minecraftVersions.length > 0 ? (
                   <select
                     value={minecraftVersion}
-                    onChange={(e) => handleMinecraftVersionChange(e.target.value)}
+                    onChange={(e) => setMinecraftVersion(e.target.value)}
                     style={{
                       width: "100%",
                       padding: "11px 14px",
@@ -668,28 +647,10 @@ export default function CreateServerModal({
                       </option>
                     ))}
                   </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={minecraftVersion}
-                    onChange={(e) => handleMinecraftVersionChange(e.target.value)}
-                    placeholder="Ej. 1.20.1"
-                    style={{
-                      width: "100%",
-                      padding: "11px 14px",
-                      borderRadius: 10,
-                      border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-                      background: isDark ? "#0d141a" : "#ffffff",
-                      color: isDark ? "#ffffff" : "#111822",
-                      fontSize: 14,
-                      fontWeight: 600,
-                      boxSizing: "border-box",
-                    }}
-                  />
-                )}
+                ) : null}
               </div>
 
-              {/* Loader */}
+              {/* Loader & Loader Version */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <div>
                   <label
@@ -743,6 +704,36 @@ export default function CreateServerModal({
                       <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#64748b", fontSize: 13, height: 42 }}>
                         <IconSpinner size={16} /> Cargando versiones...
                       </div>
+                    ) : loaderVersionsError ? (
+                      <div
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          background: "rgba(239, 68, 68, 0.12)",
+                          border: "1px solid rgba(239, 68, 68, 0.25)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 6,
+                        }}
+                      >
+                        <span style={{ fontSize: 12, color: "#ef4444" }}>{loaderVersionsError}</span>
+                        <button
+                          type="button"
+                          onClick={() => fetchLoaderVersions(minecraftVersion, loader)}
+                          className="launcher-btn-secondary"
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: 11,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                        >
+                          <IconRefresh size={12} />
+                          <span>Reintentar</span>
+                        </button>
+                      </div>
                     ) : loaderVersions.length > 0 ? (
                       <select
                         value={loaderVersion}
@@ -764,73 +755,9 @@ export default function CreateServerModal({
                           </option>
                         ))}
                       </select>
-                    ) : (
-                      <input
-                        type="text"
-                        value={loaderVersion}
-                        onChange={(e) => setLoaderVersion(e.target.value)}
-                        placeholder="Ej. 0.15.11"
-                        style={{
-                          width: "100%",
-                          padding: "11px 14px",
-                          borderRadius: 10,
-                          border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-                          background: isDark ? "#0d141a" : "#ffffff",
-                          color: isDark ? "#ffffff" : "#111822",
-                          fontSize: 14,
-                          fontWeight: 600,
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    )}
+                    ) : null}
                   </div>
                 )}
-              </div>
-
-              {/* Java Version */}
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: isDark ? "#cbd5e1" : "#334155",
-                    marginBottom: 6,
-                  }}
-                >
-                  Versión de Java Runtime
-                </label>
-                <div style={{ display: "flex", gap: 10 }}>
-                  {[8, 11, 16, 17, 21].map((jVer) => (
-                    <button
-                      key={jVer}
-                      type="button"
-                      onClick={() => setJavaVersion(jVer)}
-                      style={{
-                        flex: 1,
-                        padding: "10px 8px",
-                        borderRadius: 10,
-                        fontWeight: 700,
-                        fontSize: 13.5,
-                        cursor: "pointer",
-                        background: javaVersion === jVer
-                          ? "rgba(62, 196, 192, 0.2)"
-                          : isDark
-                          ? "#0d141a"
-                          : "#eef2f6",
-                        border: javaVersion === jVer
-                          ? "1.5px solid #3ec4c0"
-                          : isDark
-                          ? "1px solid #334155"
-                          : "1px solid #cbd5e1",
-                        color: javaVersion === jVer ? "#3ec4c0" : isDark ? "#ffffff" : "#111822",
-                        transition: "all 0.15s ease",
-                      }}
-                    >
-                      Java {jVer}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
@@ -844,8 +771,14 @@ export default function CreateServerModal({
                 </button>
                 <button
                   type="submit"
+                  disabled={Boolean(catalogLoading || catalogError || (loader !== "VANILLA" && (loaderVersionsLoading || loaderVersionsError)))}
                   className="launcher-btn-primary"
-                  style={{ padding: "10px 22px", borderRadius: 12, fontSize: 14 }}
+                  style={{
+                    padding: "10px 22px",
+                    borderRadius: 12,
+                    fontSize: 14,
+                    opacity: catalogLoading || catalogError || (loader !== "VANILLA" && (loaderVersionsLoading || loaderVersionsError)) ? 0.5 : 1,
+                  }}
                 >
                   Siguiente: Recursos
                 </button>
@@ -1068,7 +1001,7 @@ export default function CreateServerModal({
                 </div>
               </div>
 
-              {/* Square Logo */}
+              {/* Main Logo (Horizontal / Banner) -> mainLogoMediaId */}
               <div
                 style={{
                   padding: "16px 18px",
@@ -1086,101 +1019,14 @@ export default function CreateServerModal({
                     marginBottom: 6,
                   }}
                 >
-                  Logo Cuadrado / Ícono (1:1)
-                </label>
-                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                  {logoSquarePreview ? (
-                    <div style={{ position: "relative", width: 64, height: 64 }}>
-                      <img
-                        src={logoSquarePreview}
-                        alt="Logo cuadrado"
-                        style={{
-                          width: 64,
-                          height: 64,
-                          borderRadius: 12,
-                          objectFit: "cover",
-                          border: "1px solid #3ec4c0",
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleClearSquareLogo}
-                        style={{
-                          position: "absolute",
-                          top: -6,
-                          right: -6,
-                          width: 22,
-                          height: 22,
-                          borderRadius: "50%",
-                          background: "#ef4444",
-                          color: "#ffffff",
-                          border: "none",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <IconCross size={12} />
-                      </button>
-                    </div>
-                  ) : (
-                    <label
-                      style={{
-                        padding: "10px 16px",
-                        borderRadius: 10,
-                        background: isDark ? "#131d25" : "#ffffff",
-                        border: `1.5px dashed ${isDark ? "#475569" : "#cbd5e1"}`,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: isDark ? "#94a3b8" : "#64748b",
-                      }}
-                    >
-                      <IconUpload size={16} />
-                      <span>Seleccionar imagen (PNG, JPG, WebP)</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => {
-                          if (e.target.files?.[0]) handleSquareLogoSelected(e.target.files[0])
-                        }}
-                        style={{ display: "none" }}
-                      />
-                    </label>
-                  )}
-                </div>
-              </div>
-
-              {/* Wide Logo */}
-              <div
-                style={{
-                  padding: "16px 18px",
-                  borderRadius: 14,
-                  background: isDark ? "#0d141a" : "#f8fafc",
-                  border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
-                }}
-              >
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: isDark ? "#cbd5e1" : "#334155",
-                    marginBottom: 6,
-                  }}
-                >
-                  Banner / Logo Ancho (Horizontal)
+                  Logo Principal (Horizontal / Banner)
                 </label>
                 <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                   {logoWidePreview ? (
                     <div style={{ position: "relative", width: 160, height: 60 }}>
                       <img
                         src={logoWidePreview}
-                        alt="Logo horizontal"
+                        alt="Logo principal"
                         style={{
                           width: 160,
                           height: 60,
@@ -1228,12 +1074,99 @@ export default function CreateServerModal({
                       }}
                     >
                       <IconUpload size={16} />
-                      <span>Seleccionar banner horizontal</span>
+                      <span>Seleccionar logo principal horizontal</span>
                       <input
                         type="file"
                         accept="image/*"
                         onChange={(e) => {
                           if (e.target.files?.[0]) handleWideLogoSelected(e.target.files[0])
+                        }}
+                        style={{ display: "none" }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* Sidebar Logo (1:1 Square) -> sidebarLogoMediaId */}
+              <div
+                style={{
+                  padding: "16px 18px",
+                  borderRadius: 14,
+                  background: isDark ? "#0d141a" : "#f8fafc",
+                  border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
+                }}
+              >
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: isDark ? "#cbd5e1" : "#334155",
+                    marginBottom: 6,
+                  }}
+                >
+                  Logo Lateral / Ícono (1:1 Cuadrado)
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                  {logoSquarePreview ? (
+                    <div style={{ position: "relative", width: 64, height: 64 }}>
+                      <img
+                        src={logoSquarePreview}
+                        alt="Logo lateral"
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 12,
+                          objectFit: "cover",
+                          border: "1px solid #3ec4c0",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleClearSquareLogo}
+                        style={{
+                          position: "absolute",
+                          top: -6,
+                          right: -6,
+                          width: 22,
+                          height: 22,
+                          borderRadius: "50%",
+                          background: "#ef4444",
+                          color: "#ffffff",
+                          border: "none",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <IconCross size={12} />
+                      </button>
+                    </div>
+                  ) : (
+                    <label
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: 10,
+                        background: isDark ? "#131d25" : "#ffffff",
+                        border: `1.5px dashed ${isDark ? "#475569" : "#cbd5e1"}`,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: isDark ? "#94a3b8" : "#64748b",
+                      }}
+                    >
+                      <IconUpload size={16} />
+                      <span>Seleccionar logo lateral cuadrado</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) handleSquareLogoSelected(e.target.files[0])
                         }}
                         style={{ display: "none" }}
                       />
@@ -1290,7 +1223,7 @@ export default function CreateServerModal({
                       Carpeta Local
                     </span>
                     <span style={{ fontFamily: "monospace", color: "#3ec4c0" }}>
-                      HiKAT/games/{name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-")}
+                      HiKAT/games/{name.trim() || "<nombre-servidor>"}
                     </span>
                   </div>
 
@@ -1299,7 +1232,7 @@ export default function CreateServerModal({
                       Entorno
                     </span>
                     <span style={{ color: isDark ? "#ffffff" : "#111822" }}>
-                      MC {minecraftVersion} · {loader} {loaderVersion ? `(${loaderVersion})` : ""} · Java {javaVersion}
+                      MC {minecraftVersion} · {loader} {loaderVersion ? `(${loaderVersion})` : ""}
                     </span>
                   </div>
 
@@ -1327,8 +1260,8 @@ export default function CreateServerModal({
                       Multimedia
                     </span>
                     <span>
-                      {logoSquareFile ? "Logo cuadrado ✓ " : "Sin logo cuadrado · "}
-                      {logoWideFile ? "Banner ✓" : "Sin banner"}
+                      {logoWideFile ? "Logo principal ✓ " : "Sin logo principal · "}
+                      {logoSquareFile ? "Logo lateral ✓" : "Sin logo lateral"}
                     </span>
                   </div>
                 </div>

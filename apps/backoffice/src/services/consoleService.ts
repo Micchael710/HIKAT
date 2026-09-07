@@ -36,7 +36,7 @@ class ConsoleService {
    * Reference-counted retention of the console WebSocket connection.
    * Returns an unregister function.
    */
-  public retain(serverId?: string): () => void {
+  public retain(serverId: string): () => void {
     if (serverId && serverId !== this.currentServerId) {
       if (this.ws) {
         this.disconnect()
@@ -72,6 +72,12 @@ class ConsoleService {
       this.currentServerId = serverId
     }
 
+    const targetServerId = this.currentServerId
+    if (!targetServerId) {
+      this.notifyConnection(false)
+      return
+    }
+
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return
     }
@@ -89,9 +95,7 @@ class ConsoleService {
       // 1. Request a single-use console connection ticket via authenticated GraphQL
       let ticketData: { ticket: string; expiresAt: string }
       try {
-        ticketData = this.currentServerId
-          ? await serverApi.createServerConsoleTicket(this.currentServerId)
-          : await serverApi.createServerConsoleTicket()
+        ticketData = await serverApi.createServerConsoleTicket(targetServerId)
       } catch (err: unknown) {
         // If authentication failed, attempt refresh
         const isAuthError =
@@ -101,9 +105,7 @@ class ConsoleService {
         if (isAuthError) {
           const refreshed = await authService.refresh()
           if (refreshed) {
-            ticketData = this.currentServerId
-              ? await serverApi.createServerConsoleTicket(this.currentServerId)
-              : await serverApi.createServerConsoleTicket()
+            ticketData = await serverApi.createServerConsoleTicket(targetServerId)
           } else {
             this.shouldReconnect = false
             this.notifyConnection(false)
@@ -267,16 +269,17 @@ class ConsoleService {
     this.connectionListeners.forEach((listener) => listener(connected))
   }
 
-  public async sendCommand(command: string, serverId?: string): Promise<void> {
+  public async sendCommand(command: string, serverId: string): Promise<void> {
     const validation = validateServerCommand(command)
     if (!validation.valid || !validation.command) {
       throw new Error(validation.error || "El comando no es válido.")
     }
 
-    const targetServerId = serverId || this.currentServerId || undefined
-    const res = targetServerId
-      ? await serverApi.sendServerCommand(validation.command, targetServerId)
-      : await serverApi.sendServerCommand(validation.command)
+    const targetServerId = serverId || this.currentServerId
+    if (!targetServerId) {
+      throw new Error("No hay un servidor seleccionado.")
+    }
+    const res = await serverApi.sendServerCommand(validation.command, targetServerId)
     if (!res || !res.success) {
       throw new Error(res?.message || "No se pudo ejecutar el comando.")
     }

@@ -250,7 +250,10 @@ describe("Multiserver Backoffice - CreateServerModal", () => {
     // Step 5: Summary & Confirmation
     expect(screen.getByText("Resumen de Configuración")).toBeDefined()
     expect(screen.getByText("Servidor Test")).toBeDefined()
-    expect(screen.getByText("HiKAT/games/servidor-test")).toBeDefined()
+    expect(screen.getByText("HiKAT/games/Servidor Test")).toBeDefined()
+    expect(screen.queryByText(/Versión de Java/i)).toBeNull()
+    expect(screen.queryByText(/Descripción/i)).toBeNull()
+    expect(screen.queryByText(/Servidor por defecto/i)).toBeNull()
 
     // Submit
     const submitBtn = screen.getByText("Crear Servidor")
@@ -274,6 +277,30 @@ describe("Multiserver Backoffice - CreateServerModal", () => {
     expect(onCreated).toHaveBeenCalled()
     expect(onClose).toHaveBeenCalled()
   })
+
+  it("displays catalog error and retry button without manual version inputs on catalog load failure", async () => {
+    vi.spyOn(gameApi, "getGameEnvironmentCatalog").mockRejectedValue(new Error("Error de red"))
+
+    await act(async () => {
+      render(
+        <CreateServerModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onCreated={vi.fn()}
+          theme="dark"
+        />,
+      )
+    })
+
+    // Advance to Step 2
+    const nameInput = screen.getByPlaceholderText("Ej. HiKAT Survival, HiKAT RPG...")
+    fireEvent.change(nameInput, { target: { value: "Servidor Test" } })
+    fireEvent.click(screen.getByText("Siguiente: Entorno"))
+
+    expect(screen.getByText(/No se pudo cargar el catálogo de versiones/i)).toBeDefined()
+    expect(screen.getByText("Reintentar cargar catálogo")).toBeDefined()
+    expect(screen.queryByPlaceholderText("1.21.1")).toBeNull()
+  })
 })
 
 describe("Multiserver Backoffice - ServerSettingsView", () => {
@@ -294,7 +321,7 @@ describe("Multiserver Backoffice - ServerSettingsView", () => {
     )
 
     expect(screen.getByText("Ajustes del Servidor")).toBeDefined()
-    expect(screen.getByText("HiKAT/games/hikat-survival")).toBeDefined()
+    expect(screen.getByText("HiKAT/games/HiKAT Survival")).toBeDefined()
     expect(screen.getByText("srv-1")).toBeDefined()
     expect(screen.getByText("Minecraft 1.20.1")).toBeDefined()
     expect(screen.getByText("FABRIC (0.15.11)")).toBeDefined()

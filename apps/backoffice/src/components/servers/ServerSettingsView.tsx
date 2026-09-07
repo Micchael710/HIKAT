@@ -126,7 +126,7 @@ export default function ServerSettingsView({
               </span>
               <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#3ec4c0", fontFamily: "monospace", marginTop: 2 }}>
                 <IconFolder size={15} />
-                <span>HiKAT/games/{server.name.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}</span>
+                <span>HiKAT/games/{server.name}</span>
               </div>
             </div>
           </div>
@@ -324,30 +324,63 @@ export default function ServerSettingsView({
             Apariencia y Branding
           </h3>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {/* Square logo preview */}
-            <div
-              style={{
-                width: 54,
-                height: 54,
-                borderRadius: 14,
-                background: server.mainLogo?.url
-                  ? `url(${server.mainLogo.url}) center/cover no-repeat`
-                  : isDark
-                  ? "#0d141a"
-                  : "#f1f5f9",
-                border: `1.5px solid ${accent}`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: accent,
-                flexShrink: 0,
-              }}
-            >
-              {!server.mainLogo?.url && <IconServer size={24} />}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Logos Row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+              {/* Main logo (Horizontal Banner) */}
+              <div>
+                <span style={{ color: isDark ? "#94a3b8" : "#64748b", display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>
+                  Logo Principal (Horizontal)
+                </span>
+                <div
+                  style={{
+                    width: 140,
+                    height: 52,
+                    borderRadius: 10,
+                    background: server.mainLogo?.url
+                      ? `url(${server.mainLogo.url}) center/cover no-repeat`
+                      : isDark
+                      ? "#0d141a"
+                      : "#f1f5f9",
+                    border: `1.5px solid ${accent}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: accent,
+                  }}
+                >
+                  {!server.mainLogo?.url && <span style={{ fontSize: 11, color: isDark ? "#64748b" : "#94a3b8" }}>Sin banner</span>}
+                </div>
+              </div>
+
+              {/* Sidebar logo (Square) */}
+              <div>
+                <span style={{ color: isDark ? "#94a3b8" : "#64748b", display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>
+                  Logo Lateral (Cuadrado)
+                </span>
+                <div
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 12,
+                    background: server.sidebarLogo?.url
+                      ? `url(${server.sidebarLogo.url}) center/cover no-repeat`
+                      : isDark
+                      ? "#0d141a"
+                      : "#f1f5f9",
+                    border: `1.5px solid ${accent}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: accent,
+                  }}
+                >
+                  {!server.sidebarLogo?.url && <IconServer size={22} />}
+                </div>
+              </div>
             </div>
 
-            <div style={{ flex: 1 }}>
+            <div>
               <span style={{ color: isDark ? "#94a3b8" : "#64748b", display: "block", fontSize: 11.5, fontWeight: 600, textTransform: "uppercase" }}>
                 Color de Acento
               </span>

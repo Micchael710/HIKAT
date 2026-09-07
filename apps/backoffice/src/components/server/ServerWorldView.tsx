@@ -17,12 +17,14 @@ import {
 
 interface ServerWorldViewProps {
   theme: ThemeMode
+  serverId: string
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }
 
 export default function ServerWorldView({
   theme,
+  serverId,
   serverStatus,
   onToast,
 }: ServerWorldViewProps) {
@@ -44,7 +46,7 @@ export default function ServerWorldView({
     if (manual) setIsRefreshing(true)
     setError(null)
     try {
-      const data = await serverApi.getServerWorld()
+      const data = await serverApi.getServerWorld(serverId)
       if (isMountedRef.current) {
         setWorldInfo(data)
       }
@@ -62,7 +64,7 @@ export default function ServerWorldView({
         setIsRefreshing(false)
       }
     }
-  }, [])
+  }, [serverId])
 
   useEffect(() => {
     isMountedRef.current = true
@@ -75,7 +77,7 @@ export default function ServerWorldView({
   const handleCreateBackup = async () => {
     setIsBackupLoading(true)
     try {
-      await serverApi.createServerBackup("Copia de mundo")
+      await serverApi.createServerBackup("Copia de mundo", serverId)
       onToast("Copia de seguridad del mundo iniciada con éxito.", "success")
     } catch (err: unknown) {
       onToast(
@@ -92,7 +94,7 @@ export default function ServerWorldView({
   const handleDownloadWorld = async () => {
     setIsDownloadLoading(true)
     try {
-      const res = await serverApi.createServerWorldDownloadUrl()
+      const res = await serverApi.createServerWorldDownloadUrl(serverId)
       if (res && res.url) {
         const link = document.createElement("a")
         link.href = res.url
@@ -121,13 +123,13 @@ export default function ServerWorldView({
 
     try {
       // 1. Prepare signed upload URL
-      const { url } = await serverApi.prepareServerWorldUpload()
+      const { url } = await serverApi.prepareServerWorldUpload(serverId)
 
       // 2. Transfer REAL bytes to Wings signed URL and check response.ok
       await serverApi.uploadFileToSignedUrl(url, selectedFile)
 
       // 3. Call replace world mutation ONLY after real upload completes
-      await serverApi.replaceServerWorld(selectedFile.name)
+      await serverApi.replaceServerWorld(selectedFile.name, serverId)
 
       onToast("Mundo reemplazado exitosamente.", "success")
       setIsReplaceModalOpen(false)

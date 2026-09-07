@@ -29,7 +29,7 @@ import {
 
 interface ServerOverviewViewProps {
   theme: ThemeMode
-  serverId?: string
+  serverId: string
   onNavigate?: (section: any, handoff?: import("../../types").GameHandoffPayload) => void
 }
 

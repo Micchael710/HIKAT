@@ -113,30 +113,30 @@ describe("ConsoleService GraphQL Submission & WebSocket Ticket (Shard 06B & 06C)
 
     vi.stubGlobal("WebSocket", MockWebSocket)
 
-    await consoleService.connect()
+    await consoleService.connect("srv-1")
 
-    expect(createTicketSpy).toHaveBeenCalledTimes(1)
+    expect(createTicketSpy).toHaveBeenCalledWith("srv-1")
     expect(openedUrl).toContain("/api/server/console/ws?ticket=cstk_1234567890abcdef")
     expect(openedUrl).not.toContain("token=")
     expect(openedUrl).not.toContain("mock-access-token-jwt")
     expect(openedUrl).not.toContain("accessToken=")
   })
 
-  it("always sends commands via serverApi.sendServerCommand GraphQL mutation", async () => {
+  it("always sends commands via serverApi.sendServerCommand GraphQL mutation with serverId", async () => {
     const sendCommandSpy = vi.spyOn(serverApi, "sendServerCommand").mockResolvedValue({
       success: true,
       message: "Comando enviado correctamente.",
     })
 
-    await consoleService.sendCommand("say Hola HiKAT")
-    expect(sendCommandSpy).toHaveBeenCalledWith("say Hola HiKAT")
+    await consoleService.sendCommand("say Hola HiKAT", "srv-1")
+    expect(sendCommandSpy).toHaveBeenCalledWith("say Hola HiKAT", "srv-1")
 
     sendCommandSpy.mockResolvedValueOnce({
       success: false,
       message: SERVER_PUBLIC_MESSAGES.COMMAND_RATE_LIMITED,
     })
 
-    await expect(consoleService.sendCommand("say spam")).rejects.toThrow(
+    await expect(consoleService.sendCommand("say spam", "srv-1")).rejects.toThrow(
       "Has enviado demasiados comandos. Espera un momento.",
     )
   })
@@ -181,7 +181,7 @@ describe("Real React Test: ServerOverviewView (Shard 06C)", () => {
     // 1. Mount component real
     let unmountFn: () => void = () => {}
     await act(async () => {
-      const { unmount } = render(<ServerOverviewView theme="dark" />)
+      const { unmount } = render(<ServerOverviewView serverId="srv-1" theme="dark" />)
       unmountFn = unmount
     })
 
@@ -288,7 +288,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       .spyOn(consoleService, "sendCommand")
       .mockResolvedValue(undefined)
 
-    render(<ServerConsoleView serverStatus="ONLINE" theme="dark" />)
+    render(<ServerConsoleView serverId="srv-1" serverStatus="ONLINE" theme="dark" />)
 
     const input = screen.getByPlaceholderText(/Escribe un comando/i) as HTMLInputElement
     const sendButton = screen.getByRole("button", { name: /Enviar/i })
@@ -302,7 +302,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       fireEvent.click(sendButton)
     })
 
-    expect(sendCommandSpy).toHaveBeenCalledWith("say Hola Mundo")
+    expect(sendCommandSpy).toHaveBeenCalledWith("say Hola Mundo", "srv-1")
     // Verifies local echo appears in DOM
     expect(screen.getByText("> say Hola Mundo")).toBeDefined()
     // Verifies input is cleaned on success
@@ -317,7 +317,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       new Error("Has enviado demasiados comandos. Espera un momento."),
     )
 
-    render(<ServerConsoleView serverStatus="ONLINE" theme="dark" />)
+    render(<ServerConsoleView serverId="srv-1" serverStatus="ONLINE" theme="dark" />)
 
     const input = screen.getByPlaceholderText(/Escribe un comando/i) as HTMLInputElement
     const sendButton = screen.getByRole("button", { name: /Enviar/i })
@@ -392,7 +392,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     })
 
     await act(async () => {
-      render(<ServerOverviewView theme="dark" />)
+      render(<ServerOverviewView serverId="srv-1" theme="dark" />)
     })
 
     // 1. Initial General tab is rendered with live console and clean metrics (CPU, RAM, Disco)
@@ -427,7 +427,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
     vi.spyOn(serverApi, "getServerStatus").mockRejectedValue(new Error("Connection refused to Pterodactyl"))
 
     await act(async () => {
-      render(<ServerOverviewView theme="dark" />)
+      render(<ServerOverviewView serverId="srv-1" theme="dark" />)
     })
 
     // Disconnected infrastructure badge top-right is displayed
@@ -463,7 +463,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       .mockRejectedValueOnce(new Error("Pterodactyl Network Timeout"))
 
     await act(async () => {
-      render(<ServerOverviewView theme="dark" />)
+      render(<ServerOverviewView serverId="srv-1" theme="dark" />)
     })
 
     // Initially CONNECTED
@@ -501,7 +501,7 @@ describe("Real React Test: ServerConsoleView (Shard 06C)", () => {
       .mockResolvedValueOnce(localMockResources)
 
     await act(async () => {
-      render(<ServerOverviewView theme="dark" />)
+      render(<ServerOverviewView serverId="srv-1" theme="dark" />)
     })
 
     // Initially DISCONNECTED
@@ -545,7 +545,7 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
     ])
 
     await act(async () => {
-      render(<ServerFilesView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+      render(<ServerFilesView serverId="srv-1" theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
     })
 
     // Header title "Archivos del servidor" is present
@@ -570,11 +570,11 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
     })
 
     await act(async () => {
-      render(<ServerFilesView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+      render(<ServerFilesView serverId="srv-1" theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
     })
 
     // Initial root call
-    expect(getServerFilesSpy).toHaveBeenCalledWith("SERVER", undefined)
+    expect(getServerFilesSpy).toHaveBeenCalledWith("SERVER", undefined, "srv-1")
     expect(screen.getByText("mods")).toBeDefined()
     expect(screen.getByText("server.properties")).toBeDefined()
 
@@ -584,7 +584,7 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
     })
 
     // Subfolder fetch call
-    expect(getServerFilesSpy).toHaveBeenCalledWith("SERVER", "mods")
+    expect(getServerFilesSpy).toHaveBeenCalledWith("SERVER", "mods", "srv-1")
     expect(screen.getByText("voicechat.jar")).toBeDefined()
 
     // Breadcrumb updated: "Archivos del servidor > mods"
@@ -596,14 +596,14 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
       fireEvent.click(screen.getByRole("button", { name: "Archivos del servidor" }))
     })
 
-    expect(getServerFilesSpy).toHaveBeenLastCalledWith("SERVER", undefined)
+    expect(getServerFilesSpy).toHaveBeenLastCalledWith("SERVER", undefined, "srv-1")
   })
 
   it("Phase 07E Test 3: Disconnected state shows human-friendly message and disables directory action buttons", async () => {
     vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([])
 
     await act(async () => {
-      render(<ServerFilesView theme="dark" serverStatus="DISCONNECTED" onToast={onToastMock} />)
+      render(<ServerFilesView serverId="srv-1" theme="dark" serverStatus="DISCONNECTED" onToast={onToastMock} />)
     })
 
     expect(screen.getByText("Servidor sin conexión")).toBeDefined()
@@ -620,7 +620,7 @@ describe("Phase 07E Real React Test: ServerFilesView Root File Browser", () => {
     ])
 
     await act(async () => {
-      render(<ServerFilesView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+      render(<ServerFilesView serverId="srv-1" theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
     })
 
     // Symlink renders "Enlace" badge
@@ -677,7 +677,7 @@ describe("Phase 07: ServerTasksView Custom Action Toggle Preservation", () => {
     })
 
     await act(async () => {
-      render(<ServerTasksView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+      render(<ServerTasksView serverId="srv-1" theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
     })
 
     expect(screen.getByText("Parada nocturna")).toBeDefined()
@@ -701,7 +701,7 @@ describe("Phase 07: ServerTasksView Custom Action Toggle Preservation", () => {
       command: null,
       delaySeconds: null,
       enabled: false,
-    })
+    }, "srv-1")
   })
 
   it("CUSTOM + COMMAND task toggle sends action: COMMAND and preserved command string", async () => {
@@ -733,7 +733,7 @@ describe("Phase 07: ServerTasksView Custom Action Toggle Preservation", () => {
     })
 
     await act(async () => {
-      render(<ServerTasksView theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
+      render(<ServerTasksView serverId="srv-1" theme="dark" serverStatus="ONLINE" onToast={onToastMock} />)
     })
 
     expect(screen.getByText("Anuncio automático")).toBeDefined()
@@ -757,7 +757,7 @@ describe("Phase 07: ServerTasksView Custom Action Toggle Preservation", () => {
       command: "say Bienvenidos al servidor",
       delaySeconds: null,
       enabled: true,
-    })
+    }, "srv-1")
   })
 })
 
@@ -821,6 +821,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     await act(async () => {
       render(
         <ServerFilesView
+          serverId="srv-1"
           theme="dark"
           serverStatus="OFFLINE"
           onToast={onToastMock}
@@ -865,6 +866,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     await act(async () => {
       render(
         <ServerFilesView
+          serverId="srv-1"
           theme="dark"
           serverStatus="OFFLINE"
           onToast={onToastMock}
@@ -918,6 +920,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     await act(async () => {
       render(
         <ServerFilesView
+          serverId="srv-1"
           theme="dark"
           serverStatus="DISCONNECTED"
           onToast={onToastMock}
@@ -949,6 +952,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     await act(async () => {
       render(
         <ServerReleaseSyncModal
+          serverId="srv-1"
           theme="dark"
           plan={readyPlan}
           onClose={vi.fn()}
@@ -982,6 +986,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     await act(async () => {
       render(
         <ServerReleaseSyncModal
+          serverId="srv-1"
           theme="dark"
           plan={fsFailPlan}
           onClose={vi.fn()}
@@ -1015,6 +1020,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
 
     const { unmount } = render(
       <ServerReleaseSyncModal
+        serverId="srv-1"
         theme="dark"
         plan={onlinePlan}
         onClose={vi.fn()}
@@ -1042,6 +1048,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
 
     render(
       <ServerReleaseSyncModal
+        serverId="srv-1"
         theme="dark"
         plan={disconnectedPlan}
         onClose={vi.fn()}
@@ -1103,6 +1110,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     await act(async () => {
       render(
         <ServerModSearchModal
+          serverId="srv-1"
           onClose={vi.fn()}
           onSuccess={vi.fn()}
           onNavigateToGame={onNavigateToGameMock}
@@ -1191,6 +1199,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     await act(async () => {
       render(
         <ServerModSearchModal
+          serverId="srv-1"
           onClose={vi.fn()}
           onSuccess={vi.fn()}
           onNavigateToGame={onNavigateToGameMock}
@@ -1218,6 +1227,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
       20,
       20,
       "opaque-cursor-token-1",
+      "srv-1",
     )
 
     // Both items are now visible
@@ -1276,7 +1286,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       blockReason: null,
     })
 
-    render(<ServerOverviewView theme="dark" />)
+    render(<ServerOverviewView serverId="srv-1" theme="dark" />)
 
     // Banner is visible in General view
     const banner = await screen.findByTestId("server-overview-pending-changes-banner")
@@ -1304,7 +1314,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
     vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([])
     vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([])
 
-    render(<ServerOverviewView theme="dark" />)
+    render(<ServerOverviewView serverId="srv-1" theme="dark" />)
 
     const reviewBtn = await screen.findByTestId("button-overview-review-pending-changes")
     await act(async () => {
@@ -1330,7 +1340,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       blockReason: null,
     })
 
-    render(<ServerOverviewView theme="dark" />)
+    render(<ServerOverviewView serverId="srv-1" theme="dark" />)
 
     await screen.findByText("Servidor Principal")
     expect(screen.queryByTestId("server-overview-pending-changes-banner")).toBeNull()
@@ -1342,7 +1352,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
 
     vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockRejectedValue(new Error("Server unconfigured"))
 
-    render(<ServerOverviewView theme="dark" />)
+    render(<ServerOverviewView serverId="srv-1" theme="dark" />)
 
     await screen.findByText("Servidor Principal")
     expect(screen.queryByTestId("server-overview-pending-changes-banner")).toBeNull()
@@ -1363,7 +1373,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       blockReason: null,
     })
 
-    render(<ServerOverviewView theme="dark" />)
+    render(<ServerOverviewView serverId="srv-1" theme="dark" />)
 
     const banner = await screen.findByTestId("server-overview-pending-changes-banner")
     expect(banner).toBeDefined()
@@ -1388,7 +1398,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       blockReason: "Apaga el servidor para aplicar los cambios.",
     })
 
-    render(<ServerOverviewView theme="dark" />)
+    render(<ServerOverviewView serverId="srv-1" theme="dark" />)
 
     const banner = await screen.findByTestId("server-overview-pending-changes-banner")
     expect(banner).toBeDefined()
@@ -1413,7 +1423,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       blockReason: "El servidor no está disponible en este momento.",
     })
 
-    render(<ServerOverviewView theme="dark" />)
+    render(<ServerOverviewView serverId="srv-1" theme="dark" />)
 
     const banner = await screen.findByTestId("server-overview-pending-changes-banner")
     expect(banner).toBeDefined()
@@ -1423,7 +1433,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
   it("9. Live console preview receives incoming log entries without crashing", async () => {
     vi.spyOn(serverApi, "getServerStatus").mockResolvedValue(mockServerResources)
 
-    render(<ServerOverviewView theme="dark" />)
+    render(<ServerOverviewView serverId="srv-1" theme="dark" />)
 
     await screen.findByText("Consola en vivo")
 
@@ -1507,6 +1517,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
     await act(async () => {
       render(
         <ServerModSearchModal
+          serverId="srv-1"
           onClose={vi.fn()}
           onSuccess={vi.fn()}
           onNavigateToGame={onNavigateToGameMock}
@@ -1533,8 +1544,6 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
 
     // BOTH redirect alert is displayed
     const redirectAlert = await screen.findByTestId("alert-both-mod-redirect")
-    expect(redirectAlert).toBeDefined()
-
     // Click redirect button
     const redirectBtn = screen.getByTestId("button-redirect-to-game")
     await act(async () => {
@@ -1551,5 +1560,85 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
   })
 })
 
+describe("Multiserver Isolation & Console Ticket Verification", () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
 
+  it("consoleService connects with explicit serverId and clears logs when switching between srv-1 and srv-2", async () => {
+    const { consoleService } = await import("../../services/consoleService")
+    const { serverApi } = await import("../../services/graphqlClient")
+    const { authService } = await import("../../services/authService")
 
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("mock-access-token-jwt")
+    class MockWebSocket {
+      public readyState = 1
+      constructor(public url: string) {}
+      public onopen: any = null
+      public onmessage: any = null
+      public onclose: any = null
+      public onerror: any = null
+      public send = vi.fn()
+      public close = vi.fn()
+    }
+    vi.stubGlobal("WebSocket", MockWebSocket)
+
+    const ticketSpy = vi.spyOn(serverApi, "createServerConsoleTicket").mockResolvedValue({
+      ticket: "ticket-token",
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+    })
+    const commandSpy = vi.spyOn(serverApi, "sendServerCommand").mockResolvedValue({
+      success: true,
+      message: "Command sent",
+    })
+
+    // Retain and connect to srv-1
+    const unbind1 = consoleService.retain("srv-1")
+    await consoleService.connect("srv-1")
+
+    expect(ticketSpy).toHaveBeenCalledWith("srv-1")
+
+    // Send command to srv-1
+    await consoleService.sendCommand("stop", "srv-1")
+    expect(commandSpy).toHaveBeenCalledWith("stop", "srv-1")
+
+    // Switch to srv-2
+    unbind1()
+    const unbind2 = consoleService.retain("srv-2")
+    await consoleService.connect("srv-2")
+
+    expect(ticketSpy).toHaveBeenLastCalledWith("srv-2")
+    expect(consoleService.getRecentLogs()).toEqual([])
+
+    // Send command to srv-2
+    await consoleService.sendCommand("whitelist add player1", "srv-2")
+    expect(commandSpy).toHaveBeenLastCalledWith("whitelist add player1", "srv-2")
+
+    unbind2()
+  })
+
+  it("ServerOverviewView fetches scoped data for specific serverId without mixing srv-1 and srv-2", async () => {
+    const statusSpy = vi.spyOn(serverApi, "getServerStatus").mockImplementation(async (serverId: string) => ({
+      status: "ONLINE",
+      cpuPercent: serverId === "srv-1" ? 10 : 50,
+      cpuLimitPercent: 100,
+      memoryUsedBytes: serverId === "srv-1" ? 1000 : 5000,
+      memoryLimitBytes: 10000,
+      diskUsedBytes: 2000,
+      diskLimitBytes: 20000,
+      uptimeMs: 1000,
+      networkRxBytes: 0,
+      networkTxBytes: 0,
+      isSuspended: false,
+    }))
+
+    const { unmount: unmount1 } = render(<ServerOverviewView serverId="srv-1" theme="dark" />)
+    expect(statusSpy).toHaveBeenCalledWith("srv-1")
+    unmount1()
+
+    const { unmount: unmount2 } = render(<ServerOverviewView serverId="srv-2" theme="dark" />)
+    expect(statusSpy).toHaveBeenCalledWith("srv-2")
+    unmount2()
+  })
+})

@@ -19,7 +19,7 @@ import {
 
 interface ServerBackupsViewProps {
   theme: ThemeMode
-  serverId?: string
+  serverId: string
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }

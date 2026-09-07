@@ -14,6 +14,7 @@ import {
 
 interface TextFileEditorModalProps {
   theme: ThemeMode
+  serverId: string
   fileId?: string
   logicalPath: string
   isNew?: boolean
@@ -26,6 +27,7 @@ interface TextFileEditorModalProps {
 
 export default function TextFileEditorModal({
   theme,
+  serverId,
   fileId,
   logicalPath: initialLogicalPath,
   isNew = false,
@@ -116,7 +118,7 @@ export default function TextFileEditorModal({
         logicalPath: logicalPath.trim(),
         content,
         explicitPolicy,
-      })
+      }, serverId)
       setOriginalContent(content)
       onToast(`Archivo ${isNew ? "creado" : "guardado"} exitosamente.`, "success")
       onSaveSuccess(saved)
@@ -125,7 +127,7 @@ export default function TextFileEditorModal({
     } finally {
       setIsSaving(false)
     }
-  }, [readOnly, isSaving, isOverSize, isJson, jsonValidation, isNew, fileId, logicalPath, content, explicitPolicy, onToast, onSaveSuccess])
+  }, [readOnly, isSaving, isOverSize, isJson, jsonValidation, isNew, fileId, logicalPath, content, explicitPolicy, serverId, onToast, onSaveSuccess])
 
   // Keyboard shortcut Ctrl+S / Cmd+S
   useEffect(() => {

@@ -58,6 +58,7 @@ describe("Back Office GraphQL News Client", () => {
     } as Response)
 
     const result = await newsApi.getAdminNews({
+      serverId: "srv-1",
       type: "UPDATE",
       status: "PUBLISHED",
     })
@@ -117,7 +118,7 @@ describe("Back Office GraphQL News Client", () => {
         }),
       } as Response)
 
-    const result = await newsApi.getAdminNews()
+    const result = await newsApi.getAdminNews({ serverId: "srv-1" })
     expect(result.items).toEqual([])
     expect(authService.getAccessToken()).toBe(newJwt)
   })
@@ -169,7 +170,7 @@ describe("Back Office GraphQL News Client", () => {
         }),
       } as Response)
 
-    const result = await newsApi.deleteNews("news-123")
+    const result = await newsApi.deleteNews("news-123", "srv-1")
     expect(result).toBe(true)
     expect(authService.getAccessToken()).toBe(newJwt)
   })
@@ -210,7 +211,7 @@ describe("Back Office GraphQL News Client", () => {
         json: async () => ({ error: "Unauthorized" }),
       } as Response)
 
-    await expect(newsApi.getAdminNews()).rejects.toThrow(
+    await expect(newsApi.getAdminNews({ serverId: "srv-1" })).rejects.toThrow(
       "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
     )
     expect(authService.getAccessToken()).toBeNull()
@@ -238,6 +239,7 @@ describe("Back Office GraphQL News Client", () => {
 
     await expect(
       newsApi.createNews({
+        serverId: "srv-1",
         title: "Hi",
         content: "Content",
         type: "NEWS",
@@ -287,7 +289,7 @@ describe("Back Office GraphQL News Client", () => {
       } as Response
     })
 
-    await newsApi.getAdminNews()
+    await newsApi.getAdminNews({ serverId: "srv-1" })
 
     expect(refreshCalled).toBe(true)
     expect(sentBearer).toBe("Bearer proactively-renewed-admin-jwt")
@@ -313,7 +315,7 @@ describe("Back Office GraphQL News Client", () => {
       } as Response
     })
 
-    await expect(newsApi.getAdminNews()).rejects.toThrow(/Failed to fetch|Error temporal/)
+    await expect(newsApi.getAdminNews({ serverId: "srv-1" })).rejects.toThrow(/Failed to fetch|Error temporal/)
     // Session is PRESERVED!
     expect(authService.getAccessToken()).toBe("expired-jwt")
     expect(authService.getUser()?.id).toBe("admin-1")
@@ -354,7 +356,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
       json: async () => mockResponseData,
     } as Response)
 
-    const status = await serverApi.getServerStatus()
+    const status = await serverApi.getServerStatus("srv-1")
 
     expect(status.status).toBe("ONLINE")
     expect(status.cpuPercent).toBe(32.5)
@@ -380,7 +382,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
       }),
     } as Response)
 
-    const startRes = await serverApi.startServer()
+    const startRes = await serverApi.startServer("srv-1")
     expect(startRes.success).toBe(true)
     expect(startRes.status).toBe("STARTING")
 
@@ -395,7 +397,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
       }),
     } as Response)
 
-    const restartRes = await serverApi.restartServer()
+    const restartRes = await serverApi.restartServer("srv-1")
     expect(restartRes.success).toBe(true)
     expect(restartRes.status).toBe("STARTING")
 
@@ -410,7 +412,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
       }),
     } as Response)
 
-    const stopRes = await serverApi.stopServer()
+    const stopRes = await serverApi.stopServer("srv-1")
     expect(stopRes.success).toBe(true)
     expect(stopRes.status).toBe("STOPPING")
   })
@@ -431,7 +433,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
       }),
     } as Response)
 
-    const res = await serverApi.sendServerCommand("say Hola mundo")
+    const res = await serverApi.sendServerCommand("say Hola mundo", "srv-1")
     expect(res.success).toBe(true)
     expect(res.message).toBe("Comando enviado correctamente.")
   })
@@ -466,7 +468,7 @@ describe("Back Office GraphQL Server Client (Shard 06)", () => {
       return { ok: true, status: 200, json: async () => ({}) } as Response
     })
 
-    await expect(newsApi.getAdminNews()).rejects.toThrow(
+    await expect(newsApi.getAdminNews({ serverId: "srv-1" })).rejects.toThrow(
       "Failed to fetch (offline network error)",
     )
 
@@ -521,7 +523,7 @@ describe("Back Office Game Upload GraphQL Client Suite", () => {
       originalFilename: "sodium.jar",
       sizeBytes: 4294967296,
       category: "MOD",
-    })
+    }, "srv-1")
 
     expect(res.uploadToken).toBe("tok-123")
     expect(res.objectKey).toBe("game-files/uuid-1")

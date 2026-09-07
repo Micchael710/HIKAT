@@ -63,9 +63,9 @@ export default function DashboardView({
         if (serverStatusRes.status === "fulfilled") {
           setServerResources(serverStatusRes.value)
         }
-        if (newsRes.status === "fulfilled" && newsRes.value?.edges) {
-          const published = newsRes.value.edges.filter((e) => e.node.status === "PUBLISHED").length
-          const draft = newsRes.value.edges.filter((e) => e.node.status === "DRAFT").length
+        if (newsRes.status === "fulfilled" && newsRes.value?.items) {
+          const published = newsRes.value.items.filter((i) => i.status === "PUBLISHED").length
+          const draft = newsRes.value.items.filter((i) => i.status === "DRAFT").length
           setNewsCounts({ published, draft })
         }
         if (gameRes.status === "fulfilled") {

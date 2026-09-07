@@ -25,6 +25,7 @@ import {
 
 interface ServerAutomationsViewProps {
   theme: ThemeMode
+  serverId: string
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }
@@ -41,6 +42,7 @@ const WEEKDAYS = [
 
 export default function ServerAutomationsView({
   theme,
+  serverId,
   serverStatus,
   onToast,
 }: ServerAutomationsViewProps) {
@@ -79,7 +81,7 @@ export default function ServerAutomationsView({
     if (manual) setIsRefreshing(true)
     setError(null)
     try {
-      const data = await serverApi.getServerAutomations()
+      const data = await serverApi.getServerAutomations(serverId)
       if (isMountedRef.current) {
         setAutomations(data)
       }
@@ -97,7 +99,7 @@ export default function ServerAutomationsView({
         setIsRefreshing(false)
       }
     }
-  }, [])
+  }, [serverId])
 
   useEffect(() => {
     isMountedRef.current = true
@@ -149,10 +151,10 @@ export default function ServerAutomationsView({
     setIsSaving(true)
     try {
       if (editingId) {
-        await serverApi.updateServerAutomation(editingId, formData)
+        await serverApi.updateServerAutomation(editingId, formData, serverId)
         onToast("Automatización actualizada exitosamente.", "success")
       } else {
-        await serverApi.createServerAutomation(formData)
+        await serverApi.createServerAutomation(formData, serverId)
         onToast("Automatización creada exitosamente.", "success")
       }
       setIsModalOpen(false)
@@ -170,7 +172,7 @@ export default function ServerAutomationsView({
   const handleRunNow = async (item: ServerAutomationItem) => {
     setActionLoadingMap((prev) => ({ ...prev, [item.id]: true }))
     try {
-      await serverApi.runServerAutomation(item.id)
+      await serverApi.runServerAutomation(item.id, serverId)
       onToast(`Ejecución de "${item.name}" iniciada.`, "success")
       await fetchAutomations(true)
     } catch (err: unknown) {
@@ -187,7 +189,7 @@ export default function ServerAutomationsView({
     if (!deleteTarget) return
     setIsDeleting(true)
     try {
-      await serverApi.deleteServerAutomation(deleteTarget.id)
+      await serverApi.deleteServerAutomation(deleteTarget.id, serverId)
       onToast("Automatización eliminada.", "success")
       setDeleteTarget(null)
       await fetchAutomations(true)

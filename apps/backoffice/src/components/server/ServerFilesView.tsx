@@ -23,7 +23,7 @@ import { ServerReleaseSyncModal } from "./ServerReleaseSyncModal"
 
 interface ServerFilesViewProps {
   theme: ThemeMode
-  serverId?: string
+  serverId: string
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
   onNavigateToGame?: (handoff?: import("../../types").GameHandoffPayload) => void
@@ -73,11 +73,9 @@ export default function ServerFilesView({ theme, serverId, serverStatus, onToast
     setError(null)
     try {
       const [filesResult, managedResult, planResult] = await Promise.allSettled([
-        serverId
-          ? serverApi.getServerFiles("SERVER", currentPath || undefined, serverId)
-          : serverApi.getServerFiles("SERVER", currentPath || undefined),
-        serverId ? serverContentApi.getServerManagedContent(serverId) : serverContentApi.getServerManagedContent(),
-        serverId ? serverContentApi.getServerReleaseSyncPlan(serverId) : serverContentApi.getServerReleaseSyncPlan(),
+        serverApi.getServerFiles("SERVER", currentPath || undefined, serverId),
+        serverContentApi.getServerManagedContent(serverId),
+        serverContentApi.getServerReleaseSyncPlan(serverId),
       ])
 
       if (isMountedRef.current) {
@@ -1334,6 +1332,7 @@ export default function ServerFilesView({ theme, serverId, serverStatus, onToast
       {/* Shard 08D Modals */}
       {isSearchModalOpen && (
         <ServerModSearchModal
+          serverId={serverId}
           theme={theme}
           onClose={() => setIsSearchModalOpen(false)}
           onSuccess={() => {
@@ -1346,6 +1345,7 @@ export default function ServerFilesView({ theme, serverId, serverStatus, onToast
 
       {isSyncModalOpen && syncPlan && (
         <ServerReleaseSyncModal
+          serverId={serverId}
           theme={theme}
           plan={syncPlan}
           onClose={() => setIsSyncModalOpen(false)}
