@@ -496,9 +496,9 @@ export const serverTypeDefs = /* GraphQL */ `
     createServer(input: CreateServerInput!): Server!
 
     """
-    Deletes a HiKAT server and cleans up upstream Pterodactyl infrastructure - requires ADMIN role
+    Deletes a HiKAT server with explicit upstream Pterodactyl deletion choice - requires ADMIN role
     """
-    deleteServer(serverId: ID!): Boolean!
+    deleteServer(serverId: ID!, deletePterodactyl: Boolean!): Boolean!
 
     """
     Requests a short-lived single-use ticket for connecting to the live server console WebSocket - requires ADMIN role

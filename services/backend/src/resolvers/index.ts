@@ -989,14 +989,14 @@ export const resolvers = {
 
     deleteServer: async (
       _parent: unknown,
-      args: { serverId: string },
+      args: { serverId: string; deletePterodactyl: boolean },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return deleteServer(context.db, context.env, args.serverId)
+      return deleteServer(context.db, context.env, args.serverId, args.deletePterodactyl)
     },
 
     // --- Server Administration Mutations (Require ADMIN - Shard 06 & 06A) ---

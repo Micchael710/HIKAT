@@ -33,6 +33,7 @@ import {
 import { ensureSettingsRecord } from "../settingsService"
 import { broadcastReleaseActivated } from "../../releaseEvents"
 import { validateGameEnvironment } from "./gameEnvironmentService"
+import { assertExplicitServerIdIfMultiple } from "../pterodactyl/serverAdministrationService"
 import type { Env } from "../../types"
 
 
@@ -468,7 +469,7 @@ export async function getPublishedModpack(
   if (!activeRelease) return null
 
   // Ensure the active release belongs to the requested serverId if serverId is provided
-  if (serverId && activeRelease.serverId && activeRelease.serverId !== serverId) {
+  if (serverId && activeRelease.serverId !== serverId) {
     return null
   }
 
@@ -642,6 +643,8 @@ export async function prepareGameDraft(
   request?: Request,
   serverId?: string | null,
 ): Promise<GameReleaseGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "preparación de borrador de juego")
+
   const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
   const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
   if (serverId) {
@@ -682,7 +685,7 @@ export async function prepareGameDraft(
       throw createGraphQLError("La release base especificada no existe.", "NOT_FOUND")
     }
 
-    if (serverId && baseRelease.serverId && baseRelease.serverId !== serverId) {
+    if (serverId && baseRelease.serverId !== serverId) {
       throw createGraphQLError(
         "La release base pertenece a otro servidor.",
         "VALIDATION_ERROR",
@@ -802,6 +805,8 @@ export async function updateGameDraftMetadata(
   request?: Request,
   serverId?: string | null,
 ): Promise<GameReleaseGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "actualización de borrador de juego")
+
   const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
   if (serverId) {
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))
@@ -990,6 +995,8 @@ export async function updateGameDraftMetadata(
 }
 
 export async function discardGameDraft(db: Database, env?: Env, serverId?: string | null): Promise<boolean> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "descarte de borrador de juego")
+
   const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
   if (serverId) {
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))
@@ -1054,6 +1061,8 @@ export async function publishGameRelease(
   request?: Request,
   serverId?: string | null,
 ): Promise<GameReleaseGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "publicación de release de juego")
+
   const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
   if (serverId) {
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))

@@ -76,7 +76,7 @@ export async function assertExplicitServerIdIfMultiple(
   serverId?: string | null,
   operationName: string = "operación",
 ): Promise<void> {
-  if (serverId) return
+  if (serverId || !db || typeof (db as any).select !== "function") return
   const countResult = await db
     .select({ count: sql<number>`count(*)` })
     .from(schema.servers)

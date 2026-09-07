@@ -33,6 +33,7 @@ import {
   resolveReleaseEffectivePolicies,
 } from "./releaseService"
 import { generateR2TemporaryCredentials } from "../r2CredentialsService"
+import { assertExplicitServerIdIfMultiple } from "../pterodactyl/serverAdministrationService"
 
 type BatchStatements = Parameters<Database["batch"]>[0]
 type BatchStatement = BatchStatements[number]
@@ -235,6 +236,8 @@ export async function createGameFileUploadToken(
   }
 
   const targetServerId = (input as any).serverId || serverId || null
+  await assertExplicitServerIdIfMultiple(db, targetServerId, "subida de archivo de juego")
+
   const accountId = env?.CLOUDFLARE_ACCOUNT_ID
   const bucketName = env?.R2_BUCKET_NAME || "hikat-r2"
   const objectKey = targetServerId
@@ -428,6 +431,8 @@ export async function addGameFile(
   },
   serverId?: string | null,
 ): Promise<AdminGameFileGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "adición de archivo de juego")
+
   let objectKeyToCompensate: string | undefined
 
   try {
@@ -799,6 +804,8 @@ export async function saveGameFileContent(
   env: Env,
   serverId?: string | null,
 ): Promise<AdminGameFileGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "guardado de contenido de archivo de juego")
+
   const logicalPath = sanitizeGamePath(input.logicalPath)
   const filename = logicalPath.split("/").pop() || "file.txt"
 
@@ -1049,6 +1056,8 @@ export async function createGameFolder(
   userId: string,
   serverId?: string | null,
 ): Promise<AdminGameFileGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "creación de carpeta de juego")
+
   const logicalPath = sanitizeGamePath(rawLogicalPath)
   const name = logicalPath.split("/").pop() || "folder"
 
@@ -1148,6 +1157,7 @@ export async function renameGamePath(
   if (serverId) {
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))
   }
+  await assertExplicitServerIdIfMultiple(db, serverId, "renombrado de ruta de juego")
 
   // Ensure active draft
   let draft = await db
@@ -1274,6 +1284,7 @@ export async function moveGamePaths(
   if (serverId) {
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))
   }
+  await assertExplicitServerIdIfMultiple(db, serverId, "movimiento de rutas de juego")
 
   // Ensure active draft
   let draft = await db
@@ -1419,6 +1430,7 @@ export async function copyGamePaths(
   if (serverId) {
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))
   }
+  await assertExplicitServerIdIfMultiple(db, serverId, "copia de rutas de juego")
 
   // Ensure active draft
   let draft = await db
@@ -1576,6 +1588,7 @@ export async function deleteGamePaths(
   if (serverId) {
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))
   }
+  await assertExplicitServerIdIfMultiple(db, serverId, "eliminación de rutas de juego")
 
   // Ensure active draft
   const draft = await db
@@ -1661,6 +1674,7 @@ export async function setGamePathPolicy(
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))
     publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
   }
+  await assertExplicitServerIdIfMultiple(db, serverId, "actualización de política de archivo de juego")
 
   // Ensure active draft
   let draft = await db

@@ -3,7 +3,7 @@
  * Safe non-destructive parsing and allowlist-only updating of server.properties.
  */
 
-import { Database } from "@hikat/database"
+import { Database, createDatabase } from "@hikat/database"
 import {
   extractMinecraftSettings,
   serializeServerProperties,
@@ -11,7 +11,10 @@ import {
 } from "@hikat/shared"
 import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
-import { resolvePterodactylClient } from "./serverAdministrationService"
+import {
+  resolvePterodactylClient,
+  assertExplicitServerIdIfMultiple,
+} from "./serverAdministrationService"
 
 /**
  * Reads and parses Minecraft server configuration.
@@ -37,7 +40,11 @@ export async function updateMinecraftServerSettings(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<MinecraftServerSettingsData> {
-  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const database = db || (env.DB ? createDatabase(env.DB) : undefined)
+  if (database) {
+    await assertExplicitServerIdIfMultiple(database, serverId, "configuración de Minecraft")
+  }
+  const { client } = await resolvePterodactylClient(database, env, serverId, clientOverride)
   const originalContent = await client.getFileContents("server.properties")
   const updatedContent = serializeServerProperties(originalContent, input)
   await client.writeFile("server.properties", updatedContent)

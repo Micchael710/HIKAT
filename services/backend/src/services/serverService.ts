@@ -318,6 +318,7 @@ export async function deleteServer(
   db: Database,
   env: Env,
   serverId: string,
+  deletePterodactyl: boolean = true,
   clientOverride?: IPterodactylClient,
 ): Promise<boolean> {
   const server = await db
@@ -330,8 +331,8 @@ export async function deleteServer(
     throw createGraphQLError("Servidor no encontrado.", "NOT_FOUND")
   }
 
-  // If server has Pterodactyl ID, cleanup upstream
-  if (server.pterodactylServerId) {
+  // If deletePterodactyl is true and server has Pterodactyl ID, cleanup upstream first
+  if (deletePterodactyl && server.pterodactylServerId) {
     try {
       const client = clientOverride || createPterodactylApplicationClient(env)
       await client.deleteApplicationServer(server.pterodactylServerId)
@@ -344,7 +345,8 @@ export async function deleteServer(
     }
   }
 
-  // Delete server record in D1 (CASCADE removes related releases, news, tasks, etc.)
+  // Delete server record in D1 (CASCADE removes server-scoped records: releases, files, news, tasks, tickets, managed content)
+  // Does NOT delete: users, auth, skins, capes, global settings, or other servers
   await db.delete(schema.servers).where(eq(schema.servers.id, serverId))
   return true
 }

@@ -15,6 +15,7 @@ import {
   acquireServerOperationLock,
   releaseServerOperationLock,
   startServerOperationHeartbeat,
+  assertExplicitServerIdIfMultiple,
 } from "./serverAdministrationService"
 
 export interface ServerBackupItemData {
@@ -67,7 +68,11 @@ export async function createServerBackup(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<ServerBackupItemData> {
-  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const database = db || (env.DB ? createDatabase(env.DB) : undefined)
+  if (database) {
+    await assertExplicitServerIdIfMultiple(database, serverId, "creación de copia de seguridad")
+  }
+  const { client } = await resolvePterodactylClient(database, env, serverId, clientOverride)
   const safeName = name && name.trim() ? name.trim().slice(0, 100) : undefined
   const res = await client.createBackup(safeName)
   return mapBackupToItem(res)
@@ -127,7 +132,11 @@ export async function deleteServerBackup(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<boolean> {
-  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const database = db || (env.DB ? createDatabase(env.DB) : undefined)
+  if (database) {
+    await assertExplicitServerIdIfMultiple(database, serverId, "eliminación de copia de seguridad")
+  }
+  const { client } = await resolvePterodactylClient(database, env, serverId, clientOverride)
 
   if (!backupId || typeof backupId !== "string" || !backupId.trim()) {
     throw new ServerInfrastructureError(
@@ -159,7 +168,11 @@ export async function toggleServerBackupLock(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<ServerBackupItemData> {
-  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const database = db || (env.DB ? createDatabase(env.DB) : undefined)
+  if (database) {
+    await assertExplicitServerIdIfMultiple(database, serverId, "bloqueo de copia de seguridad")
+  }
+  const { client } = await resolvePterodactylClient(database, env, serverId, clientOverride)
 
   if (!backupId || typeof backupId !== "string" || !backupId.trim()) {
     throw new ServerInfrastructureError(

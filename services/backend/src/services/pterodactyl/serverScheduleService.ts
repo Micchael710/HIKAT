@@ -20,7 +20,10 @@ import {
 import type { Env } from "../../types"
 import type { IPterodactylClient, PterodactylScheduleResponse } from "./types"
 import { ServerInfrastructureError } from "./pterodactylClient"
-import { resolvePterodactylClient } from "./serverAdministrationService"
+import {
+  resolvePterodactylClient,
+  assertExplicitServerIdIfMultiple,
+} from "./serverAdministrationService"
 
 export interface ServerAutomationItemData {
   id: string
@@ -558,6 +561,8 @@ export async function createServerAutomation(
     )
   }
 
+  await assertExplicitServerIdIfMultiple(db, serverId, "creación de tarea programada")
+
   validateTaskInput(input)
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const plan = buildTemplatePlan(input)
@@ -719,9 +724,11 @@ export async function updateServerAutomation(
   if (!db) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-      "La base de datos no está disponible para modificar la tarea.",
+      "La base de datos no está disponible para actualizar la tarea.",
     )
   }
+
+  await assertExplicitServerIdIfMultiple(db, serverId, "actualización de tarea programada")
 
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
@@ -1027,6 +1034,8 @@ export async function runServerAutomation(
     )
   }
 
+  await assertExplicitServerIdIfMultiple(db, serverId, "ejecución de tarea programada")
+
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const fullSchedule = await client.getSchedule(id)
 
@@ -1109,6 +1118,8 @@ export async function deleteServerAutomation(
       "La base de datos no está disponible para eliminar la tarea.",
     )
   }
+
+  await assertExplicitServerIdIfMultiple(db, serverId, "eliminación de tarea programada")
 
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const fullSchedule = await client.getSchedule(id)

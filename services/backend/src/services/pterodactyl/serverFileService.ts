@@ -16,7 +16,10 @@ import { schema, type Database } from "@hikat/database"
 import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
 import { ServerInfrastructureError } from "./pterodactylClient"
-import { resolvePterodactylClient } from "./serverAdministrationService"
+import {
+  resolvePterodactylClient,
+  assertExplicitServerIdIfMultiple,
+} from "./serverAdministrationService"
 import { detectActiveWorldName } from "./serverWorldService"
 
 export interface ServerFileItemData {
@@ -216,6 +219,9 @@ export async function writeServerTextFile(
   arg3?: Database,
 ): Promise<boolean> {
   const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  if (db) {
+    await assertExplicitServerIdIfMultiple(db, serverId, "escritura de archivo de servidor")
+  }
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!isAllowlistedTextFile(relativePath)) {
@@ -254,6 +260,9 @@ export async function createServerFolder(
   arg3?: Database,
 ): Promise<boolean> {
   const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  if (db) {
+    await assertExplicitServerIdIfMultiple(db, serverId, "creación de carpeta de servidor")
+  }
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   const cleanFolderName = folderName.trim().replace(/[/\\:*?"<>|\x00-\x1F]/g, "").replace(/\.\.+/g, "")
@@ -282,6 +291,9 @@ export async function renameServerFile(
   arg3?: Database,
 ): Promise<boolean> {
   const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  if (db) {
+    await assertExplicitServerIdIfMultiple(db, serverId, "renombrado de archivo de servidor")
+  }
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   const cleanNewName = newName.trim().replace(/[/\\:*?"<>|\x00-\x1F]/g, "").replace(/\.\.+/g, "")
@@ -410,6 +422,9 @@ export async function deleteServerFile(
   arg3?: Database,
 ): Promise<boolean> {
   const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  if (db) {
+    await assertExplicitServerIdIfMultiple(db, serverId, "eliminación de archivo de servidor")
+  }
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
 
@@ -469,6 +484,9 @@ export async function prepareServerFileUploadUrl(
   arg3?: Database,
 ): Promise<{ url: string }> {
   const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  if (db) {
+    await assertExplicitServerIdIfMultiple(db, serverId, "subida de archivo de servidor")
+  }
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
   const res = await client.getFileUploadUrl()

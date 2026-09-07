@@ -150,14 +150,78 @@ export class ModProviderManager {
     db: Database,
     serverId?: string | null,
   ): Promise<{ minecraftVersion: string; modLoader: GameModLoaderGql; modLoaderVersion: string | null; neoForgeVersion: string }> {
-    const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
-    const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
     if (serverId) {
-      draftConditions.push(eq(schema.gameReleases.serverId, serverId))
-      publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
+      const server = await db
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, serverId))
+        .get()
+
+      if (!server) {
+        throw createGraphQLError("Servidor no encontrado.", "NOT_FOUND")
+      }
+
+      // 1. Try active draft for this server
+      const draft = await db
+        .select({
+          minecraftVersion: schema.gameReleases.minecraftVersion,
+          neoForgeVersion: schema.gameReleases.neoForgeVersion,
+          modLoader: schema.gameReleases.modLoader,
+          modLoaderVersion: schema.gameReleases.modLoaderVersion,
+        })
+        .from(schema.gameReleases)
+        .where(
+          and(
+            eq(schema.gameReleases.status, "DRAFT"),
+            eq(schema.gameReleases.serverId, serverId),
+          ),
+        )
+        .get()
+
+      if (draft) {
+        return {
+          minecraftVersion: draft.minecraftVersion || server.minecraftVersion || "1.21.1",
+          modLoader: ((draft.modLoader || server.modLoader || "NEOFORGE") as GameModLoaderGql),
+          modLoaderVersion: draft.modLoaderVersion || server.modLoaderVersion || null,
+          neoForgeVersion: draft.neoForgeVersion || server.modLoaderVersion || "21.1.65",
+        }
+      }
+
+      // 2. Try published release for this server
+      const published = await db
+        .select({
+          minecraftVersion: schema.gameReleases.minecraftVersion,
+          neoForgeVersion: schema.gameReleases.neoForgeVersion,
+          modLoader: schema.gameReleases.modLoader,
+          modLoaderVersion: schema.gameReleases.modLoaderVersion,
+        })
+        .from(schema.gameReleases)
+        .where(
+          and(
+            eq(schema.gameReleases.status, "PUBLISHED"),
+            eq(schema.gameReleases.serverId, serverId),
+          ),
+        )
+        .get()
+
+      if (published) {
+        return {
+          minecraftVersion: published.minecraftVersion || server.minecraftVersion || "1.21.1",
+          modLoader: ((published.modLoader || server.modLoader || "NEOFORGE") as GameModLoaderGql),
+          modLoaderVersion: published.modLoaderVersion || server.modLoaderVersion || null,
+          neoForgeVersion: published.neoForgeVersion || server.modLoaderVersion || "21.1.65",
+        }
+      }
+
+      return {
+        minecraftVersion: server.minecraftVersion || "1.21.1",
+        modLoader: ((server.modLoader || "NEOFORGE") as GameModLoaderGql),
+        modLoaderVersion: server.modLoaderVersion || null,
+        neoForgeVersion: server.modLoaderVersion || "21.1.65",
+      }
     }
 
-    // 1. Try active draft
+    // Legacy fallback ONLY when NO serverId was passed
     const draft = await db
       .select({
         minecraftVersion: schema.gameReleases.minecraftVersion,
@@ -166,7 +230,7 @@ export class ModProviderManager {
         modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
-      .where(and(...draftConditions))
+      .where(eq(schema.gameReleases.status, "DRAFT"))
       .get()
 
     if (draft) {
@@ -178,7 +242,6 @@ export class ModProviderManager {
       }
     }
 
-    // 2. Try published release
     const published = await db
       .select({
         minecraftVersion: schema.gameReleases.minecraftVersion,
@@ -187,7 +250,7 @@ export class ModProviderManager {
         modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
-      .where(and(...publishedConditions))
+      .where(eq(schema.gameReleases.status, "PUBLISHED"))
       .get()
 
     if (published) {
@@ -196,24 +259,6 @@ export class ModProviderManager {
         modLoader: ((published.modLoader || "NEOFORGE") as GameModLoaderGql),
         modLoaderVersion: published.modLoaderVersion || null,
         neoForgeVersion: published.neoForgeVersion || "21.1.65",
-      }
-    }
-
-    // 3. Fallback to server record if serverId is provided
-    if (serverId) {
-      const server = await db
-        .select()
-        .from(schema.servers)
-        .where(eq(schema.servers.id, serverId))
-        .get()
-
-      if (server) {
-        return {
-          minecraftVersion: server.minecraftVersion || "1.21.1",
-          modLoader: ((server.modLoader || "NEOFORGE") as GameModLoaderGql),
-          modLoaderVersion: server.modLoaderVersion || null,
-          neoForgeVersion: server.modLoaderVersion || "21.1.65",
-        }
       }
     }
 
@@ -229,11 +274,55 @@ export class ModProviderManager {
     db: Database,
     serverId?: string | null,
   ): Promise<{ minecraftVersion: string; modLoader: GameModLoaderGql; modLoaderVersion: string | null; neoForgeVersion: string; isPublished: boolean; releaseId?: string }> {
-    const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
     if (serverId) {
-      publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
+      const server = await db
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, serverId))
+        .get()
+
+      if (!server) {
+        throw createGraphQLError("Servidor no encontrado.", "NOT_FOUND")
+      }
+
+      const published = await db
+        .select({
+          id: schema.gameReleases.id,
+          minecraftVersion: schema.gameReleases.minecraftVersion,
+          neoForgeVersion: schema.gameReleases.neoForgeVersion,
+          modLoader: schema.gameReleases.modLoader,
+          modLoaderVersion: schema.gameReleases.modLoaderVersion,
+        })
+        .from(schema.gameReleases)
+        .where(
+          and(
+            eq(schema.gameReleases.status, "PUBLISHED"),
+            eq(schema.gameReleases.serverId, serverId),
+          ),
+        )
+        .get()
+
+      if (published) {
+        return {
+          releaseId: published.id,
+          minecraftVersion: published.minecraftVersion || server.minecraftVersion || "1.21.1",
+          modLoader: ((published.modLoader || server.modLoader || "NEOFORGE") as GameModLoaderGql),
+          modLoaderVersion: published.modLoaderVersion || server.modLoaderVersion || null,
+          neoForgeVersion: published.neoForgeVersion || server.modLoaderVersion || "21.1.65",
+          isPublished: true,
+        }
+      }
+
+      return {
+        minecraftVersion: server.minecraftVersion || "1.21.1",
+        modLoader: ((server.modLoader || "NEOFORGE") as GameModLoaderGql),
+        modLoaderVersion: server.modLoaderVersion || null,
+        neoForgeVersion: server.modLoaderVersion || "21.1.65",
+        isPublished: false,
+      }
     }
 
+    // Legacy fallback ONLY when NO serverId was passed
     const published = await db
       .select({
         id: schema.gameReleases.id,
@@ -243,7 +332,7 @@ export class ModProviderManager {
         modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
-      .where(and(...publishedConditions))
+      .where(eq(schema.gameReleases.status, "PUBLISHED"))
       .get()
 
     if (published) {
@@ -254,25 +343,6 @@ export class ModProviderManager {
         modLoaderVersion: published.modLoaderVersion || null,
         neoForgeVersion: published.neoForgeVersion || "21.1.65",
         isPublished: true,
-      }
-    }
-
-    // Fallback to server record if serverId is provided
-    if (serverId) {
-      const server = await db
-        .select()
-        .from(schema.servers)
-        .where(eq(schema.servers.id, serverId))
-        .get()
-
-      if (server) {
-        return {
-          minecraftVersion: server.minecraftVersion || "1.21.1",
-          modLoader: ((server.modLoader || "NEOFORGE") as GameModLoaderGql),
-          modLoaderVersion: server.modLoaderVersion || null,
-          neoForgeVersion: server.modLoaderVersion || "21.1.65",
-          isPublished: false,
-        }
       }
     }
 

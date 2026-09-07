@@ -62,6 +62,9 @@ export const gameReleases = sqliteTable(
     uniqueIndex("game_releases_server_published_idx")
       .on(sql`COALESCE(${table.serverId}, '')`, table.status)
       .where(sql`"status" = 'PUBLISHED'`),
+    uniqueIndex("game_releases_server_draft_idx")
+      .on(sql`COALESCE(${table.serverId}, '')`, table.status)
+      .where(sql`"status" = 'DRAFT'`),
   ],
 )
 
