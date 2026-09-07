@@ -13,6 +13,7 @@ export interface ApiResponse<T = any> {
   data?: T
   message?: string
   error?: string
+  errorCode?: string
   status?: number
 }
 
@@ -20,6 +21,7 @@ export interface GraphQLClientResponse<T = any> {
   success: boolean
   data?: T
   error?: string
+  errorCode?: string
   errors?: Array<{ message: string; extensions?: { code?: string; [key: string]: unknown } }>
 }
 
@@ -47,6 +49,7 @@ export async function apiClient<T = any>(
       status: 400,
       message: "URL de solicitud inválida o bloqueada por seguridad",
       error: "Blocked by security URL validator",
+      errorCode: "URL_BLOCKED",
     }
   }
 
@@ -57,6 +60,7 @@ export async function apiClient<T = any>(
       status: 0,
       message: "Error temporal al renovar sesión con el servidor.",
       error: tokenOutcome.error,
+      errorCode: "AUTH_REFRESH_TRANSIENT_FAILURE",
     }
   }
   if (tokenOutcome.kind === "TERMINAL_FAILURE") {
@@ -65,6 +69,7 @@ export async function apiClient<T = any>(
       status: 401,
       message: "Su sesión ha expirado o no está autorizada.",
       error: "UNAUTHORIZED",
+      errorCode: "SESSION_EXPIRED",
     }
   }
 
@@ -106,6 +111,7 @@ export async function apiClient<T = any>(
             status: 401,
             message: "Error temporal al renovar sesión con el servidor.",
             error: outcome.error,
+            errorCode: "AUTH_REFRESH_TRANSIENT_FAILURE",
           }
         }
       }
@@ -115,6 +121,7 @@ export async function apiClient<T = any>(
         status: 401,
         message: "Su sesión ha expirado o no está autorizada.",
         error: "UNAUTHORIZED",
+        errorCode: "SESSION_EXPIRED",
       }
     }
 
@@ -129,6 +136,7 @@ export async function apiClient<T = any>(
         status: response.status,
         message: data?.message || `HTTP Error ${response.status}`,
         error: data?.error || response.statusText,
+        errorCode: data?.errorCode || (response.status === 401 || response.status === 403 ? "SESSION_EXPIRED" : `HTTP_${response.status}`),
       }
     }
 
@@ -151,6 +159,7 @@ export async function apiClient<T = any>(
         ? "Tiempo de espera agotado al conectar con el servidor"
         : "No se pudo conectar con el servidor (Modo sin conexión)",
       error: err?.message || "Network request failed",
+      errorCode: isTimeout ? "TIMEOUT" : "NETWORK_ERROR",
     }
   }
 }
@@ -174,6 +183,7 @@ export async function graphqlClient<T = any>(
     return {
       success: false,
       error: "URL de endpoint GraphQL bloqueada por seguridad",
+      errorCode: "URL_BLOCKED",
     }
   }
 
@@ -183,12 +193,14 @@ export async function graphqlClient<T = any>(
     return {
       success: false,
       error: tokenOutcome.error || "Error temporal al renovar sesión con el servidor.",
+      errorCode: "AUTH_REFRESH_TRANSIENT_FAILURE",
     }
   }
   if (tokenOutcome.kind === "TERMINAL_FAILURE") {
     return {
       success: false,
       error: "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
+      errorCode: "SESSION_EXPIRED",
     }
   }
 
@@ -228,6 +240,7 @@ export async function graphqlClient<T = any>(
           return {
             success: false,
             error: "Error temporal de conexión con el servidor de autenticación.",
+            errorCode: "AUTH_REFRESH_TRANSIENT_FAILURE",
           }
         }
       }
@@ -235,6 +248,7 @@ export async function graphqlClient<T = any>(
       return {
         success: false,
         error: "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
+        errorCode: "SESSION_EXPIRED",
       }
     }
 
@@ -259,6 +273,7 @@ export async function graphqlClient<T = any>(
             return {
               success: false,
               error: "Error temporal al renovar sesión con el servidor.",
+              errorCode: "AUTH_REFRESH_TRANSIENT_FAILURE",
               errors: payload.errors,
             }
           }
@@ -267,13 +282,16 @@ export async function graphqlClient<T = any>(
         return {
           success: false,
           error: "Su sesión ha expirado. Por favor inicie sesión nuevamente.",
+          errorCode: "SESSION_EXPIRED",
           errors: payload.errors,
         }
       }
 
+      const firstCode = payload.errors[0]?.extensions?.code || "GRAPHQL_ERROR"
       return {
         success: false,
         error: payload.errors[0]?.message || "GraphQL query error",
+        errorCode: String(firstCode),
         errors: payload.errors,
       }
     }
@@ -282,6 +300,7 @@ export async function graphqlClient<T = any>(
       return {
         success: false,
         error: payload?.message || `HTTP Error ${response.status}`,
+        errorCode: `HTTP_${response.status}`,
       }
     }
 
@@ -297,6 +316,7 @@ export async function graphqlClient<T = any>(
       error: isTimeout
         ? "Tiempo de espera agotado al conectar con el servidor"
         : "No se pudo conectar con el servidor (Modo sin conexión)",
+      errorCode: isTimeout ? "TIMEOUT" : "NETWORK_ERROR",
     }
   }
 }

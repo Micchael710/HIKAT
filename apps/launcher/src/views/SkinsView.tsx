@@ -62,7 +62,11 @@ function SkinCapeItemCard({
     ? skinType === "skin"
       ? t("skins.noSkin")
       : t("skins.noCape")
-    : item.name
+    : item.id === "player-custom"
+      ? skinType === "skin"
+        ? t("skins.customSkinName")
+        : t("skins.customCapeName")
+      : item.name
 
   return (
     <button
@@ -118,7 +122,7 @@ function SkinCapeItemCard({
               zIndex: 3,
             }}
           >
-            PERSONAL
+            {t("skins.badgePersonal")}
           </div>
         )}
 
@@ -360,10 +364,7 @@ export default function SkinsView({
         // 3. Exact Minecraft Skin Dimensions Check (64x64 or 64x32)
         const validation = validateMinecraftSkinTexture(arrayBuffer)
         if (!validation.valid) {
-          showToast(
-            validation.error || t("skins.invalidSkinDimensions"),
-            "error",
-          )
+          showToast(t("skins.invalidSkinDimensions"), "error")
           return
         }
 
@@ -385,10 +386,8 @@ export default function SkinsView({
           showToast(t("skins.skinUploadSuccess"), "success", extractedHex)
         }
       } catch (err: any) {
-        showToast(
-          err?.message || t("skins.invalidSkinDimensions"),
-          "error",
-        )
+        console.error("Skin upload failed:", err)
+        showToast(t("skins.invalidSkinDimensions"), "error")
       } finally {
         setIsUploading(false)
         e.target.value = ""
@@ -421,10 +420,7 @@ export default function SkinsView({
         const arrayBuffer = await file.arrayBuffer()
         const validation = validateCapeTextureBuffer(arrayBuffer)
         if (!validation.valid) {
-          showToast(
-            validation.error || t("skins.invalidCapeDimensions"),
-            "error",
-          )
+          showToast(t("skins.invalidCapeDimensions"), "error")
           return
         }
 
@@ -465,10 +461,8 @@ export default function SkinsView({
           showToast(t("skins.capeUploadSuccess"), "success", extractedHex)
         }
       } catch (err: any) {
-        showToast(
-          err?.message || t("skins.invalidCapeDimensions"),
-          "error",
-        )
+        console.error("Cape upload failed:", err)
+        showToast(t("skins.invalidCapeDimensions"), "error")
       } finally {
         setIsUploading(false)
         e.target.value = ""
@@ -490,7 +484,8 @@ export default function SkinsView({
         showToast(t("skins.skinDeleteError"), "error")
       }
     } catch (err: any) {
-      showToast(err?.message || t("skins.skinDeleteError"), "error")
+      console.error("Personal skin deletion error:", err)
+      showToast(t("skins.skinDeleteError"), "error")
     } finally {
       setIsDeleting(false)
     }
@@ -510,7 +505,8 @@ export default function SkinsView({
         showToast(t("skins.capeDeleteError"), "error")
       }
     } catch (err: any) {
-      showToast(err?.message || t("skins.capeDeleteError"), "error")
+      console.error("Personal cape deletion error:", err)
+      showToast(t("skins.capeDeleteError"), "error")
     } finally {
       setIsDeleting(false)
     }

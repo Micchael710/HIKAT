@@ -147,7 +147,8 @@
     "typeUpdate": "Atualização",
     "typeAnnouncement": "Anúncio",
     "typeMaintenance": "Manutenção",
-    "playVideo": "Reproduzir vídeo"
+    "playVideo": "Reproduzir vídeo",
+    "videoBadge": "VÍDEO"
   },
   "serverStats": {
     "title": "Status do Servidor",
@@ -294,7 +295,10 @@
       "changeAnimation": "Mudar animação",
       "toggleRotate": "Rotação 360°",
       "resetCamera": "Redefinir câmera"
-    }
+    },
+    "badgePersonal": "PESSOAL",
+    "customSkinName": "Minha Skin",
+    "customCapeName": "Minha Capa"
   },
   "profile": {
     "title": "Meu Perfil",
@@ -331,5 +335,11 @@
     "logoutTitle": "Encerrar sessão",
     "logoutDesc": "Encerre sua sessão do HiKAT neste dispositivo.",
     "logoutButton": "Encerrar sessão"
+  },
+  "titlebar": {
+    "minimize": "Minimizar",
+    "maximize": "Maximizar",
+    "restore": "Restaurar",
+    "close": "Fechar"
   }
 }

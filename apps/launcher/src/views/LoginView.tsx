@@ -11,6 +11,7 @@ import {
 } from "../utils/security"
 import { authService, UserProfile } from "../services/authService"
 import { AuthStatus } from "@hikat/shared"
+import { mapAuthErrorToKey } from "../utils/authErrorMapper"
 
 interface LoginViewProps {
   onLogin: (username: string) => void
@@ -235,19 +236,9 @@ export default function LoginView({
       }
     } catch (err: any) {
       setIsEnteringWorld(false)
-      const msg = err?.message || ""
-      if (
-        msg.includes("Estado de autenticación inválido") ||
-        msg.includes("OAuth") ||
-        msg.includes("PKCE") ||
-        msg.includes("CSRF") ||
-        msg.includes("verifier") ||
-        msg.includes("state")
-      ) {
-        setErrorMessage(t("auth.invalidOAuthAttempt"))
-      } else {
-        setErrorMessage(msg || t("auth.genericAuthError"))
-      }
+      console.error("Deep link auth error:", err)
+      const errKey = mapAuthErrorToKey(err?.code || err?.message, "auth.genericAuthError")
+      setErrorMessage(t(errKey))
     }
   }
 
@@ -295,7 +286,8 @@ export default function LoginView({
         window.open(authUrl, "_blank")
       }
     } catch (err: any) {
-      setErrorMessage(err.message || t("auth.oauthInitError"))
+      console.error("OAuth init error:", err)
+      setErrorMessage(t("auth.oauthInitError"))
     }
   }
 
@@ -327,17 +319,12 @@ export default function LoginView({
         }, 350)
       } else {
         setIsEnteringWorld(false)
-        if (
-          res.error === "EMAIL_NOT_VERIFIED" ||
-          res.error?.includes("EMAIL_NOT_VERIFIED") ||
-          res.error?.toLowerCase().includes("email verification is required")
-        ) {
+        const errKey = mapAuthErrorToKey((res as any).code || res.error, "auth.loginFailed")
+        if (errKey === "auth.emailNotVerifiedError") {
           setRegisteredEmail(cleanEmail)
           setMode("verify-email")
-          setErrorMessage(t("auth.emailNotVerifiedError"))
-        } else {
-          setErrorMessage(res.error || t("auth.loginFailed"))
         }
+        setErrorMessage(t(errKey))
       }
     } else {
       const trimmedUsername = username.trim()
@@ -370,44 +357,20 @@ export default function LoginView({
           setIsEnteringWorld(false)
           setRegisteredEmail(cleanEmail)
           setMode("verify-email")
-          return
-        }
-
-        // Automatically attempt login after registration
-        const loginRes = await authService.login({
-          email: cleanEmail,
-          password: cleanPassword,
-          keepSession,
-        })
-
-        if (loginRes.success && loginRes.user) {
-          const displayName = loginRes.user.displayName || trimmedUsername
-          setTimeout(() => {
-            onLogin(displayName)
-          }, 350)
+          setErrorMessage(null)
+          setSuccessNotice(null)
+          setVerifyCooldown(authService.getRemainingCooldown("verify", cleanEmail))
         } else {
-          setIsEnteringWorld(false)
-          setTab("login")
           setSuccessNotice(t("auth.registrationSuccess"))
+          setMode("auth")
+          setTab("login")
+          setPassword("")
+          setIsEnteringWorld(false)
         }
       } else {
         setIsEnteringWorld(false)
-        const errMsg = res.error || ""
-        if (
-          errMsg === "USERNAME_ALREADY_EXISTS" ||
-          errMsg.includes("USERNAME_ALREADY_EXISTS") ||
-          errMsg.toLowerCase().includes("taken")
-        ) {
-          setErrorMessage(t("profile.usernameTakenError"))
-        } else if (
-          errMsg === "INVALID_USERNAME" ||
-          errMsg.includes("INVALID_USERNAME") ||
-          errMsg.toLowerCase().includes("invalid username")
-        ) {
-          setErrorMessage(t("profile.usernameInvalidError"))
-        } else {
-          setErrorMessage(res.error || t("auth.registrationFailed"))
-        }
+        const errKey = mapAuthErrorToKey((res as any).code || res.error, "auth.registrationFailed")
+        setErrorMessage(t(errKey))
       }
     }
   }
@@ -434,10 +397,12 @@ export default function LoginView({
           setForgotSuccess(true)
           setForgotCooldown(remaining)
         } else {
-          setErrorMessage(res.error || t("profile.emailError"))
+          const errKey = mapAuthErrorToKey((res as any).code || res.error, "profile.emailError")
+          setErrorMessage(t(errKey))
         }
       }
-    } catch {
+    } catch (err) {
+      console.error("Password reset request error:", err)
       setIsSendingReset(false)
       setErrorMessage(t("profile.emailError"))
     }
@@ -479,9 +444,11 @@ export default function LoginView({
         setTab("login")
         setSuccessNotice(t("auth.passwordResetSuccess"))
       } else {
-        setErrorMessage(t("auth.invalidResetToken"))
+        const errKey = mapAuthErrorToKey((res as any).code || res.error, "auth.invalidResetToken")
+        setErrorMessage(t(errKey))
       }
-    } catch {
+    } catch (err) {
+      console.error("Password reset execution error:", err)
       setIsResettingPassword(false)
       setErrorMessage(t("auth.invalidResetToken"))
     }
@@ -508,22 +475,8 @@ export default function LoginView({
       const res = await authService.changeUsername(trimmed)
       setIsSubmittingUsername(false)
       if (!res.success) {
-        const errMsg = res.error || ""
-        if (
-          res.code === "USERNAME_ALREADY_EXISTS" ||
-          errMsg.includes("USERNAME_ALREADY_EXISTS") ||
-          errMsg.toLowerCase().includes("taken")
-        ) {
-          setErrorMessage(t("profile.usernameTakenError"))
-        } else if (
-          res.code === "INVALID_USERNAME" ||
-          errMsg.includes("INVALID_USERNAME") ||
-          errMsg.toLowerCase().includes("invalid username")
-        ) {
-          setErrorMessage(t("profile.usernameInvalidError"))
-        } else {
-          setErrorMessage(errMsg || t("profile.usernameChangeError"))
-        }
+        const errKey = mapAuthErrorToKey(res.code || res.error, "profile.usernameChangeError")
+        setErrorMessage(t(errKey))
         return
       }
       const chosenName = res.user?.displayName || res.user?.username || trimmed
@@ -532,22 +485,9 @@ export default function LoginView({
       }, 350)
     } catch (err: any) {
       setIsSubmittingUsername(false)
-      const errMsg = err?.message || ""
-      if (
-        errMsg === "USERNAME_ALREADY_EXISTS" ||
-        errMsg.includes("USERNAME_ALREADY_EXISTS") ||
-        errMsg.toLowerCase().includes("taken")
-      ) {
-        setErrorMessage(t("profile.usernameTakenError"))
-      } else if (
-        errMsg === "INVALID_USERNAME" ||
-        errMsg.includes("INVALID_USERNAME") ||
-        errMsg.toLowerCase().includes("invalid username")
-      ) {
-        setErrorMessage(t("profile.usernameInvalidError"))
-      } else {
-        setErrorMessage(errMsg || t("profile.usernameChangeError"))
-      }
+      console.error("Change username error:", err)
+      const errKey = mapAuthErrorToKey(err?.code || err?.message, "profile.usernameChangeError")
+      setErrorMessage(t(errKey))
     }
   }
 
@@ -568,10 +508,12 @@ export default function LoginView({
         if (remaining > 0) {
           setVerifyCooldown(remaining)
         } else {
-          setErrorMessage(res.error || t("auth.genericAuthError"))
+          const errKey = mapAuthErrorToKey((res as any).code || res.error, "auth.genericAuthError")
+          setErrorMessage(t(errKey))
         }
       }
-    } catch {
+    } catch (err) {
+      console.error("Resend verification error:", err)
       setIsResendingVerification(false)
       setErrorMessage(t("auth.genericAuthError"))
     }

@@ -34,7 +34,7 @@ export default function ProfileView({
   const user = authService.getUser() || authService.getCachedUser()
 
   const [currentUsername, setCurrentUsername] = useState(
-    user?.displayName || user?.username || username || "Jugador",
+    user?.displayName || user?.username || username || t("user.anonymous"),
   )
   const [newUsernameInput, setNewUsernameInput] = useState(
     user?.displayName || user?.username || username || "",
@@ -259,7 +259,7 @@ export default function ProfileView({
         if (remaining > 0) {
           setResetCooldown(remaining)
         } else {
-          showToast(res.error || t("profile.emailError"), "error")
+          showToast(t("profile.emailError"), "error")
         }
       }
     } catch (_) {

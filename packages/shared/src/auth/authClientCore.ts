@@ -281,6 +281,14 @@ export class AuthClientCore {
     const data = (await res.json().catch(() => ({}))) as Record<string, any>
 
     if (!res.ok) {
+      const code =
+        data.code ||
+        data.error ||
+        (res.status === 401
+          ? AuthErrorCode.INVALID_CREDENTIALS
+          : res.status === 429
+            ? AuthErrorCode.RATE_LIMITED
+            : `HTTP_${res.status}`)
       const msg =
         data.message ||
         data.error ||
@@ -289,7 +297,9 @@ export class AuthClientCore {
           : res.status === 429
             ? "Demasiados intentos de inicio de sesión. Espera unos momentos."
             : `Error de autenticación (${res.status})`)
-      throw new Error(msg)
+      const err: any = new Error(msg)
+      err.code = code
+      throw err
     }
 
     const payload = data as {
@@ -338,13 +348,21 @@ export class AuthClientCore {
     const data = (await res.json().catch(() => ({}))) as Record<string, any>
 
     if (!res.ok) {
+      const code =
+        data.code ||
+        data.error ||
+        (res.status === 409
+          ? AuthErrorCode.USER_ALREADY_EXISTS
+          : `HTTP_${res.status}`)
       const msg =
         data.message ||
         data.error ||
         (res.status === 409
           ? "Este correo electrónico ya está registrado."
           : `Error al registrar la cuenta (${res.status})`)
-      throw new Error(msg)
+      const err: any = new Error(msg)
+      err.code = code
+      throw err
     }
 
     return {
