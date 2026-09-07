@@ -974,4 +974,41 @@ describe("Launcher ProfileView Component", () => {
     // Value in state and input should be sanitized to "vBrayan06"
     expect(input.value).toBe("vBrayan06")
   })
+
+  it("22. ProfileView displays OAuth access method (Discord/Google) with launcher button styling, non-clickable (cursor default) and no hover actions", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-22",
+      username: "DiscordUser",
+      displayName: "DiscordUser",
+      email: "discord@hikat.org",
+      role: "PLAYER",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "DISCORD", email: "discord@hikat.org" }],
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="DiscordUser"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const badge = Array.from(container.querySelectorAll("div")).find((el) => el.style.display === "inline-flex" && el.textContent?.includes("Discord"))
+    expect(badge).toBeDefined()
+    expect(badge?.tagName).toBe("DIV")
+    expect(badge?.style.height).toBe("44px")
+    expect(badge?.style.cursor).toBe("default")
+    expect(badge?.style.userSelect).toBe("none")
+    expect(badge?.style.borderRadius).toBe("14px")
+  })
 })
+
