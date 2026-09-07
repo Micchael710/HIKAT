@@ -29,8 +29,6 @@ describe("Launcher serverService (GraphQL serverStatus Query & Caching)", () => 
       },
     })
 
-    const apiSpy = vi.spyOn(apiClientModule, "apiClient")
-
     const result = await serverService.getServerStatus()
 
     expect(result).toBeDefined()
@@ -41,9 +39,6 @@ describe("Launcher serverService (GraphQL serverStatus Query & Caching)", () => 
     // Verify GraphQL query was executed
     expect(graphqlSpy).toHaveBeenCalledTimes(1)
     expect(graphqlSpy.mock.calls[0][0]).toContain("serverStatus")
-
-    // CRITICAL: Verify REST /server/status was NEVER called
-    expect(apiSpy).not.toHaveBeenCalledWith("/server/status")
 
     // Verify cached in localStorage
     const cached = window.localStorage.getItem("hikat_cached_server_status")
@@ -68,12 +63,9 @@ describe("Launcher serverService (GraphQL serverStatus Query & Caching)", () => 
       error: "Network offline",
     })
 
-    const apiSpy = vi.spyOn(apiClientModule, "apiClient")
-
     const result = await serverService.getServerStatus()
 
     expect(result).toEqual(cachedPayload)
-    expect(apiSpy).not.toHaveBeenCalledWith("/server/status")
   })
 
   it("returns null when GraphQL fails and no cache exists in localStorage", async () => {
@@ -82,11 +74,13 @@ describe("Launcher serverService (GraphQL serverStatus Query & Caching)", () => 
       error: "Server unavailable",
     })
 
-    const apiSpy = vi.spyOn(apiClientModule, "apiClient")
-
     const result = await serverService.getServerStatus()
 
     expect(result).toBeNull()
-    expect(apiSpy).not.toHaveBeenCalledWith("/server/status")
+  })
+
+  it("does not expose legacy REST getPlayerStats method", () => {
+    expect((serverService as any).getPlayerStats).toBeUndefined()
   })
 })
+

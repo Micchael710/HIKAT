@@ -18,14 +18,6 @@ export interface ServerStatusResponse {
   motd?: string
 }
 
-export interface PlayerStats {
-  playersOnline: number
-  maxPlayers: number
-  latencyMs: number
-  playtimeHours?: number
-  unlockedAchievements?: number
-  totalAchievements?: number
-}
 
 export interface ServerSpecs {
   name: string

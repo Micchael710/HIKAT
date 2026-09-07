@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { authService } from "./authService"
-import { apiClient, graphqlClient } from "./apiClient"
+import { graphqlClient } from "./apiClient"
 
 describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Parity)", () => {
   let mockFetch: ReturnType<typeof vi.fn>
@@ -174,7 +174,7 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
       }
     })
 
-    const res = await apiClient("/my/resource")
+    const res = await graphqlClient("query Test { ping }")
 
     expect(res.success).toBe(false)
     expect(authService.getStatus()).toBe("UNAUTHENTICATED")

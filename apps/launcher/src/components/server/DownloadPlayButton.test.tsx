@@ -1732,6 +1732,16 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
    * ───────────────────────────────────────────────────────────── */
   describe("Shard 8G: Integrity Lock, Pre-Launch Verification & Watcher Suite", () => {
     it("1. resolveIdleGameButtonState visual rules based on installedModpackVersion", () => {
+      // Null / undefined manifest with uninstalled game -> unavailable
+      localStorage.setItem("hikat_game_installed", "false")
+      expect(resolveIdleGameButtonState(null)).toBe("unavailable")
+      expect(resolveIdleGameButtonState(undefined)).toBe("unavailable")
+
+      // Null / undefined manifest with installed game -> play
+      vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
+      expect(resolveIdleGameButtonState(null)).toBe("play")
+      vi.spyOn(gameService, "isGameInstalled").mockReturnValue(false)
+
       // Missing / null installedModpackVersion -> download (or unavailable if empty)
       expect(
         resolveIdleGameButtonState({

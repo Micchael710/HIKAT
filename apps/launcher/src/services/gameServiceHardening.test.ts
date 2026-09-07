@@ -117,14 +117,11 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     }
     localStorage.setItem("hikat_game_manifest", JSON.stringify(cachedModpack))
 
-    // GraphQL and REST network fail
+    // GraphQL network fails with NETWORK_ERROR
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: false,
       error: "Network offline",
-    })
-    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
-      success: false,
-      error: "Network offline",
+      errorCode: "NETWORK_ERROR",
     })
 
     window.electronAPI = {
@@ -161,10 +158,7 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: false,
       error: "Network offline",
-    })
-    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
-      success: false,
-      error: "Network offline",
+      errorCode: "NETWORK_ERROR",
     })
 
     window.electronAPI = {
@@ -489,10 +483,7 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: false,
       error: "Network error",
-    } as any)
-    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
-      success: false,
-      error: "Network error",
+      errorCode: "NETWORK_ERROR",
     } as any)
 
     localStorage.setItem(
@@ -537,10 +528,7 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: false,
       error: "Network error",
-    } as any)
-    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
-      success: false,
-      error: "Network error",
+      errorCode: "NETWORK_ERROR",
     } as any)
 
     localStorage.setItem(
@@ -583,10 +571,7 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: false,
       error: "Network error",
-    } as any)
-    vi.spyOn(apiClientModule, "apiClient").mockResolvedValue({
-      success: false,
-      error: "Network error",
+      errorCode: "NETWORK_ERROR",
     } as any)
 
     const testPolicies = [{ path: "mods", policy: "MODIFICABLE" }]
@@ -673,6 +658,155 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     expect(manifest?.hasInterruptedDownload).toBe(true)
     expect(manifest?.stagedBytes).toBe(50)
   })
+
+  it("19. GraphQL success with real publishedModpack returns manifest and caches to localStorage", async () => {
+    const modpackData = {
+      version: "2.5.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE" as const,
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/new.jar",
+          sha256: "9".repeat(64),
+          sizeBytes: 500,
+          downloadUrl: "/game/download/9",
+          policy: "NO_MODIFICABLE" as const,
+        },
+      ],
+    }
+
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: modpackData,
+      },
+    })
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.version).toBe("2.5.0")
+
+    const cachedRaw = localStorage.getItem("hikat_game_manifest")
+    expect(cachedRaw).not.toBeNull()
+    const cached = JSON.parse(cachedRaw!)
+    expect(cached.version).toBe("2.5.0")
+  })
+
+  it("20. GraphQL success with publishedModpack === null returns null, clears stale cache, and does NOT fallback to old manifest", async () => {
+    // Pre-seed an obsolete manifest in cache
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "old-1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [],
+      }),
+    )
+
+    // Server authoritatively reports no published release (publishedModpack: null)
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: null,
+      },
+    })
+
+    const manifest = await gameService.checkGameManifest()
+
+    // Authoritative null response
+    expect(manifest).toBeNull()
+    // Stale cached manifest was invalidated/removed
+    expect(localStorage.getItem("hikat_game_manifest")).toBeNull()
+  })
+
+  it("21. GraphQL NETWORK_ERROR fallback loads cached offline manifest", async () => {
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "offline-1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [],
+      }),
+    )
+
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "NETWORK_ERROR",
+      error: "No se pudo conectar con el servidor",
+    })
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.version).toBe("offline-1.0.0")
+  })
+
+  it("22. GraphQL TIMEOUT fallback loads cached offline manifest", async () => {
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "timeout-1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [],
+      }),
+    )
+
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "TIMEOUT",
+      error: "Tiempo de espera agotado",
+    })
+
+    const manifest = await gameService.checkGameManifest()
+    expect(manifest).not.toBeNull()
+    expect(manifest?.version).toBe("timeout-1.0.0")
+  })
+
+  it("23. Non-connectivity GraphQL error (e.g. SESSION_EXPIRED or URL_BLOCKED) does NOT revive old cached manifest", async () => {
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "stale-2.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [],
+      }),
+    )
+
+    // SESSION_EXPIRED error
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "SESSION_EXPIRED",
+      error: "Su sesión ha expirado",
+    })
+
+    const manifestExpired = await gameService.checkGameManifest()
+    expect(manifestExpired).toBeNull()
+
+    // URL_BLOCKED error
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "URL_BLOCKED",
+      error: "Blocked by security",
+    })
+
+    const manifestBlocked = await gameService.checkGameManifest()
+    expect(manifestBlocked).toBeNull()
+
+    // GRAPHQL application error
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "GRAPHQL_ERROR",
+      error: "Internal application error",
+    })
+
+    const manifestAppError = await gameService.checkGameManifest()
+    expect(manifestAppError).toBeNull()
+  })
 })
+
 
 

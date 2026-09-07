@@ -125,84 +125,79 @@ Solicita un correo electrónico con token de recuperación de contraseña.
 
 ---
 
-### 2. Noticias y Novedades (`/news`)
+### 2. Noticias y Novedades (`newsFeed` GraphQL Query)
 
-#### `GET /news`
 Obtiene las publicaciones oficiales del Backoffice para el carrusel y modal.
-- **Response Success (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "data": [
-      {
-        "id": "news_1",
-        "title": "Aeronaves y Dirigibles",
-        "category": "Actualización",
-        "date": "20 Ago 2026",
-        "excerpt": "Nuevas mecánicas de vuelo a vapor...",
-        "content": "Detalles completos de la actualización...",
-        "imageUrl": "https://cdn.apparatia.net/news/aeronaves.png",
-        "author": "Equipo Apparatia"
+- **GraphQL Query**:
+  ```graphql
+  query LauncherNewsFeed($first: Int) {
+    newsFeed(first: $first) {
+      items {
+        id
+        title
+        content
+        type
+        image { url mimeType mediaType }
+        youtubeVideoId
+        youtubeUrl
+        video { url mimeType mediaType }
+        publishedAt
+        createdAt
       }
-    ]
-  }
-  ```
-
----
-
-### 3. Estado del Servidor y Jugadores (`/server` y `/players`)
-
-#### `GET /server/status`
-Estado en vivo del servidor de Minecraft (Ping y jugadores concurrentes).
-- **Response Success (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "online": true,
-      "playersOnline": 142,
-      "maxPlayers": 500,
-      "latencyMs": 48,
-      "motd": "Apparatia — Servidor Industrial y Magitech"
-    }
-  }
-  ```
-
-#### `GET /players/:username/stats`
-Estadísticas del perfil de usuario y logros.
-- **Response Success (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "playtimeHours": 128,
-      "achievementsUnlocked": 34,
-      "rank": "Ingeniero Maestro",
-      "level": 18
+      totalCount
     }
   }
   ```
 
 ---
 
-### 4. Manifiesto del Juego y Descargas (`/game`)
+### 3. Estado del Servidor (`serverStatus` GraphQL Query)
 
-#### `GET /game/manifest`
-Consulta el estado de la versión del modpack y URLs de descarga.
-- **Response Success (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "version": "1.20.1",
-      "latestVersion": "1.20.1-v1.4.2",
-      "downloadUrl": "https://cdn.apparatia.net/modpacks/apparatia-latest.zip",
-      "totalSizeGB": 28.8,
-      "md5Checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "hasUpdate": false
+Estado en vivo del servidor de Minecraft (Telemetría y disponibilidad).
+- **GraphQL Query**:
+  ```graphql
+  query GetServerStatus {
+    serverStatus {
+      status
+      cpuPercent
+      memoryUsedBytes
+      diskUsedBytes
+      uptimeMs
+      isSuspended
     }
   }
   ```
+
+---
+
+### 4. Manifiesto del Juego (`publishedModpack` GraphQL Query)
+
+Consulta la versión activa publicada del modpack, políticas de directorio y archivos del cliente.
+- **GraphQL Query**:
+  ```graphql
+  query GetPublishedModpack {
+    publishedModpack {
+      version
+      minecraftVersion
+      modLoader
+      modLoaderVersion
+      neoForgeVersion
+      mandatory
+      clientFiles {
+        path
+        sha256
+        sizeBytes
+        downloadUrl
+        policy
+      }
+      directoryPolicies {
+        path
+        policy
+      }
+    }
+  }
+  ```
+- Cuando `publishedModpack` devuelve `null`, indica autoritativamente que no hay modpack publicado activo.
 
 ---
 

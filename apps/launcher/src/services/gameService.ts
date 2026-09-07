@@ -1,4 +1,4 @@
-import { graphqlClient, apiClient } from "./apiClient"
+import { graphqlClient } from "./apiClient"
 import { getApiBaseUrl } from "../config/api"
 import type { PublishedModpack, ClientFile, SyncPlanCheckResult } from "../vite-env"
 
@@ -161,7 +161,7 @@ export const gameService = {
    * Fast query to get the current published modpack without disk verification or XMCL checks.
    */
   async getPublishedModpack(): Promise<PublishedModpack | null> {
-    const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack }>(
+    const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack | null }>(
       GET_PUBLISHED_MODPACK_QUERY,
     )
 
@@ -175,112 +175,129 @@ export const gameService = {
   subscribeReleaseEvents,
 
   /**
-   * Check published modpack state from GraphQL Backend, with fallback to cached/REST manifest.
-   * Filesystem verification is the single source of truth when running in Electron.
+   * Check published modpack state from authoritative GraphQL Backend.
+   * - GraphQL SUCCESS + modpack real: update cache & verify filesystem.
+   * - GraphQL SUCCESS + publishedModpack: null: authoritative null (no modpack published),
+   *   invalidates stale cache and returns null without REST fallback.
+   * - NETWORK_ERROR / TIMEOUT: fallback to cached offline manifest.
+   * - Non-connectivity errors (SESSION_EXPIRED, application errors): returns null.
    */
   async checkGameManifest(): Promise<GameManifest | null> {
-    // 1. Attempt GraphQL Query
-    const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack }>(
-      GET_PUBLISHED_MODPACK_QUERY,
-    )
+    let isConnectivityFailure = false
 
-    let modpack: PublishedModpack | null = null
-
-    if (gqlRes.success && gqlRes.data?.publishedModpack) {
-      modpack = gqlRes.data.publishedModpack
-    } else {
-      // REST endpoint fallback
-      const restRes = await apiClient<PublishedModpack | GameManifest>("/game/manifest")
-      if (restRes.success && restRes.data) {
-        const raw = restRes.data as any
-        modpack = {
-          version: raw.version || "1.0.0",
-          minecraftVersion: raw.minecraftVersion,
-          modLoader: raw.modLoader || "NEOFORGE",
-          modLoaderVersion: raw.modLoaderVersion ?? null,
-          neoForgeVersion: raw.neoForgeVersion ?? null,
-          clientFiles: Array.isArray(raw.clientFiles) ? raw.clientFiles : [],
-          directoryPolicies: Array.isArray(raw.directoryPolicies) ? raw.directoryPolicies : [],
-        }
-      }
-    }
-
-    if (modpack) {
-      try {
-        localStorage.setItem("hikat_game_manifest", JSON.stringify(modpack))
-      } catch (_) {}
-
-      const totalBytes = (modpack.clientFiles || []).reduce(
-        (sum, file) => sum + (Number(file.sizeBytes) || 0),
-        0,
+    try {
+      const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack | null }>(
+        GET_PUBLISHED_MODPACK_QUERY,
       )
-      const totalSizeGB = Number((totalBytes / 1024 / 1024 / 1024).toFixed(2))
 
-      // Check plan with Electron engine if available (Filesystem is the real authority)
-      let hasUpdate = false
-      let isInstalled = false
-      let hasExistingInstall = false
-      let hasInterruptedDownload = false
-      let hasPausedSession = false
-      let hasIntegrityIssue = false
-      let installedModpackVersion: string | null = null
-      let stagedBytes = 0
-      let totalDownloadBytes = totalBytes
+      if (gqlRes.success) {
+        if (gqlRes.data?.publishedModpack) {
+          const modpack = gqlRes.data.publishedModpack
+          try {
+            localStorage.setItem("hikat_game_manifest", JSON.stringify(modpack))
+          } catch (_) {}
 
-      if (window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
-        try {
-          const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
+          const totalBytes = (modpack.clientFiles || []).reduce(
+            (sum, file) => sum + (Number(file.sizeBytes) || 0),
+            0,
+          )
+          const totalSizeGB = Number((totalBytes / 1024 / 1024 / 1024).toFixed(2))
+
+          let hasUpdate = false
+          let isInstalled = false
+          let hasExistingInstall = false
+          let hasInterruptedDownload = false
+          let hasPausedSession = false
+          let hasIntegrityIssue = false
+          let installedModpackVersion: string | null = null
+          let stagedBytes = 0
+          let totalDownloadBytes = totalBytes
+
+          if (window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
+            try {
+              const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
+                clientFiles: modpack.clientFiles,
+                directoryPolicies: modpack.directoryPolicies || [],
+                modpackVersion: modpack.version,
+                minecraftVersion: modpack.minecraftVersion,
+                modLoader: modpack.modLoader,
+                modLoaderVersion: modpack.modLoaderVersion ?? undefined,
+                neoForgeVersion: modpack.neoForgeVersion ?? undefined,
+              })
+              if (planCheck.success) {
+                installedModpackVersion = planCheck.installedModpackVersion || null
+                hasUpdate = Boolean(
+                  installedModpackVersion && installedModpackVersion !== modpack.version,
+                )
+                hasIntegrityIssue = Boolean(planCheck.hasIntegrityIssue)
+                hasExistingInstall = Boolean(planCheck.hasExistingInstall)
+                isInstalled = Boolean(planCheck.isFullyInstalled)
+                hasInterruptedDownload = Boolean(planCheck.hasInterruptedDownload)
+                hasPausedSession = Boolean(planCheck.hasPausedSession)
+                stagedBytes = planCheck.stagedBytes || 0
+                if (
+                  Number.isFinite(planCheck.totalDownloadBytes) &&
+                  planCheck.totalDownloadBytes > 0
+                ) {
+                  totalDownloadBytes = planCheck.totalDownloadBytes
+                }
+                gameService.setGameInstalled(isInstalled)
+              }
+            } catch (_) {}
+          } else {
+            isInstalled = gameService.isGameInstalled()
+          }
+
+          return {
+            version: modpack.version,
+            minecraftVersion: modpack.minecraftVersion,
+            modLoader: modpack.modLoader || "NEOFORGE",
+            modLoaderVersion: modpack.modLoaderVersion ?? null,
+            neoForgeVersion: modpack.neoForgeVersion ?? null,
+            totalSizeGB,
+            hasUpdate,
+            hasIntegrityIssue,
+            installedModpackVersion,
             clientFiles: modpack.clientFiles,
             directoryPolicies: modpack.directoryPolicies || [],
-            modpackVersion: modpack.version,
-            minecraftVersion: modpack.minecraftVersion,
-            modLoader: modpack.modLoader,
-            modLoaderVersion: modpack.modLoaderVersion ?? undefined,
-            neoForgeVersion: modpack.neoForgeVersion ?? undefined,
-          })
-          if (planCheck.success) {
-            installedModpackVersion = planCheck.installedModpackVersion || null
-            hasUpdate = Boolean(
-              installedModpackVersion && installedModpackVersion !== modpack.version,
-            )
-            hasIntegrityIssue = Boolean(planCheck.hasIntegrityIssue)
-            hasExistingInstall = Boolean(planCheck.hasExistingInstall)
-            isInstalled = Boolean(planCheck.isFullyInstalled)
-            hasInterruptedDownload = Boolean(planCheck.hasInterruptedDownload)
-            hasPausedSession = Boolean(planCheck.hasPausedSession)
-            stagedBytes = planCheck.stagedBytes || 0
-            if (Number.isFinite(planCheck.totalDownloadBytes) && planCheck.totalDownloadBytes > 0) {
-              totalDownloadBytes = planCheck.totalDownloadBytes
-            }
-            gameService.setGameInstalled(isInstalled)
+            installed: isInstalled,
+            hasExistingInstall,
+            hasInterruptedDownload,
+            hasPausedSession,
+            stagedBytes,
+            totalDownloadBytes,
           }
+        }
+
+        // B) GraphQL SUCCESS + publishedModpack === null
+        // Authoritative server state: No published modpack exists.
+        // Invalidate stale cached manifest and return null.
+        try {
+          localStorage.removeItem("hikat_game_manifest")
         } catch (_) {}
-      } else {
-        isInstalled = gameService.isGameInstalled()
+        return null
       }
 
-      return {
-        version: modpack.version,
-        minecraftVersion: modpack.minecraftVersion,
-        modLoader: modpack.modLoader || "NEOFORGE",
-        modLoaderVersion: modpack.modLoaderVersion ?? null,
-        neoForgeVersion: modpack.neoForgeVersion ?? null,
-        totalSizeGB,
-        hasUpdate,
-        hasIntegrityIssue,
-        installedModpackVersion,
-        clientFiles: modpack.clientFiles,
-        directoryPolicies: modpack.directoryPolicies || [],
-        installed: isInstalled,
-        hasExistingInstall,
-        hasInterruptedDownload,
-        hasPausedSession,
-        stagedBytes,
-        totalDownloadBytes,
-      }
+      // GraphQL responded with failure
+      isConnectivityFailure =
+        gqlRes.errorCode === "NETWORK_ERROR" ||
+        gqlRes.errorCode === "TIMEOUT" ||
+        (typeof gqlRes.error === "string" &&
+          /network|timeout|abort|offline|failed to fetch/i.test(gqlRes.error))
+    } catch (err: any) {
+      const isTimeout = err?.name === "AbortError"
+      isConnectivityFailure =
+        isTimeout ||
+        (typeof err?.message === "string" &&
+          /network|timeout|abort|offline|failed to fetch/i.test(err.message))
     }
 
-    // Offline mode: Try loading cached manifest and verify local filesystem integrity
+    if (!isConnectivityFailure) {
+      // Non-connectivity error (e.g. SESSION_EXPIRED, URL_BLOCKED, application GraphQL error)
+      return null
+    }
+
+    // C) Fallo REAL de conectividad GraphQL (NETWORK_ERROR o TIMEOUT) -> offline fallback
     try {
       const cached = localStorage.getItem("hikat_game_manifest")
       if (cached) {
