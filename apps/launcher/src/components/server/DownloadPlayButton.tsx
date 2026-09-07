@@ -1254,7 +1254,7 @@ export default function DownloadPlayButton({
                   ? t("playButton.resume")
                   : t("playButton.paused")
                 : isVerifying
-                  ? t("playButton.verifyingAction") || "VERIFICANDO"
+                  ? t("playButton.verifyingAction")
                   : isInstalling
                     ? t("playButton.installing")
                     : isUpdating

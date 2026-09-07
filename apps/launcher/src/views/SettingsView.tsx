@@ -400,13 +400,13 @@ export default function SettingsView({
       if (action === "verify") {
         setIsVerifying(state === "started")
         if (state === "started") {
-          notifySaved(t("settings.verifying") || "Verificando...", "info")
+          notifySaved(t("settings.verifying"), "info")
         } else if (state === "finished") {
           refreshOperationalState()
           if (success) {
-            notifySaved(t("settings.verifiedSuccess") || "Juego verificado con éxito", "success")
+            notifySaved(t("settings.verifiedSuccess"), "success")
           } else {
-            notifySaved(t("playButton.verifyError") || "Error en verificación", "error")
+            notifySaved(t("playButton.verifyError"), "error")
           }
           if (window.electronAPI?.getGameRuntimeInfo) {
             window.electronAPI
@@ -439,9 +439,9 @@ export default function SettingsView({
             try {
               localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
             } catch (_) {}
-            notifySaved(t("playButton.uninstallSuccess") || "Juego desinstalado", "success")
+            notifySaved(t("playButton.uninstallSuccess"), "success")
           } else {
-            notifySaved(t("playButton.uninstallError") || "Error al desinstalar", "error")
+            notifySaved(t("playButton.uninstallError"), "error")
           }
         }
       }
@@ -512,7 +512,7 @@ export default function SettingsView({
     } catch (_) {
       setDedicatedGPUState(prev)
       setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, prev)
-      notifySaved(t("settings.toastSaveError") || "Error al guardar cambios", "error")
+      notifySaved(t("settings.toastSaveError"), "error")
     }
   }
 

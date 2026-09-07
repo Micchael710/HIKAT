@@ -226,7 +226,7 @@ export default function NewsModal({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar"
+            aria-label={t("titlebar.close")}
             style={{
               position: "absolute",
               top: 14,

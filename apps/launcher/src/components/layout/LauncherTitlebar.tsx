@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { ThemeMode } from "../../types"
+import { useTranslation } from "../../context/LanguageContext"
 
 interface LauncherTitlebarProps {
   theme?: ThemeMode
@@ -14,6 +15,7 @@ export default function LauncherTitlebar({
   onMaximize,
   onClose,
 }: LauncherTitlebarProps) {
+  const { t } = useTranslation()
   const [isMaximized, setIsMaximized] = useState(false)
   const isDark = theme === "dark"
 
@@ -96,7 +98,7 @@ export default function LauncherTitlebar({
         <button
           type="button"
           onClick={handleMinimize}
-          title="Minimizar"
+          title={t("titlebar.minimize")}
           style={{
             width: 44,
             height: "100%",
@@ -146,7 +148,7 @@ export default function LauncherTitlebar({
         <button
           type="button"
           onClick={handleMaximize}
-          title={isMaximized ? "Modo ventana" : "Maximizar"}
+          title={isMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
           style={{
             width: 44,
             height: "100%",
@@ -225,7 +227,7 @@ export default function LauncherTitlebar({
         <button
           type="button"
           onClick={handleClose}
-          title="Cerrar"
+          title={t("titlebar.close")}
           style={{
             width: 48,
             height: "100%",

@@ -93,7 +93,8 @@
     "confirmPasswordPlaceholder": "Repeat your new password",
     "changePassword": "Change password",
     "passwordsDoNotMatch": "Passwords do not match.",
-    "passwordResetSuccess": "Password updated successfully. Sign in with your new password."
+    "passwordResetSuccess": "Password updated successfully. Sign in with your new password.",
+    "secureAuth": "Secure authentication"
   },
   "playButton": {
     "checkingUpdates": "CHECKING...",
@@ -146,7 +147,8 @@
     "typeUpdate": "Update",
     "typeAnnouncement": "Announcement",
     "typeMaintenance": "Maintenance",
-    "playVideo": "Play video"
+    "playVideo": "Play video",
+    "videoBadge": "VIDEO"
   },
   "serverStats": {
     "title": "Server Status",
@@ -293,7 +295,10 @@
       "changeAnimation": "Change animation",
       "toggleRotate": "360° Rotation",
       "resetCamera": "Reset camera"
-    }
+    },
+    "badgePersonal": "PERSONAL",
+    "customSkinName": "My Skin",
+    "customCapeName": "My Cape"
   },
   "profile": {
     "title": "My Profile",
@@ -330,5 +335,11 @@
     "logoutTitle": "Log out",
     "logoutDesc": "Log out of your HiKAT session on this device.",
     "logoutButton": "Log out"
+  },
+  "titlebar": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close"
   }
 }

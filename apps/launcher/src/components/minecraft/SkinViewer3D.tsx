@@ -400,7 +400,7 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={triggerNextPose}
-            title={t("skins.controls.changePose") || "Cambiar pose"}
+            title={t("skins.controls.changePose")}
             className="launcher-btn-secondary"
             style={{
               display: "flex",
@@ -443,7 +443,7 @@ export default function SkinViewer3D({
               setActiveAnimation(nextAnim)
               applyPoseOrAnimation(currentPose, nextAnim)
             }}
-            title={t("skins.controls.changeAnimation") || "Cambiar animación"}
+            title={t("skins.controls.changeAnimation")}
             className="launcher-btn-secondary"
             style={{
               display: "flex",
@@ -472,16 +472,7 @@ export default function SkinViewer3D({
             >
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
-            <span>
-              {t(`skins.animations.${activeAnimation}`) ||
-                (activeAnimation === "idle"
-                  ? "Respiración"
-                  : activeAnimation === "walk"
-                    ? "Caminando"
-                    : activeAnimation === "run"
-                      ? "Corriendo"
-                      : "Pose Fija")}
-            </span>
+            <span>{t(`skins.animations.${activeAnimation}`)}</span>
           </button>
         </div>
 
@@ -491,7 +482,7 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={() => setAutoRotate(!autoRotate)}
-            title={t("skins.controls.toggleRotate") || "Giro 360°"}
+            title={t("skins.controls.toggleRotate")}
             className="launcher-btn-secondary"
             style={{
               width: 32,
@@ -532,7 +523,7 @@ export default function SkinViewer3D({
           <button
             type="button"
             onClick={handleResetCamera}
-            title={t("skins.controls.resetCamera") || "Reiniciar cámara"}
+            title={t("skins.controls.resetCamera")}
             className="launcher-btn-secondary"
             style={{
               width: 32,

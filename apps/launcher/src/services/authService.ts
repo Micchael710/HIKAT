@@ -225,6 +225,8 @@ class LauncherAuthService {
     user?: UserProfile
     token?: string
     error?: string
+    code?: string
+    errorCode?: string
   }> {
     const cleanEmail = sanitizeEmail(credentials.email)
     const password = credentials.password || ""
@@ -234,6 +236,8 @@ class LauncherAuthService {
       return {
         success: false,
         error: "Por favor ingresa tu correo y contraseña.",
+        code: "MISSING_FIELDS",
+        errorCode: "MISSING_FIELDS",
       }
     }
 
@@ -252,9 +256,18 @@ class LauncherAuthService {
         token: this.client.getAccessToken() || undefined,
       }
     } catch (err: any) {
+      const errCode = err?.code || err?.errorCode || (
+        err?.message === "EMAIL_NOT_VERIFIED" || err?.message?.includes("EMAIL_NOT_VERIFIED")
+          ? AuthErrorCode.EMAIL_NOT_VERIFIED
+          : err?.message?.includes("Credenciales") || err?.message?.includes("Invalid credentials")
+            ? AuthErrorCode.INVALID_CREDENTIALS
+            : "LOGIN_FAILED"
+      )
       return {
         success: false,
         error: err.message || "Error al iniciar sesión.",
+        code: errCode,
+        errorCode: errCode,
       }
     }
   }
@@ -265,6 +278,8 @@ class LauncherAuthService {
     emailVerificationRequired?: boolean
     retryAfterSeconds?: number
     error?: string
+    code?: string
+    errorCode?: string
   }> {
     const rawUsername = typeof credentials.username === "string" ? credentials.username.trim() : ""
     const cleanEmail = sanitizeEmail(credentials.email)
@@ -275,6 +290,8 @@ class LauncherAuthService {
       return {
         success: false,
         error: "Todos los campos son obligatorios.",
+        code: "MISSING_FIELDS",
+        errorCode: "MISSING_FIELDS",
       }
     }
 
@@ -282,6 +299,8 @@ class LauncherAuthService {
       return {
         success: false,
         error: "El nombre de usuario debe tener entre 3 y 16 caracteres y solo contener letras, números y guion bajo.",
+        code: AuthErrorCode.INVALID_USERNAME,
+        errorCode: AuthErrorCode.INVALID_USERNAME,
       }
     }
 
@@ -289,6 +308,8 @@ class LauncherAuthService {
       return {
         success: false,
         error: "La contraseña debe tener al menos 8 caracteres.",
+        code: "PASSWORD_TOO_SHORT",
+        errorCode: "PASSWORD_TOO_SHORT",
       }
     }
 
@@ -312,9 +333,20 @@ class LauncherAuthService {
         retryAfterSeconds: res.retryAfterSeconds,
       }
     } catch (err: any) {
+      const errCode = err?.code || err?.errorCode || (
+        err?.message?.includes("ya está registrado") || err?.message === AuthErrorCode.USER_ALREADY_EXISTS
+          ? AuthErrorCode.USER_ALREADY_EXISTS
+          : err?.message === AuthErrorCode.USERNAME_ALREADY_EXISTS || err?.message?.includes("USERNAME_ALREADY_EXISTS") || err?.message?.includes("taken")
+            ? AuthErrorCode.USERNAME_ALREADY_EXISTS
+            : err?.message === AuthErrorCode.INVALID_USERNAME || err?.message?.includes("INVALID_USERNAME")
+              ? AuthErrorCode.INVALID_USERNAME
+              : "REGISTRATION_FAILED"
+      )
       return {
         success: false,
         error: err.message || "Error al registrar la cuenta.",
+        code: errCode,
+        errorCode: errCode,
       }
     }
   }

@@ -1,6 +1,7 @@
 import React from "react"
 import { ThemeMode, NewsCardItem } from "../../types"
 import { useDynamicAccent } from "../../utils/dynamicAccent"
+import { useTranslation } from "../../context/LanguageContext"
 
 interface NewsCardProps {
   card: NewsCardItem
@@ -16,6 +17,7 @@ export default function NewsCard({
   CARD_H,
   onClick,
 }: NewsCardProps) {
+  const { t } = useTranslation()
   // Extract dominant accent dynamically from thumbnail image
   const accent = useDynamicAccent(card.img, card.accentColor || "#38bdf8")
 
@@ -105,7 +107,7 @@ export default function NewsCard({
           <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor">
             <polygon points="5 3 19 12 5 21 5 3" />
           </svg>
-          <span>VIDEO</span>
+          <span>{t("news.videoBadge")}</span>
         </div>
       )}
 
