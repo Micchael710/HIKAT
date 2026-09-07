@@ -19,12 +19,15 @@ describe("Launcher ProfileView Component", () => {
     delete (window as any).electronAPI
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     if (unmountCurrent) {
       unmountCurrent()
       unmountCurrent = null
     }
     document.body.innerHTML = ""
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
   })
 
   async function renderComponent(ui: React.ReactElement) {
@@ -631,10 +634,11 @@ describe("Launcher ProfileView Component", () => {
       editBtn.click()
     })
 
-    expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).not.toBeNull()
+    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
+    expect(input).not.toBeNull()
+    expect(input.title).toContain("Debe tener entre 3 y 16 caracteres (letras, números y guion bajo).")
     expect(container.textContent).toContain("Guardar")
     expect(container.textContent).toContain("Cancelar")
-    expect(container.textContent).toContain("Debe tener entre 3 y 16 caracteres (letras, números y guion bajo).")
   })
 
   function changeInput(input: HTMLInputElement, value: string) {
@@ -858,8 +862,12 @@ describe("Launcher ProfileView Component", () => {
 
     expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).not.toBeNull()
 
+    const saveBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Guardar")
     const cancelBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Cancelar")
+    expect(saveBtn).toBeDefined()
     expect(cancelBtn).toBeDefined()
+    expect(saveBtn?.classList.contains("launcher-btn-primary")).toBe(true)
+    expect(cancelBtn?.classList.contains("launcher-btn-secondary")).toBe(true)
 
     await act(async () => {
       cancelBtn?.click()
@@ -868,5 +876,102 @@ describe("Launcher ProfileView Component", () => {
     expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).toBeNull()
     expect(container.textContent).toContain("CancelPlayer")
     expect(changeUsernameSpy).not.toHaveBeenCalled()
+  })
+
+  it("20. ProfileView applies dynamic skin accent to background orbs and inline edit Guardar button", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-20",
+      username: "GreenGamer",
+      displayName: "GreenGamer",
+      email: "green@hikat.org",
+      role: "PLAYER",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "green@hikat.org" }],
+    })
+
+    const greenSkin: any = {
+      id: "skin-green",
+      name: "Green Skin",
+      shirt: "#10b981", // rgb(16, 185, 129)
+      skinUrl: "/media/green_skin.png",
+    }
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="GreenGamer"
+          activeSkinData={greenSkin}
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    // Check orb gradient contains green rgb (16, 185, 129)
+    const orb1 = container.querySelector(".skins-bg-orb-1") as HTMLElement
+    expect(orb1).not.toBeNull()
+    expect(orb1.style.background).toContain("16, 185, 129")
+
+    // Enter edit mode
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    await act(async () => {
+      editBtn.click()
+    })
+
+    const saveBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Guardar") as HTMLButtonElement
+    expect(saveBtn).toBeDefined()
+    expect(saveBtn.classList.contains("launcher-btn-primary")).toBe(true)
+    expect(saveBtn.classList.contains("dynamic-accent")).toBe(true)
+    expect(saveBtn.style.getPropertyValue("--accent-rgb")).toBe("16, 185, 129")
+  })
+
+  it("21. Username edit textbox rejects spaces and non-alphanumeric characters in real-time", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-21",
+      username: "AlphaUser",
+      displayName: "AlphaUser",
+      email: "alpha@hikat.org",
+      role: "PLAYER",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "alpha@hikat.org" }],
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="AlphaUser"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    await act(async () => {
+      editBtn.click()
+    })
+
+    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
+    expect(input).not.toBeNull()
+
+    // Simulate typing text with spaces and invalid symbols: "vBrayan 06!@#"
+    await act(async () => {
+      changeInput(input, "vBrayan 06!@#")
+    })
+
+    // Value in state and input should be sanitized to "vBrayan06"
+    expect(input.value).toBe("vBrayan06")
   })
 })

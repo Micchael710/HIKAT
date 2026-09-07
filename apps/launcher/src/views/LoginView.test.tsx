@@ -19,12 +19,15 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     delete (window as any).electronAPI
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     if (unmountCurrent) {
       unmountCurrent()
       unmountCurrent = null
     }
     document.body.innerHTML = ""
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
   })
 
   async function renderComponent(ui: React.ReactElement) {

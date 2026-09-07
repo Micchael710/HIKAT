@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo } from "react"
 import { ThemeMode, SkinItem } from "../types"
-import { hexToRGB, CANVAS_W, BASE_FONT } from "../theme/tokens"
+import { CANVAS_W, BASE_FONT } from "../theme/tokens"
 import MinecraftHead from "../components/minecraft/MinecraftHead"
 import LiveToast from "../components/common/LiveToast"
 import { useTranslation } from "../context/LanguageContext"
+import { useDynamicAccent } from "../utils/dynamicAccent"
 
 import { authService, AuthMethodSummary } from "../services/authService"
 import { isValidUsername, AuthErrorCode } from "@hikat/shared"
+import { sanitizeUsername } from "../utils/security"
 
 interface ProfileViewProps {
   username: string
@@ -220,8 +222,13 @@ export default function ProfileView({
     }
   }
 
-  const currentAccent = hexToRGB(
-    activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8",
+  const activeSkinTexture =
+    activeSkinData?.customImgUrl || activeSkinData?.skinUrl
+  const activeSkinFallback =
+    activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8"
+  const currentAccent = useDynamicAccent(
+    activeSkinTexture,
+    activeSkinFallback,
   )
   const CONTENT_LEFT = 184
 
@@ -553,7 +560,6 @@ export default function ProfileView({
                 display: "grid",
                 gridTemplateColumns: "repeat(3, 1fr)",
                 gap: 14,
-                alignItems: "start",
               }}
             >
               {/* Tile 1: Usuario */}
@@ -561,97 +567,93 @@ export default function ProfileView({
                 style={{
                   background: isDark ? "#0d1217" : "#f0f3f7",
                   border: isDark
-                    ? isEditingUsername
-                      ? "1.5px solid rgba(56, 189, 248, 0.35)"
-                      : "1.5px solid rgba(255, 255, 255, 0.06)"
-                    : isEditingUsername
-                      ? "1.5px solid rgba(14, 165, 233, 0.35)"
-                      : "1.5px solid rgba(0, 0, 0, 0.06)",
+                    ? "1.5px solid rgba(255, 255, 255, 0.06)"
+                    : "1.5px solid rgba(0, 0, 0, 0.06)",
                   borderRadius: 14,
                   padding: "14px 18px",
                   display: "flex",
                   flexDirection: "column",
-                  gap: isEditingUsername ? 8 : 4,
-                  transition: "all 0.2s ease",
+                  gap: 4,
+                  boxSizing: "border-box",
+                  minHeight: 92,
+                  justifyContent: "space-between",
                 }}
               >
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 800,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: isDark ? "#657788" : "#778899",
+                    lineHeight: "15px",
+                  }}
+                >
+                  {t("profile.username")}
+                </div>
+
                 {!isEditingUsername ? (
-                  <>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-end",
+                      justifyContent: "space-between",
+                      height: 44,
+                      paddingBottom: 4,
+                    }}
+                  >
                     <div
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 800,
-                          letterSpacing: "0.08em",
-                          textTransform: "uppercase",
-                          color: isDark ? "#657788" : "#778899",
-                        }}
-                      >
-                        {t("profile.username")}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewUsernameInput(currentUsername)
-                          setUsernameError(null)
-                          setIsEditingUsername(true)
-                        }}
-                        title={t("profile.changeUsernameTitle")}
-                        aria-label={t("profile.changeUsernameTitle")}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          background: isDark
-                            ? "rgba(255, 255, 255, 0.05)"
-                            : "rgba(0, 0, 0, 0.04)",
-                          border: isDark
-                            ? "1px solid rgba(255, 255, 255, 0.08)"
-                            : "1px solid rgba(0, 0, 0, 0.08)",
-                          cursor: "pointer",
-                          width: 24,
-                          height: 24,
-                          borderRadius: 6,
-                          color: isDark ? "#a0aec0" : "#4a5568",
-                          transition: "all 0.15s ease",
-                          padding: 0,
-                        }}
-                        className="launcher-icon-btn"
-                      >
-                        <svg
-                          width={13}
-                          height={13}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                          <path d="m15 5 4 4" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 15.5,
+                        fontSize: 16,
                         fontWeight: 600,
                         color: isDark ? "#d6e0ea" : "#1e293b",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
+                        lineHeight: "22px",
                       }}
                     >
                       {currentUsername}
                     </div>
-                  </>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewUsernameInput(currentUsername)
+                        setUsernameError(null)
+                        setIsEditingUsername(true)
+                      }}
+                      title={t("profile.changeUsernameTitle")}
+                      aria-label={t("profile.changeUsernameTitle")}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "transparent",
+                        border: "none",
+                        boxShadow: "none",
+                        cursor: "pointer",
+                        padding: "2px",
+                        borderRadius: 8,
+                        color: isDark ? "#8899aa" : "#667788",
+                        transition: "color 0.15s ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <svg
+                        width={18}
+                        height={18}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                        <path d="m15 5 4 4" />
+                      </svg>
+                    </button>
+                  </div>
                 ) : (
                   <form
                     onSubmit={(e) => {
@@ -660,22 +662,13 @@ export default function ProfileView({
                     }}
                     style={{
                       display: "flex",
-                      flexDirection: "column",
+                      alignItems: "center",
                       gap: 8,
+                      height: 44,
+                      margin: 0,
+                      padding: 0,
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 800,
-                        letterSpacing: "0.08em",
-                        textTransform: "uppercase",
-                        color: isDark ? "#657788" : "#778899",
-                      }}
-                    >
-                      {t("profile.username")}
-                    </div>
-
                     <input
                       type="text"
                       maxLength={16}
@@ -683,18 +676,33 @@ export default function ProfileView({
                       autoCapitalize="none"
                       autoCorrect="off"
                       autoFocus
+                      title={t("profile.usernameRulesHint")}
                       placeholder={t("profile.newUsernamePlaceholder")}
                       value={newUsernameInput}
+                      onKeyDown={(e) => {
+                        if (
+                          e.key === " " ||
+                          (e.key.length === 1 &&
+                            !/^[a-zA-Z0-9_]$/.test(e.key) &&
+                            !e.ctrlKey &&
+                            !e.metaKey &&
+                            !e.altKey)
+                        ) {
+                          e.preventDefault()
+                        }
+                      }}
                       onChange={(e) => {
-                        setNewUsernameInput(e.target.value)
+                        const sanitized = sanitizeUsername(e.target.value)
+                        setNewUsernameInput(sanitized)
                         if (usernameError) setUsernameError(null)
                       }}
                       className="launcher-input"
                       style={{
-                        width: "100%",
-                        height: 36,
+                        flex: "1 1 100px",
+                        minWidth: 0,
+                        height: 44,
                         padding: "0 12px",
-                        borderRadius: 10,
+                        borderRadius: 12,
                         background: isDark ? "#0d1217" : "#ffffff",
                         border: isDark
                           ? usernameError
@@ -705,131 +713,88 @@ export default function ProfileView({
                             : "1.5px solid rgba(0, 0, 0, 0.14)",
                         color: isDark ? "white" : "#111822",
                         fontFamily: BASE_FONT,
-                        fontSize: 14.5,
+                        fontSize: 16,
                         fontWeight: 600,
                         transition: "all 0.16s ease",
                         boxSizing: "border-box",
                       }}
                     />
 
-                    <div
-                      style={{
-                        fontSize: 11.5,
-                        color: isDark ? "#657788" : "#8899aa",
-                        lineHeight: 1.35,
-                      }}
-                    >
-                      {t("profile.usernameRulesHint")}
-                    </div>
-
-                    {usernameError && (
-                      <div
-                        style={{
-                          color: "#ef4444",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 5,
-                          lineHeight: 1.3,
-                        }}
-                      >
-                        <svg
-                          width={13}
-                          height={13}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          style={{ flexShrink: 0 }}
-                        >
-                          <circle cx="12" cy="12" r="10" />
-                          <line x1="12" y1="8" x2="12" y2="12" />
-                          <line x1="12" y1="16" x2="12.01" y2="16" />
-                        </svg>
-                        <span>{usernameError}</span>
-                      </div>
-                    )}
-
-                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                      <button
-                        type="submit"
-                        disabled={isSavingUsername || !canSubmitUsername}
-                        className="launcher-btn-secondary"
-                        style={{
-                          flex: 1,
+                    <button
+                      type="submit"
+                      disabled={isSavingUsername || !canSubmitUsername}
+                      className="launcher-btn-primary dynamic-accent"
+                      style={
+                        {
+                          "--accent-rgb": `${currentAccent.r}, ${currentAccent.g}, ${currentAccent.b}`,
                           display: "inline-flex",
                           alignItems: "center",
                           justifyContent: "center",
                           gap: 6,
-                          height: 34,
-                          padding: "0 12px",
-                          borderRadius: 8,
-                          fontSize: 13.5,
+                          height: 44,
+                          padding: "0 16px",
+                          borderRadius: 12,
+                          fontSize: 14,
                           fontWeight: 700,
                           fontFamily: BASE_FONT,
+                          color: "white",
                           cursor:
                             isSavingUsername || !canSubmitUsername
                               ? "default"
                               : "pointer",
                           opacity:
                             isSavingUsername || !canSubmitUsername ? 0.6 : 1,
-                        }}
-                      >
-                        {isSavingUsername ? (
-                          <>
-                            <svg
-                              width={12}
-                              height={12}
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              style={{ animation: "spin 1s linear infinite" }}
-                            >
-                              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                            </svg>
-                            <span>{t("profile.savingUsername")}</span>
-                          </>
-                        ) : (
-                          <span>{t("profile.saveUsername")}</span>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={isSavingUsername}
-                        onClick={() => {
-                          setIsEditingUsername(false)
-                          setNewUsernameInput(currentUsername)
-                          setUsernameError(null)
-                        }}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          height: 34,
-                          padding: "0 12px",
-                          borderRadius: 8,
-                          fontSize: 13,
-                          fontWeight: 600,
-                          fontFamily: BASE_FONT,
-                          background: "transparent",
-                          border: isDark
-                            ? "1px solid rgba(255, 255, 255, 0.12)"
-                            : "1px solid rgba(0, 0, 0, 0.12)",
-                          color: isDark ? "#8899aa" : "#556677",
-                          cursor: isSavingUsername ? "default" : "pointer",
-                          opacity: isSavingUsername ? 0.5 : 1,
                           flexShrink: 0,
-                        }}
-                      >
-                        {t("common.cancel")}
-                      </button>
-                    </div>
+                        } as React.CSSProperties
+                      }
+                    >
+                      {isSavingUsername ? (
+                        <>
+                          <svg
+                            width={13}
+                            height={13}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            style={{ animation: "spin 1s linear infinite" }}
+                          >
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                          </svg>
+                          <span>{t("profile.savingUsername")}</span>
+                        </>
+                      ) : (
+                        <span>{t("profile.saveUsername")}</span>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSavingUsername}
+                      onClick={() => {
+                        setIsEditingUsername(false)
+                        setNewUsernameInput(currentUsername)
+                        setUsernameError(null)
+                      }}
+                      className="launcher-btn-secondary"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        height: 44,
+                        padding: "0 16px",
+                        borderRadius: 12,
+                        fontSize: 14,
+                        fontWeight: 700,
+                        fontFamily: BASE_FONT,
+                        cursor: isSavingUsername ? "default" : "pointer",
+                        opacity: isSavingUsername ? 0.5 : 1,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {t("common.cancel")}
+                    </button>
                   </form>
                 )}
               </div>
@@ -846,6 +811,9 @@ export default function ProfileView({
                   display: "flex",
                   flexDirection: "column",
                   gap: 4,
+                  boxSizing: "border-box",
+                  minHeight: 92,
+                  justifyContent: "space-between",
                 }}
               >
                 <div
@@ -855,18 +823,24 @@ export default function ProfileView({
                     letterSpacing: "0.08em",
                     textTransform: "uppercase",
                     color: isDark ? "#657788" : "#778899",
+                    lineHeight: "15px",
                   }}
                 >
                   {t("profile.email")}
                 </div>
                 <div
                   style={{
-                    fontSize: 15.5,
+                    fontSize: 16,
                     fontWeight: 600,
                     color: isDark ? "#8899aa" : "#334455",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
+                    lineHeight: "22px",
+                    height: 44,
+                    display: "flex",
+                    alignItems: "flex-end",
+                    paddingBottom: 4,
                   }}
                 >
                   {email}
@@ -885,6 +859,9 @@ export default function ProfileView({
                   display: "flex",
                   flexDirection: "column",
                   gap: 4,
+                  boxSizing: "border-box",
+                  minHeight: 92,
+                  justifyContent: "space-between",
                 }}
               >
                 <div
@@ -894,18 +871,24 @@ export default function ProfileView({
                     letterSpacing: "0.08em",
                     textTransform: "uppercase",
                     color: isDark ? "#657788" : "#778899",
+                    lineHeight: "15px",
                   }}
                 >
                   {t("profile.memberSince")}
                 </div>
                 <div
                   style={{
-                    fontSize: 15.5,
+                    fontSize: 16,
                     fontWeight: 600,
                     color: isDark ? "#8899aa" : "#334455",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
+                    lineHeight: "22px",
+                    height: 44,
+                    display: "flex",
+                    alignItems: "flex-end",
+                    paddingBottom: 4,
                   }}
                 >
                   {joinDate}
@@ -1122,24 +1105,30 @@ export default function ProfileView({
                         <div
                           key={activeMethod.type}
                           style={{
-                            display: "flex",
+                            display: "inline-flex",
                             alignItems: "center",
                             gap: 8,
-                            padding: "10px 18px",
-                            borderRadius: 12,
-                            background: isDark ? "#0d1217" : "#f0f3f7",
+                            height: 44,
+                            padding: "0 22px",
+                            borderRadius: 14,
+                            background: isDark ? "#131c23" : "#ffffff",
                             border: isDark
-                              ? "1.5px solid rgba(255, 255, 255, 0.12)"
+                              ? "2px solid rgba(255, 255, 255, 0.1)"
                               : "1.5px solid rgba(0, 0, 0, 0.12)",
+                            boxShadow: isDark
+                              ? "none"
+                              : "0 2px 8px rgba(0, 0, 0, 0.04)",
                             color: isDark ? "white" : "#111822",
                             fontFamily: BASE_FONT,
                             fontSize: 14.5,
-                            fontWeight: 700,
+                            fontWeight: 600,
                             flexShrink: 0,
+                            cursor: "default",
+                            userSelect: "none",
                           }}
                         >
                           {activeMethod.type === "GOOGLE" && (
-                            <svg width={16} height={16} viewBox="0 0 24 24">
+                            <svg width={18} height={18} viewBox="0 0 24 24">
                               <path
                                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
                                 fill="#4285F4"
@@ -1160,8 +1149,8 @@ export default function ProfileView({
                           )}
                           {activeMethod.type === "DISCORD" && (
                             <svg
-                              width={16}
-                              height={16}
+                              width={18}
+                              height={18}
                               viewBox="0 0 24 24"
                               fill="#5865F2"
                             >
