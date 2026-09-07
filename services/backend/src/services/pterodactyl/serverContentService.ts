@@ -17,6 +17,7 @@ import {
   acquireServerOperationLock,
   releaseServerOperationLock,
   startServerOperationHeartbeat,
+  assertExplicitServerIdIfMultiple,
 } from "./serverAdministrationService"
 import { detectActiveWorldName } from "./serverWorldService"
 import { modProviderManager, getLogicalPathForServerContent } from "../providers/modProviderManager"
@@ -249,6 +250,7 @@ export async function installServerContentPlan(
   arg2?: IPterodactylClient,
 ): Promise<ServerManagedContentItemGql[]> {
   const { serverId, clientOverride } = parseContentServiceArgs(arg1, arg2)
+  await assertExplicitServerIdIfMultiple(db, serverId, "instalación de contenido del servidor")
   const plan = await modProviderManager.resolveServerInstallationPlan(env, db, input, "world", serverId)
 
   if (!plan.isValid || plan.conflicts.length > 0) {
@@ -567,6 +569,7 @@ export async function removeServerManagedContent(
   arg3?: IPterodactylClient,
 ): Promise<boolean> {
   const { deleteFile, serverId, clientOverride } = parseRemoveContentArgs(arg1, arg2, arg3)
+  await assertExplicitServerIdIfMultiple(db, serverId, "eliminación de contenido administrado del servidor")
   const conditions = [eq(schema.serverManagedContent.id, id)]
   if (serverId) conditions.push(eq(schema.serverManagedContent.serverId, serverId))
   const record = await db

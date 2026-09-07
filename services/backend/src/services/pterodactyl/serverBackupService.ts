@@ -89,6 +89,7 @@ export async function restoreServerBackup(
   serverId?: string | null,
   clientOverride?: IPterodactylClient,
 ): Promise<boolean> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "restauración de copia de seguridad")
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!backupId || typeof backupId !== "string" || !backupId.trim()) {

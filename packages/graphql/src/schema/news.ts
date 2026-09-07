@@ -112,7 +112,6 @@ export const newsTypeDefs = /* GraphQL */ `
   }
 
   input UpdateNewsInput {
-    serverId: ID
     title: String
     content: String
     type: NewsType
@@ -176,22 +175,22 @@ export const newsTypeDefs = /* GraphQL */ `
     """
     Update an existing news article - requires ADMIN role
     """
-    updateNews(id: ID!, input: UpdateNewsInput!): News!
+    updateNews(serverId: ID, id: ID!, input: UpdateNewsInput!): News!
 
     """
     Publish a news article (sets status to PUBLISHED and publishedAt to now) - requires ADMIN role
     """
-    publishNews(id: ID!): News!
+    publishNews(serverId: ID, id: ID!): News!
 
     """
     Unpublish a news article (sets status to DRAFT and publishedAt to null) - requires ADMIN role
     """
-    unpublishNews(id: ID!): News!
+    unpublishNews(serverId: ID, id: ID!): News!
 
     """
     Delete a news article - requires ADMIN role
     """
-    deleteNews(id: ID!): Boolean!
+    deleteNews(serverId: ID, id: ID!): Boolean!
 
     """
     Request a single-use token to upload binary media - requires ADMIN role

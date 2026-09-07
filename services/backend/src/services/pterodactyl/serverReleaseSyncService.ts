@@ -20,6 +20,7 @@ import {
   acquireServerOperationLock,
   releaseServerOperationLock,
   startServerOperationHeartbeat,
+  assertExplicitServerIdIfMultiple,
 } from "./serverAdministrationService"
 import { createServerBackup } from "./serverBackupService"
 import { safeDeleteServerFilePhysical, getPhysicalFileSha256 } from "./serverFileService"
@@ -350,6 +351,7 @@ export async function applyServerReleaseSync(
   arg2?: IPterodactylClient,
 ): Promise<ServerReleaseSyncResultGql> {
   const { serverId, clientOverride } = parseSyncArgs(arg1, arg2)
+  await assertExplicitServerIdIfMultiple(db, serverId, "sincronización de release en el servidor")
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   // 1. Guard: Check server status is OFFLINE (fail-closed)

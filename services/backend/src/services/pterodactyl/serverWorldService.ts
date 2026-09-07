@@ -20,6 +20,7 @@ import {
   acquireServerOperationLock,
   releaseServerOperationLock,
   startServerOperationHeartbeat,
+  assertExplicitServerIdIfMultiple,
 } from "./serverAdministrationService"
 
 export interface ServerWorldInfoData {
@@ -123,7 +124,11 @@ export async function prepareServerWorldUpload(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<{ url: string }> {
-  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const database = db || (env.DB ? createDatabase(env.DB) : undefined)
+  if (database) {
+    await assertExplicitServerIdIfMultiple(database, serverId, "subida de mundo")
+  }
+  const { client } = await resolvePterodactylClient(database, env, serverId, clientOverride)
   const res = await client.getFileUploadUrl()
   const separator = res.attributes.url.includes("?") ? "&" : "?"
   return { url: `${res.attributes.url}${separator}directory=/` }
@@ -216,6 +221,8 @@ export async function replaceServerWorld(
       }
     }
   }
+
+  await assertExplicitServerIdIfMultiple(db, serverId, "reemplazo de mundo")
 
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 

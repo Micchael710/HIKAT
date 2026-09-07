@@ -29,6 +29,7 @@ import {
   getContentMediaById,
   getContentMediaByIds,
 } from "./mediaService"
+import { assertExplicitServerIdIfMultiple } from "./pterodactyl/serverAdministrationService"
 
 type PublicFeedCursor = {
   publishedAt: string
@@ -352,6 +353,8 @@ export async function createNews(
   input: CreateNewsInputGql,
   request?: Request,
 ): Promise<NewsGql> {
+  await assertExplicitServerIdIfMultiple(db, input.serverId, "creación de noticia")
+
   const title = input.title?.trim() || ""
   if (
     title.length < NEWS_LIMITS.TITLE_MIN_LENGTH ||
@@ -478,10 +481,17 @@ export async function updateNews(
   id: string,
   input: UpdateNewsInputGql,
   request?: Request,
+  serverId?: string | null,
 ): Promise<NewsGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "actualización de noticia")
+
   const existing = await db.select().from(news).where(eq(news.id, id)).get()
   if (!existing) {
     throw createGraphQLError("News article not found", "NOT_FOUND")
+  }
+
+  if (serverId && existing.serverId !== serverId) {
+    throw createGraphQLError("La noticia pertenece a otro servidor.", "VALIDATION_ERROR")
   }
 
   const updates: Partial<News> = {
@@ -622,10 +632,17 @@ export async function publishNews(
   adminUserId: string,
   id: string,
   request?: Request,
+  serverId?: string | null,
 ): Promise<NewsGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "publicación de noticia")
+
   const existing = await db.select().from(news).where(eq(news.id, id)).get()
   if (!existing) {
     throw createGraphQLError("News article not found", "NOT_FOUND")
+  }
+
+  if (serverId && existing.serverId !== serverId) {
+    throw createGraphQLError("La noticia pertenece a otro servidor.", "VALIDATION_ERROR")
   }
 
   const now = new Date().toISOString()
@@ -657,10 +674,17 @@ export async function unpublishNews(
   adminUserId: string,
   id: string,
   request?: Request,
+  serverId?: string | null,
 ): Promise<NewsGql> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "despublicación de noticia")
+
   const existing = await db.select().from(news).where(eq(news.id, id)).get()
   if (!existing) {
     throw createGraphQLError("News article not found", "NOT_FOUND")
+  }
+
+  if (serverId && existing.serverId !== serverId) {
+    throw createGraphQLError("La noticia pertenece a otro servidor.", "VALIDATION_ERROR")
   }
 
   const now = new Date().toISOString()
@@ -686,10 +710,20 @@ export async function unpublishNews(
 /**
  * Deletes a news article.
  */
-export async function deleteNews(db: Database, id: string): Promise<boolean> {
+export async function deleteNews(
+  db: Database,
+  id: string,
+  serverId?: string | null,
+): Promise<boolean> {
+  await assertExplicitServerIdIfMultiple(db, serverId, "eliminación de noticia")
+
   const existing = await db.select().from(news).where(eq(news.id, id)).get()
   if (!existing) {
     throw createGraphQLError("News article not found", "NOT_FOUND")
+  }
+
+  if (serverId && existing.serverId !== serverId) {
+    throw createGraphQLError("La noticia pertenece a otro servidor.", "VALIDATION_ERROR")
   }
 
   await db.delete(news).where(eq(news.id, id))

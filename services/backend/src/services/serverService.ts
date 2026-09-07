@@ -318,7 +318,7 @@ export async function deleteServer(
   db: Database,
   env: Env,
   serverId: string,
-  deletePterodactyl: boolean = true,
+  deletePterodactyl: boolean,
   clientOverride?: IPterodactylClient,
 ): Promise<boolean> {
   const server = await db

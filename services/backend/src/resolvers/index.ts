@@ -1356,7 +1356,7 @@ export const resolvers = {
 
     updateNews: async (
       _parent: unknown,
-      args: { id: string; input: UpdateNewsInputGql },
+      args: { serverId?: string; id: string; input: UpdateNewsInputGql },
       context: BackendGraphQLContext,
     ): Promise<NewsGql> => {
       const identity = requireAdmin(context)
@@ -1372,12 +1372,13 @@ export const resolvers = {
         args.id,
         args.input,
         context.request,
+        args.serverId,
       )
     },
 
     publishNews: async (
       _parent: unknown,
-      args: { id: string },
+      args: { serverId?: string; id: string },
       context: BackendGraphQLContext,
     ): Promise<NewsGql> => {
       const identity = requireAdmin(context)
@@ -1392,12 +1393,13 @@ export const resolvers = {
         identity.userId,
         args.id,
         context.request,
+        args.serverId,
       )
     },
 
     unpublishNews: async (
       _parent: unknown,
-      args: { id: string },
+      args: { serverId?: string; id: string },
       context: BackendGraphQLContext,
     ): Promise<NewsGql> => {
       const identity = requireAdmin(context)
@@ -1412,12 +1414,13 @@ export const resolvers = {
         identity.userId,
         args.id,
         context.request,
+        args.serverId,
       )
     },
 
     deleteNews: async (
       _parent: unknown,
-      args: { id: string },
+      args: { serverId?: string; id: string },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
@@ -1426,7 +1429,7 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
 
-      return deleteNews(context.db, args.id)
+      return deleteNews(context.db, args.id, args.serverId)
     },
 
     // --- Media Administrative Mutations (Require ADMIN) ---

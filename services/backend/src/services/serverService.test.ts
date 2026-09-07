@@ -15,6 +15,11 @@ import {
 } from "./pterodactyl/serverAdministrationService"
 import { prepareGameDraft, getPublishedModpack } from "./game/releaseService"
 import { modProviderManager } from "./providers/modProviderManager"
+import { replaceServerWorld } from "./pterodactyl/serverWorldService"
+import { restoreServerBackup } from "./pterodactyl/serverBackupService"
+import { installServerContentPlan, removeServerManagedContent } from "./pterodactyl/serverContentService"
+import { applyServerReleaseSync } from "./pterodactyl/serverReleaseSyncService"
+import { createNews, updateNews, publishNews, unpublishNews, deleteNews } from "./newsService"
 import type { IPterodactylClient } from "./pterodactyl/types"
 import type { Env } from "../types"
 import { eq } from "drizzle-orm"
@@ -879,6 +884,246 @@ describe("ServerService & Multi-Server Provisioning", () => {
 
       expect(rowInDb).toBeDefined()
       expect(rowInDb?.id).toBe(serverId)
+    })
+
+    it("11. con 2 servidores, replaceServerWorld sin serverId falla antes de tocar Pterodactyl", async () => {
+      await mockDb.insert(schema.servers).values([
+        {
+          id: "srv-world-1",
+          name: "World Server 1",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "srv-world-2",
+          name: "World Server 2",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      await expect(
+        replaceServerWorld(mockEnv, mockDb, "user-1", "world.zip"),
+      ).rejects.toThrow("Se debe especificar el servidor para esta reemplazo de mundo")
+    })
+
+    it("12. con 2 servidores, restoreServerBackup sin serverId falla", async () => {
+      await mockDb.insert(schema.servers).values([
+        {
+          id: "srv-bk-1",
+          name: "Backup Server 1",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "srv-bk-2",
+          name: "Backup Server 2",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      await expect(
+        restoreServerBackup(mockEnv, mockDb, "user-1", "backup-uuid-123"),
+      ).rejects.toThrow("Se debe especificar el servidor para esta restauración de copia de seguridad")
+    })
+
+    it("13. con 2 servidores, installServerContentPlan sin serverId falla", async () => {
+      await mockDb.insert(schema.servers).values([
+        {
+          id: "srv-content-1",
+          name: "Content Server 1",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "srv-content-2",
+          name: "Content Server 2",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      await expect(
+        installServerContentPlan(
+          mockDb,
+          mockEnv,
+          { provider: "MODRINTH", projectId: "test-proj", versionId: "test-ver" },
+          "user-1",
+        ),
+      ).rejects.toThrow("Se debe especificar el servidor para esta instalación de contenido del servidor")
+    })
+
+    it("14. con 2 servidores, removeServerManagedContent sin serverId falla", async () => {
+      await mockDb.insert(schema.servers).values([
+        {
+          id: "srv-rm-1",
+          name: "Remove Server 1",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "srv-rm-2",
+          name: "Remove Server 2",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      await expect(
+        removeServerManagedContent(mockDb, mockEnv, "content-id-1", "user-1"),
+      ).rejects.toThrow("Se debe especificar el servidor para esta eliminación de contenido administrado del servidor")
+    })
+
+    it("15. con 2 servidores, applyServerReleaseSync sin serverId falla", async () => {
+      await mockDb.insert(schema.servers).values([
+        {
+          id: "srv-sync-1",
+          name: "Sync Server 1",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "srv-sync-2",
+          name: "Sync Server 2",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      await expect(
+        applyServerReleaseSync(mockDb, mockEnv, "user-1"),
+      ).rejects.toThrow("Se debe especificar el servidor para esta sincronización de release en el servidor")
+    })
+
+    it("16. con 2 servidores, createNews sin serverId falla", async () => {
+      await mockDb.insert(schema.servers).values([
+        {
+          id: "srv-news-1",
+          name: "News Server 1",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "srv-news-2",
+          name: "News Server 2",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      await expect(
+        createNews(mockDb, mockEnv, "user-1", {
+          title: "Test News Title",
+          content: "This is test news content of valid length",
+          type: "NEWS",
+          serverId: null,
+        }),
+      ).rejects.toThrow("Se debe especificar el servidor para esta creación de noticia")
+    })
+
+    it("17. update/publish/unpublish/delete de una noticia usando serverId de otro servidor se rechaza", async () => {
+      await mockDb.insert(schema.servers).values([
+        {
+          id: "srv-alpha",
+          name: "Server Alpha",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "srv-beta",
+          name: "Server Beta",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      const newsA = await mockDb
+        .insert(schema.news)
+        .values({
+          id: "news-srv-a",
+          serverId: "srv-alpha",
+          title: "News Alpha",
+          content: "Content for Server Alpha",
+          type: "NEWS",
+          status: "DRAFT",
+          createdBy: "user-1",
+          updatedBy: "user-1",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .returning()
+        .get()
+
+      // Update with different serverId
+      await expect(
+        updateNews(
+          mockDb,
+          mockEnv,
+          "user-1",
+          newsA.id,
+          { title: "Updated Alpha Title" },
+          undefined,
+          "srv-beta",
+        ),
+      ).rejects.toThrow("La noticia pertenece a otro servidor.")
+
+      // Publish with different serverId
+      await expect(
+        publishNews(mockDb, mockEnv, "user-1", newsA.id, undefined, "srv-beta"),
+      ).rejects.toThrow("La noticia pertenece a otro servidor.")
+
+      // Unpublish with different serverId
+      await expect(
+        unpublishNews(mockDb, mockEnv, "user-1", newsA.id, undefined, "srv-beta"),
+      ).rejects.toThrow("La noticia pertenece a otro servidor.")
+
+      // Delete with different serverId
+      await expect(
+        deleteNews(mockDb, newsA.id, "srv-beta"),
+      ).rejects.toThrow("La noticia pertenece a otro servidor.")
     })
   })
 })

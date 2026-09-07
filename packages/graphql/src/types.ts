@@ -287,8 +287,6 @@ export interface CreateNewsInputGql {
 }
 
 export interface UpdateNewsInputGql {
-  serverId?: string | null
-
   title?: string | null
 
   content?: string | null
