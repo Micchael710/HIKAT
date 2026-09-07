@@ -387,10 +387,22 @@ class LauncherAuthService {
   public async requestPasswordReset(
     email: string,
     locale?: string,
-  ): Promise<{ success: boolean; message?: string; error?: string; retryAfterSeconds?: number }> {
+  ): Promise<{
+    success: boolean
+    message?: string
+    error?: string
+    code?: string
+    errorCode?: string
+    retryAfterSeconds?: number
+  }> {
     const cleanEmail = sanitizeEmail(email)
     if (!cleanEmail) {
-      return { success: false, error: "Correo electrónico no proporcionado." }
+      return {
+        success: false,
+        error: "Correo electrónico no proporcionado.",
+        code: "MISSING_FIELDS",
+        errorCode: "MISSING_FIELDS",
+      }
     }
     try {
       const res = await fetch(`${AUTH_URL}/auth/forgot-password`, {
@@ -398,29 +410,65 @@ class LauncherAuthService {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: cleanEmail, locale: locale || undefined }),
       })
-      const data = await res.json().catch(() => ({}))
-      const retryAfter = typeof data.retryAfterSeconds === "number" ? data.retryAfterSeconds : (res.ok ? 60 : undefined)
+      const data = (await res.json().catch(() => ({}))) as Record<string, any>
+      const retryAfter =
+        typeof data.retryAfterSeconds === "number"
+          ? data.retryAfterSeconds
+          : res.ok
+            ? 60
+            : undefined
       if (retryAfter !== undefined) {
         this.setCooldown("reset", cleanEmail, retryAfter)
       }
+      if (!res.ok) {
+        const code =
+          data.code ||
+          data.error ||
+          (res.status === 429
+            ? AuthErrorCode.RATE_LIMITED
+            : "RESET_EMAIL_ERROR")
+        return {
+          success: false,
+          error: data.message || data.error || code,
+          code,
+          errorCode: code,
+          retryAfterSeconds: retryAfter,
+        }
+      }
       return {
-        success: res.ok,
+        success: true,
         message: data.message,
-        error: res.ok ? undefined : data.message || data.error,
         retryAfterSeconds: retryAfter,
       }
     } catch {
-      return { success: false, error: "Error al solicitar restablecimiento de contraseña" }
+      return {
+        success: false,
+        error: "Error al solicitar restablecimiento de contraseña",
+        code: "NETWORK_ERROR",
+        errorCode: "NETWORK_ERROR",
+      }
     }
   }
 
   public async requestEmailVerification(
     email: string,
     locale?: string,
-  ): Promise<{ success: boolean; message?: string; error?: string; retryAfterSeconds?: number }> {
+  ): Promise<{
+    success: boolean
+    message?: string
+    error?: string
+    code?: string
+    errorCode?: string
+    retryAfterSeconds?: number
+  }> {
     const cleanEmail = sanitizeEmail(email)
     if (!cleanEmail) {
-      return { success: false, error: "Correo electrónico no proporcionado." }
+      return {
+        success: false,
+        error: "Correo electrónico no proporcionado.",
+        code: "MISSING_FIELDS",
+        errorCode: "MISSING_FIELDS",
+      }
     }
     try {
       const res = await fetch(`${AUTH_URL}/auth/resend-verification`, {
@@ -428,26 +476,63 @@ class LauncherAuthService {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: cleanEmail, locale: locale || undefined }),
       })
-      const data = await res.json().catch(() => ({}))
-      const retryAfter = typeof data.retryAfterSeconds === "number" ? data.retryAfterSeconds : (res.ok ? 60 : undefined)
+      const data = (await res.json().catch(() => ({}))) as Record<string, any>
+      const retryAfter =
+        typeof data.retryAfterSeconds === "number"
+          ? data.retryAfterSeconds
+          : res.ok
+            ? 60
+            : undefined
       if (retryAfter !== undefined) {
         this.setCooldown("verify", cleanEmail, retryAfter)
       }
+      if (!res.ok) {
+        const code =
+          data.code ||
+          data.error ||
+          (res.status === 429
+            ? AuthErrorCode.RATE_LIMITED
+            : "RESEND_VERIFICATION_ERROR")
+        return {
+          success: false,
+          error: data.message || data.error || code,
+          code,
+          errorCode: code,
+          retryAfterSeconds: retryAfter,
+        }
+      }
       return {
-        success: res.ok,
+        success: true,
         message: data.message,
-        error: res.ok ? undefined : data.message || data.error,
         retryAfterSeconds: retryAfter,
       }
     } catch {
-      return { success: false, error: "Error al solicitar reenvío de verificación." }
+      return {
+        success: false,
+        error: "Error al solicitar reenvío de verificación.",
+        code: "NETWORK_ERROR",
+        errorCode: "NETWORK_ERROR",
+      }
     }
   }
 
-  public async verifyEmail(token: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  public async verifyEmail(
+    token: string,
+  ): Promise<{
+    success: boolean
+    message?: string
+    error?: string
+    code?: string
+    errorCode?: string
+  }> {
     const rawToken = typeof token === "string" ? token.trim() : ""
     if (!rawToken || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken)) {
-      return { success: false, error: "Token de verificación no proporcionado o inválido." }
+      return {
+        success: false,
+        error: "Token de verificación no proporcionado o inválido.",
+        code: AuthErrorCode.INVALID_TOKEN,
+        errorCode: AuthErrorCode.INVALID_TOKEN,
+      }
     }
     try {
       const res = await fetch(`${AUTH_URL}/auth/verify-email`, {
@@ -455,28 +540,62 @@ class LauncherAuthService {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: rawToken }),
       })
-      const data = await res.json().catch(() => ({}))
+      const data = (await res.json().catch(() => ({}))) as Record<string, any>
       if (!res.ok) {
-        return { success: false, error: data.error || data.message || "Error al verificar el correo." }
+        const code =
+          data.code ||
+          data.error ||
+          (res.status === 400 || res.status === 404
+            ? AuthErrorCode.INVALID_TOKEN
+            : res.status === 410
+              ? AuthErrorCode.TOKEN_EXPIRED
+              : "VERIFY_EMAIL_ERROR")
+        return {
+          success: false,
+          error: data.error || data.message || code,
+          code,
+          errorCode: code,
+        }
       }
       return { success: true, message: data.message }
     } catch {
-      return { success: false, error: "Error de conexión al verificar el correo." }
+      return {
+        success: false,
+        error: "Error de conexión al verificar el correo.",
+        code: "NETWORK_ERROR",
+        errorCode: "NETWORK_ERROR",
+      }
     }
   }
 
   public async resetPassword(
     token: string,
     newPassword: string,
-  ): Promise<{ success: boolean; message?: string; error?: string }> {
+  ): Promise<{
+    success: boolean
+    message?: string
+    error?: string
+    code?: string
+    errorCode?: string
+  }> {
     const rawToken = typeof token === "string" ? token.trim() : ""
     const cleanPass = newPassword || ""
 
     if (!rawToken || rawToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(rawToken) || !cleanPass) {
-      return { success: false, error: "Token y nueva contraseña requeridos." }
+      return {
+        success: false,
+        error: "Token y nueva contraseña requeridos.",
+        code: "MISSING_FIELDS",
+        errorCode: "MISSING_FIELDS",
+      }
     }
     if (cleanPass.length < 8) {
-      return { success: false, error: "La contraseña debe tener al menos 8 caracteres." }
+      return {
+        success: false,
+        error: "La contraseña debe tener al menos 8 caracteres.",
+        code: "PASSWORD_TOO_SHORT",
+        errorCode: "PASSWORD_TOO_SHORT",
+      }
     }
 
     try {
@@ -485,13 +604,31 @@ class LauncherAuthService {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: rawToken, newPassword: cleanPass }),
       })
-      const data = await res.json().catch(() => ({}))
+      const data = (await res.json().catch(() => ({}))) as Record<string, any>
       if (!res.ok) {
-        return { success: false, error: data.error || data.message || "Error al restablecer la contraseña." }
+        const code =
+          data.code ||
+          data.error ||
+          (res.status === 400 || res.status === 404
+            ? AuthErrorCode.INVALID_TOKEN
+            : res.status === 410
+              ? AuthErrorCode.TOKEN_EXPIRED
+              : "RESET_PASSWORD_ERROR")
+        return {
+          success: false,
+          error: data.error || data.message || code,
+          code,
+          errorCode: code,
+        }
       }
       return { success: true, message: data.message }
     } catch {
-      return { success: false, error: "Error de conexión al restablecer la contraseña." }
+      return {
+        success: false,
+        error: "Error de conexión al restablecer la contraseña.",
+        code: "NETWORK_ERROR",
+        errorCode: "NETWORK_ERROR",
+      }
     }
   }
 
@@ -595,7 +732,9 @@ class LauncherAuthService {
         sessionStorage.removeItem("hikat_launcher_oauth_state")
         sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
       }
-      throw new Error("Estado de autenticación inválido o sesión OAuth expirada.")
+      const err: any = new Error("Estado de autenticación inválido o sesión OAuth expirada.")
+      err.code = AuthErrorCode.INVALID_STATE
+      throw err
     }
 
     if (params.expectedState && params.state !== params.expectedState) {
@@ -610,7 +749,9 @@ class LauncherAuthService {
         sessionStorage.removeItem("hikat_launcher_oauth_state")
         sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
       }
-      throw new Error("Estado de autenticación inválido (posible ataque CSRF).")
+      const err: any = new Error("Estado de autenticación inválido (posible ataque CSRF).")
+      err.code = AuthErrorCode.INVALID_STATE
+      throw err
     }
 
     const finalKeepSession = typeof keepSession === "boolean" ? keepSession : true
@@ -673,11 +814,22 @@ class LauncherAuthService {
     }
   }
 
-  public async getAuthMethods(): Promise<{ success: boolean; methods?: AuthMethodSummary[]; error?: string }> {
+  public async getAuthMethods(): Promise<{
+    success: boolean
+    methods?: AuthMethodSummary[]
+    error?: string
+    code?: string
+    errorCode?: string
+  }> {
     try {
       const token = await this.ensureValidAccessToken()
       if (!token) {
-        return { success: false, error: "No se encontró sesión activa." }
+        return {
+          success: false,
+          error: "No se encontró sesión activa.",
+          code: "NO_SESSION",
+          errorCode: "NO_SESSION",
+        }
       }
       const res = await fetch(`${AUTH_URL}/auth/me/methods`, {
         method: "GET",
@@ -687,23 +839,41 @@ class LauncherAuthService {
         },
       })
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        return { success: false, error: data.error || data.message || `HTTP ${res.status}` }
+        const data = (await res.json().catch(() => ({}))) as Record<string, any>
+        const code = data.code || data.error || `HTTP_${res.status}`
+        return {
+          success: false,
+          error: data.error || data.message || code,
+          code,
+          errorCode: code,
+        }
       }
       const data = await res.json()
       return { success: true, methods: data.methods || [] }
     } catch (err: any) {
-      return { success: false, error: err?.message || "Error al consultar métodos de autenticación." }
+      return {
+        success: false,
+        error: err?.message || "Error al consultar métodos de autenticación.",
+        code: "NETWORK_ERROR",
+        errorCode: "NETWORK_ERROR",
+      }
     }
   }
 
-  public async changeUsername(newUsername: string): Promise<{ success: boolean; user?: UserProfile; error?: string; code?: string }> {
+  public async changeUsername(newUsername: string): Promise<{
+    success: boolean
+    user?: UserProfile
+    error?: string
+    code?: string
+    errorCode?: string
+  }> {
     const trimmed = typeof newUsername === "string" ? newUsername.trim() : ""
     if (!trimmed || !isValidUsername(trimmed)) {
       return {
         success: false,
         error: "INVALID_USERNAME",
-        code: "INVALID_USERNAME",
+        code: AuthErrorCode.INVALID_USERNAME,
+        errorCode: AuthErrorCode.INVALID_USERNAME,
       }
     }
     try {
@@ -720,7 +890,7 @@ class LauncherAuthService {
         },
       }
     } catch (err: any) {
-      const rawCode = err?.code || err?.name || ""
+      const rawCode = err?.code || err?.errorCode || ""
       const rawMessage = err?.message || ""
       let code = rawCode
       if (
@@ -735,11 +905,14 @@ class LauncherAuthService {
         rawMessage.includes("INVALID_USERNAME")
       ) {
         code = AuthErrorCode.INVALID_USERNAME
+      } else if (!code) {
+        code = "USERNAME_CHANGE_ERROR"
       }
       return {
         success: false,
-        error: rawMessage || "Error al cambiar el nombre de usuario.",
-        code: code || undefined,
+        error: rawMessage || code,
+        code,
+        errorCode: code,
       }
     }
   }

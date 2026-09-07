@@ -145,7 +145,7 @@ function SkinCapeItemCard({
             ) : (
               <SkinCardPreview
                 skinUrl={item.customImgUrl || (item as SkinItem).skinUrl}
-                alt={item.name}
+                alt={displayName}
                 width={110}
                 height={185}
               />
@@ -171,7 +171,7 @@ function SkinCapeItemCard({
           ) : (
             <CapeCardPreview
               capeUrl={item.customImgUrl || (item as CapeItem).capeUrl}
-              alt={item.name}
+              alt={displayName}
               width={85}
               height={136}
             />
@@ -382,12 +382,17 @@ export default function SkinsView({
             // fallback to default
           }
 
-          await onUploadSkin(file)
-          showToast(t("skins.skinUploadSuccess"), "success", extractedHex)
+          try {
+            await onUploadSkin(file)
+            showToast(t("skins.skinUploadSuccess"), "success", extractedHex)
+          } catch (uploadErr) {
+            console.error("Skin upload failed:", uploadErr)
+            showToast(t("settings.toastSaveError"), "error")
+          }
         }
       } catch (err: any) {
-        console.error("Skin upload failed:", err)
-        showToast(t("skins.invalidSkinDimensions"), "error")
+        console.error("Skin processing error:", err)
+        showToast(t("settings.toastSaveError"), "error")
       } finally {
         setIsUploading(false)
         e.target.value = ""
@@ -456,13 +461,18 @@ export default function SkinsView({
             // fallback to default
           }
 
-          const capeName = file.name.replace(/\.[^/.]+$/, "").slice(0, 20) || "Mi Capa"
-          await onUploadCape(file, capeName)
-          showToast(t("skins.capeUploadSuccess"), "success", extractedHex)
+          const capeName = file.name.replace(/\.[^/.]+$/, "").slice(0, 20) || file.name.slice(0, 20)
+          try {
+            await onUploadCape(file, capeName)
+            showToast(t("skins.capeUploadSuccess"), "success", extractedHex)
+          } catch (uploadErr) {
+            console.error("Cape upload failed:", uploadErr)
+            showToast(t("settings.toastSaveError"), "error")
+          }
         }
       } catch (err: any) {
-        console.error("Cape upload failed:", err)
-        showToast(t("skins.invalidCapeDimensions"), "error")
+        console.error("Cape processing error:", err)
+        showToast(t("settings.toastSaveError"), "error")
       } finally {
         setIsUploading(false)
         e.target.value = ""
@@ -909,11 +919,23 @@ export default function SkinsView({
               {([
                 [
                   t("skins.currentSkin"),
-                  hasSelectedSkin ? previewSkin.name : t("skins.noSkin"),
+                  hasSelectedSkin && previewSkin
+                    ? previewSkin.id === "player-custom"
+                      ? t("skins.customSkinName")
+                      : previewSkin.id === "none"
+                        ? t("skins.noSkin")
+                        : previewSkin.name || t("skins.noSkin")
+                    : t("skins.noSkin"),
                 ],
                 [
                   t("skins.currentCape"),
-                  hasSelectedCape ? previewCape.name : t("skins.noCape"),
+                  hasSelectedCape && previewCape
+                    ? previewCape.id === "player-custom"
+                      ? t("skins.customCapeName")
+                      : previewCape.id === "none"
+                        ? t("skins.noCape")
+                        : previewCape.name || t("skins.noCape")
+                    : t("skins.noCape"),
                 ],
                 [t("skins.character"), username],
               ] as const).map(([lbl, val]) => (

@@ -405,7 +405,7 @@ export async function uploadPlayerCape(
   }
 
   // 5. Add cape to player collection in D1
-  const capeName = (name && name.trim()) || file.name.replace(/\.[^/.]+$/, "") || "Mi Capa"
+  const capeName = (name && name.trim()) || file.name.replace(/\.[^/.]+$/, "") || file.name
   const addRes = await addMyPlayerCape(capeName, mediaId)
   if (!addRes.success || !addRes.data) {
     throw new Error(addRes.error || "No se pudo guardar la capa en tu colección")

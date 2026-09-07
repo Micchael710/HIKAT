@@ -196,7 +196,9 @@ export class AuthClientCore {
         this.logoutWithToken(session.accessToken, session.refreshToken).catch(() => {})
       }
       await this.clearSession()
-      throw new Error(errorMsg)
+      const err: any = new Error(errorMsg)
+      err.code = AuthErrorCode.FORBIDDEN
+      throw err
     }
 
     this.persistSession = persist
@@ -311,7 +313,9 @@ export class AuthClientCore {
     }
 
     if (!payload.accessToken || !payload.user) {
-      throw new Error("Respuesta de autenticación incompleta del servidor.")
+      const err: any = new Error("Respuesta de autenticación incompleta del servidor.")
+      err.code = "INVALID_PAYLOAD"
+      throw err
     }
 
     await this.setSession(
@@ -601,19 +605,32 @@ export class AuthClientCore {
     const data = (await res.json().catch(() => ({}))) as Record<string, any>
 
     if (!res.ok) {
-      const errCode = data.error || data.message
-      if (errCode === "EMAIL_CONFLICT_LINK_REQUIRED") {
-        throw new Error(
-          "Este correo ya pertenece a una cuenta de HiKAT. Inicia sesión usando el método con el que creaste la cuenta.",
-        )
+      const errCode =
+        data.code ||
+        data.error ||
+        (data.message === "EMAIL_CONFLICT_LINK_REQUIRED"
+          ? AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED
+          : data.message === "INVALID_STATE"
+            ? AuthErrorCode.INVALID_STATE
+            : data.message === "INVALID_PKCE"
+              ? AuthErrorCode.INVALID_PKCE
+              : data.message === "TOKEN_EXPIRED"
+                ? AuthErrorCode.TOKEN_EXPIRED
+                : data.message === "TOKEN_REUSE_DETECTED"
+                  ? AuthErrorCode.TOKEN_REUSE_DETECTED
+                  : `HTTP_${res.status}`)
+
+      let msg = data.message || data.error || "Error al completar la autenticación con el proveedor."
+      if (errCode === "EMAIL_CONFLICT_LINK_REQUIRED" || errCode === AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED) {
+        msg = "Este correo ya pertenece a una cuenta de HiKAT. Inicia sesión usando el método con el que creaste la cuenta."
+      } else if (errCode === "INVALID_STATE" || errCode === "INVALID_PKCE" || errCode === AuthErrorCode.INVALID_STATE || errCode === AuthErrorCode.INVALID_PKCE) {
+        msg = "Error en la validación de seguridad de OAuth (PKCE)."
+      } else if (errCode === "TOKEN_EXPIRED" || errCode === "TOKEN_REUSE_DETECTED" || errCode === AuthErrorCode.TOKEN_EXPIRED || errCode === AuthErrorCode.TOKEN_REUSE_DETECTED) {
+        msg = "El código de autorización expiró o ya fue utilizado."
       }
-      if (errCode === "INVALID_STATE" || errCode === "INVALID_PKCE") {
-        throw new Error("Error en la validación de seguridad de OAuth (PKCE).")
-      }
-      if (errCode === "TOKEN_EXPIRED" || errCode === "TOKEN_REUSE_DETECTED") {
-        throw new Error("El código de autorización expiró o ya fue utilizado.")
-      }
-      throw new Error(data.message || data.error || "Error al completar la autenticación con el proveedor.")
+      const err: any = new Error(msg)
+      err.code = errCode
+      throw err
     }
 
     const payload = data as {
@@ -625,7 +642,9 @@ export class AuthClientCore {
     }
 
     if (!payload.accessToken || !payload.user) {
-      throw new Error("Respuesta de autenticación OAuth incompleta.")
+      const err: any = new Error("Respuesta de autenticación OAuth incompleta.")
+      err.code = "INVALID_PAYLOAD"
+      throw err
     }
 
     const userPayload: AuthUser = {
@@ -667,7 +686,9 @@ export class AuthClientCore {
 
   public async changeUsername(newUsername: string): Promise<AuthUser> {
     if (!this.session) {
-      throw new Error("No active session")
+      const err: any = new Error("No active session")
+      err.code = "NO_SESSION"
+      throw err
     }
 
     const payload = parseJwtPayload(this.session.accessToken)
@@ -677,7 +698,9 @@ export class AuthClientCore {
 
     const token = this.session?.accessToken
     if (!token || !this.session) {
-      throw new Error("No active session")
+      const err: any = new Error("No active session")
+      err.code = "NO_SESSION"
+      throw err
     }
 
     const res = await this.fetcher(`${this.authServiceUrl}/auth/change-username`, {
@@ -692,17 +715,25 @@ export class AuthClientCore {
     const data = (await res.json().catch(() => ({}))) as Record<string, any>
 
     if (!res.ok) {
-      const errCode = data.error || data.message
-      if (errCode === AuthErrorCode.INVALID_USERNAME) {
-        const err: any = new Error(AuthErrorCode.INVALID_USERNAME)
-        err.code = AuthErrorCode.INVALID_USERNAME
+      const errCode =
+        data.code ||
+        data.error ||
+        (data.message === AuthErrorCode.INVALID_USERNAME
+          ? AuthErrorCode.INVALID_USERNAME
+          : data.message === AuthErrorCode.USERNAME_ALREADY_EXISTS
+            ? AuthErrorCode.USERNAME_ALREADY_EXISTS
+            : res.status === 409
+              ? AuthErrorCode.USERNAME_ALREADY_EXISTS
+              : res.status === 400
+                ? AuthErrorCode.INVALID_USERNAME
+                : `HTTP_${res.status}`)
+
+      if (errCode === AuthErrorCode.INVALID_USERNAME || errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
+        const err: any = new Error(errCode)
+        err.code = errCode
         throw err
       }
-      if (errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
-        const err: any = new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
-        err.code = AuthErrorCode.USERNAME_ALREADY_EXISTS
-        throw err
-      }
+
       const err: any = new Error(data.message || data.error || "Error al cambiar el nombre de usuario")
       err.code = errCode
       throw err

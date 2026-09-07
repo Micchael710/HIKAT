@@ -351,7 +351,7 @@ export function useLauncherState() {
     if (playerSkin) {
       items.push({
         id: "player-custom",
-        name: "Mi Skin",
+        name: "",
         badge: "CUSTOM",
         accent: "#38bdf8",
         customImgUrl: playerSkin.imageUrl,
@@ -383,7 +383,7 @@ export function useLauncherState() {
       if (playerSkin) {
         return {
           id: "player-custom",
-          name: "Mi Skin",
+          name: "",
           badge: "CUSTOM" as const,
           accent: "#38bdf8",
           customImgUrl: playerSkin.imageUrl,
@@ -392,7 +392,7 @@ export function useLauncherState() {
       }
       return {
         id: "player-custom",
-        name: "Mi Skin",
+        name: "",
         badge: "CUSTOM" as const,
         accent: "#38bdf8",
         customImgUrl: undefined,
@@ -419,7 +419,7 @@ export function useLauncherState() {
     const items: CapeItem[] = [
       {
         id: "none",
-        name: "Sin Capa",
+        name: "",
         badge: "N/A",
         accent: "#64748b",
       },

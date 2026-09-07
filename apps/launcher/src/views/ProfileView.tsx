@@ -8,6 +8,7 @@ import { useDynamicAccent } from "../utils/dynamicAccent"
 
 import { authService, AuthMethodSummary } from "../services/authService"
 import { isValidUsername, AuthErrorCode } from "@hikat/shared"
+import { mapAuthErrorToKey } from "../utils/authErrorMapper"
 
 interface ProfileViewProps {
   username: string
@@ -88,51 +89,17 @@ export default function ProfileView({
         lastInvalidCharsRef.current = false
         showToast(t("profile.usernameChangeSuccess"), "success")
       } else {
-        const errCode =
-          res.code ||
-          (res.error === AuthErrorCode.USERNAME_ALREADY_EXISTS ||
-          res.error?.includes("USERNAME_ALREADY_EXISTS")
-            ? AuthErrorCode.USERNAME_ALREADY_EXISTS
-            : res.error === AuthErrorCode.INVALID_USERNAME ||
-              res.error?.includes("INVALID_USERNAME")
-            ? AuthErrorCode.INVALID_USERNAME
-            : null)
-
-        if (errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
-          setUsernameError(t("profile.usernameTakenError"))
-          showToast(t("profile.usernameTakenError"), "error")
-        } else if (errCode === AuthErrorCode.INVALID_USERNAME) {
-          setUsernameError(t("profile.usernameInvalidError"))
-          showToast(t("profile.usernameInvalidError"), "error")
-        } else {
-          const msg = t("profile.usernameChangeError")
-          setUsernameError(msg)
-          showToast(msg, "error")
-        }
-      }
-    } catch (err: any) {
-      setIsSavingUsername(false)
-      const errCode =
-        err?.code ||
-        (err?.message === AuthErrorCode.USERNAME_ALREADY_EXISTS ||
-        err?.message?.includes?.("USERNAME_ALREADY_EXISTS")
-          ? AuthErrorCode.USERNAME_ALREADY_EXISTS
-          : err?.message === AuthErrorCode.INVALID_USERNAME ||
-            err?.message?.includes?.("INVALID_USERNAME")
-          ? AuthErrorCode.INVALID_USERNAME
-          : null)
-
-      if (errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
-        setUsernameError(t("profile.usernameTakenError"))
-        showToast(t("profile.usernameTakenError"), "error")
-      } else if (errCode === AuthErrorCode.INVALID_USERNAME) {
-        setUsernameError(t("profile.usernameInvalidError"))
-        showToast(t("profile.usernameInvalidError"), "error")
-      } else {
-        const msg = t("profile.usernameChangeError")
+        const errKey = mapAuthErrorToKey(res.code || res.error, "profile.usernameChangeError")
+        const msg = t(errKey)
         setUsernameError(msg)
         showToast(msg, "error")
       }
+    } catch (err: any) {
+      setIsSavingUsername(false)
+      const errKey = mapAuthErrorToKey(err?.code || err?.message, "profile.usernameChangeError")
+      const msg = t(errKey)
+      setUsernameError(msg)
+      showToast(msg, "error")
     }
   }
 

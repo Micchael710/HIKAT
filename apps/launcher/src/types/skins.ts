@@ -100,7 +100,7 @@ export interface ActiveCapeSelection {
 export const DEFAULT_SKINS: SkinItem[] = [
   {
     id: "none",
-    name: "Sin Skin",
+    name: "",
     shirt: "",
     badge: "N/A",
     accent: "#64748b",
@@ -110,7 +110,7 @@ export const DEFAULT_SKINS: SkinItem[] = [
 export const DEFAULT_CAPES: CapeItem[] = [
   {
     id: "none",
-    name: "Sin Capa",
+    name: "",
     color: "",
     badge: "N/A",
     accent: "#64748b",
