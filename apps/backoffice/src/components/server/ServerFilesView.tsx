@@ -119,7 +119,7 @@ export default function ServerFilesView({ theme, serverId, serverStatus, onToast
         setIsRefreshing(false)
       }
     }
-  }, [currentPath])
+  }, [currentPath, serverId])
 
   useEffect(() => {
     isMountedRef.current = true

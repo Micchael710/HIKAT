@@ -301,6 +301,29 @@ describe("Multiserver Backoffice - CreateServerModal", () => {
     expect(screen.getByText("Reintentar cargar catálogo")).toBeDefined()
     expect(screen.queryByPlaceholderText("1.21.1")).toBeNull()
   })
+
+  it("rejects server name with leading or trailing whitespace and does not advance or call createServer", async () => {
+    const createSpy = vi.spyOn(serverApi, "createServer")
+
+    await act(async () => {
+      render(
+        <CreateServerModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onCreated={vi.fn()}
+          theme="dark"
+        />,
+      )
+    })
+
+    const nameInput = screen.getByPlaceholderText("Ej. HiKAT Survival, HiKAT RPG...")
+    fireEvent.change(nameInput, { target: { value: " Servidor Con Espacios " } })
+    fireEvent.click(screen.getByText("Siguiente: Entorno"))
+
+    expect(screen.getByText("El nombre del servidor no puede empezar ni terminar con espacios.")).toBeDefined()
+    expect(screen.queryByText("Mod Loader")).toBeNull()
+    expect(createSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe("Multiserver Backoffice - ServerSettingsView", () => {

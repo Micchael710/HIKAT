@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import type {
   ModProvider,
   ModSearchResultItem,
@@ -83,7 +83,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   const debounceTimer = useRef<NodeJS.Timeout | null>(null)
   const requestIdRef = useRef(0)
 
-  const executeSearch = (
+  const executeSearch = useCallback((
     searchQuery: string,
     contentType: ContentType,
     providerTab: ModProvider | "ALL",
@@ -135,7 +135,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         setLoading(false)
         setLoadingMore(false)
       })
-  }
+  }, [serverId])
 
   // Trigger search on tab changes
   useEffect(() => {
@@ -153,7 +153,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         debounceTimer.current = null
       }
     }
-  }, [selectedContentType, selectedProviderTab])
+  }, [selectedContentType, selectedProviderTab, serverId, executeSearch])
 
   // Clean up
   useEffect(() => {
@@ -195,8 +195,33 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         (detail?.environment === "UNKNOWN" || !detail?.environment),
     )
 
+  const resolvePlanForVersion = useCallback(async (
+    provider: ModProvider,
+    projectId: string,
+    versionId: string,
+    contentType: ContentType,
+    environmentOverride?: import("../../../types").ModEnvironment | null,
+  ) => {
+    setResolvingPlan(true)
+    setInstallError(null)
+    try {
+      const resolvedPlan = await graphqlClient.resolveServerContentPlan({
+        provider,
+        projectId,
+        versionId,
+        contentType,
+        environmentOverride: environmentOverride || undefined,
+      }, serverId)
+      setPlan(resolvedPlan)
+    } catch (err: any) {
+      setInstallError(err.message || "Error al calcular el plan de instalación.")
+    } finally {
+      setResolvingPlan(false)
+    }
+  }, [serverId])
+
   // When a mod is selected, load detail
-  const handleSelectMod = async (mod: ModSearchResultItem) => {
+  const handleSelectMod = useCallback(async (mod: ModSearchResultItem) => {
     setSelectedMod(mod)
     setModDetail(null)
     setPlan(null)
@@ -226,32 +251,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     } finally {
       setLoadingDetail(false)
     }
-  }
-
-  const resolvePlanForVersion = async (
-    provider: ModProvider,
-    projectId: string,
-    versionId: string,
-    contentType: ContentType,
-    environmentOverride?: import("../../../types").ModEnvironment | null,
-  ) => {
-    setResolvingPlan(true)
-    setInstallError(null)
-    try {
-      const resolvedPlan = await graphqlClient.resolveServerContentPlan({
-        provider,
-        projectId,
-        versionId,
-        contentType,
-        environmentOverride: environmentOverride || undefined,
-      }, serverId)
-      setPlan(resolvedPlan)
-    } catch (err: any) {
-      setInstallError(err.message || "Error al calcular el plan de instalación.")
-    } finally {
-      setResolvingPlan(false)
-    }
-  }
+  }, [serverId, selectedContentType, resolvePlanForVersion])
 
   const handleVersionChange = (newVersionId: string) => {
     setSelectedVersionId(newVersionId)

@@ -219,6 +219,10 @@ export default function CreateServerModal({
       setError("El nombre del servidor es obligatorio.")
       return
     }
+    if (name !== name.trim()) {
+      setError("El nombre del servidor no puede empezar ni terminar con espacios.")
+      return
+    }
     setCurrentStep(2)
   }
 
@@ -297,7 +301,7 @@ export default function CreateServerModal({
       // 3. Create Server mutation
       setSubmitStatusText("Creando servidor y provisionando Pterodactyl...")
       const input: CreateServerInput = {
-        name: name.trim(),
+        name,
         minecraftVersion: minecraftVersion.trim(),
         modLoader: loader as import("../../types").GameModLoader,
         modLoaderVersion: loader !== "VANILLA" && loaderVersion.trim() ? loaderVersion.trim() : undefined,
@@ -551,7 +555,7 @@ export default function CreateServerModal({
                     <strong style={{ color: "#3ec4c0" }}>Importante:</strong> El nombre del servidor será permanente y se utilizará exactamente como nombre de la carpeta local.
                   </div>
                   <div style={{ marginTop: 4, fontFamily: "monospace", fontSize: 11.5, color: isDark ? "#94a3b8" : "#64748b" }}>
-                    Ruta local: HiKAT/games/{name.trim() || "<nombre-servidor>"}
+                    Ruta local: HiKAT/games/{name || "<nombre-servidor>"}
                   </div>
                 </div>
               </div>
@@ -1223,7 +1227,7 @@ export default function CreateServerModal({
                       Carpeta Local
                     </span>
                     <span style={{ fontFamily: "monospace", color: "#3ec4c0" }}>
-                      HiKAT/games/{name.trim() || "<nombre-servidor>"}
+                      HiKAT/games/{name || "<nombre-servidor>"}
                     </span>
                   </div>
 
