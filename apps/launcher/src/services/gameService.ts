@@ -278,22 +278,15 @@ export const gameService = {
         return null
       }
 
-      // GraphQL responded with failure
+      // Authoritative transport failures only: NETWORK_ERROR or TIMEOUT
       isConnectivityFailure =
-        gqlRes.errorCode === "NETWORK_ERROR" ||
-        gqlRes.errorCode === "TIMEOUT" ||
-        (typeof gqlRes.error === "string" &&
-          /network|timeout|abort|offline|failed to fetch/i.test(gqlRes.error))
-    } catch (err: any) {
-      const isTimeout = err?.name === "AbortError"
-      isConnectivityFailure =
-        isTimeout ||
-        (typeof err?.message === "string" &&
-          /network|timeout|abort|offline|failed to fetch/i.test(err.message))
+        gqlRes.errorCode === "NETWORK_ERROR" || gqlRes.errorCode === "TIMEOUT"
+    } catch (_) {
+      isConnectivityFailure = false
     }
 
     if (!isConnectivityFailure) {
-      // Non-connectivity error (e.g. SESSION_EXPIRED, URL_BLOCKED, application GraphQL error)
+      // Non-connectivity error (e.g. GRAPHQL_ERROR, SESSION_EXPIRED, AUTH_REFRESH_TRANSIENT_FAILURE, URL_BLOCKED, HTTP_*)
       return null
     }
 

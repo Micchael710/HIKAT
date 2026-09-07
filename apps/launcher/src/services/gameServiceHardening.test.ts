@@ -806,6 +806,48 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     const manifestAppError = await gameService.checkGameManifest()
     expect(manifestAppError).toBeNull()
   })
+
+  it("24. Non-connectivity error with misleading 'network' or 'timeout' text in error message does NOT trigger offline fallback", async () => {
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "stale-3.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [],
+      }),
+    )
+
+    // GRAPHQL_ERROR with string containing "Network"
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "GRAPHQL_ERROR",
+      error: "Network configuration is invalid",
+    })
+
+    const manifestGraphql = await gameService.checkGameManifest()
+    expect(manifestGraphql).toBeNull()
+
+    // AUTH_REFRESH_TRANSIENT_FAILURE with string containing "offline"
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "AUTH_REFRESH_TRANSIENT_FAILURE",
+      error: "Authentication server reported offline status",
+    })
+
+    const manifestAuth = await gameService.checkGameManifest()
+    expect(manifestAuth).toBeNull()
+
+    // HTTP_500 with string containing "timeout"
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "HTTP_500",
+      error: "Gateway timeout occurred upstream",
+    })
+
+    const manifestHttp = await gameService.checkGameManifest()
+    expect(manifestHttp).toBeNull()
+  })
 })
 
 
