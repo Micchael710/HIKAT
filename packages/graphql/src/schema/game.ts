@@ -490,22 +490,23 @@ export const gameTypeDefs = /* GraphQL */ `
     """
     Authoritative active published modpack manifest for Launcher
     """
-    publishedModpack: PublishedModpack
+    publishedModpack(serverId: ID): PublishedModpack
 
     """
     Administrative overview of game releases and drafts - requires ADMIN role
     """
-    adminGameOverview: AdminGameOverview!
+    adminGameOverview(serverId: ID): AdminGameOverview!
 
     """
     Historical releases - requires ADMIN role
     """
-    gameReleaseHistory: [GameRelease!]!
+    gameReleaseHistory(serverId: ID): [GameRelease!]!
 
     """
     List of files associated with a release or draft - requires ADMIN role
     """
     adminGameFiles(
+      serverId: ID
       releaseId: ID
       category: GameFileCategory
     ): [AdminGameFile!]!
@@ -532,6 +533,7 @@ export const gameTypeDefs = /* GraphQL */ `
     Search mods across Modrinth and/or CurseForge filtered by Minecraft version & mod loader - requires ADMIN role
     """
     searchMods(
+      serverId: ID
       query: String!
       contentType: ContentType
       provider: ModProvider
@@ -552,6 +554,7 @@ export const gameTypeDefs = /* GraphQL */ `
     Resolve and preview complete dependency plan before installing - requires ADMIN role
     """
     resolveModInstallationPlan(
+      serverId: ID
       input: ResolveModPlanInput!
     ): ModInstallationPlan!
   }
@@ -560,17 +563,17 @@ export const gameTypeDefs = /* GraphQL */ `
     """
     Create a new draft snapshot cloned from the current published release - requires ADMIN role
     """
-    prepareGameDraft(input: PrepareGameDraftInput): GameRelease!
+    prepareGameDraft(serverId: ID, input: PrepareGameDraftInput): GameRelease!
 
     """
     Discard the active draft and any pending uncommitted changes - requires ADMIN role
     """
-    discardGameDraft: Boolean!
+    discardGameDraft(serverId: ID): Boolean!
 
     """
     Request a single-use token to upload a game file binary - requires ADMIN role
     """
-    createGameFileUpload(input: CreateGameFileUploadInput!): GameFileUploadPayload!
+    createGameFileUpload(serverId: ID, input: CreateGameFileUploadInput!): GameFileUploadPayload!
 
     """
     Finalize and verify a direct R2 multipart upload - requires ADMIN role
@@ -580,7 +583,7 @@ export const gameTypeDefs = /* GraphQL */ `
     """
     Add an uploaded game file to the active draft - requires ADMIN role
     """
-    addGameFile(input: AddGameFileInput!): AdminGameFile!
+    addGameFile(serverId: ID, input: AddGameFileInput!): AdminGameFile!
 
     """
     Update metadata of an existing game file in the active draft - requires ADMIN role
@@ -590,62 +593,63 @@ export const gameTypeDefs = /* GraphQL */ `
     """
     Save direct UTF-8 text file content into active draft - requires ADMIN role
     """
-    saveGameFileContent(input: SaveGameFileContentInput!): AdminGameFile!
+    saveGameFileContent(serverId: ID, input: SaveGameFileContentInput!): AdminGameFile!
 
     """
     Create an explicit directory record in the active draft - requires ADMIN role
     """
-    createGameFolder(logicalPath: String!): AdminGameFile!
+    createGameFolder(serverId: ID, logicalPath: String!): AdminGameFile!
 
     """
     Rename a file or folder path in the active draft - requires ADMIN role
     """
-    renameGamePath(oldPath: String!, newPath: String!): Boolean!
+    renameGamePath(serverId: ID, oldPath: String!, newPath: String!): Boolean!
 
     """
     Move one or multiple files/folders into a destination folder in active draft - requires ADMIN role
     """
-    moveGamePaths(sources: [String!]!, destinationFolder: String!): Boolean!
+    moveGamePaths(serverId: ID, sources: [String!]!, destinationFolder: String!): Boolean!
 
     """
     Copy one or multiple files/folders into a destination folder in active draft - requires ADMIN role
     """
-    copyGamePaths(sources: [String!]!, destinationFolder: String!): Boolean!
+    copyGamePaths(serverId: ID, sources: [String!]!, destinationFolder: String!): Boolean!
 
     """
     Delete one or multiple files or folders from active draft - requires ADMIN role
     """
-    deleteGamePaths(paths: [String!]!): Boolean!
+    deleteGamePaths(serverId: ID, paths: [String!]!): Boolean!
 
     """
     Set explicit policy on a file or folder (pass null to inherit) - requires ADMIN role
     """
-    setGamePathPolicy(path: String!, explicitPolicy: SyncPolicy): Boolean!
+    setGamePathPolicy(serverId: ID, path: String!, explicitPolicy: SyncPolicy): Boolean!
 
     """
     Remove a game file from the active draft - requires ADMIN role
     """
-    removeGameFile(id: ID!): Boolean!
+    removeGameFile(serverId: ID, id: ID!): Boolean!
 
     """
     Restore a removed game file back to the active draft - requires ADMIN role
     """
-    restoreGameFile(id: ID!): AdminGameFile!
+    restoreGameFile(serverId: ID, id: ID!): AdminGameFile!
 
     """
     Update metadata (version, notes, coverMediaId) of the active draft - requires ADMIN role
     """
-    updateGameDraftMetadata(input: UpdateGameDraftMetadataInput!): GameRelease!
+    updateGameDraftMetadata(serverId: ID, input: UpdateGameDraftMetadataInput!): GameRelease!
 
     """
     Atomically publish the active draft as the new official version - requires ADMIN role
     """
-    publishGameRelease(input: PublishGameReleaseInput!): GameRelease!
+    publishGameRelease(serverId: ID, input: PublishGameReleaseInput!): GameRelease!
 
     """
     Download, validate, and install a mod and its required dependencies into the active draft - requires ADMIN role
     """
     installModPlan(
+      serverId: ID
       input: InstallModPlanInput!
     ): [AdminGameFile!]!
   }

@@ -1747,6 +1747,109 @@ export const UpdateDeploymentOrder = {
   PLAYERS_FIRST: "PLAYERS_FIRST",
 } as const
 
+// --- Multi-Server System (Phase 09 / Multi-Server Backend) ---
+
+export const ALLOWED_SERVER_PROVISIONING_STATUSES = ["PROVISIONING", "READY", "FAILED"] as const
+export type ServerProvisioningStatus = (typeof ALLOWED_SERVER_PROVISIONING_STATUSES)[number]
+export const ServerProvisioningStatus = {
+  PROVISIONING: "PROVISIONING",
+  READY: "READY",
+  FAILED: "FAILED",
+} as const
+
+const INVALID_WINDOWS_FOLDER_CHARS = /[<>:"/\\|?*\x00-\x1F\x7F]/
+
+export function validateWindowsFolderName(name: unknown): string {
+  if (typeof name !== "string") {
+    throw new Error("El nombre del servidor es obligatorio.")
+  }
+  if (name.endsWith(".") || name.endsWith(" ")) {
+    throw new Error("El nombre del servidor no puede terminar con un punto ni con un espacio.")
+  }
+  const trimmed = name.trim()
+  if (trimmed.length === 0) {
+    throw new Error("El nombre del servidor no puede estar vacío.")
+  }
+  if (trimmed.length > 64) {
+    throw new Error("El nombre del servidor no puede superar los 64 caracteres.")
+  }
+  if (trimmed === "." || trimmed === "..") {
+    throw new Error("El nombre del servidor no puede ser '.' ni '..'.")
+  }
+  if (INVALID_WINDOWS_FOLDER_CHARS.test(trimmed)) {
+    throw new Error("El nombre del servidor contiene caracteres no permitidos en Windows (< > : \" / \\ | ? *).")
+  }
+  const baseNameWithoutExt = trimmed.split(".")[0]?.toLowerCase() || ""
+  if (WINDOWS_RESERVED_NAMES.has(trimmed.toLowerCase()) || WINDOWS_RESERVED_NAMES.has(baseNameWithoutExt)) {
+    throw new Error(`El nombre del servidor "${trimmed}" es un nombre reservado del sistema.`)
+  }
+  return trimmed
+}
+
+export function isValidWindowsFolderName(name: unknown): boolean {
+  try {
+    validateWindowsFolderName(name)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const HEX_COLOR_REGEX = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/
+
+export function normalizeHexColor(color: unknown): string | null {
+  if (color === null || color === undefined || color === "") return null
+  if (typeof color !== "string") {
+    throw new Error("El color de acento debe ser un texto HEX válido (e.g. #FF5500).")
+  }
+  const trimmed = color.trim()
+  if (!HEX_COLOR_REGEX.test(trimmed)) {
+    throw new Error("El color de acento debe ser un código HEX válido (#RGB o #RRGGBB).")
+  }
+  if (trimmed.length === 4) {
+    const r = trimmed[1]
+    const g = trimmed[2]
+    const b = trimmed[3]
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase()
+  }
+  return trimmed.toUpperCase()
+}
+
+export function isValidHexColor(color: unknown): boolean {
+  try {
+    if (color === null || color === undefined || color === "") return true
+    normalizeHexColor(color)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function resolveJavaMajorForMinecraft(minecraftVersion: string): number {
+  const clean = (minecraftVersion || "").trim()
+  const parts = clean.split(".")
+  const major = parseInt(parts[0] || "1", 10)
+  const minor = parseInt(parts[1] || "0", 10)
+  const patch = parseInt(parts[2] || "0", 10)
+
+  if (major >= 26) return 21
+  if (major === 1) {
+    if (minor > 20 || (minor === 20 && patch >= 5)) {
+      return 21
+    }
+    if (minor >= 18) {
+      return 17
+    }
+    if (minor === 17) {
+      return 16
+    }
+    return 8
+  }
+  return 21
+}
+
+
+
 
 
 

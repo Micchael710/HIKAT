@@ -5,7 +5,7 @@
  * human schedule formatting, and multi-task atomic compensation.
  */
 
-import { eq, inArray } from "drizzle-orm"
+import { eq, and, inArray } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import {
   convertAutomationToPterodactylCron,
@@ -20,7 +20,7 @@ import {
 import type { Env } from "../../types"
 import type { IPterodactylClient, PterodactylScheduleResponse } from "./types"
 import { ServerInfrastructureError } from "./pterodactylClient"
-import { createPterodactylClient } from "./serverAdministrationService"
+import { resolvePterodactylClient } from "./serverAdministrationService"
 
 export interface ServerAutomationItemData {
   id: string
@@ -372,7 +372,6 @@ export function checkScheduleAndTasksMatch(
   if (norm(cron.month) !== "*") {
     return false
   }
-
   return true
 }
 
@@ -382,9 +381,22 @@ export function checkScheduleAndTasksMatch(
 export async function listServerAutomations(
   env: Env,
   db?: Database,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient,
 ): Promise<ServerAutomationItemData[]> {
-  const client = clientOverride || createPterodactylClient(env)
+  let serverId: string | null = null
+  let clientOverride: IPterodactylClient | undefined = undefined
+
+  if (arg1 && typeof arg1 === "object") {
+    clientOverride = arg1 as IPterodactylClient
+  } else if (typeof arg1 === "string") {
+    serverId = arg1
+    clientOverride = arg2
+  } else if (arg2 && typeof arg2 === "object") {
+    clientOverride = arg2
+  }
+
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const res = await client.listSchedules()
   if (!res || !res.data || !Array.isArray(res.data)) {
     return []
@@ -396,7 +408,12 @@ export async function listServerAutomations(
   const d1TasksMap = new Map<string, schema.ServerTaskRecord>()
   if (db) {
     try {
-      const d1Records = await db.select().from(schema.serverTasks).all()
+      const conditions = serverId ? [eq(schema.serverTasks.serverId, serverId)] : []
+      const d1Records = await db
+        .select()
+        .from(schema.serverTasks)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .all()
       for (const rec of d1Records) {
         d1TasksMap.set(rec.scheduleId, rec)
       }
@@ -404,9 +421,11 @@ export async function listServerAutomations(
       // Cleanup stale D1 records that no longer exist in Pterodactyl
       const staleScheduleIds = Array.from(d1TasksMap.keys()).filter((id) => !pteroScheduleIds.has(id))
       if (staleScheduleIds.length > 0) {
+        const deleteConditions = [inArray(schema.serverTasks.scheduleId, staleScheduleIds)]
+        if (serverId) deleteConditions.push(eq(schema.serverTasks.serverId, serverId))
         await db
           .delete(schema.serverTasks)
-          .where(inArray(schema.serverTasks.scheduleId, staleScheduleIds))
+          .where(and(...deleteConditions))
       }
     } catch {
       // Non-blocking database error
@@ -439,77 +458,14 @@ export async function listServerAutomations(
       } else {
         frequency = "WEEKLY"
         weekday = parseInt(cron.day_of_week, 10)
-        if (isNaN(weekday)) weekday = 1
       }
     }
 
-    const firstTask = attr.tasks && attr.tasks.length > 0 ? attr.tasks[0]?.attributes : undefined
-    let action: ServerAutomationAction = "BACKUP"
-    let command: string | null = null
+    const template: ServerTaskTemplate | null = (d1Record?.template as ServerTaskTemplate) || null
+    const action: ServerAutomationAction =
+      (d1Record?.action as ServerAutomationAction) ||
+      (d1Record?.command ? "COMMAND" : "BACKUP")
 
-    if (firstTask) {
-      if (firstTask.action === "backup") action = "BACKUP"
-      else if (firstTask.action === "power") {
-        const p = (firstTask.payload || "").toLowerCase()
-        if (p === "start") action = "START"
-        else if (p === "stop") action = "STOP"
-        else action = "RESTART"
-      } else if (firstTask.action === "command") {
-        action = "COMMAND"
-        command = firstTask.payload || null
-      }
-    }
-
-    if (d1Record) {
-      const template = d1Record.template as ServerTaskTemplate
-      const storedAction =
-        (d1Record.action as ServerAutomationAction) ||
-        (d1Record.command ? "COMMAND" : action)
-      const plan = buildTemplatePlan({
-        template,
-        action: storedAction,
-        command: d1Record.command,
-        delaySeconds: d1Record.delaySeconds,
-      })
-
-      const isMatching = checkScheduleAndTasksMatch(attr, d1Record, plan)
-      if (isMatching) {
-        const parsedWeekdays = d1Record.weekdays
-          ? JSON.parse(d1Record.weekdays)
-          : weekdays
-        const humanSchedule = formatScheduleHumanDescription({
-          frequency: d1Record.frequency as ServerAutomationFrequency,
-          time: d1Record.time || time,
-          weekday: d1Record.weekday ?? weekday,
-          weekdays: parsedWeekdays,
-          intervalHours: d1Record.intervalHours ?? intervalHours,
-        })
-
-        return {
-          id: scheduleId,
-          name: d1Record.name,
-          template,
-          action: storedAction,
-          frequency: d1Record.frequency as ServerAutomationFrequency,
-          time: d1Record.time || time,
-          intervalHours: d1Record.intervalHours ?? intervalHours,
-          weekday: d1Record.weekday ?? weekday,
-          weekdays: parsedWeekdays,
-          command: d1Record.command,
-          delaySeconds: d1Record.delaySeconds,
-          humanSchedule,
-          enabled: attr.is_active,
-          isProcessing: attr.is_processing,
-          isAdvanced: false,
-          isManaged: true,
-          lastRunAt: attr.last_run_at,
-          nextRunAt: attr.next_run_at,
-        }
-      }
-    }
-
-    // Schedule not managed by HiKAT or externally modified
-    const isMultiTask = attr.tasks && attr.tasks.length > 1
     const humanSchedule = formatScheduleHumanDescription({
       frequency,
       time,
@@ -518,30 +474,40 @@ export async function listServerAutomations(
       intervalHours,
     })
 
+    // Phase 07 hardening: isManaged is true ONLY IF d1Record exists AND schedule matches D1 template
+    let isManaged = false
+    if (d1Record) {
+      const plan = buildTemplatePlan({
+        template: d1Record.template as ServerTaskTemplate,
+        action: (d1Record.action as ServerAutomationAction) || (d1Record.command ? "COMMAND" : "BACKUP"),
+        command: d1Record.command,
+        delaySeconds: d1Record.delaySeconds,
+      })
+      isManaged = checkScheduleAndTasksMatch(attr, d1Record, plan)
+    }
+
+    const isAdvanced = !isManaged
+
     return {
       id: scheduleId,
-      name: d1Record
-        ? d1Record.name
-        : isMultiTask
-          ? `${attr.name || "Tarea"} (Avanzada)`
-          : attr.name || "Tarea",
-      template: d1Record ? (d1Record.template as ServerTaskTemplate) : null,
-      action: d1Record
-        ? (d1Record.action as ServerAutomationAction) || action
-        : action,
+      name: attr.name,
+      action,
+      template,
       frequency,
       time,
       intervalHours,
       weekday,
       weekdays,
-      command,
+      command: d1Record?.command || null,
+      delaySeconds: d1Record?.delaySeconds || null,
+      message: null,
       humanSchedule,
       enabled: attr.is_active,
       isProcessing: attr.is_processing,
-      isAdvanced: isMultiTask || Boolean(d1Record),
-      isManaged: false,
-      lastRunAt: attr.last_run_at,
-      nextRunAt: attr.next_run_at,
+      isAdvanced,
+      isManaged,
+      lastRunAt: attr.last_run_at || null,
+      nextRunAt: attr.next_run_at || null,
     }
   })
 }
@@ -550,11 +516,41 @@ export async function listServerAutomations(
  * Creates a scheduled server task with automatic multi-task generation and compensation rollback on failure.
  */
 export async function createServerAutomation(
-  env: Env,
-  input: ServerAutomationModel,
-  clientOverride?: IPterodactylClient,
-  db?: Database,
+  arg1: Database | Env,
+  arg2: Env | ServerAutomationModel,
+  arg3?: ServerAutomationModel | IPterodactylClient | string | null,
+  arg4?: string | IPterodactylClient | Database | null,
+  arg5?: IPterodactylClient | Database,
 ): Promise<ServerAutomationItemData> {
+  let db: Database | undefined
+  let env: Env
+  let input: ServerAutomationModel
+  let serverId: string | null = null
+  let clientOverride: IPterodactylClient | undefined
+
+  if (arg1 && typeof arg1 === "object" && "PTERODACTYL_BASE_URL" in arg1) {
+    // Legacy: (env, input, clientOverride?, db?)
+    env = arg1 as Env
+    input = arg2 as ServerAutomationModel
+    if (arg3 && typeof arg3 === "object") {
+      clientOverride = arg3 as IPterodactylClient
+    }
+    if (arg4 && typeof arg4 === "object") {
+      db = arg4 as Database
+    }
+  } else {
+    // New: (db, env, input, serverId?, clientOverride?)
+    db = arg1 as Database
+    env = arg2 as Env
+    input = arg3 as ServerAutomationModel
+    if (typeof arg4 === "string") {
+      serverId = arg4
+      clientOverride = arg5 as IPterodactylClient
+    } else if (arg4 && typeof arg4 === "object") {
+      clientOverride = arg4 as IPterodactylClient
+    }
+  }
+
   if (!db) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
@@ -563,7 +559,7 @@ export async function createServerAutomation(
   }
 
   validateTaskInput(input)
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const plan = buildTemplatePlan(input)
   const cron = convertAutomationToPterodactylCron(
     input.frequency,
@@ -616,6 +612,7 @@ export async function createServerAutomation(
     await db.insert(schema.serverTasks).values({
       id: crypto.randomUUID(),
       scheduleId,
+      serverId: serverId || null,
       template: plan.template,
       action: plan.action,
       name: input.name.trim(),
@@ -680,12 +677,45 @@ export async function createServerAutomation(
  * Updates a scheduled automation with multi-task compensation and atomic rollback.
  */
 export async function updateServerAutomation(
-  env: Env,
-  id: string,
-  input: ServerAutomationModel,
-  clientOverride?: IPterodactylClient,
-  db?: Database,
+  arg1: Database | Env,
+  arg2: Env | string,
+  arg3: string | ServerAutomationModel,
+  arg4?: ServerAutomationModel | IPterodactylClient | string | null,
+  arg5?: string | IPterodactylClient | Database | null,
+  arg6?: IPterodactylClient | Database,
 ): Promise<ServerAutomationItemData> {
+  let db: Database | undefined
+  let env: Env
+  let id: string
+  let input: ServerAutomationModel
+  let serverId: string | null = null
+  let clientOverride: IPterodactylClient | undefined
+
+  if (typeof arg2 === "string") {
+    // Legacy: (env, id, input, clientOverride?, db?)
+    env = arg1 as Env
+    id = arg2
+    input = arg3 as ServerAutomationModel
+    if (arg4 && typeof arg4 === "object") {
+      clientOverride = arg4 as IPterodactylClient
+    }
+    if (arg5 && typeof arg5 === "object") {
+      db = arg5 as Database
+    }
+  } else {
+    // New: (db, env, id, input, serverId?, clientOverride?)
+    db = arg1 as Database
+    env = arg2 as Env
+    id = arg3 as string
+    input = arg4 as ServerAutomationModel
+    if (typeof arg5 === "string") {
+      serverId = arg5
+      clientOverride = arg6 as IPterodactylClient
+    } else if (arg5 && typeof arg5 === "object") {
+      clientOverride = arg5 as IPterodactylClient
+    }
+  }
+
   if (!db) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
@@ -693,17 +723,19 @@ export async function updateServerAutomation(
     )
   }
 
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   // 1. Fetch full schedule from Pterodactyl FIRST
   const fullSchedule = await client.getSchedule(id)
   const existingTasks = fullSchedule.attributes.tasks || []
 
   // 2. Check if schedule is managed in D1
+  const conditions = [eq(schema.serverTasks.scheduleId, id)]
+  if (serverId) conditions.push(eq(schema.serverTasks.serverId, serverId))
   const d1Record = await db
     .select()
     .from(schema.serverTasks)
-    .where(eq(schema.serverTasks.scheduleId, id))
+    .where(and(...conditions))
     .get()
 
   if (!d1Record) {
@@ -809,6 +841,8 @@ export async function updateServerAutomation(
 
     // 4. Restore D1 record
     try {
+      const restoreConditions = [eq(schema.serverTasks.scheduleId, id)]
+      if (serverId) restoreConditions.push(eq(schema.serverTasks.serverId, serverId))
       await db
         .update(schema.serverTasks)
         .set({
@@ -828,14 +862,14 @@ export async function updateServerAutomation(
           enabled: originalD1.enabled,
           updatedAt: originalD1.updatedAt,
         })
-        .where(eq(schema.serverTasks.scheduleId, id))
+        .where(and(...restoreConditions))
     } catch (e: any) {
       rollbackErrors.push(`Fallo al restaurar registro en D1: ${e.message || e}`)
     }
   }
 
   try {
-    // 3. Update schedule metadata (name, cron, enabled, only_when_online)
+    // 3. Update schedule metadata
     await client.updateSchedule(id, {
       name: input.name.trim(),
       is_active: input.enabled ?? true,
@@ -883,6 +917,8 @@ export async function updateServerAutomation(
 
     // 5. Update D1 record
     const now = new Date().toISOString()
+    const updateConditions = [eq(schema.serverTasks.scheduleId, id)]
+    if (serverId) updateConditions.push(eq(schema.serverTasks.serverId, serverId))
     await db
       .update(schema.serverTasks)
       .set({
@@ -902,7 +938,7 @@ export async function updateServerAutomation(
         enabled: input.enabled ?? true,
         updatedAt: now,
       })
-      .where(eq(schema.serverTasks.scheduleId, id))
+      .where(and(...updateConditions))
   } catch (err: any) {
     await rollback()
     let errorMsg = `Error al actualizar la tarea programada: ${err.message || "Fallo en la comunicación con el servidor"}`
@@ -947,11 +983,43 @@ export async function updateServerAutomation(
  * Manually executes a scheduled automation now.
  */
 export async function runServerAutomation(
-  env: Env,
-  id: string,
-  clientOverride?: IPterodactylClient,
-  db?: Database,
+  arg1: Database | Env,
+  arg2: Env | string,
+  arg3?: string | IPterodactylClient | null,
+  arg4?: string | IPterodactylClient | Database | null,
+  arg5?: Database | IPterodactylClient,
 ): Promise<boolean> {
+  let db: Database | undefined
+  let env: Env
+  let id: string
+  let serverId: string | null = null
+  let clientOverride: IPterodactylClient | undefined
+
+  if (typeof arg2 === "string") {
+    // (env, id, ...)
+    env = arg1 as Env
+    id = arg2
+    if (typeof arg3 === "string") {
+      serverId = arg3
+      if (arg4 && typeof arg4 === "object") clientOverride = arg4 as IPterodactylClient
+      if (arg5 && typeof arg5 === "object") db = arg5 as Database
+    } else if (arg3 && typeof arg3 === "object") {
+      clientOverride = arg3 as IPterodactylClient
+      if (arg4 && typeof arg4 === "object") db = arg4 as Database
+    }
+  } else {
+    // (db, env, id, serverId?, clientOverride?)
+    db = arg1 as Database
+    env = arg2 as Env
+    id = arg3 as string
+    if (typeof arg4 === "string") {
+      serverId = arg4
+      clientOverride = arg5 as IPterodactylClient
+    } else if (arg4 && typeof arg4 === "object") {
+      clientOverride = arg4 as IPterodactylClient
+    }
+  }
+
   if (!db) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
@@ -959,14 +1027,15 @@ export async function runServerAutomation(
     )
   }
 
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const fullSchedule = await client.getSchedule(id)
-  const existingTasks = fullSchedule.attributes.tasks || []
 
+  const conditions = [eq(schema.serverTasks.scheduleId, id)]
+  if (serverId) conditions.push(eq(schema.serverTasks.serverId, serverId))
   const d1Record = await db
     .select()
     .from(schema.serverTasks)
-    .where(eq(schema.serverTasks.scheduleId, id))
+    .where(and(...conditions))
     .get()
 
   if (!d1Record) {
@@ -999,11 +1068,41 @@ export async function runServerAutomation(
  * Deletes a scheduled automation.
  */
 export async function deleteServerAutomation(
-  env: Env,
-  id: string,
-  clientOverride?: IPterodactylClient,
-  db?: Database,
+  arg1: Database | Env,
+  arg2: Env | string,
+  arg3?: string | IPterodactylClient | null,
+  arg4?: string | IPterodactylClient | Database | null,
+  arg5?: IPterodactylClient | Database,
 ): Promise<boolean> {
+  let db: Database | undefined
+  let env: Env
+  let id: string
+  let serverId: string | null = null
+  let clientOverride: IPterodactylClient | undefined
+
+  if (typeof arg2 === "string") {
+    // (env, id, clientOverride?, db?)
+    env = arg1 as Env
+    id = arg2
+    if (arg3 && typeof arg3 === "object") {
+      clientOverride = arg3 as IPterodactylClient
+    }
+    if (arg4 && typeof arg4 === "object") {
+      db = arg4 as Database
+    }
+  } else {
+    // (db, env, id, serverId?, clientOverride?)
+    db = arg1 as Database
+    env = arg2 as Env
+    id = arg3 as string
+    if (typeof arg4 === "string") {
+      serverId = arg4
+      clientOverride = arg5 as IPterodactylClient
+    } else if (arg4 && typeof arg4 === "object") {
+      clientOverride = arg4 as IPterodactylClient
+    }
+  }
+
   if (!db) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
@@ -1011,14 +1110,15 @@ export async function deleteServerAutomation(
     )
   }
 
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const fullSchedule = await client.getSchedule(id)
-  const existingTasks = fullSchedule.attributes.tasks || []
 
+  const conditions = [eq(schema.serverTasks.scheduleId, id)]
+  if (serverId) conditions.push(eq(schema.serverTasks.serverId, serverId))
   const d1Record = await db
     .select()
     .from(schema.serverTasks)
-    .where(eq(schema.serverTasks.scheduleId, id))
+    .where(and(...conditions))
     .get()
 
   if (!d1Record) {
@@ -1045,9 +1145,11 @@ export async function deleteServerAutomation(
 
   await client.deleteSchedule(id)
 
+  const deleteConditions = [eq(schema.serverTasks.scheduleId, id)]
+  if (serverId) deleteConditions.push(eq(schema.serverTasks.serverId, serverId))
   await db
     .delete(schema.serverTasks)
-    .where(eq(schema.serverTasks.scheduleId, id))
+    .where(and(...deleteConditions))
 
   return true
 }

@@ -5,7 +5,7 @@
  */
 
 import { eq, and, sql, lt, gt, isNull } from "drizzle-orm"
-import { createDatabase, schema } from "@hikat/database"
+import { createDatabase, schema, type Database } from "@hikat/database"
 import {
   mapPterodactylStateToHiKAT,
   validateServerCommand,
@@ -20,10 +20,13 @@ import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
 import { PterodactylHttpClient, ServerInfrastructureError } from "./pterodactylClient"
 
-export function createPterodactylClient(env: Env): IPterodactylClient {
+export function createPterodactylClient(
+  env: Env,
+  identifierOverride?: string,
+): IPterodactylClient {
   const baseUrl = env.PTERODACTYL_BASE_URL
   const apiKey = env.PTERODACTYL_API_KEY
-  const serverId = env.PTERODACTYL_SERVER_ID
+  const serverId = identifierOverride || env.PTERODACTYL_SERVER_ID
 
   if (!baseUrl || !apiKey || !serverId) {
     throw new ServerInfrastructureError(
@@ -36,9 +39,123 @@ export function createPterodactylClient(env: Env): IPterodactylClient {
   return new PterodactylHttpClient({
     baseUrl,
     apiKey,
+    appApiKey: env.PTERODACTYL_APP_API_KEY,
     serverId,
     isProduction: env.ENVIRONMENT === "production",
   })
+}
+
+/**
+ * Resolves the appropriate Pterodactyl client for a given serverId or fallback.
+ */
+export async function resolvePterodactylClient(
+  db: ReturnType<typeof createDatabase> | Database | undefined,
+  env: Env,
+  serverId?: string | IPterodactylClient | null,
+  clientOverride?: IPterodactylClient,
+): Promise<{ client: IPterodactylClient; serverRow?: schema.Server }> {
+  let effectiveServerId: string | null = null
+  let effectiveClientOverride: IPterodactylClient | undefined = clientOverride
+
+  if (serverId && typeof serverId === "object") {
+    effectiveClientOverride = serverId as IPterodactylClient
+    effectiveServerId = null
+  } else if (typeof serverId === "string") {
+    effectiveServerId = serverId
+  }
+
+  if (effectiveClientOverride) {
+    return { client: effectiveClientOverride }
+  }
+
+  if (!effectiveServerId) {
+    return { client: createPterodactylClient(env) }
+  }
+
+  const database = db || (env.DB ? createDatabase(env.DB) : undefined)
+  if (!database) {
+    return { client: createPterodactylClient(env) }
+  }
+
+  const server = await database
+    .select()
+    .from(schema.servers)
+    .where(eq(schema.servers.id, effectiveServerId))
+    .get()
+
+  if (!server) {
+    throw new ServerInfrastructureError(
+      "NOT_FOUND",
+      "Servidor no encontrado.",
+      `Server with id ${effectiveServerId} not found`,
+    )
+  }
+
+  const identifier = server.pterodactylIdentifier || env.PTERODACTYL_SERVER_ID
+  if (!identifier) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+      SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+      `Server ${effectiveServerId} does not have a Pterodactyl identifier and is not ready.`,
+    )
+  }
+
+  return {
+    client: createPterodactylClient(env, identifier),
+    serverRow: server,
+  }
+}
+
+function parseAdminServiceArgs(
+  arg1?: IPterodactylClient | Database | string | null,
+  arg2?: string | IPterodactylClient | Database | null,
+  arg3?: ReturnType<typeof createDatabase> | Database | IPterodactylClient | null,
+): { clientOverride?: IPterodactylClient; serverId: string | null; db?: Database } {
+  let clientOverride: IPterodactylClient | undefined
+  let serverId: string | null = null
+  let db: Database | undefined
+
+  if (arg1 && typeof arg1 === "object") {
+    if ("select" in arg1 || "batch" in arg1) {
+      db = arg1 as Database
+      if (typeof arg2 === "string") {
+        serverId = arg2
+        if (arg3 && typeof arg3 === "object" && !("select" in arg3)) {
+          clientOverride = arg3 as IPterodactylClient
+        }
+      } else if (arg2 && typeof arg2 === "object" && !("select" in arg2)) {
+        clientOverride = arg2 as IPterodactylClient
+      }
+    } else {
+      clientOverride = arg1 as IPterodactylClient
+      if (typeof arg2 === "string") {
+        serverId = arg2
+        if (arg3 && typeof arg3 === "object") {
+          db = arg3 as Database
+        }
+      } else if (arg2 && typeof arg2 === "object") {
+        db = arg2 as Database
+      }
+    }
+  } else if (typeof arg1 === "string") {
+    serverId = arg1
+    if (arg2 && typeof arg2 === "object") {
+      if ("select" in arg2) {
+        db = arg2 as Database
+      } else {
+        clientOverride = arg2 as IPterodactylClient
+      }
+    }
+    if (arg3 && typeof arg3 === "object") {
+      if ("select" in arg3) {
+        db = arg3 as Database
+      } else {
+        clientOverride = arg3 as IPterodactylClient
+      }
+    }
+  }
+
+  return { clientOverride, serverId, db }
 }
 
 /**
@@ -46,9 +163,12 @@ export function createPterodactylClient(env: Env): IPterodactylClient {
  */
 export async function getServerStatus(
   env: Env,
-  clientOverride?: IPterodactylClient,
+  arg1?: IPterodactylClient | Database | string | null,
+  arg2?: string | IPterodactylClient | null,
+  arg3?: ReturnType<typeof createDatabase> | Database,
 ): Promise<ServerResourcesData> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { clientOverride, serverId, db } = parseAdminServiceArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   const [statsRes, detailsRes] = await Promise.all([
     client.getServerResources(),
@@ -107,9 +227,10 @@ async function acquireDistributedPowerLock(
   db: ReturnType<typeof createDatabase>,
   action: ServerPowerAction,
   userId: string,
+  serverId?: string | null,
 ): Promise<void> {
   const nowIso = new Date().toISOString()
-  const lockKey = "main_server_power"
+  const lockKey = serverId ? `server_power:${serverId}` : "main_server_power"
 
   // 1. Opportunistically clear expired locks
   try {
@@ -171,11 +292,13 @@ async function acquireDistributedPowerLock(
  */
 async function releaseDistributedPowerLock(
   db: ReturnType<typeof createDatabase>,
+  serverId?: string | null,
 ): Promise<void> {
+  const lockKey = serverId ? `server_power:${serverId}` : "main_server_power"
   try {
     await db
       .delete(schema.serverPowerLocks)
-      .where(eq(schema.serverPowerLocks.lockKey, "main_server_power"))
+      .where(eq(schema.serverPowerLocks.lockKey, lockKey))
   } catch {}
 }
 
@@ -188,6 +311,7 @@ export async function executeServerPowerAction(
   action: ServerPowerAction,
   userId: string,
   clientOverride?: IPterodactylClient,
+  serverId?: string | null,
 ): Promise<{ success: boolean; status: ServerStatus; message: string }> {
   if (!env.DB) {
     throw new ServerInfrastructureError(
@@ -205,17 +329,17 @@ export async function executeServerPowerAction(
     )
   }
 
-  const client = clientOverride || createPterodactylClient(env)
   const db = createDatabase(env.DB)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   // 1. Acquire distributed lock for concurrency safety during request
-  await acquireDistributedPowerLock(db, action, userId)
+  await acquireDistributedPowerLock(db, action, userId, serverId)
 
   try {
     // 2. Validate current real server state before dispatching power action
     let currentMetrics: ServerResourcesData
     try {
-      currentMetrics = await getServerStatus(env, client)
+      currentMetrics = await getServerStatus(env, client, serverId, db)
     } catch {
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
@@ -297,7 +421,7 @@ export async function executeServerPowerAction(
       message,
     }
   } finally {
-    await releaseDistributedPowerLock(db)
+    await releaseDistributedPowerLock(db, serverId)
   }
 }
 
@@ -307,20 +431,16 @@ export async function executeServerPowerAction(
 export async function checkAndIncrementCommandRateLimit(
   db: ReturnType<typeof createDatabase>,
   userId: string,
+  serverId?: string | null,
 ): Promise<void> {
   const now = Date.now()
   const nowIso = new Date(now).toISOString()
   const newResetAtIso = new Date(
     now + SERVER_COMMAND_RATE_LIMIT.WINDOW_SECONDS * 1000,
   ).toISOString()
-  const key = `cmd_rl:${userId}`
+  const key = serverId ? `cmd_rl:${serverId}:${userId}` : `cmd_rl:${userId}`
 
   // Execute an atomic UPSERT in D1:
-  // If no row exists: inserts with count = 1, reset_at = now + 10s.
-  // If row exists:
-  //   - If reset_at <= now (expired window): resets count = 1, reset_at = now + 10s.
-  //   - If reset_at > now (active window): increments count = count + 1.
-  // RETURNING count gives the atomically assigned count for this request.
   const query = sql`
     INSERT INTO server_command_rate_limits (key, count, window_start, reset_at)
     VALUES (${key}, 1, ${nowIso}, ${newResetAtIso})
@@ -351,6 +471,7 @@ export async function executeServerCommand(
   command: string,
   userId: string,
   clientOverride?: IPterodactylClient,
+  serverId?: string | null,
 ): Promise<{ success: boolean; message: string }> {
   const validation = validateServerCommand(command)
   if (!validation.valid || !validation.command) {
@@ -370,9 +491,9 @@ export async function executeServerCommand(
   }
 
   const db = createDatabase(env.DB)
-  await checkAndIncrementCommandRateLimit(db, userId)
+  await checkAndIncrementCommandRateLimit(db, userId, serverId)
 
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   await client.sendCommand(validation.command)
 
   return {
@@ -388,8 +509,22 @@ export async function createConsoleTicket(
   env: Env,
   userId: string,
   sessionId: string,
+  arg1?: string | Database | null,
+  arg2?: string | Database | null,
 ): Promise<{ ticket: string; expiresAt: string }> {
-  if (!env.DB) {
+  let serverId: string | null = null
+  let db: Database | undefined
+
+  if (typeof arg1 === "string") {
+    serverId = arg1
+    if (arg2 && typeof arg2 === "object") db = arg2 as Database
+  } else if (arg1 && typeof arg1 === "object") {
+    db = arg1 as Database
+    if (typeof arg2 === "string") serverId = arg2
+  }
+
+  const database = db || (env.DB ? createDatabase(env.DB) : undefined)
+  if (!database) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
       SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
@@ -397,13 +532,12 @@ export async function createConsoleTicket(
     )
   }
 
-  const db = createDatabase(env.DB)
   const now = Date.now()
   const nowIso = new Date(now).toISOString()
 
   // 1. Opportunistically delete expired tickets
   try {
-    await db
+    await database
       .delete(schema.serverConsoleTickets)
       .where(lt(schema.serverConsoleTickets.expiresAt, nowIso))
   } catch {}
@@ -420,10 +554,11 @@ export async function createConsoleTicket(
     now + SERVER_CONSOLE_TICKET_TTL_SECONDS * 1000,
   ).toISOString()
 
-  await db.insert(schema.serverConsoleTickets).values({
+  await database.insert(schema.serverConsoleTickets).values({
     id: ticketId,
     userId,
     sessionId,
+    serverId: serverId || null,
     expiresAt,
     usedAt: null,
     createdAt: nowIso,
@@ -441,7 +576,8 @@ export async function createConsoleTicket(
 export async function consumeConsoleTicket(
   db: ReturnType<typeof createDatabase>,
   ticketId: string,
-): Promise<{ userId: string; sessionId: string }> {
+  serverId?: string | null,
+): Promise<{ userId: string; sessionId: string; serverId?: string | null }> {
   if (!ticketId || typeof ticketId !== "string" || !ticketId.startsWith("cstk_")) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
@@ -452,20 +588,25 @@ export async function consumeConsoleTicket(
 
   const nowIso = new Date().toISOString()
 
+  const conditions = [
+    eq(schema.serverConsoleTickets.id, ticketId),
+    isNull(schema.serverConsoleTickets.usedAt),
+    gt(schema.serverConsoleTickets.expiresAt, nowIso),
+  ]
+
+  if (serverId) {
+    conditions.push(eq(schema.serverConsoleTickets.serverId, serverId))
+  }
+
   // Atomic conditional update: update used_at only if used_at IS NULL and expires_at > now
   const updatedRow = await db
     .update(schema.serverConsoleTickets)
     .set({ usedAt: nowIso })
-    .where(
-      and(
-        eq(schema.serverConsoleTickets.id, ticketId),
-        isNull(schema.serverConsoleTickets.usedAt),
-        gt(schema.serverConsoleTickets.expiresAt, nowIso),
-      ),
-    )
+    .where(and(...conditions))
     .returning({
       userId: schema.serverConsoleTickets.userId,
       sessionId: schema.serverConsoleTickets.sessionId,
+      serverId: schema.serverConsoleTickets.serverId,
     })
     .get()
 
@@ -486,8 +627,10 @@ export async function consumeConsoleTicket(
 export async function getServerConsoleWebsocketCredentials(
   env: Env,
   clientOverride?: IPterodactylClient,
+  serverId?: string | null,
+  db?: ReturnType<typeof createDatabase> | Database,
 ): Promise<{ token: string; socket: string }> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   return client.getWebsocketCredentials()
 }
 
@@ -506,17 +649,17 @@ export interface ServerOperationHeartbeat {
 }
 
 /**
- * Acquires a distributed operation lock in D1 for destructive operations (RESTORE_BACKUP, REPLACE_WORLD, SERVER_RELEASE_SYNC, SERVER_CONTENT_CHANGE).
- * Generates an authoritative leaseId ensuring strict lease ownership.
+ * Acquires a distributed operation lock in D1 for destructive operations.
  */
 export async function acquireServerOperationLock(
   db: ReturnType<typeof createDatabase>,
   operation: "RESTORE_BACKUP" | "REPLACE_WORLD" | "SERVER_RELEASE_SYNC" | "SERVER_CONTENT_CHANGE",
   userId: string,
   ttlSeconds: number = 180,
+  serverId?: string | null,
 ): Promise<ServerOperationLockHandle> {
   const nowIso = new Date().toISOString()
-  const lockKey = "server_destructive_operation"
+  const lockKey = serverId ? `server_op:${serverId}:${operation}` : "server_destructive_operation"
 
   // 1. Clear expired locks
   try {
@@ -624,7 +767,6 @@ export async function refreshServerOperationLock(
 
 /**
  * Starts a recurring background heartbeat to renew the operation lock until stopped.
- * Sets leaseLost = true if lock renewal fails, enabling fail-closed asserts.
  */
 export function startServerOperationHeartbeat(
   db: ReturnType<typeof createDatabase>,
@@ -697,9 +839,12 @@ export async function releaseServerOperationLock(
  */
 export async function getServerActivity(
   env: Env,
-  clientOverride?: IPterodactylClient,
+  arg1?: IPterodactylClient | Database | string | null,
+  arg2?: string | IPterodactylClient | null,
+  arg3?: ReturnType<typeof createDatabase> | Database,
 ): Promise<Array<{ id: string; description: string; eventType: string; timestamp: string }>> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { clientOverride, serverId, db } = parseAdminServiceArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   try {
     const res = await client.getServerActivity()
     if (!res || !res.data || !Array.isArray(res.data)) {

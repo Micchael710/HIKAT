@@ -26,14 +26,12 @@ export async function handleGameFileDownload(
     })
   }
 
-  // 1. Fetch settings to get current launcherActiveReleaseId
-  const settings = await ensureSettingsRecord(db)
-
-  // 2. Query file and joined release status
+  // 1. Query file and joined release status and serverId
   const fileRecord = await db
     .select({
       file: schema.gameReleaseFiles,
       releaseStatus: schema.gameReleases.status,
+      releaseServerId: schema.gameReleases.serverId,
     })
     .from(schema.gameReleaseFiles)
     .innerJoin(
@@ -55,11 +53,27 @@ export async function handleGameFileDownload(
     })
   }
 
-  // 3. Verify file belongs to launcherActiveReleaseId OR belongs to an ARCHIVED release
-  const isAllowedRelease =
-    (Boolean(settings.launcherActiveReleaseId) &&
-      fileRecord.file.releaseId === settings.launcherActiveReleaseId) ||
-    fileRecord.releaseStatus === "ARCHIVED"
+  // 2. Verify file belongs to launcherActiveReleaseId (server-scoped or legacy settings) OR belongs to an ARCHIVED release
+  let isAllowedRelease = fileRecord.releaseStatus === "ARCHIVED"
+  if (!isAllowedRelease) {
+    if (fileRecord.releaseServerId) {
+      const server = await db
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, fileRecord.releaseServerId))
+        .get()
+      isAllowedRelease = Boolean(
+        server?.launcherActiveReleaseId &&
+          server.launcherActiveReleaseId === fileRecord.file.releaseId,
+      )
+    } else {
+      const settings = await ensureSettingsRecord(db)
+      isAllowedRelease = Boolean(
+        settings.launcherActiveReleaseId &&
+          settings.launcherActiveReleaseId === fileRecord.file.releaseId,
+      )
+    }
+  }
 
   if (!isAllowedRelease) {
     return new Response(JSON.stringify({ error: "Archivo de juego no encontrado o no disponible públicamente." }), {

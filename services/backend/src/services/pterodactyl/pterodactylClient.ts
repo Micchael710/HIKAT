@@ -22,6 +22,8 @@ import type {
   CreateScheduleInput,
   CreateScheduleTaskInput,
   UpdateScheduleTaskInput,
+  CreatePterodactylApplicationServerInput,
+  PterodactylApplicationServerResponse,
 } from "./types"
 import { SERVER_ERROR_CODES, SERVER_PUBLIC_MESSAGES } from "@hikat/shared"
 
@@ -47,8 +49,9 @@ export class ServerInfrastructureError extends Error {
 
 export interface PterodactylClientOptions {
   baseUrl: string
-  apiKey: string
-  serverId: string
+  apiKey?: string
+  appApiKey?: string
+  serverId?: string
   isProduction?: boolean
   timeoutMs?: number
   fetchFn?: typeof fetch
@@ -57,6 +60,7 @@ export interface PterodactylClientOptions {
 export class PterodactylHttpClient implements IPterodactylClient {
   private readonly baseUrl: string
   private readonly apiKey: string
+  private readonly appApiKey: string
   private readonly serverId: string
   private readonly isProduction: boolean
   private readonly timeoutMs: number
@@ -70,18 +74,11 @@ export class PterodactylHttpClient implements IPterodactylClient {
         "Pterodactyl baseUrl is missing or not a string",
       )
     }
-    if (!options.apiKey || typeof options.apiKey !== "string") {
+    if ((!options.apiKey || typeof options.apiKey !== "string") && (!options.appApiKey || typeof options.appApiKey !== "string")) {
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
         SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
-        "Pterodactyl apiKey is missing or not a string",
-      )
-    }
-    if (!options.serverId || typeof options.serverId !== "string") {
-      throw new ServerInfrastructureError(
-        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
-        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
-        "Pterodactyl serverId is missing or not a string",
+        "Pterodactyl apiKey or appApiKey is missing",
       )
     }
 
@@ -124,8 +121,9 @@ export class PterodactylHttpClient implements IPterodactylClient {
 
     // Normalize baseUrl: strip trailing slashes
     this.baseUrl = trimmedUrl.replace(/\/+$/, "")
-    this.apiKey = options.apiKey.trim()
-    this.serverId = options.serverId.trim()
+    this.apiKey = options.apiKey?.trim() || ""
+    this.appApiKey = options.appApiKey?.trim() || ""
+    this.serverId = options.serverId?.trim() || ""
     this.timeoutMs = options.timeoutMs ?? 8000
     this.fetchFn = options.fetchFn ?? fetch
   }
@@ -139,6 +137,13 @@ export class PterodactylHttpClient implements IPterodactylClient {
       isTextResponse?: boolean
     } = {},
   ): Promise<T> {
+    if (!this.apiKey || !this.serverId) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Pterodactyl client apiKey or serverId is missing",
+      )
+    }
     const url = `${this.baseUrl}${endpoint}`
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs)
@@ -614,4 +619,147 @@ export class PterodactylHttpClient implements IPterodactylClient {
       { method: "GET" },
     )
   }
+
+  // --- Application API ---
+
+  private async applicationRequest<T>(
+    endpoint: string,
+    options: {
+      method?: string
+      body?: Record<string, unknown> | string
+    } = {},
+  ): Promise<T> {
+    if (!this.appApiKey) {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+        SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+        "Pterodactyl Application API key (PTERODACTYL_APP_API_KEY) is not configured",
+      )
+    }
+
+    const url = `${this.baseUrl}${endpoint}`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs)
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.appApiKey}`,
+      Accept: "Application/vnd.pterodactyl.v1+json",
+      "Content-Type": "application/json",
+    }
+
+    let requestBody: string | undefined
+    if (options.body !== undefined) {
+      requestBody = typeof options.body === "string" ? options.body : JSON.stringify(options.body)
+    }
+
+    let response: Response
+    try {
+      response = await this.fetchFn(url, {
+        method: options.method ?? "GET",
+        headers,
+        body: requestBody,
+        signal: controller.signal,
+      })
+    } catch (err: unknown) {
+      clearTimeout(timeoutId)
+      if (err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))) {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+          "Connection timeout with Pterodactyl Application API",
+        )
+      }
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        "Network connection failure with Pterodactyl Application API",
+      )
+    } finally {
+      clearTimeout(timeoutId)
+    }
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+          SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+          `Pterodactyl Application API authentication failed (${response.status})`,
+        )
+      }
+      if (response.status === 404) {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+          `Pterodactyl Application server resource not found (${response.status})`,
+        )
+      }
+      if (response.status === 429) {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_RATE_LIMITED,
+          SERVER_PUBLIC_MESSAGES.SERVER_RATE_LIMITED,
+          "Pterodactyl upstream rate limit (429)",
+        )
+      }
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        throw new ServerInfrastructureError(
+          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+          `Pterodactyl upstream gateway error (${response.status})`,
+        )
+      }
+      let errDetail = ""
+      try {
+        const errJson = await response.json()
+        errDetail = JSON.stringify(errJson)
+      } catch {}
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        `Pterodactyl Application API returned HTTP error ${response.status}: ${errDetail}`,
+      )
+    }
+
+    if (response.status === 204) {
+      return undefined as unknown as T
+    }
+
+    try {
+      return (await response.json()) as T
+    } catch {
+      throw new ServerInfrastructureError(
+        SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
+        SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
+        "Invalid JSON response from Pterodactyl Application API",
+      )
+    }
+  }
+
+  async createApplicationServer(
+    payload: CreatePterodactylApplicationServerInput,
+  ): Promise<PterodactylApplicationServerResponse> {
+    return this.applicationRequest<PterodactylApplicationServerResponse>(
+      "/api/application/servers",
+      {
+        method: "POST",
+        body: payload as unknown as Record<string, unknown>,
+      },
+    )
+  }
+
+  async deleteApplicationServer(serverId: number | string): Promise<void> {
+    await this.applicationRequest<void>(
+      `/api/application/servers/${encodeURIComponent(String(serverId))}`,
+      { method: "DELETE" },
+    )
+  }
+
+  async getApplicationServer(
+    serverId: number | string,
+  ): Promise<PterodactylApplicationServerResponse> {
+    return this.applicationRequest<PterodactylApplicationServerResponse>(
+      `/api/application/servers/${encodeURIComponent(String(serverId))}`,
+      { method: "GET" },
+    )
+  }
 }
+

@@ -507,20 +507,26 @@ export async function installModPlan(
   env: Env,
   input: InstallModPlanInputGql,
   userId: string,
+  serverId?: string | null,
 ): Promise<AdminGameFileGql[]> {
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   // 1. Ensure active draft
   let draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
-    await prepareGameDraft(db, userId)
+    await prepareGameDraft(db, userId, null, env, undefined, serverId)
     draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
   }
 
@@ -669,8 +675,9 @@ export async function installModPlan(
               ? "DATA_PACK"
               : "MOD"
 
-      const objectKey =
-        `game-files/${crypto.randomUUID()}`
+      const objectKey = serverId
+        ? `games/${serverId}/files/${crypto.randomUUID()}`
+        : `game-files/${crypto.randomUUID()}`
 
       const controller =
         new AbortController()

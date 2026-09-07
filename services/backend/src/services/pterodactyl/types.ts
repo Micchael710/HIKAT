@@ -245,4 +245,76 @@ export interface IPterodactylClient {
 
   // Activity
   getServerActivity(): Promise<PterodactylActivityListResponse>
+
+  // Application API
+  createApplicationServer(payload: CreatePterodactylApplicationServerInput): Promise<PterodactylApplicationServerResponse>
+  deleteApplicationServer(serverId: number | string): Promise<void>
+  getApplicationServer(serverId: number | string): Promise<PterodactylApplicationServerResponse>
 }
+
+export interface CreatePterodactylApplicationServerInput {
+  name: string
+  user: number
+  egg: number
+  docker_image: string
+  startup: string
+  environment: Record<string, string>
+  limits: {
+    memory: number
+    swap: number
+    disk: number
+    io: number
+    cpu: number
+  }
+  feature_limits: {
+    databases: number
+    allocations: number
+    backups: number
+  }
+  deploy?: {
+    locations: number[]
+    dedicated_ip: boolean
+    port_range: string[]
+  }
+  allocation?: {
+    default: number
+  }
+  external_id?: string
+  start_on_completion?: boolean
+}
+
+export interface PterodactylApplicationServerAttributes {
+  id: number
+  external_id: string | null
+  uuid: string
+  identifier: string
+  name: string
+  description?: string | null
+  status?: string | null
+  suspended?: boolean
+  limits: PterodactylServerLimits
+  feature_limits: {
+    databases: number
+    allocations: number
+    backups: number
+  }
+  user: number
+  node: number
+  allocation: number
+  nest: number
+  egg: number
+  container?: {
+    startup_command: string
+    image: string
+    installed: number
+    environment: Record<string, string>
+  }
+  created_at: string
+  updated_at: string
+}
+
+export interface PterodactylApplicationServerResponse {
+  object: "server"
+  attributes: PterodactylApplicationServerAttributes
+}
+

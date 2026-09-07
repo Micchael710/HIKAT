@@ -545,7 +545,74 @@ describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
     // Non-ZIP category (e.g. CONFIG) allows arbitrary header
     expect(validateGameFileHeader(invalidHeader, "config.json", "CONFIG").valid).toBe(true)
   })
+
+  it("validates Windows safe folder names strictly", async () => {
+    const { validateWindowsFolderName, isValidWindowsFolderName } = await import("./index")
+    expect(isValidWindowsFolderName("Survival")).toBe(true)
+    expect(isValidWindowsFolderName("Modded_1.21.1")).toBe(true)
+    expect(isValidWindowsFolderName("My-Server-2026")).toBe(true)
+    expect(validateWindowsFolderName("Survival Server")).toBe("Survival Server")
+
+    // Invalid folder names
+    expect(isValidWindowsFolderName("")).toBe(false)
+    expect(isValidWindowsFolderName("   ")).toBe(false)
+    expect(isValidWindowsFolderName(".")).toBe(false)
+    expect(isValidWindowsFolderName("..")).toBe(false)
+    expect(isValidWindowsFolderName("trailing-dot.")).toBe(false)
+    expect(isValidWindowsFolderName("trailing-space ")).toBe(false)
+    expect(isValidWindowsFolderName("invalid/slash")).toBe(false)
+    expect(isValidWindowsFolderName("invalid\\backslash")).toBe(false)
+    expect(isValidWindowsFolderName("invalid:colon")).toBe(false)
+    expect(isValidWindowsFolderName("invalid*asterisk")).toBe(false)
+    expect(isValidWindowsFolderName("invalid?question")).toBe(false)
+    expect(isValidWindowsFolderName("invalid\"quote")).toBe(false)
+    expect(isValidWindowsFolderName("invalid<angle>")).toBe(false)
+    expect(isValidWindowsFolderName("invalid|pipe")).toBe(false)
+
+    // Reserved Windows device names
+    expect(isValidWindowsFolderName("CON")).toBe(false)
+    expect(isValidWindowsFolderName("con")).toBe(false)
+    expect(isValidWindowsFolderName("PRN")).toBe(false)
+    expect(isValidWindowsFolderName("aux")).toBe(false)
+    expect(isValidWindowsFolderName("NUL")).toBe(false)
+    expect(isValidWindowsFolderName("COM1")).toBe(false)
+    expect(isValidWindowsFolderName("com9")).toBe(false)
+    expect(isValidWindowsFolderName("LPT1")).toBe(false)
+    expect(isValidWindowsFolderName("lpt9")).toBe(false)
+    expect(isValidWindowsFolderName("CON.dir")).toBe(false)
+  })
+
+  it("validates and normalizes HEX colors correctly", async () => {
+    const { normalizeHexColor, isValidHexColor } = await import("./index")
+    expect(normalizeHexColor(null)).toBeNull()
+    expect(normalizeHexColor(undefined)).toBeNull()
+    expect(normalizeHexColor("")).toBeNull()
+    expect(normalizeHexColor("#ff5500")).toBe("#FF5500")
+    expect(normalizeHexColor("#f50")).toBe("#FF5500")
+    expect(normalizeHexColor("#123456")).toBe("#123456")
+    expect(isValidHexColor("#ABCDEF")).toBe(true)
+    expect(isValidHexColor("#123")).toBe(true)
+    expect(isValidHexColor("invalid-color")).toBe(false)
+    expect(isValidHexColor("#12345")).toBe(false)
+    expect(isValidHexColor("#1234567")).toBe(false)
+  })
+
+  it("resolves Java major version from Minecraft version", async () => {
+    const { resolveJavaMajorForMinecraft } = await import("./index")
+    expect(resolveJavaMajorForMinecraft("1.21.1")).toBe(21)
+    expect(resolveJavaMajorForMinecraft("1.20.6")).toBe(21)
+    expect(resolveJavaMajorForMinecraft("1.20.5")).toBe(21)
+    expect(resolveJavaMajorForMinecraft("1.20.4")).toBe(17)
+    expect(resolveJavaMajorForMinecraft("1.20.1")).toBe(17)
+    expect(resolveJavaMajorForMinecraft("1.19.4")).toBe(17)
+    expect(resolveJavaMajorForMinecraft("1.18.2")).toBe(17)
+    expect(resolveJavaMajorForMinecraft("1.17.1")).toBe(16)
+    expect(resolveJavaMajorForMinecraft("1.16.5")).toBe(8)
+    expect(resolveJavaMajorForMinecraft("1.12.2")).toBe(8)
+    expect(resolveJavaMajorForMinecraft("26.1")).toBe(21)
+  })
 })
+
 
 
 

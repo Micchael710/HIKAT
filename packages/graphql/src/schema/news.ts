@@ -101,6 +101,7 @@ export const newsTypeDefs = /* GraphQL */ `
   }
 
   input CreateNewsInput {
+    serverId: ID
     title: String!
     content: String!
     type: NewsType!
@@ -111,6 +112,7 @@ export const newsTypeDefs = /* GraphQL */ `
   }
 
   input UpdateNewsInput {
+    serverId: ID
     title: String
     content: String
     type: NewsType
@@ -137,6 +139,7 @@ export const newsTypeDefs = /* GraphQL */ `
     Public feed of published news articles
     """
     newsFeed(
+      serverId: ID
       first: Int
       after: String
       type: NewsType
@@ -151,6 +154,7 @@ export const newsTypeDefs = /* GraphQL */ `
     Administrative list of news articles (drafts and published) - requires ADMIN role
     """
     adminNews(
+      serverId: ID
       first: Int
       after: String
       type: NewsType

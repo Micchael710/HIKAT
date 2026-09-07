@@ -1,12 +1,17 @@
 import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { sql } from "drizzle-orm"
 import { users } from "./users"
 import { sessions } from "./sessions"
 import { gameReleases, gameReleaseFiles } from "./game"
+import { servers } from "./servers"
 
 export const serverConsoleTickets = sqliteTable(
   "server_console_tickets",
   {
     id: text("id").primaryKey(),
+    serverId: text("server_id").references(() => servers.id, {
+      onDelete: "cascade",
+    }),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -20,6 +25,7 @@ export const serverConsoleTickets = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
+    index("server_console_tickets_server_id_idx").on(table.serverId),
     index("server_console_tickets_user_id_idx").on(table.userId),
     index("server_console_tickets_session_id_idx").on(table.sessionId),
     index("server_console_tickets_expires_at_idx").on(table.expiresAt),
@@ -71,6 +77,9 @@ export const serverTasks = sqliteTable(
   "server_tasks",
   {
     id: text("id").primaryKey(),
+    serverId: text("server_id").references(() => servers.id, {
+      onDelete: "cascade",
+    }),
     scheduleId: text("schedule_id").notNull(),
     template: text("template").notNull(),
     action: text("action"),
@@ -94,13 +103,22 @@ export const serverTasks = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
   },
-  (table) => [uniqueIndex("server_tasks_schedule_id_idx").on(table.scheduleId)],
+  (table) => [
+    index("server_tasks_server_id_idx").on(table.serverId),
+    uniqueIndex("server_tasks_server_schedule_id_idx").on(
+      sql`COALESCE(${table.serverId}, '')`,
+      table.scheduleId,
+    ),
+  ],
 )
 
 export const serverManagedContent = sqliteTable(
   "server_managed_content",
   {
     id: text("id").primaryKey(),
+    serverId: text("server_id").references(() => servers.id, {
+      onDelete: "cascade",
+    }),
     managementSource: text("management_source").notNull(), // 'SERVER_DIRECT' | 'GAME_RELEASE'
     provider: text("provider"), // 'MODRINTH' | 'CURSEFORGE' | null
     projectId: text("project_id"),
@@ -125,6 +143,7 @@ export const serverManagedContent = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
+    index("server_managed_content_server_id_idx").on(table.serverId),
     index("server_managed_content_source_idx").on(table.managementSource),
     index("server_managed_content_provider_project_idx").on(table.provider, table.projectId),
     index("server_managed_content_target_path_idx").on(table.targetPath),

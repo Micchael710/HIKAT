@@ -367,217 +367,277 @@ export const serverTypeDefs = /* GraphQL */ `
     status: ServerReleaseSyncStatusEnum!
   }
 
+  enum ServerProvisioningStatus {
+    PROVISIONING
+    READY
+    FAILED
+  }
+
+  """
+  HiKAT Server Entity
+  """
+  type Server {
+    id: ID!
+    name: String!
+    minecraftVersion: String!
+    modLoader: GameModLoader!
+    modLoaderVersion: String
+    mainLogo: ContentMedia
+    sidebarLogo: ContentMedia
+    accentColor: String
+    cpu: Int!
+    memoryMb: Int!
+    diskMb: Int!
+    provisioningStatus: ServerProvisioningStatus!
+    launcherActiveReleaseId: ID
+    createdAt: DateTime!
+    updatedAt: DateTime!
+  }
+
+  input CreateServerInput {
+    name: String!
+    minecraftVersion: String!
+    modLoader: GameModLoader!
+    modLoaderVersion: String
+    cpu: Int!
+    memoryMb: Int!
+    diskMb: Int!
+    mainLogoMediaId: ID
+    sidebarLogoMediaId: ID
+    accentColor: String
+  }
+
   extend type Query {
+    """
+    Lists all servers - requires ADMIN role
+    """
+    servers: [Server!]!
+
+    """
+    Retrieves a single server by ID - requires ADMIN role
+    """
+    server(serverId: ID!): Server
+
     """
     Retrieves current server operational status and resource metrics - requires ADMIN role
     """
-    serverStatus: ServerResources
+    serverStatus(serverId: ID): ServerResources
 
     """
     Retrieves recent server activity events - requires ADMIN role
     """
-    serverActivity: [ServerActivityItem!]!
+    serverActivity(serverId: ID): [ServerActivityItem!]!
 
     """
     Lists all server backups - requires ADMIN role
     """
-    serverBackups: [ServerBackupItem!]!
+    serverBackups(serverId: ID): [ServerBackupItem!]!
 
     """
     Retrieves information on currently active world - requires ADMIN role
     """
-    serverWorld: ServerWorldInfo!
+    serverWorld(serverId: ID): ServerWorldInfo!
 
     """
     Retrieves parsed Minecraft server.properties settings - requires ADMIN role
     """
-    serverMinecraftSettings: MinecraftServerSettings!
+    serverMinecraftSettings(serverId: ID): MinecraftServerSettings!
 
     """
     Lists automated schedules - requires ADMIN role
     """
-    serverAutomations: [ServerAutomationItem!]!
+    serverAutomations(serverId: ID): [ServerAutomationItem!]!
 
     """
     Lists files and directories within a sandboxed virtual root - requires ADMIN role
     """
-    serverFiles(root: ServerFileRoot!, relativePath: String): [ServerFileItem!]!
+    serverFiles(serverId: ID, root: ServerFileRoot!, relativePath: String): [ServerFileItem!]!
 
     """
     Reads an allowlisted text file from a sandboxed virtual root - requires ADMIN role
     """
-    serverTextFile(root: ServerFileRoot!, relativePath: String!): ServerFileContent!
+    serverTextFile(serverId: ID, root: ServerFileRoot!, relativePath: String!): ServerFileContent!
 
     """
     Lists all content tracked as managed on the server - requires ADMIN role
     """
-    serverManagedContent: [ServerManagedContentItem!]!
+    serverManagedContent(serverId: ID): [ServerManagedContentItem!]!
 
     """
     Searches server-only content (SERVER mods and DATA_PACKs) against published environment - requires ADMIN role
     """
-    searchServerContent(query: String!, provider: ModProvider, limit: Int, offset: Int, cursor: String, contentType: ContentType): ServerContentSearchPayload!
+    searchServerContent(serverId: ID, query: String!, provider: ModProvider, limit: Int, offset: Int, cursor: String, contentType: ContentType): ServerContentSearchPayload!
 
     """
     Retrieves details for a server-side project scoped to the published environment - requires ADMIN role
     """
-    serverContentProjectDetail(provider: ModProvider!, projectId: String!, contentType: ContentType): ModProjectDetail!
+    serverContentProjectDetail(serverId: ID, provider: ModProvider!, projectId: String!, contentType: ContentType): ModProjectDetail!
 
     """
     Resolves dependency plan for installing content directly on the server - requires ADMIN role
     """
-    resolveServerContentPlan(input: ResolveServerContentPlanInput!): ServerContentInstallationPlan!
+    resolveServerContentPlan(serverId: ID, input: ResolveServerContentPlanInput!): ServerContentInstallationPlan!
 
     """
     Computes release synchronization plan comparing published release BOTH mods against server state - requires ADMIN role
     """
-    serverReleaseSyncPlan: ServerReleaseSyncPlan!
+    serverReleaseSyncPlan(serverId: ID): ServerReleaseSyncPlan!
 
     """
     Retrieves status of server release synchronization - requires ADMIN role
     """
-    serverReleaseSyncStatus: ServerReleaseSyncStatus
+    serverReleaseSyncStatus(serverId: ID): ServerReleaseSyncStatus
   }
 
   extend type Mutation {
     """
+    Creates a new HiKAT server and automatically provisions infrastructure in Pterodactyl - requires ADMIN role
+    """
+    createServer(input: CreateServerInput!): Server!
+
+    """
+    Deletes a HiKAT server and cleans up upstream Pterodactyl infrastructure - requires ADMIN role
+    """
+    deleteServer(serverId: ID!): Boolean!
+
+    """
     Requests a short-lived single-use ticket for connecting to the live server console WebSocket - requires ADMIN role
     """
-    createServerConsoleTicket: ServerConsoleTicketPayload!
+    createServerConsoleTicket(serverId: ID): ServerConsoleTicketPayload!
 
     """
     Executes a power action on the server (START, RESTART, STOP) - requires ADMIN role
     """
-    serverPowerAction(action: ServerPowerAction!): ServerPowerActionResult!
+    serverPowerAction(serverId: ID, action: ServerPowerAction!): ServerPowerActionResult!
 
     """
     Starts the server - requires ADMIN role
     """
-    startServer: ServerPowerActionResult!
+    startServer(serverId: ID): ServerPowerActionResult!
 
     """
     Restarts the server - requires ADMIN role
     """
-    restartServer: ServerPowerActionResult!
+    restartServer(serverId: ID): ServerPowerActionResult!
 
     """
     Stops the server - requires ADMIN role
     """
-    stopServer: ServerPowerActionResult!
+    stopServer(serverId: ID): ServerPowerActionResult!
 
     """
     Sends a console command to the Minecraft server - requires ADMIN role
     """
-    sendServerCommand(command: String!): ServerCommandResult!
+    sendServerCommand(serverId: ID, command: String!): ServerCommandResult!
 
     """
     Creates a new server backup - requires ADMIN role
     """
-    createServerBackup(name: String): ServerBackupItem!
+    createServerBackup(serverId: ID, name: String): ServerBackupItem!
 
     """
     Restores a server backup (requires server to be OFFLINE) - requires ADMIN role
     """
-    restoreServerBackup(id: ID!): Boolean!
+    restoreServerBackup(serverId: ID, id: ID!): Boolean!
 
     """
     Deletes a server backup (must not be locked) - requires ADMIN role
     """
-    deleteServerBackup(id: ID!): Boolean!
+    deleteServerBackup(serverId: ID, id: ID!): Boolean!
 
     """
     Toggles lock protection on a backup - requires ADMIN role
     """
-    toggleServerBackupLock(id: ID!): ServerBackupItem!
+    toggleServerBackupLock(serverId: ID, id: ID!): ServerBackupItem!
 
     """
     Generates a secure signed download URL for a backup - requires ADMIN role
     """
-    createServerBackupDownloadUrl(id: ID!, name: String): ServerSignedUrlPayload!
+    createServerBackupDownloadUrl(serverId: ID, id: ID!, name: String): ServerSignedUrlPayload!
 
     """
     Compresses and generates a secure download URL for the active world - requires ADMIN role
     """
-    createServerWorldDownloadUrl: ServerSignedUrlPayload!
+    createServerWorldDownloadUrl(serverId: ID): ServerSignedUrlPayload!
 
     """
     Prepares a temporary signed upload URL for world upload - requires ADMIN role
     """
-    prepareServerWorldUpload: ServerSignedUrlPayload!
+    prepareServerWorldUpload(serverId: ID): ServerSignedUrlPayload!
 
     """
     Replaces the active world with an uploaded archive (requires server to be OFFLINE, creates automatic pre-backup) - requires ADMIN role
     """
-    replaceServerWorld(uploadedFileName: String!): Boolean!
+    replaceServerWorld(serverId: ID, uploadedFileName: String!): Boolean!
 
     """
     Non-destructively updates allowlisted Minecraft server.properties settings - requires ADMIN role
     """
-    updateMinecraftServerSettings(input: UpdateMinecraftServerSettingsInput!): MinecraftServerSettings!
+    updateMinecraftServerSettings(serverId: ID, input: UpdateMinecraftServerSettingsInput!): MinecraftServerSettings!
 
     """
     Creates a scheduled server automation - requires ADMIN role
     """
-    createServerAutomation(input: ServerAutomationInput!): ServerAutomationItem!
+    createServerAutomation(serverId: ID, input: ServerAutomationInput!): ServerAutomationItem!
 
     """
     Updates a scheduled server automation - requires ADMIN role
     """
-    updateServerAutomation(id: ID!, input: ServerAutomationInput!): ServerAutomationItem!
+    updateServerAutomation(serverId: ID, id: ID!, input: ServerAutomationInput!): ServerAutomationItem!
 
     """
     Manually triggers execution of a scheduled automation - requires ADMIN role
     """
-    runServerAutomation(id: ID!): Boolean!
+    runServerAutomation(serverId: ID, id: ID!): Boolean!
 
     """
     Deletes a scheduled server automation - requires ADMIN role
     """
-    deleteServerAutomation(id: ID!): Boolean!
+    deleteServerAutomation(serverId: ID, id: ID!): Boolean!
 
     """
     Creates a new folder within a sandboxed virtual root - requires ADMIN role
     """
-    createServerFolder(root: ServerFileRoot!, relativePath: String!, folderName: String!): Boolean!
+    createServerFolder(serverId: ID, root: ServerFileRoot!, relativePath: String!, folderName: String!): Boolean!
 
     """
     Renames a file or folder within a sandboxed virtual root - requires ADMIN role
     """
-    renameServerFile(root: ServerFileRoot!, relativePath: String!, newName: String!): Boolean!
+    renameServerFile(serverId: ID, root: ServerFileRoot!, relativePath: String!, newName: String!): Boolean!
 
     """
     Deletes a file or directory within a sandboxed virtual root - requires ADMIN role
     """
-    deleteServerFile(root: ServerFileRoot!, relativePath: String!): Boolean!
+    deleteServerFile(serverId: ID, root: ServerFileRoot!, relativePath: String!): Boolean!
 
     """
     Writes content to an allowlisted text file within a sandboxed virtual root - requires ADMIN role
     """
-    writeServerTextFile(root: ServerFileRoot!, relativePath: String!, content: String!): Boolean!
+    writeServerTextFile(serverId: ID, root: ServerFileRoot!, relativePath: String!, content: String!): Boolean!
 
     """
     Prepares a signed upload URL for uploading a file into a sandboxed virtual root - requires ADMIN role
     """
-    prepareServerFileUpload(root: ServerFileRoot!, relativePath: String!): ServerSignedUrlPayload!
+    prepareServerFileUpload(serverId: ID, root: ServerFileRoot!, relativePath: String!): ServerSignedUrlPayload!
 
     """
     Generates a signed download URL for a file within a sandboxed virtual root - requires ADMIN role
     """
-    createServerFileDownloadUrl(root: ServerFileRoot!, relativePath: String!): ServerSignedUrlPayload!
+    createServerFileDownloadUrl(serverId: ID, root: ServerFileRoot!, relativePath: String!): ServerSignedUrlPayload!
 
     """
     Installs server content (SERVER mod or DATA_PACK) directly on the physical server - requires ADMIN role
     """
-    installServerContentPlan(input: InstallServerContentPlanInput!): [ServerManagedContentItem!]!
+    installServerContentPlan(serverId: ID, input: InstallServerContentPlanInput!): [ServerManagedContentItem!]!
 
     """
     Removes server-direct managed content physically and from tracking - requires ADMIN role
     """
-    removeServerManagedContent(id: ID!): Boolean!
+    removeServerManagedContent(serverId: ID, id: ID!): Boolean!
 
     """
     Applies release synchronization to server (syncs BOTH mods from published release to server) - requires ADMIN role
     """
-    applyServerReleaseSync(createBackup: Boolean): ServerReleaseSyncResult!
+    applyServerReleaseSync(serverId: ID, createBackup: Boolean): ServerReleaseSyncResult!
   }
 `

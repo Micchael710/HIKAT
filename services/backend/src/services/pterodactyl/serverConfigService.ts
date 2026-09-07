@@ -3,6 +3,7 @@
  * Safe non-destructive parsing and allowlist-only updating of server.properties.
  */
 
+import { Database } from "@hikat/database"
 import {
   extractMinecraftSettings,
   serializeServerProperties,
@@ -10,43 +11,35 @@ import {
 } from "@hikat/shared"
 import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
-import { createPterodactylClient } from "./serverAdministrationService"
+import { resolvePterodactylClient } from "./serverAdministrationService"
 
 /**
  * Reads and parses Minecraft server configuration.
- *
- * FAIL-SAFE: If server.properties cannot be read (network, auth, infra down),
- * the error is PROPAGATED. We never return fake defaults.
  */
 export async function getMinecraftServerSettings(
   env: Env,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<MinecraftServerSettingsData> {
-  const client = clientOverride || createPterodactylClient(env)
-  // Let infrastructure errors propagate — do NOT return extractMinecraftSettings("")
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const content = await client.getFileContents("server.properties")
   return extractMinecraftSettings(content)
 }
 
 /**
  * Updates allowlisted properties and preserves all unknown properties and comments.
- *
- * FAIL-SAFE: If reading server.properties fails, the update is REFUSED.
- * We never write from scratch — that would clobber existing configuration.
  */
 export async function updateMinecraftServerSettings(
   env: Env,
   input: Partial<MinecraftServerSettingsData>,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<MinecraftServerSettingsData> {
-  const client = clientOverride || createPterodactylClient(env)
-
-  // Read existing content — let errors propagate (do NOT catch and use "")
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const originalContent = await client.getFileContents("server.properties")
-
   const updatedContent = serializeServerProperties(originalContent, input)
   await client.writeFile("server.properties", updatedContent)
-
   return extractMinecraftSettings(updatedContent)
 }
-

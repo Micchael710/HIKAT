@@ -10,7 +10,10 @@ import type {
   ServerAutomationAction,
   ServerAutomationFrequency,
   ServerTaskTemplate,
+  ServerProvisioningStatus,
 } from "@hikat/shared"
+
+export type ServerProvisioningStatusGql = ServerProvisioningStatus
 
 export type ServerStatusGql = ServerStatus
 
@@ -266,6 +269,8 @@ export interface ContentMediaUploadPayloadGql {
 }
 
 export interface CreateNewsInputGql {
+  serverId?: string | null
+
   title: string
 
   content: string
@@ -282,6 +287,8 @@ export interface CreateNewsInputGql {
 }
 
 export interface UpdateNewsInputGql {
+  serverId?: string | null
+
   title?: string | null
 
   content?: string | null
@@ -295,6 +302,37 @@ export interface UpdateNewsInputGql {
   videoMediaId?: string | null
 
   status?: NewsStatus | null
+}
+
+export interface ServerGql {
+  id: string
+  name: string
+  minecraftVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  mainLogo?: ContentMediaGql | null
+  sidebarLogo?: ContentMediaGql | null
+  accentColor?: string | null
+  cpu: number
+  memoryMb: number
+  diskMb: number
+  provisioningStatus: ServerProvisioningStatusGql
+  launcherActiveReleaseId?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateServerInputGql {
+  name: string
+  minecraftVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  cpu: number
+  memoryMb: number
+  diskMb: number
+  mainLogoMediaId?: string | null
+  sidebarLogoMediaId?: string | null
+  accentColor?: string | null
 }
 
 export interface CreateContentMediaUploadInputGql {

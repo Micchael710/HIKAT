@@ -4,7 +4,7 @@
  * and offline-guarded world replacement with automatic pre-backup.
  */
 
-import { createDatabase } from "@hikat/database"
+import { Database, createDatabase } from "@hikat/database"
 import {
   SERVER_ERROR_CODES,
   SERVER_PUBLIC_MESSAGES,
@@ -15,7 +15,7 @@ import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
 import { ServerInfrastructureError } from "./pterodactylClient"
 import {
-  createPterodactylClient,
+  resolvePterodactylClient,
   getServerStatus,
   acquireServerOperationLock,
   releaseServerOperationLock,
@@ -30,17 +30,28 @@ export interface ServerWorldInfoData {
 
 /**
  * Detects the active world name by reading server.properties.
- *
- * FAIL-SAFE: If server.properties is successfully read but does not contain
- * `level-name`, returns the Minecraft default "world".
- * If reading server.properties FAILS (network, timeout, auth, infrastructure),
- * the error is PROPAGATED — we never act on a potentially wrong directory.
  */
 export async function detectActiveWorldName(
   env: Env,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: string | IPterodactylClient | null,
+  arg3?: Database,
 ): Promise<string> {
-  const client = clientOverride || createPterodactylClient(env)
+  let clientOverride: IPterodactylClient | undefined
+  let serverId: string | null = null
+  let db: Database | undefined = arg3
+
+  if (arg1 && typeof arg1 === "object") {
+    clientOverride = arg1 as IPterodactylClient
+    if (typeof arg2 === "string") serverId = arg2
+  } else if (typeof arg1 === "string") {
+    serverId = arg1
+    if (arg2 && typeof arg2 === "object") clientOverride = arg2 as IPterodactylClient
+  } else if (arg2 && typeof arg2 === "object") {
+    clientOverride = arg2 as IPterodactylClient
+  }
+
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   // Let infrastructure errors propagate — do NOT catch them
   const content = await client.getFileContents("server.properties")
   const props = parseServerProperties(content)
@@ -53,10 +64,12 @@ export async function detectActiveWorldName(
  */
 export async function getServerWorldInfo(
   env: Env,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<ServerWorldInfoData> {
-  const client = clientOverride || createPterodactylClient(env)
-  const worldName = await detectActiveWorldName(env, client)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const worldName = await detectActiveWorldName(env, client, serverId, db)
 
   // Try to inspect the world directory metadata
   try {
@@ -84,10 +97,13 @@ export async function getServerWorldInfo(
  */
 export async function createServerWorldDownloadUrl(
   env: Env,
+  worldNameArg?: string | null,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<{ url: string }> {
-  const client = clientOverride || createPterodactylClient(env)
-  const worldName = await detectActiveWorldName(env, client)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const worldName = worldNameArg || (await detectActiveWorldName(env, client, serverId, db))
 
   // Compress world directory
   const compressRes = await client.compressFiles("/", [worldName])
@@ -103,9 +119,11 @@ export async function createServerWorldDownloadUrl(
  */
 export async function prepareServerWorldUpload(
   env: Env,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<{ url: string }> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const res = await client.getFileUploadUrl()
   const separator = res.attributes.url.includes("?") ? "&" : "?"
   return { url: `${res.attributes.url}${separator}directory=/` }
@@ -153,32 +171,53 @@ export async function waitForBackupCompletion(
   )
 }
 
-/**
- * Safely replaces the server world with a multi-stage validation and rollback process.
- *
- * Flujo conservador:
- * 1. Exige estado strictly OFFLINE.
- * 2. Adquiere lock de operación D1 (REPLACE_WORLD).
- * 3. Detecta el nombre del mundo activo real (vía server.properties).
- * 4. Valida que el archivo ZIP subido exista físicamente en la raíz del servidor.
- * 5. Crea una copia de seguridad previa (pre-backup) y espera a que finalice completamente.
- * 6. Crea un directorio de staging con nombre impredecible dentro del contenedor.
- * 7. Traslada el ZIP a staging y lo extrae ÚNICAMENTE dentro de staging.
- * 8. Analiza la estructura del staging (level.dat en raíz o en carpeta contenedora única).
- * 9. Reemplaza el mundo activo mediante Pterodactyl Files API (no tolera errores en borrado activo).
- * 10. Si ocurre un fallo en la fase de reemplazo del mundo activo, ejecuta un intento de rollback restaurando el pre-backup.
- * 11. Limpia directorio de staging y archivo ZIP subido en el bloque finally.
- * 12. Libera el lock de operación D1 en el bloque finally.
- */
 export async function replaceServerWorld(
   env: Env,
-  db: ReturnType<typeof createDatabase>,
+  db: ReturnType<typeof createDatabase> | Database,
   userId: string,
   uploadedFileName: string,
-  clientOverride?: IPterodactylClient,
-  backupOptions?: { maxAttempts?: number; intervalMs?: number },
+  arg1?: string | IPterodactylClient | null,
+  arg2?: string | IPterodactylClient | { maxAttempts?: number; intervalMs?: number } | null,
+  arg3?: IPterodactylClient | { maxAttempts?: number; intervalMs?: number },
+  arg4?: { maxAttempts?: number; intervalMs?: number },
 ): Promise<boolean> {
-  const client = clientOverride || createPterodactylClient(env)
+  let targetWorldName: string | null = null
+  let serverId: string | null = null
+  let clientOverride: IPterodactylClient | undefined = undefined
+  let backupOptions: { maxAttempts?: number; intervalMs?: number } | undefined = undefined
+
+  if (arg1 && typeof arg1 === "object") {
+    // (env, db, userId, uploadedFileName, clientOverride, backupOptions?)
+    clientOverride = arg1 as IPterodactylClient
+    if (arg2 && typeof arg2 === "object") {
+      backupOptions = arg2 as { maxAttempts?: number; intervalMs?: number }
+    }
+  } else if (typeof arg1 === "string") {
+    serverId = arg1
+    if (arg2 && typeof arg2 === "object") {
+      if ("listDirectory" in arg2 || "getFileContents" in arg2) {
+        clientOverride = arg2 as IPterodactylClient
+        if (arg3 && typeof arg3 === "object") {
+          backupOptions = arg3 as { maxAttempts?: number; intervalMs?: number }
+        }
+      } else {
+        backupOptions = arg2 as { maxAttempts?: number; intervalMs?: number }
+      }
+    } else if (typeof arg2 === "string") {
+      targetWorldName = arg1
+      serverId = arg2
+      if (arg3 && typeof arg3 === "object") {
+        if ("listDirectory" in arg3 || "getFileContents" in arg3) {
+          clientOverride = arg3 as IPterodactylClient
+          backupOptions = arg4
+        } else {
+          backupOptions = arg3 as { maxAttempts?: number; intervalMs?: number }
+        }
+      }
+    }
+  }
+
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!uploadedFileName || typeof uploadedFileName !== "string" || !uploadedFileName.trim()) {
     throw new ServerInfrastructureError(
@@ -190,7 +229,7 @@ export async function replaceServerWorld(
   const cleanFileName = uploadedFileName.trim().split("/").pop() || ""
 
   // 1. Guard: Check server is strictly OFFLINE
-  const status = await getServerStatus(env, client)
+  const status = await getServerStatus(env, client, serverId, db)
   if (status.status !== "OFFLINE") {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_BUSY,
@@ -200,10 +239,10 @@ export async function replaceServerWorld(
   }
 
   // 2. Detect active world name before operation
-  const activeWorldName = await detectActiveWorldName(env, client)
+  const activeWorldName = targetWorldName || (await detectActiveWorldName(env, client, serverId, db as Database))
 
   // 3. Guard: Acquire distributed operation lock
-  const lockHandle = await acquireServerOperationLock(db, "REPLACE_WORLD", userId)
+  const lockHandle = await acquireServerOperationLock(db, "REPLACE_WORLD", userId, 180, serverId)
   const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   // Unpredictable staging directory name

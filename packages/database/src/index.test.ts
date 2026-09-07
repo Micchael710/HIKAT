@@ -786,6 +786,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0022_generic_mod_loader_columns.sql",
       "0023_external_accounts_email_idx.sql",
       "0024_users_display_name_unique_idx.sql",
+      "0025_servers_multiserver_architecture.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard

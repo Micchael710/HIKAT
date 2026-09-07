@@ -160,15 +160,23 @@ export async function getAdminGameFiles(
   db: Database,
   releaseId?: string | null,
   category?: GameFileCategoryGql | null,
+  serverId?: string | null,
 ): Promise<AdminGameFileGql[]> {
   let targetReleaseId = releaseId
 
   if (!targetReleaseId) {
+    const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+    const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+    if (serverId) {
+      draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+      publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
+    }
+
     // Prefer active draft; fallback to published
     const draft = await db
       .select({ id: schema.gameReleases.id })
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
 
     if (draft) {
@@ -177,7 +185,7 @@ export async function getAdminGameFiles(
       const published = await db
         .select({ id: schema.gameReleases.id })
         .from(schema.gameReleases)
-        .where(eq(schema.gameReleases.status, "PUBLISHED"))
+        .where(and(...publishedConditions))
         .get()
       if (published) {
         targetReleaseId = published.id
@@ -207,6 +215,7 @@ export async function createGameFileUploadToken(
   input: CreateGameFileUploadInputGql,
   userId: string,
   env?: Env,
+  serverId?: string | null,
 ): Promise<GameFileUploadPayloadGql> {
   const safeFilename = sanitizeGameFileName(input.originalFilename)
   const category = (input.category || inferGameCategory(input.logicalPath || safeFilename)) as GameFileCategory
@@ -225,9 +234,12 @@ export async function createGameFileUploadToken(
     )
   }
 
+  const targetServerId = (input as any).serverId || serverId || null
   const accountId = env?.CLOUDFLARE_ACCOUNT_ID
   const bucketName = env?.R2_BUCKET_NAME || "hikat-r2"
-  const objectKey = `game-files/${crypto.randomUUID()}`
+  const objectKey = targetServerId
+    ? `games/${targetServerId}/files/${crypto.randomUUID()}`
+    : `game-files/${crypto.randomUUID()}`
 
   const credentials = await generateR2TemporaryCredentials({
     env,
@@ -251,6 +263,7 @@ export async function createGameFileUploadToken(
 
   await db.insert(schema.gameFileUploadTokens).values({
     id: tokenId,
+    serverId: targetServerId,
     tokenHash,
     category,
     originalFilename: input.logicalPath ? sanitizeGamePath(input.logicalPath) : safeFilename,
@@ -413,6 +426,7 @@ export async function addGameFile(
     objectKey: string
     originalFilename: string
   },
+  serverId?: string | null,
 ): Promise<AdminGameFileGql> {
   let objectKeyToCompensate: string | undefined
 
@@ -456,6 +470,13 @@ export async function addGameFile(
         )
       }
 
+      if (claimedToken.serverId && serverId && claimedToken.serverId !== serverId) {
+        throw createGraphQLError(
+          "El token de subida no corresponde al servidor especificado.",
+          "VALIDATION_ERROR",
+        )
+      }
+
       sha256 = claimedToken.sha256
       sizeBytes = claimedToken.uploadedSizeBytes || claimedToken.expectedSizeBytes
       objectKey = claimedToken.objectKey
@@ -472,19 +493,24 @@ export async function addGameFile(
       throw createGraphQLError("El nombre del archivo o mod es obligatorio.", "VALIDATION_ERROR")
     }
 
+    const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+    if (serverId) {
+      draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+    }
+
     // 2. Ensure active DRAFT release
     let draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
 
     if (!draft) {
-      await prepareGameDraft(db, userId)
+      await prepareGameDraft(db, userId, null, env, undefined, serverId)
       draft = await db
         .select()
         .from(schema.gameReleases)
-        .where(eq(schema.gameReleases.status, "DRAFT"))
+        .where(and(...draftConditions))
         .get()
     }
 
@@ -626,6 +652,7 @@ export async function updateGameFile(
 
   try {
     let tokenUpdates: Partial<schema.GameReleaseFile> = {}
+    let claimedTokenServerId: string | null | undefined = undefined
 
     // 1. Single-use atomic token claim
     if (input.tokenHash) {
@@ -649,6 +676,7 @@ export async function updateGameFile(
         )
       }
 
+      claimedTokenServerId = claimedToken.serverId
       objectKeyToCompensate = claimedToken.objectKey
       tokenUpdates = {
         sha256: claimedToken.sha256,
@@ -683,6 +711,13 @@ export async function updateGameFile(
     if (!release || release.status !== "DRAFT") {
       throw createGraphQLError(
         "Solo puedes modificar archivos de una actualización en preparación.",
+        "VALIDATION_ERROR",
+      )
+    }
+
+    if (claimedTokenServerId && release.serverId && claimedTokenServerId !== release.serverId) {
+      throw createGraphQLError(
+        "El token de subida no corresponde al servidor de esta actualización.",
         "VALIDATION_ERROR",
       )
     }
@@ -762,6 +797,7 @@ export async function saveGameFileContent(
   input: SaveGameFileContentInputGql,
   userId: string,
   env: Env,
+  serverId?: string | null,
 ): Promise<AdminGameFileGql> {
   const logicalPath = sanitizeGamePath(input.logicalPath)
   const filename = logicalPath.split("/").pop() || "file.txt"
@@ -770,14 +806,14 @@ export async function saveGameFileContent(
   const lowerPath = logicalPath.toLowerCase()
   if (KNOWN_BINARY_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))) {
     throw createGraphQLError(
-      "No se puede crear ni guardar contenido de texto en un archivo con formato binario (.jar, .zip, imágenes, audio, etc.).",
+      "No se pueden crear o editar archivos binarios (.jar, .zip, .exe, etc.) mediante el editor de texto.",
       "VALIDATION_ERROR",
     )
   }
 
-  // 2. Validate text size and UTF-8 buffer
-  const textEncoder = new TextEncoder()
-  const utf8Bytes = textEncoder.encode(input.content)
+  // 2. Size & UTF-8 Validation
+  const encoder = new TextEncoder()
+  const utf8Bytes = encoder.encode(input.content)
 
   if (utf8Bytes.byteLength > MAX_GAME_TEXT_FILE_SIZE_BYTES) {
     throw createGraphQLError(
@@ -800,19 +836,24 @@ export async function saveGameFileContent(
     }
   }
 
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   // 3. Ensure active draft
   let draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
-    await prepareGameDraft(db, userId)
+    await prepareGameDraft(db, userId, null, env, undefined, serverId)
     draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
   }
 
@@ -846,7 +887,7 @@ export async function saveGameFileContent(
   const treeCheck = validateGameTreeInvariants(
     draftFiles.map((f) => ({ logicalPath: f.logicalPath, isDirectory: Boolean(f.isDirectory) })),
     [{ logicalPath, isDirectory: false }],
-    { ignoredExistingPaths: new Set([logicalPath]) },
+    { ignoredExistingPaths: existing ? new Set([existing.logicalPath]) : undefined },
   )
 
   if (!treeCheck.valid) {
@@ -861,7 +902,9 @@ export async function saveGameFileContent(
     .toLowerCase()
 
   const fileId = crypto.randomUUID()
-  const objectKey = `game-files/${fileId}-${sha256.slice(0, 16)}`
+  const objectKey = serverId
+    ? `games/${serverId}/files/${fileId}-${sha256.slice(0, 16)}`
+    : `game-files/${fileId}-${sha256.slice(0, 16)}`
   const oldObjectKey = existing?.objectKey
 
   // 6. Save to R2
@@ -1004,23 +1047,29 @@ export async function createGameFolder(
   db: Database,
   rawLogicalPath: string,
   userId: string,
+  serverId?: string | null,
 ): Promise<AdminGameFileGql> {
   const logicalPath = sanitizeGamePath(rawLogicalPath)
   const name = logicalPath.split("/").pop() || "folder"
+
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
 
   // Ensure active draft
   let draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
-    await prepareGameDraft(db, userId)
+    await prepareGameDraft(db, userId, null, undefined, undefined, serverId)
     draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
   }
 
@@ -1081,6 +1130,7 @@ export async function renameGamePath(
   oldPathRaw: string,
   newPathRaw: string,
   userId: string,
+  serverId?: string | null,
 ): Promise<boolean> {
   const oldPath = sanitizeGamePath(oldPathRaw)
   const newPath = sanitizeGamePath(newPathRaw)
@@ -1094,19 +1144,24 @@ export async function renameGamePath(
     )
   }
 
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   // Ensure active draft
   let draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
-    await prepareGameDraft(db, userId)
+    await prepareGameDraft(db, userId, null, undefined, undefined, serverId)
     draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
   }
 
@@ -1121,69 +1176,80 @@ export async function renameGamePath(
     .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
     .all()
 
-  const matchingRecords = draftFiles.filter(
+  // Find target item and its descendants if it's a folder
+  const matchingFiles = draftFiles.filter(
     (f) => f.logicalPath === oldPath || f.logicalPath.startsWith(`${oldPath}/`),
   )
 
-  if (matchingRecords.length === 0) {
-    throw createGraphQLError(`Elemento no encontrado en el borrador: ${oldPath}`, "NOT_FOUND")
+  if (matchingFiles.length === 0) {
+    throw createGraphQLError(`Elemento a renombrar no encontrado: ${oldPath}`, "NOT_FOUND")
   }
 
-  // Preflight all target paths
-  const oldPathSet = new Set(matchingRecords.map((r) => r.logicalPath))
-  const remainingFiles = draftFiles.filter((f) => !oldPathSet.has(f.logicalPath))
+  // Target item itself
+  const targetItem = matchingFiles.find((f) => f.logicalPath === oldPath)
+  if (!targetItem) {
+    throw createGraphQLError(`Elemento a renombrar no encontrado: ${oldPath}`, "NOT_FOUND")
+  }
 
-  const proposedItems: Array<{ id: string; oldPath: string; newPath: string; name: string; isDirectory: boolean }> = []
+  // Prepare replacement plans
+  const plannedChanges: Array<{ id: string; newPath: string; newName: string; isDirectory: boolean }> = []
+  const baseNewName = newPath.split("/").pop() || "renamed"
 
-  for (const f of matchingRecords) {
-    let targetPath: string
-    let newName: string
+  for (const f of matchingFiles) {
+    let itemNewPath: string
+    let itemNewName: string
     if (f.logicalPath === oldPath) {
-      targetPath = newPath
-      newName = newPath.split("/").pop() || f.name
+      itemNewPath = newPath
+      itemNewName = baseNewName
     } else {
-      const childSub = f.logicalPath.slice(oldPath.length)
-      targetPath = `${newPath}${childSub}`
-      newName = f.name
+      // Subpath replacement
+      const sub = f.logicalPath.slice(oldPath.length)
+      itemNewPath = `${newPath}${sub}`
+      itemNewName = f.name
     }
 
-    // Check collision against remaining items
-    if (remainingFiles.some((r) => r.logicalPath === targetPath)) {
-      throw createGraphQLError(
-        `Ya existe un elemento en la ruta de destino: "${targetPath}".`,
-        "VALIDATION_ERROR",
-      )
-    }
-
-    proposedItems.push({
+    plannedChanges.push({
       id: f.id,
-      oldPath: f.logicalPath,
-      newPath: targetPath,
-      name: newName,
+      newPath: itemNewPath,
+      newName: itemNewName,
       isDirectory: Boolean(f.isDirectory),
     })
   }
 
+  // Verify none of the new paths collide with existing unchanged files
+  const unchangedDraftFiles = draftFiles.filter(
+    (f) => !matchingFiles.some((m) => m.id === f.id),
+  )
+
+  for (const change of plannedChanges) {
+    if (unchangedDraftFiles.some((r) => r.logicalPath === change.newPath)) {
+      throw createGraphQLError(
+        `Ya existe un elemento en la ruta de destino: "${change.newPath}".`,
+        "VALIDATION_ERROR",
+      )
+    }
+  }
+
   // Validate resulting tree invariants
   const treeCheck = validateGameTreeInvariants(
-    remainingFiles.map((f) => ({ logicalPath: f.logicalPath, isDirectory: Boolean(f.isDirectory) })),
-    proposedItems.map((p) => ({ logicalPath: p.newPath, isDirectory: p.isDirectory })),
+    unchangedDraftFiles.map((f) => ({ logicalPath: f.logicalPath, isDirectory: Boolean(f.isDirectory) })),
+    plannedChanges.map((p) => ({ logicalPath: p.newPath, isDirectory: p.isDirectory })),
   )
 
   if (!treeCheck.valid) {
     throw createGraphQLError(treeCheck.error || "Estructura de árbol inválida.", "VALIDATION_ERROR")
   }
 
-  // Execute atomic batch
-  const statements = proposedItems.map((item) =>
+  // Execute all updates atomically via D1 batch
+  const statements = plannedChanges.map((change) =>
     db
       .update(schema.gameReleaseFiles)
       .set({
-        name: item.name,
-        logicalPath: item.newPath,
-        category: inferGameCategory(item.newPath),
+        name: change.newName,
+        logicalPath: change.newPath,
+        category: inferGameCategory(change.newPath),
       })
-      .where(eq(schema.gameReleaseFiles.id, item.id)),
+      .where(eq(schema.gameReleaseFiles.id, change.id)),
   )
 
   if (statements.length > 0) {
@@ -1198,24 +1264,30 @@ export async function moveGamePaths(
   sources: string[],
   destinationFolderRaw: string,
   userId: string,
+  serverId?: string | null,
 ): Promise<boolean> {
   const destFolder = destinationFolderRaw ? sanitizeGamePath(destinationFolderRaw) : ""
 
   if (sources.length === 0) return true
 
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   // Ensure active draft
   let draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
-    await prepareGameDraft(db, userId)
+    await prepareGameDraft(db, userId, null, undefined, undefined, serverId)
     draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
   }
 
@@ -1336,24 +1408,31 @@ export async function copyGamePaths(
   sources: string[],
   destinationFolderRaw: string,
   userId: string,
+  env?: Env,
+  serverId?: string | null,
 ): Promise<boolean> {
   const destFolder = destinationFolderRaw ? sanitizeGamePath(destinationFolderRaw) : ""
 
   if (sources.length === 0) return true
 
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   // Ensure active draft
   let draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
-    await prepareGameDraft(db, userId)
+    await prepareGameDraft(db, userId, null, env, undefined, serverId)
     draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
   }
 
@@ -1427,8 +1506,8 @@ export async function copyGamePaths(
         sha256: f.sha256,
         sizeBytes: f.sizeBytes,
         policy: f.policy,
-        isDirectory: f.isDirectory,
-        objectKey: f.objectKey,
+        isDirectory: f.isDirectory ?? 0,
+        objectKey: f.objectKey, // Shared immutable reference to the identical R2 object
         sourceProvider: f.sourceProvider || null,
         sourceProjectId: f.sourceProjectId || null,
         sourceVersionId: f.sourceVersionId || null,
@@ -1471,9 +1550,9 @@ export async function copyGamePaths(
     throw createGraphQLError(treeCheck.error || "Estructura de árbol inválida.", "VALIDATION_ERROR")
   }
 
-  // Execute inserts atomically via D1 batch
-  const statements = plannedInserts.map((insertItem) =>
-    db.insert(schema.gameReleaseFiles).values(insertItem),
+  // Insert all copied records atomically via D1 batch
+  const statements = plannedInserts.map((record) =>
+    db.insert(schema.gameReleaseFiles).values(record),
   )
 
   if (statements.length > 0) {
@@ -1488,15 +1567,21 @@ export async function deleteGamePaths(
   paths: string[],
   userId: string,
   env?: Env,
+  serverId?: string | null,
 ): Promise<boolean> {
   const normalizedPaths = normalizeDeletePaths(paths)
   if (normalizedPaths.length === 0) return true
+
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
 
   // Ensure active draft
   const draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
@@ -1566,22 +1651,30 @@ export async function setGamePathPolicy(
   pathRaw: string,
   explicitPolicy: SyncPolicyGql | null | undefined,
   userId: string,
+  serverId?: string | null,
 ): Promise<boolean> {
   const cleanPath = sanitizeGamePath(pathRaw)
+
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+    publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
 
   // Ensure active draft
   let draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
-    await prepareGameDraft(db, userId)
+    await prepareGameDraft(db, userId, null, undefined, undefined, serverId)
     draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
   }
 
@@ -1610,7 +1703,7 @@ export async function setGamePathPolicy(
   const published = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "PUBLISHED"))
+    .where(and(...publishedConditions))
     .get()
 
   if (published) {
@@ -1701,6 +1794,7 @@ export async function restoreGameFile(
   db: Database,
   rawId: string,
   userId: string,
+  serverId?: string | null,
 ): Promise<AdminGameFileGql> {
   const fileId = rawId.replace(/^tombstone-/, "")
 
@@ -1714,18 +1808,23 @@ export async function restoreGameFile(
     throw createGraphQLError("Archivo de juego original no encontrado.", "NOT_FOUND")
   }
 
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   let draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
-    await prepareGameDraft(db, userId)
+    await prepareGameDraft(db, userId, null, undefined, undefined, serverId)
     draft = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
   }
 

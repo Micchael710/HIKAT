@@ -68,6 +68,7 @@ async function attachMediaToNews(
 
     return {
       id: item.id,
+      serverId: item.serverId || null,
       title: item.title,
       content: item.content,
       type: item.type as NewsType,
@@ -95,6 +96,7 @@ export async function getPublicNewsFeed(
     first?: number | null
     after?: string | null
     type?: NewsType | null
+    serverId?: string | null
   },
   request?: Request,
 ): Promise<NewsConnectionGql> {
@@ -110,6 +112,10 @@ export async function getPublicNewsFeed(
 
   if (params.type) {
     conditions.push(eq(news.type, params.type))
+  }
+
+  if (params.serverId) {
+    conditions.push(eq(news.serverId, params.serverId))
   }
 
   // Handle cursor pagination
@@ -149,6 +155,9 @@ export async function getPublicNewsFeed(
   ]
   if (params.type) {
     countConditions.push(eq(news.type, params.type))
+  }
+  if (params.serverId) {
+    countConditions.push(eq(news.serverId, params.serverId))
   }
 
   const totalCountResult = await db
@@ -221,6 +230,7 @@ export async function getAdminNews(
     after?: string | null
     type?: NewsType | null
     status?: NewsStatus | null
+    serverId?: string | null
   },
   request?: Request,
 ): Promise<NewsConnectionGql> {
@@ -237,6 +247,10 @@ export async function getAdminNews(
 
   if (params.status) {
     conditions.push(eq(news.status, params.status))
+  }
+
+  if (params.serverId) {
+    conditions.push(eq(news.serverId, params.serverId))
   }
 
   if (params.after) {
@@ -271,6 +285,7 @@ export async function getAdminNews(
   const countConditions: any[] = []
   if (params.type) countConditions.push(eq(news.type, params.type))
   if (params.status) countConditions.push(eq(news.status, params.status))
+  if (params.serverId) countConditions.push(eq(news.serverId, params.serverId))
 
   const countWhere =
     countConditions.length > 0 ? and(...countConditions) : undefined
@@ -428,6 +443,7 @@ export async function createNews(
     .insert(news)
     .values({
       id: newId,
+      serverId: input.serverId || null,
       title,
       content,
       type: input.type,

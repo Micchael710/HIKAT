@@ -12,7 +12,7 @@ import {
 import type { Env } from "../../types"
 import { IPterodactylClient } from "./types"
 import {
-  createPterodactylClient,
+  resolvePterodactylClient,
   getServerStatus,
   acquireServerOperationLock,
   releaseServerOperationLock,
@@ -94,9 +94,11 @@ async function getPhysicalServerFilesSet(
   env: Env,
   clientOverride?: IPterodactylClient,
   strictFailClosed: boolean = false,
+  serverId?: string | null,
+  db?: Database,
 ): Promise<{ physicalPaths: Set<string>; worldName: string; physicalFilesMap: Map<string, { size: number }> }> {
-  const client = clientOverride || createPterodactylClient(env)
-  const worldName = await detectActiveWorldName(env, client)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const worldName = await detectActiveWorldName(env, client, serverId, db)
   const physicalPaths = new Set<string>()
   const physicalFilesMap = new Map<string, { size: number }>()
 
@@ -148,17 +150,42 @@ async function getPhysicalServerFilesSet(
   return { physicalPaths, worldName, physicalFilesMap }
 }
 
+function parseContentServiceArgs(
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient,
+): { serverId: string | null; clientOverride?: IPterodactylClient } {
+  if (arg1 && typeof arg1 === "object") {
+    return {
+      serverId: null,
+      clientOverride: arg1 as IPterodactylClient,
+    }
+  }
+
+  const serverId = typeof arg1 === "string" ? arg1 : null
+  const clientOverride = arg2
+
+  return { serverId, clientOverride }
+}
+
 /**
- * Returns all server managed content items with drift detection (INSTALLED vs MISSING).
+ * Returns all managed server content tracked in D1, resolving real-time physical status against Wings.
  */
 export async function getServerManagedContent(
   db: Database,
   env: Env,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient,
 ): Promise<ServerManagedContentItemGql[]> {
+  const { serverId, clientOverride } = parseContentServiceArgs(arg1, arg2)
+  if (!db) {
+    return []
+  }
+
+  const conditions = serverId ? [eq(schema.serverManagedContent.serverId, serverId)] : []
   const records = await db
     .select()
     .from(schema.serverManagedContent)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
     .all()
 
   if (records.length === 0) {
@@ -168,7 +195,7 @@ export async function getServerManagedContent(
   let physicalPaths = new Set<string>()
   let worldName = "world"
   try {
-    const res = await getPhysicalServerFilesSet(env, clientOverride, false)
+    const res = await getPhysicalServerFilesSet(env, clientOverride, false, serverId, db)
     physicalPaths = res.physicalPaths
     worldName = res.worldName
   } catch {
@@ -208,6 +235,8 @@ export async function getServerManagedContent(
   })
 }
 
+export const listServerManagedContent = getServerManagedContent
+
 /**
  * Installs server content plan (MOD SERVER or DATA_PACK) directly to Wings and tracks in D1.
  */
@@ -216,8 +245,10 @@ export async function installServerContentPlan(
   env: Env,
   input: InstallServerContentPlanInputGql,
   userId: string,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient,
 ): Promise<ServerManagedContentItemGql[]> {
+  const { serverId, clientOverride } = parseContentServiceArgs(arg1, arg2)
   const plan = await modProviderManager.resolveServerInstallationPlan(env, db, input)
 
   if (!plan.isValid || plan.conflicts.length > 0) {
@@ -232,17 +263,17 @@ export async function installServerContentPlan(
   )
 
   if (itemsToProcess.length === 0) {
-    return getServerManagedContent(db, env, clientOverride)
+    return getServerManagedContent(db, env, serverId, clientOverride)
   }
 
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   // 1. Guard: Check server status is OFFLINE if any MOD is being installed/updated
   const hasMod = itemsToProcess.some((i) => i.contentType === "MOD")
   if (hasMod) {
     let statusMetrics
     try {
-      statusMetrics = await getServerStatus(env, client)
+      statusMetrics = await getServerStatus(env, client, serverId, db)
     } catch {
       throw createGraphQLError(
         "No se pudo verificar el estado del servidor. Apaga el servidor antes de instalar mods.",
@@ -258,16 +289,18 @@ export async function installServerContentPlan(
   }
 
   // 2. Guard: Acquire distributed operation lock and start heartbeat
-  const lockHandle = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
+  const lockHandle = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId, 180, serverId)
   const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   try {
-    const worldName = await detectActiveWorldName(env, client)
-    const { physicalPaths } = await getPhysicalServerFilesSet(env, client, true)
+    const worldName = await detectActiveWorldName(env, client, serverId, db)
+    const { physicalPaths } = await getPhysicalServerFilesSet(env, client, true, serverId, db)
 
+    const conditions = serverId ? [eq(schema.serverManagedContent.serverId, serverId)] : []
     const managedRecords = await db
       .select()
       .from(schema.serverManagedContent)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .all()
 
     // 3. Strict Preflight check: Exact Path Ownership & Manual Collisions
@@ -299,7 +332,19 @@ export async function installServerContentPlan(
           if (!isSameItem) {
             const currentFileName = trackedAtTarget.targetPath.split("/").pop() || trackedAtTarget.targetPath
             throw createGraphQLError(
-              `La ruta ${targetPath} está ocupada por otro contenido administrado (${currentFileName}).`,
+              `Conflicto de archivo en el servidor: la ruta '${targetPath}' ya está administrada por el elemento '${currentFileName}' (ID: ${trackedAtTarget.projectId}) de ${trackedAtTarget.provider}. Elimina o actualiza el elemento existente primero.`,
+              "CONFLICT",
+            )
+          }
+        } else {
+          // File physically exists in Wings, but NO record in D1 owns it
+          const cleanTargetPath = targetPath.startsWith("/") ? targetPath : `/${targetPath}`
+          const physicalSha256 = await getPhysicalFileSha256(client, cleanTargetPath)
+          if (physicalSha256 && item.sha256 && physicalSha256.toLowerCase() === item.sha256.toLowerCase()) {
+            (item as any)._isAdopted = true
+          } else {
+            throw createGraphQLError(
+              `Ya existe un archivo manual en esta ruta (${targetPath}). HiKAT no lo reemplazará automáticamente.`,
               "CONFLICT",
             )
           }
@@ -307,169 +352,81 @@ export async function installServerContentPlan(
       }
     }
 
-    // 4. Download, validate, write to Wings, and handle old file cleanup
-    for (const item of itemsToProcess) {
-      const adapter = modProviderManager.getAdapter(item.provider)
-      const versionObj = await adapter.getVersion(
-        env,
-        item.versionId,
-        item.projectId,
-        item.contentType,
-      )
-      const downloadUrl = versionObj?.downloadUrl || ""
-      const filename = versionObj?.filename || item.filename
+    // 4. Download and validate all payloads in buffer before writing anything
+    const downloadedPayloads: Array<{
+      item: (typeof itemsToProcess)[number]
+      buffer: ArrayBuffer
+      sha256: string
+      logicalTargetPath: string
+      wingsParentDir: string
+      wingsFileName: string
+      existing: any | undefined
+    }> = []
 
-      if (!downloadUrl) {
+    for (const item of itemsToProcess) {
+      heartbeat.assertLeaseOwned()
+
+      const downloadUrl = (item as any).downloadUrl || ""
+      const itemName = (item as any).name || item.projectName || item.filename
+      const res = await fetch(downloadUrl)
+      if (!res.ok) {
         throw createGraphQLError(
-          `El autor de este archivo en ${item.provider} ha deshabilitado la descarga directa de terceros.`,
-          "VALIDATION_ERROR",
+          `No se pudo descargar el archivo para ${itemName} (${res.status} ${res.statusText}). No se aplicaron cambios.`,
+          "INTERNAL_ERROR",
         )
       }
 
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 45000)
-
-      let buffer: Uint8Array
-      try {
-        const res = await fetch(downloadUrl, {
-          headers: {
-            "User-Agent": "HiKAT/0.1.0 (contact@hikat.local)",
-          },
-          signal: controller.signal,
-        })
-
-        if (!res.ok) {
-          throw new Error(`Error ${res.status} al descargar "${item.projectName}" desde ${item.provider}`)
-        }
-
-        const arrayBuffer = await res.arrayBuffer()
-        buffer = new Uint8Array(arrayBuffer)
-      } finally {
-        clearTimeout(timeoutId)
-      }
-
-      if (buffer.byteLength === 0) {
-        throw createGraphQLError(`El archivo descargado para "${item.projectName}" está vacío.`, "VALIDATION_ERROR")
-      }
-
+      const buffer = await res.arrayBuffer()
       if (buffer.byteLength > MAX_GAME_FILE_SIZE_BYTES) {
         throw createGraphQLError(
-          `El archivo descargado para "${item.projectName}" supera el tamaño máximo permitido (100 MB).`,
+          `El archivo para ${itemName} supera el tamaño máximo permitido. No se aplicaron cambios.`,
           "VALIDATION_ERROR",
         )
       }
 
-      // Format & magic bytes validation
-      const validationCategory = item.contentType === "DATA_PACK" ? "DATA_PACK" : "MOD"
-      const validation = validateGameFileBuffer(
-        buffer.buffer as ArrayBuffer,
-        filename,
-        validationCategory as any,
-      )
+      const rawBytes = new Uint8Array(buffer)
+      const validation = validateGameFileBuffer(rawBytes, item.filename, item.contentType as any)
       if (!validation.valid) {
         throw createGraphQLError(
-          `El archivo descargado para "${item.projectName}" no tiene un formato binario válido.`,
+          validation.error || `El contenido descargado para ${itemName} no es válido. No se aplicaron cambios.`,
           "VALIDATION_ERROR",
         )
       }
 
-      // SHA-256
-      const shaBuffer = await crypto.subtle.digest("SHA-256", buffer.buffer as ArrayBuffer)
-      const sha256 = Array.from(new Uint8Array(shaBuffer))
+      const hashBuf = await crypto.subtle.digest("SHA-256", buffer)
+      const sha256 = Array.from(new Uint8Array(hashBuf))
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("")
-        .toLowerCase()
 
-      // Checksum verification
-      if (versionObj?.hashes?.sha512) {
-        const sha512Buffer = await crypto.subtle.digest("SHA-512", buffer.buffer as ArrayBuffer)
-        const computedSha512 = Array.from(new Uint8Array(sha512Buffer))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("")
-          .toLowerCase()
-        if (computedSha512 !== versionObj.hashes.sha512.toLowerCase()) {
+      const hashes = (item as any).hashes
+      if (hashes) {
+        if (hashes.sha256 && hashes.sha256.toLowerCase() !== sha256.toLowerCase()) {
           throw createGraphQLError(
-            `Error de integridad: el hash SHA-512 descargado para "${item.projectName}" no coincide con el proveedor.`,
+            `Fallo de verificación de integridad (SHA-256) para ${itemName}. Descarga abortada.`,
             "VALIDATION_ERROR",
           )
         }
-      } else if (versionObj?.hashes?.sha1) {
-        const sha1Buffer = await crypto.subtle.digest("SHA-1", buffer.buffer as ArrayBuffer)
-        const computedSha1 = Array.from(new Uint8Array(sha1Buffer))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("")
-          .toLowerCase()
-        if (computedSha1 !== versionObj.hashes.sha1.toLowerCase()) {
-          throw createGraphQLError(
-            `Error de integridad: el hash SHA-1 descargado para "${item.projectName}" no coincide con el proveedor.`,
-            "VALIDATION_ERROR",
-          )
-        }
-      } else if (versionObj?.hashes?.md5) {
-        const computedMd5 = computeMd5Hex(buffer)
-        if (computedMd5 !== versionObj.hashes.md5.toLowerCase()) {
-          throw createGraphQLError(
-            `Error de integridad: el hash MD5 descargado para "${item.projectName}" no coincide con el proveedor.`,
-            "VALIDATION_ERROR",
-          )
-        }
-      }
-
-      // Determine target full path on Wings
-      const logicalTargetPath = getLogicalPathForServerContent(item.contentType, filename, worldName)
-      const wingsFullPath = `/${logicalTargetPath}`
-
-      const pathSegments = wingsFullPath.split("/").filter(Boolean)
-      const wingsFileName = pathSegments.pop() || filename
-      const wingsParentDir = pathSegments.length > 0 ? `/${pathSegments.join("/")}` : "/"
-
-      // Check if a physical file already exists at targetPath without D1 tracking
-      const isPhysicalTarget =
-        physicalPaths.has(logicalTargetPath) ||
-        physicalPaths.has(`mods/${wingsFileName}`) ||
-        physicalPaths.has(`${worldName}/datapacks/${wingsFileName}`) ||
-        physicalPaths.has(`datapacks/${wingsFileName}`)
-
-      if (isPhysicalTarget) {
-        const tracked = managedRecords.find(
-          (m) =>
-            m.targetPath === logicalTargetPath ||
-            m.targetPath === `mods/${wingsFileName}` ||
-            m.targetPath === `${worldName}/datapacks/${wingsFileName}`,
-        )
-
-        if (!tracked) {
-          // Verify physical file SHA-256 before adopting or overwriting
-          const physicalSha = await getPhysicalFileSha256(client, wingsFullPath)
-          if (!physicalSha || physicalSha.toLowerCase() !== sha256.toLowerCase()) {
+        if (hashes.md5) {
+          const md5 = computeMd5Hex(rawBytes)
+          if (hashes.md5.toLowerCase() !== md5.toLowerCase()) {
             throw createGraphQLError(
-              `Ya existe un archivo manual en esta ruta (${logicalTargetPath}). HiKAT no lo reemplazará automáticamente.`,
-              "CONFLICT",
+              `Fallo de verificación de integridad (MD5) para ${itemName}. Descarga abortada.`,
+              "VALIDATION_ERROR",
             )
           }
         }
+      } else if (item.sha256 && item.sha256.toLowerCase() !== sha256.toLowerCase()) {
+        throw createGraphQLError(
+          `Fallo de verificación de integridad (SHA-256) para ${itemName}. Descarga abortada.`,
+          "VALIDATION_ERROR",
+        )
       }
 
-      // Ensure parent directory exists
-      if (item.contentType === "DATA_PACK") {
-        try {
-          await client.createFolder(`/${worldName}`, "datapacks")
-        } catch {
-          // Directory may already exist
-        }
-      } else {
-        try {
-          await client.createFolder("/", "mods")
-        } catch {
-          // Directory may already exist
-        }
-      }
-
-      // Assert lease owned before writing to Wings
-      heartbeat.assertLeaseOwned()
-
-      // Write binary to Wings
-      await client.writeFile(wingsFullPath, buffer)
+      const logicalTargetPath = item.targetPath || getLogicalPathForServerContent(item.contentType, item.filename, worldName)
+      const cleanTarget = logicalTargetPath.replace(/^\/+/, "")
+      const segments = cleanTarget.split("/")
+      const wingsFileName = segments.pop() || item.filename
+      const wingsParentDir = segments.length > 0 ? `/${segments.join("/")}` : "/"
 
       const existing = managedRecords.find(
         (m) =>
@@ -478,24 +435,45 @@ export async function installServerContentPlan(
           m.contentType === item.contentType,
       )
 
-      // If UPDATE had a filename change (old target != new target), delete old file safely
-      if (existing && existing.targetPath !== logicalTargetPath) {
-        heartbeat.assertLeaseOwned()
-        const oldSegments = existing.targetPath.replace(/^\/+/, "").split("/")
-        const oldFileName = oldSegments.pop() || ""
-        const oldParentDir = oldSegments.length > 0 ? `/${oldSegments.join("/")}` : "/"
+      downloadedPayloads.push({
+        item,
+        buffer,
+        sha256,
+        logicalTargetPath,
+        wingsParentDir,
+        wingsFileName,
+        existing,
+      })
+    }
 
-        if (oldFileName && oldFileName !== wingsFileName) {
-          try {
-            await safeDeleteServerFilePhysical(client, oldParentDir, oldFileName)
-          } catch (deleteErr: any) {
-            // Attempt compensation of newly written file
-            await client.deleteFiles(wingsParentDir, [wingsFileName]).catch(() => {})
-            throw createGraphQLError(
-              `No se pudo eliminar el archivo anterior (${oldFileName}) al actualizar a ${wingsFileName}: ${deleteErr.message}`,
-              "INTERNAL_ERROR",
-            )
-          }
+    // 5. Sequential Atomic Write + Verification + Cleanup
+    for (const payload of downloadedPayloads) {
+      heartbeat.assertLeaseOwned()
+      const { item, buffer, sha256, logicalTargetPath, wingsParentDir, wingsFileName, existing } = payload
+      const isAdopted = Boolean((item as any)._isAdopted)
+
+      if (!isAdopted) {
+        // If updating and old filename differs, delete old physical file first with verification
+        if (existing && existing.targetPath && existing.targetPath !== logicalTargetPath) {
+          const oldClean = existing.targetPath.replace(/^\/+/, "")
+          const oldSegments = oldClean.split("/")
+          const oldFileName = oldSegments.pop() || ""
+          const oldParentDir = oldSegments.length > 0 ? `/${oldSegments.join("/")}` : "/"
+          await safeDeleteServerFilePhysical(client, oldParentDir, oldFileName)
+        }
+
+        // Write new binary payload to Wings
+        const rawBytes = new Uint8Array(buffer)
+        await client.writeFile(`${wingsParentDir}/${wingsFileName}`, rawBytes)
+
+        // Verify written file integrity on disk (fail-closed if corrupt/partial write)
+        const writtenHash = await getPhysicalFileSha256(client, `${wingsParentDir}/${wingsFileName}`)
+        if (writtenHash && writtenHash.toLowerCase() !== sha256.toLowerCase()) {
+          await safeDeleteServerFilePhysical(client, wingsParentDir, wingsFileName).catch(() => {})
+          throw createGraphQLError(
+            `Error de integridad: el archivo ${wingsFileName} no se escribió correctamente en el servidor. La operación fue revertida.`,
+            "INTERNAL_ERROR",
+          )
         }
       }
 
@@ -518,6 +496,7 @@ export async function installServerContentPlan(
         } else {
           await db.insert(schema.serverManagedContent).values({
             id: crypto.randomUUID(),
+            serverId: serverId || null,
             managementSource: "SERVER_DIRECT",
             provider: item.provider,
             projectId: item.projectId,
@@ -533,18 +512,46 @@ export async function installServerContentPlan(
           })
         }
       } catch (d1Err: any) {
-        if (!existing) {
+        if (!isAdopted) {
           await safeDeleteServerFilePhysical(client, wingsParentDir, wingsFileName).catch(() => {})
         }
         throw d1Err
       }
     }
-
-    return getServerManagedContent(db, env, clientOverride)
+    return getServerManagedContent(db, env, serverId, clientOverride)
   } finally {
     heartbeat.stop()
     await releaseServerOperationLock(db, lockHandle)
   }
+}
+
+function parseRemoveContentArgs(
+  arg1?: boolean | string | IPterodactylClient | null,
+  arg2?: string | IPterodactylClient | null,
+  arg3?: IPterodactylClient,
+): { deleteFile: boolean; serverId: string | null; clientOverride?: IPterodactylClient } {
+  let deleteFile = true
+  let serverId: string | null = null
+  let clientOverride: IPterodactylClient | undefined = undefined
+
+  if (typeof arg1 === "boolean") {
+    deleteFile = arg1
+    if (typeof arg2 === "string") {
+      serverId = arg2
+      clientOverride = arg3
+    } else if (arg2 && typeof arg2 === "object") {
+      clientOverride = arg2 as IPterodactylClient
+    }
+  } else if (typeof arg1 === "string") {
+    serverId = arg1
+    if (arg2 && typeof arg2 === "object") {
+      clientOverride = arg2 as IPterodactylClient
+    }
+  } else if (arg1 && typeof arg1 === "object") {
+    clientOverride = arg1 as IPterodactylClient
+  }
+
+  return { deleteFile, serverId, clientOverride }
 }
 
 /**
@@ -555,12 +562,17 @@ export async function removeServerManagedContent(
   env: Env,
   id: string,
   userId: string,
-  clientOverride?: IPterodactylClient,
+  arg1?: boolean | string | IPterodactylClient | null,
+  arg2?: string | IPterodactylClient | null,
+  arg3?: IPterodactylClient,
 ): Promise<boolean> {
+  const { deleteFile, serverId, clientOverride } = parseRemoveContentArgs(arg1, arg2, arg3)
+  const conditions = [eq(schema.serverManagedContent.id, id)]
+  if (serverId) conditions.push(eq(schema.serverManagedContent.serverId, serverId))
   const record = await db
     .select()
     .from(schema.serverManagedContent)
-    .where(eq(schema.serverManagedContent.id, id))
+    .where(and(...conditions))
     .get()
 
   if (!record) {
@@ -574,13 +586,13 @@ export async function removeServerManagedContent(
     )
   }
 
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   // 1. Guard: Check server status is OFFLINE if content is MOD
   if (record.contentType === "MOD") {
     let statusMetrics
     try {
-      statusMetrics = await getServerStatus(env, client)
+      statusMetrics = await getServerStatus(env, client, serverId, db)
     } catch {
       throw createGraphQLError(
         "No se pudo verificar el estado del servidor. Apaga el servidor antes de eliminar mods.",
@@ -596,7 +608,7 @@ export async function removeServerManagedContent(
   }
 
   // 2. Guard: Acquire distributed operation lock and start heartbeat
-  const lockHandle = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId)
+  const lockHandle = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId, 180, serverId)
   const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   try {
@@ -607,16 +619,20 @@ export async function removeServerManagedContent(
     // Assert lease owned before physical deletion
     heartbeat.assertLeaseOwned()
 
-    // Delete physical file from Wings with safe physical check
-    await safeDeleteServerFilePhysical(client, parentPath, fileName)
+    if (deleteFile) {
+      // Delete physical file from Wings with safe physical check
+      await safeDeleteServerFilePhysical(client, parentPath, fileName)
+    }
 
     // Assert lease owned before D1 record deletion
     heartbeat.assertLeaseOwned()
 
     // Delete D1 record only after physical delete succeeds
+    const deleteConditions = [eq(schema.serverManagedContent.id, id)]
+    if (serverId) deleteConditions.push(eq(schema.serverManagedContent.serverId, serverId))
     await db
       .delete(schema.serverManagedContent)
-      .where(eq(schema.serverManagedContent.id, id))
+      .where(and(...deleteConditions))
 
     return true
   } finally {

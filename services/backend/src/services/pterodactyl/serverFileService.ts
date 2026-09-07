@@ -11,12 +11,12 @@ import {
   SERVER_ERROR_CODES,
   type ServerFileRoot,
 } from "@hikat/shared"
-import { eq } from "drizzle-orm"
+import { eq, and } from "drizzle-orm"
 import { schema, type Database } from "@hikat/database"
 import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
 import { ServerInfrastructureError } from "./pterodactylClient"
-import { createPterodactylClient } from "./serverAdministrationService"
+import { resolvePterodactylClient } from "./serverAdministrationService"
 import { detectActiveWorldName } from "./serverWorldService"
 
 export interface ServerFileItemData {
@@ -35,8 +35,6 @@ export interface ServerFileContentData {
 
 /**
  * Helper to verify that a target path exists and is not a symlink.
- * Fail-closed: If listDirectory fails, response structure is invalid, item is not found,
- * or target is a symlink, throws a human ServerInfrastructureError.
  */
 async function verifyNotSymlink(
   client: IPterodactylClient,
@@ -94,8 +92,10 @@ async function resolveSafePath(
   root: ServerFileRoot,
   relativePath?: string | null,
   client?: IPterodactylClient,
+  serverId?: string | null,
+  db?: Database,
 ): Promise<string> {
-  const worldName = root === "WORLD" ? await detectActiveWorldName(env, client) : "world"
+  const worldName = root === "WORLD" ? await detectActiveWorldName(env, client, serverId, db) : "world"
   const check = sanitizeVirtualPath(root, relativePath, worldName)
   if (!check.valid || check.fullPath === undefined) {
     throw new ServerInfrastructureError(
@@ -107,6 +107,26 @@ async function resolveSafePath(
   return check.fullPath
 }
 
+function parsePterodactylFileArgs(
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
+): { serverId: string | null; clientOverride?: IPterodactylClient; db?: Database } {
+  if (arg1 && typeof arg1 === "object" && !("select" in arg1)) {
+    return {
+      serverId: null,
+      clientOverride: arg1 as IPterodactylClient,
+      db: arg2 && "select" in arg2 ? (arg2 as Database) : undefined,
+    }
+  }
+
+  const serverId = typeof arg1 === "string" ? arg1 : null
+  const clientOverride = arg2 && !("select" in arg2) ? (arg2 as IPterodactylClient) : undefined
+  const db = arg3 || (arg2 && "select" in arg2 ? (arg2 as Database) : undefined)
+
+  return { serverId, clientOverride, db }
+}
+
 /**
  * Lists files and directories in a sandboxed virtual root.
  */
@@ -114,10 +134,13 @@ export async function listServerFiles(
   env: Env,
   root: ServerFileRoot,
   relativePath?: string | null,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
 ): Promise<ServerFileItemData[]> {
-  const client = clientOverride || createPterodactylClient(env)
-  const fullPath = await resolveSafePath(env, root, relativePath, client)
+  const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
 
   const res = await client.listDirectory(fullPath)
   if (!res || !res.data || !Array.isArray(res.data)) {
@@ -146,9 +169,12 @@ export async function readServerTextFile(
   env: Env,
   root: ServerFileRoot,
   relativePath: string,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
 ): Promise<ServerFileContentData> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!isAllowlistedTextFile(relativePath)) {
     throw new ServerInfrastructureError(
@@ -157,7 +183,7 @@ export async function readServerTextFile(
     )
   }
 
-  const fullPath = await resolveSafePath(env, root, relativePath, client)
+  const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
   await verifyNotSymlink(client, fullPath)
   const content = await client.getFileContents(fullPath)
 
@@ -185,9 +211,12 @@ export async function writeServerTextFile(
   root: ServerFileRoot,
   relativePath: string,
   content: string,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
 ): Promise<boolean> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!isAllowlistedTextFile(relativePath)) {
     throw new ServerInfrastructureError(
@@ -206,7 +235,7 @@ export async function writeServerTextFile(
     )
   }
 
-  const fullPath = await resolveSafePath(env, root, relativePath, client)
+  const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
   await verifyNotSymlink(client, fullPath)
   await client.writeFile(fullPath, content || "")
   return true
@@ -220,9 +249,12 @@ export async function createServerFolder(
   root: ServerFileRoot,
   relativePath: string,
   folderName: string,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
 ): Promise<boolean> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   const cleanFolderName = folderName.trim().replace(/[/\\:*?"<>|\x00-\x1F]/g, "").replace(/\.\.+/g, "")
   if (!cleanFolderName) {
@@ -232,7 +264,7 @@ export async function createServerFolder(
     )
   }
 
-  const fullPath = await resolveSafePath(env, root, relativePath, client)
+  const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
   await client.createFolder(fullPath, cleanFolderName)
   return true
 }
@@ -245,10 +277,12 @@ export async function renameServerFile(
   root: ServerFileRoot,
   relativePath: string,
   newName: string,
-  clientOverride?: IPterodactylClient,
-  db?: Database,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
 ): Promise<boolean> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   const cleanNewName = newName.trim().replace(/[/\\:*?"<>|\x00-\x1F]/g, "").replace(/\.\.+/g, "")
   if (!cleanNewName) {
@@ -258,7 +292,7 @@ export async function renameServerFile(
     )
   }
 
-  const fullPath = await resolveSafePath(env, root, relativePath, client)
+  const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
   const segments = fullPath.split("/").filter(Boolean)
   const oldName = segments.pop() || ""
   const parentPath = segments.length > 0 ? `/${segments.join("/")}` : "/"
@@ -267,9 +301,11 @@ export async function renameServerFile(
   if (db) {
     const cleanRelative = relativePath.replace(/^\/+/, "")
     const fileName = cleanRelative.split("/").pop() || cleanRelative
+    const conditions = serverId ? [eq(schema.serverManagedContent.serverId, serverId)] : []
     const managed = await db
       .select()
       .from(schema.serverManagedContent)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .all()
 
     const match = managed.find(
@@ -295,10 +331,6 @@ export async function renameServerFile(
 
 /**
  * Safely deletes a file from Wings while strictly verifying physical existence.
- * Returns { success: true, wasMissing: boolean }.
- * If the file was confirmed missing in parent directory listing -> wasMissing: true, success: true.
- * If file was found and deleted successfully -> wasMissing: false, success: true.
- * If listing or deletion fails with network/server error -> throws ServerInfrastructureError (fail-closed).
  */
 export async function safeDeleteServerFilePhysical(
   client: IPterodactylClient,
@@ -344,7 +376,6 @@ export async function safeDeleteServerFilePhysical(
 
 /**
  * Safely downloads a file from Wings via signed download URL and computes its SHA-256 hash.
- * Returns lowercase hex SHA-256 string, or null if download/verification fails.
  */
 export async function getPhysicalFileSha256(
   client: IPterodactylClient,
@@ -374,11 +405,13 @@ export async function deleteServerFile(
   env: Env,
   root: ServerFileRoot,
   relativePath: string,
-  clientOverride?: IPterodactylClient,
-  db?: Database,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
 ): Promise<boolean> {
-  const client = clientOverride || createPterodactylClient(env)
-  const fullPath = await resolveSafePath(env, root, relativePath, client)
+  const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
 
   const segments = fullPath.split("/").filter(Boolean)
   const fileName = segments.pop() || ""
@@ -387,9 +420,11 @@ export async function deleteServerFile(
   if (db) {
     const cleanRelative = relativePath.replace(/^\/+/, "")
     const simpleFileName = cleanRelative.split("/").pop() || cleanRelative
+    const conditions = serverId ? [eq(schema.serverManagedContent.serverId, serverId)] : []
     const managed = await db
       .select()
       .from(schema.serverManagedContent)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .all()
 
     const match = managed.find(
@@ -429,11 +464,13 @@ export async function prepareServerFileUploadUrl(
   env: Env,
   root: ServerFileRoot,
   relativePath: string,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
 ): Promise<{ url: string }> {
-  const client = clientOverride || createPterodactylClient(env)
-  // Ensure path is valid and resolved within virtual sandbox (blocks traversal ../)
-  const fullPath = await resolveSafePath(env, root, relativePath, client)
+  const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
   const res = await client.getFileUploadUrl()
   const separator = res.attributes.url.includes("?") ? "&" : "?"
   return { url: `${res.attributes.url}${separator}directory=${encodeURIComponent(fullPath)}` }
@@ -446,10 +483,13 @@ export async function createServerFileDownloadUrl(
   env: Env,
   root: ServerFileRoot,
   relativePath: string,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient | Database,
+  arg3?: Database,
 ): Promise<{ url: string }> {
-  const client = clientOverride || createPterodactylClient(env)
-  const fullPath = await resolveSafePath(env, root, relativePath, client)
+  const { serverId, clientOverride, db } = parsePterodactylFileArgs(arg1, arg2, arg3)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const fullPath = await resolveSafePath(env, root, relativePath, client, serverId, db)
   await verifyNotSymlink(client, fullPath)
   const res = await client.getFileDownload(fullPath)
   return { url: res.attributes.url }

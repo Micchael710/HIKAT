@@ -73,10 +73,15 @@ export const contentMediaUploadTokens = sqliteTable(
   ],
 )
 
+import { servers } from "./servers"
+
 export const news = sqliteTable(
   "news",
   {
     id: text("id").primaryKey(),
+    serverId: text("server_id").references(() => servers.id, {
+      onDelete: "cascade",
+    }),
     title: text("title").notNull(),
     content: text("content").notNull(),
     type: text("type", { enum: ALLOWED_NEWS_TYPES }).notNull(),
@@ -111,6 +116,7 @@ export const news = sqliteTable(
       sql`${table.type} IN ('NEWS', 'UPDATE', 'ANNOUNCEMENT', 'MAINTENANCE')`,
     ),
     check("news_status_check", sql`${table.status} IN ('DRAFT', 'PUBLISHED')`),
+    index("news_server_id_idx").on(table.serverId),
     index("news_status_published_at_idx").on(table.status, table.publishedAt),
     index("news_type_status_idx").on(table.type, table.status),
     index("news_created_by_idx").on(table.createdBy),

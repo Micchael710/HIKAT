@@ -15,7 +15,7 @@ import type { Env } from "../../types"
 import { broadcastReleaseActivated } from "../../releaseEvents"
 import type { IPterodactylClient } from "./types"
 import {
-  createPterodactylClient,
+  resolvePterodactylClient,
   getServerStatus,
   acquireServerOperationLock,
   releaseServerOperationLock,
@@ -24,10 +24,23 @@ import {
 import { createServerBackup } from "./serverBackupService"
 import { safeDeleteServerFilePhysical, getPhysicalFileSha256 } from "./serverFileService"
 
-// ... imports remain ...
-
 export const SERVER_RELEASE_SYNC_BACKUP_POLL_INTERVAL_MS = 2000
 export const SERVER_RELEASE_SYNC_BACKUP_TIMEOUT_MS = 180000 // 3 minutes
+
+function parseSyncArgs(
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient,
+): { serverId: string | null; clientOverride?: IPterodactylClient } {
+  if (arg1 && typeof arg1 === "object") {
+    return {
+      serverId: null,
+      clientOverride: arg1 as IPterodactylClient,
+    }
+  }
+  const serverId = typeof arg1 === "string" ? arg1 : null
+  const clientOverride = arg2
+  return { serverId, clientOverride }
+}
 
 /**
  * Computes the Server Release Sync Plan by comparing the published game release's
@@ -36,20 +49,24 @@ export const SERVER_RELEASE_SYNC_BACKUP_TIMEOUT_MS = 180000 // 3 minutes
 export async function getServerReleaseSyncPlan(
   db: Database,
   env: Env,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient,
 ): Promise<ServerReleaseSyncPlanGql> {
+  const { serverId, clientOverride } = parseSyncArgs(arg1, arg2)
+  const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+  if (serverId) publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
   const published = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "PUBLISHED"))
+    .where(and(...publishedConditions))
     .get()
 
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   // 1. Check server status for preconditions (fail closed)
   let serverStatus: ServerStatusGql = "UNKNOWN"
   try {
-    const statusMetrics = await getServerStatus(env, client)
+    const statusMetrics = await getServerStatus(env, client, serverId, db)
     serverStatus = statusMetrics.status as ServerStatusGql
   } catch {
     serverStatus = "DISCONNECTED"
@@ -118,10 +135,12 @@ export async function getServerReleaseSyncPlan(
     .all()
 
   // 4. Fetch current state: server_managed_content with managementSource === "GAME_RELEASE"
+  const currentConditions = [eq(schema.serverManagedContent.managementSource, "GAME_RELEASE")]
+  if (serverId) currentConditions.push(eq(schema.serverManagedContent.serverId, serverId))
   const currentRecords = await db
     .select()
     .from(schema.serverManagedContent)
-    .where(eq(schema.serverManagedContent.managementSource, "GAME_RELEASE"))
+    .where(and(...currentConditions))
     .all()
 
   const items: ServerReleaseSyncPlanItemGql[] = []
@@ -278,13 +297,34 @@ export async function getServerReleaseSyncPlan(
  */
 export async function getServerReleaseSyncStatus(
   db: Database,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient,
 ): Promise<ServerReleaseSyncStatusGql | null> {
-  const latest = await db
-    .select()
-    .from(schema.serverReleaseSyncs)
-    .orderBy(desc(schema.serverReleaseSyncs.createdAt))
-    .limit(1)
-    .get()
+  const { serverId } = parseSyncArgs(arg1, arg2)
+  let latest
+  if (serverId) {
+    const result = await db
+      .select({
+        sync: schema.serverReleaseSyncs,
+      })
+      .from(schema.serverReleaseSyncs)
+      .innerJoin(
+        schema.gameReleases,
+        eq(schema.serverReleaseSyncs.releaseId, schema.gameReleases.id),
+      )
+      .where(eq(schema.gameReleases.serverId, serverId))
+      .orderBy(desc(schema.serverReleaseSyncs.createdAt))
+      .limit(1)
+      .get()
+    latest = result?.sync
+  } else {
+    latest = await db
+      .select()
+      .from(schema.serverReleaseSyncs)
+      .orderBy(desc(schema.serverReleaseSyncs.createdAt))
+      .limit(1)
+      .get()
+  }
 
   if (!latest) {
     return null
@@ -299,29 +339,23 @@ export async function getServerReleaseSyncStatus(
 }
 
 /**
- * Applies the release sync to the server:
- * 1. Checks server is OFFLINE.
- * 2. Acquires distributed operation lock.
- * 3. Records APPLYING status in D1.
- * 4. Creates pre-sync backup if requested and waits for completion (aborts on timeout/fail).
- * 5. Preflights and authoritatively validates all R2 release binaries.
- * 6. Checks physical collisions on Wings.
- * 7. Writes binaries to Wings /mods/ with clean old-file cleanup on filename updates.
- * 8. Reconciles D1 and marks APPLIED.
+ * Applies the release sync to the server.
  */
 export async function applyServerReleaseSync(
   db: Database,
   env: Env,
   userId: string,
   createBackup: boolean = false,
-  clientOverride?: IPterodactylClient,
+  arg1?: string | IPterodactylClient | null,
+  arg2?: IPterodactylClient,
 ): Promise<ServerReleaseSyncResultGql> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { serverId, clientOverride } = parseSyncArgs(arg1, arg2)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   // 1. Guard: Check server status is OFFLINE (fail-closed)
   let statusMetrics
   try {
-    statusMetrics = await getServerStatus(env, client)
+    statusMetrics = await getServerStatus(env, client, serverId, db)
   } catch {
     throw createGraphQLError(
       "No se pudo confirmar el estado del servidor. Inténtalo de nuevo cuando el servidor esté accesible y apagado.",
@@ -337,7 +371,7 @@ export async function applyServerReleaseSync(
   }
 
   // 2. Guard: Acquire distributed operation lock
-  const lockHandle = await acquireServerOperationLock(db, "SERVER_RELEASE_SYNC", userId)
+  const lockHandle = await acquireServerOperationLock(db, "SERVER_RELEASE_SYNC", userId, 180, serverId)
   const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   const syncId = crypto.randomUUID()
@@ -345,10 +379,12 @@ export async function applyServerReleaseSync(
 
   try {
     // 3. Fetch published release
+    const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+    if (serverId) publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
     const published = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "PUBLISHED"))
+      .where(and(...publishedConditions))
       .get()
 
     if (!published) {
@@ -365,6 +401,20 @@ export async function applyServerReleaseSync(
       updatedAt: nowStart,
     })
 
+    // 4. Pre-sync backup if requested
+    if (createBackup) {
+      heartbeat.assertLeaseOwned()
+      try {
+        await createServerBackup(env, `Copia previa a sincronización ${published.version}`, serverId, client, db)
+      } catch (backupErr: any) {
+        throw createGraphQLError(
+          `No se pudo crear la copia de seguridad previa requerida: ${backupErr?.message || "Fallo en la comunicación con Pterodactyl"}. Sincronización cancelada.`,
+          "INTERNAL_ERROR",
+        )
+      }
+    }
+
+    // 5. Fetch desired state from game release
     const desiredFiles = await db
       .select()
       .from(schema.gameReleaseFiles)
@@ -377,11 +427,13 @@ export async function applyServerReleaseSync(
       )
       .all()
 
+    // 6. Fetch current state from server_managed_content
+    const allConditions = serverId ? [eq(schema.serverManagedContent.serverId, serverId)] : []
     const allManagedRecords = await db
       .select()
       .from(schema.serverManagedContent)
+      .where(allConditions.length > 0 ? and(...allConditions) : undefined)
       .all()
-
     const currentRecords = allManagedRecords.filter((m) => m.managementSource === "GAME_RELEASE")
 
     // 4. Pre-sync backup with strict timeout and failure abort semantics
@@ -389,7 +441,7 @@ export async function applyServerReleaseSync(
       heartbeat.assertLeaseOwned()
       let backupId: string | null = null
       try {
-        const backupItem = await createServerBackup(env, "Pre-Release Sync Backup", client)
+        const backupItem = await createServerBackup(env, "Pre-Release Sync Backup", serverId, client, db)
         if (!backupItem || !backupItem.id) {
           throw new Error("No se pudo iniciar el backup de Pterodactyl.")
         }
@@ -704,6 +756,22 @@ export async function applyServerReleaseSync(
       toKeep: keptCount,
     }
 
+    const activateQuery = serverId
+      ? db
+          .update(schema.servers)
+          .set({
+            launcherActiveReleaseId: published.id,
+            updatedAt: nowEnd,
+          })
+          .where(eq(schema.servers.id, serverId))
+      : db
+          .update(schema.projectSettings)
+          .set({
+            launcherActiveReleaseId: published.id,
+            updatedAt: nowEnd,
+          })
+          .where(eq(schema.projectSettings.id, "main"))
+
     await db.batch([
       db
         .update(schema.serverReleaseSyncs)
@@ -714,13 +782,7 @@ export async function applyServerReleaseSync(
           updatedAt: nowEnd,
         })
         .where(eq(schema.serverReleaseSyncs.id, syncId)),
-      db
-        .update(schema.projectSettings)
-        .set({
-          launcherActiveReleaseId: published.id,
-          updatedAt: nowEnd,
-        })
-        .where(eq(schema.projectSettings.id, "main")),
+      activateQuery,
     ])
 
     await broadcastReleaseActivated(env, {

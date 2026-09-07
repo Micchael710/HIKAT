@@ -2,12 +2,16 @@ import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqli
 import { sql } from "drizzle-orm"
 import { users } from "./users"
 import { contentMedia } from "./news"
+import { servers } from "./servers"
 
 export const gameReleases = sqliteTable(
   "game_releases",
   {
     id: text("id").primaryKey(),
-    version: text("version").notNull().unique(),
+    serverId: text("server_id").references(() => servers.id, {
+      onDelete: "cascade",
+    }),
+    version: text("version").notNull(),
     minecraftVersion: text("minecraft_version")
       .notNull()
       .default("1.21.1"),
@@ -47,11 +51,16 @@ export const gameReleases = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
+    index("game_releases_server_id_idx").on(table.serverId),
     index("game_releases_status_idx").on(table.status),
     index("game_releases_published_at_idx").on(table.publishedAt),
     index("game_releases_cover_media_id_idx").on(table.coverMediaId),
-    uniqueIndex("game_releases_single_published_idx")
-      .on(table.status)
+    uniqueIndex("game_releases_server_version_idx").on(
+      sql`COALESCE(${table.serverId}, '')`,
+      table.version,
+    ),
+    uniqueIndex("game_releases_server_published_idx")
+      .on(sql`COALESCE(${table.serverId}, '')`, table.status)
       .where(sql`"status" = 'PUBLISHED'`),
   ],
 )
@@ -99,6 +108,9 @@ export const gameFileUploadTokens = sqliteTable(
   "game_file_upload_tokens",
   {
     id: text("id").primaryKey(),
+    serverId: text("server_id").references(() => servers.id, {
+      onDelete: "cascade",
+    }),
     tokenHash: text("token_hash").notNull().unique(),
     category: text("category").notNull().default("MOD"),
     originalFilename: text("original_filename").notNull(),
@@ -116,6 +128,7 @@ export const gameFileUploadTokens = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
+    index("game_file_upload_tokens_server_id_idx").on(table.serverId),
     index("game_file_upload_tokens_token_hash_idx").on(table.tokenHash),
     index("game_file_upload_tokens_created_by_idx").on(table.createdBy),
   ],

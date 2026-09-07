@@ -244,10 +244,11 @@ export function computeDraftChanges(
 
 export async function validateDraftReadiness(
   env: Env,
-  draft: { id?: string; version: string; minecraftVersion?: string | null; neoForgeVersion?: string | null },
+  draft: { id?: string; version: string; minecraftVersion?: string | null; neoForgeVersion?: string | null; serverId?: string | null },
   draftFiles: schema.GameReleaseFile[],
   db?: Database,
   targetVersion?: string,
+  serverId?: string | null,
 ): Promise<GameDraftReadinessGql> {
   const issues: string[] = []
   let noConflicts = true
@@ -271,15 +272,18 @@ export async function validateDraftReadiness(
   } else {
     validVersion = true
     if (db) {
+      const targetServerId = serverId !== undefined ? serverId : (draft.serverId || null)
+      const collConditions = [
+        eq(schema.gameReleases.version, versionToValidate),
+        draft.id ? sql`${schema.gameReleases.id} != ${draft.id}` : sql`1=1`,
+      ]
+      if (targetServerId) {
+        collConditions.push(eq(schema.gameReleases.serverId, targetServerId))
+      }
       const collision = await db
         .select()
         .from(schema.gameReleases)
-        .where(
-          and(
-            eq(schema.gameReleases.version, versionToValidate),
-            draft.id ? sql`${schema.gameReleases.id} != ${draft.id}` : sql`1=1`,
-          ),
-        )
+        .where(and(...collConditions))
         .get()
       if (collision) {
         uniqueVersion = false
@@ -380,15 +384,21 @@ export function isClientGameReleaseFile(file: {
 export async function hasServerRelevantChanges(
   db: Database,
   draftFiles: schema.GameReleaseFile[],
+  serverId?: string | null,
 ): Promise<boolean> {
   const desiredBothMods = draftFiles.filter(
     (f) => !f.isDirectory && f.category === "MOD" && f.sourceEnvironment === "BOTH",
   )
 
+  const queryConditions = [eq(schema.serverManagedContent.managementSource, "GAME_RELEASE")]
+  if (serverId) {
+    queryConditions.push(eq(schema.serverManagedContent.serverId, serverId))
+  }
+
   const currentServerManaged = await db
     .select()
     .from(schema.serverManagedContent)
-    .where(eq(schema.serverManagedContent.managementSource, "GAME_RELEASE"))
+    .where(and(...queryConditions))
     .all()
 
   // 1. Check if any desired mod is new or has changed hash/path
@@ -427,16 +437,32 @@ export async function getPublishedModpack(
   db: Database,
   env: Env,
   request?: Request,
+  serverId?: string | null,
 ): Promise<PublishedModpackGql | null> {
-  const settings = await ensureSettingsRecord(db)
-  if (!settings.launcherActiveReleaseId) {
-    return null
+  let activeReleaseId: string | null = null
+
+  if (serverId) {
+    const server = await db
+      .select()
+      .from(schema.servers)
+      .where(eq(schema.servers.id, serverId))
+      .get()
+    if (!server || !server.launcherActiveReleaseId) {
+      return null
+    }
+    activeReleaseId = server.launcherActiveReleaseId
+  } else {
+    const settings = await ensureSettingsRecord(db)
+    if (!settings.launcherActiveReleaseId) {
+      return null
+    }
+    activeReleaseId = settings.launcherActiveReleaseId
   }
 
   const activeRelease = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.id, settings.launcherActiveReleaseId))
+    .where(eq(schema.gameReleases.id, activeReleaseId))
     .get()
 
   if (!activeRelease) return null
@@ -495,17 +521,25 @@ export async function getAdminGameOverview(
   db: Database,
   env: Env,
   request?: Request,
+  serverId?: string | null,
 ): Promise<AdminGameOverviewGql> {
+  const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   const published = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "PUBLISHED"))
+    .where(and(...publishedConditions))
     .get()
 
   const draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   // Fetch cover media for published and draft in batch
@@ -541,7 +575,7 @@ export async function getAdminGameOverview(
 
     const changeAnalysis = computeDraftChanges(publishedFiles, draftFiles)
     changes = changeAnalysis.changes
-    readiness = await validateDraftReadiness(env, draft, draftFiles, db)
+    readiness = await validateDraftReadiness(env, draft, draftFiles, db, undefined, serverId)
     draftFingerprint = await computeDraftFingerprint(draft, draftFiles)
 
     const draftCover = draft.coverMediaId ? coverMediaMap.get(draft.coverMediaId) : null
@@ -563,11 +597,17 @@ export async function getGameReleaseHistory(
   db: Database,
   env?: Env,
   request?: Request,
+  serverId?: string | null,
 ): Promise<GameReleaseGql[]> {
+  const conditions = [inArray(schema.gameReleases.status, ["PUBLISHED", "ARCHIVED"])]
+  if (serverId) {
+    conditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   const releases = await db
     .select()
     .from(schema.gameReleases)
-    .where(inArray(schema.gameReleases.status, ["PUBLISHED", "ARCHIVED"]))
+    .where(and(...conditions))
     .orderBy(desc(schema.gameReleases.publishedAt), desc(schema.gameReleases.createdAt))
     .all()
 
@@ -595,12 +635,20 @@ export async function prepareGameDraft(
   input?: PrepareGameDraftInputGql | null,
   env?: Env,
   request?: Request,
+  serverId?: string | null,
 ): Promise<GameReleaseGql> {
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+    publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   // 1. Check if a draft already exists
   const existingDraft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (existingDraft) {
@@ -628,7 +676,7 @@ export async function prepareGameDraft(
     baseRelease = await db
       .select()
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "PUBLISHED"))
+      .where(and(...publishedConditions))
       .get()
   }
 
@@ -643,8 +691,11 @@ export async function prepareGameDraft(
       : baseRelease?.modLoaderVersion ??
         (inheritedModLoader === "NEOFORGE" ? baseRelease?.neoForgeVersion || "21.1.65" : null)
 
+  const effectiveServerId = serverId || baseRelease?.serverId || null
+
   await db.insert(schema.gameReleases).values({
     id: draftId,
+    serverId: effectiveServerId,
     version: tempVersion,
     minecraftVersion: baseRelease?.minecraftVersion || "1.21.1",
     modLoader: inheritedModLoader,
@@ -716,11 +767,17 @@ export async function updateGameDraftMetadata(
   input: UpdateGameDraftMetadataInputGql,
   _userId: string,
   request?: Request,
+  serverId?: string | null,
 ): Promise<GameReleaseGql> {
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   const draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
@@ -744,15 +801,19 @@ export async function updateGameDraftMetadata(
       )
     }
 
+    const targetServerId = serverId || draft.serverId
+    const collConditions = [
+      eq(schema.gameReleases.version, trimmed),
+      sql`${schema.gameReleases.id} != ${draft.id}`,
+    ]
+    if (targetServerId) {
+      collConditions.push(eq(schema.gameReleases.serverId, targetServerId))
+    }
+
     const collision = await db
       .select()
       .from(schema.gameReleases)
-      .where(
-        and(
-          eq(schema.gameReleases.version, trimmed),
-          sql`${schema.gameReleases.id} != ${draft.id}`,
-        ),
-      )
+      .where(and(...collConditions))
       .get()
 
     if (collision) {
@@ -895,11 +956,16 @@ export async function updateGameDraftMetadata(
   return formatGameRelease(updatedDraft, draftFiles, undefined, targetCover, env, request)
 }
 
-export async function discardGameDraft(db: Database, env?: Env): Promise<boolean> {
+export async function discardGameDraft(db: Database, env?: Env, serverId?: string | null): Promise<boolean> {
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   const draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) return true
@@ -953,12 +1019,18 @@ export async function publishGameRelease(
   input: PublishGameReleaseInputGql,
   _userId: string,
   request?: Request,
+  serverId?: string | null,
 ): Promise<GameReleaseGql> {
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (serverId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+  }
+
   // 1. Locate active draft
   const draft = await db
     .select()
     .from(schema.gameReleases)
-    .where(eq(schema.gameReleases.status, "DRAFT"))
+    .where(and(...draftConditions))
     .get()
 
   if (!draft) {
@@ -1017,7 +1089,7 @@ export async function publishGameRelease(
     .all()
 
   // 6. Authoritative Pre-publication Readiness Verification
-  const readiness = await validateDraftReadiness(env, draft, draftFiles, db, targetVersion)
+  const readiness = await validateDraftReadiness(env, draft, draftFiles, db, targetVersion, serverId)
   if (!readiness.isReady) {
     const errorMsg = readiness.issues.length > 0 ? readiness.issues.join(". ") : "El borrador no está listo para publicar."
     throw createGraphQLError(`No se puede publicar la actualización: ${errorMsg}`, "VALIDATION_ERROR")
@@ -1035,10 +1107,19 @@ export async function publishGameRelease(
   }
 
   // 8. Check for existing version collision
+  const targetServerId = serverId || draft.serverId
+  const collConditions = [
+    eq(schema.gameReleases.version, targetVersion),
+    sql`${schema.gameReleases.id} != ${draft.id}`,
+  ]
+  if (targetServerId) {
+    collConditions.push(eq(schema.gameReleases.serverId, targetServerId))
+  }
+
   const existingVersion = await db
     .select()
     .from(schema.gameReleases)
-    .where(and(eq(schema.gameReleases.version, targetVersion), sql`${schema.gameReleases.id} != ${draft.id}`))
+    .where(and(...collConditions))
     .get()
 
   if (existingVersion) {
@@ -1049,7 +1130,7 @@ export async function publishGameRelease(
 
   // 9. ATOMIC CONCURRENT PUBLICATION & ACTIVATION ENGINE:
   const settings = await ensureSettingsRecord(db)
-  const hasServerChanges = await hasServerRelevantChanges(db, draftFiles)
+  const hasServerChanges = await hasServerRelevantChanges(db, draftFiles, targetServerId)
 
   let shouldActivate = false
   if (settings.updateDeploymentOrder === "PLAYERS_FIRST") {
@@ -1064,6 +1145,13 @@ export async function publishGameRelease(
     }
   }
 
+  const archiveConditions = [
+    eq(schema.gameReleases.status, "PUBLISHED"),
+    sql`EXISTS (SELECT 1 FROM game_releases WHERE id = ${draft.id} AND status = 'DRAFT')`,
+  ]
+  if (targetServerId) {
+    archiveConditions.push(eq(schema.gameReleases.serverId, targetServerId))
+  }
 
   const archiveQuery = db
     .update(schema.gameReleases)
@@ -1071,12 +1159,7 @@ export async function publishGameRelease(
       status: "ARCHIVED",
       updatedAt: now,
     })
-    .where(
-      and(
-        eq(schema.gameReleases.status, "PUBLISHED"),
-        sql`EXISTS (SELECT 1 FROM game_releases WHERE id = ${draft.id} AND status = 'DRAFT')`,
-      ),
-    )
+    .where(and(...archiveConditions))
 
   const publishQuery = db
     .update(schema.gameReleases)
@@ -1096,20 +1179,30 @@ export async function publishGameRelease(
     )
 
   if (shouldActivate) {
-    const activateQuery = db
-      .update(schema.projectSettings)
-      .set({
-        launcherActiveReleaseId: draft.id,
-        updatedAt: now,
-      })
-      .where(eq(schema.projectSettings.id, "main"))
+    if (targetServerId) {
+      const activateQuery = db
+        .update(schema.servers)
+        .set({
+          launcherActiveReleaseId: draft.id,
+          updatedAt: now,
+        })
+        .where(eq(schema.servers.id, targetServerId))
 
-    await db.batch([archiveQuery, publishQuery, activateQuery])
+      await db.batch([archiveQuery, publishQuery, activateQuery])
+    } else {
+      const activateQuery = db
+        .update(schema.projectSettings)
+        .set({
+          launcherActiveReleaseId: draft.id,
+          updatedAt: now,
+        })
+        .where(eq(schema.projectSettings.id, "main"))
+
+      await db.batch([archiveQuery, publishQuery, activateQuery])
+    }
   } else {
     await db.batch([archiveQuery, publishQuery])
   }
-
-
 
   const published = await db
     .select()

@@ -92,6 +92,8 @@ import type {
   ServerReleaseSyncPlanGql,
   ServerReleaseSyncStatusGql,
   ServerReleaseSyncResultGql,
+  ServerGql,
+  CreateServerInputGql,
 } from "@hikat/graphql"
 
 import {
@@ -103,6 +105,12 @@ import {
 } from "@hikat/shared"
 import { requireAuth, requireAdmin } from "../auth/guards"
 import { getUserById } from "../services/userService"
+import {
+  getServers,
+  getServerById,
+  createServer,
+  deleteServer,
+} from "../services/serverService"
 import {
   getPublicNewsFeed,
   getPublicNewsById,
@@ -314,6 +322,32 @@ export const resolvers = {
       }
     },
 
+    // --- Server Infrastructure Queries (Require ADMIN) ---
+
+    servers: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<ServerGql[]> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getServers(context.db, context.env, context.request)
+    },
+
+    server: async (
+      _parent: unknown,
+      args: { serverId: string },
+      context: BackendGraphQLContext,
+    ): Promise<ServerGql | null> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getServerById(context.db, context.env, args.serverId, context.request)
+    },
+
     // --- News Public Queries ---
 
     newsFeed: async (
@@ -322,6 +356,7 @@ export const resolvers = {
         first?: number | null
         after?: string | null
         type?: NewsType | null
+        serverId?: string | null
       },
       context: BackendGraphQLContext,
     ): Promise<NewsConnectionGql> => {
@@ -358,6 +393,7 @@ export const resolvers = {
         after?: string | null
         type?: NewsType | null
         status?: NewsStatus | null
+        serverId?: string | null
       },
       context: BackendGraphQLContext,
     ): Promise<NewsConnectionGql> => {
@@ -388,88 +424,88 @@ export const resolvers = {
 
     serverStatus: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerResourcesGql> => {
       requireAdmin(context)
-      return getServerStatus(context.env)
+      return getServerStatus(context.env, context.db, args?.serverId)
     },
 
     serverActivity: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerActivityItemGql[]> => {
       requireAdmin(context)
-      return getServerActivity(context.env)
+      return getServerActivity(context.env, context.db, args?.serverId)
     },
 
     serverBackups: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerBackupItemGql[]> => {
       requireAdmin(context)
-      return listServerBackups(context.env)
+      return listServerBackups(context.env, args?.serverId, undefined, context.db)
     },
 
     serverWorld: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerWorldInfoGql> => {
       requireAdmin(context)
-      return getServerWorldInfo(context.env)
+      return getServerWorldInfo(context.env, args?.serverId, undefined, context.db)
     },
 
     serverMinecraftSettings: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<MinecraftServerSettingsGql> => {
       requireAdmin(context)
-      return getMinecraftServerSettings(context.env)
+      return getMinecraftServerSettings(context.env, args?.serverId, undefined, context.db)
     },
 
     serverAutomations: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql[]> => {
       requireAdmin(context)
-      return listServerAutomations(context.env, context.db)
+      return listServerAutomations(context.env, context.db, args?.serverId)
     },
 
     serverFiles: async (
       _parent: unknown,
-      args: { root: ServerFileRoot; relativePath?: string | null },
+      args: { root: ServerFileRoot; relativePath?: string | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerFileItemGql[]> => {
       requireAdmin(context)
-      return listServerFiles(context.env, args.root, args.relativePath)
+      return listServerFiles(context.env, args.root, args.relativePath, args.serverId, undefined, context.db)
     },
 
     serverTextFile: async (
       _parent: unknown,
-      args: { root: ServerFileRoot; relativePath: string },
+      args: { root: ServerFileRoot; relativePath: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerFileContentGql> => {
       requireAdmin(context)
-      return readServerTextFile(context.env, args.root, args.relativePath)
+      return readServerTextFile(context.env, args.root, args.relativePath, args.serverId, undefined, context.db)
     },
 
     // --- Server Managed Content & Release Sync Queries (Require ADMIN - Shard 08D) ---
 
     serverManagedContent: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerManagedContentItemGql[]> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getServerManagedContent(context.db, context.env)
+      return getServerManagedContent(context.db, context.env, args?.serverId)
     },
 
     searchServerContent: async (
@@ -536,26 +572,26 @@ export const resolvers = {
 
     serverReleaseSyncPlan: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerReleaseSyncPlanGql> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getServerReleaseSyncPlan(context.db, context.env)
+      return getServerReleaseSyncPlan(context.db, context.env, args?.serverId)
     },
 
     serverReleaseSyncStatus: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerReleaseSyncStatusGql | null> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getServerReleaseSyncStatus(context.db)
+      return getServerReleaseSyncStatus(context.db, args?.serverId)
     },
 
 
@@ -764,49 +800,49 @@ export const resolvers = {
 
     publishedModpack: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<PublishedModpackGql | null> => {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getPublishedModpack(context.db, context.env, context.request)
+      return getPublishedModpack(context.db, context.env, context.request, args?.serverId)
     },
 
     adminGameOverview: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<AdminGameOverviewGql> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getAdminGameOverview(context.db, context.env, context.request)
+      return getAdminGameOverview(context.db, context.env, context.request, args?.serverId)
     },
 
     gameReleaseHistory: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<GameReleaseGql[]> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getGameReleaseHistory(context.db, context.env, context.request)
+      return getGameReleaseHistory(context.db, context.env, context.request, args?.serverId)
     },
 
     adminGameFiles: async (
       _parent: unknown,
-      args: { releaseId?: string | null; category?: GameFileCategoryGql | null },
+      args: { releaseId?: string | null; category?: GameFileCategoryGql | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<AdminGameFileGql[]> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getAdminGameFiles(context.db, args.releaseId, args.category)
+      return getAdminGameFiles(context.db, args.releaseId, args.category, args?.serverId)
     },
 
     readGameFileContent: async (
@@ -928,11 +964,37 @@ export const resolvers = {
 
 
   Mutation: {
+    // --- Server Infrastructure Mutations (Require ADMIN) ---
+
+    createServer: async (
+      _parent: unknown,
+      args: { input: CreateServerInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ServerGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createServer(context.db, context.env, args.input, identity.userId)
+    },
+
+    deleteServer: async (
+      _parent: unknown,
+      args: { serverId: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteServer(context.db, context.env, args.serverId)
+    },
+
     // --- Server Administration Mutations (Require ADMIN - Shard 06 & 06A) ---
 
     createServerConsoleTicket: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerConsoleTicketGql> => {
       const identity = requireAdmin(context)
@@ -946,12 +1008,14 @@ export const resolvers = {
         context.env,
         identity.userId,
         identity.sessionId,
+        context.db,
+        args?.serverId,
       )
     },
 
     serverPowerAction: async (
       _parent: unknown,
-      args: { action: ServerPowerAction },
+      args: { action: ServerPowerAction; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerPowerActionResultGql> => {
       const identity = requireAdmin(context)
@@ -959,12 +1023,14 @@ export const resolvers = {
         context.env,
         args.action,
         identity.userId,
+        undefined,
+        args.serverId,
       )
     },
 
     startServer: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerPowerActionResultGql> => {
       const identity = requireAdmin(context)
@@ -972,12 +1038,14 @@ export const resolvers = {
         context.env,
         "START",
         identity.userId,
+        undefined,
+        args?.serverId,
       )
     },
 
     restartServer: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerPowerActionResultGql> => {
       const identity = requireAdmin(context)
@@ -985,12 +1053,14 @@ export const resolvers = {
         context.env,
         "RESTART",
         identity.userId,
+        undefined,
+        args?.serverId,
       )
     },
 
     stopServer: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerPowerActionResultGql> => {
       const identity = requireAdmin(context)
@@ -998,12 +1068,14 @@ export const resolvers = {
         context.env,
         "STOP",
         identity.userId,
+        undefined,
+        args?.serverId,
       )
     },
 
     sendServerCommand: async (
       _parent: unknown,
-      args: { command: string },
+      args: { command: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerCommandResultGql> => {
       const identity = requireAdmin(context)
@@ -1011,6 +1083,8 @@ export const resolvers = {
         context.env,
         args.command,
         identity.userId,
+        undefined,
+        args.serverId,
       )
     },
 
@@ -1018,183 +1092,192 @@ export const resolvers = {
 
     createServerBackup: async (
       _parent: unknown,
-      args: { name?: string | null },
+      args: { name?: string | null; isLocked?: boolean | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerBackupItemGql> => {
       requireAdmin(context)
-      return createServerBackup(context.env, args.name)
+      return createServerBackup(context.env, args.name, args.serverId, undefined, context.db)
     },
 
     restoreServerBackup: async (
       _parent: unknown,
-      args: { id: string },
+      args: { id: string; truncateDirectory?: boolean | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return restoreServerBackup(context.env, context.db, identity.userId, args.id)
+      return restoreServerBackup(context.env, context.db, identity.userId, args.id, args.serverId)
     },
 
     deleteServerBackup: async (
       _parent: unknown,
-      args: { id: string },
+      args: { id: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return deleteServerBackup(context.env, args.id)
+      return deleteServerBackup(context.env, args.id, args.serverId, undefined, context.db)
     },
 
     toggleServerBackupLock: async (
       _parent: unknown,
-      args: { id: string },
+      args: { id: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerBackupItemGql> => {
       requireAdmin(context)
-      return toggleServerBackupLock(context.env, args.id)
+      return toggleServerBackupLock(context.env, args.id, args.serverId, undefined, context.db)
     },
 
     createServerBackupDownloadUrl: async (
       _parent: unknown,
-      args: { id: string; name?: string | null },
+      args: { id: string; name?: string | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerSignedUrlPayloadGql> => {
       requireAdmin(context)
-      return getServerBackupDownloadUrl(context.env, args.id)
+      return getServerBackupDownloadUrl(context.env, args.id, args.serverId, undefined, context.db)
     },
 
     createServerWorldDownloadUrl: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerSignedUrlPayloadGql> => {
       requireAdmin(context)
-      return createServerWorldDownloadUrl(context.env)
+      return createServerWorldDownloadUrl(context.env, undefined, args?.serverId, undefined, context.db)
     },
 
     prepareServerWorldUpload: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null } | undefined,
       context: BackendGraphQLContext,
     ): Promise<ServerSignedUrlPayloadGql> => {
       requireAdmin(context)
-      return prepareServerWorldUpload(context.env)
+      return prepareServerWorldUpload(context.env, args?.serverId, undefined, context.db)
     },
 
     replaceServerWorld: async (
       _parent: unknown,
-      args: { uploadedFileName: string },
+      args: { uploadedFileName: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return replaceServerWorld(context.env, context.db, identity.userId, args.uploadedFileName)
+      return replaceServerWorld(context.env, context.db, identity.userId, args.uploadedFileName, args.serverId)
     },
 
     updateMinecraftServerSettings: async (
       _parent: unknown,
-      args: { input: UpdateMinecraftServerSettingsInputGql },
+      args: { input: UpdateMinecraftServerSettingsInputGql; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<MinecraftServerSettingsGql> => {
       requireAdmin(context)
-      return updateMinecraftServerSettings(context.env, args.input as any)
+      return updateMinecraftServerSettings(context.env, args.input as any, args.serverId, undefined, context.db)
     },
 
     createServerAutomation: async (
       _parent: unknown,
-      args: { input: ServerAutomationInputGql },
+      args: { input: ServerAutomationInputGql; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql> => {
       requireAdmin(context)
-      return createServerAutomation(context.env, args.input as any, undefined, context.db)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createServerAutomation(context.db, context.env, args.input as any, args.serverId)
     },
 
     updateServerAutomation: async (
       _parent: unknown,
-      args: { id: string; input: ServerAutomationInputGql },
+      args: { id: string; input: ServerAutomationInputGql; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerAutomationItemGql> => {
       requireAdmin(context)
-      return updateServerAutomation(context.env, args.id, args.input as any, undefined, context.db)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateServerAutomation(context.db, context.env, args.id, args.input as any, args.serverId)
     },
 
     runServerAutomation: async (
       _parent: unknown,
-      args: { id: string },
+      args: { id: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return runServerAutomation(context.env, args.id, undefined, context.db)
+      return runServerAutomation(context.env, args.id, args.serverId, undefined, context.db)
     },
 
     deleteServerAutomation: async (
       _parent: unknown,
-      args: { id: string },
+      args: { id: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return deleteServerAutomation(context.env, args.id, undefined, context.db)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteServerAutomation(context.db, context.env, args.id, args.serverId)
     },
 
     createServerFolder: async (
       _parent: unknown,
-      args: { root: ServerFileRoot; relativePath: string; folderName: string },
+      args: { root: ServerFileRoot; relativePath: string; folderName: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return createServerFolder(context.env, args.root, args.relativePath, args.folderName)
+      return createServerFolder(context.env, args.root, args.relativePath, args.folderName, args.serverId, undefined, context.db)
     },
 
     renameServerFile: async (
       _parent: unknown,
-      args: { root: ServerFileRoot; relativePath: string; newName: string },
+      args: { root: ServerFileRoot; relativePath: string; newName: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return renameServerFile(context.env, args.root, args.relativePath, args.newName, undefined, context.db)
+      return renameServerFile(context.env, args.root, args.relativePath, args.newName, args.serverId, undefined, context.db)
     },
 
     deleteServerFile: async (
       _parent: unknown,
-      args: { root: ServerFileRoot; relativePath: string },
+      args: { root: ServerFileRoot; relativePath: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return deleteServerFile(context.env, args.root, args.relativePath, undefined, context.db)
+      return deleteServerFile(context.env, args.root, args.relativePath, args.serverId, undefined, context.db)
     },
 
     // --- Server Managed Content & Release Sync Mutations (Require ADMIN - Shard 08D) ---
 
     installServerContentPlan: async (
       _parent: unknown,
-      args: { input: InstallServerContentPlanInputGql },
+      args: { input: InstallServerContentPlanInputGql; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerManagedContentItemGql[]> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return installServerContentPlan(context.db, context.env, args.input, identity.userId)
+      return installServerContentPlan(context.db, context.env, args.input, identity.userId, args.serverId)
     },
 
     removeServerManagedContent: async (
       _parent: unknown,
-      args: { id: string },
+      args: { id: string; deleteFile?: boolean | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return removeServerManagedContent(context.db, context.env, args.id, identity.userId)
+      return removeServerManagedContent(context.db, context.env, args.id, identity.userId, args.deleteFile, args.serverId)
     },
 
     applyServerReleaseSync: async (
       _parent: unknown,
-      args: { createBackup?: boolean | null },
+      args: { createBackup?: boolean | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerReleaseSyncResultGql> => {
       const identity = requireAdmin(context)
@@ -1206,34 +1289,35 @@ export const resolvers = {
         context.env,
         identity.userId,
         Boolean(args.createBackup),
+        args.serverId,
       )
     },
 
     writeServerTextFile: async (
       _parent: unknown,
-      args: { root: ServerFileRoot; relativePath: string; content: string },
+      args: { root: ServerFileRoot; relativePath: string; content: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
-      return writeServerTextFile(context.env, args.root, args.relativePath, args.content)
+      return writeServerTextFile(context.env, args.root, args.relativePath, args.content, args.serverId, undefined, context.db)
     },
 
     prepareServerFileUpload: async (
       _parent: unknown,
-      args: { root: ServerFileRoot; relativePath: string },
+      args: { root: ServerFileRoot; relativePath: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerSignedUrlPayloadGql> => {
       requireAdmin(context)
-      return prepareServerFileUploadUrl(context.env, args.root, args.relativePath)
+      return prepareServerFileUploadUrl(context.env, args.root, args.relativePath, args.serverId, undefined, context.db)
     },
 
     createServerFileDownloadUrl: async (
       _parent: unknown,
-      args: { root: ServerFileRoot; relativePath: string },
+      args: { root: ServerFileRoot; relativePath: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerSignedUrlPayloadGql> => {
       requireAdmin(context)
-      return createServerFileDownloadUrl(context.env, args.root, args.relativePath)
+      return createServerFileDownloadUrl(context.env, args.root, args.relativePath, args.serverId, undefined, context.db)
     },
 
 
@@ -1631,38 +1715,38 @@ export const resolvers = {
 
     prepareGameDraft: async (
       _parent: unknown,
-      args: { input?: PrepareGameDraftInputGql | null },
+      args: { serverId?: string | null; input?: PrepareGameDraftInputGql | null },
       context: BackendGraphQLContext,
     ): Promise<GameReleaseGql> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return prepareGameDraft(context.db, identity.userId, args.input, context.env, context.request)
+      return prepareGameDraft(context.db, identity.userId, args.input, context.env, context.request, args.serverId)
     },
 
     discardGameDraft: async (
       _parent: unknown,
-      _args: unknown,
+      args: { serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return discardGameDraft(context.db, context.env)
+      return discardGameDraft(context.db, context.env, args.serverId)
     },
 
     createGameFileUpload: async (
       _parent: unknown,
-      args: { input: CreateGameFileUploadInputGql },
+      args: { serverId?: string | null; input: CreateGameFileUploadInputGql },
       context: BackendGraphQLContext,
     ): Promise<GameFileUploadPayloadGql> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return createGameFileUploadToken(context.db, args.input, identity.userId, context.env)
+      return createGameFileUploadToken(context.db, args.input, identity.userId, context.env, args.serverId)
     },
 
     completeGameFileUpload: async (
@@ -1679,14 +1763,14 @@ export const resolvers = {
 
     addGameFile: async (
       _parent: unknown,
-      args: { input: AddGameFileInputGql },
+      args: { serverId?: string | null; input: AddGameFileInputGql },
       context: BackendGraphQLContext,
     ): Promise<AdminGameFileGql> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return addGameFile(context.db, args.input, identity.userId, context.env)
+      return addGameFile(context.db, args.input, identity.userId, context.env, undefined, args.serverId)
     },
 
     updateGameFile: async (
@@ -1703,127 +1787,127 @@ export const resolvers = {
 
     saveGameFileContent: async (
       _parent: unknown,
-      args: { input: SaveGameFileContentInputGql },
+      args: { serverId?: string | null; input: SaveGameFileContentInputGql },
       context: BackendGraphQLContext,
     ): Promise<AdminGameFileGql> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return saveGameFileContent(context.db, args.input, identity.userId, context.env)
+      return saveGameFileContent(context.db, args.input, identity.userId, context.env, args.serverId)
     },
 
     createGameFolder: async (
       _parent: unknown,
-      args: { logicalPath: string },
+      args: { serverId?: string | null; logicalPath: string },
       context: BackendGraphQLContext,
     ): Promise<AdminGameFileGql> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return createGameFolder(context.db, args.logicalPath, identity.userId)
+      return createGameFolder(context.db, args.logicalPath, identity.userId, args.serverId)
     },
 
     renameGamePath: async (
       _parent: unknown,
-      args: { oldPath: string; newPath: string },
+      args: { serverId?: string | null; oldPath: string; newPath: string },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return renameGamePath(context.db, args.oldPath, args.newPath, identity.userId)
+      return renameGamePath(context.db, args.oldPath, args.newPath, identity.userId, args.serverId)
     },
 
     moveGamePaths: async (
       _parent: unknown,
-      args: { sources: string[]; destinationFolder: string },
+      args: { serverId?: string | null; sources: string[]; destinationFolder: string },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return moveGamePaths(context.db, args.sources, args.destinationFolder, identity.userId)
+      return moveGamePaths(context.db, args.sources, args.destinationFolder, identity.userId, args.serverId)
     },
 
     copyGamePaths: async (
       _parent: unknown,
-      args: { sources: string[]; destinationFolder: string },
+      args: { serverId?: string | null; sources: string[]; destinationFolder: string },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return copyGamePaths(context.db, args.sources, args.destinationFolder, identity.userId)
+      return copyGamePaths(context.db, args.sources, args.destinationFolder, identity.userId, context.env, args.serverId)
     },
 
     deleteGamePaths: async (
       _parent: unknown,
-      args: { paths: string[] },
+      args: { serverId?: string | null; paths: string[] },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return deleteGamePaths(context.db, args.paths, identity.userId, context.env)
+      return deleteGamePaths(context.db, args.paths, identity.userId, context.env, args.serverId)
     },
 
     setGamePathPolicy: async (
       _parent: unknown,
-      args: { path: string; explicitPolicy?: SyncPolicyGql | null },
+      args: { serverId?: string | null; path: string; explicitPolicy?: SyncPolicyGql | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return setGamePathPolicy(context.db, args.path, args.explicitPolicy, identity.userId)
+      return setGamePathPolicy(context.db, args.path, args.explicitPolicy, identity.userId, args.serverId)
     },
 
     removeGameFile: async (
       _parent: unknown,
-      args: { id: string },
+      args: { id: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<boolean> => {
       requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return removeGameFile(context.db, args.id)
+      return removeGameFile(context.db, args.id, context.env)
     },
 
     restoreGameFile: async (
       _parent: unknown,
-      args: { id: string },
+      args: { id: string; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<AdminGameFileGql> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return restoreGameFile(context.db, args.id, identity.userId)
+      return restoreGameFile(context.db, args.id, identity.userId, args.serverId)
     },
 
     updateGameDraftMetadata: async (
       _parent: unknown,
-      args: { input: UpdateGameDraftMetadataInputGql },
+      args: { serverId?: string | null; input: UpdateGameDraftMetadataInputGql },
       context: BackendGraphQLContext,
     ): Promise<GameReleaseGql> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return updateGameDraftMetadata(context.db, context.env, args.input, identity.userId, context.request)
+      return updateGameDraftMetadata(context.db, context.env, args.input, identity.userId, context.request, args.serverId)
     },
 
     publishGameRelease: async (
       _parent: unknown,
-      args: { input: PublishGameReleaseInputGql },
+      args: { serverId?: string | null; input: PublishGameReleaseInputGql },
       context: BackendGraphQLContext,
     ): Promise<GameReleaseGql> => {
       const identity = requireAdmin(context)
@@ -1831,19 +1915,19 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return publishGameRelease(context.db, context.env, args.input, identity.userId, context.request)
+      return publishGameRelease(context.db, context.env, args.input, identity.userId, context.request, args.serverId)
     },
 
     installModPlan: async (
       _parent: unknown,
-      args: { input: InstallModPlanInputGql },
+      args: { serverId?: string | null; input: InstallModPlanInputGql },
       context: BackendGraphQLContext,
     ): Promise<AdminGameFileGql[]> => {
       const identity = requireAdmin(context)
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return installModPlan(context.db, context.env, args.input, identity.userId)
+      return installModPlan(context.db, context.env, args.input, identity.userId, args.serverId)
     },
 
     // --- Settings Administrative Mutations (Require ADMIN - Shard 06.5) ---

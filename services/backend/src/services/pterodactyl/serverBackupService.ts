@@ -4,13 +4,13 @@
  * with distributed operation locking.
  */
 
-import { createDatabase } from "@hikat/database"
+import { Database, createDatabase } from "@hikat/database"
 import { SERVER_ERROR_CODES, SERVER_PUBLIC_MESSAGES } from "@hikat/shared"
 import type { Env } from "../../types"
 import type { IPterodactylClient, PterodactylBackupResponse } from "./types"
 import { ServerInfrastructureError } from "./pterodactylClient"
 import {
-  createPterodactylClient,
+  resolvePterodactylClient,
   getServerStatus,
   acquireServerOperationLock,
   releaseServerOperationLock,
@@ -45,9 +45,11 @@ function mapBackupToItem(res: PterodactylBackupResponse): ServerBackupItemData {
  */
 export async function listServerBackups(
   env: Env,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<ServerBackupItemData[]> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const res = await client.listBackups()
   if (!res || !res.data || !Array.isArray(res.data)) {
     return []
@@ -61,9 +63,11 @@ export async function listServerBackups(
 export async function createServerBackup(
   env: Env,
   name?: string | null,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<ServerBackupItemData> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
   const safeName = name && name.trim() ? name.trim().slice(0, 100) : undefined
   const res = await client.createBackup(safeName)
   return mapBackupToItem(res)
@@ -74,12 +78,13 @@ export async function createServerBackup(
  */
 export async function restoreServerBackup(
   env: Env,
-  db: ReturnType<typeof createDatabase>,
+  db: ReturnType<typeof createDatabase> | Database,
   userId: string,
   backupId: string,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
 ): Promise<boolean> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!backupId || typeof backupId !== "string" || !backupId.trim()) {
     throw new ServerInfrastructureError(
@@ -89,7 +94,7 @@ export async function restoreServerBackup(
   }
 
   // 1. Guard: Check server is OFFLINE
-  const status = await getServerStatus(env, client)
+  const status = await getServerStatus(env, client, serverId, db)
   if (status.status !== "OFFLINE") {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_BUSY,
@@ -99,7 +104,7 @@ export async function restoreServerBackup(
   }
 
   // 2. Guard: Acquire distributed operation lock
-  const lockHandle = await acquireServerOperationLock(db, "RESTORE_BACKUP", userId)
+  const lockHandle = await acquireServerOperationLock(db, "RESTORE_BACKUP", userId, 180, serverId)
   const heartbeat = startServerOperationHeartbeat(db, lockHandle, userId)
 
   try {
@@ -118,9 +123,11 @@ export async function restoreServerBackup(
 export async function deleteServerBackup(
   env: Env,
   backupId: string,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<boolean> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!backupId || typeof backupId !== "string" || !backupId.trim()) {
     throw new ServerInfrastructureError(
@@ -148,9 +155,11 @@ export async function deleteServerBackup(
 export async function toggleServerBackupLock(
   env: Env,
   backupId: string,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<ServerBackupItemData> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!backupId || typeof backupId !== "string" || !backupId.trim()) {
     throw new ServerInfrastructureError(
@@ -169,9 +178,11 @@ export async function toggleServerBackupLock(
 export async function getServerBackupDownloadUrl(
   env: Env,
   backupId: string,
+  serverId?: string | null,
   clientOverride?: IPterodactylClient,
+  db?: Database,
 ): Promise<{ url: string }> {
-  const client = clientOverride || createPterodactylClient(env)
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   if (!backupId || typeof backupId !== "string" || !backupId.trim()) {
     throw new ServerInfrastructureError(
