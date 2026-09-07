@@ -403,18 +403,6 @@ export async function applyServerReleaseSync(
       updatedAt: nowStart,
     })
 
-    // 4. Pre-sync backup if requested
-    if (createBackup) {
-      heartbeat.assertLeaseOwned()
-      try {
-        await createServerBackup(env, `Copia previa a sincronización ${published.version}`, serverId, client, db)
-      } catch (backupErr: any) {
-        throw createGraphQLError(
-          `No se pudo crear la copia de seguridad previa requerida: ${backupErr?.message || "Fallo en la comunicación con Pterodactyl"}. Sincronización cancelada.`,
-          "INTERNAL_ERROR",
-        )
-      }
-    }
 
     // 5. Fetch desired state from game release
     const desiredFiles = await db

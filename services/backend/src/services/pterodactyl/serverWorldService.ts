@@ -103,7 +103,11 @@ export async function createServerWorldDownloadUrl(
   clientOverride?: IPterodactylClient,
   db?: Database,
 ): Promise<{ url: string }> {
-  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+  const database = db || (env.DB ? createDatabase(env.DB) : undefined)
+  if (database) {
+    await assertExplicitServerIdIfMultiple(database, serverId, "descarga de mundo")
+  }
+  const { client } = await resolvePterodactylClient(database, env, serverId, clientOverride)
   const worldName = worldNameArg || (await detectActiveWorldName(env, client, serverId, db))
 
   // Compress world directory

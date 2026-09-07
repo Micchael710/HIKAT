@@ -627,6 +627,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
     options: {
       method?: string
       body?: Record<string, unknown> | string
+      allowNotFound?: boolean
     } = {},
   ): Promise<T> {
     if (!this.appApiKey) {
@@ -687,6 +688,9 @@ export class PterodactylHttpClient implements IPterodactylClient {
         )
       }
       if (response.status === 404) {
+        if (options.allowNotFound) {
+          return undefined as unknown as T
+        }
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
           SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
@@ -749,7 +753,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
   async deleteApplicationServer(serverId: number | string): Promise<void> {
     await this.applicationRequest<void>(
       `/api/application/servers/${encodeURIComponent(String(serverId))}`,
-      { method: "DELETE" },
+      { method: "DELETE", allowNotFound: true },
     )
   }
 
