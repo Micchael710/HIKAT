@@ -517,6 +517,7 @@ export const resolvers = {
         limit?: number | null
         offset?: number | null
         cursor?: string | null
+        serverId?: string | null
       },
       context: BackendGraphQLContext,
     ): Promise<ServerContentSearchPayloadGql> => {
@@ -533,12 +534,13 @@ export const resolvers = {
         args.offset || 0,
         args.contentType || "MOD",
         args.cursor,
+        args.serverId,
       )
     },
 
     serverContentProjectDetail: async (
       _parent: unknown,
-      args: { provider: ModProviderGql; projectId: string; contentType?: ContentTypeGql | null },
+      args: { provider: ModProviderGql; projectId: string; contentType?: ContentTypeGql | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ModProjectDetailGql> => {
       requireAdmin(context)
@@ -551,12 +553,13 @@ export const resolvers = {
         args.provider,
         args.projectId,
         args.contentType || "MOD",
+        args.serverId,
       )
     },
 
     resolveServerContentPlan: async (
       _parent: unknown,
-      args: { input: ResolveServerContentPlanInputGql },
+      args: { input: ResolveServerContentPlanInputGql; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ServerContentInstallationPlanGql> => {
       requireAdmin(context)
@@ -567,6 +570,8 @@ export const resolvers = {
         context.env,
         context.db,
         args.input,
+        "world",
+        args.serverId,
       )
     },
 
@@ -883,6 +888,7 @@ export const resolvers = {
         provider?: ModProviderGql | null
         limit?: number | null
         offset?: number | null
+        serverId?: string | null
       },
       context: BackendGraphQLContext,
     ): Promise<ModSearchPayloadGql> => {
@@ -898,12 +904,13 @@ export const resolvers = {
         args.limit || 20,
         args.offset || 0,
         args.contentType || "MOD",
+        args.serverId,
       )
     },
 
     getModProjectDetail: async (
       _parent: unknown,
-      args: { provider: ModProviderGql; projectId: string; contentType?: ContentTypeGql | null },
+      args: { provider: ModProviderGql; projectId: string; contentType?: ContentTypeGql | null; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ModProjectDetailGql> => {
       requireAdmin(context)
@@ -916,12 +923,13 @@ export const resolvers = {
         args.provider,
         args.projectId,
         args.contentType || "MOD",
+        args.serverId,
       )
     },
 
     resolveModInstallationPlan: async (
       _parent: unknown,
-      args: { input: ResolveModPlanInputGql },
+      args: { input: ResolveModPlanInputGql; serverId?: string | null },
       context: BackendGraphQLContext,
     ): Promise<ModInstallationPlanGql> => {
       requireAdmin(context)
@@ -932,6 +940,7 @@ export const resolvers = {
         context.env,
         context.db,
         args.input,
+        args.serverId,
       )
     },
 

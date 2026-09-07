@@ -148,7 +148,15 @@ export class ModProviderManager {
 
   async getActiveEnvironment(
     db: Database,
+    serverId?: string | null,
   ): Promise<{ minecraftVersion: string; modLoader: GameModLoaderGql; modLoaderVersion: string | null; neoForgeVersion: string }> {
+    const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+    const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+    if (serverId) {
+      draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+      publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
+    }
+
     // 1. Try active draft
     const draft = await db
       .select({
@@ -158,7 +166,7 @@ export class ModProviderManager {
         modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
 
     if (draft) {
@@ -179,7 +187,7 @@ export class ModProviderManager {
         modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "PUBLISHED"))
+      .where(and(...publishedConditions))
       .get()
 
     if (published) {
@@ -188,6 +196,24 @@ export class ModProviderManager {
         modLoader: ((published.modLoader || "NEOFORGE") as GameModLoaderGql),
         modLoaderVersion: published.modLoaderVersion || null,
         neoForgeVersion: published.neoForgeVersion || "21.1.65",
+      }
+    }
+
+    // 3. Fallback to server record if serverId is provided
+    if (serverId) {
+      const server = await db
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, serverId))
+        .get()
+
+      if (server) {
+        return {
+          minecraftVersion: server.minecraftVersion || "1.21.1",
+          modLoader: ((server.modLoader || "NEOFORGE") as GameModLoaderGql),
+          modLoaderVersion: server.modLoaderVersion || null,
+          neoForgeVersion: server.modLoaderVersion || "21.1.65",
+        }
       }
     }
 
@@ -201,7 +227,13 @@ export class ModProviderManager {
 
   async getPublishedEnvironment(
     db: Database,
+    serverId?: string | null,
   ): Promise<{ minecraftVersion: string; modLoader: GameModLoaderGql; modLoaderVersion: string | null; neoForgeVersion: string; isPublished: boolean; releaseId?: string }> {
+    const publishedConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+    if (serverId) {
+      publishedConditions.push(eq(schema.gameReleases.serverId, serverId))
+    }
+
     const published = await db
       .select({
         id: schema.gameReleases.id,
@@ -211,7 +243,7 @@ export class ModProviderManager {
         modLoaderVersion: schema.gameReleases.modLoaderVersion,
       })
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "PUBLISHED"))
+      .where(and(...publishedConditions))
       .get()
 
     if (published) {
@@ -222,6 +254,25 @@ export class ModProviderManager {
         modLoaderVersion: published.modLoaderVersion || null,
         neoForgeVersion: published.neoForgeVersion || "21.1.65",
         isPublished: true,
+      }
+    }
+
+    // Fallback to server record if serverId is provided
+    if (serverId) {
+      const server = await db
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, serverId))
+        .get()
+
+      if (server) {
+        return {
+          minecraftVersion: server.minecraftVersion || "1.21.1",
+          modLoader: ((server.modLoader || "NEOFORGE") as GameModLoaderGql),
+          modLoaderVersion: server.modLoaderVersion || null,
+          neoForgeVersion: server.modLoaderVersion || "21.1.65",
+          isPublished: false,
+        }
       }
     }
 
@@ -242,8 +293,9 @@ export class ModProviderManager {
     limit: number = 20,
     offset: number = 0,
     contentType: ContentTypeGql = "MOD",
+    serverId?: string | null,
   ): Promise<ModSearchPayloadGql> {
-    const envData = await this.getActiveEnvironment(db)
+    const envData = await this.getActiveEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
     const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
     const providersStatus: ModProviderStatusGql[] = []
@@ -421,6 +473,7 @@ export class ModProviderManager {
     offset: number = 0,
     contentType: ContentTypeGql = "MOD",
     cursor?: string | null,
+    serverId?: string | null,
   ): Promise<ServerContentSearchPayloadGql> {
     if (contentType !== "MOD" && contentType !== "DATA_PACK") {
       throw createGraphQLError(
@@ -429,7 +482,7 @@ export class ModProviderManager {
       )
     }
 
-    const envData = await this.getPublishedEnvironment(db)
+    const envData = await this.getPublishedEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion, isPublished } = envData
     const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
     const providersStatus: ModProviderStatusGql[] = []
@@ -709,86 +762,6 @@ export class ModProviderManager {
     }
   }
 
-  async getServerProjectDetail(
-    env: Env,
-    db: Database,
-    provider: ModProviderGql,
-    projectId: string,
-    contentType: ContentTypeGql = "MOD",
-  ): Promise<ModProjectDetailGql> {
-    if (contentType !== "MOD" && contentType !== "DATA_PACK") {
-      throw createGraphQLError(
-        `Tipo de contenido no permitido para el servidor (${contentType}). Solo se admiten Mods de servidor y Data Packs.`,
-        "VALIDATION_ERROR",
-      )
-    }
-
-    const envData = await this.getPublishedEnvironment(db)
-    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
-    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
-
-    const adapter = this.getAdapter(provider)
-    if (!adapter.isConfigured(env)) {
-      throw createGraphQLError(
-        `El proveedor ${provider} no está configurado en el servidor.`,
-        "VALIDATION_ERROR",
-      )
-    }
-
-    const [project, compatibleVersions] = await Promise.all([
-      adapter.getProject(env, projectId, contentType),
-      adapter.getCompatibleVersions(env, projectId, minecraftVersion, loader, contentType),
-    ])
-
-    if (!project) {
-      throw createGraphQLError("Proyecto no encontrado en el proveedor.", "NOT_FOUND")
-    }
-
-    // Check if installed in server_managed_content
-    let installedVersion: string | null = null
-    let isInstalled = false
-
-    const installedRecord = await db
-      .select()
-      .from(schema.serverManagedContent)
-      .where(
-        and(
-          eq(schema.serverManagedContent.provider, provider),
-          eq(schema.serverManagedContent.projectId, projectId),
-        ),
-      )
-      .get()
-
-    if (installedRecord) {
-      isInstalled = true
-      const matchingVer = compatibleVersions.find(
-        (v) => v.id === installedRecord.versionId || v.fileId === installedRecord.fileId,
-      )
-      installedVersion = matchingVer?.versionNumber || installedRecord.targetPath.split("/").pop() || null
-    }
-
-    return {
-      provider,
-      projectId: project.projectId,
-      slug: project.slug,
-      name: project.name,
-      summary: project.summary,
-      description: project.description,
-      author: project.author,
-      iconUrl: project.iconUrl,
-      downloads: project.downloads,
-      contentType: project.contentType || contentType,
-      environment: project.environment || null,
-      compatibleVersions: compatibleVersions as any,
-      installedVersion,
-      isInstalled,
-      minecraftVersion,
-      modLoader,
-      modLoaderVersion,
-      neoForgeVersion,
-    }
-  }
-
   private async fetchFilteredFromProvider(
     adapter: ModProviderAdapter,
     env: Env,
@@ -914,8 +887,9 @@ export class ModProviderManager {
     provider: ModProviderGql,
     projectId: string,
     contentType: ContentTypeGql = "MOD",
+    serverId?: string | null,
   ): Promise<ModProjectDetailGql> {
-    const envData = await this.getActiveEnvironment(db)
+    const envData = await this.getActiveEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
     const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
 
@@ -962,10 +936,15 @@ export class ModProviderManager {
     let installedVersion: string | null = null
     let isInstalled = false
 
+    const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+    if (serverId) {
+      draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+    }
+
     const draft = await db
       .select({ id: schema.gameReleases.id })
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
 
     const targetCategory = contentType === "SHADER" ? "SHADER_PACK" : contentType
@@ -988,10 +967,109 @@ export class ModProviderManager {
         isInstalled = true
         // Match version number
         const matchingVer = compatibleVersions.find(
-          (v) => v.id === installedFile.sourceVersionId || v.fileId === installedFile.sourceFileId,
+          (v) => v.id === installedFile.sourceVersionId || (installedFile.sourceFileId && String(v.fileId) === String(installedFile.sourceFileId)),
         )
         installedVersion = matchingVer?.versionNumber || installedFile.name
       }
+    }
+
+    return {
+      provider,
+      projectId: project.projectId,
+      slug: project.slug,
+      name: project.name,
+      summary: project.summary,
+      description: project.description,
+      author: project.author,
+      iconUrl: project.iconUrl,
+      downloads: project.downloads,
+      contentType: project.contentType || contentType,
+      environment: project.environment || null,
+      compatibleVersions: compatibleVersions as any,
+      installedVersion,
+      isInstalled,
+      minecraftVersion,
+      modLoader,
+      modLoaderVersion,
+      neoForgeVersion,
+    }
+  }
+
+  async getServerProjectDetail(
+    env: Env,
+    db: Database,
+    provider: ModProviderGql,
+    projectId: string,
+    contentType: ContentTypeGql = "MOD",
+    serverId?: string | null,
+  ): Promise<ModProjectDetailGql> {
+    const envData = await this.getPublishedEnvironment(db, serverId)
+    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+
+    const adapter = this.getAdapter(provider)
+    if (!adapter.isConfigured(env)) {
+      throw createGraphQLError(
+        `El proveedor ${provider} no está configurado en el servidor.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    let supportedTypes: ContentTypeGql[] = []
+    if (typeof adapter.getSupportedContentTypes === "function") {
+      supportedTypes = await adapter
+        .getSupportedContentTypes(env, projectId, minecraftVersion)
+        .catch(() => [])
+    }
+
+    if (supportedTypes.length > 0 && !supportedTypes.includes(contentType)) {
+      throw createGraphQLError(
+        `El proyecto no es compatible con el tipo solicitado (${contentType}) en Minecraft ${minecraftVersion}. Tipos disponibles: ${supportedTypes.join(", ")}.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    const [project, compatibleVersions] = await Promise.all([
+      adapter.getProject(env, projectId, contentType),
+      adapter.getCompatibleVersions(env, projectId, minecraftVersion, loader, contentType),
+    ])
+
+    if (!project) {
+      throw createGraphQLError("Proyecto no encontrado en el proveedor.", "NOT_FOUND")
+    }
+
+    if (supportedTypes.length === 0 && project.contentType && project.contentType !== contentType) {
+      throw createGraphQLError(
+        `El proyecto "${project.name}" es de tipo ${project.contentType}, no corresponde al tipo solicitado ${contentType}.`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    // Check if installed in server_managed_content
+    let installedVersion: string | null = null
+    let isInstalled = false
+
+    const queryConditions = [
+      eq(schema.serverManagedContent.provider, provider),
+      eq(schema.serverManagedContent.projectId, projectId),
+      eq(schema.serverManagedContent.contentType, contentType),
+    ]
+    if (serverId) {
+      queryConditions.push(eq(schema.serverManagedContent.serverId, serverId))
+    }
+
+    const managed = await db
+      .select()
+      .from(schema.serverManagedContent)
+      .where(and(...queryConditions))
+      .get()
+
+    if (managed) {
+      isInstalled = true
+      const matchingVer = compatibleVersions.find(
+        (v) => v.id === managed.versionId || (managed.fileId && String(v.fileId) === String(managed.fileId)),
+      )
+      installedVersion = matchingVer?.versionNumber || managed.targetPath.split("/").pop() || null
     }
 
     return {
@@ -1028,8 +1106,9 @@ export class ModProviderManager {
     env: Env,
     db: Database,
     input: ResolveModPlanInputGql,
+    serverId?: string | null,
   ): Promise<ModInstallationPlanGql> {
-    const envData = await this.getActiveEnvironment(db)
+    const envData = await this.getActiveEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
     const contentType = input.contentType || "MOD"
     if (contentType === "DATA_PACK") {
@@ -1050,10 +1129,14 @@ export class ModProviderManager {
 
     // 1. Fetch active draft files for status comparison
     let draftFiles: schema.GameReleaseFile[] = []
+    const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+    if (serverId) {
+      draftConditions.push(eq(schema.gameReleases.serverId, serverId))
+    }
     const draft = await db
       .select({ id: schema.gameReleases.id })
       .from(schema.gameReleases)
-      .where(eq(schema.gameReleases.status, "DRAFT"))
+      .where(and(...draftConditions))
       .get()
 
     if (draft) {
@@ -1682,6 +1765,7 @@ export class ModProviderManager {
     db: Database,
     input: ResolveServerContentPlanInputGql,
     activeWorldName: string = "world",
+    serverId?: string | null,
   ): Promise<ServerContentInstallationPlanGql> {
     const contentType = input.contentType || "MOD"
     if (contentType !== "MOD" && contentType !== "DATA_PACK") {
@@ -1691,7 +1775,7 @@ export class ModProviderManager {
       )
     }
 
-    const envData = await this.getPublishedEnvironment(db)
+    const envData = await this.getPublishedEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
     const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
 
@@ -1704,9 +1788,11 @@ export class ModProviderManager {
     }
 
     // 1. Fetch server_managed_content records for status comparison
+    const conditions = serverId ? [eq(schema.serverManagedContent.serverId, serverId)] : []
     const managedRecords = await db
       .select()
       .from(schema.serverManagedContent)
+      .where(and(...conditions))
       .all()
 
     const manualOverridesMap = new Map<string, string>()

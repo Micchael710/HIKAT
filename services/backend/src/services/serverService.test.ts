@@ -9,6 +9,12 @@ import {
   formatServerGql,
 } from "./serverService"
 import { handleGameFileDownload } from "./game/gameStorageService"
+import {
+  createPterodactylApplicationClient,
+  resolvePterodactylClient,
+} from "./pterodactyl/serverAdministrationService"
+import { prepareGameDraft, getPublishedModpack } from "./game/releaseService"
+import { modProviderManager } from "./providers/modProviderManager"
 import type { IPterodactylClient } from "./pterodactyl/types"
 import type { Env } from "../types"
 import { eq } from "drizzle-orm"
@@ -540,6 +546,223 @@ describe("ServerService & Multi-Server Provisioning", () => {
       expect(res.status).toBe(404)
       const data = await res.json()
       expect((data as any).error).toContain("no disponible públicamente")
+    })
+  })
+
+  describe("Phase 1 Regression Protections", () => {
+    it("1. provisioning Application API funciona sin PTERODACTYL_SERVER_ID ni Client API key", async () => {
+      const appEnv = createMockEnv({
+        PTERODACTYL_BASE_URL: "https://panel.example.com",
+        PTERODACTYL_APP_API_KEY: "ptla_valid_app_key",
+        PTERODACTYL_API_KEY: undefined,
+        PTERODACTYL_SERVER_ID: undefined,
+      })
+
+      const appClient = createPterodactylApplicationClient(appEnv)
+      expect(appClient).toBeDefined()
+
+      const server = await createServer(
+        mockDb,
+        appEnv,
+        {
+          name: "App Provisioning Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("READY")
+    })
+
+    it("2. serverId explícito nunca cae al servidor global", async () => {
+      const serverId = "srv-no-ptero"
+      await mockDb.insert(schema.servers).values({
+        id: serverId,
+        name: "Unconfigured Ptero Server",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        pterodactylIdentifier: null,
+        provisioningStatus: "PROVISIONING",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      mockEnv.PTERODACTYL_SERVER_ID = "global-fallback-id"
+
+      // Explicit serverId must reject with SERVER_NOT_CONFIGURED and NEVER use global-fallback-id
+      await expect(
+        resolvePterodactylClient(mockDb, mockEnv, serverId),
+      ).rejects.toThrow(/El servidor todavía no está configurado/)
+
+      // Omitting serverId allows legacy global fallback
+      const legacyResolved = await resolvePterodactylClient(mockDb, mockEnv, null)
+      expect(legacyResolved.client).toBeDefined()
+    })
+
+    it("3. dos servidores con MC/loaders distintos obtienen búsquedas/planes separados", async () => {
+      const srv1 = "srv-mc-120"
+      const srv2 = "srv-mc-116"
+
+      await mockDb.insert(schema.servers).values({
+        id: srv1,
+        name: "NeoForge 1.20",
+        minecraftVersion: "1.20.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "20.1.0",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      await mockDb.insert(schema.servers).values({
+        id: srv2,
+        name: "Forge 1.16",
+        minecraftVersion: "1.16.5",
+        modLoader: "FORGE",
+        modLoaderVersion: "36.2.39",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      const env1 = await modProviderManager.getActiveEnvironment(mockDb, srv1)
+      const env2 = await modProviderManager.getActiveEnvironment(mockDb, srv2)
+
+      expect(env1.minecraftVersion).toBe("1.20.1")
+      expect(env1.modLoader).toBe("NEOFORGE")
+
+      expect(env2.minecraftVersion).toBe("1.16.5")
+      expect(env2.modLoader).toBe("FORGE")
+
+      const pubEnv1 = await modProviderManager.getPublishedEnvironment(mockDb, srv1)
+      const pubEnv2 = await modProviderManager.getPublishedEnvironment(mockDb, srv2)
+
+      expect(pubEnv1.minecraftVersion).toBe("1.20.1")
+      expect(pubEnv2.minecraftVersion).toBe("1.16.5")
+    })
+
+    it("4. baseReleaseId de otro servidor se rechaza en prepareGameDraft", async () => {
+      const srv1 = "srv-rel-1"
+      const srv2 = "srv-rel-2"
+      const releaseId = "rel-of-srv-1"
+
+      await mockDb.insert(schema.servers).values({
+        id: srv1,
+        name: "Server 1",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      await mockDb.insert(schema.servers).values({
+        id: srv2,
+        name: "Server 2",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      await mockDb.insert(schema.gameReleases).values({
+        id: releaseId,
+        serverId: srv1,
+        version: "1.0.0",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        status: "PUBLISHED",
+        createdBy: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      await expect(
+        prepareGameDraft(mockDb, "user-1", { baseReleaseId: releaseId }, mockEnv, undefined, srv2),
+      ).rejects.toThrow("La release base pertenece a otro servidor.")
+    })
+
+    it("5. active release de otro servidor se rechaza en getPublishedModpack", async () => {
+      const srv1 = "srv-pub-1"
+      const srv2 = "srv-pub-2"
+      const releaseId = "rel-pub-1"
+
+      await mockDb.insert(schema.servers).values({
+        id: srv1,
+        name: "Server 1 Pub",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      await mockDb.insert(schema.gameReleases).values({
+        id: releaseId,
+        serverId: srv1,
+        version: "1.0.0",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        status: "PUBLISHED",
+        createdBy: "user-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Server 2 mistakenly points to Server 1's release
+      await mockDb.insert(schema.servers).values({
+        id: srv2,
+        name: "Server 2 Pub",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        launcherActiveReleaseId: releaseId,
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      const modpack = await getPublishedModpack(mockDb, mockEnv, undefined, srv2)
+      expect(modpack).toBeNull()
+    })
+
+    it("6. fallo al borrar en Pterodactyl conserva la fila en D1", async () => {
+      const serverId = "srv-failing-delete"
+      await mockDb.insert(schema.servers).values({
+        id: serverId,
+        name: "Server Failing Delete",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        pterodactylServerId: "9999",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      const failingDeleteClient = {
+        deleteApplicationServer: vi.fn(async () => {
+          throw new Error("Pterodactyl Upstream 500 Failure")
+        }),
+      } as unknown as IPterodactylClient
+
+      await expect(
+        deleteServer(mockDb, mockEnv, serverId, failingDeleteClient),
+      ).rejects.toThrow("Error al eliminar el servidor en Pterodactyl")
+
+      // Verify row is still in D1 for retry
+      const rowInDb = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, serverId))
+        .get()
+
+      expect(rowInDb).toBeDefined()
+      expect(rowInDb?.id).toBe(serverId)
     })
   })
 })

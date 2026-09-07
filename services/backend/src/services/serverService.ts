@@ -10,12 +10,11 @@ import type {
 import {
   validateWindowsFolderName,
   normalizeHexColor,
-  resolveJavaMajorForMinecraft,
 } from "@hikat/shared"
 import type { Env } from "../types"
 import { getContentMediaById, formatMediaGql } from "./mediaService"
-import { validateGameEnvironment } from "./game/gameEnvironmentService"
-import { createPterodactylClient } from "./pterodactyl/serverAdministrationService"
+import { validateGameEnvironment, getMinecraftJavaMajorVersion } from "./game/gameEnvironmentService"
+import { createPterodactylApplicationClient } from "./pterodactyl/serverAdministrationService"
 import type { IPterodactylClient } from "./pterodactyl/types"
 
 export async function formatServerGql(
@@ -116,10 +115,30 @@ export async function createServer(
     input.modLoaderVersion,
   )
 
-  // 4. Validate resources
-  const cpu = Math.max(50, Math.floor(Number(input.cpu) || 200))
-  const memoryMb = Math.max(512, Math.floor(Number(input.memoryMb) || 4096))
-  const diskMb = Math.max(1024, Math.floor(Number(input.diskMb) || 10240))
+  // 4. Validate resources strictly without silent substitution
+  const cpu = input.cpu !== undefined && input.cpu !== null ? Number(input.cpu) : 200
+  if (!Number.isInteger(cpu) || cpu < 50) {
+    throw createGraphQLError(
+      "La asignación de CPU debe ser un número entero de al menos 50%.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const memoryMb = input.memoryMb !== undefined && input.memoryMb !== null ? Number(input.memoryMb) : 4096
+  if (!Number.isInteger(memoryMb) || memoryMb < 512) {
+    throw createGraphQLError(
+      "La memoria RAM debe ser un número entero de al menos 512 MB.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const diskMb = input.diskMb !== undefined && input.diskMb !== null ? Number(input.diskMb) : 10240
+  if (!Number.isInteger(diskMb) || diskMb < 1024) {
+    throw createGraphQLError(
+      "El espacio en disco debe ser un número entero de al menos 1024 MB.",
+      "VALIDATION_ERROR",
+    )
+  }
 
   // 5. Validate and normalize accent color
   const normalizedColor = normalizeHexColor(input.accentColor)
@@ -145,10 +164,36 @@ export async function createServer(
     }
   }
 
+  // 7. Validate Pterodactyl provisioning configuration
+  const rawOwnerId = env.PTERODACTYL_DEFAULT_OWNER_ID
+  const rawEggId = env.PTERODACTYL_DEFAULT_EGG_ID
+  const rawLocationId = env.PTERODACTYL_DEFAULT_LOCATION_ID
+
+  const ownerUserId = Number(rawOwnerId)
+  const eggId = Number(rawEggId)
+  const locationId = Number(rawLocationId)
+
+  if (
+    !rawOwnerId ||
+    !Number.isInteger(ownerUserId) ||
+    ownerUserId <= 0 ||
+    !rawEggId ||
+    !Number.isInteger(eggId) ||
+    eggId <= 0 ||
+    !rawLocationId ||
+    !Number.isInteger(locationId) ||
+    locationId <= 0
+  ) {
+    throw createGraphQLError(
+      "La configuración de aprovisionamiento de Pterodactyl está incompleta o es inválida (PTERODACTYL_DEFAULT_OWNER_ID, PTERODACTYL_DEFAULT_EGG_ID, PTERODACTYL_DEFAULT_LOCATION_ID).",
+      "VALIDATION_ERROR",
+    )
+  }
+
   const serverId = crypto.randomUUID()
   const now = new Date().toISOString()
 
-  // 7. Insert initial server record in D1 with PROVISIONING status
+  // 8. Insert initial server record in D1 with PROVISIONING status
   await db.insert(schema.servers).values({
     id: serverId,
     name: cleanName,
@@ -166,18 +211,15 @@ export async function createServer(
     updatedAt: now,
   })
 
-  // 8. Provision in Pterodactyl Application API
-  const client = clientOverride || createPterodactylClient(env)
-  const javaMajor = resolveJavaMajorForMinecraft(input.minecraftVersion)
+  // 9. Provision in Pterodactyl Application API
+  const client = clientOverride || createPterodactylApplicationClient(env)
+  const javaMajor = await getMinecraftJavaMajorVersion(input.minecraftVersion)
   const dockerImage =
     env.PTERODACTYL_DEFAULT_DOCKER_IMAGE ||
     `ghcr.io/pterodactyl/yolks:java_${javaMajor}`
   const startup =
     env.PTERODACTYL_DEFAULT_STARTUP ||
     "java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}"
-  const ownerUserId = Number(env.PTERODACTYL_DEFAULT_OWNER_ID) || 1
-  const eggId = Number(env.PTERODACTYL_DEFAULT_EGG_ID) || 1
-  const locationId = Number(env.PTERODACTYL_DEFAULT_LOCATION_ID) || 1
 
   let pterodactylRes: any
   try {
@@ -228,7 +270,7 @@ export async function createServer(
     throw createGraphQLError(errorMsg, "INTERNAL_ERROR")
   }
 
-  // 9. Update server with Pterodactyl identifiers and READY status
+  // 10. Update server with Pterodactyl identifiers and READY status
   const pterodactylId = String(pterodactylRes.attributes.id)
   const pterodactylIdentifier = pterodactylRes.attributes.identifier
 
@@ -291,11 +333,14 @@ export async function deleteServer(
   // If server has Pterodactyl ID, cleanup upstream
   if (server.pterodactylServerId) {
     try {
-      const client = clientOverride || createPterodactylClient(env)
+      const client = clientOverride || createPterodactylApplicationClient(env)
       await client.deleteApplicationServer(server.pterodactylServerId)
     } catch (err) {
       console.error("[ServerService] Failed to delete Pterodactyl server:", err)
-      // Continue to delete from D1 fail-safe
+      throw createGraphQLError(
+        `Error al eliminar el servidor en Pterodactyl: ${err instanceof Error ? err.message : String(err)}. La eliminación local se canceló para permitir reintentar.`,
+        "INTERNAL_ERROR",
+      )
     }
   }
 

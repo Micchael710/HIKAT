@@ -33,6 +33,7 @@ let cachedForgeVersions: CacheEntry<string[]> | null = null
 // Fabric/Quilt are per-minecraft-version, keyed by mc version
 const cachedFabricLoaders = new Map<string, CacheEntry<GameLoaderVersionGql[]>>()
 const cachedQuiltLoaders = new Map<string, CacheEntry<GameLoaderVersionGql[]>>()
+const cachedJavaMajorVersions = new Map<string, CacheEntry<number>>()
 
 export function clearGameEnvironmentCache(): void {
     cachedMinecraftVersions = null
@@ -40,6 +41,7 @@ export function clearGameEnvironmentCache(): void {
     cachedForgeVersions = null
     cachedFabricLoaders.clear()
     cachedQuiltLoaders.clear()
+    cachedJavaMajorVersions.clear()
 }
 
 // ─── Internal types ───────────────────────────────────────────────────────────
@@ -47,7 +49,16 @@ export function clearGameEnvironmentCache(): void {
 interface MinecraftManifestVersion {
     id: string
     type: string
+    url?: string
     releaseTime?: string
+}
+
+interface MinecraftVersionPackage {
+    id?: string
+    javaVersion?: {
+        component?: string
+        majorVersion?: number
+    }
 }
 
 interface MinecraftVersionManifest {
@@ -95,6 +106,58 @@ async function getOfficialMinecraftVersions(): Promise<MinecraftManifestVersion[
     }
     cachedMinecraftVersions = { data: versions, expiresAt: now + CACHE_TTL_MS }
     return versions
+}
+
+export async function getMinecraftJavaMajorVersion(minecraftVersion: string): Promise<number> {
+    const cleanVersion = String(minecraftVersion || "").trim()
+    if (!cleanVersion) {
+        throw createGraphQLError(
+            "Versión de Minecraft requerida para resolver la versión de Java.",
+            "VALIDATION_ERROR",
+        )
+    }
+
+    const now = Date.now()
+    const cached = cachedJavaMajorVersions.get(cleanVersion)
+    if (cached && cached.expiresAt > now) {
+        return cached.data
+    }
+
+    const versions = await getOfficialMinecraftVersions()
+    const match = versions.find((v) => v.id === cleanVersion)
+    if (!match || !match.url) {
+        throw createGraphQLError(
+            `Versión de Minecraft no encontrada en el catálogo oficial de Mojang: ${cleanVersion}`,
+            "NOT_FOUND",
+        )
+    }
+
+    try {
+        const response = await fetchWithTimeout(match.url)
+        const pkg = (await response.json()) as MinecraftVersionPackage
+        const major = pkg.javaVersion?.majorVersion
+        if (typeof major === "number" && Number.isFinite(major) && major > 0) {
+            cachedJavaMajorVersions.set(cleanVersion, {
+                data: major,
+                expiresAt: now + CACHE_TTL_MS,
+            })
+            return major
+        }
+        const fallback = 8
+        cachedJavaMajorVersions.set(cleanVersion, {
+            data: fallback,
+            expiresAt: now + CACHE_TTL_MS,
+        })
+        return fallback
+    } catch (err: unknown) {
+        if (err && typeof err === "object" && "extensions" in err) {
+            throw err
+        }
+        throw createGraphQLError(
+            `No se pudo obtener la metadata oficial de Java para Minecraft ${cleanVersion}.`,
+            "INTERNAL_ERROR",
+        )
+    }
 }
 
 // ─── NeoForge ─────────────────────────────────────────────────────────────────

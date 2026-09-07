@@ -467,6 +467,11 @@ export async function getPublishedModpack(
 
   if (!activeRelease) return null
 
+  // Ensure the active release belongs to the requested serverId if serverId is provided
+  if (serverId && activeRelease.serverId && activeRelease.serverId !== serverId) {
+    return null
+  }
+
   const allRecords = await db
     .select()
     .from(schema.gameReleaseFiles)
@@ -672,6 +677,17 @@ export async function prepareGameDraft(
       .from(schema.gameReleases)
       .where(eq(schema.gameReleases.id, input.baseReleaseId))
       .get()
+
+    if (!baseRelease) {
+      throw createGraphQLError("La release base especificada no existe.", "NOT_FOUND")
+    }
+
+    if (serverId && baseRelease.serverId && baseRelease.serverId !== serverId) {
+      throw createGraphQLError(
+        "La release base pertenece a otro servidor.",
+        "VALIDATION_ERROR",
+      )
+    }
   } else {
     baseRelease = await db
       .select()
@@ -680,16 +696,33 @@ export async function prepareGameDraft(
       .get()
   }
 
+  let defaultMcVersion = "1.21.1"
+  let defaultLoader: GameModLoaderGql = "NEOFORGE"
+  let defaultLoaderVersion: string | null = "21.1.65"
+
+  if (serverId) {
+    const serverRow = await db
+      .select()
+      .from(schema.servers)
+      .where(eq(schema.servers.id, serverId))
+      .get()
+    if (serverRow) {
+      defaultMcVersion = serverRow.minecraftVersion || defaultMcVersion
+      defaultLoader = (serverRow.modLoader || defaultLoader) as GameModLoaderGql
+      defaultLoaderVersion = serverRow.modLoaderVersion || null
+    }
+  }
+
   const now = new Date().toISOString()
   const draftId = crypto.randomUUID()
   const tempVersion = `draft-${Date.now()}`
 
-  const inheritedModLoader = (baseRelease?.modLoader || "NEOFORGE") as GameModLoaderGql
+  const inheritedModLoader = (baseRelease?.modLoader || defaultLoader) as GameModLoaderGql
   const inheritedModLoaderVersion =
     inheritedModLoader === "VANILLA"
       ? null
       : baseRelease?.modLoaderVersion ??
-        (inheritedModLoader === "NEOFORGE" ? baseRelease?.neoForgeVersion || "21.1.65" : null)
+        (inheritedModLoader === "NEOFORGE" ? baseRelease?.neoForgeVersion || defaultLoaderVersion : defaultLoaderVersion)
 
   const effectiveServerId = serverId || baseRelease?.serverId || null
 
@@ -697,7 +730,7 @@ export async function prepareGameDraft(
     id: draftId,
     serverId: effectiveServerId,
     version: tempVersion,
-    minecraftVersion: baseRelease?.minecraftVersion || "1.21.1",
+    minecraftVersion: baseRelease?.minecraftVersion || defaultMcVersion,
     modLoader: inheritedModLoader,
     modLoaderVersion: inheritedModLoaderVersion,
     neoForgeVersion: baseRelease?.neoForgeVersion || (inheritedModLoader === "NEOFORGE" ? inheritedModLoaderVersion : null) || "21.1.65",

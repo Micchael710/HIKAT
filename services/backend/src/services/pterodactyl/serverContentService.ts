@@ -249,7 +249,7 @@ export async function installServerContentPlan(
   arg2?: IPterodactylClient,
 ): Promise<ServerManagedContentItemGql[]> {
   const { serverId, clientOverride } = parseContentServiceArgs(arg1, arg2)
-  const plan = await modProviderManager.resolveServerInstallationPlan(env, db, input)
+  const plan = await modProviderManager.resolveServerInstallationPlan(env, db, input, "world", serverId)
 
   if (!plan.isValid || plan.conflicts.length > 0) {
     throw createGraphQLError(

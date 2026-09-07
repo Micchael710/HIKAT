@@ -539,6 +539,7 @@ export async function installModPlan(
     env,
     db,
     input,
+    serverId,
   )
 
   if (!plan.isValid || plan.conflicts.length > 0) {

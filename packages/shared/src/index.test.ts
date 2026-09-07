@@ -596,21 +596,6 @@ describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
     expect(isValidHexColor("#12345")).toBe(false)
     expect(isValidHexColor("#1234567")).toBe(false)
   })
-
-  it("resolves Java major version from Minecraft version", async () => {
-    const { resolveJavaMajorForMinecraft } = await import("./index")
-    expect(resolveJavaMajorForMinecraft("1.21.1")).toBe(21)
-    expect(resolveJavaMajorForMinecraft("1.20.6")).toBe(21)
-    expect(resolveJavaMajorForMinecraft("1.20.5")).toBe(21)
-    expect(resolveJavaMajorForMinecraft("1.20.4")).toBe(17)
-    expect(resolveJavaMajorForMinecraft("1.20.1")).toBe(17)
-    expect(resolveJavaMajorForMinecraft("1.19.4")).toBe(17)
-    expect(resolveJavaMajorForMinecraft("1.18.2")).toBe(17)
-    expect(resolveJavaMajorForMinecraft("1.17.1")).toBe(16)
-    expect(resolveJavaMajorForMinecraft("1.16.5")).toBe(8)
-    expect(resolveJavaMajorForMinecraft("1.12.2")).toBe(8)
-    expect(resolveJavaMajorForMinecraft("26.1")).toBe(21)
-  })
 })
 
 

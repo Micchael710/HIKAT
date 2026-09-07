@@ -545,6 +545,7 @@ export const gameTypeDefs = /* GraphQL */ `
     Get detailed information and compatible versions of a mod project - requires ADMIN role
     """
     getModProjectDetail(
+      serverId: ID
       provider: ModProvider!
       projectId: String!
       contentType: ContentType

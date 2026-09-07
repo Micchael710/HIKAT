@@ -46,7 +46,56 @@ export function createPterodactylClient(
 }
 
 /**
+ * Creates a Pterodactyl client scoped strictly to the Application API (for provisioning/deletion).
+ * Requires ONLY PTERODACTYL_BASE_URL and PTERODACTYL_APP_API_KEY.
+ */
+export function createPterodactylApplicationClient(env: Env): IPterodactylClient {
+  const baseUrl = env.PTERODACTYL_BASE_URL
+  const appApiKey = env.PTERODACTYL_APP_API_KEY
+
+  if (!baseUrl || !appApiKey) {
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+      SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+      "Pterodactyl Application API configuration missing (PTERODACTYL_BASE_URL or PTERODACTYL_APP_API_KEY)",
+    )
+  }
+
+  return new PterodactylHttpClient({
+    baseUrl,
+    appApiKey,
+    isProduction: env.ENVIRONMENT === "production",
+  })
+}
+
+/**
+ * Ensures that if multiple servers exist in D1, a modifying/destructive operation cannot execute without an explicit serverId.
+ */
+export async function assertExplicitServerIdIfMultiple(
+  db: ReturnType<typeof createDatabase> | Database,
+  serverId?: string | null,
+  operationName: string = "operación",
+): Promise<void> {
+  if (serverId) return
+  const countResult = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.servers)
+    .get()
+  const serverCount = countResult?.count ?? 0
+  if (serverCount > 1) {
+    throw new ServerInfrastructureError(
+      "BAD_USER_INPUT",
+      `Se debe especificar el servidor para esta ${operationName} porque existen múltiples servidores configurados.`,
+      `Ambiguous server target for ${operationName} with ${serverCount} servers in database`,
+    )
+  }
+}
+
+/**
  * Resolves the appropriate Pterodactyl client for a given serverId or fallback.
+ * - When an explicit serverId is provided, searches EXCLUSIVELY for its pterodactylIdentifier.
+ *   If missing, fails with SERVER_NOT_CONFIGURED (NEVER falling back to PTERODACTYL_SERVER_ID).
+ * - Legacy fallback to PTERODACTYL_SERVER_ID is preserved ONLY when no serverId was passed.
  */
 export async function resolvePterodactylClient(
   db: ReturnType<typeof createDatabase> | Database | undefined,
@@ -68,13 +117,18 @@ export async function resolvePterodactylClient(
     return { client: effectiveClientOverride }
   }
 
+  // Legacy fallback ONLY when NO serverId was received.
   if (!effectiveServerId) {
     return { client: createPterodactylClient(env) }
   }
 
   const database = db || (env.DB ? createDatabase(env.DB) : undefined)
   if (!database) {
-    return { client: createPterodactylClient(env) }
+    throw new ServerInfrastructureError(
+      SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
+      SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
+      "Database is required to resolve specific server",
+    )
   }
 
   const server = await database
@@ -91,7 +145,7 @@ export async function resolvePterodactylClient(
     )
   }
 
-  const identifier = server.pterodactylIdentifier || env.PTERODACTYL_SERVER_ID
+  const identifier = server.pterodactylIdentifier
   if (!identifier) {
     throw new ServerInfrastructureError(
       SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
@@ -330,6 +384,7 @@ export async function executeServerPowerAction(
   }
 
   const db = createDatabase(env.DB)
+  await assertExplicitServerIdIfMultiple(db, serverId, "acción de energía")
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
 
   // 1. Acquire distributed lock for concurrency safety during request
@@ -491,6 +546,7 @@ export async function executeServerCommand(
   }
 
   const db = createDatabase(env.DB)
+  await assertExplicitServerIdIfMultiple(db, serverId, "comando de consola")
   await checkAndIncrementCommandRateLimit(db, userId, serverId)
 
   const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
@@ -531,6 +587,7 @@ export async function createConsoleTicket(
       "Database binding is unavailable",
     )
   }
+  await assertExplicitServerIdIfMultiple(database, serverId, "ticket de consola")
 
   const now = Date.now()
   const nowIso = new Date(now).toISOString()
@@ -658,6 +715,7 @@ export async function acquireServerOperationLock(
   ttlSeconds: number = 180,
   serverId?: string | null,
 ): Promise<ServerOperationLockHandle> {
+  await assertExplicitServerIdIfMultiple(db, serverId, `operación destructiva (${operation})`)
   const nowIso = new Date().toISOString()
   const lockKey = serverId ? `server_op:${serverId}:${operation}` : "server_destructive_operation"
 
