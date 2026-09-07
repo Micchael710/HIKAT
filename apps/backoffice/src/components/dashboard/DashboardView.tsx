@@ -1,21 +1,25 @@
 import React, { useState, useEffect } from "react"
-import type { ThemeMode, AdminDashboardSummary, BackofficeSection } from "../../types"
-import { dashboardApi } from "../../services/graphqlClient"
+import type { ThemeMode, ServerResources, AdminGameOverview, BackofficeSection, ServerItem } from "../../types"
+import { serverApi, newsApi, gameApi } from "../../services/graphqlClient"
 import { getThemeTokens } from "../../theme/tokens"
 import {
-  IconDashboard,
   IconServer,
   IconNews,
-  IconShirt,
   IconGamepad,
   IconSpinner,
   IconPlus,
   IconSettings,
+  IconTerminal,
+  IconCpu,
+  IconRam,
+  IconDisk,
 } from "../../theme/icons"
 import LiveToast from "../common/LiveToast"
 
 interface DashboardViewProps {
   theme: ThemeMode
+  serverId: string
+  server?: ServerItem | null
   onNavigate: (section: BackofficeSection) => void
 }
 
@@ -28,33 +32,65 @@ const SERVER_STATUS_CONFIG: Record<string, { label: string; bg: string; color: s
   UNKNOWN: { label: "No disponible", bg: "rgba(148, 163, 184, 0.15)", color: "#94a3b8" },
 }
 
-export default function DashboardView({ theme, onNavigate }: DashboardViewProps) {
+export default function DashboardView({
+  theme,
+  serverId,
+  server,
+  onNavigate,
+}: DashboardViewProps) {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
-  const [data, setData] = useState<AdminDashboardSummary | null>(null)
+
+  const [serverResources, setServerResources] = useState<ServerResources | null>(null)
+  const [newsCounts, setNewsCounts] = useState<{ published: number; draft: number }>({ published: 0, draft: 0 })
+  const [gameOverview, setGameOverview] = useState<AdminGameOverview | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let isMounted = true
-    async function loadDashboard() {
+    async function loadScopedDashboard() {
       setIsLoading(true)
       try {
-        const summary = await dashboardApi.getAdminDashboard()
-        if (isMounted) setData(summary)
-      } catch (err: any) {
-        if (isMounted) setToastMessage("No se pudo cargar el resumen del panel.")
+        const [serverStatusRes, newsRes, gameRes] = await Promise.allSettled([
+          serverApi.getServerStatus(serverId),
+          newsApi.getAdminNews({ serverId, first: 100 }),
+          gameApi.getAdminGameOverview(serverId),
+        ])
+
+        if (!isMounted) return
+
+        if (serverStatusRes.status === "fulfilled") {
+          setServerResources(serverStatusRes.value)
+        }
+        if (newsRes.status === "fulfilled" && newsRes.value?.edges) {
+          const published = newsRes.value.edges.filter((e) => e.node.status === "PUBLISHED").length
+          const draft = newsRes.value.edges.filter((e) => e.node.status === "DRAFT").length
+          setNewsCounts({ published, draft })
+        }
+        if (gameRes.status === "fulfilled") {
+          setGameOverview(gameRes.value)
+        }
+      } catch {
+        if (isMounted) setToastMessage("No se pudo cargar el resumen del servidor.")
       } finally {
         if (isMounted) setIsLoading(false)
       }
     }
-    loadDashboard()
+
+    loadScopedDashboard()
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [serverId])
 
-  const serverStatus = data?.server?.status ? (SERVER_STATUS_CONFIG[data.server.status] || SERVER_STATUS_CONFIG.UNKNOWN) : SERVER_STATUS_CONFIG.UNKNOWN
+  const currentStatusConfig = serverResources?.status
+    ? SERVER_STATUS_CONFIG[serverResources.status] || SERVER_STATUS_CONFIG.UNKNOWN
+    : SERVER_STATUS_CONFIG.UNKNOWN
+
+  const pendingChangesCount =
+    gameOverview?.changes?.total ||
+    (gameOverview?.draftRelease?.files ? gameOverview.draftRelease.files.length : 0)
 
   return (
     <div
@@ -79,7 +115,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
             letterSpacing: "-0.02em",
           }}
         >
-          Panel de control
+          {server?.name ? `Dashboard: ${server.name}` : "Panel de control del servidor"}
         </h1>
         <p
           style={{
@@ -89,7 +125,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
             color: tokens.textSecondary,
           }}
         >
-          Estado general y métricas clave de HiKAT.
+          Estado general, noticias y actualizaciones activas del servidor.
         </p>
       </div>
 
@@ -105,7 +141,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
           }}
         >
           <IconSpinner size={24} />
-          <span>Cargando panel de control...</span>
+          <span>Cargando panel del servidor...</span>
         </div>
       ) : (
         <>
@@ -118,7 +154,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
               marginBottom: "32px",
             }}
           >
-            {/* Card 1: Servidor */}
+            {/* Card 1: Servidor Minecraft */}
             <div
               style={{
                 backgroundColor: tokens.bgCard,
@@ -134,7 +170,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
                   <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
-                    Servidor Minecraft
+                    Servidor de Juego
                   </span>
                   <div
                     style={{
@@ -162,17 +198,22 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                       borderRadius: "20px",
                       fontSize: "13px",
                       fontWeight: "600",
-                      backgroundColor: serverStatus.bg,
-                      color: serverStatus.color,
+                      backgroundColor: currentStatusConfig.bg,
+                      color: currentStatusConfig.color,
                     }}
                   >
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: serverStatus.color }} />
-                    {serverStatus.label}
+                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: currentStatusConfig.color }} />
+                    {currentStatusConfig.label}
                   </span>
+                </div>
+
+                <div style={{ fontSize: "12.5px", color: tokens.textSecondary, marginTop: 6 }}>
+                  {serverResources ? `${serverResources.cpuPercent.toFixed(1)}% CPU · ${(serverResources.memoryUsedBytes / (1024 * 1024)).toFixed(0)} MB RAM` : "Sin telemetría en vivo"}
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={() => onNavigate("server")}
                 className="launcher-btn-secondary"
                 style={{
@@ -189,7 +230,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
               </button>
             </div>
 
-            {/* Card 2: Noticias */}
+            {/* Card 2: Noticias del Servidor */}
             <div
               style={{
                 backgroundColor: tokens.bgCard,
@@ -205,7 +246,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
                   <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
-                    Noticias y Anuncios
+                    Noticias del Servidor
                   </span>
                   <div
                     style={{
@@ -224,14 +265,15 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 </div>
 
                 <div style={{ fontSize: "28px", fontWeight: "800", color: tokens.textPrimary, marginBottom: "4px" }}>
-                  {data?.news?.publishedCount || 0}
+                  {newsCounts.published}
                 </div>
                 <div style={{ fontSize: "12px", color: tokens.textSecondary }}>
-                  Publicadas ({data?.news?.draftCount || 0} en borrador)
+                  Publicadas ({newsCounts.draft} en borrador)
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={() => onNavigate("news")}
                 className="launcher-btn-secondary"
                 style={{
@@ -248,7 +290,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
               </button>
             </div>
 
-            {/* Card 3: Skins */}
+            {/* Card 3: Juego / Actualizaciones del Modpack */}
             <div
               style={{
                 backgroundColor: tokens.bgCard,
@@ -264,66 +306,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
                   <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
-                    Catálogo de Skins
-                  </span>
-                  <div
-                    style={{
-                      width: "38px",
-                      height: "38px",
-                      borderRadius: "12px",
-                      backgroundColor: isDark ? "rgba(244, 63, 94, 0.15)" : "#fff1f2",
-                      color: "#f43f5e",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <IconShirt size={20} />
-                  </div>
-                </div>
-
-                <div style={{ fontSize: "28px", fontWeight: "800", color: tokens.textPrimary, marginBottom: "4px" }}>
-                  {data?.skins?.availableCount || 0}
-                </div>
-                <div style={{ fontSize: "12px", color: tokens.textSecondary }}>
-                  Disponibles en el catálogo ({data?.skins?.totalCount || 0} total)
-                </div>
-              </div>
-
-              <button
-                onClick={() => onNavigate("skins")}
-                className="launcher-btn-secondary"
-                style={{
-                  marginTop: "16px",
-                  padding: "9px 16px",
-                  borderRadius: "12px",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  textAlign: "center",
-                  justifyContent: "center",
-                }}
-              >
-                Ver skins →
-              </button>
-            </div>
-
-            {/* Card 4: Juego / Actualizaciones */}
-            <div
-              style={{
-                backgroundColor: tokens.bgCard,
-                border: `1px solid ${tokens.borderSubtle}`,
-                borderRadius: "18px",
-                padding: "24px",
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "space-between",
-                boxShadow: tokens.cardShadow,
-              }}
-            >
-              <div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
-                    Versión del Juego
+                    Versión del Modpack
                   </span>
                   <div
                     style={{
@@ -342,14 +325,15 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 </div>
 
                 <div style={{ fontSize: "24px", fontWeight: "800", color: tokens.textPrimary, marginBottom: "4px" }}>
-                  {data?.game?.publishedVersion ? `v${data.game.publishedVersion}` : "Sin publicar"}
+                  {gameOverview?.publishedRelease?.version ? `v${gameOverview.publishedRelease.version}` : "Sin publicar"}
                 </div>
                 <div style={{ fontSize: "12px", color: tokens.textSecondary }}>
-                  {data?.game?.pendingChangesCount ? `${data.game.pendingChangesCount} cambios en borrador` : "Al día con el cliente"}
+                  {pendingChangesCount ? `${pendingChangesCount} cambios en borrador` : "Al día con los clientes"}
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={() => onNavigate("game")}
                 className="launcher-btn-secondary"
                 style={{
@@ -363,6 +347,71 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 }}
               >
                 Gestionar juego y mods →
+              </button>
+            </div>
+
+            {/* Card 4: Ajustes y Recursos */}
+            <div
+              style={{
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "18px",
+                padding: "24px",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                boxShadow: tokens.cardShadow,
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+                  <span style={{ fontSize: "14px", fontWeight: "600", color: tokens.textSecondary }}>
+                    Recursos del Servidor
+                  </span>
+                  <div
+                    style={{
+                      width: "38px",
+                      height: "38px",
+                      borderRadius: "12px",
+                      backgroundColor: isDark ? "rgba(245, 166, 35, 0.15)" : "#fffbeb",
+                      color: "#f5a623",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <IconCpu size={20} />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "13px", color: tokens.textPrimary }}>
+                  <div>
+                    <strong>CPU:</strong> {server?.cpu ? `${server.cpu}%` : "—"}
+                  </div>
+                  <div>
+                    <strong>RAM:</strong> {server?.memoryMb ? `${(server.memoryMb / 1024).toFixed(0)} GB` : "—"}
+                  </div>
+                  <div>
+                    <strong>Disco:</strong> {server?.diskMb ? `${(server.diskMb / 1024).toFixed(0)} GB` : "—"}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onNavigate("server-settings")}
+                className="launcher-btn-secondary"
+                style={{
+                  marginTop: "16px",
+                  padding: "9px 16px",
+                  borderRadius: "12px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  textAlign: "center",
+                  justifyContent: "center",
+                }}
+              >
+                Ajustes del servidor →
               </button>
             </div>
           </div>
@@ -385,10 +434,11 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 color: tokens.textPrimary,
               }}
             >
-              Accesos rápidos
+              Accesos rápidos del espacio de trabajo
             </h2>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
               <button
+                type="button"
                 onClick={() => onNavigate("news")}
                 className="launcher-btn-secondary"
                 style={{
@@ -406,7 +456,8 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
               </button>
 
               <button
-                onClick={() => onNavigate("skins")}
+                type="button"
+                onClick={() => onNavigate("server")}
                 className="launcher-btn-secondary"
                 style={{
                   padding: "10px 18px",
@@ -418,11 +469,12 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                   gap: "8px",
                 }}
               >
-                <IconPlus size={16} />
-                <span>Subir Skin</span>
+                <IconTerminal size={16} />
+                <span>Consola del Servidor</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => onNavigate("game")}
                 className="launcher-btn-secondary"
                 style={{
@@ -436,11 +488,12 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 }}
               >
                 <IconGamepad size={16} />
-                <span>Actualizaciones del Juego</span>
+                <span>Actualizaciones del Modpack</span>
               </button>
 
               <button
-                onClick={() => onNavigate("settings")}
+                type="button"
+                onClick={() => onNavigate("server-settings")}
                 className="launcher-btn-secondary"
                 style={{
                   padding: "10px 18px",
@@ -453,7 +506,7 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
                 }}
               >
                 <IconSettings size={16} />
-                <span>Ajustes Generales</span>
+                <span>Ajustes del Servidor</span>
               </button>
             </div>
           </div>
@@ -471,3 +524,4 @@ export default function DashboardView({ theme, onNavigate }: DashboardViewProps)
     </div>
   )
 }
+

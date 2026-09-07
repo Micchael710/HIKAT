@@ -2,6 +2,8 @@ import type {
   NewsItem,
   NewsConnection,
   ContentMedia,
+  ServerItem,
+  CreateServerInput,
   ServerResources,
   ServerStatus,
   ServerActivityItem,
@@ -47,6 +49,7 @@ export function resolveMediaUrl(url?: string | null): string {
 
 
 export interface CreateNewsInput {
+  serverId?: string | null
   title: string
   content: string
   type: NewsType
@@ -223,14 +226,15 @@ export async function executeGraphQL<T>(
 
 export const newsApi = {
   async getAdminNews(options?: {
+    serverId?: string | null
     first?: number
     after?: string
     type?: NewsType | null
     status?: NewsStatus | null
   }): Promise<NewsConnection> {
     const query = /* GraphQL */ `
-      query AdminNews($first: Int, $after: String, $type: NewsType, $status: NewsStatus) {
-        adminNews(first: $first, after: $after, type: $type, status: $status) {
+      query AdminNews($serverId: ID, $first: Int, $after: String, $type: NewsType, $status: NewsStatus) {
+        adminNews(serverId: $serverId, first: $first, after: $after, type: $type, status: $status) {
           items {
             ${NEWS_FIELDS}
           }
@@ -246,6 +250,7 @@ export const newsApi = {
     `
 
     const data = await executeGraphQL<{ adminNews: NewsConnection }>(query, {
+      serverId: options?.serverId || null,
       first: options?.first ?? 50,
       after: options?.after ?? null,
       type: options?.type ?? null,
@@ -281,53 +286,66 @@ export const newsApi = {
     return data.createNews
   },
 
-  async updateNews(id: string, input: UpdateNewsInput): Promise<NewsItem> {
+  async updateNews(id: string, input: UpdateNewsInput, serverId?: string | null): Promise<NewsItem> {
     const mutation = /* GraphQL */ `
-      mutation UpdateNews($id: ID!, $input: UpdateNewsInput!) {
-        updateNews(id: $id, input: $input) {
+      mutation UpdateNews($serverId: ID, $id: ID!, $input: UpdateNewsInput!) {
+        updateNews(serverId: $serverId, id: $id, input: $input) {
           ${NEWS_FIELDS}
         }
       }
     `
 
-    const data = await executeGraphQL<{ updateNews: NewsItem }>(mutation, { id, input })
+    const data = await executeGraphQL<{ updateNews: NewsItem }>(mutation, {
+      serverId: serverId || null,
+      id,
+      input,
+    })
     return data.updateNews
   },
 
-  async publishNews(id: string): Promise<NewsItem> {
+  async publishNews(id: string, serverId?: string | null): Promise<NewsItem> {
     const mutation = /* GraphQL */ `
-      mutation PublishNews($id: ID!) {
-        publishNews(id: $id) {
+      mutation PublishNews($serverId: ID, $id: ID!) {
+        publishNews(serverId: $serverId, id: $id) {
           ${NEWS_FIELDS}
         }
       }
     `
 
-    const data = await executeGraphQL<{ publishNews: NewsItem }>(mutation, { id })
+    const data = await executeGraphQL<{ publishNews: NewsItem }>(mutation, {
+      serverId: serverId || null,
+      id,
+    })
     return data.publishNews
   },
 
-  async unpublishNews(id: string): Promise<NewsItem> {
+  async unpublishNews(id: string, serverId?: string | null): Promise<NewsItem> {
     const mutation = /* GraphQL */ `
-      mutation UnpublishNews($id: ID!) {
-        unpublishNews(id: $id) {
+      mutation UnpublishNews($serverId: ID, $id: ID!) {
+        unpublishNews(serverId: $serverId, id: $id) {
           ${NEWS_FIELDS}
         }
       }
     `
 
-    const data = await executeGraphQL<{ unpublishNews: NewsItem }>(mutation, { id })
+    const data = await executeGraphQL<{ unpublishNews: NewsItem }>(mutation, {
+      serverId: serverId || null,
+      id,
+    })
     return data.unpublishNews
   },
 
-  async deleteNews(id: string): Promise<boolean> {
+  async deleteNews(id: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation DeleteNews($id: ID!) {
-        deleteNews(id: $id)
+      mutation DeleteNews($serverId: ID, $id: ID!) {
+        deleteNews(serverId: $serverId, id: $id)
       }
     `
 
-    const data = await executeGraphQL<{ deleteNews: boolean }>(mutation, { id })
+    const data = await executeGraphQL<{ deleteNews: boolean }>(mutation, {
+      serverId: serverId || null,
+      id,
+    })
     return data.deleteNews
   },
 
@@ -398,11 +416,92 @@ export const newsApi = {
   },
 }
 
+const SERVER_FIELDS = `
+  id
+  name
+  minecraftVersion
+  modLoader
+  modLoaderVersion
+  mainLogo {
+    id
+    mediaType
+    mimeType
+    sizeBytes
+    url
+    createdAt
+  }
+  sidebarLogo {
+    id
+    mediaType
+    mimeType
+    sizeBytes
+    url
+    createdAt
+  }
+  accentColor
+  cpu
+  memoryMb
+  diskMb
+  provisioningStatus
+  launcherActiveReleaseId
+  createdAt
+  updatedAt
+`
+
 export const serverApi = {
-  async getServerStatus(): Promise<ServerResources> {
+  async getServers(): Promise<ServerItem[]> {
     const query = /* GraphQL */ `
-      query ServerStatus {
-        serverStatus {
+      query Servers {
+        servers {
+          ${SERVER_FIELDS}
+        }
+      }
+    `
+    const data = await executeGraphQL<{ servers: ServerItem[] }>(query)
+    return data.servers || []
+  },
+
+  async getServer(serverId: string): Promise<ServerItem | null> {
+    const query = /* GraphQL */ `
+      query Server($serverId: ID!) {
+        server(serverId: $serverId) {
+          ${SERVER_FIELDS}
+        }
+      }
+    `
+    const data = await executeGraphQL<{ server: ServerItem | null }>(query, { serverId })
+    return data.server
+  },
+
+  async createServer(input: CreateServerInput): Promise<ServerItem> {
+    const mutation = /* GraphQL */ `
+      mutation CreateServer($input: CreateServerInput!) {
+        createServer(input: $input) {
+          ${SERVER_FIELDS}
+        }
+      }
+    `
+    const data = await executeGraphQL<{ createServer: ServerItem }>(mutation, { input })
+    return data.createServer
+  },
+
+  async deleteServer(serverId: string, deletePterodactyl: boolean): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteServer($serverId: ID!, $deletePterodactyl: Boolean!) {
+        deleteServer(serverId: $serverId, deletePterodactyl: $deletePterodactyl)
+      }
+    `
+    const data = await executeGraphQL<{ deleteServer: boolean }>(mutation, {
+      serverId,
+      deletePterodactyl,
+    })
+    return data.deleteServer
+  },
+
+  async getServerStatus(serverId?: string | null): Promise<ServerResources> {
+    const query = /* GraphQL */ `
+      query ServerStatus($serverId: ID) {
+        serverStatus(serverId: $serverId) {
           status
           cpuPercent
           cpuLimitPercent
@@ -418,14 +517,16 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ serverStatus: ServerResources }>(query)
+    const data = await executeGraphQL<{ serverStatus: ServerResources }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverStatus
   },
 
-  async getServerActivity(): Promise<ServerActivityItem[]> {
+  async getServerActivity(serverId?: string | null): Promise<ServerActivityItem[]> {
     const query = /* GraphQL */ `
-      query ServerActivity {
-        serverActivity {
+      query ServerActivity($serverId: ID) {
+        serverActivity(serverId: $serverId) {
           id
           description
           eventType
@@ -434,14 +535,16 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ serverActivity: ServerActivityItem[] }>(query)
+    const data = await executeGraphQL<{ serverActivity: ServerActivityItem[] }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverActivity || []
   },
 
-  async startServer(): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
+  async startServer(serverId?: string | null): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
     const mutation = /* GraphQL */ `
-      mutation StartServer {
-        startServer {
+      mutation StartServer($serverId: ID) {
+        startServer(serverId: $serverId) {
           success
           status
           message
@@ -451,14 +554,14 @@ export const serverApi = {
 
     const data = await executeGraphQL<{
       startServer: { success: boolean; status: ServerStatus; message?: string }
-    }>(mutation)
+    }>(mutation, { serverId: serverId || null })
     return data.startServer
   },
 
-  async restartServer(): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
+  async restartServer(serverId?: string | null): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
     const mutation = /* GraphQL */ `
-      mutation RestartServer {
-        restartServer {
+      mutation RestartServer($serverId: ID) {
+        restartServer(serverId: $serverId) {
           success
           status
           message
@@ -468,14 +571,14 @@ export const serverApi = {
 
     const data = await executeGraphQL<{
       restartServer: { success: boolean; status: ServerStatus; message?: string }
-    }>(mutation)
+    }>(mutation, { serverId: serverId || null })
     return data.restartServer
   },
 
-  async stopServer(): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
+  async stopServer(serverId?: string | null): Promise<{ success: boolean; status: ServerStatus; message?: string }> {
     const mutation = /* GraphQL */ `
-      mutation StopServer {
-        stopServer {
+      mutation StopServer($serverId: ID) {
+        stopServer(serverId: $serverId) {
           success
           status
           message
@@ -485,16 +588,17 @@ export const serverApi = {
 
     const data = await executeGraphQL<{
       stopServer: { success: boolean; status: ServerStatus; message?: string }
-    }>(mutation)
+    }>(mutation, { serverId: serverId || null })
     return data.stopServer
   },
 
   async sendServerCommand(
     command: string,
+    serverId?: string | null,
   ): Promise<{ success: boolean; message?: string }> {
     const mutation = /* GraphQL */ `
-      mutation SendServerCommand($command: String!) {
-        sendServerCommand(command: $command) {
+      mutation SendServerCommand($command: String!, $serverId: ID) {
+        sendServerCommand(command: $command, serverId: $serverId) {
           success
           message
         }
@@ -503,14 +607,14 @@ export const serverApi = {
 
     const data = await executeGraphQL<{
       sendServerCommand: { success: boolean; message?: string }
-    }>(mutation, { command })
+    }>(mutation, { command, serverId: serverId || null })
     return data.sendServerCommand
   },
 
-  async createServerConsoleTicket(): Promise<{ ticket: string; expiresAt: string }> {
+  async createServerConsoleTicket(serverId?: string | null): Promise<{ ticket: string; expiresAt: string }> {
     const mutation = /* GraphQL */ `
-      mutation CreateServerConsoleTicket {
-        createServerConsoleTicket {
+      mutation CreateServerConsoleTicket($serverId: ID) {
+        createServerConsoleTicket(serverId: $serverId) {
           ticket
           expiresAt
         }
@@ -519,16 +623,16 @@ export const serverApi = {
 
     const data = await executeGraphQL<{
       createServerConsoleTicket: { ticket: string; expiresAt: string }
-    }>(mutation)
+    }>(mutation, { serverId: serverId || null })
     return data.createServerConsoleTicket
   },
 
   // --- Backups API ---
 
-  async getServerBackups(): Promise<ServerBackupItem[]> {
+  async getServerBackups(serverId?: string | null): Promise<ServerBackupItem[]> {
     const query = /* GraphQL */ `
-      query ServerBackups {
-        serverBackups {
+      query ServerBackups($serverId: ID) {
+        serverBackups(serverId: $serverId) {
           id
           name
           bytes
@@ -540,14 +644,16 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ serverBackups: ServerBackupItem[] }>(query)
+    const data = await executeGraphQL<{ serverBackups: ServerBackupItem[] }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverBackups || []
   },
 
-  async createServerBackup(name?: string): Promise<ServerBackupItem> {
+  async createServerBackup(name?: string, serverId?: string | null): Promise<ServerBackupItem> {
     const mutation = /* GraphQL */ `
-      mutation CreateServerBackup($name: String) {
-        createServerBackup(name: $name) {
+      mutation CreateServerBackup($name: String, $serverId: ID) {
+        createServerBackup(name: $name, serverId: $serverId) {
           id
           name
           bytes
@@ -559,36 +665,45 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ createServerBackup: ServerBackupItem }>(mutation, { name })
+    const data = await executeGraphQL<{ createServerBackup: ServerBackupItem }>(mutation, {
+      name,
+      serverId: serverId || null,
+    })
     return data.createServerBackup
   },
 
-  async restoreServerBackup(id: string): Promise<boolean> {
+  async restoreServerBackup(id: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation RestoreServerBackup($id: ID!) {
-        restoreServerBackup(id: $id)
+      mutation RestoreServerBackup($id: ID!, $serverId: ID) {
+        restoreServerBackup(id: $id, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ restoreServerBackup: boolean }>(mutation, { id })
+    const data = await executeGraphQL<{ restoreServerBackup: boolean }>(mutation, {
+      id,
+      serverId: serverId || null,
+    })
     return data.restoreServerBackup
   },
 
-  async deleteServerBackup(id: string): Promise<boolean> {
+  async deleteServerBackup(id: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation DeleteServerBackup($id: ID!) {
-        deleteServerBackup(id: $id)
+      mutation DeleteServerBackup($id: ID!, $serverId: ID) {
+        deleteServerBackup(id: $id, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ deleteServerBackup: boolean }>(mutation, { id })
+    const data = await executeGraphQL<{ deleteServerBackup: boolean }>(mutation, {
+      id,
+      serverId: serverId || null,
+    })
     return data.deleteServerBackup
   },
 
-  async toggleServerBackupLock(id: string): Promise<ServerBackupItem> {
+  async toggleServerBackupLock(id: string, serverId?: string | null): Promise<ServerBackupItem> {
     const mutation = /* GraphQL */ `
-      mutation ToggleServerBackupLock($id: ID!) {
-        toggleServerBackupLock(id: $id) {
+      mutation ToggleServerBackupLock($id: ID!, $serverId: ID) {
+        toggleServerBackupLock(id: $id, serverId: $serverId) {
           id
           name
           bytes
@@ -600,29 +715,36 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ toggleServerBackupLock: ServerBackupItem }>(mutation, { id })
+    const data = await executeGraphQL<{ toggleServerBackupLock: ServerBackupItem }>(mutation, {
+      id,
+      serverId: serverId || null,
+    })
     return data.toggleServerBackupLock
   },
 
-  async createServerBackupDownloadUrl(id: string, name?: string): Promise<{ url: string }> {
+  async createServerBackupDownloadUrl(id: string, name?: string, serverId?: string | null): Promise<{ url: string }> {
     const mutation = /* GraphQL */ `
-      mutation CreateServerBackupDownloadUrl($id: ID!, $name: String) {
-        createServerBackupDownloadUrl(id: $id, name: $name) {
+      mutation CreateServerBackupDownloadUrl($id: ID!, $name: String, $serverId: ID) {
+        createServerBackupDownloadUrl(id: $id, name: $name, serverId: $serverId) {
           url
         }
       }
     `
 
-    const data = await executeGraphQL<{ createServerBackupDownloadUrl: { url: string } }>(mutation, { id, name })
+    const data = await executeGraphQL<{ createServerBackupDownloadUrl: { url: string } }>(mutation, {
+      id,
+      name,
+      serverId: serverId || null,
+    })
     return data.createServerBackupDownloadUrl
   },
 
   // --- World API ---
 
-  async getServerWorld(): Promise<ServerWorldInfo> {
+  async getServerWorld(serverId?: string | null): Promise<ServerWorldInfo> {
     const query = /* GraphQL */ `
-      query ServerWorld {
-        serverWorld {
+      query ServerWorld($serverId: ID) {
+        serverWorld(serverId: $serverId) {
           name
           sizeBytes
           lastModified
@@ -630,44 +752,53 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ serverWorld: ServerWorldInfo }>(query)
+    const data = await executeGraphQL<{ serverWorld: ServerWorldInfo }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverWorld
   },
 
-  async createServerWorldDownloadUrl(): Promise<{ url: string }> {
+  async createServerWorldDownloadUrl(serverId?: string | null): Promise<{ url: string }> {
     const mutation = /* GraphQL */ `
-      mutation CreateServerWorldDownloadUrl {
-        createServerWorldDownloadUrl {
+      mutation CreateServerWorldDownloadUrl($serverId: ID) {
+        createServerWorldDownloadUrl(serverId: $serverId) {
           url
         }
       }
     `
 
-    const data = await executeGraphQL<{ createServerWorldDownloadUrl: { url: string } }>(mutation)
+    const data = await executeGraphQL<{ createServerWorldDownloadUrl: { url: string } }>(mutation, {
+      serverId: serverId || null,
+    })
     return data.createServerWorldDownloadUrl
   },
 
-  async prepareServerWorldUpload(): Promise<{ url: string }> {
+  async prepareServerWorldUpload(serverId?: string | null): Promise<{ url: string }> {
     const mutation = /* GraphQL */ `
-      mutation PrepareServerWorldUpload {
-        prepareServerWorldUpload {
+      mutation PrepareServerWorldUpload($serverId: ID) {
+        prepareServerWorldUpload(serverId: $serverId) {
           url
         }
       }
     `
 
-    const data = await executeGraphQL<{ prepareServerWorldUpload: { url: string } }>(mutation)
+    const data = await executeGraphQL<{ prepareServerWorldUpload: { url: string } }>(mutation, {
+      serverId: serverId || null,
+    })
     return data.prepareServerWorldUpload
   },
 
-  async replaceServerWorld(uploadedFileName: string): Promise<boolean> {
+  async replaceServerWorld(uploadedFileName: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation ReplaceServerWorld($uploadedFileName: String!) {
-        replaceServerWorld(uploadedFileName: $uploadedFileName)
+      mutation ReplaceServerWorld($uploadedFileName: String!, $serverId: ID) {
+        replaceServerWorld(uploadedFileName: $uploadedFileName, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ replaceServerWorld: boolean }>(mutation, { uploadedFileName })
+    const data = await executeGraphQL<{ replaceServerWorld: boolean }>(mutation, {
+      uploadedFileName,
+      serverId: serverId || null,
+    })
     return data.replaceServerWorld
   },
 
@@ -689,10 +820,10 @@ export const serverApi = {
 
   // --- Minecraft Configuration API ---
 
-  async getMinecraftServerSettings(): Promise<MinecraftServerSettings> {
+  async getMinecraftServerSettings(serverId?: string | null): Promise<MinecraftServerSettings> {
     const query = /* GraphQL */ `
-      query ServerMinecraftSettings {
-        serverMinecraftSettings {
+      query ServerMinecraftSettings($serverId: ID) {
+        serverMinecraftSettings(serverId: $serverId) {
           difficulty
           maxPlayers
           pvp
@@ -705,14 +836,16 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ serverMinecraftSettings: MinecraftServerSettings }>(query)
+    const data = await executeGraphQL<{ serverMinecraftSettings: MinecraftServerSettings }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverMinecraftSettings
   },
 
-  async updateMinecraftServerSettings(input: UpdateMinecraftServerSettingsInput): Promise<MinecraftServerSettings> {
+  async updateMinecraftServerSettings(input: UpdateMinecraftServerSettingsInput, serverId?: string | null): Promise<MinecraftServerSettings> {
     const mutation = /* GraphQL */ `
-      mutation UpdateMinecraftServerSettings($input: UpdateMinecraftServerSettingsInput!) {
-        updateMinecraftServerSettings(input: $input) {
+      mutation UpdateMinecraftServerSettings($input: UpdateMinecraftServerSettingsInput!, $serverId: ID) {
+        updateMinecraftServerSettings(input: $input, serverId: $serverId) {
           difficulty
           maxPlayers
           pvp
@@ -725,16 +858,19 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ updateMinecraftServerSettings: MinecraftServerSettings }>(mutation, { input })
+    const data = await executeGraphQL<{ updateMinecraftServerSettings: MinecraftServerSettings }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.updateMinecraftServerSettings
   },
 
   // --- Automations / Schedules API ---
 
-  async getServerAutomations(): Promise<ServerAutomationItem[]> {
+  async getServerAutomations(serverId?: string | null): Promise<ServerAutomationItem[]> {
     const query = /* GraphQL */ `
-      query ServerAutomations {
-        serverAutomations {
+      query ServerAutomations($serverId: ID) {
+        serverAutomations(serverId: $serverId) {
           id
           name
           template
@@ -757,14 +893,16 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ serverAutomations: ServerAutomationItem[] }>(query)
+    const data = await executeGraphQL<{ serverAutomations: ServerAutomationItem[] }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverAutomations || []
   },
 
-  async createServerAutomation(input: ServerAutomationInput): Promise<ServerAutomationItem> {
+  async createServerAutomation(input: ServerAutomationInput, serverId?: string | null): Promise<ServerAutomationItem> {
     const mutation = /* GraphQL */ `
-      mutation CreateServerAutomation($input: ServerAutomationInput!) {
-        createServerAutomation(input: $input) {
+      mutation CreateServerAutomation($input: ServerAutomationInput!, $serverId: ID) {
+        createServerAutomation(input: $input, serverId: $serverId) {
           id
           name
           template
@@ -787,14 +925,17 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ createServerAutomation: ServerAutomationItem }>(mutation, { input })
+    const data = await executeGraphQL<{ createServerAutomation: ServerAutomationItem }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.createServerAutomation
   },
 
-  async updateServerAutomation(id: string, input: ServerAutomationInput): Promise<ServerAutomationItem> {
+  async updateServerAutomation(id: string, input: ServerAutomationInput, serverId?: string | null): Promise<ServerAutomationItem> {
     const mutation = /* GraphQL */ `
-      mutation UpdateServerAutomation($id: ID!, $input: ServerAutomationInput!) {
-        updateServerAutomation(id: $id, input: $input) {
+      mutation UpdateServerAutomation($id: ID!, $input: ServerAutomationInput!, $serverId: ID) {
+        updateServerAutomation(id: $id, input: $input, serverId: $serverId) {
           id
           name
           template
@@ -817,38 +958,48 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ updateServerAutomation: ServerAutomationItem }>(mutation, { id, input })
+    const data = await executeGraphQL<{ updateServerAutomation: ServerAutomationItem }>(mutation, {
+      id,
+      input,
+      serverId: serverId || null,
+    })
     return data.updateServerAutomation
   },
 
-  async runServerAutomation(id: string): Promise<boolean> {
+  async runServerAutomation(id: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation RunServerAutomation($id: ID!) {
-        runServerAutomation(id: $id)
+      mutation RunServerAutomation($id: ID!, $serverId: ID) {
+        runServerAutomation(id: $id, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ runServerAutomation: boolean }>(mutation, { id })
+    const data = await executeGraphQL<{ runServerAutomation: boolean }>(mutation, {
+      id,
+      serverId: serverId || null,
+    })
     return data.runServerAutomation
   },
 
-  async deleteServerAutomation(id: string): Promise<boolean> {
+  async deleteServerAutomation(id: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation DeleteServerAutomation($id: ID!) {
-        deleteServerAutomation(id: $id)
+      mutation DeleteServerAutomation($id: ID!, $serverId: ID) {
+        deleteServerAutomation(id: $id, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ deleteServerAutomation: boolean }>(mutation, { id })
+    const data = await executeGraphQL<{ deleteServerAutomation: boolean }>(mutation, {
+      id,
+      serverId: serverId || null,
+    })
     return data.deleteServerAutomation
   },
 
   // --- Files API ---
 
-  async getServerFiles(root: ServerFileRoot, relativePath?: string): Promise<ServerFileItem[]> {
+  async getServerFiles(root: ServerFileRoot, relativePath?: string, serverId?: string | null): Promise<ServerFileItem[]> {
     const query = /* GraphQL */ `
-      query ServerFiles($root: ServerFileRoot!, $relativePath: String) {
-        serverFiles(root: $root, relativePath: $relativePath) {
+      query ServerFiles($root: ServerFileRoot!, $relativePath: String, $serverId: ID) {
+        serverFiles(root: $root, relativePath: $relativePath, serverId: $serverId) {
           name
           isFile
           isSymlink
@@ -859,91 +1010,126 @@ export const serverApi = {
       }
     `
 
-    const data = await executeGraphQL<{ serverFiles: ServerFileItem[] }>(query, { root, relativePath })
+    const data = await executeGraphQL<{ serverFiles: ServerFileItem[] }>(query, {
+      root,
+      relativePath,
+      serverId: serverId || null,
+    })
     return data.serverFiles || []
   },
 
-  async getServerTextFile(root: ServerFileRoot, relativePath: string): Promise<ServerFileContent> {
+  async getServerTextFile(root: ServerFileRoot, relativePath: string, serverId?: string | null): Promise<ServerFileContent> {
     const query = /* GraphQL */ `
-      query ServerTextFile($root: ServerFileRoot!, $relativePath: String!) {
-        serverTextFile(root: $root, relativePath: $relativePath) {
+      query ServerTextFile($root: ServerFileRoot!, $relativePath: String!, $serverId: ID) {
+        serverTextFile(root: $root, relativePath: $relativePath, serverId: $serverId) {
           content
           sizeBytes
         }
       }
     `
 
-    const data = await executeGraphQL<{ serverTextFile: ServerFileContent }>(query, { root, relativePath })
+    const data = await executeGraphQL<{ serverTextFile: ServerFileContent }>(query, {
+      root,
+      relativePath,
+      serverId: serverId || null,
+    })
     return data.serverTextFile
   },
 
-  async writeServerTextFile(root: ServerFileRoot, relativePath: string, content: string): Promise<boolean> {
+  async writeServerTextFile(root: ServerFileRoot, relativePath: string, content: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation WriteServerTextFile($root: ServerFileRoot!, $relativePath: String!, $content: String!) {
-        writeServerTextFile(root: $root, relativePath: $relativePath, content: $content)
+      mutation WriteServerTextFile($root: ServerFileRoot!, $relativePath: String!, $content: String!, $serverId: ID) {
+        writeServerTextFile(root: $root, relativePath: $relativePath, content: $content, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ writeServerTextFile: boolean }>(mutation, { root, relativePath, content })
+    const data = await executeGraphQL<{ writeServerTextFile: boolean }>(mutation, {
+      root,
+      relativePath,
+      content,
+      serverId: serverId || null,
+    })
     return data.writeServerTextFile
   },
 
-  async createServerFolder(root: ServerFileRoot, relativePath: string, folderName: string): Promise<boolean> {
+  async createServerFolder(root: ServerFileRoot, relativePath: string, folderName: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation CreateServerFolder($root: ServerFileRoot!, $relativePath: String!, $folderName: String!) {
-        createServerFolder(root: $root, relativePath: $relativePath, folderName: $folderName)
+      mutation CreateServerFolder($root: ServerFileRoot!, $relativePath: String!, $folderName: String!, $serverId: ID) {
+        createServerFolder(root: $root, relativePath: $relativePath, folderName: $folderName, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ createServerFolder: boolean }>(mutation, { root, relativePath, folderName })
+    const data = await executeGraphQL<{ createServerFolder: boolean }>(mutation, {
+      root,
+      relativePath,
+      folderName,
+      serverId: serverId || null,
+    })
     return data.createServerFolder
   },
 
-  async renameServerFile(root: ServerFileRoot, relativePath: string, newName: string): Promise<boolean> {
+  async renameServerFile(root: ServerFileRoot, relativePath: string, newName: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation RenameServerFile($root: ServerFileRoot!, $relativePath: String!, $newName: String!) {
-        renameServerFile(root: $root, relativePath: $relativePath, newName: $newName)
+      mutation RenameServerFile($root: ServerFileRoot!, $relativePath: String!, $newName: String!, $serverId: ID) {
+        renameServerFile(root: $root, relativePath: $relativePath, newName: $newName, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ renameServerFile: boolean }>(mutation, { root, relativePath, newName })
+    const data = await executeGraphQL<{ renameServerFile: boolean }>(mutation, {
+      root,
+      relativePath,
+      newName,
+      serverId: serverId || null,
+    })
     return data.renameServerFile
   },
 
-  async deleteServerFile(root: ServerFileRoot, relativePath: string): Promise<boolean> {
+  async deleteServerFile(root: ServerFileRoot, relativePath: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation DeleteServerFile($root: ServerFileRoot!, $relativePath: String!) {
-        deleteServerFile(root: $root, relativePath: $relativePath)
+      mutation DeleteServerFile($root: ServerFileRoot!, $relativePath: String!, $serverId: ID) {
+        deleteServerFile(root: $root, relativePath: $relativePath, serverId: $serverId)
       }
     `
 
-    const data = await executeGraphQL<{ deleteServerFile: boolean }>(mutation, { root, relativePath })
+    const data = await executeGraphQL<{ deleteServerFile: boolean }>(mutation, {
+      root,
+      relativePath,
+      serverId: serverId || null,
+    })
     return data.deleteServerFile
   },
 
-  async prepareServerFileUpload(root: ServerFileRoot, relativePath: string): Promise<{ url: string }> {
+  async prepareServerFileUpload(root: ServerFileRoot, relativePath: string, serverId?: string | null): Promise<{ url: string }> {
     const mutation = /* GraphQL */ `
-      mutation PrepareServerFileUpload($root: ServerFileRoot!, $relativePath: String!) {
-        prepareServerFileUpload(root: $root, relativePath: $relativePath) {
+      mutation PrepareServerFileUpload($root: ServerFileRoot!, $relativePath: String!, $serverId: ID) {
+        prepareServerFileUpload(root: $root, relativePath: $relativePath, serverId: $serverId) {
           url
         }
       }
     `
 
-    const data = await executeGraphQL<{ prepareServerFileUpload: { url: string } }>(mutation, { root, relativePath })
+    const data = await executeGraphQL<{ prepareServerFileUpload: { url: string } }>(mutation, {
+      root,
+      relativePath,
+      serverId: serverId || null,
+    })
     return data.prepareServerFileUpload
   },
 
-  async createServerFileDownloadUrl(root: ServerFileRoot, relativePath: string): Promise<{ url: string }> {
+  async createServerFileDownloadUrl(root: ServerFileRoot, relativePath: string, serverId?: string | null): Promise<{ url: string }> {
     const mutation = /* GraphQL */ `
-      mutation CreateServerFileDownloadUrl($root: ServerFileRoot!, $relativePath: String!) {
-        createServerFileDownloadUrl(root: $root, relativePath: $relativePath) {
+      mutation CreateServerFileDownloadUrl($root: ServerFileRoot!, $relativePath: String!, $serverId: ID) {
+        createServerFileDownloadUrl(root: $root, relativePath: $relativePath, serverId: $serverId) {
           url
         }
       }
     `
 
-    const data = await executeGraphQL<{ createServerFileDownloadUrl: { url: string } }>(mutation, { root, relativePath })
+    const data = await executeGraphQL<{ createServerFileDownloadUrl: { url: string } }>(mutation, {
+      root,
+      relativePath,
+      serverId: serverId || null,
+    })
     return data.createServerFileDownloadUrl
   },
 }
@@ -1329,10 +1515,10 @@ export const capesApi = {
 // --- Game & Updates API Facade (Shard 06.5) ---
 
 export const gameApi = {
-  async getAdminGameOverview(): Promise<import("../types").AdminGameOverview> {
+  async getAdminGameOverview(serverId?: string | null): Promise<import("../types").AdminGameOverview> {
     const query = /* GraphQL */ `
-      query AdminGameOverview {
-        adminGameOverview {
+      query AdminGameOverview($serverId: ID) {
+        adminGameOverview(serverId: $serverId) {
           publishedRelease {
             id
             version
@@ -1437,14 +1623,16 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ adminGameOverview: import("../types").AdminGameOverview }>(query)
+    const data = await executeGraphQL<{ adminGameOverview: import("../types").AdminGameOverview }>(query, {
+      serverId: serverId || null,
+    })
     return data.adminGameOverview
   },
 
-  async getGameReleaseHistory(): Promise<import("../types").GameRelease[]> {
+  async getGameReleaseHistory(serverId?: string | null): Promise<import("../types").GameRelease[]> {
     const query = /* GraphQL */ `
-      query GameReleaseHistory {
-        gameReleaseHistory {
+      query GameReleaseHistory($serverId: ID) {
+        gameReleaseHistory(serverId: $serverId) {
           id
           version
           minecraftVersion
@@ -1487,14 +1675,16 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ gameReleaseHistory: import("../types").GameRelease[] }>(query)
+    const data = await executeGraphQL<{ gameReleaseHistory: import("../types").GameRelease[] }>(query, {
+      serverId: serverId || null,
+    })
     return data.gameReleaseHistory
   },
 
-  async prepareGameDraft(input?: { baseReleaseId?: string }): Promise<import("../types").GameRelease> {
+  async prepareGameDraft(input?: { baseReleaseId?: string }, serverId?: string | null): Promise<import("../types").GameRelease> {
     const mutation = /* GraphQL */ `
-      mutation PrepareGameDraft($input: PrepareGameDraftInput) {
-        prepareGameDraft(input: $input) {
+      mutation PrepareGameDraft($input: PrepareGameDraftInput, $serverId: ID) {
+        prepareGameDraft(input: $input, serverId: $serverId) {
           id
           version
           minecraftVersion
@@ -1536,26 +1726,32 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ prepareGameDraft: import("../types").GameRelease }>(mutation, { input })
+    const data = await executeGraphQL<{ prepareGameDraft: import("../types").GameRelease }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.prepareGameDraft
   },
 
-  async discardGameDraft(): Promise<boolean> {
+  async discardGameDraft(serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation DiscardGameDraft {
-        discardGameDraft
+      mutation DiscardGameDraft($serverId: ID) {
+        discardGameDraft(serverId: $serverId)
       }
     `
-    const data = await executeGraphQL<{ discardGameDraft: boolean }>(mutation)
+    const data = await executeGraphQL<{ discardGameDraft: boolean }>(mutation, {
+      serverId: serverId || null,
+    })
     return data.discardGameDraft
   },
 
   async createGameFileUpload(
     input: CreateGameFileUploadInputGql,
+    serverId?: string | null,
   ): Promise<GameFileUploadPayloadGql> {
     const mutation = /* GraphQL */ `
-      mutation CreateGameFileUpload($input: CreateGameFileUploadInput!) {
-        createGameFileUpload(input: $input) {
+      mutation CreateGameFileUpload($input: CreateGameFileUploadInput!, $serverId: ID) {
+        createGameFileUpload(input: $input, serverId: $serverId) {
           uploadToken
           expiresAt
           maxSizeBytes
@@ -1571,7 +1767,10 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ createGameFileUpload: GameFileUploadPayloadGql }>(mutation, { input })
+    const data = await executeGraphQL<{ createGameFileUpload: GameFileUploadPayloadGql }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.createGameFileUpload
   },
 
@@ -1596,10 +1795,10 @@ export const gameApi = {
     logicalPath?: string
     explicitPolicy?: import("../types").SyncPolicy
     tokenHash: string
-  }): Promise<import("../types").AdminGameFile> {
+  }, serverId?: string | null): Promise<import("../types").AdminGameFile> {
     const mutation = /* GraphQL */ `
-      mutation AddGameFile($input: AddGameFileInput!) {
-        addGameFile(input: $input) {
+      mutation AddGameFile($input: AddGameFileInput!, $serverId: ID) {
+        addGameFile(input: $input, serverId: $serverId) {
           id
           name
           logicalPath
@@ -1615,7 +1814,10 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ addGameFile: import("../types").AdminGameFile }>(mutation, { input })
+    const data = await executeGraphQL<{ addGameFile: import("../types").AdminGameFile }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.addGameFile
   },
 
@@ -1655,10 +1857,10 @@ export const gameApi = {
     logicalPath: string
     content: string
     explicitPolicy?: import("../types").SyncPolicy | null
-  }): Promise<import("../types").AdminGameFile> {
+  }, serverId?: string | null): Promise<import("../types").AdminGameFile> {
     const mutation = /* GraphQL */ `
-      mutation SaveGameFileContent($input: SaveGameFileContentInput!) {
-        saveGameFileContent(input: $input) {
+      mutation SaveGameFileContent($input: SaveGameFileContentInput!, $serverId: ID) {
+        saveGameFileContent(input: $input, serverId: $serverId) {
           id
           name
           logicalPath
@@ -1674,7 +1876,10 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ saveGameFileContent: import("../types").AdminGameFile }>(mutation, { input })
+    const data = await executeGraphQL<{ saveGameFileContent: import("../types").AdminGameFile }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.saveGameFileContent
   },
 
@@ -1688,10 +1893,10 @@ export const gameApi = {
     return data.readGameFileContent
   },
 
-  async createGameFolder(logicalPath: string): Promise<import("../types").AdminGameFile> {
+  async createGameFolder(logicalPath: string, serverId?: string | null): Promise<import("../types").AdminGameFile> {
     const mutation = /* GraphQL */ `
-      mutation CreateGameFolder($logicalPath: String!) {
-        createGameFolder(logicalPath: $logicalPath) {
+      mutation CreateGameFolder($logicalPath: String!, $serverId: ID) {
+        createGameFolder(logicalPath: $logicalPath, serverId: $serverId) {
           id
           name
           logicalPath
@@ -1707,74 +1912,99 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ createGameFolder: import("../types").AdminGameFile }>(mutation, { logicalPath })
+    const data = await executeGraphQL<{ createGameFolder: import("../types").AdminGameFile }>(mutation, {
+      logicalPath,
+      serverId: serverId || null,
+    })
     return data.createGameFolder
   },
 
-  async renameGamePath(oldPath: string, newPath: string): Promise<boolean> {
+  async renameGamePath(oldPath: string, newPath: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation RenameGamePath($oldPath: String!, $newPath: String!) {
-        renameGamePath(oldPath: $oldPath, newPath: $newPath)
+      mutation RenameGamePath($oldPath: String!, $newPath: String!, $serverId: ID) {
+        renameGamePath(oldPath: $oldPath, newPath: $newPath, serverId: $serverId)
       }
     `
-    const data = await executeGraphQL<{ renameGamePath: boolean }>(mutation, { oldPath, newPath })
+    const data = await executeGraphQL<{ renameGamePath: boolean }>(mutation, {
+      oldPath,
+      newPath,
+      serverId: serverId || null,
+    })
     return data.renameGamePath
   },
 
-  async moveGamePaths(sources: string[], destinationFolder: string): Promise<boolean> {
+  async moveGamePaths(sources: string[], destinationFolder: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation MoveGamePaths($sources: [String!]!, $destinationFolder: String!) {
-        moveGamePaths(sources: $sources, destinationFolder: $destinationFolder)
+      mutation MoveGamePaths($sources: [String!]!, $destinationFolder: String!, $serverId: ID) {
+        moveGamePaths(sources: $sources, destinationFolder: $destinationFolder, serverId: $serverId)
       }
     `
-    const data = await executeGraphQL<{ moveGamePaths: boolean }>(mutation, { sources, destinationFolder })
+    const data = await executeGraphQL<{ moveGamePaths: boolean }>(mutation, {
+      sources,
+      destinationFolder,
+      serverId: serverId || null,
+    })
     return data.moveGamePaths
   },
 
-  async copyGamePaths(sources: string[], destinationFolder: string): Promise<boolean> {
+  async copyGamePaths(sources: string[], destinationFolder: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation CopyGamePaths($sources: [String!]!, $destinationFolder: String!) {
-        copyGamePaths(sources: $sources, destinationFolder: $destinationFolder)
+      mutation CopyGamePaths($sources: [String!]!, $destinationFolder: String!, $serverId: ID) {
+        copyGamePaths(sources: $sources, destinationFolder: $destinationFolder, serverId: $serverId)
       }
     `
-    const data = await executeGraphQL<{ copyGamePaths: boolean }>(mutation, { sources, destinationFolder })
+    const data = await executeGraphQL<{ copyGamePaths: boolean }>(mutation, {
+      sources,
+      destinationFolder,
+      serverId: serverId || null,
+    })
     return data.copyGamePaths
   },
 
-  async deleteGamePaths(paths: string[]): Promise<boolean> {
+  async deleteGamePaths(paths: string[], serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation DeleteGamePaths($paths: [String!]!) {
-        deleteGamePaths(paths: $paths)
+      mutation DeleteGamePaths($paths: [String!]!, $serverId: ID) {
+        deleteGamePaths(paths: $paths, serverId: $serverId)
       }
     `
-    const data = await executeGraphQL<{ deleteGamePaths: boolean }>(mutation, { paths })
+    const data = await executeGraphQL<{ deleteGamePaths: boolean }>(mutation, {
+      paths,
+      serverId: serverId || null,
+    })
     return data.deleteGamePaths
   },
 
-  async setGamePathPolicy(path: string, explicitPolicy?: import("../types").SyncPolicy | null): Promise<boolean> {
+  async setGamePathPolicy(path: string, explicitPolicy?: import("../types").SyncPolicy | null, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation SetGamePathPolicy($path: String!, $explicitPolicy: SyncPolicy) {
-        setGamePathPolicy(path: $path, explicitPolicy: $explicitPolicy)
+      mutation SetGamePathPolicy($path: String!, $explicitPolicy: SyncPolicy, $serverId: ID) {
+        setGamePathPolicy(path: $path, explicitPolicy: $explicitPolicy, serverId: $serverId)
       }
     `
-    const data = await executeGraphQL<{ setGamePathPolicy: boolean }>(mutation, { path, explicitPolicy })
+    const data = await executeGraphQL<{ setGamePathPolicy: boolean }>(mutation, {
+      path,
+      explicitPolicy,
+      serverId: serverId || null,
+    })
     return data.setGamePathPolicy
   },
 
-  async removeGameFile(id: string): Promise<boolean> {
+  async removeGameFile(id: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation RemoveGameFile($id: ID!) {
-        removeGameFile(id: $id)
+      mutation RemoveGameFile($id: ID!, $serverId: ID) {
+        removeGameFile(id: $id, serverId: $serverId)
       }
     `
-    const data = await executeGraphQL<{ removeGameFile: boolean }>(mutation, { id })
+    const data = await executeGraphQL<{ removeGameFile: boolean }>(mutation, {
+      id,
+      serverId: serverId || null,
+    })
     return data.removeGameFile
   },
 
-  async restoreGameFile(id: string): Promise<import("../types").AdminGameFile> {
+  async restoreGameFile(id: string, serverId?: string | null): Promise<import("../types").AdminGameFile> {
     const mutation = /* GraphQL */ `
-      mutation RestoreGameFile($id: ID!) {
-        restoreGameFile(id: $id) {
+      mutation RestoreGameFile($id: ID!, $serverId: ID) {
+        restoreGameFile(id: $id, serverId: $serverId) {
           id
           name
           logicalPath
@@ -1790,7 +2020,10 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ restoreGameFile: import("../types").AdminGameFile }>(mutation, { id })
+    const data = await executeGraphQL<{ restoreGameFile: import("../types").AdminGameFile }>(mutation, {
+      id,
+      serverId: serverId || null,
+    })
     return data.restoreGameFile
   },
 
@@ -1828,10 +2061,11 @@ export const gameApi = {
 
   async updateGameDraftMetadata(
     input: import("../types").UpdateGameDraftMetadataInput,
+    serverId?: string | null,
   ): Promise<import("../types").GameRelease> {
     const mutation = /* GraphQL */ `
-      mutation UpdateGameDraftMetadata($input: UpdateGameDraftMetadataInput!) {
-        updateGameDraftMetadata(input: $input) {
+      mutation UpdateGameDraftMetadata($input: UpdateGameDraftMetadataInput!, $serverId: ID) {
+        updateGameDraftMetadata(input: $input, serverId: $serverId) {
           id
           version
           minecraftVersion
@@ -1875,16 +2109,20 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ updateGameDraftMetadata: import("../types").GameRelease }>(mutation, { input })
+    const data = await executeGraphQL<{ updateGameDraftMetadata: import("../types").GameRelease }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.updateGameDraftMetadata
   },
 
   async publishGameRelease(
     input: import("../types").PublishGameReleaseInput,
+    serverId?: string | null,
   ): Promise<import("../types").GameRelease> {
     const mutation = /* GraphQL */ `
-      mutation PublishGameRelease($input: PublishGameReleaseInput!) {
-        publishGameRelease(input: $input) {
+      mutation PublishGameRelease($input: PublishGameReleaseInput!, $serverId: ID) {
+        publishGameRelease(input: $input, serverId: $serverId) {
           id
           version
           minecraftVersion
@@ -1927,7 +2165,10 @@ export const gameApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ publishGameRelease: import("../types").GameRelease }>(mutation, { input })
+    const data = await executeGraphQL<{ publishGameRelease: import("../types").GameRelease }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.publishGameRelease
   },
 
@@ -1937,28 +2178,32 @@ export const gameApi = {
     provider?: import("../types").ModProvider | null,
     limit?: number,
     offset?: number,
+    serverId?: string | null,
   ): Promise<import("../types").ModSearchPayload> {
-    return graphqlClient.searchMods(query, contentType, provider, limit, offset)
+    return modProvidersApi.searchMods(query, contentType, provider, limit, offset, serverId)
   },
 
   async getModProjectDetail(
     provider: import("../types").ModProvider,
     projectId: string,
     contentType?: import("../types").ContentType | null,
+    serverId?: string | null,
   ): Promise<import("../types").ModProjectDetail> {
-    return graphqlClient.getModProjectDetail(provider, projectId, contentType)
+    return modProvidersApi.getModProjectDetail(provider, projectId, contentType, serverId)
   },
 
   async resolveModInstallationPlan(
     input: import("../types").ResolveModPlanInput,
+    serverId?: string | null,
   ): Promise<import("../types").ModInstallationPlan> {
-    return graphqlClient.resolveModInstallationPlan(input)
+    return modProvidersApi.resolveModInstallationPlan(input, serverId)
   },
 
   async installModPlan(
     input: import("../types").InstallModPlanInput,
+    serverId?: string | null,
   ): Promise<import("../types").AdminGameFile[]> {
-    return graphqlClient.installModPlan(input)
+    return modProvidersApi.installModPlan(input, serverId)
   },
 }
 
@@ -2025,6 +2270,7 @@ export const modProvidersApi = {
     provider?: import("../types").ModProvider | null,
     limit?: number,
     offset?: number,
+    serverId?: string | null,
   ): Promise<import("../types").ModSearchPayload> {
     const gqlQuery = /* GraphQL */ `
       query SearchMods(
@@ -2033,6 +2279,7 @@ export const modProvidersApi = {
         $provider: ModProvider
         $limit: Int
         $offset: Int
+        $serverId: ID
       ) {
         searchMods(
           query: $query
@@ -2040,6 +2287,7 @@ export const modProvidersApi = {
           provider: $provider
           limit: $limit
           offset: $offset
+          serverId: $serverId
         ) {
           items {
             provider
@@ -2078,6 +2326,7 @@ export const modProvidersApi = {
       provider,
       limit,
       offset,
+      serverId: serverId || null,
     })
     return data.searchMods
   },
@@ -2086,17 +2335,20 @@ export const modProvidersApi = {
     provider: import("../types").ModProvider,
     projectId: string,
     contentType?: import("../types").ContentType | null,
+    serverId?: string | null,
   ): Promise<import("../types").ModProjectDetail> {
     const gqlQuery = /* GraphQL */ `
       query GetModProjectDetail(
         $provider: ModProvider!
         $projectId: String!
         $contentType: ContentType
+        $serverId: ID
       ) {
         getModProjectDetail(
           provider: $provider
           projectId: $projectId
           contentType: $contentType
+          serverId: $serverId
         ) {
           provider
           projectId
@@ -2144,16 +2396,18 @@ export const modProvidersApi = {
       provider,
       projectId,
       contentType: contentType || "MOD",
+      serverId: serverId || null,
     })
     return data.getModProjectDetail
   },
 
   async resolveModInstallationPlan(
     input: import("../types").ResolveModPlanInput,
+    serverId?: string | null,
   ): Promise<import("../types").ModInstallationPlan> {
     const gqlQuery = /* GraphQL */ `
-      query ResolveModInstallationPlan($input: ResolveModPlanInput!) {
-        resolveModInstallationPlan(input: $input) {
+      query ResolveModInstallationPlan($input: ResolveModPlanInput!, $serverId: ID) {
+        resolveModInstallationPlan(input: $input, serverId: $serverId) {
           items {
             provider
             projectId
@@ -2208,16 +2462,18 @@ export const modProvidersApi = {
     `
     const data = await executeGraphQL<{ resolveModInstallationPlan: import("../types").ModInstallationPlan }>(gqlQuery, {
       input,
+      serverId: serverId || null,
     })
     return data.resolveModInstallationPlan
   },
 
   async installModPlan(
     input: import("../types").InstallModPlanInput,
+    serverId?: string | null,
   ): Promise<import("../types").AdminGameFile[]> {
     const mutation = /* GraphQL */ `
-      mutation InstallModPlan($input: InstallModPlanInput!) {
-        installModPlan(input: $input) {
+      mutation InstallModPlan($input: InstallModPlanInput!, $serverId: ID) {
+        installModPlan(input: $input, serverId: $serverId) {
           id
           name
           logicalPath
@@ -2239,7 +2495,10 @@ export const modProvidersApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ installModPlan: import("../types").AdminGameFile[] }>(mutation, { input })
+    const data = await executeGraphQL<{ installModPlan: import("../types").AdminGameFile[] }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.installModPlan
   },
 }
@@ -2247,10 +2506,10 @@ export const modProvidersApi = {
 // --- Server Content & Release Sync API (Shard 08D) ---
 
 export const serverContentApi = {
-  async getServerManagedContent(): Promise<import("../types").ServerManagedContentItem[]> {
+  async getServerManagedContent(serverId?: string | null): Promise<import("../types").ServerManagedContentItem[]> {
     const query = /* GraphQL */ `
-      query ServerManagedContent {
-        serverManagedContent {
+      query ServerManagedContent($serverId: ID) {
+        serverManagedContent(serverId: $serverId) {
           id
           managementSource
           provider
@@ -2271,7 +2530,9 @@ export const serverContentApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ serverManagedContent: import("../types").ServerManagedContentItem[] }>(query)
+    const data = await executeGraphQL<{ serverManagedContent: import("../types").ServerManagedContentItem[] }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverManagedContent || []
   },
 
@@ -2282,6 +2543,7 @@ export const serverContentApi = {
     limit?: number,
     offset?: number,
     cursor?: string | null,
+    serverId?: string | null,
   ): Promise<import("../types").ServerContentSearchPayload> {
     const gqlQuery = /* GraphQL */ `
       query SearchServerContent(
@@ -2291,6 +2553,7 @@ export const serverContentApi = {
         $limit: Int
         $offset: Int
         $cursor: String
+        $serverId: ID
       ) {
         searchServerContent(
           query: $query
@@ -2299,6 +2562,7 @@ export const serverContentApi = {
           limit: $limit
           offset: $offset
           cursor: $cursor
+          serverId: $serverId
         ) {
           items {
             provider
@@ -2341,6 +2605,7 @@ export const serverContentApi = {
       limit,
       offset,
       cursor,
+      serverId: serverId || null,
     })
     return data.searchServerContent
   },
@@ -2349,17 +2614,20 @@ export const serverContentApi = {
     provider: import("../types").ModProvider,
     projectId: string,
     contentType?: import("../types").ContentType | null,
+    serverId?: string | null,
   ): Promise<import("../types").ModProjectDetail> {
     const gqlQuery = /* GraphQL */ `
       query ServerContentProjectDetail(
         $provider: ModProvider!
         $projectId: String!
         $contentType: ContentType
+        $serverId: ID
       ) {
         serverContentProjectDetail(
           provider: $provider
           projectId: $projectId
           contentType: $contentType
+          serverId: $serverId
         ) {
           provider
           projectId
@@ -2407,16 +2675,18 @@ export const serverContentApi = {
       provider,
       projectId,
       contentType: contentType || "MOD",
+      serverId: serverId || null,
     })
     return data.serverContentProjectDetail
   },
 
   async resolveServerContentPlan(
     input: import("../types").ResolveServerContentPlanInput,
+    serverId?: string | null,
   ): Promise<import("../types").ServerContentInstallationPlan> {
     const gqlQuery = /* GraphQL */ `
-      query ResolveServerContentPlan($input: ResolveServerContentPlanInput!) {
-        resolveServerContentPlan(input: $input) {
+      query ResolveServerContentPlan($input: ResolveServerContentPlanInput!, $serverId: ID) {
+        resolveServerContentPlan(input: $input, serverId: $serverId) {
           items {
             provider
             projectId
@@ -2473,16 +2743,18 @@ export const serverContentApi = {
     `
     const data = await executeGraphQL<{ resolveServerContentPlan: import("../types").ServerContentInstallationPlan }>(gqlQuery, {
       input,
+      serverId: serverId || null,
     })
     return data.resolveServerContentPlan
   },
 
   async installServerContentPlan(
     input: import("../types").InstallServerContentPlanInput,
+    serverId?: string | null,
   ): Promise<import("../types").ServerManagedContentItem[]> {
     const mutation = /* GraphQL */ `
-      mutation InstallServerContentPlan($input: InstallServerContentPlanInput!) {
-        installServerContentPlan(input: $input) {
+      mutation InstallServerContentPlan($input: InstallServerContentPlanInput!, $serverId: ID) {
+        installServerContentPlan(input: $input, serverId: $serverId) {
           id
           managementSource
           provider
@@ -2503,24 +2775,30 @@ export const serverContentApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ installServerContentPlan: import("../types").ServerManagedContentItem[] }>(mutation, { input })
+    const data = await executeGraphQL<{ installServerContentPlan: import("../types").ServerManagedContentItem[] }>(mutation, {
+      input,
+      serverId: serverId || null,
+    })
     return data.installServerContentPlan
   },
 
-  async removeServerManagedContent(id: string): Promise<boolean> {
+  async removeServerManagedContent(id: string, serverId?: string | null): Promise<boolean> {
     const mutation = /* GraphQL */ `
-      mutation RemoveServerManagedContent($id: ID!) {
-        removeServerManagedContent(id: $id)
+      mutation RemoveServerManagedContent($id: ID!, $serverId: ID) {
+        removeServerManagedContent(id: $id, serverId: $serverId)
       }
     `
-    const data = await executeGraphQL<{ removeServerManagedContent: boolean }>(mutation, { id })
+    const data = await executeGraphQL<{ removeServerManagedContent: boolean }>(mutation, {
+      id,
+      serverId: serverId || null,
+    })
     return data.removeServerManagedContent
   },
 
-  async getServerReleaseSyncPlan(): Promise<import("../types").ServerReleaseSyncPlan> {
+  async getServerReleaseSyncPlan(serverId?: string | null): Promise<import("../types").ServerReleaseSyncPlan> {
     const query = /* GraphQL */ `
-      query ServerReleaseSyncPlan {
-        serverReleaseSyncPlan {
+      query ServerReleaseSyncPlan($serverId: ID) {
+        serverReleaseSyncPlan(serverId: $serverId) {
           releaseId
           releaseVersion
           isPending
@@ -2551,14 +2829,16 @@ export const serverContentApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ serverReleaseSyncPlan: import("../types").ServerReleaseSyncPlan }>(query)
+    const data = await executeGraphQL<{ serverReleaseSyncPlan: import("../types").ServerReleaseSyncPlan }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverReleaseSyncPlan
   },
 
-  async getServerReleaseSyncStatus(): Promise<import("../types").ServerReleaseSyncStatus | null> {
+  async getServerReleaseSyncStatus(serverId?: string | null): Promise<import("../types").ServerReleaseSyncStatus | null> {
     const query = /* GraphQL */ `
-      query ServerReleaseSyncStatus {
-        serverReleaseSyncStatus {
+      query ServerReleaseSyncStatus($serverId: ID) {
+        serverReleaseSyncStatus(serverId: $serverId) {
           releaseId
           releaseVersion
           status
@@ -2567,14 +2847,16 @@ export const serverContentApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ serverReleaseSyncStatus: import("../types").ServerReleaseSyncStatus | null }>(query)
+    const data = await executeGraphQL<{ serverReleaseSyncStatus: import("../types").ServerReleaseSyncStatus | null }>(query, {
+      serverId: serverId || null,
+    })
     return data.serverReleaseSyncStatus
   },
 
-  async applyServerReleaseSync(createBackup?: boolean): Promise<import("../types").ServerReleaseSyncResult> {
+  async applyServerReleaseSync(createBackup?: boolean, serverId?: string | null): Promise<import("../types").ServerReleaseSyncResult> {
     const mutation = /* GraphQL */ `
-      mutation ApplyServerReleaseSync($createBackup: Boolean) {
-        applyServerReleaseSync(createBackup: $createBackup) {
+      mutation ApplyServerReleaseSync($createBackup: Boolean, $serverId: ID) {
+        applyServerReleaseSync(createBackup: $createBackup, serverId: $serverId) {
           success
           message
           syncedCount
@@ -2582,7 +2864,10 @@ export const serverContentApi = {
         }
       }
     `
-    const data = await executeGraphQL<{ applyServerReleaseSync: import("../types").ServerReleaseSyncResult }>(mutation, { createBackup })
+    const data = await executeGraphQL<{ applyServerReleaseSync: import("../types").ServerReleaseSyncResult }>(mutation, {
+      createBackup,
+      serverId: serverId || null,
+    })
     return data.applyServerReleaseSync
   },
 }

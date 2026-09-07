@@ -16,6 +16,7 @@ import LiveToast from "../common/LiveToast"
 
 interface NewsListViewProps {
   theme: ThemeMode
+  serverId?: string
 }
 
 const TYPE_FILTER_OPTIONS: SelectOption[] = [
@@ -39,7 +40,7 @@ const TYPE_CONFIG: Record<NewsType, { label: string; color: string }> = {
   MAINTENANCE: { label: "Mantenimiento", color: "#efc436" },
 }
 
-export default function NewsListView({ theme }: NewsListViewProps) {
+export default function NewsListView({ theme, serverId }: NewsListViewProps) {
   const isDark = theme === "dark"
 
   const [newsList, setNewsList] = useState<NewsItem[]>([])
@@ -83,6 +84,7 @@ export default function NewsListView({ theme }: NewsListViewProps) {
         selectedStatus === "ALL" ? null : (selectedStatus as NewsStatus)
 
       const result = await newsApi.getAdminNews({
+        serverId,
         type: typeParam,
         status: statusParam,
         first: 50,
@@ -93,7 +95,7 @@ export default function NewsListView({ theme }: NewsListViewProps) {
     } finally {
       setIsLoading(false)
     }
-  }, [selectedType, selectedStatus])
+  }, [serverId, selectedType, selectedStatus])
 
   useEffect(() => {
     loadNews()
@@ -112,10 +114,11 @@ export default function NewsListView({ theme }: NewsListViewProps) {
           imageMediaId: data.imageMediaId,
           youtubeUrl: data.youtubeUrl,
           videoMediaId: data.videoMediaId,
-        })
+        }, serverId)
         showToast("Noticia actualizada correctamente", "success")
       } else {
         await newsApi.createNews({
+          serverId,
           title: data.title,
           content: data.content,
           type: data.type,
@@ -141,10 +144,10 @@ export default function NewsListView({ theme }: NewsListViewProps) {
   const handleTogglePublish = async (item: NewsItem) => {
     try {
       if (item.status === "PUBLISHED") {
-        await newsApi.unpublishNews(item.id)
+        await newsApi.unpublishNews(item.id, serverId)
         showToast("Noticia pasada a borrador", "info")
       } else {
-        await newsApi.publishNews(item.id)
+        await newsApi.publishNews(item.id, serverId)
         showToast("Noticia publicada exitosamente", "success")
       }
       await loadNews()
@@ -158,7 +161,7 @@ export default function NewsListView({ theme }: NewsListViewProps) {
     if (!deleteItem) return
     setIsDeleting(true)
     try {
-      await newsApi.deleteNews(deleteItem.id)
+      await newsApi.deleteNews(deleteItem.id, serverId)
       showToast("Noticia eliminada correctamente", "success")
       setDeleteItem(null)
       await loadNews()

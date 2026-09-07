@@ -11,7 +11,42 @@ export type { ServerStatus, ServerPowerAction }
 
 export type ThemeMode = "dark" | "light"
 
-export type BackofficeSection = "dashboard" | "news" | "skins" | "server" | "game" | "settings"
+export type BackofficeGlobalSection = "servers" | "skins" | "settings"
+export type ServerWorkspaceSection = "dashboard" | "news" | "server" | "game" | "server-settings"
+export type BackofficeSection = BackofficeGlobalSection | ServerWorkspaceSection
+
+export type ServerProvisioningStatus = "PROVISIONING" | "READY" | "FAILED"
+
+export interface ServerItem {
+  id: string
+  name: string
+  minecraftVersion: string
+  modLoader: GameModLoader
+  modLoaderVersion?: string | null
+  mainLogo?: ContentMedia | null
+  sidebarLogo?: ContentMedia | null
+  accentColor?: string | null
+  cpu: number
+  memoryMb: number
+  diskMb: number
+  provisioningStatus: ServerProvisioningStatus
+  launcherActiveReleaseId?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateServerInput {
+  name: string
+  minecraftVersion: string
+  modLoader: GameModLoader
+  modLoaderVersion?: string | null
+  cpu: number
+  memoryMb: number
+  diskMb: number
+  mainLogoMediaId?: string | null
+  sidebarLogoMediaId?: string | null
+  accentColor?: string | null
+}
 
 export interface ContentMedia {
   id: string
@@ -261,6 +296,11 @@ export type GameModLoader = "VANILLA" | "NEOFORGE" | "FORGE" | "FABRIC" | "QUILT
 export interface GameLoaderVersion {
   version: string
   stable: boolean
+}
+
+export interface GameEnvironmentCatalog {
+  minecraftVersions: string[]
+  loaders: GameModLoader[]
 }
 
 

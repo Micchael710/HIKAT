@@ -29,6 +29,7 @@ import {
 
 interface ServerOverviewViewProps {
   theme: ThemeMode
+  serverId?: string
   onNavigate?: (section: any, handoff?: import("../../types").GameHandoffPayload) => void
 }
 
@@ -42,7 +43,7 @@ const SUB_TABS: Array<{ id: ServerSubTab; label: string; icon: React.ReactNode }
   { id: "tasks", label: "Tareas", icon: <IconCalendar size={18} /> },
 ]
 
-export default function ServerOverviewView({ theme, onNavigate }: ServerOverviewViewProps) {
+export default function ServerOverviewView({ theme, serverId, onNavigate }: ServerOverviewViewProps) {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
   const [activeTab, setActiveTab] = useState<ServerSubTab>("general")
@@ -73,7 +74,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
   // Sync plan fetcher
   const fetchSyncPlan = useCallback(async () => {
     try {
-      const plan = await serverContentApi.getServerReleaseSyncPlan()
+      const plan = await serverContentApi.getServerReleaseSyncPlan(serverId)
       if (isMountedRef.current) {
         setSyncPlan(plan)
       }
@@ -82,7 +83,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
         setSyncPlan(null)
       }
     }
-  }, [])
+  }, [serverId])
 
   // Stable status fetcher
   const fetchStatus = useCallback(async (isManual: boolean = false) => {
@@ -96,7 +97,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
     }
 
     try {
-      const data = await serverApi.getServerStatus()
+      const data = await serverApi.getServerStatus(serverId)
       if (isMountedRef.current) {
         setResources(data)
         setInfraState("CONNECTED")
@@ -119,7 +120,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
       }
       isFetchingRef.current = false
     }
-  }, [fetchSyncPlan])
+  }, [serverId, fetchSyncPlan])
 
   // Controlled polling: initial fetch, then once every 5s
   useEffect(() => {
@@ -164,7 +165,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
     // Pre-populate with existing rolling logs
     setLiveLogs(consoleService.getRecentLogs(15))
 
-    const unretain = consoleService.retain()
+    const unretain = consoleService.retain(serverId)
 
     const unsubLog = consoleService.onLog((entry) => {
       setLiveLogs((prev) => [...prev.slice(-20), entry])
@@ -179,7 +180,7 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
       unsubConn()
       unretain()
     }
-  }, [activeTab])
+  }, [activeTab, serverId])
 
   // Auto-scroll live console preview safely inside local container
   useEffect(() => {
@@ -196,11 +197,11 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
     try {
       let result: { success: boolean; status: any; message?: string }
       if (action === "START") {
-        result = await serverApi.startServer()
+        result = await serverApi.startServer(serverId)
       } else if (action === "RESTART") {
-        result = await serverApi.restartServer()
+        result = await serverApi.restartServer(serverId)
       } else {
-        result = await serverApi.stopServer()
+        result = await serverApi.stopServer(serverId)
       }
 
       if (result.success) {
@@ -798,24 +799,26 @@ export default function ServerOverviewView({ theme, onNavigate }: ServerOverview
 
       {/* Subtab Views */}
       {activeTab === "console" && (
-        <ServerConsoleView theme={theme} serverStatus={resources?.status || "UNKNOWN"} />
+        <ServerConsoleView theme={theme} serverId={serverId} serverStatus={resources?.status || "UNKNOWN"} />
       )}
 
       {activeTab === "files" && (
         <ServerFilesView
           theme={theme}
+          serverId={serverId}
           onToast={showToast}
           onNavigateToGame={(handoff) => onNavigate?.("game", handoff)}
         />
       )}
 
       {activeTab === "backups" && (
-        <ServerBackupsView theme={theme} onToast={showToast} />
+        <ServerBackupsView theme={theme} serverId={serverId} onToast={showToast} />
       )}
 
       {activeTab === "tasks" && (
         <ServerTasksView
           theme={theme}
+          serverId={serverId}
           serverStatus={resources?.status}
           onToast={showToast}
         />

@@ -565,3 +565,161 @@ describe("Back Office Game Upload GraphQL Client Suite", () => {
   })
 })
 
+describe("Back Office Multiserver GraphQL Operations (Phase 2)", () => {
+  beforeEach(() => {
+    authService.clearSession()
+    vi.restoreAllMocks()
+  })
+
+  it("getServers fetches list of servers with full schema fields", async () => {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "ref-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    const mockServers = [
+      {
+        id: "srv-1",
+        name: "HiKAT Survival",
+        minecraftVersion: "1.20.1",
+        modLoader: "FABRIC",
+        modLoaderVersion: "0.15.11",
+        cpu: 200,
+        memoryMb: 4096,
+        diskMb: 10240,
+        accentColor: "#3ec4c0",
+        provisioningStatus: "READY",
+        createdAt: "2026-08-01T00:00:00Z",
+        updatedAt: "2026-08-01T00:00:00Z",
+      },
+    ]
+
+    let capturedBody: any
+    vi.spyOn(global, "fetch").mockImplementationOnce(async (_url, opts) => {
+      capturedBody = JSON.parse(opts?.body as string)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            servers: mockServers,
+          },
+        }),
+      } as Response
+    })
+
+    const result = await serverApi.getServers()
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe("HiKAT Survival")
+    expect(capturedBody.query).toContain("servers {")
+  })
+
+  it("createServer sends input payload and returns created server", async () => {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "ref-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    let capturedBody: any
+    vi.spyOn(global, "fetch").mockImplementationOnce(async (_url, opts) => {
+      capturedBody = JSON.parse(opts?.body as string)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            createServer: {
+              id: "srv-new",
+              name: "Servidor Nuevo",
+              minecraftVersion: "1.20.1",
+              modLoader: "FABRIC",
+              cpu: 200,
+              memoryMb: 4096,
+              diskMb: 10240,
+              provisioningStatus: "PROVISIONING",
+              createdAt: "2026-09-01T00:00:00Z",
+              updatedAt: "2026-09-01T00:00:00Z",
+            },
+          },
+        }),
+      } as Response
+    })
+
+    const created = await serverApi.createServer({
+      name: "Servidor Nuevo",
+      minecraftVersion: "1.20.1",
+      modLoader: "FABRIC",
+      cpu: 200,
+      memoryMb: 4096,
+      diskMb: 10240,
+      accentColor: "#3ec4c0",
+    })
+
+    expect(created.id).toBe("srv-new")
+    expect(capturedBody.query).toContain("createServer")
+    expect(capturedBody.variables.input.name).toBe("Servidor Nuevo")
+  })
+
+  it("deleteServer forwards serverId and deletePterodactyl choice", async () => {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "ref-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    let capturedBody: any
+    vi.spyOn(global, "fetch").mockImplementationOnce(async (_url, opts) => {
+      capturedBody = JSON.parse(opts?.body as string)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            deleteServer: true,
+          },
+        }),
+      } as Response
+    })
+
+    const success = await serverApi.deleteServer("srv-123", true)
+    expect(success).toBe(true)
+    expect(capturedBody.query).toContain("deleteServer")
+    expect(capturedBody.variables.serverId).toBe("srv-123")
+    expect(capturedBody.variables.deletePterodactyl).toBe(true)
+  })
+
+  it("server-scoped operations explicitly forward serverId to GraphQL", async () => {
+    const validJwt = createMockAdminJwt(600)
+    authService.setSession(validJwt, "ref-tok", {
+      id: "admin-1",
+      role: "ADMIN",
+    })
+
+    let capturedBody: any
+    vi.spyOn(global, "fetch").mockImplementationOnce(async (_url, opts) => {
+      capturedBody = JSON.parse(opts?.body as string)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            serverStatus: {
+              status: "ONLINE",
+              cpuPercent: 12.5,
+              memoryUsedBytes: 2147483648,
+              diskUsedBytes: 5368709120,
+              isSuspended: false,
+            },
+          },
+        }),
+      } as Response
+    })
+
+    await serverApi.getServerStatus("srv-target-id")
+    expect(capturedBody.variables.serverId).toBe("srv-target-id")
+  })
+})
+
+

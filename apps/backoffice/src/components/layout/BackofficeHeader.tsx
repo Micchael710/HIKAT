@@ -1,12 +1,14 @@
 import React from "react"
-import type { ThemeMode, AdminUser } from "../../types"
-import { IconMoon, IconSun, IconUser, IconLogout } from "../../theme/icons"
+import type { ThemeMode, AdminUser, ServerItem } from "../../types"
+import { IconMoon, IconSun, IconUser, IconLogout, IconServer, IconChevronDown } from "../../theme/icons"
 
 interface BackofficeHeaderProps {
   theme: ThemeMode
   setTheme: (theme: ThemeMode) => void
   user: AdminUser | null
   onLogout: () => void
+  selectedServer?: ServerItem | null
+  onExitWorkspace?: () => void
 }
 
 export default function BackofficeHeader({
@@ -14,8 +16,11 @@ export default function BackofficeHeader({
   setTheme,
   user,
   onLogout,
+  selectedServer,
+  onExitWorkspace,
 }: BackofficeHeaderProps) {
   const isDark = theme === "dark"
+  const accentHex = selectedServer?.accentColor || "#3ec4c0"
 
   return (
     <header
@@ -37,7 +42,7 @@ export default function BackofficeHeader({
         position: "relative",
       }}
     >
-      {/* Branding Title */}
+      {/* Left Branding / Breadcrumb */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h1
           style={{
@@ -47,10 +52,86 @@ export default function BackofficeHeader({
             letterSpacing: "-0.02em",
             color: isDark ? "#ffffff" : "#111822",
             fontFamily: "Inter, sans-serif",
+            cursor: selectedServer && onExitWorkspace ? "pointer" : "default",
           }}
+          onClick={selectedServer && onExitWorkspace ? onExitWorkspace : undefined}
+          title={selectedServer && onExitWorkspace ? "Volver a la vista general de servidores" : undefined}
         >
           HiKAT Back Office
         </h1>
+
+        {/* Server Workspace Breadcrumb Pill */}
+        {selectedServer && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: isDark ? "rgba(255, 255, 255, 0.3)" : "rgba(0, 0, 0, 0.3)", fontSize: 16, fontWeight: 700 }}>
+              /
+            </span>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "4px 10px 4px 6px",
+                borderRadius: 12,
+                background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.04)",
+                border: isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+              }}
+            >
+              {selectedServer.mainLogo?.url ? (
+                <img
+                  src={selectedServer.mainLogo.url}
+                  alt={selectedServer.name}
+                  style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover" }}
+                />
+              ) : (
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    background: accentHex,
+                    display: "inline-block",
+                    boxShadow: `0 0 8px ${accentHex}`,
+                    marginLeft: 4,
+                  }}
+                />
+              )}
+
+              <span
+                style={{
+                  fontSize: 13.5,
+                  fontWeight: 800,
+                  color: isDark ? "#ffffff" : "#111822",
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                {selectedServer.name}
+              </span>
+
+              {onExitWorkspace && (
+                <button
+                  type="button"
+                  onClick={onExitWorkspace}
+                  title="Cambiar de servidor"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#3ec4c0",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    padding: "2px 4px",
+                    borderRadius: 4,
+                    marginLeft: 4,
+                  }}
+                >
+                  Cambiar
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right Controls: Theme Toggle + User / Logout Pill */}
@@ -156,3 +237,4 @@ export default function BackofficeHeader({
     </header>
   )
 }
+

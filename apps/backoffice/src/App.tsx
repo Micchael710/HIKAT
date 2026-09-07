@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react"
-import type { ThemeMode, BackofficeSection, GameHandoffPayload } from "./types"
+import type { ThemeMode, BackofficeSection, GameHandoffPayload, ServerItem } from "./types"
 import { AuthProvider, useAuth } from "./context/AuthContext"
 import LoginView from "./components/auth/LoginView"
 import BackofficeSidebar from "./components/layout/BackofficeSidebar"
 import BackofficeHeader from "./components/layout/BackofficeHeader"
-import PlaceholderView from "./components/layout/PlaceholderView"
+import ServersView from "./components/servers/ServersView"
+import ServerSettingsView from "./components/servers/ServerSettingsView"
 import NewsListView from "./components/news/NewsListView"
 import ServerOverviewView from "./components/server/ServerOverviewView"
 import DashboardView from "./components/dashboard/DashboardView"
@@ -20,9 +21,20 @@ function BackofficeShell({
   setTheme: (t: ThemeMode) => void
 }) {
   const { user, isAuthenticated, logout } = useAuth()
-  const [section, setSection] = useState<BackofficeSection>("dashboard")
+  const [selectedServer, setSelectedServer] = useState<ServerItem | null>(null)
+  const [section, setSection] = useState<BackofficeSection>("servers")
   const [gameHandoff, setGameHandoff] = useState<GameHandoffPayload | null>(null)
   const isDark = theme === "dark"
+
+  const handleSelectServer = (server: ServerItem) => {
+    setSelectedServer(server)
+    setSection("dashboard")
+  }
+
+  const handleExitWorkspace = () => {
+    setSelectedServer(null)
+    setSection("servers")
+  }
 
   // If not authenticated, show Login View
   if (!isAuthenticated) {
@@ -80,6 +92,8 @@ function BackofficeShell({
         section={section}
         setSection={setSection}
         theme={theme}
+        selectedServer={selectedServer}
+        onExitWorkspace={handleExitWorkspace}
       />
 
       {/* Main Content Area */}
@@ -100,30 +114,60 @@ function BackofficeShell({
           setTheme={setTheme}
           user={user}
           onLogout={logout}
+          selectedServer={selectedServer}
+          onExitWorkspace={handleExitWorkspace}
         />
 
         {/* View Router */}
         <main style={{ flex: 1, height: "calc(100vh - 64px)", overflowY: "auto", position: "relative" }}>
-          {section === "dashboard" && <DashboardView theme={theme} onNavigate={setSection} />}
-          {section === "news" && <NewsListView theme={theme} />}
-          {section === "skins" && <SkinsView theme={theme} />}
-          {section === "server" && (
-            <ServerOverviewView
-              theme={theme}
-              onNavigate={(sec, handoff) => {
-                setSection(sec)
-                setGameHandoff(handoff || null)
-              }}
-            />
+          {/* Global Views (when no server is selected) */}
+          {!selectedServer && (
+            <>
+              {section === "servers" && (
+                <ServersView theme={theme} onSelectServer={handleSelectServer} />
+              )}
+              {section === "skins" && <SkinsView theme={theme} />}
+              {section === "settings" && <SettingsView theme={theme} />}
+            </>
           )}
-          {section === "game" && (
-            <GameView
-              theme={theme}
-              handoff={gameHandoff}
-              onClearHandoff={() => setGameHandoff(null)}
-            />
+
+          {/* Server Workspace Views (when a server is active) */}
+          {selectedServer && (
+            <>
+              {section === "dashboard" && (
+                <DashboardView
+                  theme={theme}
+                  serverId={selectedServer.id}
+                  server={selectedServer}
+                  onNavigate={setSection}
+                />
+              )}
+              {section === "news" && (
+                <NewsListView theme={theme} serverId={selectedServer.id} />
+              )}
+              {section === "server" && (
+                <ServerOverviewView
+                  theme={theme}
+                  serverId={selectedServer.id}
+                  onNavigate={(sec, handoff) => {
+                    setSection(sec)
+                    setGameHandoff(handoff || null)
+                  }}
+                />
+              )}
+              {section === "game" && (
+                <GameView
+                  theme={theme}
+                  serverId={selectedServer.id}
+                  handoff={gameHandoff}
+                  onClearHandoff={() => setGameHandoff(null)}
+                />
+              )}
+              {section === "server-settings" && (
+                <ServerSettingsView theme={theme} server={selectedServer} />
+              )}
+            </>
           )}
-          {section === "settings" && <SettingsView theme={theme} />}
         </main>
       </div>
     </div>

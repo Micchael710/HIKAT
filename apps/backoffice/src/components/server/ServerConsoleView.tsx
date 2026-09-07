@@ -14,11 +14,13 @@ import LiveToast from "../common/LiveToast"
 interface ServerConsoleViewProps {
   serverStatus: ServerStatus
   theme: ThemeMode
+  serverId?: string
 }
 
 export default function ServerConsoleView({
   serverStatus,
   theme,
+  serverId,
 }: ServerConsoleViewProps) {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
@@ -43,7 +45,7 @@ export default function ServerConsoleView({
   useEffect(() => {
     if (isDisconnected) return
 
-    const release = consoleService.retain()
+    const release = consoleService.retain(serverId)
 
     const unsubscribeLogs = consoleService.onLog((entry) => {
       setLogs((prev) => [...prev.slice(-499), entry]) // Retain max 500 lines
@@ -53,7 +55,7 @@ export default function ServerConsoleView({
       unsubscribeLogs()
       release()
     }
-  }, [isDisconnected])
+  }, [isDisconnected, serverId])
 
   // Auto-scroll logic
   useEffect(() => {
@@ -90,7 +92,11 @@ export default function ServerConsoleView({
 
     setIsSending(true)
     try {
-      await consoleService.sendCommand(trimmed)
+      if (serverId) {
+        await consoleService.sendCommand(trimmed, serverId)
+      } else {
+        await consoleService.sendCommand(trimmed)
+      }
       // Add local echo log entry for immediate responsiveness
       const echoEntry: ConsoleLogEntry = {
         id: `${Date.now()}-echo`,

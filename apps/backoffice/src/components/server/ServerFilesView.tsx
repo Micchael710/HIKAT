@@ -23,12 +23,13 @@ import { ServerReleaseSyncModal } from "./ServerReleaseSyncModal"
 
 interface ServerFilesViewProps {
   theme: ThemeMode
+  serverId?: string
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
   onNavigateToGame?: (handoff?: import("../../types").GameHandoffPayload) => void
 }
 
-export default function ServerFilesView({ theme, serverStatus, onToast, onNavigateToGame }: ServerFilesViewProps) {
+export default function ServerFilesView({ theme, serverId, serverStatus, onToast, onNavigateToGame }: ServerFilesViewProps) {
   const isDark = theme === "dark"
   const isDisconnected = serverStatus === "DISCONNECTED"
   const [currentPath, setCurrentPath] = useState("")
@@ -72,9 +73,11 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     setError(null)
     try {
       const [filesResult, managedResult, planResult] = await Promise.allSettled([
-        serverApi.getServerFiles("SERVER", currentPath || undefined),
-        serverContentApi.getServerManagedContent(),
-        serverContentApi.getServerReleaseSyncPlan(),
+        serverId
+          ? serverApi.getServerFiles("SERVER", currentPath || undefined, serverId)
+          : serverApi.getServerFiles("SERVER", currentPath || undefined),
+        serverId ? serverContentApi.getServerManagedContent(serverId) : serverContentApi.getServerManagedContent(),
+        serverId ? serverContentApi.getServerReleaseSyncPlan(serverId) : serverContentApi.getServerReleaseSyncPlan(),
       ])
 
       if (isMountedRef.current) {
@@ -149,7 +152,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     if (!newFolderName.trim() || isDisconnected) return
     setIsCreatingFolder(true)
     try {
-      await serverApi.createServerFolder("SERVER", currentPath, newFolderName.trim())
+      await serverApi.createServerFolder("SERVER", currentPath, newFolderName.trim(), serverId)
       onToast("Carpeta creada exitosamente.", "success")
       setIsNewFolderModalOpen(false)
       setNewFolderName("")
@@ -171,7 +174,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     setIsRenaming(true)
     const targetRelative = currentPath ? `${currentPath}/${renameTarget.name}` : renameTarget.name
     try {
-      await serverApi.renameServerFile("SERVER", targetRelative, newName.trim())
+      await serverApi.renameServerFile("SERVER", targetRelative, newName.trim(), serverId)
       onToast("Elemento renombrado exitosamente.", "success")
       setRenameTarget(null)
       setNewName("")
@@ -192,7 +195,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     setIsDeleting(true)
     const targetRelative = currentPath ? `${currentPath}/${deleteTarget.name}` : deleteTarget.name
     try {
-      await serverApi.deleteServerFile("SERVER", targetRelative)
+      await serverApi.deleteServerFile("SERVER", targetRelative, serverId)
       onToast("Elemento eliminado exitosamente.", "success")
       setDeleteTarget(null)
       await fetchFiles(true)
@@ -211,7 +214,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     if (isDisconnected) return
     const targetRelative = currentPath ? `${currentPath}/${file.name}` : file.name
     try {
-      const res = await serverApi.createServerFileDownloadUrl("SERVER", targetRelative)
+      const res = await serverApi.createServerFileDownloadUrl("SERVER", targetRelative, serverId)
       if (res && res.url) {
         const link = document.createElement("a")
         link.href = res.url
@@ -236,7 +239,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     setIsUploading(true)
     try {
       // 1. Request signed upload URL from backend for current directory
-      const { url } = await serverApi.prepareServerFileUpload("SERVER", currentPath)
+      const { url } = await serverApi.prepareServerFileUpload("SERVER", currentPath, serverId)
       // 2. Transfer REAL bytes to Wings signed URL and check response.ok
       await serverApi.uploadFileToSignedUrl(url, file)
       // 3. Notify success only after HTTP response.ok
@@ -259,7 +262,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     setEditingFile({ path: targetRelative, name: file.name })
     setIsEditorLoading(true)
     try {
-      const res = await serverApi.getServerTextFile("SERVER", targetRelative)
+      const res = await serverApi.getServerTextFile("SERVER", targetRelative, serverId)
       setEditorContent(res.content)
     } catch (err: unknown) {
       onToast(
@@ -276,7 +279,7 @@ export default function ServerFilesView({ theme, serverStatus, onToast, onNaviga
     if (!editingFile) return
     setIsEditorSaving(true)
     try {
-      await serverApi.writeServerTextFile("SERVER", editingFile.path, editorContent)
+      await serverApi.writeServerTextFile("SERVER", editingFile.path, editorContent, serverId)
       onToast("Archivo guardado exitosamente.", "success")
       setEditingFile(null)
       await fetchFiles(true)

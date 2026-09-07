@@ -26,11 +26,12 @@ import LiveToast from "../common/LiveToast"
 
 interface GameViewProps {
   theme: ThemeMode
+  serverId?: string
   handoff?: import("../../types").GameHandoffPayload | null
   onClearHandoff?: () => void
 }
 
-export default function GameView({ theme, handoff, onClearHandoff }: GameViewProps) {
+export default function GameView({ theme, serverId, handoff, onClearHandoff }: GameViewProps) {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
 
@@ -65,39 +66,39 @@ export default function GameView({ theme, handoff, onClearHandoff }: GameViewPro
 
   const fetchServerPlan = useCallback(async () => {
     try {
-      const plan = await serverContentApi.getServerReleaseSyncPlan()
+      const plan = await serverContentApi.getServerReleaseSyncPlan(serverId)
       setServerPlan(plan)
     } catch {
       // Best-effort: Server might be disconnected or Pterodactyl down
     }
-  }, [])
+  }, [serverId])
 
   const fetchOverview = useCallback(async (showLoading: boolean = true) => {
     if (showLoading) setIsLoading(true)
     setError(null)
     try {
-      const data = await gameApi.getAdminGameOverview()
+      const data = await gameApi.getAdminGameOverview(serverId)
       setOverview(data)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "No se pudo cargar la información de versiones.")
     } finally {
       if (showLoading) setIsLoading(false)
     }
-  }, [])
+  }, [serverId])
 
   const refreshSilently = useCallback(() => fetchOverview(false), [fetchOverview])
 
   const fetchHistory = useCallback(async () => {
     setIsHistoryLoading(true)
     try {
-      const list = await gameApi.getGameReleaseHistory()
+      const list = await gameApi.getGameReleaseHistory(serverId)
       setHistory(list)
     } catch {
       // Fallback
     } finally {
       setIsHistoryLoading(false)
     }
-  }, [])
+  }, [serverId])
 
   useEffect(() => {
     fetchOverview()
@@ -114,7 +115,7 @@ export default function GameView({ theme, handoff, onClearHandoff }: GameViewPro
     setIsPreparingDraft(true)
     setError(null)
     try {
-      await gameApi.prepareGameDraft()
+      await gameApi.prepareGameDraft(undefined, serverId)
       showToast("Borrador de actualización preparado.", "success")
       await fetchOverview()
     } catch (err: unknown) {
@@ -132,7 +133,7 @@ export default function GameView({ theme, handoff, onClearHandoff }: GameViewPro
     setIsDiscardingDraft(true)
     setError(null)
     try {
-      await gameApi.discardGameDraft()
+      await gameApi.discardGameDraft(serverId)
       showToast("Borrador descartado correctamente.", "success")
       await fetchOverview()
     } catch (err: unknown) {
@@ -697,7 +698,8 @@ export default function GameView({ theme, handoff, onClearHandoff }: GameViewPro
               activeRelease?.modLoader
             }
             modLoaderVersion={
-              activeRelease?.modLoaderVersion
+              activeRelease?.modLoaderVersion ||
+              activeRelease?.neoForgeVersion
             }
             onRefresh={refreshSilently}
             onToast={showToast}
@@ -712,6 +714,7 @@ export default function GameView({ theme, handoff, onClearHandoff }: GameViewPro
       {isPublishOpen && (publishingDraft || draft) && (
         <PublishReleaseModal
           theme={theme}
+          serverId={serverId}
           draftRelease={publishingDraft || draft!}
           publishedRelease={published}
           changes={overview?.changes}

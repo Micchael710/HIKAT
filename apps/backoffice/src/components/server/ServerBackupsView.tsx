@@ -19,12 +19,14 @@ import {
 
 interface ServerBackupsViewProps {
   theme: ThemeMode
+  serverId?: string
   serverStatus?: ServerStatus
   onToast: (message: string, type: "success" | "error") => void
 }
 
 export default function ServerBackupsView({
   theme,
+  serverId,
   serverStatus,
   onToast,
 }: ServerBackupsViewProps) {
@@ -56,7 +58,7 @@ export default function ServerBackupsView({
     if (manual) setIsRefreshing(true)
     setError(null)
     try {
-      const data = await serverApi.getServerBackups()
+      const data = await serverApi.getServerBackups(serverId)
       if (isMountedRef.current) {
         setBackups(data)
       }
@@ -74,7 +76,7 @@ export default function ServerBackupsView({
         setIsRefreshing(false)
       }
     }
-  }, [])
+  }, [serverId])
 
   useEffect(() => {
     isMountedRef.current = true
@@ -88,7 +90,7 @@ export default function ServerBackupsView({
     e.preventDefault()
     setIsCreating(true)
     try {
-      await serverApi.createServerBackup(newBackupName.trim() || undefined)
+      await serverApi.createServerBackup(newBackupName.trim() || undefined, serverId)
       onToast("Copia de seguridad creada exitosamente.", "success")
       setIsCreateModalOpen(false)
       setNewBackupName("")
@@ -106,7 +108,7 @@ export default function ServerBackupsView({
   const handleToggleLock = async (backup: ServerBackupItem) => {
     setActionLoadingMap((prev) => ({ ...prev, [backup.id]: true }))
     try {
-      await serverApi.toggleServerBackupLock(backup.id)
+      await serverApi.toggleServerBackupLock(backup.id, serverId)
       onToast(
         backup.isLocked
           ? "Copia de seguridad desprotegida."
@@ -127,7 +129,7 @@ export default function ServerBackupsView({
   const handleDownload = async (backup: ServerBackupItem) => {
     setActionLoadingMap((prev) => ({ ...prev, [backup.id]: true }))
     try {
-      const res = await serverApi.createServerBackupDownloadUrl(backup.id, backup.name)
+      const res = await serverApi.createServerBackupDownloadUrl(backup.id, backup.name, serverId)
       if (res && res.url) {
         const link = document.createElement("a")
         link.href = res.url
@@ -151,7 +153,7 @@ export default function ServerBackupsView({
     if (!restoreBackupTarget) return
     setIsRestoring(true)
     try {
-      await serverApi.restoreServerBackup(restoreBackupTarget.id)
+      await serverApi.restoreServerBackup(restoreBackupTarget.id, serverId)
       onToast("Copia restaurada exitosamente.", "success")
       setRestoreBackupTarget(null)
       await fetchBackups(true)
@@ -169,7 +171,7 @@ export default function ServerBackupsView({
     if (!deleteBackupTarget) return
     setIsDeleting(true)
     try {
-      await serverApi.deleteServerBackup(deleteBackupTarget.id)
+      await serverApi.deleteServerBackup(deleteBackupTarget.id, serverId)
       onToast("Copia eliminada exitosamente.", "success")
       setDeleteBackupTarget(null)
       await fetchBackups(true)

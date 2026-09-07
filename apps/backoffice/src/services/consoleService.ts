@@ -30,15 +30,26 @@ class ConsoleService {
   private retryCount: number = 0
   private subscriberCount: number = 0
   private recentLogs: ConsoleLogEntry[] = []
+  private currentServerId: string | null = null
 
   /**
    * Reference-counted retention of the console WebSocket connection.
    * Returns an unregister function.
    */
-  public retain(): () => void {
+  public retain(serverId?: string): () => void {
+    if (serverId && serverId !== this.currentServerId) {
+      if (this.ws) {
+        this.disconnect()
+      }
+      this.currentServerId = serverId
+      this.recentLogs = []
+    } else if (serverId) {
+      this.currentServerId = serverId
+    }
+
     this.subscriberCount++
     if (this.subscriberCount === 1) {
-      this.connect()
+      this.connect(serverId)
     }
     return () => {
       this.release()
@@ -56,7 +67,11 @@ class ConsoleService {
     return this.recentLogs.slice(-limit)
   }
 
-  public async connect(): Promise<void> {
+  public async connect(serverId?: string): Promise<void> {
+    if (serverId) {
+      this.currentServerId = serverId
+    }
+
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return
     }
@@ -74,7 +89,9 @@ class ConsoleService {
       // 1. Request a single-use console connection ticket via authenticated GraphQL
       let ticketData: { ticket: string; expiresAt: string }
       try {
-        ticketData = await serverApi.createServerConsoleTicket()
+        ticketData = this.currentServerId
+          ? await serverApi.createServerConsoleTicket(this.currentServerId)
+          : await serverApi.createServerConsoleTicket()
       } catch (err: unknown) {
         // If authentication failed, attempt refresh
         const isAuthError =
@@ -84,7 +101,9 @@ class ConsoleService {
         if (isAuthError) {
           const refreshed = await authService.refresh()
           if (refreshed) {
-            ticketData = await serverApi.createServerConsoleTicket()
+            ticketData = this.currentServerId
+              ? await serverApi.createServerConsoleTicket(this.currentServerId)
+              : await serverApi.createServerConsoleTicket()
           } else {
             this.shouldReconnect = false
             this.notifyConnection(false)
@@ -248,13 +267,16 @@ class ConsoleService {
     this.connectionListeners.forEach((listener) => listener(connected))
   }
 
-  public async sendCommand(command: string): Promise<void> {
+  public async sendCommand(command: string, serverId?: string): Promise<void> {
     const validation = validateServerCommand(command)
     if (!validation.valid || !validation.command) {
       throw new Error(validation.error || "El comando no es válido.")
     }
 
-    const res = await serverApi.sendServerCommand(validation.command)
+    const targetServerId = serverId || this.currentServerId || undefined
+    const res = targetServerId
+      ? await serverApi.sendServerCommand(validation.command, targetServerId)
+      : await serverApi.sendServerCommand(validation.command)
     if (!res || !res.success) {
       throw new Error(res?.message || "No se pudo ejecutar el comando.")
     }

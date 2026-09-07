@@ -30,6 +30,7 @@ import {
 
 interface PublishReleaseModalProps {
   theme: ThemeMode
+  serverId?: string
   draftRelease: GameRelease
   publishedRelease?: GameRelease | null
   changes?: GameDraftChanges | null
@@ -44,6 +45,7 @@ type ChangeFilter = "ALL" | "ADDED" | "UPDATED" | "REMOVED"
 
 export default function PublishReleaseModal({
   theme,
+  serverId,
   draftRelease,
   publishedRelease,
   changes,
@@ -211,10 +213,10 @@ export default function PublishReleaseModal({
         version: trimmedVersion,
         notes: notes.trim() || null,
         coverMediaId: coverMediaId || null,
-      })
+      }, serverId)
 
       // Fetch fresh live overview
-      const overview = await gameApi.getAdminGameOverview()
+      const overview = await gameApi.getAdminGameOverview(serverId)
       if (!overview.draftRelease) {
         throw new Error("No se encontró ningún borrador activo.")
       }
@@ -250,7 +252,7 @@ export default function PublishReleaseModal({
   const handleGoToStep3 = async () => {
     setError(null)
     try {
-      const overview = await gameApi.getAdminGameOverview()
+      const overview = await gameApi.getAdminGameOverview(serverId)
       if (!overview.draftRelease) {
         throw new Error("No se encontró ningún borrador activo.")
       }
@@ -306,18 +308,22 @@ export default function PublishReleaseModal({
 
     try {
       // 1. Publish Game Release via authoritative GraphQL mutation
-      setSubmitStatusText("Publicando actualización oficial...")
-      const published = await gameApi.publishGameRelease({
+      const input = {
         version: trimmedVersion,
         notes: notes.trim() || null,
         coverMediaId: coverMediaId || null,
-        expectedDraftFingerprint: currentFingerprint || undefined,
-      })
+        ...(currentFingerprint ? { expectedDraftFingerprint: currentFingerprint } : {}),
+      }
+      const published = serverId
+        ? await gameApi.publishGameRelease(input, serverId)
+        : await gameApi.publishGameRelease(input)
 
       // 2. Post-publication verification
       setSubmitStatusText("Verificando publicación en vivo...")
       try {
-        const verifyOverview = await gameApi.getAdminGameOverview()
+        const verifyOverview = serverId
+          ? await gameApi.getAdminGameOverview(serverId)
+          : await gameApi.getAdminGameOverview()
         if (
           verifyOverview.publishedRelease?.version !== trimmedVersion ||
           verifyOverview.draftRelease?.id === currentDraft.id
@@ -339,7 +345,7 @@ export default function PublishReleaseModal({
       let fetchedPlan: ServerReleaseSyncPlan | null = null
       let planFetchFailed = false
       try {
-        fetchedPlan = await serverContentApi.getServerReleaseSyncPlan()
+        fetchedPlan = await serverContentApi.getServerReleaseSyncPlan(serverId)
       } catch {
         planFetchFailed = true
       }
