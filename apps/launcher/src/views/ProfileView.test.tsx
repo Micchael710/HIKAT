@@ -931,7 +931,7 @@ describe("Launcher ProfileView Component", () => {
     expect(saveBtn.style.getPropertyValue("--accent-rgb")).toBe("16, 185, 129")
   })
 
-  it("21. Username edit textbox rejects spaces and non-alphanumeric characters in real-time", async () => {
+  it("21. Username edit textbox preserves invalid characters, disables save, and triggers error toast without silent alterations", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-21",
       username: "AlphaUser",
@@ -966,13 +966,28 @@ describe("Launcher ProfileView Component", () => {
     const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
     expect(input).not.toBeNull()
 
-    // Simulate typing text with spaces and invalid symbols: "vBrayan 06!@#"
+    // 1. Partial input with only 2 valid characters: does NOT show error toast
     await act(async () => {
-      changeInput(input, "vBrayan 06!@#")
+      changeInput(input, "Br")
+    })
+    expect(input.value).toBe("Br")
+    expect(container.textContent).not.toContain("El nombre de usuario debe tener entre 3 y 16 caracteres")
+
+    // 2. Typing invalid characters (spaces and symbols): "Brayan Mateo"
+    await act(async () => {
+      changeInput(input, "Brayan Mateo")
     })
 
-    // Value in state and input should be sanitized to "vBrayan06"
-    expect(input.value).toBe("vBrayan06")
+    // Value in input MUST NOT be altered/sanitized to "BrayanMateo"
+    expect(input.value).toBe("Brayan Mateo")
+
+    // Error toast must be displayed with localized message
+    expect(container.textContent).toContain("El nombre de usuario debe tener entre 3 y 16 caracteres y solo contener letras, números y guion bajo.")
+
+    // Save button must be disabled
+    const saveBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Guardar") as HTMLButtonElement
+    expect(saveBtn).toBeDefined()
+    expect(saveBtn.disabled).toBe(true)
   })
 
   it("22. ProfileView displays OAuth access method (Discord/Google) with launcher button styling, non-clickable (cursor default) and no hover actions", async () => {
@@ -1009,6 +1024,150 @@ describe("Launcher ProfileView Component", () => {
     expect(badge?.style.cursor).toBe("default")
     expect(badge?.style.userSelect).toBe("none")
     expect(badge?.style.borderRadius).toBe("14px")
+  })
+
+  it("23. ProfileView translates backend USERNAME_ALREADY_EXISTS and INVALID_USERNAME without exposing raw technical error codes", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-23",
+      username: "ErrorPlayer",
+      displayName: "ErrorPlayer",
+      email: "err@hikat.org",
+      role: "PLAYER",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "err@hikat.org" }],
+    })
+    vi.spyOn(authService, "changeUsername").mockResolvedValue({
+      success: false,
+      code: "USERNAME_ALREADY_EXISTS",
+      error: "USERNAME_ALREADY_EXISTS",
+    })
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="ErrorPlayer"
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    await act(async () => {
+      editBtn.click()
+    })
+
+    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
+    await act(async () => {
+      changeInput(input, "ValidTakenName")
+    })
+
+    const form = container.querySelector("form")
+    await act(async () => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+    })
+
+    // Must show friendly translation
+    expect(container.textContent).toContain("Este nombre de usuario ya está en uso.")
+    // Must NOT contain technical error code
+    expect(container.textContent).not.toContain("USERNAME_ALREADY_EXISTS")
+  })
+
+  it("24. Integrated Back button uses launcher-btn-secondary and executes onBack", async () => {
+    const onBackSpy = vi.fn()
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="BackTester"
+          onBack={onBackSpy}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    const backBtn = (container.querySelector('button[title*="olv"]') ||
+      container.querySelector('button[title*="ack"]')) as HTMLButtonElement
+    expect(backBtn).not.toBeNull()
+    expect(backBtn.classList.contains("launcher-btn-secondary")).toBe(true)
+
+    await act(async () => {
+      backBtn.click()
+    })
+    expect(onBackSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("25. LiveToast for successful username change uses skin dynamic accent color", async () => {
+    vi.spyOn(authService, "getCachedUser").mockReturnValue({
+      id: "u-25",
+      username: "OldEmerald",
+      displayName: "OldEmerald",
+      email: "emerald@hikat.org",
+      role: "PLAYER",
+    })
+    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
+      success: true,
+      methods: [{ type: "PASSWORD", email: "emerald@hikat.org" }],
+    })
+    vi.spyOn(authService, "changeUsername").mockResolvedValue({
+      success: true,
+      user: {
+        id: "u-25",
+        username: "NewEmerald",
+        displayName: "NewEmerald",
+        email: "emerald@hikat.org",
+        role: "PLAYER",
+      },
+    })
+
+    const emeraldSkin: any = {
+      id: "skin-emerald",
+      name: "Emerald Skin",
+      shirt: "#10b981", // rgb(16, 185, 129)
+      skinUrl: "/media/emerald_skin.png",
+    }
+
+    const container = await renderComponent(
+      <LanguageProvider>
+        <ProfileView
+          username="OldEmerald"
+          activeSkinData={emeraldSkin}
+          onBack={vi.fn()}
+          theme="dark"
+        />
+      </LanguageProvider>,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
+    await act(async () => {
+      editBtn.click()
+    })
+
+    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
+    await act(async () => {
+      changeInput(input, "NewEmerald")
+    })
+
+    const form = container.querySelector("form")
+    await act(async () => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+    })
+
+    const toast = container.querySelector(".settings-live-toast") as HTMLElement
+    expect(toast).not.toBeNull()
+    expect(toast.textContent).toContain("Nombre de usuario actualizado correctamente.")
+    // LiveToast checkmark or border should reflect emerald accent (#10b981)
+    const checkSvg = toast.querySelector("svg")
+    expect(checkSvg?.getAttribute("stroke")?.toLowerCase()).toBe("#10b981")
   })
 })
 

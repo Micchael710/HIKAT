@@ -357,8 +357,8 @@ export default function SkinViewer3D({
     <div
       style={{
         position: "relative",
-        width,
-        height,
+        width: "100%",
+        height: "100%",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -401,21 +401,20 @@ export default function SkinViewer3D({
             type="button"
             onClick={triggerNextPose}
             title={t("skins.controls.changePose") || "Cambiar pose"}
+            className="launcher-btn-secondary"
             style={{
               display: "flex",
               alignItems: "center",
               gap: 6,
               padding: "7px 13px",
-              background: isDark ? "rgba(18, 26, 36, 0.85)" : "rgba(255, 255, 255, 0.9)",
-              border: isDark ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid rgba(0, 0, 0, 0.12)",
               borderRadius: 10,
-              color: isDark ? "#ffffff" : "#111827",
               fontSize: 12,
               fontWeight: 700,
               cursor: "pointer",
               backdropFilter: "blur(12px)",
-              transition: "all 0.15s ease",
-              boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
+              boxShadow: isDark
+                ? "0 4px 14px rgba(0,0,0,0.25)"
+                : "0 2px 8px rgba(0,0,0,0.08)",
             }}
           >
             <svg
@@ -445,21 +444,20 @@ export default function SkinViewer3D({
               applyPoseOrAnimation(currentPose, nextAnim)
             }}
             title={t("skins.controls.changeAnimation") || "Cambiar animación"}
+            className="launcher-btn-secondary"
             style={{
               display: "flex",
               alignItems: "center",
               gap: 6,
               padding: "7px 13px",
-              background: isDark ? "rgba(18, 26, 36, 0.85)" : "rgba(255, 255, 255, 0.9)",
-              border: isDark ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid rgba(0, 0, 0, 0.12)",
               borderRadius: 10,
-              color: isDark ? "#ffffff" : "#111827",
               fontSize: 12,
               fontWeight: 700,
               cursor: "pointer",
               backdropFilter: "blur(12px)",
-              transition: "all 0.15s ease",
-              boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
+              boxShadow: isDark
+                ? "0 4px 14px rgba(0,0,0,0.25)"
+                : "0 2px 8px rgba(0,0,0,0.08)",
             }}
           >
             <svg
@@ -494,24 +492,26 @@ export default function SkinViewer3D({
             type="button"
             onClick={() => setAutoRotate(!autoRotate)}
             title={t("skins.controls.toggleRotate") || "Giro 360°"}
+            className="launcher-btn-secondary"
             style={{
               width: 32,
               height: 32,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: autoRotate
-                ? `rgba(${accentHex}, 0.35)`
-                : isDark
-                  ? "rgba(18, 26, 36, 0.85)"
-                  : "rgba(255, 255, 255, 0.9)",
-              border: isDark ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid rgba(0, 0, 0, 0.12)",
               borderRadius: 10,
-              color: isDark ? "#ffffff" : "#111827",
               cursor: "pointer",
               backdropFilter: "blur(12px)",
-              transition: "all 0.15s ease",
-              boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
+              boxShadow: isDark
+                ? "0 4px 14px rgba(0,0,0,0.25)"
+                : "0 2px 8px rgba(0,0,0,0.08)",
+              ...(autoRotate
+                ? {
+                    background: isDark ? "rgba(255, 255, 255, 0.18)" : "rgba(0, 0, 0, 0.12)",
+                    borderColor: isDark ? "rgba(255, 255, 255, 0.5)" : "rgba(0, 0, 0, 0.4)",
+                    color: isDark ? "#ffffff" : "#111827",
+                  }
+                : {}),
             }}
           >
             <svg
@@ -533,21 +533,19 @@ export default function SkinViewer3D({
             type="button"
             onClick={handleResetCamera}
             title={t("skins.controls.resetCamera") || "Reiniciar cámara"}
-
+            className="launcher-btn-secondary"
             style={{
               width: 32,
               height: 32,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: isDark ? "rgba(18, 26, 36, 0.85)" : "rgba(255, 255, 255, 0.9)",
-              border: isDark ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid rgba(0, 0, 0, 0.12)",
               borderRadius: 10,
-              color: isDark ? "#ffffff" : "#111827",
               cursor: "pointer",
               backdropFilter: "blur(12px)",
-              transition: "all 0.15s ease",
-              boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
+              boxShadow: isDark
+                ? "0 4px 14px rgba(0,0,0,0.25)"
+                : "0 2px 8px rgba(0,0,0,0.08)",
             }}
           >
             <svg

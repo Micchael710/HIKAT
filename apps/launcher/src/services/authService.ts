@@ -14,6 +14,7 @@ import {
   generateCodeChallenge,
   generateRandomState,
   isValidUsername,
+  AuthErrorCode,
 } from "@hikat/shared"
 import { sanitizeUsername, sanitizeEmail, sanitizeInput } from "../utils/security"
 
@@ -666,13 +667,10 @@ class LauncherAuthService {
 
   public async changeUsername(newUsername: string): Promise<{ success: boolean; user?: UserProfile; error?: string; code?: string }> {
     const trimmed = typeof newUsername === "string" ? newUsername.trim() : ""
-    if (!trimmed) {
-      return { success: false, error: "Nombre de usuario requerido.", code: "INVALID_USERNAME" }
-    }
-    if (!isValidUsername(trimmed)) {
+    if (!trimmed || !isValidUsername(trimmed)) {
       return {
         success: false,
-        error: "El nombre de usuario debe tener entre 3 y 16 caracteres y solo contener letras, números y guion bajo.",
+        error: "INVALID_USERNAME",
         code: "INVALID_USERNAME",
       }
     }
@@ -690,10 +688,26 @@ class LauncherAuthService {
         },
       }
     } catch (err: any) {
+      const rawCode = err?.code || err?.name || ""
+      const rawMessage = err?.message || ""
+      let code = rawCode
+      if (
+        rawMessage === AuthErrorCode.USERNAME_ALREADY_EXISTS ||
+        rawCode === AuthErrorCode.USERNAME_ALREADY_EXISTS ||
+        rawMessage.includes("USERNAME_ALREADY_EXISTS")
+      ) {
+        code = AuthErrorCode.USERNAME_ALREADY_EXISTS
+      } else if (
+        rawMessage === AuthErrorCode.INVALID_USERNAME ||
+        rawCode === AuthErrorCode.INVALID_USERNAME ||
+        rawMessage.includes("INVALID_USERNAME")
+      ) {
+        code = AuthErrorCode.INVALID_USERNAME
+      }
       return {
         success: false,
-        error: err.message || "Error al cambiar el nombre de usuario.",
-        code: err.code || err.name,
+        error: rawMessage || "Error al cambiar el nombre de usuario.",
+        code: code || undefined,
       }
     }
   }

@@ -249,5 +249,50 @@ describe("SkinsView Component — Custom Skin & Cape Delete Button Placement", (
     expect(personalBadge?.style.background).toContain("rgba(")
     expect(personalBadge?.style.color).toContain("rgb(")
   })
+
+  it("7. Uploading a custom skin triggers LiveToast with dynamic accent color", async () => {
+    const { encode } = await import("fast-png")
+    const validPngBuffer = encode({
+      width: 64,
+      height: 64,
+      data: new Uint8Array(64 * 64 * 4).fill(255),
+      channels: 4,
+      depth: 8,
+    })
+
+    const onUploadSkin = vi.fn().mockResolvedValue(true)
+    const container = await renderComponent(
+      <LanguageProvider>
+        <SkinsView
+          username="TestUser"
+          appliedSkin="alex"
+          setAppliedSkin={vi.fn()}
+          appliedCape="none"
+          setAppliedCape={vi.fn()}
+          playerSkin={null}
+          onUploadSkin={onUploadSkin}
+        />
+      </LanguageProvider>,
+    )
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    expect(fileInput).not.toBeNull()
+
+    const file = new File([validPngBuffer.buffer as ArrayBuffer], "custom_duck.png", { type: "image/png" })
+    Object.defineProperty(fileInput, "files", {
+      value: [file],
+      writable: false,
+    })
+
+    await act(async () => {
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+
+    expect(onUploadSkin).toHaveBeenCalledTimes(1)
+    const toast = container.querySelector(".settings-live-toast") as HTMLElement
+    expect(toast).not.toBeNull()
+    expect(toast.textContent).toContain("¡Skin personalizada subida y aplicada con éxito!")
+  })
 })
+
 

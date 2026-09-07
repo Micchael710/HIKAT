@@ -43,16 +43,12 @@ export default function LauncherSelect({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        className="launcher-btn-secondary"
         style={{
           width: "100%",
           height: 48,
           padding: "0 18px",
           borderRadius: 12,
-          background: isDark ? "#0d1217" : "#f0f3f7",
-          border: isDark
-            ? "1.5px solid rgba(255, 255, 255, 0.12)"
-            : "1.5px solid rgba(0, 0, 0, 0.12)",
-          color: isDark ? "white" : "#111822",
           fontSize: 15.5,
           fontWeight: 600,
           fontFamily: BASE_FONT,
@@ -60,7 +56,6 @@ export default function LauncherSelect({
           alignItems: "center",
           justifyContent: "space-between",
           cursor: "pointer",
-          transition: "border-color 0.16s ease",
         }}
       >
         <span>{current.label}</span>
@@ -69,7 +64,7 @@ export default function LauncherSelect({
           height={11}
           viewBox="0 0 11 11"
           fill="none"
-          stroke={isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.6)"}
+          stroke="currentColor"
           strokeWidth={2.2}
           strokeLinecap="round"
           strokeLinejoin="round"

@@ -756,41 +756,11 @@ export default function SettingsView({
             <button
               type="button"
               onClick={() => setActiveTab("general")}
+              className={`launcher-tab-btn ${activeTab === "general" ? "is-active" : ""}`}
               style={{
                 padding: "10px 28px",
-                borderRadius: 10,
                 fontFamily: BASE_FONT,
                 fontSize: 15.5,
-                fontWeight: 700,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                border:
-                  activeTab === "general"
-                    ? isDark
-                      ? "1.5px solid rgba(255, 255, 255, 0.14)"
-                      : "1.5px solid rgba(0, 0, 0, 0.08)"
-                    : "1.5px solid transparent",
-                background:
-                  activeTab === "general"
-                    ? isDark
-                      ? "#1c2630"
-                      : "#ffffff"
-                    : "transparent",
-                color:
-                  activeTab === "general"
-                    ? isDark
-                      ? "#ffffff"
-                      : "#111822"
-                    : isDark
-                      ? "#7a8b9e"
-                      : "#667788",
-                boxShadow:
-                  activeTab === "general" && !isDark
-                    ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                    : "none",
-                transition: "all 0.16s ease",
               }}
             >
               <svg
@@ -812,41 +782,11 @@ export default function SettingsView({
             <button
               type="button"
               onClick={() => setActiveTab("game")}
+              className={`launcher-tab-btn ${activeTab === "game" ? "is-active" : ""}`}
               style={{
                 padding: "10px 28px",
-                borderRadius: 10,
                 fontFamily: BASE_FONT,
                 fontSize: 15.5,
-                fontWeight: 700,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                border:
-                  activeTab === "game"
-                    ? isDark
-                      ? "1.5px solid rgba(255, 255, 255, 0.14)"
-                      : "1.5px solid rgba(0, 0, 0, 0.08)"
-                    : "1.5px solid transparent",
-                background:
-                  activeTab === "game"
-                    ? isDark
-                      ? "#1c2630"
-                      : "#ffffff"
-                    : "transparent",
-                color:
-                  activeTab === "game"
-                    ? isDark
-                      ? "#ffffff"
-                      : "#111822"
-                    : isDark
-                      ? "#7a8b9e"
-                      : "#667788",
-                boxShadow:
-                  activeTab === "game" && !isDark
-                    ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                    : "none",
-                transition: "all 0.16s ease",
               }}
             >
               <svg
@@ -953,25 +893,11 @@ export default function SettingsView({
                         setTheme?.("dark")
                         notifySaved(t("settings.toastDarkTheme"))
                       }}
+                      className={`launcher-tab-btn ${isDark ? "is-active" : ""}`}
                       style={{
                         padding: "8px 20px",
-                        borderRadius: 10,
-                        background: isDark ? "#1c2630" : "transparent",
-                        border: isDark
-                          ? "1.5px solid rgba(255, 255, 255, 0.14)"
-                          : "1.5px solid transparent",
-                        color: isDark ? "white" : "#667788",
-                        fontWeight: isDark ? 700 : 500,
                         fontFamily: BASE_FONT,
                         fontSize: 14,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        boxShadow: isDark
-                          ? "0 2px 8px rgba(0, 0, 0, 0.3)"
-                          : "none",
-                        transition: "all 0.15s ease",
                       }}
                     >
                       <IconMoon size={15} />
@@ -983,25 +909,11 @@ export default function SettingsView({
                         setTheme?.("light")
                         notifySaved(t("settings.toastLightTheme"))
                       }}
+                      className={`launcher-tab-btn ${!isDark ? "is-active" : ""}`}
                       style={{
                         padding: "8px 20px",
-                        borderRadius: 10,
-                        background: !isDark ? "#ffffff" : "transparent",
-                        border: !isDark
-                          ? "1.5px solid rgba(0, 0, 0, 0.08)"
-                          : "1.5px solid transparent",
-                        color: !isDark ? "#111822" : "#7a8b9e",
-                        fontWeight: !isDark ? 700 : 500,
                         fontFamily: BASE_FONT,
                         fontSize: 14,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        boxShadow: !isDark
-                          ? "0 2px 8px rgba(0, 0, 0, 0.08)"
-                          : "none",
-                        transition: "all 0.15s ease",
                       }}
                     >
                       <IconSun size={15} />

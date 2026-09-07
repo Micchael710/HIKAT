@@ -39,10 +39,10 @@ function getOrCreateSharedViewer(): { viewer: SkinViewer; canvas: HTMLCanvasElem
 
   viewer.background = null
 
-  // Camera setup: closer zoom and centered vertically so character fills the card nicely
+  // Camera setup: calibrated zoom and vertical offset so character with hat/accessories fits completely without clipping
   viewer.camera.position.set(0, 0, 36)
   viewer.camera.lookAt(0, 0, 0)
-  viewer.zoom = 1.1
+  viewer.zoom = 0.90
   viewer.adjustCameraDistance()
 
   // Directional lighting from upper front-left for crisp 3D depth & limb shading
@@ -76,10 +76,15 @@ async function processQueue() {
     try {
       await viewer.loadSkin(task.url, { model: "auto-detect" })
 
-      // Apply charming 3D isometric presentation pose
+      // Calibrate zoom and camera distance
+      viewer.zoom = 0.90
+      viewer.adjustCameraDistance()
+      viewer.camera.lookAt(0, 0, 0)
+
+      // Apply charming 3D isometric presentation pose centered vertically
       const player = viewer.playerObject
       player.rotation.set(0, 0.42, 0) // Charming 24 degree isometric angle
-      player.position.set(0, 0, 0)
+      player.position.set(0, -0.6, 0) // Centered vertically so head (plus hat/accessories) and feet are equally balanced
       player.skin.resetJoints()
 
       // Natural limbs & head tilt

@@ -676,12 +676,18 @@ export class AuthClientCore {
     if (!res.ok) {
       const errCode = data.error || data.message
       if (errCode === AuthErrorCode.INVALID_USERNAME) {
-        throw new Error(AuthErrorCode.INVALID_USERNAME)
+        const err: any = new Error(AuthErrorCode.INVALID_USERNAME)
+        err.code = AuthErrorCode.INVALID_USERNAME
+        throw err
       }
       if (errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
-        throw new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+        const err: any = new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+        err.code = AuthErrorCode.USERNAME_ALREADY_EXISTS
+        throw err
       }
-      throw new Error(data.message || data.error || "Error al cambiar el nombre de usuario")
+      const err: any = new Error(data.message || data.error || "Error al cambiar el nombre de usuario")
+      err.code = errCode
+      throw err
     }
 
     const updatedDisplayName = data.user?.displayName || newUsername

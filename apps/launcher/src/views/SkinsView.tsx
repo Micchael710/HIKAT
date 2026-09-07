@@ -15,7 +15,7 @@ import CapeCardPreview from "../components/minecraft/CapeCardPreview"
 import { loadCapeToCanvas } from "skinview-utils"
 import LiveToast from "../components/common/LiveToast"
 import { useTranslation } from "../context/LanguageContext"
-import { useDynamicAccent } from "../utils/dynamicAccent"
+import { useDynamicAccent, extractDominantAccent } from "../utils/dynamicAccent"
 import {
   validateMinecraftSkinTexture,
   validateCapeTextureBuffer,
@@ -368,8 +368,21 @@ export default function SkinsView({
         }
 
         if (onUploadSkin) {
+          let extractedHex = "#38bdf8"
+          try {
+            const fileUrl = URL.createObjectURL(file)
+            try {
+              const dominant = await extractDominantAccent(fileUrl, "#38bdf8")
+              extractedHex = dominant.hex
+            } finally {
+              URL.revokeObjectURL(fileUrl)
+            }
+          } catch (_) {
+            // fallback to default
+          }
+
           await onUploadSkin(file)
-          showToast(t("skins.skinUploadSuccess"), "success", "#38bdf8")
+          showToast(t("skins.skinUploadSuccess"), "success", extractedHex)
         }
       } catch (err: any) {
         showToast(
@@ -434,9 +447,22 @@ export default function SkinsView({
         }
 
         if (onUploadCape) {
+          let extractedHex = "#10b981"
+          try {
+            const fileUrl = URL.createObjectURL(file)
+            try {
+              const dominant = await extractDominantAccent(fileUrl, "#10b981")
+              extractedHex = dominant.hex
+            } finally {
+              URL.revokeObjectURL(fileUrl)
+            }
+          } catch (_) {
+            // fallback to default
+          }
+
           const capeName = file.name.replace(/\.[^/.]+$/, "").slice(0, 20) || "Mi Capa"
           await onUploadCape(file, capeName)
-          showToast(t("skins.capeUploadSuccess"), "success", "#10b981")
+          showToast(t("skins.capeUploadSuccess"), "success", extractedHex)
         }
       } catch (err: any) {
         showToast(
@@ -663,36 +689,11 @@ export default function SkinsView({
                   key={tab}
                   type="button"
                   onClick={() => setSkinType(tab)}
+                  className={`launcher-tab-btn ${isCurrent ? "is-active" : ""}`}
                   style={{
                     padding: "9px 26px",
-                    borderRadius: 10,
-                    background: isCurrent
-                      ? isDark
-                        ? "#1c2630"
-                        : "#ffffff"
-                      : "transparent",
-                    border: isCurrent
-                      ? isDark
-                        ? "1.5px solid rgba(255,255,255,0.14)"
-                        : "1.5px solid rgba(0,0,0,0.08)"
-                      : "1.5px solid transparent",
-                    color: isCurrent
-                      ? isDark
-                        ? "white"
-                        : "#111822"
-                      : isDark
-                        ? "#7a8b9e"
-                        : "#667788",
-                    boxShadow:
-                      isCurrent && !isDark
-                        ? "0 2px 8px rgba(0,0,0,0.08)"
-                        : "none",
-                    fontSize: 15,
-                    fontWeight: 700,
                     fontFamily: BASE_FONT,
-                    cursor: "pointer",
-                    transition:
-                      "background 0.16s, color 0.16s, border-color 0.16s",
+                    fontSize: 15,
                   }}
                 >
                   {tab === "skin" ? t("skins.tabSkins") : t("skins.tabCapes")}
@@ -863,9 +864,10 @@ export default function SkinsView({
                         : undefined
                     }
                     accentHex={currentAccent.hex}
-                    width={380}
-                    height={520}
+                    width={414}
+                    height={554}
                     isCapeMode={skinType === "capa"}
+                    isDark={isDark}
                   />
                 ) : (
                   <div

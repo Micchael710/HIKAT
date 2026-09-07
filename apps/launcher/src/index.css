@@ -612,6 +612,57 @@ img, svg, a {
   transform: translateY(-2px);
 }
 
+/* Segmented tab / toggle pill button styles */
+.launcher-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  border: 1.5px solid transparent;
+  color: #7a8b9e;
+  transition: all 0.16s ease;
+  user-select: none;
+}
+
+[data-theme="light"] .launcher-tab-btn {
+  color: #667788;
+}
+
+.launcher-tab-btn:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+[data-theme="light"] .launcher-tab-btn:hover:not(.is-active) {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #111822;
+  transform: translateY(-1px);
+}
+
+.launcher-tab-btn.is-active {
+  background: #1c2630;
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: default;
+}
+
+[data-theme="light"] .launcher-tab-btn.is-active {
+  background: #ffffff;
+  border: 1.5px solid rgba(0, 0, 0, 0.08);
+  color: #111822;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  cursor: default;
+}
+
 /* Custom dark & light scrollbar for grid collections */
 .custom-grid-scroll::-webkit-scrollbar {
   width: 6px;

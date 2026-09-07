@@ -8,7 +8,6 @@ import { useDynamicAccent } from "../utils/dynamicAccent"
 
 import { authService, AuthMethodSummary } from "../services/authService"
 import { isValidUsername, AuthErrorCode } from "@hikat/shared"
-import { sanitizeUsername } from "../utils/security"
 
 interface ProfileViewProps {
   username: string
@@ -43,6 +42,7 @@ export default function ProfileView({
   const [isEditingUsername, setIsEditingUsername] = useState(false)
   const [isSavingUsername, setIsSavingUsername] = useState(false)
   const [usernameError, setUsernameError] = useState<string | null>(null)
+  const lastInvalidCharsRef = useRef(false)
 
   // Listen to authService state updates
   useEffect(() => {
@@ -70,6 +70,7 @@ export default function ProfileView({
 
     if (!isValidUsername(trimmed)) {
       setUsernameError(t("profile.usernameInvalidError"))
+      showToast(t("profile.usernameInvalidError"), "error")
       return
     }
 
@@ -84,25 +85,54 @@ export default function ProfileView({
         setCurrentUsername(updatedName)
         setNewUsernameInput(updatedName)
         setIsEditingUsername(false)
+        lastInvalidCharsRef.current = false
         showToast(t("profile.usernameChangeSuccess"), "success")
       } else {
-        if (res.code === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
+        const errCode =
+          res.code ||
+          (res.error === AuthErrorCode.USERNAME_ALREADY_EXISTS ||
+          res.error?.includes("USERNAME_ALREADY_EXISTS")
+            ? AuthErrorCode.USERNAME_ALREADY_EXISTS
+            : res.error === AuthErrorCode.INVALID_USERNAME ||
+              res.error?.includes("INVALID_USERNAME")
+            ? AuthErrorCode.INVALID_USERNAME
+            : null)
+
+        if (errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
           setUsernameError(t("profile.usernameTakenError"))
           showToast(t("profile.usernameTakenError"), "error")
-        } else if (res.code === AuthErrorCode.INVALID_USERNAME) {
+        } else if (errCode === AuthErrorCode.INVALID_USERNAME) {
           setUsernameError(t("profile.usernameInvalidError"))
           showToast(t("profile.usernameInvalidError"), "error")
         } else {
-          const msg = res.error || t("profile.usernameChangeError")
+          const msg = t("profile.usernameChangeError")
           setUsernameError(msg)
           showToast(msg, "error")
         }
       }
     } catch (err: any) {
       setIsSavingUsername(false)
-      const msg = err?.message || t("profile.usernameChangeError")
-      setUsernameError(msg)
-      showToast(msg, "error")
+      const errCode =
+        err?.code ||
+        (err?.message === AuthErrorCode.USERNAME_ALREADY_EXISTS ||
+        err?.message?.includes?.("USERNAME_ALREADY_EXISTS")
+          ? AuthErrorCode.USERNAME_ALREADY_EXISTS
+          : err?.message === AuthErrorCode.INVALID_USERNAME ||
+            err?.message?.includes?.("INVALID_USERNAME")
+          ? AuthErrorCode.INVALID_USERNAME
+          : null)
+
+      if (errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
+        setUsernameError(t("profile.usernameTakenError"))
+        showToast(t("profile.usernameTakenError"), "error")
+      } else if (errCode === AuthErrorCode.INVALID_USERNAME) {
+        setUsernameError(t("profile.usernameInvalidError"))
+        showToast(t("profile.usernameInvalidError"), "error")
+      } else {
+        const msg = t("profile.usernameChangeError")
+        setUsernameError(msg)
+        showToast(msg, "error")
+      }
     }
   }
 
@@ -178,9 +208,19 @@ export default function ProfileView({
     return () => clearInterval(timer)
   }, [email])
 
+  const activeSkinTexture =
+    activeSkinData?.customImgUrl || activeSkinData?.skinUrl
+  const activeSkinFallback =
+    activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8"
+  const currentAccent = useDynamicAccent(
+    activeSkinTexture,
+    activeSkinFallback,
+  )
+
   const [toastState, setToastState] = useState<{
     message: string | null
     type: "success" | "error" | "info"
+    accentColor?: string
   }>({
     message: null,
     type: "success",
@@ -191,9 +231,15 @@ export default function ProfileView({
   const showToast = (
     msg?: string,
     type: "success" | "error" | "info" = "success",
+    overrideAccent?: string,
   ) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
-    setToastState({ message: msg || t("settings.toastSaved"), type })
+    setToastState({
+      message: msg || t("settings.toastSaved"),
+      type,
+      accentColor:
+        type === "error" ? undefined : overrideAccent || currentAccent.hex,
+    })
     toastTimeoutRef.current = setTimeout(() => {
       setToastState({ message: null, type: "success" })
     }, 2800)
@@ -222,14 +268,6 @@ export default function ProfileView({
     }
   }
 
-  const activeSkinTexture =
-    activeSkinData?.customImgUrl || activeSkinData?.skinUrl
-  const activeSkinFallback =
-    activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8"
-  const currentAccent = useDynamicAccent(
-    activeSkinTexture,
-    activeSkinFallback,
-  )
   const CONTENT_LEFT = 184
 
   /* Smooth delayed mouse-following parallax */
@@ -384,42 +422,18 @@ export default function ProfileView({
               type="button"
               onClick={onBack}
               title={t("common.back")}
+              aria-label={t("common.back")}
+              className="launcher-btn-secondary"
               style={{
                 width: 44,
                 height: 44,
                 borderRadius: 14,
-                background: isDark ? "#0d1217" : "#ffffff",
-                border: isDark
-                  ? "1.5px solid rgba(255, 255, 255, 0.1)"
-                  : "1.5px solid rgba(0, 0, 0, 0.1)",
-                boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: isDark ? "#8899aa" : "#556677",
                 cursor: "pointer",
                 flexShrink: 0,
-                transition: "all 0.16s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = isDark ? "#ffffff" : "#111822"
-                e.currentTarget.style.borderColor = isDark
-                  ? "rgba(255, 255, 255, 0.26)"
-                  : "rgba(0, 0, 0, 0.25)"
-                e.currentTarget.style.background = isDark
-                  ? "#151e26"
-                  : "#f0f3f7"
-                e.currentTarget.style.transform = "translateX(-2px)"
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = isDark ? "#8899aa" : "#556677"
-                e.currentTarget.style.borderColor = isDark
-                  ? "rgba(255, 255, 255, 0.1)"
-                  : "rgba(0, 0, 0, 0.1)"
-                e.currentTarget.style.background = isDark
-                  ? "#0d1217"
-                  : "#ffffff"
-                e.currentTarget.style.transform = "none"
+                padding: 0,
               }}
             >
               <svg
@@ -620,6 +634,7 @@ export default function ProfileView({
                       onClick={() => {
                         setNewUsernameInput(currentUsername)
                         setUsernameError(null)
+                        lastInvalidCharsRef.current = false
                         setIsEditingUsername(true)
                       }}
                       title={t("profile.changeUsernameTitle")}
@@ -679,22 +694,23 @@ export default function ProfileView({
                       title={t("profile.usernameRulesHint")}
                       placeholder={t("profile.newUsernamePlaceholder")}
                       value={newUsernameInput}
-                      onKeyDown={(e) => {
-                        if (
-                          e.key === " " ||
-                          (e.key.length === 1 &&
-                            !/^[a-zA-Z0-9_]$/.test(e.key) &&
-                            !e.ctrlKey &&
-                            !e.metaKey &&
-                            !e.altKey)
-                        ) {
-                          e.preventDefault()
-                        }
-                      }}
                       onChange={(e) => {
-                        const sanitized = sanitizeUsername(e.target.value)
-                        setNewUsernameInput(sanitized)
-                        if (usernameError) setUsernameError(null)
+                        const val = e.target.value
+                        setNewUsernameInput(val)
+
+                        const hasInvalidChars = /[^a-zA-Z0-9_]/.test(val)
+                        if (hasInvalidChars) {
+                          setUsernameError(t("profile.usernameInvalidError"))
+                          if (!lastInvalidCharsRef.current) {
+                            showToast(t("profile.usernameInvalidError"), "error")
+                            lastInvalidCharsRef.current = true
+                          }
+                        } else {
+                          lastInvalidCharsRef.current = false
+                          if (usernameError) {
+                            setUsernameError(null)
+                          }
+                        }
                       }}
                       className="launcher-input"
                       style={{
@@ -776,6 +792,7 @@ export default function ProfileView({
                         setIsEditingUsername(false)
                         setNewUsernameInput(currentUsername)
                         setUsernameError(null)
+                        lastInvalidCharsRef.current = false
                       }}
                       className="launcher-btn-secondary"
                       style={{
@@ -1261,7 +1278,11 @@ export default function ProfileView({
         </div>
 
         {/* ── Real-time Toast ── */}
-        <LiveToast message={toastState.message} type={toastState.type} />
+        <LiveToast
+          message={toastState.message}
+          type={toastState.type}
+          accentColor={toastState.accentColor}
+        />
       </div>
     </div>
   )
