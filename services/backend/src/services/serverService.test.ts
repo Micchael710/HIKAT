@@ -15,7 +15,8 @@ import {
 } from "./pterodactyl/serverAdministrationService"
 import { prepareGameDraft, getPublishedModpack } from "./game/releaseService"
 import { modProviderManager } from "./providers/modProviderManager"
-import { replaceServerWorld } from "./pterodactyl/serverWorldService"
+import { replaceServerWorld, createServerWorldDownloadUrl } from "./pterodactyl/serverWorldService"
+import { PterodactylHttpClient } from "./pterodactyl/pterodactylClient"
 import { restoreServerBackup } from "./pterodactyl/serverBackupService"
 import { installServerContentPlan, removeServerManagedContent } from "./pterodactyl/serverContentService"
 import { applyServerReleaseSync } from "./pterodactyl/serverReleaseSyncService"
@@ -1124,6 +1125,73 @@ describe("ServerService & Multi-Server Provisioning", () => {
       await expect(
         deleteNews(mockDb, newsA.id, "srv-beta"),
       ).rejects.toThrow("La noticia pertenece a otro servidor.")
+    })
+
+    it("18. con 2 servidores, createServerWorldDownloadUrl sin serverId falla antes de llamar compressFiles", async () => {
+      await mockDb.insert(schema.servers).values([
+        {
+          id: "srv-wdl-1",
+          name: "World DL Server 1",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "srv-wdl-2",
+          name: "World DL Server 2",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          provisioningStatus: "READY",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      const compressFiles = vi.fn()
+      const mockClient = { compressFiles } as unknown as IPterodactylClient
+
+      await expect(
+        createServerWorldDownloadUrl(mockEnv, undefined, null, mockClient, mockDb),
+      ).rejects.toThrow("Se debe especificar el servidor para esta descarga de mundo")
+
+      expect(compressFiles).not.toHaveBeenCalled()
+    })
+
+    it("19. deleteApplicationServer con 404 es idempotente: deleteServer retorna true y elimina D1", async () => {
+      const serverId = "srv-del-404"
+      await mockDb.insert(schema.servers).values({
+        id: serverId,
+        name: "Server Del 404",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+        pterodactylServerId: "ptero-404-id",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Real PterodactylHttpClient with a fetch mock that returns 404 for DELETE
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ errors: [{ code: "NotFound" }] }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      const realClient = new PterodactylHttpClient({
+        baseUrl: mockEnv.PTERODACTYL_BASE_URL as string,
+        appApiKey: mockEnv.PTERODACTYL_APP_API_KEY as string,
+        fetchFn: mockFetch,
+      })
+
+      // deleteServer with deletePterodactyl=true; 404 from Pterodactyl must be treated as success
+      const result = await deleteServer(mockDb, mockEnv, serverId, true, realClient as unknown as IPterodactylClient)
+      expect(result).toBe(true)
+
+      // D1 row must be gone
+      const row = await mockDb.select().from(schema.servers).where(eq(schema.servers.id, serverId)).get()
+      expect(row).toBeUndefined()
     })
   })
 })

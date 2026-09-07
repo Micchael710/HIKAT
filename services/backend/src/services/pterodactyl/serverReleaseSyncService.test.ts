@@ -309,6 +309,7 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
 
     expect(result.success).toBe(true)
     expect(createBackupSpy).toHaveBeenCalledWith("Pre-Release Sync Backup")
+    expect(createBackupSpy).toHaveBeenCalledTimes(1)
     expect(env.ASSETS.get).toHaveBeenCalledWith("releases/rel-pub-2/mods/new-server-mod.jar")
     expect(writeFileSpy).toHaveBeenCalledWith("/mods/new-server-mod.jar", expect.any(Uint8Array))
 
