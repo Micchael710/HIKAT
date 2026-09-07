@@ -10,7 +10,7 @@ import {
   isValidUsername,
 } from "../utils/security"
 import { authService, UserProfile } from "../services/authService"
-import { AuthStatus } from "@hikat/shared"
+import { AuthStatus, AuthErrorCode } from "@hikat/shared"
 import { mapAuthErrorToKey } from "../utils/authErrorMapper"
 
 interface LoginViewProps {
@@ -127,8 +127,10 @@ export default function LoginView({
 
   const processDeepLinkUrl = async (rawUrl: string) => {
     try {
-      const urlObj = new URL(rawUrl)
-      if (urlObj.protocol !== "hikat:") return
+      if (!rawUrl || typeof rawUrl !== "string") return
+      const trimmed = rawUrl.trim()
+      if (!trimmed.startsWith("hikat://")) return
+      const urlObj = new URL(trimmed.replace(/^hikat:\/\//, "http://"))
       const host = urlObj.hostname || urlObj.host
       if (host !== "auth") return
       const cleanPath = urlObj.pathname.replace(/\/+$/, "")
@@ -165,36 +167,68 @@ export default function LoginView({
         const pendingKeepSession = pendingOAuthRef.current?.keepSession
 
         setIsEnteringWorld(true)
-        const user = await authService.handleOAuthCallback({
-          code,
-          codeVerifier: pendingVerifier,
-          state,
-          expectedState,
-          keepSession: pendingKeepSession,
-        })
+        try {
+          const user = await authService.handleOAuthCallback({
+            code,
+            codeVerifier: pendingVerifier,
+            state,
+            expectedState,
+            keepSession: pendingKeepSession,
+          })
 
-        pendingOAuthRef.current = null
-        if (typeof sessionStorage !== "undefined") {
-          sessionStorage.removeItem("hikat_launcher_oauth_verifier")
-          sessionStorage.removeItem("hikat_launcher_oauth_state")
-          sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
-        }
+          pendingOAuthRef.current = null
+          if (typeof sessionStorage !== "undefined") {
+            sessionStorage.removeItem("hikat_launcher_oauth_verifier")
+            sessionStorage.removeItem("hikat_launcher_oauth_state")
+            sessionStorage.removeItem("hikat_launcher_oauth_keep_session")
+          }
 
-        if (!user.displayName || user.displayName.trim() === "") {
+          if (!user.displayName || user.displayName.trim() === "") {
+            setIsEnteringWorld(false)
+            const rawSuggestion = user.suggestedUsername || (user.email ? user.email.split("@")[0] : "")
+            const suggestion = sanitizeUsername(rawSuggestion)
+            setOnboardingUsername(suggestion)
+            setMode("choose-username")
+            setErrorMessage(null)
+            setSuccessNotice(null)
+            return
+          }
+
+          setTimeout(() => {
+            onLogin(user.displayName!)
+          }, 350)
+          return
+        } catch (oauthErr: any) {
           setIsEnteringWorld(false)
-          const rawSuggestion = user.suggestedUsername || (user.email ? user.email.split("@")[0] : "")
-          const suggestion = sanitizeUsername(rawSuggestion)
-          setOnboardingUsername(suggestion)
-          setMode("choose-username")
-          setErrorMessage(null)
-          setSuccessNotice(null)
+          console.error("OAuth callback exchange error:", oauthErr)
+          const errCode = oauthErr?.code || oauthErr?.message || ""
+          const msg = oauthErr?.message || ""
+          if (
+            errCode === AuthErrorCode.INVALID_STATE ||
+            errCode === AuthErrorCode.INVALID_PKCE ||
+            errCode === AuthErrorCode.TOKEN_EXPIRED ||
+            errCode === AuthErrorCode.TOKEN_REUSE_DETECTED ||
+            errCode === "INVALID_STATE" ||
+            errCode === "INVALID_PKCE" ||
+            errCode === "TOKEN_EXPIRED" ||
+            errCode === "TOKEN_REUSE_DETECTED" ||
+            msg.includes("Estado de autenticación inválido") ||
+            msg.includes("OAuth") ||
+            msg.includes("PKCE") ||
+            msg.includes("CSRF") ||
+            msg.includes("state")
+          ) {
+            setErrorMessage(t("auth.invalidOAuthAttempt"))
+          } else if (
+            errCode === AuthErrorCode.EMAIL_CONFLICT_LINK_REQUIRED ||
+            errCode === "EMAIL_CONFLICT_LINK_REQUIRED"
+          ) {
+            setErrorMessage(t("auth.emailConflictError"))
+          } else {
+            setErrorMessage(t("auth.externalAuthError"))
+          }
           return
         }
-
-        setTimeout(() => {
-          onLogin(user.displayName!)
-        }, 350)
-        return
       }
 
       if (cleanPath === "/verify-email") {
@@ -207,13 +241,31 @@ export default function LoginView({
         }
         setErrorMessage(null)
         setSuccessNotice(null)
-        const res = await authService.verifyEmail(token)
-        setMode("auth")
-        setTab("login")
-        if (res.success) {
-          setSuccessNotice(t("auth.emailVerifiedSuccess"))
-        } else {
-          setErrorMessage(t("auth.invalidVerificationToken"))
+        try {
+          const res = await authService.verifyEmail(token)
+          setMode("auth")
+          setTab("login")
+          if (res.success) {
+            setSuccessNotice(t("auth.emailVerifiedSuccess"))
+          } else {
+            const errCode = (res as any).code || res.error
+            if (
+              errCode === AuthErrorCode.INVALID_TOKEN ||
+              errCode === AuthErrorCode.TOKEN_EXPIRED ||
+              errCode === AuthErrorCode.TOKEN_REUSE_DETECTED ||
+              errCode === "INVALID_TOKEN" ||
+              errCode === "TOKEN_EXPIRED" ||
+              errCode === "TOKEN_REUSE_DETECTED"
+            ) {
+              setErrorMessage(t("auth.invalidVerificationToken"))
+            } else {
+              setErrorMessage(t("auth.genericAuthError"))
+            }
+          }
+        } catch (err: any) {
+          setMode("auth")
+          setTab("login")
+          setErrorMessage(t("auth.genericAuthError"))
         }
         return
       }
@@ -444,13 +496,28 @@ export default function LoginView({
         setTab("login")
         setSuccessNotice(t("auth.passwordResetSuccess"))
       } else {
-        const errKey = mapAuthErrorToKey((res as any).code || res.error, "auth.invalidResetToken")
-        setErrorMessage(t(errKey))
+        const errCode = (res as any).code || res.error
+        if (
+          errCode === AuthErrorCode.INVALID_TOKEN ||
+          errCode === AuthErrorCode.TOKEN_EXPIRED ||
+          errCode === AuthErrorCode.TOKEN_REUSE_DETECTED ||
+          errCode === "INVALID_TOKEN" ||
+          errCode === "TOKEN_EXPIRED" ||
+          errCode === "TOKEN_REUSE_DETECTED"
+        ) {
+          setErrorMessage(t("auth.invalidResetToken"))
+        } else if (errCode === "PASSWORD_TOO_SHORT") {
+          setErrorMessage(t("auth.passwordMinLength"))
+        } else if (errCode === "PASSWORDS_DO_NOT_MATCH") {
+          setErrorMessage(t("auth.passwordsDoNotMatch"))
+        } else {
+          setErrorMessage(t("auth.genericAuthError"))
+        }
       }
     } catch (err) {
       console.error("Password reset execution error:", err)
       setIsResettingPassword(false)
-      setErrorMessage(t("auth.invalidResetToken"))
+      setErrorMessage(t("auth.genericAuthError"))
     }
   }
 

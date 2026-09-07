@@ -42,14 +42,6 @@ export function mapAuthErrorToKey(
     case "OAUTH_CALLBACK_ERROR":
       return "auth.invalidOAuthAttempt"
 
-    case AuthErrorCode.INVALID_TOKEN:
-    case "INVALID_TOKEN":
-      return "auth.invalidVerificationToken"
-
-    case AuthErrorCode.TOKEN_EXPIRED:
-    case "TOKEN_EXPIRED":
-      return "auth.invalidResetToken"
-
     case "OAUTH_INIT_ERROR":
       return "auth.oauthInitError"
 

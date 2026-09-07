@@ -4,6 +4,7 @@
 import React, { act } from "react"
 import { createRoot } from "react-dom/client"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { encode } from "fast-png"
 import { LanguageProvider } from "../context/LanguageContext"
 import LoginView from "../views/LoginView"
 import ProfileView from "../views/ProfileView"
@@ -182,8 +183,197 @@ describe("i18n Component Regressions & Error Rendering Test Suite", () => {
     })
   })
 
-  describe("2. ProfileView: Username error mapping renders localized copy", () => {
-    it("renders localized usernameTakenError in English when changeUsername returns USERNAME_ALREADY_EXISTS", async () => {
+  describe("2. Contextual Token Error Handling: verify-email, reset-password, and OAuth", () => {
+    it("verify-email + INVALID_TOKEN renders invalidVerificationToken and never raw code", async () => {
+      vi.spyOn(authService, "verifyEmail").mockResolvedValueOnce({
+        success: false,
+        error: "INVALID_TOKEN",
+        code: AuthErrorCode.INVALID_TOKEN,
+      })
+
+      const container = await renderComponent(
+        <LoginView onLogin={vi.fn()} theme="dark" initialDeepLinkUrl="hikat://auth/verify-email?token=invalid_tok_123" />,
+        "en",
+      )
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      expect(container.textContent).toContain("The verification link is invalid or has expired.")
+      expect(container.textContent).not.toContain("INVALID_TOKEN")
+      expect(container.textContent).not.toContain("auth.invalidVerificationToken")
+    })
+
+    it("verify-email + NETWORK_ERROR renders genericAuthError (never invalidVerificationToken)", async () => {
+      vi.spyOn(authService, "verifyEmail").mockResolvedValueOnce({
+        success: false,
+        error: "Error de conexión",
+        code: "NETWORK_ERROR",
+      })
+
+      const container = await renderComponent(
+        <LoginView onLogin={vi.fn()} theme="dark" initialDeepLinkUrl="hikat://auth/verify-email?token=valid_tok_123" />,
+        "en",
+      )
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      expect(container.textContent).toContain("Failed to complete authentication.")
+      expect(container.textContent).not.toContain("The verification link is invalid")
+      expect(container.textContent).not.toContain("NETWORK_ERROR")
+      expect(container.textContent).not.toContain("auth.genericAuthError")
+    })
+
+    it("reset-password + INVALID_TOKEN renders invalidResetToken (never invalidVerificationToken)", async () => {
+      vi.spyOn(authService, "resetPassword").mockResolvedValueOnce({
+        success: false,
+        error: "INVALID_TOKEN",
+        code: AuthErrorCode.INVALID_TOKEN,
+      })
+
+      const container = await renderComponent(
+        <LoginView onLogin={vi.fn()} theme="dark" initialDeepLinkUrl="hikat://auth/reset-password?token=invalid_reset_tok" />,
+        "en",
+      )
+
+      const inputs = container.querySelectorAll("input")
+      expect(inputs.length).toBeGreaterThanOrEqual(2)
+
+      await act(async () => {
+        changeInput(inputs[0], "NewSecurePass123!")
+        changeInput(inputs[1], "NewSecurePass123!")
+      })
+
+      const submitBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.classList.contains("launcher-btn-primary"),
+      )
+      expect(submitBtn).toBeDefined()
+
+      await act(async () => {
+        submitBtn?.click()
+      })
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      expect(container.textContent).toContain("The reset link is invalid or has expired.")
+      expect(container.textContent).not.toContain("The verification link is invalid")
+      expect(container.textContent).not.toContain("INVALID_TOKEN")
+      expect(container.textContent).not.toContain("auth.invalidResetToken")
+    })
+
+    it("reset-password + TOKEN_EXPIRED renders invalidResetToken (never invalidVerificationToken)", async () => {
+      vi.spyOn(authService, "resetPassword").mockResolvedValueOnce({
+        success: false,
+        error: "TOKEN_EXPIRED",
+        code: AuthErrorCode.TOKEN_EXPIRED,
+      })
+
+      const container = await renderComponent(
+        <LoginView onLogin={vi.fn()} theme="dark" initialDeepLinkUrl="hikat://auth/reset-password?token=expired_reset_tok" />,
+        "en",
+      )
+
+      const inputs = container.querySelectorAll("input")
+      await act(async () => {
+        changeInput(inputs[0], "NewSecurePass123!")
+        changeInput(inputs[1], "NewSecurePass123!")
+      })
+
+      const submitBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.classList.contains("launcher-btn-primary"),
+      )
+
+      await act(async () => {
+        submitBtn?.click()
+      })
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      expect(container.textContent).toContain("The reset link is invalid or has expired.")
+      expect(container.textContent).not.toContain("The verification link is invalid")
+      expect(container.textContent).not.toContain("TOKEN_EXPIRED")
+    })
+
+    it("reset-password + NETWORK_ERROR renders genericAuthError (never invalidResetToken)", async () => {
+      vi.spyOn(authService, "resetPassword").mockResolvedValueOnce({
+        success: false,
+        error: "Error de conexión",
+        code: "NETWORK_ERROR",
+      })
+
+      const container = await renderComponent(
+        <LoginView onLogin={vi.fn()} theme="dark" initialDeepLinkUrl="hikat://auth/reset-password?token=valid_reset_tok" />,
+        "en",
+      )
+
+      const inputs = container.querySelectorAll("input")
+      await act(async () => {
+        changeInput(inputs[0], "NewSecurePass123!")
+        changeInput(inputs[1], "NewSecurePass123!")
+      })
+
+      const submitBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.classList.contains("launcher-btn-primary"),
+      )
+
+      await act(async () => {
+        submitBtn?.click()
+      })
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      expect(container.textContent).toContain("Failed to complete authentication.")
+      expect(container.textContent).not.toContain("The reset link is invalid")
+      expect(container.textContent).not.toContain("NETWORK_ERROR")
+    })
+
+    it("OAuth + INVALID_STATE renders invalidOAuthAttempt (never technical code)", async () => {
+      const err: any = new Error("Invalid state")
+      err.code = AuthErrorCode.INVALID_STATE
+      vi.spyOn(authService, "handleOAuthCallback").mockRejectedValueOnce(err)
+
+      const container = await renderComponent(
+        <LoginView onLogin={vi.fn()} theme="dark" initialDeepLinkUrl="hikat://auth/callback?code=mock_code&state=bad_state" />,
+        "en",
+      )
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      expect(container.textContent).toContain("This sign-in attempt is no longer valid. Please try again.")
+      expect(container.textContent).not.toContain("INVALID_STATE")
+      expect(container.textContent).not.toContain("The reset link is invalid")
+    })
+
+    it("OAuth + TOKEN_EXPIRED renders invalidOAuthAttempt (NEVER invalidResetToken)", async () => {
+      const err: any = new Error("OAuth token expired")
+      err.code = AuthErrorCode.TOKEN_EXPIRED
+      vi.spyOn(authService, "handleOAuthCallback").mockRejectedValueOnce(err)
+
+      const container = await renderComponent(
+        <LoginView onLogin={vi.fn()} theme="dark" initialDeepLinkUrl="hikat://auth/callback?code=expired_code&state=valid_state" />,
+        "en",
+      )
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      expect(container.textContent).toContain("This sign-in attempt is no longer valid. Please try again.")
+      expect(container.textContent).not.toContain("The reset link is invalid")
+      expect(container.textContent).not.toContain("TOKEN_EXPIRED")
+    })
+  })
+
+  describe("3. ProfileView: Username error mapping renders localized copy", () => {
+    it("enters edit mode and renders localized usernameTakenError in English when changeUsername returns USERNAME_ALREADY_EXISTS", async () => {
       vi.spyOn(authService, "getUser").mockReturnValue({
         id: "u-1",
         username: "CurrentName",
@@ -202,32 +392,40 @@ describe("i18n Component Regressions & Error Rendering Test Suite", () => {
         "en",
       )
 
-      const input = container.querySelector("input")
-      if (input) {
-        await act(async () => {
-          changeInput(input, "TakenUsername")
-        })
+      // Enter edit mode by clicking the pencil button
+      const editBtn = container.querySelector('button[aria-label="Change Username"], button[title="Change Username"]') as HTMLButtonElement
+      expect(editBtn).not.toBeNull()
 
-        const saveBtn = Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.includes("Save") || b.textContent?.includes("Guardar"),
-        )
-        if (saveBtn) {
-          await act(async () => {
-            saveBtn.click()
-          })
-          await act(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50))
-          })
+      await act(async () => {
+        editBtn.click()
+      })
 
-          expect(container.textContent).toContain("This username is already taken.")
-          expect(container.textContent).not.toContain("USERNAME_ALREADY_EXISTS")
-          expect(container.textContent).not.toContain("Este nombre de usuario ya está en uso")
-        }
-      }
+      const input = container.querySelector("input") as HTMLInputElement
+      expect(input).not.toBeNull()
+
+      await act(async () => {
+        changeInput(input, "TakenUsername")
+      })
+
+      const saveBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.includes("Save") || b.textContent?.includes("Guardar"),
+      )
+      expect(saveBtn).toBeDefined()
+
+      await act(async () => {
+        saveBtn?.click()
+      })
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      expect(container.textContent).toContain("This username is already taken.")
+      expect(container.textContent).not.toContain("USERNAME_ALREADY_EXISTS")
+      expect(container.textContent).not.toContain("Este nombre de usuario ya está en uso")
     })
   })
 
-  describe("3. SkinsView: Sentinels and accessibility use dynamic localized labels", () => {
+  describe("4. SkinsView: Sentinels and accessibility use dynamic localized labels", () => {
     it("renders English sentinel names and alt attributes for 'none' and 'player-custom'", async () => {
       const container = await renderComponent(
         <SkinsView
@@ -353,7 +551,7 @@ describe("i18n Component Regressions & Error Rendering Test Suite", () => {
     })
   })
 
-  describe("4. SkinsView: Upload failure differentiation", () => {
+  describe("5. SkinsView: Upload failure differentiation", () => {
     it("shows dimensions error when file buffer has invalid dimensions", async () => {
       const container = await renderComponent(
         <SkinsView
@@ -385,7 +583,7 @@ describe("i18n Component Regressions & Error Rendering Test Suite", () => {
       expect(container.textContent).toContain("The image doesn't look like a Minecraft skin. Please use a valid skin file.")
     })
 
-    it("does NOT show invalid dimensions error when local validation passes but upload rejects with network error", async () => {
+    it("shows toastSaveError when local validation passes but upload rejects with network error (does NOT show invalidSkinDimensions)", async () => {
       const onUploadSkinMock = vi.fn().mockRejectedValueOnce(new Error("Failed to fetch GraphQL upload endpoint"))
 
       const container = await renderComponent(
@@ -401,17 +599,17 @@ describe("i18n Component Regressions & Error Rendering Test Suite", () => {
       )
 
       const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+      expect(fileInput).not.toBeNull()
 
-      // 64x64 PNG buffer (valid header + dimensions)
-      const valid64x64Header = new Uint8Array([
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-        0, 0, 0, 13,
-        0x49, 0x48, 0x44, 0x52,
-        0, 0, 0, 64, // width 64
-        0, 0, 0, 64, // height 64
-        8, 6, 0, 0, 0,
-      ])
-      const mockFile = new File([valid64x64Header], "valid_skin.png", { type: "image/png" })
+      // 64x64 valid decoded PNG buffer
+      const valid64x64Png = encode({
+        width: 64,
+        height: 64,
+        data: new Uint8Array(64 * 64 * 4).fill(255),
+        channels: 4,
+        depth: 8,
+      })
+      const mockFile = new File([valid64x64Png.buffer as ArrayBuffer], "valid_skin.png", { type: "image/png" })
 
       await act(async () => {
         Object.defineProperty(fileInput, "files", {
@@ -421,8 +619,14 @@ describe("i18n Component Regressions & Error Rendering Test Suite", () => {
         fileInput.dispatchEvent(new Event("change", { bubbles: true }))
       })
 
-      // When fast-png decode fails or upload throws, toastSaveError ("Error saving changes") is displayed,
-      // NOT "The image doesn't look like a Minecraft skin. Please use a valid skin file." if dimensions check passed.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+
+      // When upload throws after passing header & texture validation, toastSaveError ("Error saving changes") is displayed,
+      // and invalidSkinDimensions ("The image doesn't look like a Minecraft skin. Please use a valid skin file.") is NOT shown.
+      expect(container.textContent).toContain("Error saving changes")
+      expect(container.textContent).not.toContain("The image doesn't look like a Minecraft skin. Please use a valid skin file.")
       expect(container.textContent).not.toContain("Failed to fetch GraphQL upload endpoint")
     })
   })
