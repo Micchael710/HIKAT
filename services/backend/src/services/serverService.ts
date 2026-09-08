@@ -259,10 +259,6 @@ function resolvePterodactylLoaderConfig(
     )
   }
 
-  if (env.PTERODACTYL_DEFAULT_DOCKER_IMAGE) {
-    dockerImage = env.PTERODACTYL_DEFAULT_DOCKER_IMAGE
-  }
-
   return {
     eggId,
     dockerImage,
