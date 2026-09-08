@@ -164,31 +164,142 @@ export async function createServer(
     }
   }
 
+interface LoaderProvisioningConfig {
+  eggId: number
+  dockerImage: string
+  startup: string
+  environment: Record<string, string>
+}
+
+function resolvePterodactylLoaderConfig(
+  modLoader: GameModLoaderGql,
+  minecraftVersion: string,
+  modLoaderVersion: string | null | undefined,
+  javaMajor: number,
+  env: Env,
+): LoaderProvisioningConfig {
+  const mcVersion = minecraftVersion.trim()
+  const loaderVersion = modLoaderVersion?.trim() || ""
+
+  let rawEggId: string | undefined
+  let dockerImage: string
+  let startup: string
+  let environment: Record<string, string>
+
+  switch (modLoader) {
+    case "VANILLA":
+      rawEggId = env.PTERODACTYL_EGG_VANILLA_ID
+      dockerImage = `ghcr.io/pterodactyl/yolks:java_${javaMajor}`
+      startup = "java -Xms128M -XX:MaxRAMPercentage=95.0 -jar {{SERVER_JARFILE}}"
+      environment = {
+        SERVER_JARFILE: "server.jar",
+        VANILLA_VERSION: mcVersion,
+      }
+      break
+
+    case "FORGE":
+      rawEggId = env.PTERODACTYL_EGG_FORGE_ID
+      dockerImage = `ghcr.io/pterodactyl/yolks:java_${javaMajor}`
+      startup =
+        'java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true $( [[  ! -f unix_args.txt ]] && printf %s "-jar {{SERVER_JARFILE}}" || printf %s "@unix_args.txt" )'
+      environment = {
+        SERVER_JARFILE: "server.jar",
+        MC_VERSION: mcVersion,
+        BUILD_TYPE: "recommended",
+        FORGE_VERSION: `${mcVersion}-${loaderVersion}`,
+      }
+      break
+
+    case "NEOFORGE":
+      rawEggId = env.PTERODACTYL_EGG_NEOFORGE_ID
+      dockerImage = `ghcr.io/pterodactyl/yolks:java_${javaMajor}`
+      startup =
+        "java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true @unix_args.txt"
+      environment = {
+        MC_VERSION: mcVersion,
+        NEOFORGE_VERSION: loaderVersion,
+      }
+      break
+
+    case "FABRIC":
+      rawEggId = env.PTERODACTYL_EGG_FABRIC_ID
+      dockerImage = `ghcr.io/ptero-eggs/yolks:java_${javaMajor}`
+      startup = "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}"
+      environment = {
+        SERVER_JARFILE: "server.jar",
+        MC_VERSION: mcVersion,
+        FABRIC_VERSION: "latest",
+        LOADER_VERSION: loaderVersion,
+      }
+      break
+
+    case "QUILT":
+      rawEggId = env.PTERODACTYL_EGG_QUILT_ID
+      dockerImage = `ghcr.io/ptero-eggs/yolks:java_${javaMajor}`
+      startup = "java -Xms128M -XX:MaxRAMPercentage=95.0 -jar {{SERVER_JARFILE}} nogui"
+      environment = {
+        SERVER_JARFILE: "server.jar",
+        MC_VERSION: mcVersion,
+        QUILT_LOADER_VERSION: loaderVersion,
+      }
+      break
+
+    default:
+      throw createGraphQLError(
+        `Mod loader no soportado: ${modLoader}`,
+        "VALIDATION_ERROR",
+      )
+  }
+
+  const eggId = Number(rawEggId)
+  if (!rawEggId || !Number.isInteger(eggId) || eggId <= 0) {
+    throw createGraphQLError(
+      `La configuración de aprovisionamiento de Pterodactyl para ${modLoader} está incompleta o es inválida (PTERODACTYL_EGG_${modLoader}_ID).`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  if (env.PTERODACTYL_DEFAULT_DOCKER_IMAGE) {
+    dockerImage = env.PTERODACTYL_DEFAULT_DOCKER_IMAGE
+  }
+
+  return {
+    eggId,
+    dockerImage,
+    startup,
+    environment,
+  }
+}
+
   // 7. Validate Pterodactyl provisioning configuration
   const rawOwnerId = env.PTERODACTYL_DEFAULT_OWNER_ID
-  const rawEggId = env.PTERODACTYL_DEFAULT_EGG_ID
   const rawLocationId = env.PTERODACTYL_DEFAULT_LOCATION_ID
 
   const ownerUserId = Number(rawOwnerId)
-  const eggId = Number(rawEggId)
   const locationId = Number(rawLocationId)
 
   if (
     !rawOwnerId ||
     !Number.isInteger(ownerUserId) ||
     ownerUserId <= 0 ||
-    !rawEggId ||
-    !Number.isInteger(eggId) ||
-    eggId <= 0 ||
     !rawLocationId ||
     !Number.isInteger(locationId) ||
     locationId <= 0
   ) {
     throw createGraphQLError(
-      "La configuración de aprovisionamiento de Pterodactyl está incompleta o es inválida (PTERODACTYL_DEFAULT_OWNER_ID, PTERODACTYL_DEFAULT_EGG_ID, PTERODACTYL_DEFAULT_LOCATION_ID).",
+      "La configuración de aprovisionamiento de Pterodactyl está incompleta o es inválida (PTERODACTYL_DEFAULT_OWNER_ID, PTERODACTYL_DEFAULT_LOCATION_ID).",
       "VALIDATION_ERROR",
     )
   }
+
+  const javaMajor = await getMinecraftJavaMajorVersion(input.minecraftVersion)
+  const loaderConfig = resolvePterodactylLoaderConfig(
+    input.modLoader,
+    input.minecraftVersion,
+    input.modLoaderVersion,
+    javaMajor,
+    env,
+  )
 
   const serverId = crypto.randomUUID()
   const now = new Date().toISOString()
@@ -213,28 +324,16 @@ export async function createServer(
 
   // 9. Provision in Pterodactyl Application API
   const client = clientOverride || createPterodactylApplicationClient(env)
-  const javaMajor = await getMinecraftJavaMajorVersion(input.minecraftVersion)
-  const dockerImage =
-    env.PTERODACTYL_DEFAULT_DOCKER_IMAGE ||
-    `ghcr.io/pterodactyl/yolks:java_${javaMajor}`
-  const startup =
-    env.PTERODACTYL_DEFAULT_STARTUP ||
-    "java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}"
 
   let pterodactylRes: any
   try {
     pterodactylRes = await client.createApplicationServer({
       name: cleanName,
       user: ownerUserId,
-      egg: eggId,
-      docker_image: dockerImage,
-      startup,
-      environment: {
-        MC_VERSION: input.minecraftVersion.trim(),
-        MOD_LOADER: input.modLoader,
-        MOD_LOADER_VERSION: input.modLoaderVersion?.trim() || "",
-        SERVER_JARFILE: "server.jar",
-      },
+      egg: loaderConfig.eggId,
+      docker_image: loaderConfig.dockerImage,
+      startup: loaderConfig.startup,
+      environment: loaderConfig.environment,
       limits: {
         memory: memoryMb,
         swap: 0,

@@ -40,8 +40,12 @@ function createMockEnv(overrides?: Partial<Env>): Env {
     PTERODACTYL_API_KEY: "ptlc_test_client_key",
     PTERODACTYL_SERVER_ID: "fallback-pterodactyl-id",
     PTERODACTYL_DEFAULT_OWNER_ID: "1",
-    PTERODACTYL_DEFAULT_EGG_ID: "1",
     PTERODACTYL_DEFAULT_LOCATION_ID: "1",
+    PTERODACTYL_EGG_VANILLA_ID: "3",
+    PTERODACTYL_EGG_FORGE_ID: "1",
+    PTERODACTYL_EGG_NEOFORGE_ID: "15",
+    PTERODACTYL_EGG_FABRIC_ID: "16",
+    PTERODACTYL_EGG_QUILT_ID: "18",
     ...overrides,
   } as Env
 }
@@ -201,6 +205,178 @@ describe("ServerService & Multi-Server Provisioning", () => {
       expect(server.provisioningStatus).toBe("READY")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_8")
+    })
+
+    it("provisions VANILLA server with correct Egg (3), environment, startup, and Java docker image", async () => {
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Vanilla Server",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("READY")
+      const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
+      expect(call.egg).toBe(3)
+      expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_21")
+      expect(call.startup).toBe("java -Xms128M -XX:MaxRAMPercentage=95.0 -jar {{SERVER_JARFILE}}")
+      expect(call.environment).toEqual({
+        SERVER_JARFILE: "server.jar",
+        VANILLA_VERSION: "1.21.1",
+      })
+    })
+
+    it("provisions FORGE server with correct Egg (1), environment, startup, and Java docker image", async () => {
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Forge Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "FORGE",
+          modLoaderVersion: "47.2.0",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("READY")
+      const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
+      expect(call.egg).toBe(1)
+      expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_17")
+      expect(call.startup).toBe(
+        'java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true $( [[  ! -f unix_args.txt ]] && printf %s "-jar {{SERVER_JARFILE}}" || printf %s "@unix_args.txt" )',
+      )
+      expect(call.environment).toEqual({
+        SERVER_JARFILE: "server.jar",
+        MC_VERSION: "1.20.1",
+        BUILD_TYPE: "recommended",
+        FORGE_VERSION: "1.20.1-47.2.0",
+      })
+    })
+
+    it("provisions NEOFORGE server with correct Egg (15), environment, startup, and Java docker image", async () => {
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "NeoForge Server",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          modLoaderVersion: "21.1.65",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("READY")
+      const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
+      expect(call.egg).toBe(15)
+      expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_21")
+      expect(call.startup).toBe(
+        "java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true @unix_args.txt",
+      )
+      expect(call.environment).toEqual({
+        MC_VERSION: "1.21.1",
+        NEOFORGE_VERSION: "21.1.65",
+      })
+    })
+
+    it("provisions FABRIC server with correct Egg (16), environment, startup, and ptero-eggs Java docker image", async () => {
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Fabric Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "FABRIC",
+          modLoaderVersion: "0.15.11",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("READY")
+      const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
+      expect(call.egg).toBe(16)
+      expect(call.docker_image).toBe("ghcr.io/ptero-eggs/yolks:java_17")
+      expect(call.startup).toBe("java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}")
+      expect(call.environment).toEqual({
+        SERVER_JARFILE: "server.jar",
+        MC_VERSION: "1.20.1",
+        FABRIC_VERSION: "latest",
+        LOADER_VERSION: "0.15.11",
+      })
+    })
+
+    it("provisions QUILT server with correct Egg (18), environment, startup, and ptero-eggs Java docker image", async () => {
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Quilt Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "QUILT",
+          modLoaderVersion: "0.25.0",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("READY")
+      const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
+      expect(call.egg).toBe(18)
+      expect(call.docker_image).toBe("ghcr.io/ptero-eggs/yolks:java_17")
+      expect(call.startup).toBe("java -Xms128M -XX:MaxRAMPercentage=95.0 -jar {{SERVER_JARFILE}} nogui")
+      expect(call.environment).toEqual({
+        SERVER_JARFILE: "server.jar",
+        MC_VERSION: "1.20.1",
+        QUILT_LOADER_VERSION: "0.25.0",
+      })
+    })
+
+    it("rejects server creation when modLoader egg ID environment variable is missing", async () => {
+      const invalidEnv = createMockEnv({
+        PTERODACTYL_EGG_FABRIC_ID: undefined,
+      })
+
+      await expect(
+        createServer(
+          mockDb,
+          invalidEnv,
+          {
+            name: "Missing Fabric Egg Server",
+            minecraftVersion: "1.20.1",
+            modLoader: "FABRIC",
+            modLoaderVersion: "0.15.11",
+            cpu: 200,
+            memoryMb: 4096,
+            diskMb: 10240,
+          },
+          "user-1",
+          mockClient,
+        ),
+      ).rejects.toThrow("PTERODACTYL_EGG_FABRIC_ID")
     })
   })
 
