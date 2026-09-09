@@ -862,7 +862,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
     serverId: number | string,
   ): Promise<PterodactylApplicationServerResponse> {
     return this.applicationRequest<PterodactylApplicationServerResponse>(
-      `/api/application/servers/${encodeURIComponent(String(serverId))}`,
+      `/api/application/servers/${encodeURIComponent(String(serverId))}?include=allocations`,
       { method: "GET" },
     )
   }

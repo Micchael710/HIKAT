@@ -8,6 +8,11 @@ import {
   deleteServer,
   formatServerGql,
   getServerNodeCapacity,
+  bootstrapServerPostInstall,
+  updateServerPropertiesBootstrap,
+  updateEulaBootstrap,
+  resolveServerAllocationPort,
+  syncServerProvisioningStatus,
 } from "./serverService"
 import { handleGameFileDownload } from "./game/gameStorageService"
 import {
@@ -923,16 +928,40 @@ describe("ServerService & Multi-Server Provisioning", () => {
 
       expect(server.provisioningStatus).toBe("PROVISIONING")
 
+      const writtenFiles: Record<string, string> = {}
       const syncClient = {
         getApplicationServer: vi.fn(async () => ({
           object: "server",
           attributes: {
             id: 100,
             identifier: "ptero_100",
+            allocation: 10,
+            node: 1,
             status: null,
             container: { installed: 1 },
           },
         })),
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "allocation",
+              attributes: {
+                id: 10,
+                ip: "127.0.0.1",
+                port: 25565,
+                assigned: true,
+              },
+            },
+          ],
+        })),
+        getFileContents: vi.fn(async (file: string) => {
+          if (writtenFiles[file]) return writtenFiles[file]
+          throw new Error("404 File not found")
+        }),
+        writeFile: vi.fn(async (file: string, content: string) => {
+          writtenFiles[file] = content
+        }),
       } as unknown as IPterodactylClient
 
       const list = await getServers(mockDb, mockEnv, undefined, syncClient)
@@ -946,6 +975,12 @@ describe("ServerService & Multi-Server Provisioning", () => {
         .where(eq(schema.servers.id, server.id))
         .get()
       expect(inDb?.provisioningStatus).toBe("READY")
+
+      // Verify post-install bootstrap wrote eula.txt and server.properties
+      expect(writtenFiles["eula.txt"]).toContain("eula=true")
+      expect(writtenFiles["server.properties"]).toContain("server-ip=0.0.0.0")
+      expect(writtenFiles["server.properties"]).toContain("server-port=25565")
+      expect(writtenFiles["server.properties"]).toContain("query.port=25565")
     })
 
     it("syncs provisioning status from PROVISIONING to FAILED when Pterodactyl indicates installation failed", async () => {
@@ -1068,6 +1103,257 @@ describe("ServerService & Multi-Server Provisioning", () => {
       await expect(getServerNodeCapacity(mockEnv, emptyNodeClient)).rejects.toThrow(
         "No se pudo obtener la información de capacidad del nodo de Pterodactyl",
       )
+    })
+  })
+
+  describe("Post-Install Bootstrap", () => {
+    it("updateServerPropertiesBootstrap generates minimum properties for empty file", () => {
+      const result = updateServerPropertiesBootstrap("", 25575)
+      expect(result).toContain("server-ip=0.0.0.0")
+      expect(result).toContain("server-port=25575")
+      expect(result).toContain("query.port=25575")
+    })
+
+    it("updateServerPropertiesBootstrap preserves comments and existing custom properties", () => {
+      const original = [
+        "# Minecraft server properties",
+        "# Sun Mar 08 2026",
+        "motd=HiKAT Epic Realm",
+        "difficulty=hard",
+        "pvp=false",
+        "server-port=12345",
+        "max-players=50",
+      ].join("\n")
+
+      const result = updateServerPropertiesBootstrap(original, 25580)
+      expect(result).toContain("# Minecraft server properties")
+      expect(result).toContain("motd=HiKAT Epic Realm")
+      expect(result).toContain("difficulty=hard")
+      expect(result).toContain("pvp=false")
+      expect(result).toContain("max-players=50")
+      expect(result).toContain("server-port=25580")
+      expect(result).not.toContain("server-port=12345")
+      expect(result).toContain("query.port=25580")
+      expect(result).toContain("server-ip=0.0.0.0")
+    })
+
+    it("updateEulaBootstrap creates eula=true when empty and updates eula=false when existing", () => {
+      expect(updateEulaBootstrap("")).toBe("eula=true\n")
+      expect(updateEulaBootstrap("# comment\neula=false\n")).toBe("# comment\neula=true\n")
+      expect(updateEulaBootstrap("eula=true\n")).toBe("eula=true\n")
+    })
+
+    it("resolveServerAllocationPort resolves port from relationships, node allocations, or allocation id", async () => {
+      const mockPtero = {
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "allocation",
+              attributes: { id: 77, port: 25590, assigned: true },
+            },
+          ],
+        })),
+      } as unknown as IPterodactylClient
+
+      // 1. From relationships
+      const portFromRel = await resolveServerAllocationPort(mockPtero, {
+        id: 1,
+        allocation: 10,
+        relationships: {
+          allocations: {
+            object: "list",
+            data: [
+              {
+                object: "allocation",
+                attributes: { id: 10, ip: "0.0.0.0", port: 25566, assigned: true, alias: null, notes: null },
+              },
+            ],
+          },
+        },
+      } as any)
+      expect(portFromRel).toBe(25566)
+
+      // 2. From node allocations
+      const portFromNode = await resolveServerAllocationPort(mockPtero, {
+        id: 2,
+        node: 1,
+        allocation: 77,
+      } as any)
+      expect(portFromNode).toBe(25590)
+
+      // 3. Fallback when allocation is directly a port number
+      const portDirect = await resolveServerAllocationPort({} as any, {
+        id: 3,
+        allocation: 25599,
+      } as any)
+      expect(portDirect).toBe(25599)
+    })
+
+    it("executes bootstrap across all 5 loaders (VANILLA, FORGE, NEOFORGE, FABRIC, QUILT) without touching loader internal files", async () => {
+      const loaders = [
+        { loader: "VANILLA" as const, mc: "1.20.1", version: undefined },
+        { loader: "FORGE" as const, mc: "1.20.1", version: "47.2.0" },
+        { loader: "NEOFORGE" as const, mc: "1.21.1", version: "21.1.65" },
+        { loader: "FABRIC" as const, mc: "1.20.1", version: "0.15.7" },
+        { loader: "QUILT" as const, mc: "1.20.1", version: "0.25.0" },
+      ]
+
+      for (const [i, entry] of loaders.entries()) {
+        const { loader, mc, version } = entry
+        const server = await createServer(
+          mockDb,
+          mockEnv,
+          {
+            name: `${loader} Bootstrap Server`,
+            minecraftVersion: mc,
+            modLoader: loader,
+            modLoaderVersion: version,
+            cpu: 200,
+            memoryMb: 4096,
+            diskMb: 10240,
+          },
+          "user-1",
+          mockClient,
+        )
+
+        expect(server.provisioningStatus).toBe("PROVISIONING")
+
+        const writtenFiles: Record<string, string> = {}
+        const syncClient = {
+          getApplicationServer: vi.fn(async () => ({
+            object: "server",
+            attributes: {
+              id: 200 + i,
+              identifier: `ptero_${200 + i}`,
+              allocation: 20 + i,
+              node: 1,
+              status: null,
+              container: { installed: 1 },
+            },
+          })),
+          listApplicationNodeAllocations: vi.fn(async () => ({
+            object: "list",
+            data: [
+              {
+                object: "allocation",
+                attributes: {
+                  id: 20 + i,
+                  ip: "127.0.0.1",
+                  port: 25570 + i,
+                  assigned: true,
+                },
+              },
+            ],
+          })),
+          getFileContents: vi.fn(async (file: string) => {
+            if (writtenFiles[file]) return writtenFiles[file]
+            throw new Error("404 File not found")
+          }),
+          writeFile: vi.fn(async (file: string, content: string) => {
+            writtenFiles[file] = content
+          }),
+        } as unknown as IPterodactylClient
+
+        const list = await getServers(mockDb, mockEnv, undefined, syncClient)
+        const found = list.find((s) => s.id === server.id)
+        expect(found?.provisioningStatus).toBe("READY")
+
+        // Invariants for each loader:
+        // 1. eula=true
+        expect(writtenFiles["eula.txt"]).toBe("eula=true\n")
+        // 2. server-ip=0.0.0.0
+        expect(writtenFiles["server.properties"]).toContain("server-ip=0.0.0.0")
+        // 3. server-port uses real allocation
+        expect(writtenFiles["server.properties"]).toContain(`server-port=${25570 + i}`)
+        // 4. query.port uses same allocation
+        expect(writtenFiles["server.properties"]).toContain(`query.port=${25570 + i}`)
+
+        // 5. Must NOT touch internal loader files
+        expect(writtenFiles["unix_args.txt"]).toBeUndefined()
+        expect(writtenFiles["run.sh"]).toBeUndefined()
+        expect(writtenFiles["server.jar"]).toBeUndefined()
+        expect(writtenFiles["libraries"]).toBeUndefined()
+      }
+    })
+
+    it("fails without marking server READY and does not hide error when file writing fails", async () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Write Fail Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      const serverInDb = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, server.id))
+        .get()
+
+      expect(serverInDb).toBeDefined()
+      expect(serverInDb?.pterodactylServerId).toBeDefined()
+
+      const failingWriteClient = {
+        getApplicationServer: vi.fn(async () => ({
+          object: "server",
+          attributes: {
+            id: Number(serverInDb?.pterodactylServerId),
+            identifier: "ptero_fail",
+            allocation: 10,
+            node: 1,
+            status: null,
+            container: { installed: 1 },
+          },
+        })),
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [{ object: "allocation", attributes: { id: 10, port: 25565, assigned: true } }],
+        })),
+        getFileContents: vi.fn(async () => ""),
+        writeFile: vi.fn(async () => {
+          throw new ServerInfrastructureError(
+            "SERVER_UNAVAILABLE",
+            "Fallo de disco en Wings al escribir archivo.",
+            "Wings HTTP 500: Disk quota exceeded",
+          )
+        }),
+      } as unknown as IPterodactylClient
+
+      // Direct sync call should throw and log
+      await expect(
+        syncServerProvisioningStatus(serverInDb!, mockDb, mockEnv, failingWriteClient),
+      ).rejects.toThrow("Fallo de disco en Wings al escribir archivo.")
+
+      // Error was logged with diagnostic details
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "[Pterodactyl Server Bootstrap Error]",
+        expect.objectContaining({
+          serverId: server.id,
+          pterodactylServerId: serverInDb?.pterodactylServerId,
+          errorMessage: "Fallo de disco en Wings al escribir archivo.",
+        }),
+      )
+
+      // Server in D1 was NOT marked READY (remains PROVISIONING)
+      const inDb = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, server.id))
+        .get()
+      expect(inDb?.provisioningStatus).toBe("PROVISIONING")
+
+      consoleErrorSpy.mockRestore()
     })
   })
 

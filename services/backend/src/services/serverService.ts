@@ -15,8 +15,15 @@ import {
 import type { Env } from "../types"
 import { getContentMediaById, formatMediaGql } from "./mediaService"
 import { validateGameEnvironment, getMinecraftJavaMajorVersion } from "./game/gameEnvironmentService"
-import { createPterodactylApplicationClient } from "./pterodactyl/serverAdministrationService"
-import type { IPterodactylClient } from "./pterodactyl/types"
+import {
+  createPterodactylApplicationClient,
+  createPterodactylClient,
+} from "./pterodactyl/serverAdministrationService"
+import type {
+  IPterodactylClient,
+  PterodactylApplicationServerAttributes,
+  PterodactylApplicationServerResponse,
+} from "./pterodactyl/types"
 
 export async function formatServerGql(
   server: schema.Server,
@@ -59,7 +66,157 @@ export async function formatServerGql(
   }
 }
 
-async function syncServerProvisioningStatus(
+export async function resolveServerAllocationPort(
+  client: IPterodactylClient,
+  pServer: PterodactylApplicationServerAttributes,
+): Promise<number> {
+  // 1. Check relationships.allocations if present
+  const relAllocations = pServer.relationships?.allocations?.data
+  if (Array.isArray(relAllocations) && relAllocations.length > 0) {
+    const match = relAllocations.find(
+      (a) =>
+        a.attributes?.id === pServer.allocation ||
+        (a.attributes as any)?.is_default === true,
+    )
+    const alloc = match || relAllocations[0]
+    if (alloc?.attributes?.port) {
+      return alloc.attributes.port
+    }
+  }
+
+  // 2. Check node allocations if node is present and client supports listApplicationNodeAllocations
+  if (pServer.node && typeof client.listApplicationNodeAllocations === "function") {
+    try {
+      const nodeAllocations = await client.listApplicationNodeAllocations(pServer.node)
+      if (nodeAllocations?.data && Array.isArray(nodeAllocations.data)) {
+        const match = nodeAllocations.data.find(
+          (a) => a.attributes.id === pServer.allocation,
+        )
+        if (match?.attributes?.port) {
+          return match.attributes.port
+        }
+      }
+    } catch {
+      // Fall through to port heuristic or default
+    }
+  }
+
+  // 3. If allocation is directly a valid port number (> 1024 and <= 65535)
+  if (
+    typeof pServer.allocation === "number" &&
+    pServer.allocation > 1024 &&
+    pServer.allocation <= 65535
+  ) {
+    return pServer.allocation
+  }
+
+  // 4. Default fallback: Minecraft standard port 25565
+  return 25565
+}
+
+export function updateServerPropertiesBootstrap(
+  originalContent: string,
+  port: number,
+): string {
+  const lines = (originalContent || "").split(/\r?\n/)
+  const requiredValues: Record<string, string> = {
+    "server-ip": "0.0.0.0",
+    "server-port": String(port),
+    "query.port": String(port),
+  }
+
+  const foundKeys = new Set<string>()
+
+  const newLines = lines.map((line) => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("!")) {
+      return line
+    }
+    const eqIdx = line.indexOf("=")
+    if (eqIdx !== -1) {
+      const key = line.slice(0, eqIdx).trim()
+      if (key in requiredValues) {
+        foundKeys.add(key)
+        return `${key}=${requiredValues[key]}`
+      }
+    }
+    return line
+  })
+
+  // Append any missing required keys
+  for (const [k, v] of Object.entries(requiredValues)) {
+    if (!foundKeys.has(k)) {
+      if (newLines.length === 1 && newLines[0] === "") {
+        newLines[0] = `${k}=${v}`
+      } else {
+        newLines.push(`${k}=${v}`)
+      }
+    }
+  }
+
+  return newLines.join("\n").trimEnd() + "\n"
+}
+
+export function updateEulaBootstrap(originalContent?: string): string {
+  if (!originalContent || !originalContent.trim()) {
+    return "eula=true\n"
+  }
+  if (originalContent.includes("eula=")) {
+    return originalContent.replace(/eula\s*=\s*(false|true)/i, "eula=true").trimEnd() + "\n"
+  }
+  return originalContent.trimEnd() + "\neula=true\n"
+}
+
+export async function bootstrapServerPostInstall(
+  server: schema.Server,
+  pServer: PterodactylApplicationServerAttributes,
+  client: IPterodactylClient,
+  fileClient: IPterodactylClient,
+): Promise<void> {
+  const port = await resolveServerAllocationPort(client, pServer)
+
+  // 1. Read existing server.properties if present
+  let originalProperties = ""
+  try {
+    originalProperties = await fileClient.getFileContents("server.properties")
+  } catch (err: unknown) {
+    const errorStr = String(err).toLowerCase()
+    const internalMsg = String((err as any)?.internalMessage || "").toLowerCase()
+    const isNotFound =
+      errorStr.includes("404") ||
+      errorStr.includes("not found") ||
+      internalMsg.includes("404") ||
+      internalMsg.includes("not found")
+    if (!isNotFound) {
+      throw err
+    }
+  }
+
+  const updatedProperties = updateServerPropertiesBootstrap(originalProperties, port)
+  await fileClient.writeFile("server.properties", updatedProperties)
+
+  // 2. Read existing eula.txt if present
+  let originalEula = ""
+  try {
+    originalEula = await fileClient.getFileContents("eula.txt")
+  } catch (err: unknown) {
+    const errorStr = String(err).toLowerCase()
+    const internalMsg = String((err as any)?.internalMessage || "").toLowerCase()
+    const isNotFound =
+      errorStr.includes("404") ||
+      errorStr.includes("not found") ||
+      internalMsg.includes("404") ||
+      internalMsg.includes("not found")
+    if (!isNotFound) {
+      throw err
+    }
+  }
+
+  const updatedEula = updateEulaBootstrap(originalEula)
+  await fileClient.writeFile("eula.txt", updatedEula)
+}
+
+export async function syncServerProvisioningStatus(
   server: schema.Server,
   db: Database,
   env: Env,
@@ -69,35 +226,58 @@ async function syncServerProvisioningStatus(
     return
   }
 
+  let pServer: PterodactylApplicationServerResponse | undefined
   try {
     const client = clientOverride || createPterodactylApplicationClient(env)
-    const pServer = await client.getApplicationServer(server.pterodactylServerId)
-    if (pServer?.attributes) {
-      const isInstalled =
-        pServer.attributes.container?.installed === 1 ||
-        pServer.attributes.status === null
-      const isFailed =
-        pServer.attributes.container?.installed === 2 ||
-        pServer.attributes.status === "install_failed"
-
-      if (isInstalled) {
-        server.provisioningStatus = "READY"
-        server.updatedAt = new Date().toISOString()
-        await db
-          .update(schema.servers)
-          .set({ provisioningStatus: "READY", updatedAt: server.updatedAt })
-          .where(eq(schema.servers.id, server.id))
-      } else if (isFailed) {
-        server.provisioningStatus = "FAILED"
-        server.updatedAt = new Date().toISOString()
-        await db
-          .update(schema.servers)
-          .set({ provisioningStatus: "FAILED", updatedAt: server.updatedAt })
-          .where(eq(schema.servers.id, server.id))
-      }
-    }
+    pServer = await client.getApplicationServer(server.pterodactylServerId)
   } catch {
     // If Pterodactyl API is temporarily unreachable, leave as PROVISIONING
+    return
+  }
+
+  if (pServer?.attributes) {
+    const isInstalled =
+      pServer.attributes.container?.installed === 1 ||
+      pServer.attributes.status === null
+    const isFailed =
+      pServer.attributes.container?.installed === 2 ||
+      pServer.attributes.status === "install_failed"
+
+    if (isInstalled) {
+      const client = clientOverride || createPterodactylApplicationClient(env)
+      const fileClient =
+        clientOverride ||
+        createPterodactylClient(
+          env,
+          server.pterodactylIdentifier || pServer.attributes.identifier,
+        )
+
+      try {
+        await bootstrapServerPostInstall(server, pServer.attributes, client, fileClient)
+      } catch (bootstrapErr: unknown) {
+        console.error("[Pterodactyl Server Bootstrap Error]", {
+          serverId: server.id,
+          pterodactylServerId: server.pterodactylServerId,
+          errorName: bootstrapErr instanceof Error ? bootstrapErr.name : "Error",
+          errorMessage: bootstrapErr instanceof Error ? bootstrapErr.message : String(bootstrapErr),
+        })
+        throw bootstrapErr
+      }
+
+      server.provisioningStatus = "READY"
+      server.updatedAt = new Date().toISOString()
+      await db
+        .update(schema.servers)
+        .set({ provisioningStatus: "READY", updatedAt: server.updatedAt })
+        .where(eq(schema.servers.id, server.id))
+    } else if (isFailed) {
+      server.provisioningStatus = "FAILED"
+      server.updatedAt = new Date().toISOString()
+      await db
+        .update(schema.servers)
+        .set({ provisioningStatus: "FAILED", updatedAt: server.updatedAt })
+        .where(eq(schema.servers.id, server.id))
+    }
   }
 }
 
@@ -109,7 +289,13 @@ export async function getServers(
 ): Promise<ServerGql[]> {
   const allServers = await db.select().from(schema.servers).all()
   await Promise.all(
-    allServers.map((s) => syncServerProvisioningStatus(s, db, env, clientOverride)),
+    allServers.map(async (s) => {
+      try {
+        await syncServerProvisioningStatus(s, db, env, clientOverride)
+      } catch {
+        // Bootstrap error logged, keep server in PROVISIONING
+      }
+    }),
   )
   return Promise.all(allServers.map((s) => formatServerGql(s, db, env, request)))
 }

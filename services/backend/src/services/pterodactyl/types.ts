@@ -365,6 +365,12 @@ export interface PterodactylApplicationServerAttributes {
     installed: number
     environment: Record<string, string>
   }
+  relationships?: {
+    allocations?: {
+      object: "list"
+      data: PterodactylAllocationResponse[]
+    }
+  }
   created_at: string
   updated_at: string
 }
