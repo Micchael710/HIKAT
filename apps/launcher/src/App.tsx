@@ -214,6 +214,7 @@ export default function App() {
                 isActive={view === "home"}
                 selectedServer={selectedServer}
                 selectedGameId={selectedGameId}
+                servers={servers}
               />
             </div>
             {view === "skins" && (

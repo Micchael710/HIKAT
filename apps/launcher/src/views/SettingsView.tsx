@@ -47,8 +47,8 @@ interface GameItem {
 
 const DEFAULT_GAMES: GameItem[] = [
   {
-    id: "apparatia",
-    name: "Apparatia",
+    id: "default",
+    name: "HiKAT",
     logo: apparatiaLogo,
   },
 ]
@@ -103,6 +103,17 @@ export default function SettingsView({
     getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
   )
 
+  const legacyLocalServerId = React.useMemo(() => {
+    if (!servers || servers.length === 0) {
+      return propSelectedGameId || "default"
+    }
+    return (
+      servers.find(
+        (server) => server.name.trim().toLowerCase() === "apparatia",
+      )?.id ?? null
+    )
+  }, [servers, propSelectedGameId])
+
   const games: GameItem[] = React.useMemo(() => {
     if (servers && servers.length > 0) {
       return servers.map((s) => {
@@ -119,28 +130,45 @@ export default function SettingsView({
         }
       })
     }
-    return DEFAULT_GAMES
-  }, [servers])
+    return [
+      {
+        id: legacyLocalServerId || "default",
+        name: "Apparatia",
+        logo: apparatiaLogo,
+      },
+    ]
+  }, [servers, legacyLocalServerId])
 
   const [internalSelectedGameId, setInternalSelectedGameId] = useState<string>(() => {
-    return propSelectedGameId || games[0]?.id || "apparatia"
+    return propSelectedGameId || games[0]?.id || ""
   })
 
   const selectedGameId = (propSelectedGameId && games.some((g) => g.id === propSelectedGameId))
     ? propSelectedGameId
-    : (games.some((g) => g.id === internalSelectedGameId) ? internalSelectedGameId : games[0]?.id || "apparatia")
+    : (games.some((g) => g.id === internalSelectedGameId) ? internalSelectedGameId : games[0]?.id || "")
 
   const setSelectedGameId = (id: string) => {
     setInternalSelectedGameId(id)
     onSelectGameId?.(id)
   }
 
+  const isLegacyLocal = Boolean(
+    !servers || servers.length === 0
+      ? true
+      : legacyLocalServerId && selectedGameId === legacyLocalServerId,
+  )
+  const isLegacyLocalRef = useRef(isLegacyLocal)
+  isLegacyLocalRef.current = isLegacyLocal
+
   // Game & Runtime Info State (Hydrated from local cache to prevent flickering)
   const [manifest, setManifest] = useState<GameManifest | null>(() => {
     if (typeof window !== "undefined") {
       try {
-        const cacheKey = selectedGameId ? `hikat_game_manifest_${selectedGameId}` : "hikat_game_manifest"
-        const cached = localStorage.getItem(cacheKey) || (!selectedGameId || selectedGameId === "apparatia" ? localStorage.getItem("hikat_game_manifest") : null)
+        const cacheKey =
+          (servers && servers.length > 0) || propSelectedGameId
+            ? `hikat_game_manifest_${selectedGameId}`
+            : "hikat_game_manifest"
+        const cached = localStorage.getItem(cacheKey)
         if (cached) {
           const parsed = JSON.parse(cached)
           if (parsed && typeof parsed === "object") {
@@ -223,14 +251,24 @@ export default function SettingsView({
     hasUpdate: boolean
     installedModpackVersion: string | null
     hasIntegrityIssue: boolean
-  }>({
-    isInstalled: gameService.isGameInstalled(),
+  }>(() => ({
+    isInstalled: isLegacyLocal ? gameService.isGameInstalled() : false,
     hasUpdate: false,
     installedModpackVersion: null,
     hasIntegrityIssue: false,
-  })
+  }))
 
   const refreshOperationalState = async (targetManifest?: GameManifest | null) => {
+    if (!isLegacyLocal) {
+      setOperativeState({
+        isInstalled: false,
+        hasUpdate: false,
+        installedModpackVersion: null,
+        hasIntegrityIssue: false,
+      })
+      return
+    }
+
     const m = targetManifest !== undefined ? targetManifest : manifestRef.current
     if (window.electronAPI?.checkSyncPlan && m?.clientFiles && m.clientFiles.length > 0) {
       try {
@@ -395,25 +433,9 @@ export default function SettingsView({
       if (isMounted) setOperationState(phase)
     })
 
-    // Subscribe to WebSocket Release Events
-    const unsubRelease = gameService.subscribeReleaseEvents(async (event) => {
-      if (event?.serverId && selectedGameId && event.serverId !== selectedGameId) {
-        return
-      }
-      if (!event?.serverId && selectedGameId && selectedGameId !== "apparatia") {
-        return
-      }
-      try {
-        const fresh = await gameService.checkGameManifest(selectedGameId)
-        if (isMounted && fresh) {
-          setManifest(fresh)
-          refreshOperationalState(fresh)
-        }
-      } catch (_) {}
-    })
-
     // Listen to game action status events from DownloadPlayButton
     const handleActionStatus = (e: Event) => {
+      if (!isLegacyLocalRef.current) return
       const customEvt = e as CustomEvent<{
         action: "verify" | "uninstall"
         state: "started" | "finished"
@@ -479,22 +501,54 @@ export default function SettingsView({
       }
       unsubLaunch?.()
       unsubPhase?.()
-      unsubRelease()
       window.removeEventListener("hikat:game-action-status", handleActionStatus)
     }
   }, [])
 
+  // Dedicated WebSocket release events subscription with current server scope
+  useEffect(() => {
+    let isMounted = true
+    const activeServerId =
+      (servers && servers.length > 0) || propSelectedGameId ? selectedGameId : undefined
+
+    const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
+      if (event?.serverId) {
+        if (!activeServerId || event.serverId !== activeServerId) {
+          return
+        }
+      } else {
+        if (activeServerId) {
+          return
+        }
+      }
+
+      try {
+        const fresh = await gameService.checkGameManifest(activeServerId, {
+          allowLegacyLocalFilesystem: isLegacyLocal,
+        })
+        if (isMounted && fresh) {
+          setManifest(fresh)
+          refreshOperationalState(fresh)
+        }
+      } catch (_) {}
+    })
+
+    return () => {
+      isMounted = false
+      unsubscribe()
+    }
+  }, [selectedGameId, legacyLocalServerId, isLegacyLocal, servers, propSelectedGameId])
+
   // Load/update manifest when selectedGameId changes
   useEffect(() => {
     let isMounted = true
-    const cacheKey = selectedGameId ? `hikat_game_manifest_${selectedGameId}` : "hikat_game_manifest"
+    const cacheKey =
+      (servers && servers.length > 0) || propSelectedGameId
+        ? `hikat_game_manifest_${selectedGameId}`
+        : "hikat_game_manifest"
     let hasCached = false
     try {
-      const cached =
-        localStorage.getItem(cacheKey) ||
-        (!selectedGameId || selectedGameId === "apparatia"
-          ? localStorage.getItem("hikat_game_manifest")
-          : null)
+      const cached = localStorage.getItem(cacheKey)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (parsed && typeof parsed === "object") {
@@ -507,7 +561,12 @@ export default function SettingsView({
 
     if (!hasCached) {
       gameService
-        .checkGameManifest(selectedGameId)
+        .checkGameManifest(
+          (servers && servers.length > 0) || propSelectedGameId ? selectedGameId : undefined,
+          {
+            allowLegacyLocalFilesystem: isLegacyLocal,
+          },
+        )
         .then((m) => {
           if (isMounted && m) {
             setManifest(m)
@@ -520,7 +579,7 @@ export default function SettingsView({
     return () => {
       isMounted = false
     }
-  }, [selectedGameId])
+  }, [selectedGameId, isLegacyLocal, servers, propSelectedGameId])
 
   const setStartWithSystem = async (v: boolean) => {
     setStartWithSystemState(v)
@@ -556,6 +615,7 @@ export default function SettingsView({
   }
 
   const setDedicatedGPU = async (v: boolean) => {
+    if (!isLegacyLocal) return
     const prev = dedicatedGPU
     setDedicatedGPUState(v)
     setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, v)
@@ -578,6 +638,7 @@ export default function SettingsView({
   }
 
   const setRamGB = (v: number) => {
+    if (!isLegacyLocal) return
     setRamGBState(v)
     setStoredNumber(STORAGE_KEYS.RAM_GB, v)
     markPendingRestartChangeIfNeeded()
@@ -603,6 +664,7 @@ export default function SettingsView({
   }
 
   const handleToggleAutoRam = (v: boolean) => {
+    if (!isLegacyLocal) return
     setRamAutoState(v)
     setStoredBoolean(STORAGE_KEYS.RAM_AUTO, v)
     markPendingRestartChangeIfNeeded()
@@ -614,6 +676,7 @@ export default function SettingsView({
   }
 
   const handleAutoRam = () => {
+    if (!isLegacyLocal) return
     handleToggleAutoRam(true)
   }
 
@@ -627,11 +690,11 @@ export default function SettingsView({
     isVerifying ||
     isUninstalling
 
-  const isVerifyDisabled = !isInstalled || hasUpdate || isGameBusy
-  const isUninstallDisabled = !isInstalled || isGameBusy
+  const isVerifyDisabled = !isLegacyLocal || !isInstalled || hasUpdate || isGameBusy
+  const isUninstallDisabled = !isLegacyLocal || !isInstalled || isGameBusy
 
   const handleVerify = () => {
-    if (isVerifyDisabled) return
+    if (!isLegacyLocal || isVerifyDisabled) return
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-request", {
         detail: { action: "verify" },
@@ -640,7 +703,7 @@ export default function SettingsView({
   }
 
   const handleUninstall = () => {
-    if (isUninstallDisabled) return
+    if (!isLegacyLocal || isUninstallDisabled) return
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-request", {
         detail: { action: "uninstall" },

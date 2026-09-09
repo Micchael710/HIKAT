@@ -18,6 +18,7 @@ interface HomeViewProps {
   isActive?: boolean
   selectedServer?: LauncherServer | null
   selectedGameId?: string | null
+  servers?: LauncherServer[]
 }
 
 export default function HomeView({
@@ -26,6 +27,7 @@ export default function HomeView({
   isActive = true,
   selectedServer,
   selectedGameId: propSelectedGameId,
+  servers,
 }: HomeViewProps) {
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
@@ -34,12 +36,24 @@ export default function HomeView({
   const activeServerId = selectedServer?.id || propSelectedGameId || undefined
   const serverName = selectedServer?.name || "Apparatia"
 
+  const legacyLocalServerId =
+    servers?.find(
+      (server) => server.name.trim().toLowerCase() === "apparatia",
+    )?.id ?? null
+
+  const allowLegacyLocalOperations =
+    activeServerId != null
+      ? activeServerId === legacyLocalServerId
+      : true
+
   const [publishedModpack, setPublishedModpack] = useState<PublishedModpack | null>(null)
   const [mediaError, setMediaError] = useState(false)
-  const [logoError, setLogoError] = useState(false)
+  const [mainLogoFailed, setMainLogoFailed] = useState(false)
+  const [sidebarLogoFailed, setSidebarLogoFailed] = useState(false)
 
   useEffect(() => {
-    setLogoError(false)
+    setMainLogoFailed(false)
+    setSidebarLogoFailed(false)
     setMediaError(false)
   }, [activeServerId])
 
@@ -62,11 +76,14 @@ export default function HomeView({
 
     const unsubscribe = gameService.subscribeReleaseEvents((event) => {
       if (event.type === "RELEASE_ACTIVATED") {
-        if (event.serverId && activeServerId && event.serverId !== activeServerId) {
-          return
-        }
-        if (!event.serverId && activeServerId && activeServerId !== "apparatia") {
-          return
+        if (event.serverId) {
+          if (!activeServerId || event.serverId !== activeServerId) {
+            return
+          }
+        } else {
+          if (activeServerId) {
+            return
+          }
         }
         loadPublished()
       }
@@ -80,12 +97,20 @@ export default function HomeView({
 
   const cover = publishedModpack?.cover
   const coverUrl = cover?.url ? resolveApiAssetUrl(cover.url) : ""
-  const mainLogoUrl =
-    !logoError && selectedServer?.mainLogo?.url
-      ? resolveApiAssetUrl(selectedServer.mainLogo.url)
-      : !logoError && selectedServer?.sidebarLogo?.url
-        ? resolveApiAssetUrl(selectedServer.sidebarLogo.url)
-        : apparatiaLogo
+
+  const hasMainLogo = Boolean(!mainLogoFailed && selectedServer?.mainLogo?.url)
+  const hasSidebarLogo = Boolean(!sidebarLogoFailed && selectedServer?.sidebarLogo?.url)
+
+  let logoSrc = apparatiaLogo
+  let onLogoError: (() => void) | undefined = undefined
+
+  if (hasMainLogo) {
+    logoSrc = resolveApiAssetUrl(selectedServer!.mainLogo!.url)
+    onLogoError = () => setMainLogoFailed(true)
+  } else if (hasSidebarLogo) {
+    logoSrc = resolveApiAssetUrl(selectedServer!.sidebarLogo!.url)
+    onLogoError = () => setSidebarLogoFailed(true)
+  }
 
   return (
     <div
@@ -210,8 +235,8 @@ export default function HomeView({
       >
         <img
           alt={serverName}
-          src={mainLogoUrl}
-          onError={() => setLogoError(true)}
+          src={logoSrc}
+          onError={onLogoError}
           style={{
             width: "100%",
             height: "100%",
@@ -230,6 +255,7 @@ export default function HomeView({
         onPlay={onPlay}
         serverId={activeServerId}
         gameId={activeServerId}
+        allowLegacyLocalOperations={allowLegacyLocalOperations}
       />
 
       {/* Description */}

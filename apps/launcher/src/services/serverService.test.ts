@@ -14,36 +14,13 @@ describe("Launcher serverService (GraphQL serverStatus Query & Caching)", () => 
     vi.restoreAllMocks()
   })
 
-  it("queries live server status via GraphQL serverStatus query and caches result in localStorage", async () => {
-    const graphqlSpy = vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
-      success: true,
-      data: {
-        serverStatus: {
-          status: "ONLINE",
-          cpuPercent: 12.5,
-          memoryUsedBytes: 1024 * 1024 * 512,
-          diskUsedBytes: 1024 * 1024 * 1024,
-          uptimeMs: 3600000,
-          isSuspended: false,
-        },
-      },
-    })
+  it("does not call admin GraphQL serverStatus query and returns null when no cache exists", async () => {
+    const graphqlSpy = vi.spyOn(apiClientModule, "graphqlClient")
 
     const result = await serverService.getServerStatus()
 
-    expect(result).toBeDefined()
-    expect(result?.online).toBe(true)
-    expect(result?.playersOnline).toBe(1)
-    expect(result?.maxPlayers).toBe(20)
-
-    // Verify GraphQL query was executed
-    expect(graphqlSpy).toHaveBeenCalledTimes(1)
-    expect(graphqlSpy.mock.calls[0][0]).toContain("serverStatus")
-
-    // Verify cached in localStorage
-    const cached = window.localStorage.getItem("hikat_cached_server_status")
-    expect(cached).toBeDefined()
-    expect(JSON.parse(cached!).online).toBe(true)
+    expect(graphqlSpy).not.toHaveBeenCalled()
+    expect(result).toBeNull()
   })
 
   it("falls back to localStorage cache when GraphQL request fails", async () => {

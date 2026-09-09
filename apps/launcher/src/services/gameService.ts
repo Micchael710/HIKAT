@@ -99,23 +99,28 @@ export function subscribeReleaseEvents(
   }
 
   const scheduleReconnect = () => {
-    if (isClosed) return
-    if (reconnectTimer) clearTimeout(reconnectTimer)
-
+    if (isClosed || reconnectTimer) return
     reconnectTimer = setTimeout(() => {
-      backoffMs = Math.min(backoffMs * 1.5, 30000)
+      reconnectTimer = null
       connect()
     }, backoffMs)
+    backoffMs = Math.min(backoffMs * 2, 60000)
   }
 
   connect()
 
   return () => {
     isClosed = true
-    if (reconnectTimer) clearTimeout(reconnectTimer)
-    try {
-      socket?.close()
-    } catch (_) {}
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (socket) {
+      try {
+        socket.close()
+      } catch (_) {}
+      socket = null
+    }
   }
 }
 
@@ -173,15 +178,23 @@ export const gameService = {
 
   /**
    * Check published modpack state from authoritative GraphQL Backend.
-   * - GraphQL SUCCESS + modpack real: update cache & verify filesystem.
+   * - GraphQL SUCCESS + modpack real: update cache & verify filesystem if allowLegacyLocalFilesystem is true.
    * - GraphQL SUCCESS + publishedModpack: null: authoritative null (no modpack published),
    *   invalidates stale cache and returns null without REST fallback.
    * - NETWORK_ERROR / TIMEOUT: fallback to cached offline manifest.
    * - Non-connectivity errors (SESSION_EXPIRED, application errors): returns null.
    */
-  async checkGameManifest(serverId?: string): Promise<GameManifest | null> {
+  async checkGameManifest(
+    serverId?: string,
+    options?: {
+      allowLegacyLocalFilesystem?: boolean
+    },
+  ): Promise<GameManifest | null> {
     let isConnectivityFailure = false
     const cacheKey = serverId ? `hikat_game_manifest_${serverId}` : "hikat_game_manifest"
+    const allowLegacyLocal = serverId
+      ? options?.allowLegacyLocalFilesystem === true
+      : (options?.allowLegacyLocalFilesystem ?? true)
 
     try {
       const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack | null }>(
@@ -212,10 +225,7 @@ export const gameService = {
           let stagedBytes = 0
           let totalDownloadBytes = totalBytes
 
-          // In Phase 1: only run local filesystem checkSyncPlan for legacy/default server
-          // to avoid mixing global Apparatia filesystem verification with other servers.
-          const isLegacySingleGame = !serverId || serverId === "apparatia"
-          if (isLegacySingleGame && window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
+          if (allowLegacyLocal && window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
             try {
               const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
                 clientFiles: modpack.clientFiles,
@@ -246,7 +256,7 @@ export const gameService = {
                 gameService.setGameInstalled(isInstalled)
               }
             } catch (_) {}
-          } else if (isLegacySingleGame) {
+          } else if (allowLegacyLocal) {
             isInstalled = gameService.isGameInstalled()
           }
 
@@ -311,9 +321,8 @@ export const gameService = {
           let offlineHasPausedSession = false
           let offlineStagedBytes = 0
           let offlineTotalDownloadBytes = 0
-          const isLegacySingleGame = !serverId || serverId === "apparatia"
 
-          if (isLegacySingleGame && window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
+          if (allowLegacyLocal && window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
             try {
               const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
                 clientFiles: cachedFiles,
@@ -339,7 +348,7 @@ export const gameService = {
                 gameService.setGameInstalled(offlineInstalled)
               }
             } catch (_) {}
-          } else if (isLegacySingleGame) {
+          } else if (allowLegacyLocal) {
             offlineInstalled = gameService.isGameInstalled()
           }
 

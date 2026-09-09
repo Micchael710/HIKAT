@@ -41,11 +41,7 @@ export default function NewsCarousel({
     if (news && news.length > 0) return news
     // Read from localStorage cache if available
     try {
-      const cached =
-        localStorage.getItem(cacheKey) ||
-        (!serverId || serverId === "apparatia"
-          ? localStorage.getItem("hikat_cached_news")
-          : null)
+      const cached = localStorage.getItem(cacheKey)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (Array.isArray(parsed) && parsed.length > 0) return parsed
@@ -82,11 +78,7 @@ export default function NewsCarousel({
       setArticles(news)
     } else {
       try {
-        const cached =
-          localStorage.getItem(cacheKey) ||
-          (!serverId || serverId === "apparatia"
-            ? localStorage.getItem("hikat_cached_news")
-            : null)
+        const cached = localStorage.getItem(cacheKey)
         if (cached) {
           const parsed = JSON.parse(cached)
           if (Array.isArray(parsed)) {

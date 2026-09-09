@@ -72,56 +72,15 @@ export const serverService = {
   },
 
   /**
-   * Fetch live Minecraft server ping status & player count via GraphQL serverStatus query.
-   * Returns null if unreachable and no cache exists.
+   * Fetch live Minecraft server ping status & player count.
+   * Note: In Phase 1, the backend GraphQL serverStatus query requires ADMIN privileges.
+   * The Launcher must not call this administrative query.
+   * Returns cached status if available, or null.
    */
   async getServerStatus(serverId?: string): Promise<ServerStatusResponse | null> {
-    const query = /* GraphQL */ `
-      query GetServerStatus($serverId: ID) {
-        serverStatus(serverId: $serverId) {
-          status
-          cpuPercent
-          memoryUsedBytes
-          diskUsedBytes
-          uptimeMs
-          isSuspended
-        }
-      }
-    `
     const cacheKey = serverId
       ? `hikat_cached_server_status_${serverId}`
       : "hikat_cached_server_status"
-
-    const res = await graphqlClient<{
-      serverStatus?: {
-        status?: string
-        cpuPercent?: number
-        memoryUsedBytes?: number
-        diskUsedBytes?: number
-        uptimeMs?: number
-        isSuspended?: boolean
-      } | null
-    }>(query, serverId ? { serverId } : undefined)
-
-    if (res.success && res.data?.serverStatus) {
-      const isOnline =
-        res.data.serverStatus.status === "ONLINE" ||
-        res.data.serverStatus.status === "online" ||
-        res.data.serverStatus.status === "STARTING"
-
-      const data: ServerStatusResponse = {
-        online: isOnline,
-        playersOnline: isOnline ? 1 : 0,
-        maxPlayers: 20,
-        latencyMs: 35,
-        version: "1.21.1",
-      }
-
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify(data))
-      } catch (_) {}
-      return data
-    }
 
     try {
       const cached = localStorage.getItem(cacheKey)

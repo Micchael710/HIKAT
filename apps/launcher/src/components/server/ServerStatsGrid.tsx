@@ -45,11 +45,7 @@ export default function ServerStatsGrid({
       }
     }
     try {
-      const cached =
-        localStorage.getItem(cacheKey) ||
-        (!serverId || serverId === "apparatia"
-          ? localStorage.getItem("hikat_cached_server_status")
-          : null)
+      const cached = localStorage.getItem(cacheKey)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (parsed && typeof parsed === "object") {
@@ -82,11 +78,7 @@ export default function ServerStatsGrid({
 
     // Check cached state first for immediate hydration on server switch
     try {
-      const cached =
-        localStorage.getItem(cacheKey) ||
-        (!serverId || serverId === "apparatia"
-          ? localStorage.getItem("hikat_cached_server_status")
-          : null)
+      const cached = localStorage.getItem(cacheKey)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (parsed && typeof parsed === "object") {
@@ -128,7 +120,7 @@ export default function ServerStatsGrid({
     }
   }, [stats, isActive, serverId, cacheKey])
 
-  const serverName = propServerName || stats?.name || "Apparatia"
+  const serverName = propServerName || stats?.name || "Server"
   const isOnline = serverData.online
   const playersOnline = serverData.playersOnline
   const maxPlayers = serverData.maxPlayers
