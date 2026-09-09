@@ -122,7 +122,7 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
     }
   }, [serverId, fetchSyncPlan])
 
-  // Controlled polling: initial fetch, then once every 5s
+  // Controlled polling: initial fetch, then once every 5s ONLY if WebSocket is not connected
   useEffect(() => {
     isMountedRef.current = true
     fetchStatus()
@@ -130,14 +130,18 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
 
     const interval = setInterval(() => {
       if (document.visibilityState === "visible" && !isActionLoadingRef.current) {
-        fetchStatus()
+        if (!consoleService.isConnected()) {
+          fetchStatus()
+        }
         fetchSyncPlan()
       }
     }, 5000)
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible" && !isActionLoadingRef.current) {
-        fetchStatus()
+        if (!consoleService.isConnected()) {
+          fetchStatus()
+        }
         fetchSyncPlan()
       }
     }
@@ -158,29 +162,76 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
     }
   }, [activeTab, fetchSyncPlan])
 
-  // Live console preview subscription on General tab
+  // Live console and telemetry connection for the server view
   useEffect(() => {
-    if (activeTab !== "general") return
-
     // Pre-populate with existing rolling logs
     setLiveLogs(consoleService.getRecentLogs(15))
 
     const unretain = consoleService.retain(serverId)
 
     const unsubLog = consoleService.onLog((entry) => {
-      setLiveLogs((prev) => [...prev.slice(-20), entry])
+      if (activeTab === "general") {
+        setLiveLogs((prev) => [...prev.slice(-20), entry])
+      }
+    })
+
+    const unsubStatus = consoleService.onStatus((newStatus) => {
+      if (isMountedRef.current) {
+        setResources((prev) => (prev ? { ...prev, status: newStatus } : null))
+      }
+    })
+
+    const unsubTelemetry = consoleService.onTelemetry((telemetry) => {
+      if (!isMountedRef.current) return
+      setResources((prev) => {
+        if (!prev) {
+          return {
+            status: telemetry.status || "ONLINE",
+            cpuPercent: telemetry.cpuPercent ?? 0,
+            cpuLimitPercent: null,
+            memoryUsedBytes: telemetry.memoryUsedBytes ?? 0,
+            memoryLimitBytes: null,
+            diskUsedBytes: telemetry.diskUsedBytes ?? 0,
+            diskLimitBytes: null,
+            networkRxBytes: null,
+            networkTxBytes: null,
+            uptimeMs: telemetry.uptimeMs ?? null,
+            isSuspended: false,
+          }
+        }
+        return {
+          ...prev,
+          status: telemetry.status || prev.status,
+          cpuPercent: telemetry.cpuPercent !== undefined ? telemetry.cpuPercent : prev.cpuPercent,
+          memoryUsedBytes:
+            telemetry.memoryUsedBytes !== undefined ? telemetry.memoryUsedBytes : prev.memoryUsedBytes,
+          diskUsedBytes:
+            telemetry.diskUsedBytes !== undefined ? telemetry.diskUsedBytes : prev.diskUsedBytes,
+          uptimeMs: telemetry.uptimeMs !== undefined ? telemetry.uptimeMs : prev.uptimeMs,
+        }
+      })
+      setInfraState("CONNECTED")
     })
 
     const unsubConn = consoleService.onConnectionChange((connected) => {
-      setIsConsoleConnected(connected)
+      if (isMountedRef.current) {
+        setIsConsoleConnected(connected)
+        if (!connected) {
+          fetchStatus()
+        } else {
+          setInfraState("CONNECTED")
+        }
+      }
     })
 
     return () => {
       unsubLog()
+      unsubStatus()
+      unsubTelemetry()
       unsubConn()
       unretain()
     }
-  }, [activeTab, serverId])
+  }, [serverId, activeTab, fetchStatus])
 
   // Auto-scroll live console preview safely inside local container
   useEffect(() => {
@@ -189,10 +240,35 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
     }
   }, [liveLogs, activeTab])
 
-  // Power action dispatcher
+  // Power action dispatcher with instant optimistic state transitions
   const handlePowerAction = async (action: ServerPowerAction) => {
     setIsActionLoading(true)
     isActionLoadingRef.current = true
+
+    const optimisticTarget: Record<ServerPowerAction, ServerResources["status"]> = {
+      START: "STARTING",
+      RESTART: "STARTING",
+      STOP: "STOPPING",
+    }
+    const targetStatus = optimisticTarget[action]
+
+    setResources((prev) =>
+      prev
+        ? { ...prev, status: targetStatus }
+        : {
+            status: targetStatus,
+            cpuPercent: 0,
+            cpuLimitPercent: null,
+            memoryUsedBytes: 0,
+            memoryLimitBytes: null,
+            diskUsedBytes: 0,
+            diskLimitBytes: null,
+            networkRxBytes: null,
+            networkTxBytes: null,
+            uptimeMs: null,
+            isSuspended: false,
+          },
+    )
 
     try {
       let result: { success: boolean; status: any; message?: string }
@@ -212,13 +288,20 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
         }
         showToast(actionLabels[action], "success")
 
-        if (resources) {
-          setResources({ ...resources, status: result.status })
+        if (isMountedRef.current) {
+          setResources((prev) =>
+            prev ? { ...prev, status: result.status || targetStatus } : null,
+          )
         }
 
-        setTimeout(() => {
-          fetchStatus()
-        }, 1500)
+        // If WebSocket is not available, execute fallback poll after short grace period
+        if (!consoleService.isConnected()) {
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              fetchStatus()
+            }
+          }, 3000)
+        }
       } else {
         showToast(
           result.message || `No se pudo ejecutar la acción ${action}.`,

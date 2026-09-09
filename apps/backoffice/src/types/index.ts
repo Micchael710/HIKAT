@@ -102,6 +102,23 @@ export interface NewsConnection {
   totalCount: number
 }
 
+export interface ServerNodeCapacity {
+  totalMemoryMb: number
+  allocatedMemoryMb: number
+  availableMemoryMb: number
+  totalDiskMb: number
+  allocatedDiskMb: number
+  availableDiskMb: number
+}
+
+export interface ServerTelemetryUpdate {
+  cpuPercent?: number
+  memoryUsedBytes?: number
+  diskUsedBytes?: number
+  uptimeMs?: number
+  status?: ServerStatus
+}
+
 export interface ServerResources {
   status: ServerStatus
   cpuPercent: number

@@ -250,6 +250,42 @@ export interface IPterodactylClient {
   createApplicationServer(payload: CreatePterodactylApplicationServerInput): Promise<PterodactylApplicationServerResponse>
   deleteApplicationServer(serverId: number | string): Promise<void>
   getApplicationServer(serverId: number | string): Promise<PterodactylApplicationServerResponse>
+  listApplicationNodes(): Promise<PterodactylNodeListResponse>
+  getApplicationNode(nodeId: number | string): Promise<PterodactylNodeResponse>
+}
+
+export interface PterodactylNodeAllocatedResources {
+  memory: number
+  disk: number
+}
+
+export interface PterodactylNodeAttributes {
+  id: number
+  name: string
+  description: string | null
+  location_id: number
+  public: boolean
+  fqdn: string
+  scheme: string
+  behind_proxy: boolean
+  memory: number
+  memory_overallocate: number
+  disk: number
+  disk_overallocate: number
+  daemon_listen: number
+  daemon_sftp: number
+  daemon_base: string
+  allocated_resources?: PterodactylNodeAllocatedResources
+}
+
+export interface PterodactylNodeResponse {
+  object: "node"
+  attributes: PterodactylNodeAttributes
+}
+
+export interface PterodactylNodeListResponse {
+  object: "list"
+  data: PterodactylNodeResponse[]
 }
 
 export interface CreatePterodactylApplicationServerInput {

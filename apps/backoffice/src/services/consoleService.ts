@@ -8,13 +8,14 @@
 import { authService } from "./authService"
 import { serverApi } from "./graphqlClient"
 import { validateServerCommand } from "@hikat/shared"
-import type { ConsoleLogEntry, ServerStatus } from "../types"
+import type { ConsoleLogEntry, ServerStatus, ServerTelemetryUpdate } from "../types"
 
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_API_URL || "http://localhost:8787"
 
 type LogListener = (entry: ConsoleLogEntry) => void
 type StatusListener = (status: ServerStatus) => void
+type TelemetryListener = (telemetry: ServerTelemetryUpdate) => void
 type ConnectionListener = (connected: boolean) => void
 type ErrorListener = (error: string) => void
 
@@ -22,6 +23,7 @@ class ConsoleService {
   private ws: WebSocket | null = null
   private logListeners: Set<LogListener> = new Set()
   private statusListeners: Set<StatusListener> = new Set()
+  private telemetryListeners: Set<TelemetryListener> = new Set()
   private connectionListeners: Set<ConnectionListener> = new Set()
   private errorListeners: Set<ErrorListener> = new Set()
   private isConnecting: boolean = false
@@ -155,6 +157,18 @@ class ConsoleService {
             this.logListeners.forEach((listener) => listener(entry))
           } else if (data.type === "status" && data.status) {
             this.statusListeners.forEach((listener) => listener(data.status))
+          } else if (data.type === "stats") {
+            const telemetry: ServerTelemetryUpdate = {
+              cpuPercent: typeof data.cpuPercent === "number" ? data.cpuPercent : undefined,
+              memoryUsedBytes: typeof data.memoryUsedBytes === "number" ? data.memoryUsedBytes : undefined,
+              diskUsedBytes: typeof data.diskUsedBytes === "number" ? data.diskUsedBytes : undefined,
+              uptimeMs: typeof data.uptimeMs === "number" ? data.uptimeMs : undefined,
+              status: data.status,
+            }
+            this.telemetryListeners.forEach((listener) => listener(telemetry))
+            if (telemetry.status) {
+              this.statusListeners.forEach((listener) => listener(telemetry.status!))
+            }
           } else if (data.type === "error" && typeof data.message === "string") {
             this.errorListeners.forEach((listener) => listener(data.message))
           }
@@ -243,6 +257,13 @@ class ConsoleService {
     this.statusListeners.add(listener)
     return () => {
       this.statusListeners.delete(listener)
+    }
+  }
+
+  public onTelemetry(listener: TelemetryListener): () => void {
+    this.telemetryListeners.add(listener)
+    return () => {
+      this.telemetryListeners.delete(listener)
     }
   }
 

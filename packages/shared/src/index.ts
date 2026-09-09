@@ -279,8 +279,11 @@ export const ALLOWED_SERVER_POWER_ACTIONS = [
 ] as const
 export type ServerPowerAction = typeof ALLOWED_SERVER_POWER_ACTIONS[number]
 
+export const SERVER_MAX_CPU_PERCENT = 1200
+
 export const SERVER_LIMITS = {
   MAX_COMMAND_LENGTH: 500,
+  MAX_CPU_PERCENT: SERVER_MAX_CPU_PERCENT,
 } as const
 
 export interface ServerResourcesData {

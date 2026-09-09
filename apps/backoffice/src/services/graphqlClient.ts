@@ -16,6 +16,7 @@ import type {
   ServerFileRoot,
   ServerFileItem,
   ServerFileContent,
+  ServerNodeCapacity,
 } from "../types"
 
 import type { NewsType, NewsStatus } from "@hikat/shared"
@@ -503,6 +504,23 @@ export const serverApi = {
       deletePterodactyl,
     })
     return data.deleteServer
+  },
+
+  async getServerNodeCapacity(): Promise<ServerNodeCapacity> {
+    const query = /* GraphQL */ `
+      query ServerNodeCapacity {
+        serverNodeCapacity {
+          totalMemoryMb
+          allocatedMemoryMb
+          availableMemoryMb
+          totalDiskMb
+          allocatedDiskMb
+          availableDiskMb
+        }
+      }
+    `
+    const data = await executeGraphQL<{ serverNodeCapacity: ServerNodeCapacity }>(query)
+    return data.serverNodeCapacity
   },
 
   async getServerStatus(serverId: string): Promise<ServerResources> {

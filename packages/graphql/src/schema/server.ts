@@ -487,6 +487,23 @@ export const serverTypeDefs = /* GraphQL */ `
     Retrieves status of server release synchronization - requires ADMIN role
     """
     serverReleaseSyncStatus(serverId: ID): ServerReleaseSyncStatus
+
+    """
+    Retrieves available hardware capacity from Pterodactyl node for server provisioning - requires ADMIN role
+    """
+    serverNodeCapacity: ServerNodeCapacity!
+  }
+
+  """
+  Hardware capacity from Pterodactyl node for server provisioning
+  """
+  type ServerNodeCapacity {
+    totalMemoryMb: Int!
+    allocatedMemoryMb: Int!
+    availableMemoryMb: Int!
+    totalDiskMb: Int!
+    allocatedDiskMb: Int!
+    availableDiskMb: Int!
   }
 
   extend type Mutation {

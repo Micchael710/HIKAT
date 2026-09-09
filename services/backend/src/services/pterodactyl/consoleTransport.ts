@@ -92,7 +92,7 @@ export async function handleConsoleWebSocket(
   }
 
   const db = createDatabase(env.DB)
-  let ticketRecord: { userId: string; sessionId: string }
+  let ticketRecord: { userId: string; sessionId: string; serverId?: string | null }
 
   try {
     ticketRecord = await consumeConsoleTicket(db, ticket)
@@ -106,7 +106,7 @@ export async function handleConsoleWebSocket(
     )
   }
 
-  const { userId, sessionId } = ticketRecord
+  const { userId, sessionId, serverId } = ticketRecord
   const nowIso = new Date().toISOString()
 
   // 6. Verify active session and user admin role in D1
@@ -152,7 +152,7 @@ export async function handleConsoleWebSocket(
   // 7. Acquire Wings credentials (never exposed to browser)
   let wsCreds: { token: string; socket: string }
   try {
-    wsCreds = await getServerConsoleWebsocketCredentials(env, clientOverride)
+    wsCreds = await getServerConsoleWebsocketCredentials(env, clientOverride, serverId, db)
   } catch {
     return new Response(
       JSON.stringify({ error: "Unable to retrieve server console credentials" }),
@@ -277,8 +277,47 @@ export async function handleConsoleWebSocket(
             status,
           }),
         )
+      } else if (data.event === "stats" && data.args?.[0]) {
+        let statsPayload: any = data.args[0]
+        if (typeof statsPayload === "string") {
+          try {
+            statsPayload = JSON.parse(statsPayload)
+          } catch {}
+        }
+        if (statsPayload && typeof statsPayload === "object") {
+          const cpuPercent =
+            typeof statsPayload.cpu_absolute === "number"
+              ? statsPayload.cpu_absolute
+              : 0
+          const memoryUsedBytes =
+            typeof statsPayload.memory_bytes === "number"
+              ? statsPayload.memory_bytes
+              : 0
+          const diskUsedBytes =
+            typeof statsPayload.disk_bytes === "number"
+              ? statsPayload.disk_bytes
+              : 0
+          const uptimeMs =
+            typeof statsPayload.uptime === "number"
+              ? statsPayload.uptime
+              : 0
+          const status =
+            typeof statsPayload.state === "string"
+              ? mapPterodactylStateToHiKAT(statsPayload.state)
+              : undefined
+
+          serverWs.send(
+            JSON.stringify({
+              type: "stats",
+              cpuPercent,
+              memoryUsedBytes,
+              diskUsedBytes,
+              uptimeMs,
+              status,
+            }),
+          )
+        }
       }
-      // Security: DO NOT forward raw Pterodactyl "stats" or daemon details
     } catch {
       if (typeof event.data === "string" && event.data.trim()) {
         serverWs.send(

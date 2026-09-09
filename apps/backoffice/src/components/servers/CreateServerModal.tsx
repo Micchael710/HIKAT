@@ -5,7 +5,9 @@ import type {
   CreateServerInput,
   GameEnvironmentCatalog,
   GameLoaderVersion,
+  ServerNodeCapacity,
 } from "../../types"
+import { SERVER_MAX_CPU_PERCENT } from "@hikat/shared"
 import { serverApi, gameApi } from "../../services/graphqlClient"
 import { uploadMediaFile } from "../../services/mediaUploadService"
 import {
@@ -68,6 +70,8 @@ export default function CreateServerModal({
   const [cpu, setCpu] = useState<number>(200)
   const [ram, setRam] = useState<number>(4096)
   const [disk, setDisk] = useState<number>(10240)
+  const [nodeCapacity, setNodeCapacity] = useState<ServerNodeCapacity | null>(null)
+  const [nodeCapacityLoading, setNodeCapacityLoading] = useState(false)
 
   // Step 4: Appearance
   const [logoWideFile, setLogoWideFile] = useState<File | null>(null)
@@ -87,6 +91,26 @@ export default function CreateServerModal({
     isMountedRef.current = true
     return () => {
       isMountedRef.current = false
+    }
+  }, [])
+
+  const fetchNodeCapacity = useCallback(async () => {
+    setNodeCapacityLoading(true)
+    try {
+      const cap = await serverApi.getServerNodeCapacity()
+      if (isMountedRef.current && cap) {
+        setNodeCapacity(cap)
+        if (cap.availableMemoryMb > 0) {
+          setRam((prev) => Math.min(prev, cap.availableMemoryMb))
+        }
+        if (cap.availableDiskMb > 0) {
+          setDisk((prev) => Math.min(prev, cap.availableDiskMb))
+        }
+      }
+    } catch {
+      // Fallback
+    } finally {
+      if (isMountedRef.current) setNodeCapacityLoading(false)
     }
   }, [])
 
@@ -115,7 +139,7 @@ export default function CreateServerModal({
     }
   }, [])
 
-  // Load catalog when modal opens
+  // Load catalog and capacity when modal opens
   useEffect(() => {
     if (!isOpen) return
 
@@ -137,7 +161,8 @@ export default function CreateServerModal({
     setSubmitStatusText(null)
 
     fetchCatalog()
-  }, [isOpen, fetchCatalog])
+    fetchNodeCapacity()
+  }, [isOpen, fetchCatalog, fetchNodeCapacity])
 
   const fetchLoaderVersions = useCallback(async (mcVer: string, modLdr: string) => {
     if (modLdr === "VANILLA") {
@@ -794,8 +819,43 @@ export default function CreateServerModal({
           {currentStep === 3 && (
             <form onSubmit={handleNextFromStep3} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
               <div style={{ fontSize: 13, color: isDark ? "#94a3b8" : "#64748b" }}>
-                Asigna las especificaciones de hardware para la instancia de Pterodactyl.
+                Asigna las especificaciones de hardware para la instancia de Pterodactyl según la capacidad real del nodo.
               </div>
+
+              {/* Node Capacity Summary */}
+              {nodeCapacity && (
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    background: isDark ? "rgba(62, 196, 192, 0.08)" : "rgba(62, 196, 192, 0.06)",
+                    border: "1px solid rgba(62, 196, 192, 0.2)",
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 12,
+                    fontSize: 12,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#3ec4c0", marginBottom: 2 }}>Capacidad de Memoria</div>
+                    <div style={{ color: isDark ? "#94a3b8" : "#64748b" }}>
+                      Total: {(nodeCapacity.totalMemoryMb / 1024).toFixed(1)} GB | Asignada: {(nodeCapacity.allocatedMemoryMb / 1024).toFixed(1)} GB
+                    </div>
+                    <div style={{ fontWeight: 600, color: isDark ? "#ffffff" : "#111822", marginTop: 2 }}>
+                      Disponible: {(nodeCapacity.availableMemoryMb / 1024).toFixed(1)} GB
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#3ec4c0", marginBottom: 2 }}>Capacidad de Disco</div>
+                    <div style={{ color: isDark ? "#94a3b8" : "#64748b" }}>
+                      Total: {(nodeCapacity.totalDiskMb / 1024).toFixed(0)} GB | Asignado: {(nodeCapacity.allocatedDiskMb / 1024).toFixed(0)} GB
+                    </div>
+                    <div style={{ fontWeight: 600, color: isDark ? "#ffffff" : "#111822", marginTop: 2 }}>
+                      Disponible: {(nodeCapacity.availableDiskMb / 1024).toFixed(0)} GB
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* CPU */}
               <div
@@ -820,7 +880,7 @@ export default function CreateServerModal({
                 <input
                   type="range"
                   min={50}
-                  max={800}
+                  max={SERVER_MAX_CPU_PERCENT}
                   step={25}
                   value={cpu}
                   onChange={(e) => setCpu(Number(e.target.value))}
@@ -831,88 +891,103 @@ export default function CreateServerModal({
                   <span>200% (2 cores)</span>
                   <span>400% (4 cores)</span>
                   <span>800% (8 cores)</span>
+                  <span>1200% (12 cores)</span>
                 </div>
               </div>
 
               {/* RAM */}
-              <div
-                style={{
-                  padding: "14px 16px",
-                  borderRadius: 12,
-                  background: isDark ? "#0d141a" : "#f8fafc",
-                  border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ color: "#3ec4c0" }}>
-                      <IconRam size={18} />
+              {(() => {
+                const maxRam =
+                  nodeCapacity && nodeCapacity.availableMemoryMb > 0
+                    ? Math.max(1024, nodeCapacity.availableMemoryMb)
+                    : 32768
+                return (
+                  <div
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: 12,
+                      background: isDark ? "#0d141a" : "#f8fafc",
+                      border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ color: "#3ec4c0" }}>
+                          <IconRam size={18} />
+                        </div>
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: isDark ? "#ffffff" : "#111822" }}>
+                          Memoria RAM
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "#3ec4c0" }}>
+                        {ram >= 1024 ? `${(ram / 1024).toFixed(1)} GB` : `${ram} MB`}
+                      </span>
                     </div>
-                    <span style={{ fontSize: 13.5, fontWeight: 700, color: isDark ? "#ffffff" : "#111822" }}>
-                      Memoria RAM
-                    </span>
+                    <input
+                      type="range"
+                      min={1024}
+                      max={maxRam}
+                      step={Math.min(1024, maxRam)}
+                      value={Math.min(ram, maxRam)}
+                      onChange={(e) => setRam(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: "#3ec4c0" }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                      <span>1 GB</span>
+                      {maxRam >= 4096 && <span>4 GB (Recomendado)</span>}
+                      {maxRam >= 8192 && <span>8 GB</span>}
+                      <span>{(maxRam / 1024).toFixed(1)} GB (Máx)</span>
+                    </div>
                   </div>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: "#3ec4c0" }}>
-                    {ram >= 1024 ? `${(ram / 1024).toFixed(1)} GB` : `${ram} MB`}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={1024}
-                  max={32768}
-                  step={1024}
-                  value={ram}
-                  onChange={(e) => setRam(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#3ec4c0" }}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b", marginTop: 4 }}>
-                  <span>1 GB</span>
-                  <span>4 GB (Recomendado)</span>
-                  <span>8 GB</span>
-                  <span>16 GB</span>
-                  <span>32 GB</span>
-                </div>
-              </div>
+                )
+              })()}
 
               {/* Disk */}
-              <div
-                style={{
-                  padding: "14px 16px",
-                  borderRadius: 12,
-                  background: isDark ? "#0d141a" : "#f8fafc",
-                  border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ color: "#3ec4c0" }}>
-                      <IconDisk size={18} />
+              {(() => {
+                const maxDisk =
+                  nodeCapacity && nodeCapacity.availableDiskMb > 0
+                    ? Math.max(2048, nodeCapacity.availableDiskMb)
+                    : 102400
+                return (
+                  <div
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: 12,
+                      background: isDark ? "#0d141a" : "#f8fafc",
+                      border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ color: "#3ec4c0" }}>
+                          <IconDisk size={18} />
+                        </div>
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: isDark ? "#ffffff" : "#111822" }}>
+                          Espacio en Disco
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "#3ec4c0" }}>
+                        {disk >= 1024 ? `${(disk / 1024).toFixed(0)} GB` : `${disk} MB`}
+                      </span>
                     </div>
-                    <span style={{ fontSize: 13.5, fontWeight: 700, color: isDark ? "#ffffff" : "#111822" }}>
-                      Espacio en Disco
-                    </span>
+                    <input
+                      type="range"
+                      min={2048}
+                      max={maxDisk}
+                      step={Math.min(2048, maxDisk)}
+                      value={Math.min(disk, maxDisk)}
+                      onChange={(e) => setDisk(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: "#3ec4c0" }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                      <span>2 GB</span>
+                      {maxDisk >= 10240 && <span>10 GB (Recomendado)</span>}
+                      {maxDisk >= 25600 && <span>25 GB</span>}
+                      <span>{(maxDisk / 1024).toFixed(0)} GB (Máx)</span>
+                    </div>
                   </div>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: "#3ec4c0" }}>
-                    {disk >= 1024 ? `${(disk / 1024).toFixed(0)} GB` : `${disk} MB`}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={2048}
-                  max={102400}
-                  step={2048}
-                  value={disk}
-                  onChange={(e) => setDisk(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#3ec4c0" }}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b", marginTop: 4 }}>
-                  <span>2 GB</span>
-                  <span>10 GB (Recomendado)</span>
-                  <span>25 GB</span>
-                  <span>50 GB</span>
-                  <span>100 GB</span>
-                </div>
-              </div>
+                )
+              })()}
 
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
                 <button

@@ -58,12 +58,58 @@ export async function formatServerGql(
   }
 }
 
+async function syncServerProvisioningStatus(
+  server: schema.Server,
+  db: Database,
+  env: Env,
+  clientOverride?: IPterodactylClient,
+): Promise<void> {
+  if (server.provisioningStatus !== "PROVISIONING" || !server.pterodactylServerId) {
+    return
+  }
+
+  try {
+    const client = clientOverride || createPterodactylApplicationClient(env)
+    const pServer = await client.getApplicationServer(server.pterodactylServerId)
+    if (pServer?.attributes) {
+      const isInstalled =
+        pServer.attributes.container?.installed === 1 ||
+        pServer.attributes.status === null
+      const isFailed =
+        pServer.attributes.container?.installed === 2 ||
+        pServer.attributes.status === "install_failed"
+
+      if (isInstalled) {
+        server.provisioningStatus = "READY"
+        server.updatedAt = new Date().toISOString()
+        await db
+          .update(schema.servers)
+          .set({ provisioningStatus: "READY", updatedAt: server.updatedAt })
+          .where(eq(schema.servers.id, server.id))
+      } else if (isFailed) {
+        server.provisioningStatus = "FAILED"
+        server.updatedAt = new Date().toISOString()
+        await db
+          .update(schema.servers)
+          .set({ provisioningStatus: "FAILED", updatedAt: server.updatedAt })
+          .where(eq(schema.servers.id, server.id))
+      }
+    }
+  } catch {
+    // If Pterodactyl API is temporarily unreachable, leave as PROVISIONING
+  }
+}
+
 export async function getServers(
   db: Database,
   env: Env,
   request?: Request,
+  clientOverride?: IPterodactylClient,
 ): Promise<ServerGql[]> {
   const allServers = await db.select().from(schema.servers).all()
+  await Promise.all(
+    allServers.map((s) => syncServerProvisioningStatus(s, db, env, clientOverride)),
+  )
   return Promise.all(allServers.map((s) => formatServerGql(s, db, env, request)))
 }
 
@@ -72,6 +118,7 @@ export async function getServerById(
   env: Env,
   serverId: string,
   request?: Request,
+  clientOverride?: IPterodactylClient,
 ): Promise<ServerGql | null> {
   const server = await db
     .select()
@@ -80,6 +127,7 @@ export async function getServerById(
     .get()
 
   if (!server) return null
+  await syncServerProvisioningStatus(server, db, env, clientOverride)
   return formatServerGql(server, db, env, request)
 }
 
@@ -383,9 +431,15 @@ export async function createServer(
     throw createGraphQLError(errorMsg, "INTERNAL_ERROR")
   }
 
-  // 10. Update server with Pterodactyl identifiers and READY status
+  // 10. Update server with Pterodactyl identifiers and proper initial status
   const pterodactylId = String(pterodactylRes.attributes.id)
   const pterodactylIdentifier = pterodactylRes.attributes.identifier
+
+  const isAlreadyInstalled =
+    pterodactylRes.attributes?.container?.installed === 1 ||
+    pterodactylRes.attributes?.status === null
+
+  const initialStatus = isAlreadyInstalled ? "READY" : "PROVISIONING"
 
   try {
     await db
@@ -393,7 +447,7 @@ export async function createServer(
       .set({
         pterodactylServerId: pterodactylId,
         pterodactylIdentifier,
-        provisioningStatus: "READY",
+        provisioningStatus: initialStatus,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.servers.id, serverId))
@@ -471,4 +525,66 @@ export async function deleteServer(
   // Does NOT delete: users, auth, skins, capes, global settings, or other servers
   await db.delete(schema.servers).where(eq(schema.servers.id, serverId))
   return true
+}
+
+export interface ServerNodeCapacityData {
+  totalMemoryMb: number
+  allocatedMemoryMb: number
+  availableMemoryMb: number
+  totalDiskMb: number
+  allocatedDiskMb: number
+  availableDiskMb: number
+}
+
+export async function getServerNodeCapacity(
+  env: Env,
+  clientOverride?: IPterodactylClient,
+): Promise<ServerNodeCapacityData> {
+  const client = clientOverride || createPterodactylApplicationClient(env)
+  const rawLocationId = env.PTERODACTYL_DEFAULT_LOCATION_ID
+  const locationId = rawLocationId ? Number(rawLocationId) : 1
+
+  let node: import("./pterodactyl/types").PterodactylNodeAttributes | undefined
+
+  try {
+    const nodesList = await client.listApplicationNodes()
+    if (nodesList?.data && nodesList.data.length > 0) {
+      const match = nodesList.data.find(
+        (n) => n.attributes.location_id === locationId,
+      )
+      node = match?.attributes || nodesList.data[0]?.attributes
+    }
+  } catch {
+    // If list fails, fallback safely
+  }
+
+  if (!node) {
+    return {
+      totalMemoryMb: 16384,
+      allocatedMemoryMb: 0,
+      availableMemoryMb: 16384,
+      totalDiskMb: 65536,
+      allocatedDiskMb: 0,
+      availableDiskMb: 65536,
+    }
+  }
+
+  const memoryOverallocate = node.memory_overallocate || 0
+  const maxMemoryMb = Math.floor(node.memory * (1 + memoryOverallocate / 100))
+  const allocatedMemoryMb = node.allocated_resources?.memory || 0
+  const availableMemoryMb = Math.max(0, maxMemoryMb - allocatedMemoryMb)
+
+  const diskOverallocate = node.disk_overallocate || 0
+  const maxDiskMb = Math.floor(node.disk * (1 + diskOverallocate / 100))
+  const allocatedDiskMb = node.allocated_resources?.disk || 0
+  const availableDiskMb = Math.max(0, maxDiskMb - allocatedDiskMb)
+
+  return {
+    totalMemoryMb: maxMemoryMb,
+    allocatedMemoryMb,
+    availableMemoryMb,
+    totalDiskMb: maxDiskMb,
+    allocatedDiskMb,
+    availableDiskMb,
+  }
 }

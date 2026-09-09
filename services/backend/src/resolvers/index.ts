@@ -110,6 +110,7 @@ import {
   getServerById,
   createServer,
   deleteServer,
+  getServerNodeCapacity,
 } from "../services/serverService"
 import {
   getPublicNewsFeed,
@@ -597,6 +598,15 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return getServerReleaseSyncStatus(context.db, args?.serverId)
+    },
+
+    serverNodeCapacity: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<import("../services/serverService").ServerNodeCapacityData> => {
+      requireAdmin(context)
+      return getServerNodeCapacity(context.env)
     },
 
 

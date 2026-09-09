@@ -24,6 +24,8 @@ import type {
   UpdateScheduleTaskInput,
   CreatePterodactylApplicationServerInput,
   PterodactylApplicationServerResponse,
+  PterodactylNodeListResponse,
+  PterodactylNodeResponse,
 } from "./types"
 import { SERVER_ERROR_CODES, SERVER_PUBLIC_MESSAGES } from "@hikat/shared"
 
@@ -861,6 +863,22 @@ export class PterodactylHttpClient implements IPterodactylClient {
   ): Promise<PterodactylApplicationServerResponse> {
     return this.applicationRequest<PterodactylApplicationServerResponse>(
       `/api/application/servers/${encodeURIComponent(String(serverId))}`,
+      { method: "GET" },
+    )
+  }
+
+  async listApplicationNodes(): Promise<PterodactylNodeListResponse> {
+    return this.applicationRequest<PterodactylNodeListResponse>(
+      "/api/application/nodes",
+      { method: "GET" },
+    )
+  }
+
+  async getApplicationNode(
+    nodeId: number | string,
+  ): Promise<PterodactylNodeResponse> {
+    return this.applicationRequest<PterodactylNodeResponse>(
+      `/api/application/nodes/${encodeURIComponent(String(nodeId))}`,
       { method: "GET" },
     )
   }

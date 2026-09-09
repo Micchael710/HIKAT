@@ -333,6 +333,15 @@ export interface CreateServerInputGql {
   accentColor?: string | null
 }
 
+export interface ServerNodeCapacityGql {
+  totalMemoryMb: number
+  allocatedMemoryMb: number
+  availableMemoryMb: number
+  totalDiskMb: number
+  allocatedDiskMb: number
+  availableDiskMb: number
+}
+
 export interface CreateContentMediaUploadInputGql {
   mimeType: string
 

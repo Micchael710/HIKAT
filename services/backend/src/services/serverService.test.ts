@@ -7,6 +7,7 @@ import {
   getServerById,
   deleteServer,
   formatServerGql,
+  getServerNodeCapacity,
 } from "./serverService"
 import { handleGameFileDownload } from "./game/gameStorageService"
 import {
@@ -124,7 +125,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
       )
 
       expect(server.name).toBe("Survival 1.20.6")
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       expect(server.cpu).toBe(250)
       expect(server.memoryMb).toBe(8192)
       expect(server.diskMb).toBe(20480)
@@ -160,7 +161,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
         mockClient,
       )
 
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_17")
     })
@@ -181,7 +182,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
         mockClient,
       )
 
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_16")
     })
@@ -202,7 +203,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
         mockClient,
       )
 
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_8")
     })
@@ -223,7 +224,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
         mockClient,
       )
 
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.egg).toBe(3)
       expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_21")
@@ -251,7 +252,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
         mockClient,
       )
 
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.egg).toBe(1)
       expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_17")
@@ -283,7 +284,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
         mockClient,
       )
 
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.egg).toBe(15)
       expect(call.docker_image).toBe("ghcr.io/pterodactyl/yolks:java_21")
@@ -313,7 +314,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
         mockClient,
       )
 
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.egg).toBe(16)
       expect(call.docker_image).toBe("ghcr.io/ptero-eggs/yolks:java_17")
@@ -343,7 +344,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
         mockClient,
       )
 
-      expect(server.provisioningStatus).toBe("READY")
+      expect(server.provisioningStatus).toBe("PROVISIONING")
       const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
       expect(call.egg).toBe(18)
       expect(call.docker_image).toBe("ghcr.io/ptero-eggs/yolks:java_17")
@@ -663,6 +664,126 @@ describe("ServerService & Multi-Server Provisioning", () => {
         .get()
 
       expect(check).toBeUndefined()
+    })
+
+    it("syncs provisioning status from PROVISIONING to READY when Pterodactyl indicates installation completed", async () => {
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Provisioning Sync Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("PROVISIONING")
+
+      const syncClient = {
+        getApplicationServer: vi.fn(async () => ({
+          object: "server",
+          attributes: {
+            id: 100,
+            identifier: "ptero_100",
+            status: null,
+            container: { installed: 1 },
+          },
+        })),
+      } as unknown as IPterodactylClient
+
+      const list = await getServers(mockDb, mockEnv, undefined, syncClient)
+      const found = list.find((s) => s.id === server.id)
+      expect(found?.provisioningStatus).toBe("READY")
+
+      // Verify D1 record updated to READY
+      const inDb = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, server.id))
+        .get()
+      expect(inDb?.provisioningStatus).toBe("READY")
+    })
+
+    it("syncs provisioning status from PROVISIONING to FAILED when Pterodactyl indicates installation failed", async () => {
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Failed Install Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("PROVISIONING")
+
+      const syncClient = {
+        getApplicationServer: vi.fn(async () => ({
+          object: "server",
+          attributes: {
+            id: 100,
+            identifier: "ptero_100",
+            status: "install_failed",
+            container: { installed: 2 },
+          },
+        })),
+      } as unknown as IPterodactylClient
+
+      const single = await getServerById(mockDb, mockEnv, server.id, undefined, syncClient)
+      expect(single?.provisioningStatus).toBe("FAILED")
+
+      // Verify D1 record updated to FAILED
+      const inDb = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, server.id))
+        .get()
+      expect(inDb?.provisioningStatus).toBe("FAILED")
+    })
+
+    it("calculates real Node capacity respecting memory and disk overallocation", async () => {
+      const nodeClient = {
+        listApplicationNodes: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "node",
+              attributes: {
+                id: 1,
+                name: "Node-EU-1",
+                location_id: 1,
+                memory: 32768,
+                memory_overallocate: 20, // 32768 * 1.2 = 39321 MB
+                disk: 102400,
+                disk_overallocate: 10, // 102400 * 1.1 = 112640 MB
+                allocated_resources: {
+                  memory: 8192,
+                  disk: 20480,
+                },
+              },
+            },
+          ],
+        })),
+      } as unknown as IPterodactylClient
+
+      const capacity = await getServerNodeCapacity(mockEnv, nodeClient)
+      expect(capacity.totalMemoryMb).toBe(39321)
+      expect(capacity.allocatedMemoryMb).toBe(8192)
+      expect(capacity.availableMemoryMb).toBe(39321 - 8192)
+
+      expect(capacity.totalDiskMb).toBe(112640)
+      expect(capacity.allocatedDiskMb).toBe(20480)
+      expect(capacity.availableDiskMb).toBe(112640 - 20480)
     })
   })
 
