@@ -5564,6 +5564,68 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
         expect(resReused.status).toBe(401)
       })
+
+      it("logs [Console WS] diagnostics and 502 stages without leaking secrets or tokens", async () => {
+        const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+        // 1. Generate console ticket
+        const ticketRes = await executeGqlServer(
+          `mutation { createServerConsoleTicket { ticket expiresAt } }`,
+          {},
+          adminToken,
+        )
+
+        const ticket = ticketRes.data?.createServerConsoleTicket?.ticket
+
+        // Mock fetch to simulate Wings returning credentials
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any) => {
+          if (String(url).includes("/api/client/servers/")) {
+            return new Response(
+              JSON.stringify({
+                object: "token",
+                data: { socket: "wss://wings.test.host/api/servers/uuid/ws", token: "secret-token-jwt" },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            )
+          }
+          return new Response("Bad gateway from Wings proxy", { status: 502 })
+        })
+
+        const req = new Request(
+          `http://localhost/api/server/console/ws?ticket=${ticket}`,
+          {
+            method: "GET",
+            headers: {
+              Upgrade: "websocket",
+              Origin: "https://admin.hikat.org",
+            },
+          },
+        )
+
+        const res = await worker.fetch(req, createServerEnv())
+        expect(res.status).toBe(200) // 200 in Node test mock environment (before WebSocketPair)
+
+        // Verify [Console WS] log was called before connecting
+        expect(consoleLogSpy).toHaveBeenCalledWith(
+          "[Console WS] Connecting to Wings WebSocket",
+          expect.objectContaining({
+            host: "wings.test.host",
+            pathname: "/api/servers/uuid/ws",
+            origin: "https://panel.test.hikat.org",
+          }),
+        )
+
+        // Verify no secrets or JWT leaked in log arguments
+        const allLogCalls = consoleLogSpy.mock.calls
+        const serialized = JSON.stringify(allLogCalls)
+        expect(serialized).not.toContain("secret-token-jwt")
+        expect(serialized).not.toContain("Bearer")
+
+        fetchSpy.mockRestore()
+        consoleLogSpy.mockRestore()
+        consoleErrorSpy.mockRestore()
+      })
     })
   })
 

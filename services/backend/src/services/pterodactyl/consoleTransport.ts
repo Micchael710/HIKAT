@@ -153,7 +153,13 @@ export async function handleConsoleWebSocket(
   let wsCreds: { token: string; socket: string }
   try {
     wsCreds = await getServerConsoleWebsocketCredentials(env, clientOverride, serverId, db)
-  } catch {
+  } catch (err: any) {
+    console.error("[Console WS] 502 Failed obtaining Pterodactyl console credentials", {
+      serverId: serverId || undefined,
+      errorName: err?.name,
+      errorMessage: err?.message,
+      internalMessage: err?.extensions?.internalMessage || err?.internalMessage,
+    })
     return new Response(
       JSON.stringify({ error: "Unable to retrieve server console credentials" }),
       {
@@ -163,39 +169,48 @@ export async function handleConsoleWebSocket(
     )
   }
 
+  // Parse socket host and pathname safely without query params or tokens
+  let socketHost = ""
+  let socketPath = ""
+  try {
+    const parsedSocketUrl = new URL(wsCreds.socket)
+    socketHost = parsedSocketUrl.host
+    socketPath = parsedSocketUrl.pathname
+  } catch {
+    socketHost = "invalid-url"
+  }
+  const wingsOrigin = env.PTERODACTYL_BASE_URL || "https://panel.example.com"
+
+  // 1. Log before connecting to Wings
+  console.log("[Console WS] Connecting to Wings WebSocket", {
+    serverId: serverId || undefined,
+    host: socketHost,
+    pathname: socketPath,
+    origin: wingsOrigin,
+  })
+
   // In Node test environment where WebSocketPair is absent, return 200 OK
   if (typeof (globalThis as any).WebSocketPair === "undefined") {
     return new Response(null, { status: 200 })
   }
 
   // 8. Connect upstream to Wings WebSocket
-  let upstreamWs: WebSocket
+  let upstreamRes: Response
   try {
-    const upstreamRes = await fetch(wsCreds.socket, {
+    upstreamRes = await fetch(wsCreds.socket, {
       headers: {
         Upgrade: "websocket",
-        Origin: env.PTERODACTYL_BASE_URL || "https://panel.example.com",
+        Origin: wingsOrigin,
       },
     })
-
-    if (
-      upstreamRes.status !== 101 ||
-      !(upstreamRes as unknown as { webSocket?: WebSocket }).webSocket
-    ) {
-      return new Response(
-        JSON.stringify({
-          error: "Unable to establish connection with server console",
-        }),
-        {
-          status: 502,
-          headers: { "Content-Type": "application/json" },
-        },
-      )
-    }
-
-    upstreamWs = (upstreamRes as unknown as { webSocket: WebSocket }).webSocket
-    upstreamWs.accept()
-  } catch {
+  } catch (fetchErr: any) {
+    console.error("[Console WS] 502 Network exception during fetch to Wings", {
+      serverId: serverId || undefined,
+      host: socketHost,
+      pathname: socketPath,
+      errorName: fetchErr?.name,
+      errorMessage: fetchErr?.message,
+    })
     return new Response(
       JSON.stringify({
         error: "Unable to establish connection with server console",
@@ -206,6 +221,49 @@ export async function handleConsoleWebSocket(
       },
     )
   }
+
+  const hasWebSocket = Boolean(
+    (upstreamRes as unknown as { webSocket?: WebSocket }).webSocket,
+  )
+
+  // 2. Log after fetch to Wings
+  console.log("[Console WS] Wings fetch response received", {
+    serverId: serverId || undefined,
+    status: upstreamRes.status,
+    statusText: upstreamRes.statusText,
+    hasWebSocket,
+  })
+
+  if (upstreamRes.status !== 101 || !hasWebSocket) {
+    let responseBody = ""
+    try {
+      const rawText = await upstreamRes.text()
+      responseBody = rawText ? rawText.slice(0, 500) : ""
+    } catch {}
+
+    console.error("[Console WS] 502 Wings handshake failed", {
+      serverId: serverId || undefined,
+      status: upstreamRes.status,
+      statusText: upstreamRes.statusText,
+      hasWebSocket,
+      responseBody: responseBody || undefined,
+    })
+
+    return new Response(
+      JSON.stringify({
+        error: "Unable to establish connection with server console",
+      }),
+      {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+  }
+
+  const upstreamWs: WebSocket = (
+    upstreamRes as unknown as { webSocket: WebSocket }
+  ).webSocket
+  upstreamWs.accept()
 
   // 9. Establish downstream connection to Back Office client
   const webSocketPair = new (globalThis as any).WebSocketPair()
@@ -258,6 +316,18 @@ export async function handleConsoleWebSocket(
     try {
       const data = JSON.parse(String(event.data))
       if (!data) return
+
+      if (
+        data.event === "auth success" ||
+        data.event === "jwt error" ||
+        data.event === "token expired" ||
+        data.event === "token expiring"
+      ) {
+        console.log(`[Console WS] Wings auth event: ${data.event}`, {
+          serverId: serverId || undefined,
+          event: data.event,
+        })
+      }
 
       if (data.event === "console output" && Array.isArray(data.args)) {
         const text = data.args.join("\n")
@@ -378,8 +448,22 @@ export async function handleConsoleWebSocket(
   // 12. Closure and error listeners
   serverWs.addEventListener("close", () => cleanup())
   serverWs.addEventListener("error", () => cleanup())
-  upstreamWs.addEventListener("close", () => cleanup())
-  upstreamWs.addEventListener("error", () => cleanup())
+  upstreamWs.addEventListener("close", (event: any) => {
+    console.log("[Console WS] Upstream Wings WebSocket closed", {
+      serverId: serverId || undefined,
+      code: event?.code,
+      reason: event?.reason,
+      wasClean: event?.wasClean,
+    })
+    cleanup()
+  })
+  upstreamWs.addEventListener("error", (event: any) => {
+    console.error("[Console WS] Upstream Wings WebSocket error", {
+      serverId: serverId || undefined,
+      error: event?.message || event?.type || "unknown error",
+    })
+    cleanup()
+  })
 
   return new Response(null, {
     status: 101,
