@@ -95,16 +95,7 @@ function resolveGameContext(payload = {}) {
   if (hasGameId && hasGameName) {
     const gameId = String(payload.gameId).trim()
     const validName = validateGameName(payload.gameName)
-    let resolvedInstanceRoot = path.join(gamesRoot, validName)
-
-    // Rule 5: Temporary Apparatia compatibility bridge
-    if (validName.toLowerCase() === "apparatia") {
-      if (fs.existsSync(resolvedInstanceRoot)) {
-        // Use games/Apparatia
-      } else if (fs.existsSync(legacyInstanceRoot)) {
-        resolvedInstanceRoot = legacyInstanceRoot
-      }
-    }
+    const resolvedInstanceRoot = path.join(gamesRoot, validName)
 
     return {
       gameId,
@@ -133,6 +124,7 @@ const operationManager = new GameOperationManager()
 const settingsStore = new SettingsStore(app.getPath("userData"))
 const authStore = new SecureAuthStore(app.getPath("userData"))
 let activeOperationGameId = null
+let activeOperationSnapshot = null
 
 let mainWindow = null
 let splashWindow = null
@@ -1750,8 +1742,28 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
   }
 
   activeOperationGameId = ctx.gameId
+  activeOperationSnapshot = {
+    gameId: ctx.gameId || null,
+    phase: payload.isVerify ? "VERIFYING" : "DOWNLOADING",
+    progress: 0,
+    speedMBs: 0,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    remainingMinutes: 0,
+  }
 
   const onProgress = (data) => {
+    if (activeOperationSnapshot) {
+      activeOperationSnapshot = {
+        gameId: ctx.gameId || null,
+        phase: data.phase || activeOperationSnapshot.phase || "DOWNLOADING",
+        progress: typeof data.progress === "number" ? data.progress : (activeOperationSnapshot.progress || 0),
+        speedMBs: typeof data.speedMBs === "number" ? data.speedMBs : 0,
+        downloadedBytes: typeof data.downloadedBytes === "number" ? data.downloadedBytes : 0,
+        totalBytes: typeof data.totalBytes === "number" ? data.totalBytes : 0,
+        remainingMinutes: typeof data.remainingMinutes === "number" ? data.remainingMinutes : 0,
+      }
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("game-download-progress", {
         ...data,
@@ -1761,8 +1773,12 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
   }
 
   const onPhaseChange = (phase) => {
+    if (activeOperationSnapshot) {
+      activeOperationSnapshot.phase = phase
+    }
     if (phase === "IDLE") {
       activeOperationGameId = null
+      activeOperationSnapshot = null
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("game-phase-changed", phase, ctx.gameId || null)
@@ -1787,12 +1803,14 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     })
     if (operationManager.getState() === "IDLE") {
       activeOperationGameId = null
+      activeOperationSnapshot = null
     }
     setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
     return result
   } catch (err) {
     if (operationManager.getState() === "IDLE") {
       activeOperationGameId = null
+      activeOperationSnapshot = null
     }
     throw err
   }
@@ -1831,6 +1849,7 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
       return await operationManager.cancelSync(ctx.instanceRoot)
     } finally {
       activeOperationGameId = null
+      activeOperationSnapshot = null
     }
   }
 
@@ -1841,6 +1860,7 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
     return await operationManager.cancelSync(instanceRoot)
   } finally {
     activeOperationGameId = null
+    activeOperationSnapshot = null
   }
 })
 
@@ -1888,6 +1908,7 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
     const status = isThisGameRunning ? launchStatus.status : "idle"
     const pid = isThisGameRunning ? launchStatus.pid : null
     const operationState = activeOperationGameId === requestedGameId ? operationManager.getState() : "IDLE"
+    const operationSnapshot = activeOperationGameId === requestedGameId ? activeOperationSnapshot : null
 
     return {
       status,
@@ -1896,6 +1917,7 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
       runningGameId,
       operationState,
       activeOperationGameId,
+      operationSnapshot,
     }
   }
 
@@ -1904,6 +1926,7 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
     runningGameId,
     operationState: operationManager.getState(),
     activeOperationGameId,
+    operationSnapshot: activeOperationSnapshot,
   }
 })
 
@@ -1953,3 +1976,10 @@ app.on("window-all-closed", () => {
     app.quit()
   }
 })
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    resolveGameContext,
+    validateGameName,
+  }
+}

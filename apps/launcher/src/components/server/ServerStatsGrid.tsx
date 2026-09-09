@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { ThemeMode, ServerSpecs } from "../../types"
 import { useTranslation } from "../../context/LanguageContext"
 import { serverService } from "../../services/serverService"
+import type { AccentColor } from "../../utils/dynamicAccent"
 
 interface ServerStatsGridProps {
   theme?: ThemeMode
@@ -9,6 +10,7 @@ interface ServerStatsGridProps {
   isActive?: boolean
   serverId?: string | null
   serverName?: string
+  resolvedAccent?: AccentColor
 }
 
 export default function ServerStatsGrid({
@@ -17,10 +19,11 @@ export default function ServerStatsGrid({
   isActive = true,
   serverId,
   serverName: propServerName,
+  resolvedAccent,
 }: ServerStatsGridProps) {
   const { t } = useTranslation()
   const isDark = theme === "dark"
-  const cacheKey = serverId ? `hikat_cached_server_status_${serverId}` : "hikat_cached_server_status"
+  const cacheKey = serverId ? `hikat_cached_server_status_${serverId}` : null
 
   const [serverData, setServerData] = useState<{
     online: boolean
@@ -44,23 +47,25 @@ export default function ServerStatsGrid({
         totalAchievements: stats.totalAchievements ?? 52,
       }
     }
-    try {
-      const cached = localStorage.getItem(cacheKey)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (parsed && typeof parsed === "object") {
-          return {
-            online: Boolean(parsed.online),
-            playersOnline: parsed.playersOnline ?? 0,
-            maxPlayers: parsed.maxPlayers ?? 0,
-            latencyMs: parsed.latencyMs ?? 0,
-            playtimeHours: null,
-            unlockedAchievements: null,
-            totalAchievements: 52,
+    if (cacheKey) {
+      try {
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (parsed && typeof parsed === "object") {
+            return {
+              online: Boolean(parsed.online),
+              playersOnline: parsed.playersOnline ?? 0,
+              maxPlayers: parsed.maxPlayers ?? 0,
+              latencyMs: parsed.latencyMs ?? 0,
+              playtimeHours: null,
+              unlockedAchievements: null,
+              totalAchievements: 52,
+            }
           }
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
     return {
       online: false,
       playersOnline: 0,
@@ -74,29 +79,35 @@ export default function ServerStatsGrid({
 
   useEffect(() => {
     if (!isActive || stats) return
+    if (serverId === null) {
+      setServerData((prev) => ({ ...prev, online: false }))
+      return
+    }
     let isMounted = true
 
     // Check cached state first for immediate hydration on server switch
     try {
-      const cached = localStorage.getItem(cacheKey)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (parsed && typeof parsed === "object") {
-          setServerData((prev) => ({
-            ...prev,
-            online: Boolean(parsed.online),
-            playersOnline: parsed.playersOnline ?? 0,
-            maxPlayers: parsed.maxPlayers ?? 0,
-            latencyMs: parsed.latencyMs ?? 0,
-          }))
+      if (cacheKey) {
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (parsed && typeof parsed === "object") {
+            setServerData((prev) => ({
+              ...prev,
+              online: Boolean(parsed.online),
+              playersOnline: parsed.playersOnline ?? 0,
+              maxPlayers: parsed.maxPlayers ?? 0,
+              latencyMs: parsed.latencyMs ?? 0,
+            }))
+          }
+        } else {
+          setServerData((prev) => ({ ...prev, online: false }))
         }
-      } else {
-        setServerData((prev) => ({ ...prev, online: false }))
       }
     } catch (_) {}
 
     serverService
-      .getServerStatus(serverId || undefined)
+      .getServerStatus(serverId)
       .then((res) => {
         if (!isMounted) return
         if (res && res.online) {
@@ -128,6 +139,11 @@ export default function ServerStatsGrid({
   const playtime = serverData.playtimeHours
   const achievements = serverData.unlockedAchievements
   const totalAchievements = serverData.totalAchievements ?? 52
+
+  const accentHex = resolvedAccent?.hex || "#3ec4c0"
+  const accentLighter = resolvedAccent
+    ? `color-mix(in srgb, ${resolvedAccent.hex} 55%, white)`
+    : "#7dd3fc"
 
   return (
     <div style={{ display: "flex", gap: 48 }}>
@@ -165,7 +181,7 @@ export default function ServerStatsGrid({
           gap: 18,
         }}
       >
-        {/* Card 1: Apparatia Server Card */}
+        {/* Card 1: Server Card */}
         <div
           className="settings-card"
           style={{
@@ -257,7 +273,7 @@ export default function ServerStatsGrid({
                             ? `${Math.min(100, (playersOnline / maxPlayers) * 100)}%`
                             : "0%",
                         background:
-                          "linear-gradient(90deg, #efc436 0%, #f59e0b 100%)",
+                          `linear-gradient(90deg, ${accentHex} 0%, ${accentLighter} 100%)`,
                         borderRadius: 4,
                       }}
                     />
@@ -316,7 +332,7 @@ export default function ServerStatsGrid({
               height={16}
               viewBox="0 0 24 24"
               fill="none"
-              stroke={isOnline ? "#efc436" : isDark ? "#556677" : "#99aabb"}
+              stroke={isOnline ? accentHex : isDark ? "#556677" : "#99aabb"}
               strokeWidth="2.2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -361,7 +377,7 @@ export default function ServerStatsGrid({
                 ? "1.5px solid rgba(255, 255, 255, 0.08)"
                 : "1.5px solid rgba(0, 0, 0, 0.08)",
               color:
-                playtime !== null ? "#efc436" : isDark ? "#556677" : "#99aabb",
+                playtime !== null ? accentHex : isDark ? "#556677" : "#99aabb",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -464,7 +480,7 @@ export default function ServerStatsGrid({
                 : "1.5px solid rgba(0, 0, 0, 0.08)",
               color:
                 achievements !== null
-                  ? "#efc436"
+                  ? accentHex
                   : isDark
                     ? "#556677"
                     : "#99aabb",
@@ -549,7 +565,7 @@ export default function ServerStatsGrid({
                           ? `${(achievements / totalAchievements) * 100}%`
                           : "0%",
                       background:
-                        "linear-gradient(90deg, #efc436 0%, #f59e0b 100%)",
+                        `linear-gradient(90deg, ${accentHex} 0%, ${accentLighter} 100%)`,
                       borderRadius: 4,
                     }}
                   />

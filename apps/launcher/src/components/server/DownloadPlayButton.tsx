@@ -19,6 +19,7 @@ import {
   getStoredBoolean,
 } from "../../utils/settingsStorage"
 import LiveToast from "../common/LiveToast"
+import type { AccentColor } from "../../utils/dynamicAccent"
 
 interface DownloadPlayButtonProps {
   left: number
@@ -27,14 +28,20 @@ interface DownloadPlayButtonProps {
   onPlay?: () => void
   serverId?: string | null
   gameId?: string | null
+  gameContext?: {
+    gameId: string
+    gameName: string
+  } | null
+  accent?: AccentColor
   allowLegacyLocalOperations?: boolean
 }
 
 export function resolveIdleGameButtonState(
   manifest: GameManifest | null | undefined,
+  gameId?: string,
 ): GameButtonState {
   if (!manifest) {
-    return gameService.isGameInstalled() ? "play" : "unavailable"
+    return gameService.isGameInstalled(gameId) ? "play" : "unavailable"
   }
 
   if (!manifest.installedModpackVersion) {
@@ -79,13 +86,28 @@ export default function DownloadPlayButton({
   onPlay,
   serverId,
   gameId,
+  gameContext,
+  accent,
   allowLegacyLocalOperations,
 }: DownloadPlayButtonProps) {
-  const activeServerId = serverId || gameId || undefined
-  const isLocalAllowed = allowLegacyLocalOperations ?? (!activeServerId)
   const { t } = useTranslation()
+  const activeServerId = gameContext?.gameId || serverId || gameId || undefined
+  const effectiveGameContext = gameContext || undefined
+  const isLocalAllowed = gameContext !== undefined
+    ? Boolean(gameContext?.gameId)
+    : (allowLegacyLocalOperations ?? (!activeServerId))
   const [status, setStatusState] = useState<GameButtonState>("checking")
   const statusRef = useRef<GameButtonState>("checking")
+
+  const accentHex = accent?.hex || "#efc436"
+  const accentCss = accent?.css || "239, 196, 54"
+  const accentLighter = accent
+    ? `color-mix(in srgb, ${accent.hex} 55%, white)`
+    : "#ffe692"
+  const accentDarkForLight = accent
+    ? `color-mix(in srgb, ${accent.hex} 65%, black)`
+    : "#92400e"
+  const accentGlow = `rgba(${accentCss}, 0.45)`
 
   const setStatus = useCallback((next: GameButtonState | ((prev: GameButtonState) => GameButtonState)) => {
     setStatusState((prev: GameButtonState) => {
@@ -134,7 +156,12 @@ export default function DownloadPlayButton({
 
   // Listen to filesystem integrity changes while launcher is open (marks integrity lock silently)
   useEffect(() => {
-    const unsubscribe = window.electronAPI?.onGameFileIntegrityChanged?.(() => {
+    const unsubscribe = window.electronAPI?.onGameFileIntegrityChanged?.((data: any) => {
+      if (gameContext) {
+        if (data?.gameId !== gameContext.gameId) return
+      } else {
+        if (data?.gameId) return
+      }
       isIntegrityBlockedRef.current = true
     })
 
@@ -207,6 +234,7 @@ export default function DownloadPlayButton({
         currentManifest.neoForgeVersion,
         false,
         ...(currentManifest.directoryPolicies ? [currentManifest.directoryPolicies] : []),
+        ...(gameContext ? [gameContext] : []),
       )
       .then((res: any) => {
         if (res?.paused) {
@@ -215,7 +243,7 @@ export default function DownloadPlayButton({
         }
         if (res?.success) {
           isIntegrityBlockedRef.current = false
-          gameService.setGameInstalled(true)
+          gameService.setGameInstalled(true, gameContext?.gameId)
           markSyncedVersionInstalled(syncingVersion)
 
           const hasNewerRelease = Boolean(
@@ -268,8 +296,8 @@ export default function DownloadPlayButton({
           return
         }
         console.error("Sync error:", err)
-        gameService.setGameInstalled(false)
-        setStatus(resolveIdleGameButtonState(currentManifest))
+        gameService.setGameInstalled(false, gameContext?.gameId)
+        setStatus(resolveIdleGameButtonState(currentManifest, activeServerId))
         showToast(t("playButton.syncError"), "error")
       })
       .finally(() => {
@@ -277,7 +305,7 @@ export default function DownloadPlayButton({
           isStartingSyncRef.current = false
         }
       })
-  }, [isLocalAllowed, markSyncedVersionInstalled, setStatus, showToast, t])
+  }, [isLocalAllowed, markSyncedVersionInstalled, setStatus, showToast, t, gameContext, activeServerId])
 
   // Close options menu on click outside
   useEffect(() => {
@@ -293,10 +321,15 @@ export default function DownloadPlayButton({
 
   // Check manifest and authoritative filesystem state on mount
   useEffect(() => {
+    if (!isLocalAllowed) {
+      setStatus("unavailable")
+      return
+    }
     let isMounted = true
     gameService
       .checkGameManifest(activeServerId, {
         allowLegacyLocalFilesystem: isLocalAllowed,
+        gameContext: effectiveGameContext,
       })
       .then(async (res) => {
         if (!isMounted) return
@@ -316,6 +349,50 @@ export default function DownloadPlayButton({
             return
           }
 
+          const launchInfo = await window.electronAPI?.getLaunchStatus?.(effectiveGameContext).catch(() => null)
+
+          if (
+            gameContext?.gameId &&
+            launchInfo?.runningGameId === gameContext.gameId &&
+            (launchInfo?.status === "running" || launchInfo?.status === "preparing")
+          ) {
+            setStatus(launchInfo.status === "preparing" ? "launching" : "running")
+            const hasUpdate = Boolean(
+              res.installedModpackVersion && res.installedModpackVersion !== res.version
+            )
+            const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+            if (autoUpdatesEnabled && hasUpdate) {
+              pendingAutoUpdateRef.current = true
+            }
+            return
+          }
+
+          if (
+            gameContext?.gameId &&
+            launchInfo?.activeOperationGameId === gameContext.gameId &&
+            launchInfo?.operationState &&
+            launchInfo?.operationState !== "IDLE"
+          ) {
+            const opState = launchInfo.operationState
+            if (opState === "SYNCING") setStatus("downloading")
+            else if (opState === "INSTALLING") setStatus("installing")
+            else if (opState === "VERIFYING") setStatus("verifying")
+            else if (opState === "PAUSED") setStatus("paused")
+            else setStatus("downloading")
+
+            isStartingSyncRef.current = opState !== "PAUSED"
+
+            if (launchInfo.operationSnapshot) {
+              const snap = launchInfo.operationSnapshot
+              setProgress(snap.progress || 0)
+              setSpeed(snap.speedMBs || 0)
+              setDownloadedBytes(snap.downloadedBytes || 0)
+              if (snap.totalBytes > 0) setTotalBytes(snap.totalBytes)
+              setTimeRemainingMin(snap.remainingMinutes || 0)
+            }
+            return
+          }
+
           const isPausedSession = Boolean(
             (res.hasPausedSession || res.hasInterruptedDownload) && !res.installed
           )
@@ -327,7 +404,6 @@ export default function DownloadPlayButton({
             setProgress(pct)
             setStatus("paused")
           } else {
-            const launchInfo = await window.electronAPI?.getLaunchStatus?.().catch(() => null)
             const isGameRunning =
               launchInfo?.status === "running" ||
               launchInfo?.status === "preparing" ||
@@ -335,7 +411,7 @@ export default function DownloadPlayButton({
               statusRef.current === "running"
 
             if (isGameRunning) {
-              setStatus("running")
+              setStatus(launchInfo?.status === "preparing" ? "launching" : "running")
               const hasUpdate = Boolean(
                 res.installedModpackVersion && res.installedModpackVersion !== res.version
               )
@@ -346,7 +422,7 @@ export default function DownloadPlayButton({
               return
             }
 
-            const idleState = resolveIdleGameButtonState(res)
+            const idleState = resolveIdleGameButtonState(res, activeServerId)
             setStatus(idleState)
 
             const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
@@ -366,20 +442,22 @@ export default function DownloadPlayButton({
             }
           }
         } else {
-          setStatus(isLocalAllowed ? resolveIdleGameButtonState(null) : "unavailable")
+          setStatus(isLocalAllowed ? resolveIdleGameButtonState(null, activeServerId) : "unavailable")
         }
       })
     return () => {
       isMounted = false
     }
-  }, [triggerSync, activeServerId, isLocalAllowed])
+  }, [triggerSync, activeServerId, isLocalAllowed, gameContext])
 
   // Real-time WebSocket subscription for release activation events
   useEffect(() => {
     if (!manifest) return
 
     const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
-      if (event.serverId) {
+      if (gameContext) {
+        if (event.serverId !== gameContext.gameId) return
+      } else if (event.serverId) {
         if (!activeServerId || event.serverId !== activeServerId) {
           return
         }
@@ -452,7 +530,7 @@ export default function DownloadPlayButton({
           return prevStatus
         }
 
-        return resolveIdleGameButtonState(freshManifest)
+        return resolveIdleGameButtonState(freshManifest, activeServerId)
       })
 
       const hasUpdate = Boolean(
@@ -481,7 +559,7 @@ export default function DownloadPlayButton({
     return () => {
       unsubscribe()
     }
-  }, [manifest, triggerSync, activeServerId, isLocalAllowed])
+  }, [manifest, triggerSync, activeServerId, isLocalAllowed, gameContext])
 
   // Listen to renderer settings changes (e.g. AUTO_UPDATES toggled ON/OFF in SettingsView)
   useEffect(() => {
@@ -547,11 +625,15 @@ export default function DownloadPlayButton({
     const unsubscribe = window.electronAPI?.onLaunchStatus?.(
       (
         launchStatus: "idle" | "preparing" | "running",
-        details?: { unexpected?: boolean; code?: number | null; error?: any },
+        details?: { unexpected?: boolean; code?: number | null; error?: any; gameId?: string | null },
       ) => {
         if (!isLocalAllowed) {
           setStatus("unavailable")
           return
+        }
+
+        if (gameContext) {
+          if (!details?.gameId || details.gameId !== gameContext.gameId) return
         }
 
         if (launchStatus === "preparing") {
@@ -574,7 +656,7 @@ export default function DownloadPlayButton({
 
           if (wasRunningOrLaunching) {
             const currentManifest = manifestRef.current
-            const idleState = resolveIdleGameButtonState(currentManifest)
+            const idleState = resolveIdleGameButtonState(currentManifest, activeServerId)
             setStatus(idleState)
 
             const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
@@ -602,13 +684,18 @@ export default function DownloadPlayButton({
     )
 
     return () => unsubscribe?.()
-  }, [setStatus, showToast, t, triggerSync, isLocalAllowed])
+  }, [setStatus, showToast, t, triggerSync, isLocalAllowed, gameContext, activeServerId])
 
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
     if (!isLocalAllowed) return
     const unsubProgress = window.electronAPI?.onDownloadProgress?.((data: any) => {
-      if (!isStartingSyncRef.current) return
+      if (gameContext) {
+        if (data?.gameId !== gameContext.gameId) return
+      }
+      if (!isStartingSyncRef.current) {
+        isStartingSyncRef.current = true
+      }
       setProgress(data.progress)
       setSpeed(data.speedMBs || 0)
       if (Number.isFinite(data.downloadedBytes)) {
@@ -621,7 +708,6 @@ export default function DownloadPlayButton({
 
       setStatus((prev) => {
         if (prev === "verifying") return prev
-        if (!isStartingSyncRef.current) return prev
         if (prev !== "downloading" && prev !== "installing") return prev
         if (data.phase === "INSTALLING") return "installing"
         if (data.phase === "DOWNLOADING" && prev === "installing") return "downloading"
@@ -629,10 +715,26 @@ export default function DownloadPlayButton({
       })
     })
 
-    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string) => {
+    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string, eventGameId?: string | null) => {
+      if (gameContext) {
+        if (eventGameId !== gameContext.gameId) return
+      }
+      if (phase === "IDLE") {
+        isStartingSyncRef.current = false
+        syncOpIdRef.current++
+        gameService
+          .checkGameManifest(activeServerId, {
+            allowLegacyLocalFilesystem: isLocalAllowed,
+            gameContext: effectiveGameContext,
+          })
+          .then((fresh) => {
+            setManifest(fresh)
+            setStatus(isLocalAllowed ? resolveIdleGameButtonState(fresh, activeServerId) : "unavailable")
+          })
+        return
+      }
       setStatus((prev) => {
         if (prev === "verifying") return prev
-        if (!isStartingSyncRef.current) return prev
         if (prev !== "downloading" && prev !== "installing") return prev
         if (phase === "INSTALLING") return "installing"
         if (phase === "DOWNLOADING" && prev === "installing") return "downloading"
@@ -644,7 +746,7 @@ export default function DownloadPlayButton({
       unsubProgress?.()
       unsubPhase?.()
     }
-  }, [])
+  }, [isLocalAllowed, gameContext, activeServerId])
 
   const isExpanded =
     status === "downloading" ||
@@ -657,15 +759,16 @@ export default function DownloadPlayButton({
     setIsTransitioning(true)
     isCancellingRef.current = true
     try {
-      const res: any = await gameService.cancelSync()
+      const res: any = await gameService.cancelSync(effectiveGameContext)
       if (res?.success || res === true) {
         syncOpIdRef.current++
         isStartingSyncRef.current = false
         const freshManifest = await gameService.checkGameManifest(activeServerId, {
           allowLegacyLocalFilesystem: isLocalAllowed,
+          gameContext: effectiveGameContext,
         })
         setManifest(freshManifest)
-        setStatus(isLocalAllowed ? resolveIdleGameButtonState(freshManifest) : "unavailable")
+        setStatus(isLocalAllowed ? resolveIdleGameButtonState(freshManifest, activeServerId) : "unavailable")
         setProgress(0)
         setSpeed(0)
         setDownloadedBytes(0)
@@ -688,7 +791,7 @@ export default function DownloadPlayButton({
     if (status === "downloading") {
       setIsTransitioning(true)
       try {
-        const res: any = await gameService.pauseSync()
+        const res: any = await gameService.pauseSync(effectiveGameContext)
         if (res?.paused || res?.success || res === true) {
           setStatus("paused")
           syncOpIdRef.current++
@@ -724,6 +827,7 @@ export default function DownloadPlayButton({
           manifest.neoForgeVersion,
           false,
           ...(manifest.directoryPolicies ? [manifest.directoryPolicies] : []),
+          ...(gameContext ? [gameContext] : []),
         )
         .then((res: any) => {
           if (res?.paused) {
@@ -734,7 +838,7 @@ export default function DownloadPlayButton({
             if (syncOpIdRef.current === syncOpId) {
               isStartingSyncRef.current = false
             }
-            gameService.setGameInstalled(true)
+            gameService.setGameInstalled(true, gameContext?.gameId)
             markSyncedVersionInstalled(syncingVersion)
 
             if (
@@ -755,8 +859,8 @@ export default function DownloadPlayButton({
             return
           }
           console.error("Sync resume error:", err)
-          gameService.setGameInstalled(false)
-          setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest) : "unavailable")
+          gameService.setGameInstalled(false, gameContext?.gameId)
+          setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest, activeServerId) : "unavailable")
           showToast(t("playButton.syncError"), "error")
         })
         .finally(() => {
@@ -789,7 +893,6 @@ export default function DownloadPlayButton({
         return
       }
 
-      const ramGB = Number(localStorage.getItem("hikat_ram_gb")) || 4
       let playerName = "Player"
       try {
         const userRaw = localStorage.getItem("hikat_user_data")
@@ -802,11 +905,11 @@ export default function DownloadPlayButton({
       try {
         await gameService.launchGame({
           playerName,
-          ramGB,
           minecraftVersion: manifest?.minecraftVersion,
           modLoader: manifest?.modLoader,
           modLoaderVersion: manifest?.modLoaderVersion,
           neoForgeVersion: manifest?.neoForgeVersion,
+          gameContext: effectiveGameContext,
         })
         if (onPlay) onPlay()
       } catch (err: any) {
@@ -836,14 +939,14 @@ export default function DownloadPlayButton({
       showToast(t("playButton.verifyError"), "error")
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "verify", state: "finished", success: false },
+          detail: { action: "verify", state: "finished", success: false, gameId: gameContext?.gameId },
         }),
       )
       return
     }
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-status", {
-        detail: { action: "verify", state: "started" },
+        detail: { action: "verify", state: "started", gameId: gameContext?.gameId },
       }),
     )
     showToast(t("playButton.verifying"), "info")
@@ -866,6 +969,7 @@ export default function DownloadPlayButton({
         manifest.neoForgeVersion,
         true,
         ...(manifest.directoryPolicies ? [manifest.directoryPolicies] : []),
+        ...(gameContext ? [gameContext] : []),
       )
       .then(async (res: any) => {
         if (res?.paused) {
@@ -874,6 +978,7 @@ export default function DownloadPlayButton({
         }
         const verified = await gameService.checkGameManifest(activeServerId, {
           allowLegacyLocalFilesystem: isLocalAllowed,
+          gameContext: effectiveGameContext,
         })
 
         if (verified) {
@@ -889,7 +994,7 @@ export default function DownloadPlayButton({
 
         if (verified?.installed && !hasUpdate && !verified?.hasIntegrityIssue) {
           isIntegrityBlockedRef.current = false
-          gameService.setGameInstalled(true)
+          gameService.setGameInstalled(true, gameContext?.gameId)
           setStatus("play")
           verifySuccess = true
           showToast(t("playButton.verifySuccess"), "success")
@@ -905,16 +1010,16 @@ export default function DownloadPlayButton({
             setStatus("update")
           }
         } else {
-          gameService.setGameInstalled(false)
-          setStatus(isLocalAllowed ? resolveIdleGameButtonState(verified) : "unavailable")
+          gameService.setGameInstalled(false, gameContext?.gameId)
+          setStatus(isLocalAllowed ? resolveIdleGameButtonState(verified, activeServerId) : "unavailable")
           showToast(t("playButton.verifyError"), "error")
         }
       })
       .catch((err: any) => {
         console.error("Verify repair error:", err)
-        gameService.setGameInstalled(false)
+        gameService.setGameInstalled(false, gameContext?.gameId)
         showToast(t("playButton.verifyError"), "error")
-        setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest) : "unavailable")
+        setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest, activeServerId) : "unavailable")
       })
       .finally(() => {
         if (syncOpIdRef.current === syncOpId) {
@@ -922,7 +1027,7 @@ export default function DownloadPlayButton({
         }
         window.dispatchEvent(
           new CustomEvent("hikat:game-action-status", {
-            detail: { action: "verify", state: "finished", success: verifySuccess },
+            detail: { action: "verify", state: "finished", success: verifySuccess, gameId: gameContext?.gameId },
           }),
         )
       })
@@ -934,22 +1039,23 @@ export default function DownloadPlayButton({
     setIsTransitioning(true)
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-status", {
-        detail: { action: "uninstall", state: "started" },
+        detail: { action: "uninstall", state: "started", gameId: gameContext?.gameId },
       }),
     )
     let success = false
     try {
-      success = await gameService.uninstallGame()
+      success = await gameService.uninstallGame(effectiveGameContext)
       if (success) {
         const freshManifest = await gameService.checkGameManifest(activeServerId, {
           allowLegacyLocalFilesystem: isLocalAllowed,
+          gameContext: effectiveGameContext,
         })
         setManifest(freshManifest)
         setTotalBytes(
           freshManifest?.totalDownloadBytes ||
             (freshManifest ? manifestTotalBytes(freshManifest.clientFiles) : 0),
         )
-        setStatus(isLocalAllowed ? resolveIdleGameButtonState(freshManifest) : "unavailable")
+        setStatus(isLocalAllowed ? resolveIdleGameButtonState(freshManifest, activeServerId) : "unavailable")
         showToast(t("playButton.uninstallSuccess"), "success")
       } else {
         showToast(t("playButton.uninstallError"), "error")
@@ -958,7 +1064,7 @@ export default function DownloadPlayButton({
       setIsTransitioning(false)
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "uninstall", state: "finished", success: Boolean(success) },
+          detail: { action: "uninstall", state: "finished", success: Boolean(success), gameId: gameContext?.gameId },
         }),
       )
     }
@@ -968,7 +1074,10 @@ export default function DownloadPlayButton({
   useEffect(() => {
     const handleGameActionRequest = (e: Event) => {
       if (!isLocalAllowed) return
-      const customEvt = e as CustomEvent<{ action: "verify" | "uninstall" }>
+      const customEvt = e as CustomEvent<{ action: "verify" | "uninstall"; gameId?: string }>
+      if (gameContext && customEvt.detail?.gameId && customEvt.detail.gameId !== gameContext.gameId) {
+        return
+      }
       const action = customEvt.detail?.action
       if (action === "verify") {
         handleVerifyInstallation()
@@ -981,7 +1090,7 @@ export default function DownloadPlayButton({
     return () => {
       window.removeEventListener("hikat:game-action-request", handleGameActionRequest)
     }
-  }, [handleVerifyInstallation, handleUninstallGame, isLocalAllowed])
+  }, [handleVerifyInstallation, handleUninstallGame, isLocalAllowed, gameContext])
 
   /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / PLAY ── */
   if (!isExpanded) {
@@ -1018,12 +1127,12 @@ export default function DownloadPlayButton({
             borderRadius: 24,
             background: isDisabled
               ? isDark
-                ? "linear-gradient(135deg, rgba(239, 196, 54, 0.22), rgba(255, 230, 146, 0.22))"
-                : "linear-gradient(135deg, rgba(239, 196, 54, 0.35), rgba(255, 230, 146, 0.35))"
-              : "linear-gradient(135deg, #efc436, #ffe692)",
+                ? `linear-gradient(135deg, rgba(${accentCss}, 0.22), rgba(${accentCss}, 0.22))`
+                : `linear-gradient(135deg, rgba(${accentCss}, 0.35), rgba(${accentCss}, 0.35))`
+              : `linear-gradient(135deg, ${accentHex}, ${accentLighter})`,
             boxShadow: isDisabled
               ? "none"
-              : "0 0 28px -6px rgba(245, 208, 86, 0.45)",
+              : `0 0 28px -6px ${accentGlow}`,
             border: "none",
             cursor: isDisabled ? "not-allowed" : "pointer",
             opacity: isDisabled ? 0.65 : 1,
@@ -1269,11 +1378,11 @@ export default function DownloadPlayButton({
             width: `${progress}%`,
             background: isDark
               ? status === "paused"
-                ? "linear-gradient(90deg, rgba(239, 196, 54, 0.15), rgba(239, 196, 54, 0.28))"
-                : "linear-gradient(90deg, rgba(239, 196, 54, 0.25), rgba(239, 196, 54, 0.5))"
+                ? `linear-gradient(90deg, rgba(${accentCss}, 0.15), rgba(${accentCss}, 0.28))`
+                : `linear-gradient(90deg, rgba(${accentCss}, 0.25), rgba(${accentCss}, 0.5))`
               : status === "paused"
-                ? "linear-gradient(90deg, rgba(239, 196, 54, 0.22), rgba(239, 196, 54, 0.38))"
-                : "linear-gradient(90deg, rgba(239, 196, 54, 0.32), rgba(239, 196, 54, 0.6))",
+                ? `linear-gradient(90deg, rgba(${accentCss}, 0.22), rgba(${accentCss}, 0.38))`
+                : `linear-gradient(90deg, rgba(${accentCss}, 0.32), rgba(${accentCss}, 0.6))`,
             transition: "width 0.15s ease",
             pointerEvents: "none",
           }}
@@ -1291,11 +1400,11 @@ export default function DownloadPlayButton({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             {status === "paused" && isHovered && (
-              <IconResume size={13} color={isDark ? "#efc436" : "#92400e"} />
+              <IconResume size={13} color={isDark ? accentHex : accentDarkForLight} />
             )}
             <span
               style={{
-                color: isDark ? "#efc436" : "#92400e",
+                color: isDark ? accentHex : accentDarkForLight,
                 fontFamily: BASE_FONT,
                 fontWeight: 800,
                 fontSize: 13.5,

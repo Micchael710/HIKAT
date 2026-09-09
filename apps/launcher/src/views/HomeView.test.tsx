@@ -52,6 +52,16 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
     }
   })
 
+  const mockServer = {
+    id: "test-server-id",
+    name: "Test Server",
+    minecraftVersion: "1.21.1",
+    modLoader: "NEOFORGE",
+    launcherActiveReleaseId: "rel-1",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+
   it("1. cover IMAGE -> HomeView renders img with cover.url as background", async () => {
     const mockModpack: PublishedModpack = {
       version: "2.0.0",
@@ -74,7 +84,7 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
     await act(async () => {
       root?.render(
         <LanguageProvider>
-          <HomeView theme="dark" />
+          <HomeView theme="dark" selectedServer={mockServer} />
         </LanguageProvider>,
       )
     })
@@ -110,7 +120,7 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
     await act(async () => {
       root?.render(
         <LanguageProvider>
-          <HomeView theme="dark" />
+          <HomeView theme="dark" selectedServer={mockServer} />
         </LanguageProvider>,
       )
     })
@@ -129,7 +139,7 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
     expect(container?.textContent).toContain("Video Showcase Notes")
   })
 
-  it("3. Without cover -> renders fallback heroHomeBg", async () => {
+  it("3. Without cover -> renders neutral background without heroHomeBg", async () => {
     const mockModpack: PublishedModpack = {
       version: "2.0.0",
       minecraftVersion: "1.21.1",
@@ -144,7 +154,7 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
     await act(async () => {
       root?.render(
         <LanguageProvider>
-          <HomeView theme="dark" />
+          <HomeView theme="dark" selectedServer={mockServer} />
         </LanguageProvider>,
       )
     })
@@ -154,34 +164,29 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
 
     const imgs = container?.querySelectorAll("img")
     const bgImg = Array.from(imgs || []).find((img) => img.src.includes(heroHomeBg) || img.getAttribute("src") === heroHomeBg)
-    expect(bgImg).toBeDefined()
+    expect(bgImg).toBeUndefined()
   })
 
-  it("4. Without notes -> renders heroSubtitle fallback", async () => {
-    const mockModpack: PublishedModpack = {
-      version: "2.0.0",
-      minecraftVersion: "1.21.1",
-      modLoader: "NEOFORGE",
-      clientFiles: [],
-      notes: null,
-      cover: null,
-    }
-
-    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue(mockModpack)
+  it("4. Empty backend state (no selectedServer) -> no Apparatia, no heroHomeBg, no modpack query", async () => {
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue(null)
 
     await act(async () => {
       root?.render(
         <LanguageProvider>
-          <HomeView theme="dark" />
+          <HomeView theme="dark" selectedServer={null} />
         </LanguageProvider>,
       )
     })
 
-    // Default translation contains Apparatia description
-    expect(container?.textContent).toContain("Apparatia")
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    const imgs = container?.querySelectorAll("img")
+    const bgImg = Array.from(imgs || []).find((img) => img.src.includes(heroHomeBg) || img.getAttribute("src") === heroHomeBg)
+    expect(bgImg).toBeUndefined()
+    expect(imgs?.length).toBe(0)
+    expect(container?.textContent).toContain("UNAVAILABLE")
   })
 
-  it("5. RELEASE_ACTIVATED event refreshes publishedModpack cover and notes dynamically", async () => {
+  it("5. RELEASE_ACTIVATED event refreshes publishedModpack cover and notes dynamically for active server", async () => {
     const initialModpack: PublishedModpack = {
       version: "1.0.0",
       minecraftVersion: "1.21.1",
@@ -215,17 +220,29 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
     await act(async () => {
       root?.render(
         <LanguageProvider>
-          <HomeView theme="dark" />
+          <HomeView theme="dark" selectedServer={mockServer} />
         </LanguageProvider>,
       )
     })
 
     expect(container?.textContent).toContain("Initial v1.0 Notes")
 
-    // Dispatch WebSocket RELEASE_ACTIVATED event
+    // Event for another server -> ignored
     await act(async () => {
       releaseSubscriber?.({
         type: "RELEASE_ACTIVATED",
+        serverId: "other-server-id",
+        version: "3.0.0",
+        minecraftVersion: "1.21.1",
+      })
+    })
+    expect(getPublishedSpy).toHaveBeenCalledTimes(1)
+
+    // Event for this server -> refreshed
+    await act(async () => {
+      releaseSubscriber?.({
+        type: "RELEASE_ACTIVATED",
+        serverId: "test-server-id",
         version: "2.0.0",
         minecraftVersion: "1.21.1",
       })

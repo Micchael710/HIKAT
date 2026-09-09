@@ -62,6 +62,18 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
       maxPlayers: 20,
       latencyMs: 15,
     })
+    vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([
+      {
+        id: "server-test-1",
+        name: "Test Server",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        launcherActiveReleaseId: "rel-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
 
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
       version: "1.0.0",

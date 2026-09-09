@@ -1,6 +1,5 @@
 import { graphqlClient } from "./apiClient"
 import { resolveApiAssetUrl } from "../config/api"
-import { heroHomeBg } from "../assets"
 import type { NewsCardItem } from "../types"
 
 export interface NewsResult {
@@ -35,7 +34,7 @@ interface NewsItemResponse {
  * 1. Explicit cover image
  * 2. YouTube official thumbnail (via youtubeVideoId)
  * 3. Uploaded video asset URL
- * 4. Neutral fallback launcher artwork
+ * 4. Empty string (no Apparatia artwork fallback)
  */
 export function resolveNewsPreview(item: NewsItemResponse): string {
   if (item.image?.url) {
@@ -47,7 +46,7 @@ export function resolveNewsPreview(item: NewsItemResponse): string {
   if (item.video?.url) {
     return resolveApiAssetUrl(item.video.url)
   }
-  return heroHomeBg
+  return ""
 }
 
 export const newsService = {

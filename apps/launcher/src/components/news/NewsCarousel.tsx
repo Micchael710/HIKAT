@@ -35,16 +35,20 @@ export default function NewsCarousel({
   const [canLeft, setCanLeft] = useState(false)
   const [canRight, setCanRight] = useState(true)
 
-  const cacheKey = serverId ? `hikat_cached_news_${serverId}` : "hikat_cached_news"
+  const isNoServer = serverId === null
+  const cacheKey = serverId ? `hikat_cached_news_${serverId}` : null
 
   const [articles, setArticles] = useState<NewsCardItem[]>(() => {
+    if (isNoServer) return []
     if (news && news.length > 0) return news
     // Read from localStorage cache if available
     try {
-      const cached = localStorage.getItem(cacheKey)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      if (cacheKey) {
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        }
       }
     } catch (_) {}
     return []
@@ -52,13 +56,18 @@ export default function NewsCarousel({
   const [isLoading, setIsLoading] = useState(false)
 
   const fetchNews = async () => {
+    if (isNoServer) {
+      setArticles([])
+      setIsLoading(false)
+      return
+    }
     if (news && news.length > 0) {
       setArticles(news)
       return
     }
     setIsLoading(true)
     try {
-      const res = await newsService.getNewsArticles(language, serverId || undefined)
+      const res = await newsService.getNewsArticles(language, serverId)
       if (res.items && res.items.length > 0) {
         setArticles(res.items)
       } else {
@@ -74,23 +83,31 @@ export default function NewsCarousel({
   useEffect(() => {
     if (!isActive) return
 
+    if (isNoServer) {
+      setArticles([])
+      setIsLoading(false)
+      return
+    }
+
     if (news && news.length > 0) {
       setArticles(news)
     } else {
       try {
-        const cached = localStorage.getItem(cacheKey)
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          if (Array.isArray(parsed)) {
-            setArticles(parsed)
+        if (cacheKey) {
+          const cached = localStorage.getItem(cacheKey)
+          if (cached) {
+            const parsed = JSON.parse(cached)
+            if (Array.isArray(parsed)) {
+              setArticles(parsed)
+            }
+          } else {
+            setArticles([])
           }
-        } else {
-          setArticles([])
         }
       } catch (_) {}
       fetchNews()
     }
-  }, [news, language, isActive, serverId])
+  }, [news, language, isActive, serverId, cacheKey])
 
   const CARD_W = 490
   const CARD_H = 280

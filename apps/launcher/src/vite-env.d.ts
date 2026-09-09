@@ -78,6 +78,16 @@ export interface GameContext {
   gameName: string
 }
 
+export interface OperationSnapshot {
+  gameId: string | null
+  phase: string
+  progress: number
+  speedMBs: number
+  downloadedBytes: number
+  totalBytes: number
+  remainingMinutes: number
+}
+
 interface ElectronAPI {
   minimizeWindow: () => void
   maximizeWindow: () => void
@@ -144,6 +154,7 @@ interface ElectronAPI {
     gameId?: string
     gameName?: string
   }) => Promise<{ success: boolean; pid?: number }>
+
   getLaunchStatus?: (gameContext?: GameContext) => Promise<{
     status: string
     pid?: number | null
@@ -151,6 +162,7 @@ interface ElectronAPI {
     gameId?: string | null
     runningGameId?: string | null
     activeOperationGameId?: string | null
+    operationSnapshot?: OperationSnapshot | null
   }>
   getGameRuntimeInfo?: (gameContext?: GameContext) => Promise<{ javaMajorVersion: number | null }>
   onDownloadProgress?: (callback: (data: DownloadProgressData) => void) => () => void

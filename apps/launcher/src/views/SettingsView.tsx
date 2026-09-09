@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from "react"
 import { ThemeMode, SettingsTab } from "../types"
 import { IconMoon, IconSun } from "../theme/icons"
 import { CANVAS_W, BASE_FONT } from "../theme/tokens"
-import { apparatiaLogo } from "../assets"
 import LauncherToggle from "../components/common/LauncherToggle"
 import LauncherSelect from "../components/common/LauncherSelect"
 import LiveToast from "../components/common/LiveToast"
@@ -26,6 +25,7 @@ import {
 import { useDynamicAccent, useServerAccent } from "../utils/dynamicAccent"
 import { LauncherServer } from "../services/serverService"
 import { resolveApiAssetUrl } from "../config/api"
+import { apparatiaLogo } from "../assets"
 
 export { calculateAutomaticRam, formatModLoaderName }
 
@@ -44,14 +44,6 @@ interface GameItem {
   logo: string
   accentColor?: string | null
 }
-
-const DEFAULT_GAMES: GameItem[] = [
-  {
-    id: "default",
-    name: "HiKAT",
-    logo: apparatiaLogo,
-  },
-]
 
 export default function SettingsView({
   theme = "dark",
@@ -90,35 +82,20 @@ export default function SettingsView({
   })
 
   // Game & Performance State
-  const [ramGB, setRamGBState] = useState<number>(() => {
-    const defaultVal = 8
-    return getStoredNumber(STORAGE_KEYS.RAM_GB, defaultVal)
-  })
+  const [ramGB, setRamGBState] = useState<number>(8)
+  const [ramAuto, setRamAutoState] = useState<boolean>(false)
+  const [dedicatedGPU, setDedicatedGPUState] = useState<boolean>(true)
 
-  const [ramAuto, setRamAutoState] = useState<boolean>(() =>
-    getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false),
-  )
-
-  const [dedicatedGPU, setDedicatedGPUState] = useState<boolean>(() =>
-    getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
-  )
-
-  const hasServerCatalog = Boolean(servers && servers.length > 0)
-
-  const legacyLocalServerId = hasServerCatalog
-    ? servers?.find(
-        (server) => server.name.trim().toLowerCase() === "apparatia",
-      )?.id ?? null
-    : null
+  const isLegacyTestMode = servers === undefined
 
   const games: GameItem[] = React.useMemo(() => {
-    if (hasServerCatalog) {
-      return servers!.map((s) => {
+    if (servers && servers.length > 0) {
+      return servers.map((s) => {
         const logoUrl = s.sidebarLogo?.url
           ? resolveApiAssetUrl(s.sidebarLogo.url)
           : s.mainLogo?.url
             ? resolveApiAssetUrl(s.mainLogo.url)
-            : apparatiaLogo
+            : ""
         return {
           id: s.id,
           name: s.name,
@@ -127,14 +104,17 @@ export default function SettingsView({
         }
       })
     }
-    return [
-      {
-        id: propSelectedGameId || "default",
-        name: "Apparatia",
-        logo: apparatiaLogo,
-      },
-    ]
-  }, [servers, hasServerCatalog, propSelectedGameId])
+    if (servers === undefined) {
+      return [
+        {
+          id: propSelectedGameId || "default",
+          name: "Apparatia",
+          logo: apparatiaLogo,
+        },
+      ]
+    }
+    return []
+  }, [servers, propSelectedGameId])
 
   const [internalSelectedGameId, setInternalSelectedGameId] = useState<string>(() => {
     return propSelectedGameId || games[0]?.id || ""
@@ -157,48 +137,6 @@ export default function SettingsView({
     onSelectGameId?.(id)
   }
 
-  const isPureLegacyMode =
-    !hasServerCatalog &&
-    !propSelectedGameId
-
-  const isLegacyLocal =
-    isPureLegacyMode ||
-    Boolean(
-      legacyLocalServerId &&
-      selectedGameId === legacyLocalServerId
-    )
-  const isLegacyLocalRef = useRef(isLegacyLocal)
-  isLegacyLocalRef.current = isLegacyLocal
-
-  // Apparatia one-time legacy migration for renderer storage
-  useEffect(() => {
-    if (typeof window !== "undefined" && gameContext && gameContext.gameName.trim().toLowerCase() === "apparatia") {
-      try {
-        const scopedAutoKey = `hikat_ram_auto_${gameContext.gameId}`
-        if (localStorage.getItem(scopedAutoKey) === null) {
-          const legacyAuto = localStorage.getItem(STORAGE_KEYS.RAM_AUTO)
-          if (legacyAuto !== null) {
-            localStorage.setItem(scopedAutoKey, legacyAuto)
-          }
-        }
-        const scopedRamKey = `hikat_ram_gb_${gameContext.gameId}`
-        if (localStorage.getItem(scopedRamKey) === null) {
-          const legacyRam = localStorage.getItem(STORAGE_KEYS.RAM_GB)
-          if (legacyRam !== null) {
-            localStorage.setItem(scopedRamKey, legacyRam)
-          }
-        }
-        const scopedGpuKey = `hikat_dedicated_gpu_${gameContext.gameId}`
-        if (localStorage.getItem(scopedGpuKey) === null) {
-          const legacyGpu = localStorage.getItem(STORAGE_KEYS.DEDICATED_GPU)
-          if (legacyGpu !== null) {
-            localStorage.setItem(scopedGpuKey, legacyGpu)
-          }
-        }
-      } catch (_) {}
-    }
-  }, [gameContext?.gameId, gameContext?.gameName])
-
   // Sync state values on selectedGameId change
   useEffect(() => {
     if (gameContext) {
@@ -219,33 +157,52 @@ export default function SettingsView({
       } else {
         setRuntimeInfo(null)
       }
-    } else {
-      setDedicatedGPUState(getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true))
-      setRamAutoState(getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false))
-      setRamGBState(getStoredNumber(STORAGE_KEYS.RAM_GB, 8))
-      const savedJava = localStorage.getItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
+    } else if (isLegacyTestMode) {
+      const savedGpu = localStorage.getItem(STORAGE_KEYS.DEDICATED_GPU)
+      setDedicatedGPUState(savedGpu === null ? true : savedGpu === "true")
+
+      const isAuto = localStorage.getItem(STORAGE_KEYS.RAM_AUTO) === "true"
+      setRamAutoState(isAuto)
+
+      const savedRam = localStorage.getItem(STORAGE_KEYS.RAM_GB)
+      const parsedRam = savedRam !== null ? parseInt(savedRam, 10) : 8
+      setRamGBState(!isNaN(parsedRam) && parsedRam >= 1 ? parsedRam : 8)
+
+      const savedJava = localStorage.getItem("hikat_java_major_version")
       if (savedJava !== null) {
         const p = parseInt(savedJava, 10)
         setRuntimeInfo(!isNaN(p) && p > 0 ? { javaMajorVersion: p } : null)
       } else {
         setRuntimeInfo(null)
       }
+    } else {
+      setDedicatedGPUState(true)
+      setRamAutoState(false)
+      setRamGBState(8)
+      setRuntimeInfo(null)
     }
-  }, [selectedGameId, gameContext?.gameId])
+  }, [selectedGameId, gameContext?.gameId, isLegacyTestMode])
 
   // Game & Runtime Info State (Hydrated from local cache to prevent flickering)
   const [manifest, setManifest] = useState<GameManifest | null>(() => {
     if (typeof window !== "undefined") {
       try {
-        const cacheKey =
-          (servers && servers.length > 0) || propSelectedGameId
-            ? `hikat_game_manifest_${selectedGameId}`
-            : "hikat_game_manifest"
-        const cached = localStorage.getItem(cacheKey)
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          if (parsed && typeof parsed === "object") {
-            return parsed
+        if (gameContext) {
+          const cacheKey = `hikat_game_manifest_${gameContext.gameId}`
+          const cached = localStorage.getItem(cacheKey)
+          if (cached) {
+            const parsed = JSON.parse(cached)
+            if (parsed && typeof parsed === "object") {
+              return parsed
+            }
+          }
+        } else if (isLegacyTestMode) {
+          const cached = localStorage.getItem("hikat_game_manifest")
+          if (cached) {
+            const parsed = JSON.parse(cached)
+            if (parsed && typeof parsed === "object") {
+              return parsed
+            }
           }
         }
       } catch (_) {}
@@ -260,9 +217,9 @@ export default function SettingsView({
   }, [manifest])
 
   const [runtimeInfo, setRuntimeInfo] = useState<{ javaMajorVersion: number | null } | null>(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && gameContext) {
       try {
-        const cachedJava = localStorage.getItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
+        const cachedJava = localStorage.getItem(`hikat_java_major_version_${gameContext.gameId}`)
         if (cachedJava !== null) {
           const parsedNum = parseInt(cachedJava, 10)
           if (!isNaN(parsedNum) && parsedNum > 0) {
@@ -325,14 +282,14 @@ export default function SettingsView({
     installedModpackVersion: string | null
     hasIntegrityIssue: boolean
   }>(() => ({
-    isInstalled: isLegacyLocal ? gameService.isGameInstalled() : false,
+    isInstalled: gameContext ? gameService.isGameInstalled(gameContext.gameId) : false,
     hasUpdate: false,
     installedModpackVersion: null,
     hasIntegrityIssue: false,
   }))
 
   const refreshOperationalState = async (targetManifest?: GameManifest | null) => {
-    if (!gameContext && !isLegacyLocal) {
+    if (!gameContext && !isLegacyTestMode) {
       setOperativeState({
         isInstalled: false,
         hasUpdate: false,
@@ -342,12 +299,11 @@ export default function SettingsView({
       return
     }
 
+    const effectiveGameId = gameContext?.gameId
     const m = targetManifest !== undefined ? targetManifest : manifestRef.current
     if (window.electronAPI?.checkSyncPlan && m?.clientFiles && m.clientFiles.length > 0) {
       try {
-        const planCheck = await window.electronAPI.checkSyncPlan({
-          gameId: gameContext?.gameId,
-          gameName: gameContext?.gameName,
+        const planPayload: any = {
           clientFiles: m.clientFiles,
           directoryPolicies: m.directoryPolicies || [],
           modpackVersion: m.version,
@@ -355,12 +311,17 @@ export default function SettingsView({
           modLoader: m.modLoader,
           modLoaderVersion: m.modLoaderVersion ?? undefined,
           neoForgeVersion: m.neoForgeVersion ?? undefined,
-        })
+        }
+        if (gameContext) {
+          planPayload.gameId = gameContext.gameId
+          planPayload.gameName = gameContext.gameName
+        }
+        const planCheck = await window.electronAPI.checkSyncPlan(planPayload)
         if (planCheck?.success) {
           const isInst =
             typeof planCheck.hasExistingInstall === "boolean"
               ? planCheck.hasExistingInstall
-              : Boolean(planCheck.isFullyInstalled || gameService.isGameInstalled(gameContext?.gameId))
+              : Boolean(planCheck.isFullyInstalled || gameService.isGameInstalled(effectiveGameId))
           const instVer = planCheck.installedModpackVersion || null
           const hasUpd = Boolean(instVer && m.version && instVer !== m.version)
           setOperativeState({
@@ -370,14 +331,14 @@ export default function SettingsView({
             hasIntegrityIssue: Boolean(planCheck.hasIntegrityIssue),
           })
           if (typeof planCheck.hasExistingInstall === "boolean") {
-            gameService.setGameInstalled(planCheck.hasExistingInstall, gameContext?.gameId)
+            gameService.setGameInstalled(planCheck.hasExistingInstall, effectiveGameId)
           }
           return
         }
       } catch (_) {}
     }
     setOperativeState({
-      isInstalled: gameService.isGameInstalled(gameContext?.gameId),
+      isInstalled: gameService.isGameInstalled(effectiveGameId),
       hasUpdate: false,
       installedModpackVersion: null,
       hasIntegrityIssue: false,
@@ -396,15 +357,17 @@ export default function SettingsView({
             setSystemTotalRAM(info.totalGb)
             const isAuto = gameContext
               ? localStorage.getItem(`hikat_ram_auto_${gameContext.gameId}`) === "true"
-              : getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false)
+              : isLegacyTestMode
+                ? localStorage.getItem(STORAGE_KEYS.RAM_AUTO) === "true"
+                : false
             if (isAuto) {
               const autoRam = calculateAutomaticRam(info.totalGb)
               setRamGBState(autoRam)
               if (gameContext) {
                 localStorage.setItem(`hikat_ram_gb_${gameContext.gameId}`, String(autoRam))
                 window.electronAPI?.setRamAllocation?.(autoRam, gameContext)
-              } else if (isLegacyLocalRef.current) {
-                setStoredNumber(STORAGE_KEYS.RAM_GB, autoRam)
+              } else if (isLegacyTestMode) {
+                localStorage.setItem(STORAGE_KEYS.RAM_GB, String(autoRam))
                 window.electronAPI?.setRamAllocation?.(autoRam)
               }
             }
@@ -461,7 +424,7 @@ export default function SettingsView({
   useEffect(() => {
     let isMounted = true
 
-    if (!gameContext && !isLegacyLocal) {
+    if (!gameContext && !isLegacyTestMode) {
       setLaunchStatus("idle")
       setOperationState("IDLE")
       return
@@ -470,17 +433,17 @@ export default function SettingsView({
     refreshOperationalState()
 
     if (window.electronAPI?.getDedicatedGpu) {
-      const gpuPromise = gameContext
+      const getGpuPromise = gameContext
         ? window.electronAPI.getDedicatedGpu(gameContext)
         : window.electronAPI.getDedicatedGpu()
-      gpuPromise
+      getGpuPromise
         .then((realState: any) => {
           if (isMounted && typeof realState === "boolean") {
             setDedicatedGPUState(realState)
             if (gameContext) {
               localStorage.setItem(`hikat_dedicated_gpu_${gameContext.gameId}`, String(realState))
-            } else {
-              setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, realState)
+            } else if (isLegacyTestMode) {
+              localStorage.setItem(STORAGE_KEYS.DEDICATED_GPU, String(realState))
             }
           }
         })
@@ -488,20 +451,20 @@ export default function SettingsView({
     }
 
     if (window.electronAPI?.getRamAllocation) {
-      const ramPromise = gameContext
+      const getRamPromise = gameContext
         ? window.electronAPI.getRamAllocation(gameContext)
         : window.electronAPI.getRamAllocation()
-      ramPromise
+      getRamPromise
         .then((realRam: any) => {
           const isAuto = gameContext
             ? localStorage.getItem(`hikat_ram_auto_${gameContext.gameId}`) === "true"
-            : getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false)
+            : localStorage.getItem(STORAGE_KEYS.RAM_AUTO) === "true"
           if (isMounted && typeof realRam === "number" && realRam >= 1 && !isAuto) {
             setRamGBState(realRam)
             if (gameContext) {
               localStorage.setItem(`hikat_ram_gb_${gameContext.gameId}`, String(realRam))
-            } else {
-              setStoredNumber(STORAGE_KEYS.RAM_GB, realRam)
+            } else if (isLegacyTestMode) {
+              localStorage.setItem(STORAGE_KEYS.RAM_GB, String(realRam))
             }
           }
         })
@@ -510,18 +473,18 @@ export default function SettingsView({
 
     // Load Runtime Info
     if (window.electronAPI?.getGameRuntimeInfo) {
-      const rtPromise = gameContext
+      const getRuntimePromise = gameContext
         ? window.electronAPI.getGameRuntimeInfo(gameContext)
         : window.electronAPI.getGameRuntimeInfo()
-      rtPromise
+      getRuntimePromise
         .then((info: any) => {
           if (isMounted && info && typeof info.javaMajorVersion === "number" && info.javaMajorVersion > 0) {
             setRuntimeInfo(info)
             try {
               if (gameContext) {
                 localStorage.setItem(`hikat_java_major_version_${gameContext.gameId}`, String(info.javaMajorVersion))
-              } else {
-                localStorage.setItem(STORAGE_KEYS.JAVA_MAJOR_VERSION, String(info.javaMajorVersion))
+              } else if (isLegacyTestMode) {
+                localStorage.setItem("hikat_java_major_version", String(info.javaMajorVersion))
               }
             } catch (_) {}
           }
@@ -531,10 +494,10 @@ export default function SettingsView({
 
     // Load Launch & Operation Status
     if (window.electronAPI?.getLaunchStatus) {
-      const statusPromise = gameContext
+      const getStatusPromise = gameContext
         ? window.electronAPI.getLaunchStatus(gameContext)
         : window.electronAPI.getLaunchStatus()
-      statusPromise
+      getStatusPromise
         .then((st: any) => {
           if (isMounted && st) {
             if (st.status) setLaunchStatus(st.status)
@@ -544,39 +507,24 @@ export default function SettingsView({
         .catch(() => {})
     }
 
-    // Subscribe to Launch Status changes (filter other games if gameContext)
+    // Subscribe to Launch Status changes (filter other games)
     const unsubLaunch = window.electronAPI?.onLaunchStatus?.((status: any, details?: any) => {
       if (!isMounted) return
-      if (gameContext) {
-        if (details?.gameId && details.gameId !== gameContext.gameId) return
-        if (!details?.gameId && !isPureLegacyMode) return
-      } else if (!isPureLegacyMode) {
-        return
-      }
+      if (gameContext && details?.gameId && details.gameId !== gameContext.gameId) return
       setLaunchStatus(status)
     })
 
-    // Subscribe to Phase Changes (filter other games if gameContext)
+    // Subscribe to Phase Changes (filter other games)
     const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: any, evtGameId?: any) => {
       if (!isMounted) return
-      if (gameContext) {
-        if (evtGameId && evtGameId !== gameContext.gameId) return
-        if (!evtGameId && !isPureLegacyMode) return
-      } else if (!isPureLegacyMode) {
-        return
-      }
+      if (gameContext && evtGameId && evtGameId !== gameContext.gameId) return
       setOperationState(phase)
     })
 
     // Subscribe to integrity changed (filter other games)
     const unsubIntegrity = window.electronAPI?.onGameFileIntegrityChanged?.((data: any) => {
       if (!isMounted) return
-      if (gameContext) {
-        if (data?.gameId && data.gameId !== gameContext.gameId) return
-        if (!data?.gameId && !isPureLegacyMode) return
-      } else if (!isPureLegacyMode) {
-        return
-      }
+      if (gameContext && data?.gameId && data.gameId !== gameContext.gameId) return
       refreshOperationalState()
     })
 
@@ -586,8 +534,18 @@ export default function SettingsView({
         action: "verify" | "uninstall"
         state: "started" | "finished"
         success?: boolean
+        gameId?: string
       }>
-      const { action, state, success } = customEvt.detail || {}
+      const { action, state, success, gameId: eventGameId } = customEvt.detail || {}
+      if (gameContext) {
+        if (eventGameId) {
+          if (eventGameId !== gameContext.gameId) return
+        } else {
+          const isLegacyApparatia = gameContext.gameName?.toLowerCase() === "apparatia"
+          if (!isLegacyApparatia && !isLegacyTestMode) return
+        }
+      }
+
       if (action === "verify") {
         setIsVerifying(state === "started")
         if (state === "started") {
@@ -600,10 +558,7 @@ export default function SettingsView({
             notifySaved(t("playButton.verifyError"), "error")
           }
           if (window.electronAPI?.getGameRuntimeInfo) {
-            const rtPromise = gameContext
-              ? window.electronAPI.getGameRuntimeInfo(gameContext)
-              : window.electronAPI.getGameRuntimeInfo()
-            rtPromise
+            window.electronAPI.getGameRuntimeInfo(gameContext)
               .then((runtime: any) => {
                 if (
                   isMounted &&
@@ -612,19 +567,14 @@ export default function SettingsView({
                   runtime.javaMajorVersion > 0
                 ) {
                   setRuntimeInfo(runtime)
-                  try {
-                    if (gameContext) {
+                  if (gameContext?.gameId) {
+                    try {
                       localStorage.setItem(
                         `hikat_java_major_version_${gameContext.gameId}`,
                         String(runtime.javaMajorVersion),
                       )
-                    } else {
-                      localStorage.setItem(
-                        STORAGE_KEYS.JAVA_MAJOR_VERSION,
-                        String(runtime.javaMajorVersion),
-                      )
-                    }
-                  } catch (_) {}
+                    } catch (_) {}
+                  }
                 }
               })
               .catch(() => {})
@@ -635,12 +585,12 @@ export default function SettingsView({
         if (state === "finished") {
           refreshOperationalState()
           if (success) {
-            setRuntimeInfo({ javaMajorVersion: null })
+            setRuntimeInfo(null)
             try {
               if (gameContext) {
                 localStorage.removeItem(`hikat_java_major_version_${gameContext.gameId}`)
-              } else {
-                localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
+              } else if (isLegacyTestMode) {
+                localStorage.removeItem("hikat_java_major_version")
               }
             } catch (_) {}
             notifySaved(t("playButton.uninstallSuccess"), "success")
@@ -651,41 +601,31 @@ export default function SettingsView({
       }
     }
 
-    if (isLegacyLocal) {
-      window.addEventListener("hikat:game-action-status", handleActionStatus)
-    }
+    window.addEventListener("hikat:game-action-status", handleActionStatus)
 
     return () => {
       isMounted = false
       unsubLaunch?.()
       unsubPhase?.()
       unsubIntegrity?.()
-      if (isLegacyLocal) {
-        window.removeEventListener("hikat:game-action-status", handleActionStatus)
-      }
+      window.removeEventListener("hikat:game-action-status", handleActionStatus)
     }
-  }, [isLegacyLocal, selectedGameId, gameContext?.gameId])
+  }, [selectedGameId, gameContext?.gameId, isLegacyTestMode])
 
   // Dedicated WebSocket release events subscription with current server scope
   useEffect(() => {
+    if (!gameContext && !isLegacyTestMode) return
     let isMounted = true
-    const activeServerId =
-      (servers && servers.length > 0) || propSelectedGameId ? selectedGameId : undefined
+    const activeServerId = gameContext?.gameId
 
     const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
-      if (event?.serverId) {
-        if (!activeServerId || event.serverId !== activeServerId) {
-          return
-        }
-      } else {
-        if (activeServerId) {
-          return
-        }
+      if (gameContext && (!event?.serverId || event.serverId !== activeServerId)) {
+        return
       }
 
       try {
         const fresh = await gameService.checkGameManifest(activeServerId, {
-          allowLegacyLocalFilesystem: isLegacyLocal,
+          allowLegacyLocalFilesystem: isLegacyTestMode,
           gameContext,
         })
         if (isMounted && fresh) {
@@ -699,15 +639,18 @@ export default function SettingsView({
       isMounted = false
       unsubscribe()
     }
-  }, [selectedGameId, legacyLocalServerId, isLegacyLocal, servers, propSelectedGameId])
+  }, [selectedGameId, gameContext?.gameId, isLegacyTestMode])
 
   // Load/update manifest when selectedGameId changes
   useEffect(() => {
+    if (!gameContext && !isLegacyTestMode) {
+      setManifest(null)
+      return
+    }
     let isMounted = true
-    const cacheKey =
-      (servers && servers.length > 0) || propSelectedGameId
-        ? `hikat_game_manifest_${selectedGameId}`
-        : "hikat_game_manifest"
+    const cacheKey = gameContext
+      ? `hikat_game_manifest_${gameContext.gameId}`
+      : "hikat_game_manifest"
     let hasCached = false
     try {
       const cached = localStorage.getItem(cacheKey)
@@ -723,13 +666,10 @@ export default function SettingsView({
 
     if (!hasCached) {
       gameService
-        .checkGameManifest(
-          (servers && servers.length > 0) || propSelectedGameId ? selectedGameId : undefined,
-          {
-            allowLegacyLocalFilesystem: isLegacyLocal,
-            gameContext,
-          },
-        )
+        .checkGameManifest(gameContext?.gameId, {
+          allowLegacyLocalFilesystem: isLegacyTestMode,
+          gameContext,
+        })
         .then((m) => {
           if (isMounted && m) {
             setManifest(m)
@@ -742,7 +682,7 @@ export default function SettingsView({
     return () => {
       isMounted = false
     }
-  }, [selectedGameId, isLegacyLocal, servers, propSelectedGameId])
+  }, [selectedGameId, gameContext?.gameId, isLegacyTestMode])
 
   const setStartWithSystem = async (v: boolean) => {
     setStartWithSystemState(v)
@@ -778,13 +718,13 @@ export default function SettingsView({
   }
 
   const setDedicatedGPU = async (v: boolean) => {
-    if (!gameContext && !isLegacyLocal) return
+    if (!gameContext && !isLegacyTestMode) return
     const prev = dedicatedGPU
     setDedicatedGPUState(v)
     if (gameContext) {
       localStorage.setItem(`hikat_dedicated_gpu_${gameContext.gameId}`, String(v))
-    } else {
-      setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, v)
+    } else if (isLegacyTestMode) {
+      localStorage.setItem(STORAGE_KEYS.DEDICATED_GPU, String(v))
     }
     try {
       const res = gameContext
@@ -794,8 +734,8 @@ export default function SettingsView({
         setDedicatedGPUState(res)
         if (gameContext) {
           localStorage.setItem(`hikat_dedicated_gpu_${gameContext.gameId}`, String(res))
-        } else {
-          setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, res)
+        } else if (isLegacyTestMode) {
+          localStorage.setItem(STORAGE_KEYS.DEDICATED_GPU, String(res))
         }
         if (res !== prev) {
           markPendingRestartChangeIfNeeded()
@@ -803,24 +743,25 @@ export default function SettingsView({
       } else if (v !== prev) {
         markPendingRestartChangeIfNeeded()
       }
+      notifySaved(t("settings.savedNotice"), "success")
     } catch (_) {
       setDedicatedGPUState(prev)
       if (gameContext) {
         localStorage.setItem(`hikat_dedicated_gpu_${gameContext.gameId}`, String(prev))
-      } else {
-        setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, prev)
+      } else if (isLegacyTestMode) {
+        localStorage.setItem(STORAGE_KEYS.DEDICATED_GPU, String(prev))
       }
       notifySaved(t("settings.toastSaveError"), "error")
     }
   }
 
   const setRamGB = (v: number) => {
-    if (!gameContext && !isLegacyLocal) return
+    if (!gameContext && !isLegacyTestMode) return
     setRamGBState(v)
     if (gameContext) {
       localStorage.setItem(`hikat_ram_gb_${gameContext.gameId}`, String(v))
-    } else {
-      setStoredNumber(STORAGE_KEYS.RAM_GB, v)
+    } else if (isLegacyTestMode) {
+      localStorage.setItem(STORAGE_KEYS.RAM_GB, String(v))
     }
     markPendingRestartChangeIfNeeded()
     if (gameContext) {
@@ -849,12 +790,12 @@ export default function SettingsView({
   }
 
   const handleToggleAutoRam = (v: boolean) => {
-    if (!gameContext && !isLegacyLocal) return
+    if (!gameContext && !isLegacyTestMode) return
     setRamAutoState(v)
     if (gameContext) {
       localStorage.setItem(`hikat_ram_auto_${gameContext.gameId}`, String(v))
-    } else {
-      setStoredBoolean(STORAGE_KEYS.RAM_AUTO, v)
+    } else if (isLegacyTestMode) {
+      localStorage.setItem(STORAGE_KEYS.RAM_AUTO, String(v))
     }
     markPendingRestartChangeIfNeeded()
     if (v) {
@@ -865,7 +806,7 @@ export default function SettingsView({
   }
 
   const handleAutoRam = () => {
-    if (!gameContext && !isLegacyLocal) return
+    if (!gameContext && !isLegacyTestMode) return
     handleToggleAutoRam(true)
   }
 
@@ -879,23 +820,23 @@ export default function SettingsView({
     isVerifying ||
     isUninstalling
 
-  const isVerifyDisabled = !isLegacyLocal || !isInstalled || hasUpdate || isGameBusy
-  const isUninstallDisabled = !isLegacyLocal || !isInstalled || isGameBusy
+  const isVerifyDisabled = (!gameContext && !isLegacyTestMode) || !isInstalled || hasUpdate || isGameBusy
+  const isUninstallDisabled = (!gameContext && !isLegacyTestMode) || !isInstalled || isGameBusy
 
   const handleVerify = () => {
-    if (!isLegacyLocal || isVerifyDisabled) return
+    if ((!gameContext && !isLegacyTestMode) || isVerifyDisabled) return
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-request", {
-        detail: { action: "verify" },
+        detail: { action: "verify", gameId: gameContext?.gameId },
       }),
     )
   }
 
   const handleUninstall = () => {
-    if (!isLegacyLocal || isUninstallDisabled) return
+    if ((!gameContext && !isLegacyTestMode) || isUninstallDisabled) return
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-request", {
-        detail: { action: "uninstall" },
+        detail: { action: "uninstall", gameId: gameContext?.gameId },
       }),
     )
   }
@@ -1573,35 +1514,39 @@ export default function SettingsView({
                     }}
                   >
                     {/* Selected Game Identity Header: Logo + Name */}
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 14,
-                        padding: "2px 0 6px",
-                      }}
-                    >
-                      <img
-                        src={selectedGame.logo}
-                        alt={selectedGame.name}
+                    {selectedGame && (
+                      <div
                         style={{
-                          width: 48,
-                          height: 48,
-                          objectFit: "contain",
-                          borderRadius: 12,
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontSize: 22,
-                          fontWeight: 800,
-                          color: isDark ? "#ffffff" : "#111822",
-                          letterSpacing: "-0.01em",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 14,
+                          padding: "2px 0 6px",
                         }}
                       >
-                        {selectedGame.name}
-                      </span>
-                    </div>
+                        {selectedGame.logo ? (
+                          <img
+                            src={selectedGame.logo}
+                            alt={selectedGame.name}
+                            style={{
+                              width: 48,
+                              height: 48,
+                              objectFit: "contain",
+                              borderRadius: 12,
+                            }}
+                          />
+                        ) : null}
+                        <span
+                          style={{
+                            fontSize: 22,
+                            fontWeight: 800,
+                            color: isDark ? "#ffffff" : "#111822",
+                            letterSpacing: "-0.01em",
+                          }}
+                        >
+                          {selectedGame.name}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Inline Pending Restart Notice */}
                     {hasPendingRestartChanges && (

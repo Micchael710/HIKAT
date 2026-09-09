@@ -566,9 +566,9 @@ describe("HiKAT Multi-Server Phase 2 Focused Regressions Suite", () => {
     })
   })
 
-  // G. SETTINGS STORE SETTER-FIRST MIGRATION
-  describe("G. SettingsStore Apparatia setter-first legacy migration", () => {
-    it("First call to setGameSetting for Apparatia migrates legacy values", () => {
+  // G. SETTINGS STORE SETTER-FIRST (NO LEGACY MIGRATION IN PHASE 3)
+  describe("G. SettingsStore Apparatia setter-first defaults", () => {
+    it("First call to setGameSetting for Apparatia uses clean defaults without legacy migration", () => {
       const store = new SettingsStore(tempDir)
       store.set("ramGB", 12)
       store.set("dedicatedGpu", false)
@@ -579,8 +579,8 @@ describe("HiKAT Multi-Server Phase 2 Focused Regressions Suite", () => {
       // First action: setGameSetting for Apparatia
       store.setGameSetting(apparatiaId, "dedicatedGpu", true, { gameName: "Apparatia" })
 
-      // ramGB preserves legacy 12, dedicatedGpu was updated to true
-      expect(store.getGameSetting(apparatiaId, "ramGB", { gameName: "Apparatia" })).toBe(12)
+      // In Phase 3, legacy migration is removed: ramGB gets standard default 8, dedicatedGpu was updated to true
+      expect(store.getGameSetting(apparatiaId, "ramGB", { gameName: "Apparatia" })).toBe(8)
       expect(store.getGameSetting(apparatiaId, "dedicatedGpu", { gameName: "Apparatia" })).toBe(true)
 
       // Warria receives defaults and does NOT inherit Apparatia legacy settings
@@ -721,19 +721,19 @@ describe("HiKAT Multi-Server Phase 2 Focused Regressions Suite", () => {
     })
   })
 
-  // M. MIGRACIÓN LEGACY GETTER-FIRST
-  describe("M. Legacy Apparatia Getter-First Migration", () => {
-    it("Legacy Apparatia migration getter-first migrates legacy values once, Warria gets safe defaults", () => {
+  // M. CLEAN DEFAULTS (NO LEGACY APPARATIA MIGRATION IN PHASE 3)
+  describe("M. Clean Defaults for All Servers", () => {
+    it("First access to any gameId gives clean defaults (8GB, true), Apparatia does NOT inherit legacy", () => {
       const store = new SettingsStore(tempDir)
       // Legacy settings exist
       store.set("ramGB", 12)
       store.set("dedicatedGpu", false)
 
-      // Apparatia accesses settings via getter -> receives legacy values
+      // Apparatia accesses settings via getter -> in Phase 3 gets standard defaults (8GB, true)
       const appRam = store.getGameSetting("app-id", "ramGB", { gameName: "Apparatia" })
       const appGpu = store.getGameSetting("app-id", "dedicatedGpu", { gameName: "Apparatia" })
-      expect(appRam).toBe(12)
-      expect(appGpu).toBe(false)
+      expect(appRam).toBe(8)
+      expect(appGpu).toBe(true)
 
       // Warria accesses settings -> receives standard defaults (8GB, true), NOT Apparatia legacy
       const warriaRam = store.getGameSetting("warria-id", "ramGB", { gameName: "Warria" })

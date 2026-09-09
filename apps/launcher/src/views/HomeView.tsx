@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import { ThemeMode } from "../types"
 import { getThemeTokens, CANVAS_W, CANVAS_H } from "../theme/tokens"
-import { heroHomeBg, apparatiaLogo } from "../assets"
 import DownloadPlayButton from "../components/server/DownloadPlayButton"
 import NewsCarousel from "../components/news/NewsCarousel"
 import ServerStatsGrid from "../components/server/ServerStatsGrid"
@@ -9,6 +8,7 @@ import CommunityHubGrid from "../components/server/CommunityHubGrid"
 import { useTranslation } from "../context/LanguageContext"
 import { gameService } from "../services/gameService"
 import { resolveApiAssetUrl } from "../config/api"
+import { useServerAccent } from "../utils/dynamicAccent"
 import type { PublishedModpack } from "../vite-env"
 import type { LauncherServer } from "../services/serverService"
 
@@ -26,38 +26,50 @@ export default function HomeView({
   onPlay,
   isActive = true,
   selectedServer,
-  selectedGameId: propSelectedGameId,
-  servers,
+  servers: _servers,
 }: HomeViewProps) {
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
   const CONTENT_LEFT = 184
 
-  const activeServerId = selectedServer?.id || propSelectedGameId || undefined
-  const serverName = selectedServer?.name || "Apparatia"
+  const gameContext = useMemo(
+    () =>
+      selectedServer
+        ? {
+            gameId: selectedServer.id,
+            gameName: selectedServer.name,
+          }
+        : null,
+    [selectedServer?.id, selectedServer?.name],
+  )
 
-  const legacyLocalServerId =
-    servers?.find(
-      (server) => server.name.trim().toLowerCase() === "apparatia",
-    )?.id ?? null
+  const activeServerId = selectedServer?.id || null
+  const serverName = selectedServer?.name || ""
 
-  const allowLegacyLocalOperations =
-    activeServerId != null
-      ? activeServerId === legacyLocalServerId
-      : true
+  const mainLogoUrl = selectedServer?.mainLogo?.url
+  const sidebarLogoUrl = selectedServer?.sidebarLogo?.url
+  const logoUrlForAccent = mainLogoUrl || sidebarLogoUrl || null
+  const resolvedAccent = useServerAccent(selectedServer?.accentColor, logoUrlForAccent, "#3ec4c0")
 
   const [publishedModpack, setPublishedModpack] = useState<PublishedModpack | null>(null)
   const [mediaError, setMediaError] = useState(false)
   const [mainLogoFailed, setMainLogoFailed] = useState(false)
   const [sidebarLogoFailed, setSidebarLogoFailed] = useState(false)
 
+  // Immediately clear previous server visual state when selectedServer changes
   useEffect(() => {
+    setPublishedModpack(null)
     setMainLogoFailed(false)
     setSidebarLogoFailed(false)
     setMediaError(false)
-  }, [activeServerId])
+  }, [selectedServer?.id])
 
   useEffect(() => {
+    if (!activeServerId) {
+      setPublishedModpack(null)
+      return
+    }
+
     let isMounted = true
 
     const loadPublished = async () => {
@@ -68,7 +80,7 @@ export default function HomeView({
           setMediaError(false)
         }
       } catch {
-        // Fallback to default assets
+        // Leave publishedModpack null
       }
     }
 
@@ -98,17 +110,17 @@ export default function HomeView({
   const cover = publishedModpack?.cover
   const coverUrl = cover?.url ? resolveApiAssetUrl(cover.url) : ""
 
-  const hasMainLogo = Boolean(!mainLogoFailed && selectedServer?.mainLogo?.url)
-  const hasSidebarLogo = Boolean(!sidebarLogoFailed && selectedServer?.sidebarLogo?.url)
+  const hasMainLogo = Boolean(!mainLogoFailed && mainLogoUrl)
+  const hasSidebarLogo = Boolean(!sidebarLogoFailed && sidebarLogoUrl)
 
-  let logoSrc = apparatiaLogo
+  let logoSrc: string | null = null
   let onLogoError: (() => void) | undefined = undefined
 
   if (hasMainLogo) {
-    logoSrc = resolveApiAssetUrl(selectedServer!.mainLogo!.url)
+    logoSrc = resolveApiAssetUrl(mainLogoUrl!)
     onLogoError = () => setMainLogoFailed(true)
   } else if (hasSidebarLogo) {
-    logoSrc = resolveApiAssetUrl(selectedServer!.sidebarLogo!.url)
+    logoSrc = resolveApiAssetUrl(sidebarLogoUrl!)
     onLogoError = () => setSidebarLogoFailed(true)
   }
 
@@ -129,6 +141,7 @@ export default function HomeView({
           top: 0,
           width: CANVAS_W,
           height: 1080,
+          background: tokens.bgBase,
         }}
       >
         {!mediaError && cover?.mediaType === "VIDEO" && coverUrl ? (
@@ -149,7 +162,7 @@ export default function HomeView({
           />
         ) : !mediaError && cover?.mediaType === "IMAGE" && coverUrl ? (
           <img
-            alt={`${serverName} World`}
+            alt={serverName ? `${serverName} World` : "World"}
             src={coverUrl}
             onError={() => setMediaError(true)}
             style={{
@@ -159,18 +172,7 @@ export default function HomeView({
               display: "block",
             }}
           />
-        ) : (
-          <img
-            alt={`${serverName} World`}
-            src={heroHomeBg}
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              display: "block",
-            }}
-          />
-        )}
+        ) : null}
       </div>
       <div
         style={{
@@ -223,7 +225,7 @@ export default function HomeView({
         }}
       />
 
-      {/* APPARATIA / Server title logo */}
+      {/* Server title logo */}
       <div
         style={{
           position: "absolute",
@@ -233,29 +235,33 @@ export default function HomeView({
           height: 140,
         }}
       >
-        <img
-          alt={serverName}
-          src={logoSrc}
-          onError={onLogoError}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "contain",
-            objectPosition: "left center",
-            display: "block",
-          }}
-        />
+        {logoSrc ? (
+          <img
+            alt={serverName}
+            src={logoSrc}
+            onError={onLogoError}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              objectPosition: "left center",
+              display: "block",
+            }}
+          />
+        ) : null}
       </div>
 
       {/* Action Download / Play button */}
       <DownloadPlayButton
+        key={selectedServer?.id || "no-server"}
         left={CONTENT_LEFT}
         top={355}
         theme={theme}
         onPlay={onPlay}
         serverId={activeServerId}
         gameId={activeServerId}
-        allowLegacyLocalOperations={allowLegacyLocalOperations}
+        gameContext={gameContext}
+        accent={resolvedAccent}
       />
 
       {/* Description */}
@@ -272,7 +278,7 @@ export default function HomeView({
           lineHeight: 1.55,
         }}
       >
-        {publishedModpack?.notes?.trim() ? publishedModpack.notes : t("home.heroSubtitle")}
+        {publishedModpack?.notes?.trim() ? publishedModpack.notes : ""}
       </div>
 
       {/* ÚLTIMAS NOVEDADES (Positioned to peek smoothly at the bottom fold) */}
@@ -329,6 +335,7 @@ export default function HomeView({
           isActive={isActive}
           serverId={activeServerId}
           serverName={serverName}
+          resolvedAccent={resolvedAccent}
         />
         <CommunityHubGrid theme={theme} />
       </div>

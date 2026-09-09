@@ -116,7 +116,7 @@ class SettingsStore {
     return true
   }
 
-  getGameSetting(gameId, key, options = {}) {
+  getGameSetting(gameId, key, _options = {}) {
     if (!gameId || typeof gameId !== "string") {
       return this.get(key)
     }
@@ -126,20 +126,7 @@ class SettingsStore {
     }
 
     if (!this.settings.games[gameId]) {
-      const isApparatia =
-        options.gameName &&
-        typeof options.gameName === "string" &&
-        options.gameName.trim().toLowerCase() === "apparatia"
-
-      if (isApparatia) {
-        this.settings.games[gameId] = {
-          dedicatedGpu: this.get("dedicatedGpu"),
-          ramGB: this.get("ramGB"),
-        }
-        this.save()
-      } else {
-        return key === "dedicatedGpu" ? true : 8
-      }
+      return key === "dedicatedGpu" ? true : 8
     }
 
     const entry = this.settings.games[gameId]
@@ -152,7 +139,7 @@ class SettingsStore {
     return this.get(key)
   }
 
-  setGameSetting(gameId, key, value, options = {}) {
+  setGameSetting(gameId, key, value, _options = {}) {
     if (!gameId || typeof gameId !== "string") {
       return false
     }
@@ -162,22 +149,9 @@ class SettingsStore {
     }
 
     if (!this.settings.games[gameId]) {
-      const isApparatia =
-        options &&
-        options.gameName &&
-        typeof options.gameName === "string" &&
-        options.gameName.trim().toLowerCase() === "apparatia"
-
-      if (isApparatia) {
-        this.settings.games[gameId] = {
-          dedicatedGpu: this.get("dedicatedGpu"),
-          ramGB: this.get("ramGB"),
-        }
-      } else {
-        this.settings.games[gameId] = {
-          dedicatedGpu: true,
-          ramGB: 8,
-        }
+      this.settings.games[gameId] = {
+        dedicatedGpu: true,
+        ramGB: 8,
       }
     }
 

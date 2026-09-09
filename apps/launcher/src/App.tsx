@@ -10,6 +10,8 @@ import SkinsView from "./views/SkinsView"
 import SettingsView from "./views/SettingsView"
 import ProfileView from "./views/ProfileView"
 
+import { useServerAccent } from "./utils/dynamicAccent"
+
 export default function App() {
   const {
     screen,
@@ -43,6 +45,9 @@ export default function App() {
     setSelectedGameId,
     selectedServer,
   } = useLauncherState()
+
+  const serverLogoUrl = selectedServer?.mainLogo?.url || selectedServer?.sidebarLogo?.url || null
+  const homeResolvedAccent = useServerAccent(selectedServer?.accentColor, serverLogoUrl, "#3ec4c0")
 
   const [settingsAccent, setSettingsAccent] = React.useState<{
     r: number
@@ -298,6 +303,7 @@ export default function App() {
             theme={theme}
             activeSkinAccent={activeSkinAccent}
             settingsAccent={settingsAccent}
+            homeAccent={homeResolvedAccent}
           />
 
           {/* Top-Right Profile Card / Menu (Positioned with clean breathing room beneath window controls) */}

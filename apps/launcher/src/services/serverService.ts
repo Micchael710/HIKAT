@@ -21,9 +21,13 @@ export interface LauncherServer {
   updatedAt: string
 }
 
+let inMemoryServers: LauncherServer[] = []
+
 export const serverService = {
   /**
    * Fetch published servers available to the launcher.
+   * Authoritative source is Backend GraphQL launcherServers.
+   * Does NOT read or write localStorage catalog cache.
    */
   async getLauncherServers(): Promise<LauncherServer[]> {
     const query = /* GraphQL */ `
@@ -51,36 +55,20 @@ export const serverService = {
     `
     const res = await graphqlClient<{ launcherServers: LauncherServer[] }>(query)
     if (res.success && Array.isArray(res.data?.launcherServers)) {
-      try {
-        localStorage.setItem(
-          "hikat_launcher_servers",
-          JSON.stringify(res.data.launcherServers),
-        )
-      } catch (_) {}
+      inMemoryServers = res.data.launcherServers
       return res.data.launcherServers
     }
 
-    try {
-      const cached = localStorage.getItem("hikat_launcher_servers")
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed)) return parsed
-      }
-    } catch (_) {}
-
-    return []
+    return inMemoryServers
   },
 
   /**
    * Fetch live Minecraft server ping status & player count.
-   * Note: In Phase 1, the backend GraphQL serverStatus query requires ADMIN privileges.
-   * The Launcher must not call this administrative query.
-   * Returns cached status if available, or null.
+   * Returns cached per-server status if available, or null.
+   * Does NOT use global cached status.
    */
   async getServerStatus(serverId?: string): Promise<ServerStatusResponse | null> {
-    const cacheKey = serverId
-      ? `hikat_cached_server_status_${serverId}`
-      : "hikat_cached_server_status"
+    const cacheKey = serverId ? `hikat_cached_server_status_${serverId}` : "hikat_cached_server_status"
 
     try {
       const cached = localStorage.getItem(cacheKey)

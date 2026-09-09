@@ -44,22 +44,24 @@ export default function NewsCard({
       }}
     >
       {/* Full-bleed background thumbnail image */}
-      <img
-        src={card.img}
-        alt={card.title}
-        draggable={false}
-        className="news-thumbnail-img"
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          display: "block",
-          transition: "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
-          pointerEvents: "none",
-        }}
-      />
+      {card.img ? (
+        <img
+          src={card.img}
+          alt={card.title}
+          draggable={false}
+          className="news-thumbnail-img"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+            transition: "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+            pointerEvents: "none",
+          }}
+        />
+      ) : null}
 
       {/* Dynamic bottom accent glow wash */}
       <div

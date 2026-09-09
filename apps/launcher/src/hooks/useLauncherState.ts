@@ -65,18 +65,7 @@ export function useLauncherState() {
   }, [theme])
 
   /* Multi-Server Catalog State */
-  const [servers, setServers] = useState<LauncherServer[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const cached = localStorage.getItem("hikat_launcher_servers")
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed
-        }
-      } catch (_) {}
-    }
-    return []
-  })
+  const [servers, setServers] = useState<LauncherServer[]>([])
 
   const [selectedGameId, setSelectedGameIdState] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
@@ -112,6 +101,11 @@ export function useLauncherState() {
           } catch (_) {}
           return fallbackId
         })
+      } else {
+        setSelectedGameIdState(null)
+        try {
+          localStorage.removeItem("hikat_selected_game_id")
+        } catch (_) {}
       }
       return list
     } catch (_) {

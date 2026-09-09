@@ -478,7 +478,7 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
       expect(store.get("dedicatedGpu")).toBe(true)
     })
 
-    it("20. Multi-game: Apparatia setter-first migrates legacy values, Warria receives defaults", () => {
+    it("20. Multi-game: Apparatia clean defaults without legacy migration, Warria receives defaults", () => {
       const store = new SettingsStore(tempDir)
       // Legacy settings exist
       store.set("ramGB", 12)
@@ -490,8 +490,8 @@ describe("Electron Main SettingsStore & SecureAuthStore Suite (Shard 8F)", () =>
       // First call is setGameSetting for Apparatia
       store.setGameSetting(apparatiaId, "dedicatedGpu", true, { gameName: "Apparatia" })
 
-      // ramGB must retain migrated legacy value 12, dedicatedGpu is now true
-      expect(store.getGameSetting(apparatiaId, "ramGB", { gameName: "Apparatia" })).toBe(12)
+      // In Phase 3, legacy migration is removed: ramGB gets standard default 8, dedicatedGpu is now true
+      expect(store.getGameSetting(apparatiaId, "ramGB", { gameName: "Apparatia" })).toBe(8)
       expect(store.getGameSetting(apparatiaId, "dedicatedGpu", { gameName: "Apparatia" })).toBe(true)
 
       // Warria receives defaults and does NOT inherit Apparatia legacy settings
