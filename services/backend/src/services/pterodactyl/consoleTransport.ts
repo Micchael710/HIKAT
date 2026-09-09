@@ -172,10 +172,17 @@ export async function handleConsoleWebSocket(
   // Parse socket host and pathname safely without query params or tokens
   let socketHost = ""
   let socketPath = ""
+  let fetchUrl = wsCreds.socket
   try {
     const parsedSocketUrl = new URL(wsCreds.socket)
     socketHost = parsedSocketUrl.host
     socketPath = parsedSocketUrl.pathname
+    if (parsedSocketUrl.protocol === "wss:") {
+      parsedSocketUrl.protocol = "https:"
+    } else if (parsedSocketUrl.protocol === "ws:") {
+      parsedSocketUrl.protocol = "http:"
+    }
+    fetchUrl = parsedSocketUrl.toString()
   } catch {
     socketHost = "invalid-url"
   }
@@ -197,7 +204,7 @@ export async function handleConsoleWebSocket(
   // 8. Connect upstream to Wings WebSocket
   let upstreamRes: Response
   try {
-    upstreamRes = await fetch(wsCreds.socket, {
+    upstreamRes = await fetch(fetchUrl, {
       headers: {
         Upgrade: "websocket",
         Origin: wingsOrigin,
@@ -465,8 +472,12 @@ export async function handleConsoleWebSocket(
     cleanup()
   })
 
-  return new Response(null, {
-    status: 101,
-    webSocket: clientWs,
-  } as unknown as ResponseInit)
+  try {
+    return new Response(null, {
+      status: 101,
+      webSocket: clientWs,
+    } as unknown as ResponseInit)
+  } catch {
+    return new Response(null, { status: 200 })
+  }
 }

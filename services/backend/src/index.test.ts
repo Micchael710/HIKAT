@@ -5626,6 +5626,98 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         consoleLogSpy.mockRestore()
         consoleErrorSpy.mockRestore()
       })
+
+      it("converts wss:// and ws:// to https:// and http:// for Cloudflare Workers fetch", async () => {
+        // 1. Generate console ticket
+        const ticketRes = await executeGqlServer(
+          `mutation { createServerConsoleTicket { ticket expiresAt } }`,
+          {},
+          adminToken,
+        )
+
+        const ticket = ticketRes.data?.createServerConsoleTicket?.ticket
+
+        let attemptedFetchUrl = ""
+        let attemptedFetchHeaders: any = null
+
+        // Mock WebSocketPair
+        class MockClientWs {
+          accept() {}
+          send() {}
+          close() {}
+          addEventListener() {}
+        }
+        class MockServerWs {
+          accept() {}
+          send() {}
+          close() {}
+          addEventListener() {}
+        }
+
+        const originalWebSocketPair = (globalThis as any).WebSocketPair
+        ;(globalThis as any).WebSocketPair = class {
+          0 = new MockClientWs()
+          1 = new MockServerWs()
+        }
+
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any, init?: any) => {
+          if (String(url).includes("/api/client/servers/")) {
+            return new Response(
+              JSON.stringify({
+                object: "token",
+                data: { socket: "wss://node.example.com:8443/api/servers/uuid-123/ws", token: "secret-token" },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            )
+          }
+
+          // Wings fetch
+          attemptedFetchUrl = String(url)
+          attemptedFetchHeaders = init?.headers
+
+          const mockWingsWs = {
+            accept: vi.fn(),
+            send: vi.fn(),
+            close: vi.fn(),
+            addEventListener: vi.fn(),
+          }
+
+          return {
+            status: 101,
+            statusText: "Switching Protocols",
+            webSocket: mockWingsWs,
+            text: async () => "",
+          } as any
+        })
+
+        try {
+          const req = new Request(
+            `http://localhost/api/server/console/ws?ticket=${ticket}`,
+            {
+              method: "GET",
+              headers: {
+                Upgrade: "websocket",
+                Origin: "https://admin.hikat.org",
+              },
+            },
+          )
+
+          const res = await worker.fetch(req, createServerEnv())
+          expect([101, 200]).toContain(res.status)
+
+          // Verify that wss:// was converted to https:// preserving host, port, path
+          expect(attemptedFetchUrl).toBe("https://node.example.com:8443/api/servers/uuid-123/ws")
+          expect(attemptedFetchHeaders?.Upgrade).toBe("websocket")
+          expect(attemptedFetchHeaders?.Origin).toBe("https://panel.test.hikat.org")
+        } finally {
+          fetchSpy.mockRestore()
+          if (originalWebSocketPair) {
+            ;(globalThis as any).WebSocketPair = originalWebSocketPair
+          } else {
+            delete (globalThis as any).WebSocketPair
+          }
+        }
+      })
     })
   })
 
