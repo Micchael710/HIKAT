@@ -72,6 +72,7 @@ export default function CreateServerModal({
   const [disk, setDisk] = useState<number>(10240)
   const [nodeCapacity, setNodeCapacity] = useState<ServerNodeCapacity | null>(null)
   const [nodeCapacityLoading, setNodeCapacityLoading] = useState(false)
+  const [nodeCapacityError, setNodeCapacityError] = useState<string | null>(null)
 
   // Step 4: Appearance
   const [logoWideFile, setLogoWideFile] = useState<File | null>(null)
@@ -96,6 +97,7 @@ export default function CreateServerModal({
 
   const fetchNodeCapacity = useCallback(async () => {
     setNodeCapacityLoading(true)
+    setNodeCapacityError(null)
     try {
       const cap = await serverApi.getServerNodeCapacity()
       if (isMountedRef.current && cap) {
@@ -108,7 +110,10 @@ export default function CreateServerModal({
         }
       }
     } catch {
-      // Fallback
+      if (isMountedRef.current) {
+        setNodeCapacity(null)
+        setNodeCapacityError("No se pudo obtener la capacidad del nodo desde Pterodactyl. Se aplicarán límites visuales por defecto.")
+      }
     } finally {
       if (isMountedRef.current) setNodeCapacityLoading(false)
     }
@@ -854,6 +859,44 @@ export default function CreateServerModal({
                       Disponible: {(nodeCapacity.availableDiskMb / 1024).toFixed(0)} GB
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* Node Capacity Warning / Error notice */}
+              {nodeCapacityError && (
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    background: "rgba(245, 158, 11, 0.12)",
+                    border: "1px solid rgba(245, 158, 11, 0.25)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ color: "#f59e0b" }}>
+                      <IconWarning size={16} />
+                    </div>
+                    <span style={{ fontSize: 12.5, color: isDark ? "#fbbf24" : "#b45309" }}>{nodeCapacityError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchNodeCapacity}
+                    className="launcher-btn-secondary"
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: 11,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <IconRefresh size={12} />
+                    <span>Reintentar</span>
+                  </button>
                 </div>
               )}
 

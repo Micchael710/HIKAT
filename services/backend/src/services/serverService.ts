@@ -10,6 +10,7 @@ import type {
 import {
   validateWindowsFolderName,
   normalizeHexColor,
+  SERVER_MAX_CPU_PERCENT,
 } from "@hikat/shared"
 import type { Env } from "../types"
 import { getContentMediaById, formatMediaGql } from "./mediaService"
@@ -165,9 +166,9 @@ export async function createServer(
 
   // 4. Validate resources strictly without silent substitution
   const cpu = input.cpu !== undefined && input.cpu !== null ? Number(input.cpu) : 200
-  if (!Number.isInteger(cpu) || cpu < 50) {
+  if (!Number.isInteger(cpu) || cpu < 50 || cpu > SERVER_MAX_CPU_PERCENT) {
     throw createGraphQLError(
-      "La asignación de CPU debe ser un número entero de al menos 50%.",
+      `La asignación de CPU debe ser un número entero entre 50% y ${SERVER_MAX_CPU_PERCENT}%.`,
       "VALIDATION_ERROR",
     )
   }
@@ -559,25 +560,37 @@ export async function getServerNodeCapacity(
   }
 
   if (!node) {
-    return {
-      totalMemoryMb: 16384,
-      allocatedMemoryMb: 0,
-      availableMemoryMb: 16384,
-      totalDiskMb: 65536,
-      allocatedDiskMb: 0,
-      availableDiskMb: 65536,
-    }
+    throw createGraphQLError(
+      "No se pudo obtener la información de capacidad del nodo de Pterodactyl.",
+      "INTERNAL_ERROR",
+    )
   }
 
-  const memoryOverallocate = node.memory_overallocate || 0
-  const maxMemoryMb = Math.floor(node.memory * (1 + memoryOverallocate / 100))
+  const memoryOverallocate = node.memory_overallocate ?? 0
   const allocatedMemoryMb = node.allocated_resources?.memory || 0
-  const availableMemoryMb = Math.max(0, maxMemoryMb - allocatedMemoryMb)
+  let maxMemoryMb: number
+  let availableMemoryMb: number
 
-  const diskOverallocate = node.disk_overallocate || 0
-  const maxDiskMb = Math.floor(node.disk * (1 + diskOverallocate / 100))
+  if (memoryOverallocate === -1) {
+    maxMemoryMb = node.memory
+    availableMemoryMb = node.memory
+  } else {
+    maxMemoryMb = Math.floor(node.memory * (1 + Math.max(0, memoryOverallocate) / 100))
+    availableMemoryMb = Math.max(0, maxMemoryMb - allocatedMemoryMb)
+  }
+
+  const diskOverallocate = node.disk_overallocate ?? 0
   const allocatedDiskMb = node.allocated_resources?.disk || 0
-  const availableDiskMb = Math.max(0, maxDiskMb - allocatedDiskMb)
+  let maxDiskMb: number
+  let availableDiskMb: number
+
+  if (diskOverallocate === -1) {
+    maxDiskMb = node.disk
+    availableDiskMb = node.disk
+  } else {
+    maxDiskMb = Math.floor(node.disk * (1 + Math.max(0, diskOverallocate) / 100))
+    availableDiskMb = Math.max(0, maxDiskMb - allocatedDiskMb)
+  }
 
   return {
     totalMemoryMb: maxMemoryMb,

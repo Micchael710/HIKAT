@@ -435,6 +435,42 @@ describe("ServerService & Multi-Server Provisioning", () => {
       ).rejects.toThrow('Ya existe un servidor con el nombre "main survival"')
     })
 
+    it("rejects CPU assignment below 50% or exceeding SERVER_MAX_CPU_PERCENT (1200%)", async () => {
+      await expect(
+        createServer(
+          mockDb,
+          mockEnv,
+          {
+            name: "Low CPU Server",
+            minecraftVersion: "1.20.1",
+            modLoader: "VANILLA",
+            cpu: 40,
+            memoryMb: 4096,
+            diskMb: 10240,
+          },
+          "user-1",
+          mockClient,
+        ),
+      ).rejects.toThrow("La asignación de CPU debe ser un número entero entre 50% y 1200%")
+
+      await expect(
+        createServer(
+          mockDb,
+          mockEnv,
+          {
+            name: "High CPU Server",
+            minecraftVersion: "1.20.1",
+            modLoader: "VANILLA",
+            cpu: 1250,
+            memoryMb: 4096,
+            diskMb: 10240,
+          },
+          "user-1",
+          mockClient,
+        ),
+      ).rejects.toThrow("La asignación de CPU debe ser un número entero entre 50% y 1200%")
+    })
+
     it("validates and normalizes accent colors", async () => {
       const server = await createServer(
         mockDb,
@@ -784,6 +820,51 @@ describe("ServerService & Multi-Server Provisioning", () => {
       expect(capacity.totalDiskMb).toBe(112640)
       expect(capacity.allocatedDiskMb).toBe(20480)
       expect(capacity.availableDiskMb).toBe(112640 - 20480)
+    })
+
+    it("handles -1 overallocate (unlimited) properly using base node capacity without negative values", async () => {
+      const unlimitedClient = {
+        listApplicationNodes: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "node",
+              attributes: {
+                id: 1,
+                name: "Node-Unlimited",
+                location_id: 1,
+                memory: 16384,
+                memory_overallocate: -1, // Unlimited
+                disk: 51200,
+                disk_overallocate: -1, // Unlimited
+                allocated_resources: {
+                  memory: 20480, // Even if allocated > memory
+                  disk: 60000,
+                },
+              },
+            },
+          ],
+        })),
+      } as unknown as IPterodactylClient
+
+      const capacity = await getServerNodeCapacity(mockEnv, unlimitedClient)
+      expect(capacity.totalMemoryMb).toBe(16384)
+      expect(capacity.availableMemoryMb).toBe(16384)
+      expect(capacity.totalDiskMb).toBe(51200)
+      expect(capacity.availableDiskMb).toBe(51200)
+    })
+
+    it("throws controlled SERVICE_UNAVAILABLE error when node capacity cannot be obtained", async () => {
+      const emptyNodeClient = {
+        listApplicationNodes: vi.fn(async () => ({
+          object: "list",
+          data: [],
+        })),
+      } as unknown as IPterodactylClient
+
+      await expect(getServerNodeCapacity(mockEnv, emptyNodeClient)).rejects.toThrow(
+        "No se pudo obtener la información de capacidad del nodo de Pterodactyl",
+      )
     })
   })
 
