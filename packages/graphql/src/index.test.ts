@@ -682,4 +682,61 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(setPlayerSkinType.getFields().model).toBeUndefined()
     expect(setPlayerSkinType.getFields().mediaId).toBeDefined()
   })
+
+  it("defines public launcherServers query and LauncherServer type without infrastructure leaks", () => {
+    const schema = getBaseSchema()
+    const queryType = schema.getQueryType()
+    expect(queryType?.getFields()["launcherServers"]).toBeDefined()
+
+    const launcherServerType = schema.getType("LauncherServer") as GraphQLObjectType
+    expect(launcherServerType).toBeDefined()
+    const fields = launcherServerType.getFields()
+
+    // Public allowed fields
+    expect(fields.id).toBeDefined()
+    expect(fields.name).toBeDefined()
+    expect(fields.minecraftVersion).toBeDefined()
+    expect(fields.modLoader).toBeDefined()
+    expect(fields.modLoaderVersion).toBeDefined()
+    expect(fields.mainLogo).toBeDefined()
+    expect(fields.sidebarLogo).toBeDefined()
+    expect(fields.accentColor).toBeDefined()
+    expect(fields.launcherActiveReleaseId).toBeDefined()
+    expect(fields.createdAt).toBeDefined()
+    expect(fields.updatedAt).toBeDefined()
+
+    // Infrastructure sensitive fields strictly excluded
+    expect((fields as any).cpu).toBeUndefined()
+    expect((fields as any).memoryMb).toBeUndefined()
+    expect((fields as any).diskMb).toBeUndefined()
+    expect((fields as any).provisioningStatus).toBeUndefined()
+    expect((fields as any).pterodactylServerId).toBeUndefined()
+    expect((fields as any).pterodactylIdentifier).toBeUndefined()
+    expect((fields as any).allocations).toBeUndefined()
+    expect((fields as any).node).toBeUndefined()
+
+    // Query validation
+    const queryDoc = /* GraphQL */ `
+      query GetLauncherServers {
+        launcherServers {
+          id
+          name
+          minecraftVersion
+          modLoader
+          modLoaderVersion
+          accentColor
+          launcherActiveReleaseId
+          mainLogo {
+            id
+            url
+          }
+          sidebarLogo {
+            id
+            url
+          }
+        }
+      }
+    `
+    expect(validate(schema, parse(queryDoc))).toHaveLength(0)
+  })
 })

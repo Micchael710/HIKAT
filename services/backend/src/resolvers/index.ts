@@ -93,6 +93,7 @@ import type {
   ServerReleaseSyncStatusGql,
   ServerReleaseSyncResultGql,
   ServerGql,
+  LauncherServerGql,
   CreateServerInputGql,
 } from "@hikat/graphql"
 
@@ -108,6 +109,7 @@ import { getUserById } from "../services/userService"
 import {
   getServers,
   getServerById,
+  getLauncherServers,
   createServer,
   deleteServer,
   getServerNodeCapacity,
@@ -812,6 +814,17 @@ export const resolvers = {
 
 
     // --- Game & Launcher Queries (Shard 06.5) ---
+
+    launcherServers: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<LauncherServerGql[]> => {
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getLauncherServers(context.db, context.env, context.request)
+    },
 
     publishedModpack: async (
       _parent: unknown,

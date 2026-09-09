@@ -1,8 +1,9 @@
-import { eq, sql } from "drizzle-orm"
+import { eq, and, isNotNull, ne, sql } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
 import type {
   ServerGql,
+  LauncherServerGql,
   CreateServerInputGql,
   GameModLoaderGql,
   ServerProvisioningStatusGql,
@@ -64,6 +65,62 @@ export async function formatServerGql(
     createdAt: server.createdAt,
     updatedAt: server.updatedAt,
   }
+}
+
+export async function formatLauncherServerGql(
+  server: schema.Server,
+  db: Database,
+  env: Env,
+  request?: Request,
+): Promise<LauncherServerGql> {
+  let mainLogo = null
+  if (server.mainLogoMediaId) {
+    const media = await getContentMediaById(db, server.mainLogoMediaId)
+    if (media) {
+      mainLogo = formatMediaGql(media, env, request)
+    }
+  }
+
+  let sidebarLogo = null
+  if (server.sidebarLogoMediaId) {
+    const media = await getContentMediaById(db, server.sidebarLogoMediaId)
+    if (media) {
+      sidebarLogo = formatMediaGql(media, env, request)
+    }
+  }
+
+  return {
+    id: server.id,
+    name: server.name,
+    minecraftVersion: server.minecraftVersion,
+    modLoader: server.modLoader as GameModLoaderGql,
+    modLoaderVersion: server.modLoaderVersion || null,
+    mainLogo,
+    sidebarLogo,
+    accentColor: server.accentColor || null,
+    launcherActiveReleaseId: server.launcherActiveReleaseId!,
+    createdAt: server.createdAt,
+    updatedAt: server.updatedAt,
+  }
+}
+
+export async function getLauncherServers(
+  db: Database,
+  env: Env,
+  request?: Request,
+): Promise<LauncherServerGql[]> {
+  const activeServers = await db
+    .select()
+    .from(schema.servers)
+    .where(
+      and(
+        isNotNull(schema.servers.launcherActiveReleaseId),
+        ne(schema.servers.launcherActiveReleaseId, ""),
+      ),
+    )
+    .all()
+
+  return Promise.all(activeServers.map((s) => formatLauncherServerGql(s, db, env, request)))
 }
 
 export async function resolveServerAllocationPort(

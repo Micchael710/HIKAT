@@ -320,6 +320,20 @@ export interface ServerGql {
   updatedAt: string
 }
 
+export interface LauncherServerGql {
+  id: string
+  name: string
+  minecraftVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  mainLogo?: ContentMediaGql | null
+  sidebarLogo?: ContentMediaGql | null
+  accentColor?: string | null
+  launcherActiveReleaseId: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface CreateServerInputGql {
   name: string
   minecraftVersion: string

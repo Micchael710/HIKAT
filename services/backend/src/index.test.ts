@@ -22,6 +22,7 @@ import {
   skins,
   playerSkins,
   playerSkinSelections,
+  servers,
 } from "@hikat/database"
 
 import { createTestD1 } from "@hikat/database/testUtils"
@@ -6359,6 +6360,105 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       )
 
       expect(modpack.clientFiles[0].policy).toBe("NO_MODIFICABLE")
+    })
+
+    it("provides public launcherServers query discovering only servers with active releases without ADMIN role", async () => {
+      const testEnv = createCoreEnv()
+      const db = createDatabase(testD1)
+
+      const activeServerId = "srv-launcher-pub-1"
+      const inactiveServerId = "srv-launcher-pub-2"
+
+      await db.insert(servers).values([
+        {
+          id: activeServerId,
+          name: "Servidor Principal Activo",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          modLoaderVersion: "21.1.80",
+          accentColor: "#ff0055",
+          cpu: 200,
+          memoryMb: 6144,
+          diskMb: 15360,
+          provisioningStatus: "READY",
+          pterodactylServerId: "secret-ptero-id-1",
+          pterodactylIdentifier: "secret-ptero-ident-1",
+          launcherActiveReleaseId: "rel-launcher-pub-1",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: inactiveServerId,
+          name: "Servidor Privado Sin Release",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          cpu: 100,
+          memoryMb: 2048,
+          diskMb: 10240,
+          provisioningStatus: "READY",
+          pterodactylServerId: "secret-ptero-id-2",
+          pterodactylIdentifier: "secret-ptero-ident-2",
+          launcherActiveReleaseId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+
+      const query = `
+        query {
+          launcherServers {
+            id
+            name
+            minecraftVersion
+            modLoader
+            modLoaderVersion
+            accentColor
+            launcherActiveReleaseId
+            createdAt
+            updatedAt
+          }
+        }
+      `
+
+      // 1. Unauthenticated request (no Authorization header, no ADMIN required)
+      const unauthReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      })
+      const unauthRes = await worker.fetch(unauthReq, testEnv)
+      const unauthData = (await unauthRes.json()) as any
+
+      expect(unauthData.errors).toBeUndefined()
+      const launcherServerList = unauthData.data.launcherServers
+      expect(Array.isArray(launcherServerList)).toBe(true)
+
+      const activeFound = launcherServerList.find((s: any) => s.id === activeServerId)
+      expect(activeFound).toBeDefined()
+      expect(activeFound.name).toBe("Servidor Principal Activo")
+      expect(activeFound.minecraftVersion).toBe("1.21.1")
+      expect(activeFound.modLoader).toBe("NEOFORGE")
+      expect(activeFound.modLoaderVersion).toBe("21.1.80")
+      expect(activeFound.accentColor).toBe("#ff0055")
+      expect(activeFound.launcherActiveReleaseId).toBe("rel-launcher-pub-1")
+
+      // Server without release must NOT appear
+      const inactiveFound = launcherServerList.find((s: any) => s.id === inactiveServerId)
+      expect(inactiveFound).toBeUndefined()
+
+      // 2. Request with PLAYER role (non-admin token) works identically
+      const playerReq = new Request("http://localhost/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${playerUserToken}`,
+        },
+        body: JSON.stringify({ query }),
+      })
+      const playerRes = await worker.fetch(playerReq, testEnv)
+      const playerData = (await playerRes.json()) as any
+      expect(playerData.errors).toBeUndefined()
+      expect(playerData.data.launcherServers.find((s: any) => s.id === activeServerId)).toBeDefined()
     })
 
     it("manages typed project settings and provides public client configuration", async () => {

@@ -5,8 +5,10 @@ import {
   createServer,
   getServers,
   getServerById,
+  getLauncherServers,
   deleteServer,
   formatServerGql,
+  formatLauncherServerGql,
   getServerNodeCapacity,
   bootstrapServerPostInstall,
   updateServerPropertiesBootstrap,
@@ -2428,6 +2430,134 @@ describe("ServerService & Multi-Server Provisioning", () => {
       // D1 row must be gone
       const row = await mockDb.select().from(schema.servers).where(eq(schema.servers.id, serverId)).get()
       expect(row).toBeUndefined()
+    })
+  })
+
+  describe("getLauncherServers (Launcher server discovery)", () => {
+    it("returns only servers with launcherActiveReleaseId and strictly excludes infrastructure data", async () => {
+      // 1. Server with active release
+      await mockDb.insert(schema.servers).values({
+        id: "server-active-1",
+        name: "Survival Main",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.80",
+        accentColor: "#00ff88",
+        cpu: 400,
+        memoryMb: 8192,
+        diskMb: 20480,
+        provisioningStatus: "READY",
+        pterodactylServerId: "ptero-secret-123",
+        pterodactylIdentifier: "ident-secret-abc",
+        launcherActiveReleaseId: "rel-active-1",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      // 2. Server without active release (null)
+      await mockDb.insert(schema.servers).values({
+        id: "server-inactive-2",
+        name: "Dev Test Server",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+        cpu: 200,
+        memoryMb: 4096,
+        diskMb: 10240,
+        provisioningStatus: "READY",
+        pterodactylServerId: "ptero-secret-456",
+        pterodactylIdentifier: "ident-secret-def",
+        launcherActiveReleaseId: null,
+        createdAt: "2026-09-02T00:00:00.000Z",
+        updatedAt: "2026-09-02T00:00:00.000Z",
+      })
+
+      // 3. Another server with active release
+      await mockDb.insert(schema.servers).values({
+        id: "server-active-3",
+        name: "Creative Skyblock",
+        minecraftVersion: "1.20.4",
+        modLoader: "FABRIC",
+        modLoaderVersion: "0.15.11",
+        accentColor: "#3399ff",
+        cpu: 200,
+        memoryMb: 4096,
+        diskMb: 10240,
+        provisioningStatus: "READY",
+        pterodactylServerId: "ptero-secret-789",
+        pterodactylIdentifier: "ident-secret-ghi",
+        launcherActiveReleaseId: "rel-active-3",
+        createdAt: "2026-09-03T00:00:00.000Z",
+        updatedAt: "2026-09-03T00:00:00.000Z",
+      })
+
+      const results = await getLauncherServers(mockDb, mockEnv)
+
+      // Only active servers returned
+      expect(results).toHaveLength(2)
+
+      const ids = results.map((s) => s.id)
+      expect(ids).toContain("server-active-1")
+      expect(ids).toContain("server-active-3")
+      expect(ids).not.toContain("server-inactive-2")
+
+      const s1 = results.find((s) => s.id === "server-active-1")!
+      expect(s1.name).toBe("Survival Main")
+      expect(s1.minecraftVersion).toBe("1.21.1")
+      expect(s1.modLoader).toBe("NEOFORGE")
+      expect(s1.modLoaderVersion).toBe("21.1.80")
+      expect(s1.accentColor).toBe("#00ff88")
+      expect(s1.launcherActiveReleaseId).toBe("rel-active-1")
+
+      // Strictly verify NO infrastructure or Pterodactyl internals are exposed
+      expect((s1 as any).pterodactylServerId).toBeUndefined()
+      expect((s1 as any).pterodactylIdentifier).toBeUndefined()
+      expect((s1 as any).cpu).toBeUndefined()
+      expect((s1 as any).memoryMb).toBeUndefined()
+      expect((s1 as any).diskMb).toBeUndefined()
+      expect((s1 as any).provisioningStatus).toBeUndefined()
+      expect((s1 as any).allocations).toBeUndefined()
+      expect((s1 as any).node).toBeUndefined()
+    })
+
+    it("resolves logos if present and ignores servers with empty string launcherActiveReleaseId", async () => {
+      const mediaId = "media-logo-1"
+      await mockDb.insert(schema.contentMedia).values({
+        id: mediaId,
+        objectKey: "uploads/logo.png",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 1024,
+        createdBy: "user-1",
+        createdAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      await mockDb.insert(schema.servers).values({
+        id: "server-with-logo",
+        name: "Logo Server",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+        mainLogoMediaId: mediaId,
+        launcherActiveReleaseId: "rel-logo",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      await mockDb.insert(schema.servers).values({
+        id: "server-empty-rel",
+        name: "Empty Rel Server",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+        launcherActiveReleaseId: "",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      const results = await getLauncherServers(mockDb, mockEnv)
+      expect(results).toHaveLength(1)
+      const server = results[0]!
+      expect(server.id).toBe("server-with-logo")
+      expect(server.mainLogo).toBeDefined()
+      expect(server.mainLogo?.id).toBe(mediaId)
     })
   })
 })

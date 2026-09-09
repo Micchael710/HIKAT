@@ -394,6 +394,23 @@ export const serverTypeDefs = /* GraphQL */ `
     updatedAt: DateTime!
   }
 
+  """
+  Public Server entity for HiKAT Launcher discovery (strictly excludes infrastructure details)
+  """
+  type LauncherServer {
+    id: ID!
+    name: String!
+    minecraftVersion: String!
+    modLoader: GameModLoader!
+    modLoaderVersion: String
+    mainLogo: ContentMedia
+    sidebarLogo: ContentMedia
+    accentColor: String
+    launcherActiveReleaseId: ID!
+    createdAt: DateTime!
+    updatedAt: DateTime!
+  }
+
   input CreateServerInput {
     name: String!
     minecraftVersion: String!
@@ -408,6 +425,11 @@ export const serverTypeDefs = /* GraphQL */ `
   }
 
   extend type Query {
+    """
+    Public query discovering all available servers with active releases for Launcher
+    """
+    launcherServers: [LauncherServer!]!
+
     """
     Lists all servers - requires ADMIN role
     """
