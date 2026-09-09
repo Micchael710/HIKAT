@@ -78,9 +78,8 @@ export async function resolveServerAllocationPort(
         a.attributes?.id === pServer.allocation ||
         (a.attributes as any)?.is_default === true,
     )
-    const alloc = match || relAllocations[0]
-    if (alloc?.attributes?.port) {
-      return alloc.attributes.port
+    if (match?.attributes?.port) {
+      return match.attributes.port
     }
   }
 

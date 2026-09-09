@@ -1143,7 +1143,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
       expect(updateEulaBootstrap("eula=true\n")).toBe("eula=true\n")
     })
 
-    it("resolveServerAllocationPort resolves port from relationships, node allocations, or allocation id", async () => {
+    it("resolveServerAllocationPort resolves port from relationships, node allocations, and does not fallback to first allocation", async () => {
       const mockPtero = {
         listApplicationNodeAllocations: vi.fn(async () => ({
           object: "list",
@@ -1152,11 +1152,15 @@ describe("ServerService & Multi-Server Provisioning", () => {
               object: "allocation",
               attributes: { id: 77, port: 25590, assigned: true },
             },
+            {
+              object: "allocation",
+              attributes: { id: 88, port: 25595, assigned: true },
+            },
           ],
         })),
       } as unknown as IPterodactylClient
 
-      // 1. From relationships
+      // 1. From relationships matching allocation id
       const portFromRel = await resolveServerAllocationPort(mockPtero, {
         id: 1,
         allocation: 10,
@@ -1174,18 +1178,42 @@ describe("ServerService & Multi-Server Provisioning", () => {
       } as any)
       expect(portFromRel).toBe(25566)
 
-      // 2. From node allocations
-      const portFromNode = await resolveServerAllocationPort(mockPtero, {
+      // 2. Multiple relationships allocations, none matching: must NOT use relAllocations[0] and must continue to node lookup
+      const portContinuedToNode = await resolveServerAllocationPort(mockPtero, {
         id: 2,
+        node: 1,
+        allocation: 88,
+        relationships: {
+          allocations: {
+            object: "list",
+            data: [
+              {
+                object: "allocation",
+                attributes: { id: 1, ip: "0.0.0.0", port: 25501, assigned: true, is_default: false },
+              },
+              {
+                object: "allocation",
+                attributes: { id: 2, ip: "0.0.0.0", port: 25502, assigned: true, is_default: false },
+              },
+            ],
+          },
+        },
+      } as any)
+      expect(portContinuedToNode).toBe(25595)
+      expect(portContinuedToNode).not.toBe(25501)
+
+      // 3. From node allocations when relationships is absent
+      const portFromNode = await resolveServerAllocationPort(mockPtero, {
+        id: 3,
         node: 1,
         allocation: 77,
       } as any)
       expect(portFromNode).toBe(25590)
 
-      // 3. Throws controlled error when real allocation cannot be resolved
+      // 4. Throws controlled error when real allocation cannot be resolved
       await expect(
         resolveServerAllocationPort({} as any, {
-          id: 3,
+          id: 4,
           allocation: 999,
         } as any),
       ).rejects.toThrow("No se pudo resolver el puerto real de la allocation (999) para el servidor.")
