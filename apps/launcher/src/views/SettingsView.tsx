@@ -311,14 +311,9 @@ export default function SettingsView({
     })
   }
 
-  // Sync settings with Electron process and OS on mount
+  // Sync global settings with Electron process and OS on mount
   useEffect(() => {
     let isMounted = true
-
-    // Check operative state locally
-    if (isLegacyLocalRef.current) {
-      refreshOperationalState()
-    }
 
     if (window.electronAPI?.getMemory) {
       window.electronAPI
@@ -375,73 +370,6 @@ export default function SettingsView({
         })
         .catch(() => {})
     }
-
-    if (isLegacyLocalRef.current && window.electronAPI?.getDedicatedGpu) {
-      window.electronAPI
-        .getDedicatedGpu()
-        .then((realState: any) => {
-          if (isMounted && typeof realState === "boolean") {
-            setDedicatedGPUState(realState)
-            setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, realState)
-          }
-        })
-        .catch(() => {})
-    }
-
-    if (isLegacyLocalRef.current && window.electronAPI?.getRamAllocation) {
-      window.electronAPI
-        .getRamAllocation()
-        .then((realRam: any) => {
-          const isAuto = getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false)
-          if (isMounted && typeof realRam === "number" && realRam >= 1 && !isAuto) {
-            setRamGBState(realRam)
-            setStoredNumber(STORAGE_KEYS.RAM_GB, realRam)
-          }
-        })
-        .catch(() => {})
-    }
-
-    // Load Runtime Info
-    if (isLegacyLocalRef.current && window.electronAPI?.getGameRuntimeInfo) {
-      window.electronAPI
-        .getGameRuntimeInfo()
-        .then((info: any) => {
-          if (isMounted && info && typeof info.javaMajorVersion === "number" && info.javaMajorVersion > 0) {
-            setRuntimeInfo(info)
-            try {
-              localStorage.setItem(STORAGE_KEYS.JAVA_MAJOR_VERSION, String(info.javaMajorVersion))
-            } catch (_) {}
-          }
-        })
-        .catch(() => {})
-    }
-
-    // Load Launch & Operation Status
-    if (isLegacyLocalRef.current && window.electronAPI?.getLaunchStatus) {
-      window.electronAPI
-        .getLaunchStatus()
-        .then((st: any) => {
-          if (isMounted && st) {
-            if (st.status) setLaunchStatus(st.status)
-            if (st.operationState) setOperationState(st.operationState)
-          }
-        })
-        .catch(() => {})
-    }
-
-    // Subscribe to Launch Status changes
-    const unsubLaunch = isLegacyLocalRef.current
-      ? window.electronAPI?.onLaunchStatus?.((status: any) => {
-          if (isMounted) setLaunchStatus(status)
-        })
-      : undefined
-
-    // Subscribe to Phase Changes
-    const unsubPhase = isLegacyLocalRef.current
-      ? window.electronAPI?.onPhaseChange?.((phase: any) => {
-          if (isMounted) setOperationState(phase)
-        })
-      : undefined
 
     // Listen to game action status events from DownloadPlayButton
     const handleActionStatus = (e: Event) => {
@@ -509,11 +437,91 @@ export default function SettingsView({
       if (toastTimeoutRef.current) {
         clearTimeout(toastTimeoutRef.current)
       }
-      unsubLaunch?.()
-      unsubPhase?.()
       window.removeEventListener("hikat:game-action-status", handleActionStatus)
     }
   }, [])
+
+  // Game-specific legacy operations and Electron subscriptions
+  useEffect(() => {
+    let isMounted = true
+
+    if (!isLegacyLocal) {
+      setLaunchStatus("idle")
+      setOperationState("IDLE")
+      return
+    }
+
+    refreshOperationalState()
+
+    if (window.electronAPI?.getDedicatedGpu) {
+      window.electronAPI
+        .getDedicatedGpu()
+        .then((realState: any) => {
+          if (isMounted && typeof realState === "boolean") {
+            setDedicatedGPUState(realState)
+            setStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, realState)
+          }
+        })
+        .catch(() => {})
+    }
+
+    if (window.electronAPI?.getRamAllocation) {
+      window.electronAPI
+        .getRamAllocation()
+        .then((realRam: any) => {
+          const isAuto = getStoredBoolean(STORAGE_KEYS.RAM_AUTO, false)
+          if (isMounted && typeof realRam === "number" && realRam >= 1 && !isAuto) {
+            setRamGBState(realRam)
+            setStoredNumber(STORAGE_KEYS.RAM_GB, realRam)
+          }
+        })
+        .catch(() => {})
+    }
+
+    // Load Runtime Info
+    if (window.electronAPI?.getGameRuntimeInfo) {
+      window.electronAPI
+        .getGameRuntimeInfo()
+        .then((info: any) => {
+          if (isMounted && info && typeof info.javaMajorVersion === "number" && info.javaMajorVersion > 0) {
+            setRuntimeInfo(info)
+            try {
+              localStorage.setItem(STORAGE_KEYS.JAVA_MAJOR_VERSION, String(info.javaMajorVersion))
+            } catch (_) {}
+          }
+        })
+        .catch(() => {})
+    }
+
+    // Load Launch & Operation Status
+    if (window.electronAPI?.getLaunchStatus) {
+      window.electronAPI
+        .getLaunchStatus()
+        .then((st: any) => {
+          if (isMounted && st) {
+            if (st.status) setLaunchStatus(st.status)
+            if (st.operationState) setOperationState(st.operationState)
+          }
+        })
+        .catch(() => {})
+    }
+
+    // Subscribe to Launch Status changes
+    const unsubLaunch = window.electronAPI?.onLaunchStatus?.((status: any) => {
+      if (isMounted) setLaunchStatus(status)
+    })
+
+    // Subscribe to Phase Changes
+    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: any) => {
+      if (isMounted) setOperationState(phase)
+    })
+
+    return () => {
+      isMounted = false
+      unsubLaunch?.()
+      unsubPhase?.()
+    }
+  }, [isLegacyLocal, selectedGameId])
 
   // Dedicated WebSocket release events subscription with current server scope
   useEffect(() => {

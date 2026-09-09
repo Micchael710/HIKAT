@@ -543,6 +543,155 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
     expect((window as any).electronAPI.startSync).not.toHaveBeenCalled()
   })
 
+  it("E5. Caso obligatorio 1: Settings se monta con Warria (no listeners Electron legacy) -> cambia selectedGameId a Apparatia -> ejecuta legacy APIs y suscribe listeners", async () => {
+    const checkSyncPlanMock = vi.fn().mockResolvedValue({ success: true })
+    const getGpuMock = vi.fn().mockResolvedValue(true)
+    const getRamMock = vi.fn().mockResolvedValue(8)
+    const getRuntimeMock = vi.fn().mockResolvedValue({ javaMajorVersion: 21 })
+    const getLaunchStatusMock = vi.fn().mockResolvedValue({ status: "idle", operationState: "IDLE" })
+    const onLaunchStatusMock = vi.fn().mockReturnValue(() => {})
+    const onPhaseChangeMock = vi.fn().mockReturnValue(() => {})
+
+    ;(window as any).electronAPI = {
+      getMemory: vi.fn().mockResolvedValue({ totalGb: 16 }),
+      getStartWithSystem: vi.fn().mockResolvedValue(true),
+      getMinimizeToTray: vi.fn().mockResolvedValue(true),
+      getMinimizeOnGameLaunch: vi.fn().mockResolvedValue(true),
+      checkSyncPlan: checkSyncPlanMock,
+      getDedicatedGpu: getGpuMock,
+      getRamAllocation: getRamMock,
+      getGameRuntimeInfo: getRuntimeMock,
+      getLaunchStatus: getLaunchStatusMock,
+      onLaunchStatus: onLaunchStatusMock,
+      onPhaseChange: onPhaseChangeMock,
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    unmountCurrent = () => root.unmount()
+
+    // 1. Mount with Warria
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <SettingsView
+            theme="dark"
+            servers={[mockApparatia, mockWarria]}
+            selectedGameId={WARRIA_ID}
+            onSelectGameId={() => {}}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    // Warria: no legacy APIs or subscriptions
+    expect(checkSyncPlanMock).not.toHaveBeenCalled()
+    expect(getGpuMock).not.toHaveBeenCalled()
+    expect(getRamMock).not.toHaveBeenCalled()
+    expect(getRuntimeMock).not.toHaveBeenCalled()
+    expect(getLaunchStatusMock).not.toHaveBeenCalled()
+    expect(onLaunchStatusMock).not.toHaveBeenCalled()
+    expect(onPhaseChangeMock).not.toHaveBeenCalled()
+
+    // 2. Change selectedGameId to Apparatia
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <SettingsView
+            theme="dark"
+            servers={[mockApparatia, mockWarria]}
+            selectedGameId={APPARATIA_ID}
+            onSelectGameId={() => {}}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    // Apparatia: now legacy operations must run and listeners must subscribe
+    expect(getGpuMock).toHaveBeenCalled()
+    expect(getRamMock).toHaveBeenCalled()
+    expect(getRuntimeMock).toHaveBeenCalled()
+    expect(getLaunchStatusMock).toHaveBeenCalled()
+    expect(onLaunchStatusMock).toHaveBeenCalled()
+    expect(onPhaseChangeMock).toHaveBeenCalled()
+  })
+
+  it("E6. Caso obligatorio 2: Settings se monta con Apparatia (listeners activos) -> cambia selectedGameId a Warria -> unsubscribe inmediato y eventos posteriores de Apparatia no alteran Warria", async () => {
+    let launchStatusCb: ((status: any) => void) | null = null
+    let phaseChangeCb: ((phase: any) => void) | null = null
+    const unsubLaunchMock = vi.fn()
+    const unsubPhaseMock = vi.fn()
+
+    const onLaunchStatusMock = vi.fn().mockImplementation((cb: any) => {
+      launchStatusCb = cb
+      return unsubLaunchMock
+    })
+    const onPhaseChangeMock = vi.fn().mockImplementation((cb: any) => {
+      phaseChangeCb = cb
+      return unsubPhaseMock
+    })
+
+    ;(window as any).electronAPI = {
+      getMemory: vi.fn().mockResolvedValue({ totalGb: 16 }),
+      getStartWithSystem: vi.fn().mockResolvedValue(true),
+      getMinimizeToTray: vi.fn().mockResolvedValue(true),
+      getMinimizeOnGameLaunch: vi.fn().mockResolvedValue(true),
+      getDedicatedGpu: vi.fn().mockResolvedValue(true),
+      getRamAllocation: vi.fn().mockResolvedValue(8),
+      getGameRuntimeInfo: vi.fn().mockResolvedValue({ javaMajorVersion: 21 }),
+      getLaunchStatus: vi.fn().mockResolvedValue({ status: "running", operationState: "RUNNING" }),
+      onLaunchStatus: onLaunchStatusMock,
+      onPhaseChange: onPhaseChangeMock,
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    unmountCurrent = () => root.unmount()
+
+    // 1. Mount with Apparatia
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <SettingsView
+            theme="dark"
+            servers={[mockApparatia, mockWarria]}
+            selectedGameId={APPARATIA_ID}
+            onSelectGameId={() => {}}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    expect(onLaunchStatusMock).toHaveBeenCalled()
+    expect(onPhaseChangeMock).toHaveBeenCalled()
+
+    // 2. Change selectedGameId to Warria
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <SettingsView
+            theme="dark"
+            servers={[mockApparatia, mockWarria]}
+            selectedGameId={WARRIA_ID}
+            onSelectGameId={() => {}}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    // Unsubscribe must be executed immediately
+    expect(unsubLaunchMock).toHaveBeenCalled()
+    expect(unsubPhaseMock).toHaveBeenCalled()
+
+    // 3. Calling old callbacks does not throw or re-enable legacy listeners
+    await act(async () => {
+      launchStatusCb?.("running")
+      phaseChangeCb?.("RUNNING")
+    })
+  })
+
   it("F. Cambiar seleccion: Apparatia -> Warria y recibir RELEASE_ACTIVATED de Warria debe refrescar Warria; evento de Apparatia se ignora", async () => {
     let wsCallback: ((ev: ReleaseActivatedEvent) => void) | null = null
     vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
