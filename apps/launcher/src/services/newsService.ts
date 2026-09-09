@@ -56,10 +56,10 @@ export const newsService = {
    * with multimedia metadata (YouTube, video, cover image) and automatic offline caching.
    * If offline and no previous articles exist in cache, returns empty list with error flag.
    */
-  async getNewsArticles(_lang?: string): Promise<NewsResult> {
+  async getNewsArticles(_lang?: string, serverId?: string): Promise<NewsResult> {
     const query = /* GraphQL */ `
-      query LauncherNewsFeed($first: Int) {
-        newsFeed(first: $first) {
+      query LauncherNewsFeed($first: Int, $serverId: ID) {
+        newsFeed(first: $first, serverId: $serverId) {
           items {
             id
             title
@@ -85,12 +85,14 @@ export const newsService = {
       }
     `
 
+    const cacheKey = serverId ? `hikat_cached_news_${serverId}` : "hikat_cached_news"
+
     const res = await graphqlClient<{
       newsFeed: {
         items: NewsItemResponse[]
         totalCount: number
       }
-    }>(query, { first: 20 })
+    }>(query, { first: 20, ...(serverId ? { serverId } : {}) })
 
     if (res.success && res.data?.newsFeed) {
       const items = res.data.newsFeed.items || []
@@ -119,16 +121,16 @@ export const newsService = {
 
       if (formattedItems.length > 0) {
         try {
-          localStorage.setItem("hikat_cached_news", JSON.stringify(formattedItems))
+          localStorage.setItem(cacheKey, JSON.stringify(formattedItems))
         } catch (_) {}
       }
 
       return { items: formattedItems, isCached: false }
     }
 
-    // Fallback: Check if the player previously saw news stored in localStorage
+    // Fallback: Check if the player previously saw news stored in localStorage for this server
     try {
-      const cached = localStorage.getItem("hikat_cached_news")
+      const cached = localStorage.getItem(cacheKey)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (Array.isArray(parsed) && parsed.length > 0) {

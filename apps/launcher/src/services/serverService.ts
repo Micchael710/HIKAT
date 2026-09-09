@@ -1,15 +1,84 @@
 import { graphqlClient } from "./apiClient"
 import type { ServerStatusResponse } from "../types"
 
+export interface LauncherServer {
+  id: string
+  name: string
+  minecraftVersion: string
+  modLoader: string
+  modLoaderVersion?: string | null
+  mainLogo?: {
+    id: string
+    url: string
+  } | null
+  sidebarLogo?: {
+    id: string
+    url: string
+  } | null
+  accentColor?: string | null
+  launcherActiveReleaseId: string
+  createdAt: string
+  updatedAt: string
+}
+
 export const serverService = {
+  /**
+   * Fetch published servers available to the launcher.
+   */
+  async getLauncherServers(): Promise<LauncherServer[]> {
+    const query = /* GraphQL */ `
+      query GetLauncherServers {
+        launcherServers {
+          id
+          name
+          minecraftVersion
+          modLoader
+          modLoaderVersion
+          mainLogo {
+            id
+            url
+          }
+          sidebarLogo {
+            id
+            url
+          }
+          accentColor
+          launcherActiveReleaseId
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const res = await graphqlClient<{ launcherServers: LauncherServer[] }>(query)
+    if (res.success && Array.isArray(res.data?.launcherServers)) {
+      try {
+        localStorage.setItem(
+          "hikat_launcher_servers",
+          JSON.stringify(res.data.launcherServers),
+        )
+      } catch (_) {}
+      return res.data.launcherServers
+    }
+
+    try {
+      const cached = localStorage.getItem("hikat_launcher_servers")
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed)) return parsed
+      }
+    } catch (_) {}
+
+    return []
+  },
+
   /**
    * Fetch live Minecraft server ping status & player count via GraphQL serverStatus query.
    * Returns null if unreachable and no cache exists.
    */
-  async getServerStatus(): Promise<ServerStatusResponse | null> {
+  async getServerStatus(serverId?: string): Promise<ServerStatusResponse | null> {
     const query = /* GraphQL */ `
-      query GetServerStatus {
-        serverStatus {
+      query GetServerStatus($serverId: ID) {
+        serverStatus(serverId: $serverId) {
           status
           cpuPercent
           memoryUsedBytes
@@ -19,6 +88,10 @@ export const serverService = {
         }
       }
     `
+    const cacheKey = serverId
+      ? `hikat_cached_server_status_${serverId}`
+      : "hikat_cached_server_status"
+
     const res = await graphqlClient<{
       serverStatus?: {
         status?: string
@@ -28,7 +101,7 @@ export const serverService = {
         uptimeMs?: number
         isSuspended?: boolean
       } | null
-    }>(query)
+    }>(query, serverId ? { serverId } : undefined)
 
     if (res.success && res.data?.serverStatus) {
       const isOnline =
@@ -45,16 +118,13 @@ export const serverService = {
       }
 
       try {
-        localStorage.setItem(
-          "hikat_cached_server_status",
-          JSON.stringify(data),
-        )
+        localStorage.setItem(cacheKey, JSON.stringify(data))
       } catch (_) {}
       return data
     }
 
     try {
-      const cached = localStorage.getItem("hikat_cached_server_status")
+      const cached = localStorage.getItem(cacheKey)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (parsed && typeof parsed === "object") return parsed
@@ -64,4 +134,5 @@ export const serverService = {
     return null
   },
 }
+
 

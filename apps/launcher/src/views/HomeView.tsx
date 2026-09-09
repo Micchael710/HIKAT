@@ -10,31 +10,45 @@ import { useTranslation } from "../context/LanguageContext"
 import { gameService } from "../services/gameService"
 import { resolveApiAssetUrl } from "../config/api"
 import type { PublishedModpack } from "../vite-env"
+import type { LauncherServer } from "../services/serverService"
 
 interface HomeViewProps {
   theme?: ThemeMode
   onPlay?: () => void
   isActive?: boolean
+  selectedServer?: LauncherServer | null
+  selectedGameId?: string | null
 }
 
 export default function HomeView({
   theme = "dark",
   onPlay,
   isActive = true,
+  selectedServer,
+  selectedGameId: propSelectedGameId,
 }: HomeViewProps) {
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
   const CONTENT_LEFT = 184
 
+  const activeServerId = selectedServer?.id || propSelectedGameId || undefined
+  const serverName = selectedServer?.name || "Apparatia"
+
   const [publishedModpack, setPublishedModpack] = useState<PublishedModpack | null>(null)
   const [mediaError, setMediaError] = useState(false)
+  const [logoError, setLogoError] = useState(false)
+
+  useEffect(() => {
+    setLogoError(false)
+    setMediaError(false)
+  }, [activeServerId])
 
   useEffect(() => {
     let isMounted = true
 
     const loadPublished = async () => {
       try {
-        const data = await gameService.getPublishedModpack()
+        const data = await gameService.getPublishedModpack(activeServerId)
         if (isMounted) {
           setPublishedModpack(data)
           setMediaError(false)
@@ -48,6 +62,12 @@ export default function HomeView({
 
     const unsubscribe = gameService.subscribeReleaseEvents((event) => {
       if (event.type === "RELEASE_ACTIVATED") {
+        if (event.serverId && activeServerId && event.serverId !== activeServerId) {
+          return
+        }
+        if (!event.serverId && activeServerId && activeServerId !== "apparatia") {
+          return
+        }
         loadPublished()
       }
     })
@@ -56,10 +76,16 @@ export default function HomeView({
       isMounted = false
       unsubscribe()
     }
-  }, [])
+  }, [activeServerId])
 
   const cover = publishedModpack?.cover
   const coverUrl = cover?.url ? resolveApiAssetUrl(cover.url) : ""
+  const mainLogoUrl =
+    !logoError && selectedServer?.mainLogo?.url
+      ? resolveApiAssetUrl(selectedServer.mainLogo.url)
+      : !logoError && selectedServer?.sidebarLogo?.url
+        ? resolveApiAssetUrl(selectedServer.sidebarLogo.url)
+        : apparatiaLogo
 
   return (
     <div
@@ -98,7 +124,7 @@ export default function HomeView({
           />
         ) : !mediaError && cover?.mediaType === "IMAGE" && coverUrl ? (
           <img
-            alt="Apparatia World"
+            alt={`${serverName} World`}
             src={coverUrl}
             onError={() => setMediaError(true)}
             style={{
@@ -110,7 +136,7 @@ export default function HomeView({
           />
         ) : (
           <img
-            alt="Apparatia World"
+            alt={`${serverName} World`}
             src={heroHomeBg}
             style={{
               width: "100%",
@@ -172,7 +198,7 @@ export default function HomeView({
         }}
       />
 
-      {/* APPARATIA title logo */}
+      {/* APPARATIA / Server title logo */}
       <div
         style={{
           position: "absolute",
@@ -183,8 +209,9 @@ export default function HomeView({
         }}
       >
         <img
-          alt="APPARATIA"
-          src={apparatiaLogo}
+          alt={serverName}
+          src={mainLogoUrl}
+          onError={() => setLogoError(true)}
           style={{
             width: "100%",
             height: "100%",
@@ -201,6 +228,8 @@ export default function HomeView({
         top={355}
         theme={theme}
         onPlay={onPlay}
+        serverId={activeServerId}
+        gameId={activeServerId}
       />
 
       {/* Description */}
@@ -251,6 +280,7 @@ export default function HomeView({
           canvasWidth={CANVAS_W}
           theme={theme}
           isActive={isActive}
+          serverId={activeServerId}
         />
       </div>
 
@@ -268,7 +298,12 @@ export default function HomeView({
           paddingBottom: 90,
         }}
       >
-        <ServerStatsGrid theme={theme} isActive={isActive} />
+        <ServerStatsGrid
+          theme={theme}
+          isActive={isActive}
+          serverId={activeServerId}
+          serverName={serverName}
+        />
         <CommunityHubGrid theme={theme} />
       </div>
     </div>

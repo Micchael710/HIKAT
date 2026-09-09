@@ -13,6 +13,7 @@ interface NewsCarouselProps {
   theme?: ThemeMode
   news?: NewsCardItem[]
   isActive?: boolean
+  serverId?: string | null
 }
 
 export default function NewsCarousel({
@@ -20,6 +21,7 @@ export default function NewsCarousel({
   theme = "dark",
   news,
   isActive = true,
+  serverId,
 }: NewsCarouselProps) {
   const { t, language } = useTranslation()
   const isDark = theme === "dark"
@@ -33,11 +35,17 @@ export default function NewsCarousel({
   const [canLeft, setCanLeft] = useState(false)
   const [canRight, setCanRight] = useState(true)
 
+  const cacheKey = serverId ? `hikat_cached_news_${serverId}` : "hikat_cached_news"
+
   const [articles, setArticles] = useState<NewsCardItem[]>(() => {
     if (news && news.length > 0) return news
     // Read from localStorage cache if available
     try {
-      const cached = localStorage.getItem("hikat_cached_news")
+      const cached =
+        localStorage.getItem(cacheKey) ||
+        (!serverId || serverId === "apparatia"
+          ? localStorage.getItem("hikat_cached_news")
+          : null)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (Array.isArray(parsed) && parsed.length > 0) return parsed
@@ -54,7 +62,7 @@ export default function NewsCarousel({
     }
     setIsLoading(true)
     try {
-      const res = await newsService.getNewsArticles(language)
+      const res = await newsService.getNewsArticles(language, serverId || undefined)
       if (res.items && res.items.length > 0) {
         setArticles(res.items)
       } else {
@@ -73,9 +81,24 @@ export default function NewsCarousel({
     if (news && news.length > 0) {
       setArticles(news)
     } else {
+      try {
+        const cached =
+          localStorage.getItem(cacheKey) ||
+          (!serverId || serverId === "apparatia"
+            ? localStorage.getItem("hikat_cached_news")
+            : null)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (Array.isArray(parsed)) {
+            setArticles(parsed)
+          }
+        } else {
+          setArticles([])
+        }
+      } catch (_) {}
       fetchNews()
     }
-  }, [news, language, isActive])
+  }, [news, language, isActive, serverId])
 
   const CARD_W = 490
   const CARD_H = 280

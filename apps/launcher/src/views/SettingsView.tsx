@@ -23,7 +23,9 @@ import {
   calculateAutomaticRam,
   formatModLoaderName,
 } from "../utils/gameSettings"
-import { useDynamicAccent } from "../utils/dynamicAccent"
+import { useDynamicAccent, useServerAccent } from "../utils/dynamicAccent"
+import { LauncherServer } from "../services/serverService"
+import { resolveApiAssetUrl } from "../config/api"
 
 export { calculateAutomaticRam, formatModLoaderName }
 
@@ -31,15 +33,19 @@ interface SettingsViewProps {
   theme?: ThemeMode
   setTheme?: (t: ThemeMode) => void
   onSidebarAccentChange?: (accent: { r: number; g: number; b: number; css: string }) => void
+  servers?: LauncherServer[]
+  selectedGameId?: string | null
+  onSelectGameId?: (id: string) => void
 }
 
 interface GameItem {
   id: string
   name: string
   logo: string
+  accentColor?: string | null
 }
 
-const GAMES: GameItem[] = [
+const DEFAULT_GAMES: GameItem[] = [
   {
     id: "apparatia",
     name: "Apparatia",
@@ -51,6 +57,9 @@ export default function SettingsView({
   theme = "dark",
   setTheme,
   onSidebarAccentChange,
+  servers,
+  selectedGameId: propSelectedGameId,
+  onSelectGameId,
 }: SettingsViewProps) {
   const { t, language, setLanguage } = useTranslation()
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
@@ -94,12 +103,44 @@ export default function SettingsView({
     getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
   )
 
+  const games: GameItem[] = React.useMemo(() => {
+    if (servers && servers.length > 0) {
+      return servers.map((s) => {
+        const logoUrl = s.sidebarLogo?.url
+          ? resolveApiAssetUrl(s.sidebarLogo.url)
+          : s.mainLogo?.url
+            ? resolveApiAssetUrl(s.mainLogo.url)
+            : apparatiaLogo
+        return {
+          id: s.id,
+          name: s.name,
+          logo: logoUrl,
+          accentColor: s.accentColor,
+        }
+      })
+    }
+    return DEFAULT_GAMES
+  }, [servers])
+
+  const [internalSelectedGameId, setInternalSelectedGameId] = useState<string>(() => {
+    return propSelectedGameId || games[0]?.id || "apparatia"
+  })
+
+  const selectedGameId = (propSelectedGameId && games.some((g) => g.id === propSelectedGameId))
+    ? propSelectedGameId
+    : (games.some((g) => g.id === internalSelectedGameId) ? internalSelectedGameId : games[0]?.id || "apparatia")
+
+  const setSelectedGameId = (id: string) => {
+    setInternalSelectedGameId(id)
+    onSelectGameId?.(id)
+  }
+
   // Game & Runtime Info State (Hydrated from local cache to prevent flickering)
-  const [selectedGameId, setSelectedGameId] = useState<string>("apparatia")
   const [manifest, setManifest] = useState<GameManifest | null>(() => {
     if (typeof window !== "undefined") {
       try {
-        const cached = localStorage.getItem("hikat_game_manifest")
+        const cacheKey = selectedGameId ? `hikat_game_manifest_${selectedGameId}` : "hikat_game_manifest"
+        const cached = localStorage.getItem(cacheKey) || (!selectedGameId || selectedGameId === "apparatia" ? localStorage.getItem("hikat_game_manifest") : null)
         if (cached) {
           const parsed = JSON.parse(cached)
           if (parsed && typeof parsed === "object") {
@@ -150,10 +191,10 @@ export default function SettingsView({
     }
   }
 
-  // Extract dynamic accent color from selected game logo
-  const selectedGame = GAMES.find((g) => g.id === selectedGameId) || GAMES[0]
-  const gameAccent = useDynamicAccent(selectedGame?.logo, "#3ec4c0")
-  const showGameSidebar = GAMES.length > 1
+  // Extract dynamic accent color from selected game: server.accentColor -> dynamic logo -> fallback
+  const selectedGame = games.find((g) => g.id === selectedGameId) || games[0]
+  const gameAccent = useServerAccent(selectedGame?.accentColor, selectedGame?.logo, "#3ec4c0")
+  const showGameSidebar = games.length > 1
 
   // Inform sidebar of current active accent for Settings (general vs selected game)
   useEffect(() => {
@@ -316,30 +357,6 @@ export default function SettingsView({
         .catch(() => {})
     }
 
-    // Load Game Manifest ONLY if not already in cache
-    let hasCachedManifest = false
-    try {
-      const cached = localStorage.getItem("hikat_game_manifest")
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (parsed && typeof parsed === "object") {
-          hasCachedManifest = true
-        }
-      }
-    } catch (_) {}
-
-    if (!hasCachedManifest) {
-      gameService
-        .checkGameManifest()
-        .then((m) => {
-          if (isMounted && m) {
-            setManifest(m)
-            refreshOperationalState(m)
-          }
-        })
-        .catch(() => {})
-    }
-
     // Load Runtime Info
     if (window.electronAPI?.getGameRuntimeInfo) {
       window.electronAPI
@@ -379,9 +396,15 @@ export default function SettingsView({
     })
 
     // Subscribe to WebSocket Release Events
-    const unsubRelease = gameService.subscribeReleaseEvents(async () => {
+    const unsubRelease = gameService.subscribeReleaseEvents(async (event) => {
+      if (event?.serverId && selectedGameId && event.serverId !== selectedGameId) {
+        return
+      }
+      if (!event?.serverId && selectedGameId && selectedGameId !== "apparatia") {
+        return
+      }
       try {
-        const fresh = await gameService.checkGameManifest()
+        const fresh = await gameService.checkGameManifest(selectedGameId)
         if (isMounted && fresh) {
           setManifest(fresh)
           refreshOperationalState(fresh)
@@ -460,6 +483,44 @@ export default function SettingsView({
       window.removeEventListener("hikat:game-action-status", handleActionStatus)
     }
   }, [])
+
+  // Load/update manifest when selectedGameId changes
+  useEffect(() => {
+    let isMounted = true
+    const cacheKey = selectedGameId ? `hikat_game_manifest_${selectedGameId}` : "hikat_game_manifest"
+    let hasCached = false
+    try {
+      const cached =
+        localStorage.getItem(cacheKey) ||
+        (!selectedGameId || selectedGameId === "apparatia"
+          ? localStorage.getItem("hikat_game_manifest")
+          : null)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (parsed && typeof parsed === "object") {
+          hasCached = true
+          setManifest(parsed)
+          refreshOperationalState(parsed)
+        }
+      }
+    } catch (_) {}
+
+    if (!hasCached) {
+      gameService
+        .checkGameManifest(selectedGameId)
+        .then((m) => {
+          if (isMounted && m) {
+            setManifest(m)
+            refreshOperationalState(m)
+          }
+        })
+        .catch(() => {})
+    }
+
+    return () => {
+      isMounted = false
+    }
+  }, [selectedGameId])
 
   const setStartWithSystem = async (v: boolean) => {
     setStartWithSystemState(v)
@@ -1184,7 +1245,7 @@ export default function SettingsView({
                       }}
                     >
                       {/* Games collection */}
-                      {GAMES.map((game) => {
+                      {games.map((game) => {
                         const isSelected = selectedGameId === game.id
                         return (
                           <button

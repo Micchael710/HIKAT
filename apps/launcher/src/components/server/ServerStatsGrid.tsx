@@ -7,15 +7,20 @@ interface ServerStatsGridProps {
   theme?: ThemeMode
   stats?: Partial<ServerSpecs>
   isActive?: boolean
+  serverId?: string | null
+  serverName?: string
 }
 
 export default function ServerStatsGrid({
   theme = "dark",
   stats,
   isActive = true,
+  serverId,
+  serverName: propServerName,
 }: ServerStatsGridProps) {
   const { t } = useTranslation()
   const isDark = theme === "dark"
+  const cacheKey = serverId ? `hikat_cached_server_status_${serverId}` : "hikat_cached_server_status"
 
   const [serverData, setServerData] = useState<{
     online: boolean
@@ -40,7 +45,11 @@ export default function ServerStatsGrid({
       }
     }
     try {
-      const cached = localStorage.getItem("hikat_cached_server_status")
+      const cached =
+        localStorage.getItem(cacheKey) ||
+        (!serverId || serverId === "apparatia"
+          ? localStorage.getItem("hikat_cached_server_status")
+          : null)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (parsed && typeof parsed === "object") {
@@ -70,8 +79,32 @@ export default function ServerStatsGrid({
   useEffect(() => {
     if (!isActive || stats) return
     let isMounted = true
+
+    // Check cached state first for immediate hydration on server switch
+    try {
+      const cached =
+        localStorage.getItem(cacheKey) ||
+        (!serverId || serverId === "apparatia"
+          ? localStorage.getItem("hikat_cached_server_status")
+          : null)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (parsed && typeof parsed === "object") {
+          setServerData((prev) => ({
+            ...prev,
+            online: Boolean(parsed.online),
+            playersOnline: parsed.playersOnline ?? 0,
+            maxPlayers: parsed.maxPlayers ?? 0,
+            latencyMs: parsed.latencyMs ?? 0,
+          }))
+        }
+      } else {
+        setServerData((prev) => ({ ...prev, online: false }))
+      }
+    } catch (_) {}
+
     serverService
-      .getServerStatus()
+      .getServerStatus(serverId || undefined)
       .then((res) => {
         if (!isMounted) return
         if (res && res.online) {
@@ -93,9 +126,9 @@ export default function ServerStatsGrid({
     return () => {
       isMounted = false
     }
-  }, [stats, isActive])
+  }, [stats, isActive, serverId, cacheKey])
 
-  const serverName = stats?.name ?? "Apparatia"
+  const serverName = propServerName || stats?.name || "Apparatia"
   const isOnline = serverData.online
   const playersOnline = serverData.playersOnline
   const maxPlayers = serverData.maxPlayers

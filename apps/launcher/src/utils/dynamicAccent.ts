@@ -248,3 +248,28 @@ export function useDynamicAccent(
 
   return accent
 }
+
+/**
+ * Resolves accent color for a server following the exact priority:
+ * 1. server.accentColor (if valid)
+ * 2. Accent dynamically extracted from logo (via useDynamicAccent)
+ * 3. Fallback visual accent (default #3ec4c0)
+ */
+export function useServerAccent(
+  accentColor?: string | null,
+  logoUrl?: string | null,
+  fallbackHex: string = "#3ec4c0",
+): AccentColor {
+  const hasValidAccent = Boolean(
+    accentColor &&
+      accentColor.trim() &&
+      /^#([0-9a-f]{3,8})$/i.test(accentColor.trim()),
+  )
+  const logoAccent = useDynamicAccent(hasValidAccent ? null : logoUrl, fallbackHex)
+
+  if (hasValidAccent) {
+    return parseFallbackAccent(accentColor!.trim())
+  }
+  return logoAccent
+}
+

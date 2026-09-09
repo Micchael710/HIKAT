@@ -38,6 +38,10 @@ export default function App() {
     scale,
     handleLogin,
     handleLogout,
+    servers,
+    selectedGameId,
+    setSelectedGameId,
+    selectedServer,
   } = useLauncherState()
 
   const [settingsAccent, setSettingsAccent] = React.useState<{
@@ -208,6 +212,8 @@ export default function App() {
               <HomeView
                 theme={theme}
                 isActive={view === "home"}
+                selectedServer={selectedServer}
+                selectedGameId={selectedGameId}
               />
             </div>
             {view === "skins" && (
@@ -234,6 +240,9 @@ export default function App() {
                 theme={theme}
                 setTheme={setTheme}
                 onSidebarAccentChange={setSettingsAccent}
+                servers={servers}
+                selectedGameId={selectedGameId}
+                onSelectGameId={setSelectedGameId}
               />
             )}
             {view === "profile" && (

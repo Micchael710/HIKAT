@@ -38,6 +38,7 @@ export interface GameManifest {
 
 export interface ReleaseActivatedEvent {
   type: "RELEASE_ACTIVATED"
+  serverId?: string | null
   version: string
   minecraftVersion: string
   modLoader?: string
@@ -98,34 +99,29 @@ export function subscribeReleaseEvents(
   }
 
   const scheduleReconnect = () => {
-    if (isClosed || reconnectTimer) return
+    if (isClosed) return
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+
     reconnectTimer = setTimeout(() => {
-      reconnectTimer = null
+      backoffMs = Math.min(backoffMs * 1.5, 30000)
       connect()
     }, backoffMs)
-    backoffMs = Math.min(backoffMs * 2, 60000)
   }
 
   connect()
 
   return () => {
     isClosed = true
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
-    if (socket) {
-      try {
-        socket.close()
-      } catch (_) {}
-      socket = null
-    }
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    try {
+      socket?.close()
+    } catch (_) {}
   }
 }
 
 export const GET_PUBLISHED_MODPACK_QUERY = `
-  query GetPublishedModpack {
-    publishedModpack {
+  query GetPublishedModpack($serverId: ID) {
+    publishedModpack(serverId: $serverId) {
       version
       minecraftVersion
       modLoader
@@ -160,9 +156,10 @@ export const gameService = {
   /**
    * Fast query to get the current published modpack without disk verification or XMCL checks.
    */
-  async getPublishedModpack(): Promise<PublishedModpack | null> {
+  async getPublishedModpack(serverId?: string): Promise<PublishedModpack | null> {
     const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack | null }>(
       GET_PUBLISHED_MODPACK_QUERY,
+      serverId ? { serverId } : undefined,
     )
 
     if (gqlRes.success && gqlRes.data?.publishedModpack) {
@@ -182,19 +179,21 @@ export const gameService = {
    * - NETWORK_ERROR / TIMEOUT: fallback to cached offline manifest.
    * - Non-connectivity errors (SESSION_EXPIRED, application errors): returns null.
    */
-  async checkGameManifest(): Promise<GameManifest | null> {
+  async checkGameManifest(serverId?: string): Promise<GameManifest | null> {
     let isConnectivityFailure = false
+    const cacheKey = serverId ? `hikat_game_manifest_${serverId}` : "hikat_game_manifest"
 
     try {
       const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack | null }>(
         GET_PUBLISHED_MODPACK_QUERY,
+        serverId ? { serverId } : undefined,
       )
 
       if (gqlRes.success) {
         if (gqlRes.data?.publishedModpack) {
           const modpack = gqlRes.data.publishedModpack
           try {
-            localStorage.setItem("hikat_game_manifest", JSON.stringify(modpack))
+            localStorage.setItem(cacheKey, JSON.stringify(modpack))
           } catch (_) {}
 
           const totalBytes = (modpack.clientFiles || []).reduce(
@@ -213,7 +212,10 @@ export const gameService = {
           let stagedBytes = 0
           let totalDownloadBytes = totalBytes
 
-          if (window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
+          // In Phase 1: only run local filesystem checkSyncPlan for legacy/default server
+          // to avoid mixing global Apparatia filesystem verification with other servers.
+          const isLegacySingleGame = !serverId || serverId === "apparatia"
+          if (isLegacySingleGame && window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
             try {
               const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
                 clientFiles: modpack.clientFiles,
@@ -244,7 +246,7 @@ export const gameService = {
                 gameService.setGameInstalled(isInstalled)
               }
             } catch (_) {}
-          } else {
+          } else if (isLegacySingleGame) {
             isInstalled = gameService.isGameInstalled()
           }
 
@@ -273,7 +275,7 @@ export const gameService = {
         // Authoritative server state: No published modpack exists.
         // Invalidate stale cached manifest and return null.
         try {
-          localStorage.removeItem("hikat_game_manifest")
+          localStorage.removeItem(cacheKey)
         } catch (_) {}
         return null
       }
@@ -292,7 +294,7 @@ export const gameService = {
 
     // C) Fallo REAL de conectividad GraphQL (NETWORK_ERROR o TIMEOUT) -> offline fallback
     try {
-      const cached = localStorage.getItem("hikat_game_manifest")
+      const cached = localStorage.getItem(cacheKey)
       if (cached) {
         const parsed = JSON.parse(cached)
         if (parsed && typeof parsed === "object") {
@@ -309,8 +311,9 @@ export const gameService = {
           let offlineHasPausedSession = false
           let offlineStagedBytes = 0
           let offlineTotalDownloadBytes = 0
+          const isLegacySingleGame = !serverId || serverId === "apparatia"
 
-          if (window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
+          if (isLegacySingleGame && window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
             try {
               const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
                 clientFiles: cachedFiles,
@@ -318,8 +321,8 @@ export const gameService = {
                 modpackVersion: parsed.version,
                 minecraftVersion: parsed.minecraftVersion,
                 modLoader: parsed.modLoader,
-                modLoaderVersion: parsed.modLoaderVersion,
-                neoForgeVersion: parsed.neoForgeVersion,
+                modLoaderVersion: parsed.modLoaderVersion ?? undefined,
+                neoForgeVersion: parsed.neoForgeVersion ?? undefined,
               })
               if (planCheck.success) {
                 offlineInstalledVersion = planCheck.installedModpackVersion || null
@@ -333,21 +336,25 @@ export const gameService = {
                 offlineHasPausedSession = Boolean(planCheck.hasPausedSession)
                 offlineStagedBytes = planCheck.stagedBytes || 0
                 offlineTotalDownloadBytes = planCheck.totalDownloadBytes || 0
+                gameService.setGameInstalled(offlineInstalled)
               }
             } catch (_) {}
-          } else {
+          } else if (isLegacySingleGame) {
             offlineInstalled = gameService.isGameInstalled()
           }
 
-          gameService.setGameInstalled(offlineInstalled)
+          const totalBytes = cachedFiles.reduce(
+            (sum: number, file: any) => sum + (Number(file.sizeBytes) || 0),
+            0,
+          )
 
           return {
             version: parsed.version || "1.0.0",
-            minecraftVersion: parsed.minecraftVersion,
+            minecraftVersion: parsed.minecraftVersion || "1.21.1",
             modLoader: parsed.modLoader || "NEOFORGE",
             modLoaderVersion: parsed.modLoaderVersion ?? null,
             neoForgeVersion: parsed.neoForgeVersion ?? null,
-            totalSizeGB: 0,
+            totalSizeGB: Number((totalBytes / 1024 / 1024 / 1024).toFixed(2)),
             hasUpdate: offlineHasUpdate,
             hasIntegrityIssue: offlineIntegrityIssue,
             installedModpackVersion: offlineInstalledVersion,
@@ -358,7 +365,7 @@ export const gameService = {
             hasInterruptedDownload: offlineHasInterruptedDownload,
             hasPausedSession: offlineHasPausedSession,
             stagedBytes: offlineStagedBytes,
-            totalDownloadBytes: offlineTotalDownloadBytes,
+            totalDownloadBytes: offlineTotalDownloadBytes || (offlineInstalled ? 0 : totalBytes),
           }
         }
       }

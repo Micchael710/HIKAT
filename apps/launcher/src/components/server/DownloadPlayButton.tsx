@@ -25,6 +25,8 @@ interface DownloadPlayButtonProps {
   top: number
   theme?: ThemeMode
   onPlay?: () => void
+  serverId?: string | null
+  gameId?: string | null
 }
 
 export function resolveIdleGameButtonState(
@@ -74,7 +76,10 @@ export default function DownloadPlayButton({
   top,
   theme = "dark",
   onPlay,
+  serverId,
+  gameId,
 }: DownloadPlayButtonProps) {
+  const activeServerId = serverId || gameId || undefined
   const { t } = useTranslation()
   const [status, setStatusState] = useState<GameButtonState>("checking")
   const statusRef = useRef<GameButtonState>("checking")
@@ -285,7 +290,7 @@ export default function DownloadPlayButton({
   // Check manifest and authoritative filesystem state on mount
   useEffect(() => {
     let isMounted = true
-    gameService.checkGameManifest().then(async (res) => {
+    gameService.checkGameManifest(activeServerId).then(async (res) => {
       if (!isMounted) return
       setManifest(res)
       if (res) {
@@ -353,18 +358,24 @@ export default function DownloadPlayButton({
     return () => {
       isMounted = false
     }
-  }, [triggerSync])
+  }, [triggerSync, activeServerId])
 
   // Real-time WebSocket subscription for release activation events
   useEffect(() => {
     if (!manifest) return
 
     const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
+      if (event.serverId && activeServerId && event.serverId !== activeServerId) {
+        return
+      }
+      if (!event.serverId && activeServerId && activeServerId !== "apparatia") {
+        return
+      }
       if (event.version === manifest.version) {
         return
       }
 
-      const published = await gameService.getPublishedModpack()
+      const published = await gameService.getPublishedModpack(activeServerId)
       if (!published || published.version === manifest.version) return
 
       latestManifestVersionRef.current = published.version

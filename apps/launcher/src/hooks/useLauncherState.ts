@@ -31,6 +31,7 @@ import {
   deleteMyPlayerCape,
 } from "../services/capeService"
 import { authService } from "../services/authService"
+import { serverService, LauncherServer } from "../services/serverService"
 
 export function useLauncherState() {
   const [screen, setScreen] = useState<LauncherScreen>("login")
@@ -63,6 +64,75 @@ export function useLauncherState() {
     } catch (_) {}
   }, [theme])
 
+  /* Multi-Server Catalog State */
+  const [servers, setServers] = useState<LauncherServer[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem("hikat_launcher_servers")
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        }
+      } catch (_) {}
+    }
+    return []
+  })
+
+  const [selectedGameId, setSelectedGameIdState] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("hikat_selected_game_id")
+      if (saved) return saved
+    }
+    return null
+  })
+
+  const setSelectedGameId = useCallback((id: string | null) => {
+    setSelectedGameIdState(id)
+    try {
+      if (id) {
+        localStorage.setItem("hikat_selected_game_id", id)
+      } else {
+        localStorage.removeItem("hikat_selected_game_id")
+      }
+    } catch (_) {}
+  }, [])
+
+  const loadServers = useCallback(async () => {
+    try {
+      const list = await serverService.getLauncherServers()
+      setServers(list)
+      if (list.length > 0) {
+        setSelectedGameIdState((current) => {
+          if (current && list.some((s) => s.id === current)) {
+            return current
+          }
+          const fallbackId = list[0].id
+          try {
+            localStorage.setItem("hikat_selected_game_id", fallbackId)
+          } catch (_) {}
+          return fallbackId
+        })
+      }
+      return list
+    } catch (_) {
+      return []
+    }
+  }, [])
+
+  useEffect(() => {
+    loadServers()
+  }, [loadServers])
+
+  // Computed selected server
+  const selectedServer = useMemo(() => {
+    if (servers.length === 0) return null
+    if (selectedGameId) {
+      const found = servers.find((s) => s.id === selectedGameId)
+      if (found) return found
+    }
+    return servers[0] || null
+  }, [servers, selectedGameId])
+
   /* Skins Domain State */
   const [appliedSkin, setAppliedSkin] = useState<string>("player-custom")
   const [globalSkins, setGlobalSkins] = useState<GlobalSkin[]>([])
@@ -79,6 +149,7 @@ export function useLauncherState() {
 
   const [pendingAuthDeepLink, setPendingAuthDeepLink] = useState<string | null>(null)
   const pendingAuthActionRef = useRef<boolean>(false)
+
 
   /**
    * Authoritative Auth Session Lifecycle Subscription & Bootstrap
@@ -596,5 +667,10 @@ export function useLauncherState() {
     refreshPlayerCapes,
     handleLogin,
     handleLogout,
+    servers,
+    selectedGameId,
+    setSelectedGameId,
+    selectedServer,
+    refreshServers: loadServers,
   }
 }
