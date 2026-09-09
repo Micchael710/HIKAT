@@ -50,32 +50,34 @@ function validateGameName(name) {
   if (typeof name !== "string") {
     throw new Error("Invalid gameName: must be a string.")
   }
-  const trimmed = name.trim()
-  if (!trimmed) {
+  if (!name) {
     throw new Error("Invalid gameName: cannot be empty.")
   }
-  if (trimmed === "." || trimmed === "..") {
+  if (name !== name.trim()) {
+    throw new Error("Invalid gameName: leading or trailing whitespace is not allowed.")
+  }
+  if (name === "." || name === "..") {
     throw new Error("Invalid gameName: '.' or '..' is not allowed.")
   }
-  if (trimmed.includes("/") || trimmed.includes("\\")) {
+  if (name.includes("/") || name.includes("\\")) {
     throw new Error("Invalid gameName: directory separators are not allowed.")
   }
-  if (trimmed.endsWith(".") || trimmed.endsWith(" ")) {
-    throw new Error("Invalid gameName: name cannot end with a period or space.")
+  if (name.endsWith(".")) {
+    throw new Error("Invalid gameName: name cannot end with a period.")
   }
-  if (WINDOWS_INVALID_CHARS.test(trimmed)) {
+  if (WINDOWS_INVALID_CHARS.test(name)) {
     throw new Error("Invalid gameName: contains invalid filesystem characters.")
   }
-  const baseName = trimmed.split(".")[0]
-  if (WINDOWS_RESERVED_NAMES.test(trimmed) || WINDOWS_RESERVED_NAMES.test(baseName)) {
-    throw new Error(`Invalid gameName: "${trimmed}" is a reserved system name.`)
+  const baseName = name.split(".")[0]
+  if (WINDOWS_RESERVED_NAMES.test(name) || WINDOWS_RESERVED_NAMES.test(baseName)) {
+    throw new Error(`Invalid gameName: "${name}" is a reserved system name.`)
   }
-  const resolved = path.resolve(gamesRoot, trimmed)
+  const resolved = path.resolve(gamesRoot, name)
   const rel = path.relative(gamesRoot, resolved)
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
     throw new Error("Invalid gameName: path escapes gamesRoot.")
   }
-  return trimmed
+  return name
 }
 
 function resolveGameContext(payload = {}) {
@@ -175,7 +177,10 @@ function setupInstanceWatcher(gameId = null, targetInstanceRoot = instanceRoot) 
         const installedManifest = await loadInstalledManifest(root)
         if (!installedManifest || !installedManifest.modpackVersion) return
 
-        const policies = latestDirectoryPoliciesByGameId.get(key) || latestDirectoryPolicies
+        const policies =
+          key === "__legacy__"
+            ? latestDirectoryPolicies
+            : (latestDirectoryPoliciesByGameId.get(key) || [])
         const decision = resolveWatcherDecision(
           relPath,
           policies,
@@ -1585,7 +1590,7 @@ ipcMain.handle("get-dedicated-gpu", async (_event, payload) => {
 ipcMain.handle("setting-dedicated-gpu", async (_event, enabled, context) => {
   const safeVal = Boolean(enabled)
   if (context && context.gameId) {
-    settingsStore.setGameSetting(context.gameId, "dedicatedGpu", safeVal)
+    settingsStore.setGameSetting(context.gameId, "dedicatedGpu", safeVal, { gameName: context.gameName })
     return settingsStore.getGameSetting(context.gameId, "dedicatedGpu", { gameName: context.gameName })
   }
   const saved = settingsStore.set("dedicatedGpu", safeVal)
@@ -1599,7 +1604,7 @@ ipcMain.handle("setting-dedicated-gpu", async (_event, enabled, context) => {
 ipcMain.on("setting-dedicated-gpu", (_event, enabled, context) => {
   const safeVal = Boolean(enabled)
   if (context && context.gameId) {
-    settingsStore.setGameSetting(context.gameId, "dedicatedGpu", safeVal)
+    settingsStore.setGameSetting(context.gameId, "dedicatedGpu", safeVal, { gameName: context.gameName })
   } else {
     const saved = settingsStore.set("dedicatedGpu", safeVal)
     if (saved) {
@@ -1617,7 +1622,7 @@ ipcMain.handle("get-ram-allocation", async (_event, payload) => {
 
 ipcMain.handle("setting-ram-allocation", async (_event, ramGB, context) => {
   if (context && context.gameId) {
-    settingsStore.setGameSetting(context.gameId, "ramGB", ramGB)
+    settingsStore.setGameSetting(context.gameId, "ramGB", ramGB, { gameName: context.gameName })
     return settingsStore.getGameSetting(context.gameId, "ramGB", { gameName: context.gameName })
   }
   settingsStore.set("ramGB", ramGB)
@@ -1626,7 +1631,7 @@ ipcMain.handle("setting-ram-allocation", async (_event, ramGB, context) => {
 
 ipcMain.on("setting-ram-allocation", (_event, ramGB, context) => {
   if (context && context.gameId) {
-    settingsStore.setGameSetting(context.gameId, "ramGB", ramGB)
+    settingsStore.setGameSetting(context.gameId, "ramGB", ramGB, { gameName: context.gameName })
   } else {
     settingsStore.set("ramGB", ramGB)
   }
@@ -1705,7 +1710,9 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
     const watcherKey = ctx.gameId || "__legacy__"
     if (Array.isArray(payload.directoryPolicies)) {
       latestDirectoryPoliciesByGameId.set(watcherKey, payload.directoryPolicies)
-      latestDirectoryPolicies = payload.directoryPolicies
+      if (!ctx.gameId) {
+        latestDirectoryPolicies = payload.directoryPolicies
+      }
     }
     setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
     return await operationManager.checkPlan({
@@ -1737,7 +1744,9 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
   const watcherKey = ctx.gameId || "__legacy__"
   if (Array.isArray(payload.directoryPolicies)) {
     latestDirectoryPoliciesByGameId.set(watcherKey, payload.directoryPolicies)
-    latestDirectoryPolicies = payload.directoryPolicies
+    if (!ctx.gameId) {
+      latestDirectoryPolicies = payload.directoryPolicies
+    }
   }
 
   activeOperationGameId = ctx.gameId
@@ -1790,25 +1799,46 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
 })
 
 ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
-  if (payload && payload.gameId) {
-    if (activeOperationGameId && payload.gameId !== activeOperationGameId) {
+  const ctx = resolveGameContext(payload)
+
+  if (ctx.gameId) {
+    if (operationManager.getState() === "IDLE") {
+      throw new Error("Cannot pause sync: operation manager is IDLE.")
+    }
+    if (activeOperationGameId !== ctx.gameId) {
       throw new Error("Cannot pause operation for another game.")
     }
+    return await operationManager.pauseSync()
+  }
+
+  if (activeOperationGameId !== null) {
+    throw new Error("Cannot pause scoped game operation from legacy request.")
   }
   return await operationManager.pauseSync()
 })
 
 ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
-  let targetInstanceRoot = instanceRoot
-  if (payload && payload.gameId) {
-    if (activeOperationGameId && payload.gameId !== activeOperationGameId) {
+  const ctx = resolveGameContext(payload)
+
+  if (ctx.gameId) {
+    if (operationManager.getState() === "IDLE") {
+      throw new Error("Cannot cancel sync: operation manager is IDLE.")
+    }
+    if (activeOperationGameId !== ctx.gameId) {
       throw new Error("Cannot cancel operation for another game.")
     }
-    const ctx = resolveGameContext(payload)
-    targetInstanceRoot = ctx.instanceRoot
+    try {
+      return await operationManager.cancelSync(ctx.instanceRoot)
+    } finally {
+      activeOperationGameId = null
+    }
+  }
+
+  if (activeOperationGameId !== null) {
+    throw new Error("Cannot cancel scoped game operation from legacy request.")
   }
   try {
-    return await operationManager.cancelSync(targetInstanceRoot)
+    return await operationManager.cancelSync(instanceRoot)
   } finally {
     activeOperationGameId = null
   }

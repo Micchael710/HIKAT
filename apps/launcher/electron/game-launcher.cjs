@@ -322,8 +322,6 @@ class GameLauncher {
     }
 
     const effectiveInstanceRoot = instanceRoot || this.instanceRoot
-    this.runningGameId = gameId || null
-    this.runningInstanceRoot = effectiveInstanceRoot
 
     // Resolve effective loader (supports legacy neoForgeVersion path)
     const resolvedLoader = (modLoader || (neoForgeVersion ? "NEOFORGE" : "VANILLA")).toUpperCase()
@@ -333,7 +331,9 @@ class GameLauncher {
       throw new Error(`Cannot launch Minecraft: Missing required loader version for ${resolvedLoader}.`)
     }
 
-    this.setStatus("preparing", { gameId: gameId || null })
+    this.runningGameId = gameId || null
+    this.runningInstanceRoot = effectiveInstanceRoot
+    this.setStatus("preparing", gameId ? { gameId } : null)
 
     try {
       const cleanMc = String(minecraftVersion).trim()

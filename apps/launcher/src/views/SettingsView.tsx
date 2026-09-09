@@ -879,11 +879,11 @@ export default function SettingsView({
     isVerifying ||
     isUninstalling
 
-  const isVerifyDisabled = (!gameContext && !isLegacyLocal) || !isInstalled || hasUpdate || isGameBusy
-  const isUninstallDisabled = (!gameContext && !isLegacyLocal) || !isInstalled || isGameBusy
+  const isVerifyDisabled = !isLegacyLocal || !isInstalled || hasUpdate || isGameBusy
+  const isUninstallDisabled = !isLegacyLocal || !isInstalled || isGameBusy
 
   const handleVerify = () => {
-    if ((!gameContext && !isLegacyLocal) || isVerifyDisabled) return
+    if (!isLegacyLocal || isVerifyDisabled) return
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-request", {
         detail: { action: "verify" },
@@ -892,7 +892,7 @@ export default function SettingsView({
   }
 
   const handleUninstall = () => {
-    if ((!gameContext && !isLegacyLocal) || isUninstallDisabled) return
+    if (!isLegacyLocal || isUninstallDisabled) return
     window.dispatchEvent(
       new CustomEvent("hikat:game-action-request", {
         detail: { action: "uninstall" },
