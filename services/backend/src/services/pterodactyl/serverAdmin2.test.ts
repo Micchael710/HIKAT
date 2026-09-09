@@ -2203,6 +2203,146 @@ rcon.password=secret123
 
     await releaseServerOperationLock(db as any, handle)
   })
+
+  // Test 57: PterodactylHttpClient logs complete error context without secrets on Client HTTP error
+  it("PterodactylHttpClient logs method, endpoint, status, errorBody without secrets on Client HTTP error", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          errors: [{ code: "HttpForbiddenException", detail: "You lack permission to access this resource." }],
+        }),
+        {
+          status: 403,
+          statusText: "Forbidden",
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    )
+
+    const client = new PterodactylHttpClient({
+      baseUrl: "https://panel.example.com",
+      apiKey: "secret_client_api_key_123",
+      serverId: "srv-test-id",
+      fetchFn: mockFetch,
+    })
+
+    await expect(client.getServerDetails()).rejects.toThrow(ServerInfrastructureError)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[Pterodactyl HTTP Error]",
+      expect.objectContaining({
+        method: "GET",
+        endpoint: "/api/client/servers/srv-test-id",
+        status: 403,
+        statusText: "Forbidden",
+        errorBody: {
+          errors: [{ code: "HttpForbiddenException", detail: "You lack permission to access this resource." }],
+        },
+        errorName: "ServerInfrastructureError",
+        internalMessage: "Pterodactyl authentication failed with status 403",
+      }),
+    )
+
+    const loggedStr = JSON.stringify(consoleErrorSpy.mock.calls)
+    expect(loggedStr).not.toContain("secret_client_api_key_123")
+    expect(loggedStr).not.toContain("Authorization")
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  // Test 58: PterodactylHttpClient logs method, endpoint, status, errorBody without secrets on Application HTTP error
+  it("PterodactylHttpClient logs method, endpoint, status, errorBody without secrets on Application HTTP error", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          errors: [{ code: "ValidationException", detail: "Cannot deploy server on requested node." }],
+        }),
+        {
+          status: 422,
+          statusText: "Unprocessable Entity",
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    )
+
+    const client = new PterodactylHttpClient({
+      baseUrl: "https://panel.example.com",
+      appApiKey: "secret_app_api_key_456",
+      fetchFn: mockFetch,
+    })
+
+    await expect(
+      client.createApplicationServer({
+        name: "Test Server",
+        user: 1,
+        egg: 3,
+        docker_image: "ghcr.io/pterodactyl/yolks:java_21",
+        startup: "java -jar server.jar",
+        environment: {},
+        limits: { memory: 1024, swap: 0, disk: 5120, io: 500, cpu: 100 },
+        feature_limits: { databases: 0, allocations: 1, backups: 1 },
+        deploy: { locations: [1], dedicated_ip: false, port_range: [] },
+      }),
+    ).rejects.toThrow(ServerInfrastructureError)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[Pterodactyl HTTP Error]",
+      expect.objectContaining({
+        method: "POST",
+        endpoint: "/api/application/servers",
+        status: 422,
+        statusText: "Unprocessable Entity",
+        errorBody: {
+          errors: [{ code: "ValidationException", detail: "Cannot deploy server on requested node." }],
+        },
+        errorName: "ServerInfrastructureError",
+        internalMessage: expect.stringContaining("Cannot deploy server on requested node."),
+      }),
+    )
+
+    const loggedStr = JSON.stringify(consoleErrorSpy.mock.calls)
+    expect(loggedStr).not.toContain("secret_app_api_key_456")
+    expect(loggedStr).not.toContain("Authorization")
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  // Test 59: PterodactylHttpClient logs network failure without secrets
+  it("PterodactylHttpClient logs network failure with method and endpoint without leaking secrets", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const mockFetch = vi.fn().mockRejectedValue(new Error("Connection reset by peer"))
+
+    const client = new PterodactylHttpClient({
+      baseUrl: "https://panel.example.com",
+      apiKey: "secret_client_key_789",
+      serverId: "srv-net-test",
+      fetchFn: mockFetch,
+    })
+
+    await expect(client.getServerDetails()).rejects.toThrow(ServerInfrastructureError)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[Pterodactyl HTTP Error]",
+      expect.objectContaining({
+        method: "GET",
+        endpoint: "/api/client/servers/srv-net-test",
+        errorName: "Error",
+        errorMessage: "Connection reset by peer",
+        internalMessage: "Network connection failure with Pterodactyl API",
+      }),
+    )
+
+    const loggedStr = JSON.stringify(consoleErrorSpy.mock.calls)
+    expect(loggedStr).not.toContain("secret_client_key_789")
+    expect(loggedStr).not.toContain("Authorization")
+
+    consoleErrorSpy.mockRestore()
+  })
 })
 
 

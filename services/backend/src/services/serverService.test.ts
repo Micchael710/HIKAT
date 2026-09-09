@@ -16,7 +16,7 @@ import {
 import { prepareGameDraft, getPublishedModpack } from "./game/releaseService"
 import { modProviderManager } from "./providers/modProviderManager"
 import { replaceServerWorld, createServerWorldDownloadUrl } from "./pterodactyl/serverWorldService"
-import { PterodactylHttpClient } from "./pterodactyl/pterodactylClient"
+import { PterodactylHttpClient, ServerInfrastructureError } from "./pterodactyl/pterodactylClient"
 import { restoreServerBackup } from "./pterodactyl/serverBackupService"
 import { installServerContentPlan, removeServerManagedContent } from "./pterodactyl/serverContentService"
 import { applyServerReleaseSync } from "./pterodactyl/serverReleaseSyncService"
@@ -488,6 +488,75 @@ describe("ServerService & Multi-Server Provisioning", () => {
 
       expect(inDb).toBeDefined()
       expect(inDb?.provisioningStatus).toBe("FAILED")
+    })
+
+    it("logs complete provisioning failure details without leaking secrets and returns safe INTERNAL_ERROR", async () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+      const mockError = new ServerInfrastructureError(
+        "SERVER_UNAVAILABLE",
+        "El servidor de juego no se encuentra disponible en este momento.",
+        'Pterodactyl Application API returned HTTP error 422: {"errors":[{"code":"ValidationException","detail":"No allocation available"}]}',
+      )
+
+      const failingClient = {
+        createApplicationServer: vi.fn(async () => {
+          throw mockError
+        }),
+      } as unknown as IPterodactylClient
+
+      let caughtErr: any
+      try {
+        await createServer(
+          mockDb,
+          mockEnv,
+          {
+            name: "Logging Test Server",
+            minecraftVersion: "1.21.1",
+            modLoader: "VANILLA",
+            cpu: 250,
+            memoryMb: 8192,
+            diskMb: 20480,
+          },
+          "user-1",
+          failingClient,
+        )
+      } catch (err) {
+        caughtErr = err
+      }
+
+      expect(caughtErr).toBeDefined()
+      // GraphQL error code should be INTERNAL_ERROR and safe message
+      expect(caughtErr.extensions?.code).toBe("INTERNAL_ERROR")
+      expect(caughtErr.message).toBe("El servidor de juego no se encuentra disponible en este momento.")
+
+      // Verify console.error was called with [Pterodactyl Provisioning Error] and all fields
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "[Pterodactyl Provisioning Error]",
+        expect.objectContaining({
+          serverName: "Logging Test Server",
+          modLoader: "VANILLA",
+          minecraftVersion: "1.21.1",
+          eggId: 3,
+          locationId: 1,
+          memoryMb: 8192,
+          cpu: 250,
+          diskMb: 20480,
+          errorName: "ServerInfrastructureError",
+          errorMessage: "El servidor de juego no se encuentra disponible en este momento.",
+          internalMessage: expect.stringContaining("No allocation available"),
+        }),
+      )
+
+      // Ensure no secrets appear in the log arguments
+      const allCalls = consoleErrorSpy.mock.calls
+      const serializedLogs = JSON.stringify(allCalls)
+      expect(serializedLogs).not.toContain("ptla_test_app_key")
+      expect(serializedLogs).not.toContain("ptlc_test_client_key")
+      expect(serializedLogs).not.toContain("test-auth-secret")
+      expect(serializedLogs).not.toContain("Bearer")
+
+      consoleErrorSpy.mockRestore()
     })
 
     it("executes compensation deletion on Pterodactyl if final D1 update fails", async () => {

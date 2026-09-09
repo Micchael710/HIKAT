@@ -362,7 +362,16 @@ export async function createServer(
 
 
     console.error("[Pterodactyl Provisioning Error]", {
-      message: err instanceof Error ? err.message : String(err),
+      serverName: cleanName,
+      modLoader: input.modLoader,
+      minecraftVersion: input.minecraftVersion.trim(),
+      eggId: loaderConfig.eggId,
+      locationId,
+      memoryMb,
+      cpu,
+      diskMb,
+      errorName: err instanceof Error ? err.name : typeof err,
+      errorMessage: err instanceof Error ? err.message : String(err),
       internalMessage:
         err && typeof err === "object" && "internalMessage" in err
           ? (err as any).internalMessage
@@ -441,7 +450,16 @@ export async function deleteServer(
       const client = clientOverride || createPterodactylApplicationClient(env)
       await client.deleteApplicationServer(server.pterodactylServerId)
     } catch (err) {
-      console.error("[ServerService] Failed to delete Pterodactyl server:", err)
+      console.error("[Pterodactyl Delete Server Error]", {
+        serverId,
+        pterodactylServerId: server.pterodactylServerId,
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        internalMessage:
+          err && typeof err === "object" && "internalMessage" in err
+            ? (err as any).internalMessage
+            : undefined,
+      })
       throw createGraphQLError(
         `Error al eliminar el servidor en Pterodactyl: ${err instanceof Error ? err.message : String(err)}. La eliminación local se canceló para permitir reintentar.`,
         "INTERNAL_ERROR",

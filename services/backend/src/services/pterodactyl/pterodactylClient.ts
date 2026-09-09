@@ -174,55 +174,97 @@ export class PterodactylHttpClient implements IPterodactylClient {
       })
     } catch (err: unknown) {
       clearTimeout(timeoutId)
-      if (err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))) {
-        throw new ServerInfrastructureError(
-          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-          "Connection timeout with Pterodactyl API",
-        )
-      }
+      const isTimeout =
+        err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))
+      const internalMessage = isTimeout
+        ? "Connection timeout with Pterodactyl API"
+        : "Network connection failure with Pterodactyl API"
+
+      console.error("[Pterodactyl HTTP Error]", {
+        method: options.method ?? "GET",
+        endpoint,
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        internalMessage,
+      })
+
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
         SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-        "Network connection failure with Pterodactyl API",
+        internalMessage,
       )
     } finally {
       clearTimeout(timeoutId)
     }
 
     if (!response.ok) {
+      let errorBody: unknown = undefined
+      let errorBodyRaw = ""
+      try {
+        errorBodyRaw = await response.text()
+        try {
+          errorBody = JSON.parse(errorBodyRaw)
+        } catch {
+          errorBody = errorBodyRaw
+        }
+      } catch {}
+
+      let internalMessage = `Pterodactyl API returned HTTP error ${response.status}`
+      if (response.status === 401 || response.status === 403) {
+        internalMessage = `Pterodactyl authentication failed with status ${response.status}`
+      } else if (response.status === 404) {
+        internalMessage = `Pterodactyl server resource not found (${response.status})`
+      } else if (response.status === 429) {
+        internalMessage = "Pterodactyl upstream rate limit (429)"
+      } else if (response.status === 502 || response.status === 503 || response.status === 504) {
+        internalMessage = `Pterodactyl upstream gateway error (${response.status})`
+      } else if (errorBodyRaw) {
+        internalMessage = `Pterodactyl API returned HTTP error ${response.status}: ${errorBodyRaw}`
+      }
+
+      console.error("[Pterodactyl HTTP Error]", {
+        method: options.method ?? "GET",
+        endpoint,
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: errorBody ?? errorBodyRaw,
+        errorName: "ServerInfrastructureError",
+        errorMessage: internalMessage,
+        internalMessage,
+      })
+
       if (response.status === 401 || response.status === 403) {
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
           SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
-          `Pterodactyl authentication failed with status ${response.status}`,
+          internalMessage,
         )
       }
       if (response.status === 404) {
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
           SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-          `Pterodactyl server resource not found (${response.status})`,
+          internalMessage,
         )
       }
       if (response.status === 429) {
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_RATE_LIMITED,
           SERVER_PUBLIC_MESSAGES.SERVER_RATE_LIMITED,
-          "Pterodactyl upstream rate limit (429)",
+          internalMessage,
         )
       }
       if (response.status === 502 || response.status === 503 || response.status === 504) {
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
           SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-          `Pterodactyl upstream gateway error (${response.status})`,
+          internalMessage,
         )
       }
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
         SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-        `Pterodactyl API returned HTTP error ${response.status}`,
+        internalMessage,
       )
     }
 
@@ -235,7 +277,14 @@ export class PterodactylHttpClient implements IPterodactylClient {
       try {
         const text = await response.text()
         return text as unknown as T
-      } catch {
+      } catch (err: unknown) {
+        console.error("[Pterodactyl HTTP Error]", {
+          method: options.method ?? "GET",
+          endpoint,
+          errorName: err instanceof Error ? err.name : typeof err,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          internalMessage: "Invalid text response from Pterodactyl API",
+        })
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
           SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
@@ -247,7 +296,14 @@ export class PterodactylHttpClient implements IPterodactylClient {
     try {
       const data = await response.json()
       return data as T
-    } catch {
+    } catch (err: unknown) {
+      console.error("[Pterodactyl HTTP Error]", {
+        method: options.method ?? "GET",
+        endpoint,
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        internalMessage: "Invalid JSON response from Pterodactyl API",
+      })
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
         SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
@@ -662,73 +718,100 @@ export class PterodactylHttpClient implements IPterodactylClient {
         signal: controller.signal,
       })
     } catch (err: unknown) {
-      console.error("[Pterodactyl Application fetch raw error]", {
-        name: err instanceof Error ? err.name : typeof err,
-        message: err instanceof Error ? err.message : String(err),
-        cause:
-          err instanceof Error && "cause" in err
-            ? String((err as any).cause)
-            : undefined,
+      clearTimeout(timeoutId)
+      const isTimeout =
+        err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))
+      const internalMessage = isTimeout
+        ? "Connection timeout with Pterodactyl Application API"
+        : "Network connection failure with Pterodactyl Application API"
+
+      console.error("[Pterodactyl HTTP Error]", {
+        method: options.method ?? "GET",
+        endpoint,
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        internalMessage,
       })
 
-      clearTimeout(timeoutId)
-      if (err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))) {
-        throw new ServerInfrastructureError(
-          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-          SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-          "Connection timeout with Pterodactyl Application API",
-        )
-      }
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
         SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-        "Network connection failure with Pterodactyl Application API",
+        internalMessage,
       )
     } finally {
       clearTimeout(timeoutId)
     }
 
     if (!response.ok) {
+      if (response.status === 404 && options.allowNotFound) {
+        return undefined as unknown as T
+      }
+
+      let errorBody: unknown = undefined
+      let errorBodyRaw = ""
+      try {
+        errorBodyRaw = await response.text()
+        try {
+          errorBody = JSON.parse(errorBodyRaw)
+        } catch {
+          errorBody = errorBodyRaw
+        }
+      } catch {}
+
+      let internalMessage = `Pterodactyl Application API returned HTTP error ${response.status}: ${errorBodyRaw}`
+      if (response.status === 401 || response.status === 403) {
+        internalMessage = `Pterodactyl Application API authentication failed (${response.status})`
+      } else if (response.status === 404) {
+        internalMessage = `Pterodactyl Application server resource not found (${response.status})`
+      } else if (response.status === 429) {
+        internalMessage = "Pterodactyl upstream rate limit (429)"
+      } else if (response.status === 502 || response.status === 503 || response.status === 504) {
+        internalMessage = `Pterodactyl upstream gateway error (${response.status})`
+      }
+
+      console.error("[Pterodactyl HTTP Error]", {
+        method: options.method ?? "GET",
+        endpoint,
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: errorBody ?? errorBodyRaw,
+        errorName: "ServerInfrastructureError",
+        errorMessage: internalMessage,
+        internalMessage,
+      })
+
       if (response.status === 401 || response.status === 403) {
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_NOT_CONFIGURED,
           SERVER_PUBLIC_MESSAGES.SERVER_NOT_CONFIGURED,
-          `Pterodactyl Application API authentication failed (${response.status})`,
+          internalMessage,
         )
       }
       if (response.status === 404) {
-        if (options.allowNotFound) {
-          return undefined as unknown as T
-        }
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
           SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-          `Pterodactyl Application server resource not found (${response.status})`,
+          internalMessage,
         )
       }
       if (response.status === 429) {
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_RATE_LIMITED,
           SERVER_PUBLIC_MESSAGES.SERVER_RATE_LIMITED,
-          "Pterodactyl upstream rate limit (429)",
+          internalMessage,
         )
       }
       if (response.status === 502 || response.status === 503 || response.status === 504) {
         throw new ServerInfrastructureError(
           SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
           SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-          `Pterodactyl upstream gateway error (${response.status})`,
+          internalMessage,
         )
       }
-      let errDetail = ""
-      try {
-        const errJson = await response.json()
-        errDetail = JSON.stringify(errJson)
-      } catch { }
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
         SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
-        `Pterodactyl Application API returned HTTP error ${response.status}: ${errDetail}`,
+        internalMessage,
       )
     }
 
@@ -738,7 +821,14 @@ export class PterodactylHttpClient implements IPterodactylClient {
 
     try {
       return (await response.json()) as T
-    } catch {
+    } catch (err: unknown) {
+      console.error("[Pterodactyl HTTP Error]", {
+        method: options.method ?? "GET",
+        endpoint,
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        internalMessage: "Invalid JSON response from Pterodactyl Application API",
+      })
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
         SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,
