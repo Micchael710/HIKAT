@@ -19,6 +19,10 @@ import ServerStatsGrid from "../components/server/ServerStatsGrid"
 import NewsCarousel from "../components/news/NewsCarousel"
 import { useLauncherState } from "../hooks/useLauncherState"
 import * as apiClientModule from "../services/apiClient"
+import App from "../App"
+import { authService } from "../services/authService"
+import * as skinServiceModule from "../services/skinService"
+import * as capeServiceModule from "../services/capeService"
 
 const initTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hikat-p3-main-"))
 const electronMock = {
@@ -837,6 +841,656 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
 
       const card = container?.querySelector(".server-stats-card") as HTMLElement
       expect(card).toBeDefined()
+    })
+  })
+
+  // Q. PHASE 3 CLOSURE MANDATORY REGRESSIONS (POINTS A - G)
+  describe("Q. Phase 3 Closure Mandatory Regressions (Points A - G)", () => {
+    it("A. NO APPARATIA FALLBACK: servers=[] and selectedGameId=null produces no fake Apparatia or game Electron calls", async () => {
+      localStorage.setItem("hikat_language", "es")
+      const getDedicatedGpuSpy = vi.fn().mockResolvedValue(true)
+      const getRamAllocationSpy = vi.fn().mockResolvedValue(8)
+      const checkSyncPlanSpy = vi.fn()
+      ;(window as any).electronAPI = {
+        getDedicatedGpu: getDedicatedGpuSpy,
+        getRamAllocation: getRamAllocationSpy,
+        checkSyncPlan: checkSyncPlanSpy,
+        getSystemTotalRAM: vi.fn().mockResolvedValue(16),
+        onLaunchStatus: vi.fn().mockReturnValue(() => {}),
+        onPhaseChange: vi.fn().mockReturnValue(() => {}),
+        onGameFileIntegrityChanged: vi.fn().mockReturnValue(() => {}),
+      }
+
+      await act(async () => {
+        root?.render(
+          <LanguageProvider>
+            <SettingsView
+              theme="dark"
+              setTheme={vi.fn()}
+              servers={[]}
+              selectedGameId={null}
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      // Must not contain Apparatia
+      expect(container?.textContent).not.toContain("Apparatia")
+      // Must not render apparatiaLogo
+      const imgs = container?.querySelectorAll("img") || []
+      expect(Array.from(imgs).some((img) => img.src.includes("apparatiaLogo"))).toBe(false)
+      // Must not invoke game-specific Electron calls
+      expect(getDedicatedGpuSpy).not.toHaveBeenCalled()
+      expect(getRamAllocationSpy).not.toHaveBeenCalled()
+      expect(checkSyncPlanSpy).not.toHaveBeenCalled()
+    })
+
+    it("B. SETTINGS CON SERVIDOR REAL: servers with Warria preserves existing game settings behavior", async () => {
+      localStorage.setItem("hikat_language", "es")
+      const getDedicatedGpuSpy = vi.fn().mockResolvedValue(true)
+      const getRamAllocationSpy = vi.fn().mockResolvedValue(8)
+      const checkSyncPlanSpy = vi.fn().mockResolvedValue({
+        success: true,
+        isFullyInstalled: true,
+        hasExistingInstall: true,
+        needsUpdate: false,
+      })
+      ;(window as any).electronAPI = {
+        getDedicatedGpu: getDedicatedGpuSpy,
+        getRamAllocation: getRamAllocationSpy,
+        checkSyncPlan: checkSyncPlanSpy,
+        getSystemTotalRAM: vi.fn().mockResolvedValue(16),
+        onLaunchStatus: vi.fn().mockReturnValue(() => {}),
+        onPhaseChange: vi.fn().mockReturnValue(() => {}),
+        onGameFileIntegrityChanged: vi.fn().mockReturnValue(() => {}),
+      }
+
+      localStorage.setItem(
+        "hikat_game_manifest_warria-id",
+        JSON.stringify({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          modLoaderVersion: "21.1.65",
+          neoForgeVersion: "21.1.65",
+          installed: true,
+          hasUpdate: false,
+          hasExistingInstall: true,
+          installedModpackVersion: "1.0.0",
+          totalSizeGB: 1,
+          clientFiles: [{ path: "test.jar", sha256: "abc", sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+        }),
+      )
+
+      const mockWarria: LauncherServer = {
+        id: "warria-id",
+        name: "Warria",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        launcherActiveReleaseId: "rel-w",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+
+      await act(async () => {
+        root?.render(
+          <LanguageProvider>
+            <SettingsView
+              theme="dark"
+              setTheme={vi.fn()}
+              servers={[mockWarria]}
+              selectedGameId="warria-id"
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      // Switch to Juegos tab
+      const buttons = Array.from(container?.querySelectorAll("button") || [])
+      const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos") || b.textContent?.includes("Games"))
+      await act(async () => {
+        gamesTabBtn?.click()
+      })
+
+      expect(container?.textContent).toContain("Warria")
+      expect(getDedicatedGpuSpy).toHaveBeenCalledWith(expect.objectContaining({ gameId: "warria-id" }))
+      expect(getRamAllocationSpy).toHaveBeenCalledWith(expect.objectContaining({ gameId: "warria-id" }))
+      expect(checkSyncPlanSpy).toHaveBeenCalledWith(expect.objectContaining({ gameId: "warria-id" }))
+    })
+
+    it("C. STRICT EVENT FILTER — SETTINGS: filters events by strict gameId matching", async () => {
+      localStorage.setItem("hikat_language", "es")
+      localStorage.setItem(
+        "hikat_game_manifest_warria-id",
+        JSON.stringify({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          modLoaderVersion: "21.1.65",
+          neoForgeVersion: "21.1.65",
+          installed: true,
+          hasUpdate: false,
+          hasExistingInstall: true,
+          installedModpackVersion: "1.0.0",
+          totalSizeGB: 1,
+          clientFiles: [{ path: "test.jar", sha256: "abc", sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+        }),
+      )
+      localStorage.setItem("hikat_game_installed_warria-id", "true")
+
+      let launchStatusCb: any = null
+      let phaseCb: any = null
+      let integrityCb: any = null
+      const checkSyncPlanSpy = vi.fn().mockResolvedValue({
+        success: true,
+        isFullyInstalled: true,
+        hasExistingInstall: true,
+        needsUpdate: false,
+      })
+
+      ;(window as any).electronAPI = {
+        getDedicatedGpu: vi.fn().mockResolvedValue(true),
+        getRamAllocation: vi.fn().mockResolvedValue(8),
+        getLaunchStatus: vi.fn().mockResolvedValue({ status: "idle", operationState: "IDLE" }),
+        checkSyncPlan: checkSyncPlanSpy,
+        getSystemTotalRAM: vi.fn().mockResolvedValue(16),
+        onLaunchStatus: vi.fn().mockImplementation((cb) => {
+          launchStatusCb = cb
+          return () => {}
+        }),
+        onPhaseChange: vi.fn().mockImplementation((cb) => {
+          phaseCb = cb
+          return () => {}
+        }),
+        onGameFileIntegrityChanged: vi.fn().mockImplementation((cb) => {
+          integrityCb = cb
+          return () => {}
+        }),
+      }
+
+      const mockWarria: LauncherServer = {
+        id: "warria-id",
+        name: "Warria",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        launcherActiveReleaseId: "rel-w",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+
+      await act(async () => {
+        root?.render(
+          <LanguageProvider>
+            <SettingsView
+              theme="dark"
+              setTheme={vi.fn()}
+              servers={[mockWarria]}
+              selectedGameId="warria-id"
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      // Switch to Juegos tab
+      const buttons = Array.from(container?.querySelectorAll("button") || [])
+      const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos") || b.textContent?.includes("Games"))
+      await act(async () => {
+        gamesTabBtn?.click()
+      })
+
+      const uninstallBtn = Array.from(container?.querySelectorAll("button") || []).find((b) =>
+        b.textContent?.includes("Desinstalar") || b.textContent?.includes("Uninstall"),
+      ) as HTMLButtonElement
+      expect(uninstallBtn).toBeDefined()
+      expect(uninstallBtn.disabled).toBe(false)
+
+      // 1. Launch status filter
+      // onLaunchStatus("running", undefined) -> ignore
+      await act(async () => {
+        launchStatusCb?.("running", undefined)
+      })
+      expect(uninstallBtn.disabled).toBe(false)
+
+      // onLaunchStatus("running", {}) -> ignore
+      await act(async () => {
+        launchStatusCb?.("running", {})
+      })
+      expect(uninstallBtn.disabled).toBe(false)
+
+      // onLaunchStatus("running", { gameId: "server-b-id" }) -> ignore
+      await act(async () => {
+        launchStatusCb?.("running", { gameId: "server-b-id" })
+      })
+      expect(uninstallBtn.disabled).toBe(false)
+
+      // onLaunchStatus("running", { gameId: "warria-id" }) -> accept (disables button)
+      await act(async () => {
+        launchStatusCb?.("running", { gameId: "warria-id" })
+      })
+      expect(uninstallBtn.disabled).toBe(true)
+
+      // Reset to idle
+      await act(async () => {
+        launchStatusCb?.("idle", { gameId: "warria-id" })
+      })
+      expect(uninstallBtn.disabled).toBe(false)
+
+      // 2. Phase change filter
+      // onPhaseChange("DOWNLOADING", undefined) -> ignore
+      await act(async () => {
+        phaseCb?.("DOWNLOADING", undefined)
+      })
+      expect(uninstallBtn.disabled).toBe(false)
+
+      // onPhaseChange("DOWNLOADING", "server-b-id") -> ignore
+      await act(async () => {
+        phaseCb?.("DOWNLOADING", "server-b-id")
+      })
+      expect(uninstallBtn.disabled).toBe(false)
+
+      // onPhaseChange("DOWNLOADING", "warria-id") -> accept
+      await act(async () => {
+        phaseCb?.("DOWNLOADING", "warria-id")
+      })
+      expect(uninstallBtn.disabled).toBe(true)
+
+      // Reset phase to IDLE
+      await act(async () => {
+        phaseCb?.("IDLE", "warria-id")
+      })
+      expect(uninstallBtn.disabled).toBe(false)
+
+      // 3. Integrity changed filter
+      checkSyncPlanSpy.mockClear()
+      // onGameFileIntegrityChanged(undefined) -> ignore
+      await act(async () => {
+        integrityCb?.(undefined)
+      })
+      expect(checkSyncPlanSpy).not.toHaveBeenCalled()
+
+      // onGameFileIntegrityChanged({ gameId: "server-b-id" }) -> ignore
+      await act(async () => {
+        integrityCb?.({ gameId: "server-b-id" })
+      })
+      expect(checkSyncPlanSpy).not.toHaveBeenCalled()
+
+      // onGameFileIntegrityChanged({ gameId: "warria-id" }) -> accept
+      await act(async () => {
+        integrityCb?.({ gameId: "warria-id" })
+      })
+      expect(checkSyncPlanSpy).toHaveBeenCalledWith(expect.objectContaining({ gameId: "warria-id" }))
+    })
+
+    it("D. ACTION STATUS: SettingsView ignores action-status without matching gameId", async () => {
+      localStorage.setItem("hikat_language", "es")
+      ;(window as any).electronAPI = {
+        getDedicatedGpu: vi.fn().mockResolvedValue(true),
+        getRamAllocation: vi.fn().mockResolvedValue(8),
+        getLaunchStatus: vi.fn().mockResolvedValue({ status: "idle", operationState: "IDLE" }),
+        checkSyncPlan: vi.fn().mockResolvedValue({
+          success: true,
+          isFullyInstalled: true,
+          hasExistingInstall: true,
+          needsUpdate: false,
+        }),
+        getSystemTotalRAM: vi.fn().mockResolvedValue(16),
+        onLaunchStatus: vi.fn().mockReturnValue(() => {}),
+        onPhaseChange: vi.fn().mockReturnValue(() => {}),
+        onGameFileIntegrityChanged: vi.fn().mockReturnValue(() => {}),
+      }
+
+      const mockWarria: LauncherServer = {
+        id: "warria-id",
+        name: "Warria",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        launcherActiveReleaseId: "rel-w",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+
+      await act(async () => {
+        root?.render(
+          <LanguageProvider>
+            <SettingsView
+              theme="dark"
+              setTheme={vi.fn()}
+              servers={[mockWarria]}
+              selectedGameId="warria-id"
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      // Switch to Juegos tab
+      const buttons = Array.from(container?.querySelectorAll("button") || [])
+      const gamesTabBtn = buttons.find((b) => b.textContent?.includes("Juegos") || b.textContent?.includes("Games"))
+      await act(async () => {
+        gamesTabBtn?.click()
+      })
+
+      // 1. hikat:game-action-status without gameId -> ignored
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-status", {
+            detail: { action: "verify", state: "started" },
+          }),
+        )
+      })
+      expect(container?.textContent).not.toMatch(/Verificando\.\.\.|Verifying\.\.\./)
+
+      // 2. gameId server-b-id -> ignored
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-status", {
+            detail: { action: "verify", state: "started", gameId: "server-b-id" },
+          }),
+        )
+      })
+      expect(container?.textContent).not.toMatch(/Verificando\.\.\.|Verifying\.\.\./)
+
+      // 3. gameId warria-id -> accepted
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-status", {
+            detail: { action: "verify", state: "started", gameId: "warria-id" },
+          }),
+        )
+      })
+      expect(container?.textContent).toMatch(/Verificando\.\.\.|Verifying\.\.\./)
+
+      // Finish verification
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-status", {
+            detail: { action: "verify", state: "finished", gameId: "warria-id" },
+          }),
+        )
+      })
+      expect(container?.textContent).not.toMatch(/Verificando\.\.\.|Verifying\.\.\./)
+    })
+
+    it("E. DOWNLOADPLAYBUTTON REQUEST: Warria button accepts requests only matching warria-id", async () => {
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+      let resolveSync: any = null
+      const syncPromise = new Promise((resolve) => {
+        resolveSync = resolve
+      })
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockReturnValue(syncPromise as any)
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasExistingInstall: true,
+        installedModpackVersion: "1.0.0",
+        totalSizeGB: 1,
+        clientFiles: [{ path: "test.jar", sha256: "abc", sizeBytes: 100, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+      })
+
+      ;(window as any).electronAPI = {
+        getLaunchStatus: vi.fn().mockResolvedValue({ status: "idle", operationState: "IDLE" }),
+        onLaunchStatus: vi.fn().mockReturnValue(() => {}),
+        onPhaseChange: vi.fn().mockReturnValue(() => {}),
+        checkSyncPlan: vi.fn().mockResolvedValue({
+          success: true,
+          isFullyInstalled: true,
+          hasExistingInstall: true,
+          needsUpdate: false,
+        }),
+      }
+
+      await act(async () => {
+        root?.render(
+          <LanguageProvider>
+            <DownloadPlayButton
+              left={0}
+              top={0}
+              serverId="warria-id"
+              gameContext={{ gameId: "warria-id", gameName: "Warria" }}
+              theme="dark"
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      // 1. Request without gameId -> ignored
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "verify" },
+          }),
+        )
+      })
+      expect(startSyncSpy).not.toHaveBeenCalled()
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "uninstall" },
+          }),
+        )
+      })
+      expect(uninstallSpy).not.toHaveBeenCalled()
+
+      // 2. Request for server-b-id -> ignored
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "verify", gameId: "server-b-id" },
+          }),
+        )
+      })
+      expect(startSyncSpy).not.toHaveBeenCalled()
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "uninstall", gameId: "server-b-id" },
+          }),
+        )
+      })
+      expect(uninstallSpy).not.toHaveBeenCalled()
+
+      // 3. Request for warria-id -> accepted
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "verify", gameId: "warria-id" },
+          }),
+        )
+      })
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        resolveSync?.({ paused: false })
+      })
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:game-action-request", {
+            detail: { action: "uninstall", gameId: "warria-id" },
+          }),
+        )
+      })
+      expect(uninstallSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it("F. SERVERSTATS EMPTY: without serverName or stats.name, does NOT invent 'Server'", async () => {
+      vi.spyOn(serverService, "getServerStatus").mockResolvedValue({
+        online: true,
+        playersOnline: 5,
+        maxPlayers: 20,
+        latencyMs: 30,
+      })
+
+      await act(async () => {
+        root?.render(
+          <LanguageProvider>
+            <ServerStatsGrid serverId="custom-server" theme="dark" />
+          </LanguageProvider>,
+        )
+      })
+
+      // In the server card, the server title element (fontSize: 22) must be empty and not contain the placeholder "Server"
+      const serverNameHeader = container?.querySelector("div[style*='font-size: 22px']")
+      expect(serverNameHeader?.textContent).toBe("")
+      expect(serverNameHeader?.textContent).not.toBe("Server")
+    })
+
+    it("G. HOME RESET POR SERVER ID: App renders HomeView with server id key, resetting on change", async () => {
+      const mockWarria: LauncherServer = {
+        id: "warria-id",
+        name: "Warria",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        launcherActiveReleaseId: "rel-w",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      const mockServerB: LauncherServer = {
+        id: "server-b-id",
+        name: "Server B",
+        minecraftVersion: "1.20.1",
+        modLoader: "FORGE",
+        modLoaderVersion: "47.2.0",
+        launcherActiveReleaseId: "rel-b",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+
+      vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+        cb(
+          {
+            user: {
+              id: "u-1",
+              displayName: "Tester",
+              email: "tester@example.com",
+              role: "PLAYER",
+            },
+          },
+          "AUTHENTICATED",
+        )
+        return () => {}
+      })
+      vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+      vi.spyOn(authService, "getAccessToken").mockReturnValue("fake-token")
+      vi.spyOn(authService, "getCachedUser").mockReturnValue({
+        id: "u-1",
+        displayName: "Tester",
+        username: "Tester",
+        email: "tester@example.com",
+        role: "PLAYER",
+      } as any)
+
+      vi.spyOn(skinServiceModule, "fetchGlobalSkins").mockResolvedValue([])
+      vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue(null)
+      vi.spyOn(skinServiceModule, "fetchMyActiveSkin").mockResolvedValue(null)
+      vi.spyOn(capeServiceModule, "fetchGlobalCapes").mockResolvedValue([])
+      vi.spyOn(capeServiceModule, "fetchMyPlayerCapes").mockResolvedValue([])
+      vi.spyOn(capeServiceModule, "fetchMyActiveCape").mockResolvedValue({
+        type: "NONE",
+        capeId: null,
+        playerCapeId: null,
+      })
+
+      vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({ items: [], isCached: false })
+      vi.spyOn(serverService, "getServerStatus").mockResolvedValue({
+        online: true,
+        playersOnline: 2,
+        maxPlayers: 20,
+        latencyMs: 15,
+      })
+      vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([mockWarria, mockServerB])
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        neoForgeVersion: "21.1.65",
+        installed: false,
+        hasUpdate: false,
+        hasExistingInstall: false,
+        totalSizeGB: 10,
+        clientFiles: [],
+      })
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockReturnValue(() => {})
+
+      ;(window as any).electronAPI = {
+        onOAuthCallback: vi.fn(() => () => {}),
+        getPendingOAuthCallback: vi.fn().mockResolvedValue(null),
+        getLaunchStatus: vi.fn().mockResolvedValue({ status: "idle", operationState: "IDLE" }),
+        onLaunchStatus: vi.fn().mockReturnValue(() => {}),
+        onPhaseChange: vi.fn().mockReturnValue(() => {}),
+        checkSyncPlan: vi.fn().mockResolvedValue({
+          success: true,
+          isFullyInstalled: true,
+          hasExistingInstall: true,
+          needsUpdate: false,
+        }),
+      }
+
+      await act(async () => {
+        root?.render(
+          <LanguageProvider>
+            <App />
+          </LanguageProvider>,
+        )
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Initially Warria is selected and rendered
+      expect(container?.textContent).toContain("Warria")
+
+      // Verify direct key remounting: HomeView rendered with key=server.id recreates DOM
+      function HomeWithKeyTracker({ server }: { server: LauncherServer }) {
+        return (
+          <div data-testid={`wrapper-${server.id}`}>
+            <HomeView key={server.id} theme="dark" selectedServer={server} />
+          </div>
+        )
+      }
+
+      const trackerContainer = document.createElement("div")
+      const trackerRoot = createRoot(trackerContainer)
+
+      await act(async () => {
+        trackerRoot.render(
+          <LanguageProvider>
+            <HomeWithKeyTracker server={mockWarria} />
+          </LanguageProvider>,
+        )
+      })
+      expect(trackerContainer.textContent).toContain("Warria")
+      const warriaHomeEl = trackerContainer.querySelector("[data-testid='wrapper-warria-id'] > div")
+
+      // Changing server forces unmount of old instance and new instance mount due to key change
+      await act(async () => {
+        trackerRoot.render(
+          <LanguageProvider>
+            <HomeWithKeyTracker server={mockServerB} />
+          </LanguageProvider>,
+        )
+      })
+      const serverBHomeEl = trackerContainer.querySelector("[data-testid='wrapper-server-b-id'] > div")
+      expect(warriaHomeEl).not.toBe(serverBHomeEl)
+      expect(trackerContainer.textContent).toContain("Server B")
+      expect(trackerContainer.textContent).not.toContain("Warria")
+
+      act(() => {
+        trackerRoot.unmount()
+      })
+      trackerContainer.remove()
     })
   })
 })

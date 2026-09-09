@@ -1073,9 +1073,9 @@ export default function DownloadPlayButton({
   // Listen for game action requests from SettingsView
   useEffect(() => {
     const handleGameActionRequest = (e: Event) => {
-      if (!isLocalAllowed) return
+      if (!isLocalAllowed || !gameContext) return
       const customEvt = e as CustomEvent<{ action: "verify" | "uninstall"; gameId?: string }>
-      if (gameContext && customEvt.detail?.gameId && customEvt.detail.gameId !== gameContext.gameId) {
+      if (customEvt.detail?.gameId !== gameContext.gameId) {
         return
       }
       const action = customEvt.detail?.action

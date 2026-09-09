@@ -73,7 +73,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     vi.restoreAllMocks()
   })
 
-  async function mountButton() {
+  async function mountButton(props: any = {}) {
     const container = document.createElement("div")
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -81,7 +81,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     await act(async () => {
       root.render(
         <LanguageProvider>
-          <DownloadPlayButton left={0} top={0} theme="dark" />
+          <DownloadPlayButton left={0} top={0} theme="dark" {...props} />
         </LanguageProvider>,
       )
     })
@@ -4649,12 +4649,13 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       })
       const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
 
-      const { unmount } = await mountButton()
+      const testContext = { gameId: "test-server", gameName: "Test Server" }
+      const { unmount } = await mountButton({ serverId: "test-server", gameContext: testContext })
 
       await act(async () => {
         window.dispatchEvent(
           new CustomEvent("hikat:game-action-request", {
-            detail: { action: "uninstall" },
+            detail: { action: "uninstall", gameId: "test-server" },
           }),
         )
       })
@@ -4683,12 +4684,13 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       })
       vi.spyOn(gameService, "startSync").mockReturnValue(syncPromise as any)
 
-      const { container, unmount } = await mountButton()
+      const testContext = { gameId: "test-server", gameName: "Test Server" }
+      const { container, unmount } = await mountButton({ serverId: "test-server", gameContext: testContext })
 
       await act(async () => {
         window.dispatchEvent(
           new CustomEvent("hikat:game-action-request", {
-            detail: { action: "verify" },
+            detail: { action: "verify", gameId: "test-server" },
           }),
         )
       })
@@ -4745,12 +4747,13 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
       vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
 
-      const { unmount } = await mountButton()
+      const testContext = { gameId: "test-server", gameName: "Test Server" }
+      const { unmount } = await mountButton({ serverId: "test-server", gameContext: testContext })
 
       await act(async () => {
         window.dispatchEvent(
           new CustomEvent("hikat:game-action-request", {
-            detail: { action: "verify" },
+            detail: { action: "verify", gameId: "test-server" },
           }),
         )
       })

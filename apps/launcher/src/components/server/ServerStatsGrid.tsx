@@ -131,7 +131,7 @@ export default function ServerStatsGrid({
     }
   }, [stats, isActive, serverId, cacheKey])
 
-  const serverName = propServerName || stats?.name || "Server"
+  const serverName = propServerName || stats?.name || ""
   const isOnline = serverData.online
   const playersOnline = serverData.playersOnline
   const maxPlayers = serverData.maxPlayers

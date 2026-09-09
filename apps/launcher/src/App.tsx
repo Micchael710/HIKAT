@@ -215,6 +215,7 @@ export default function App() {
           >
             <div style={{ display: view === "home" ? "block" : "none" }}>
               <HomeView
+                key={selectedServer?.id || "no-server"}
                 theme={theme}
                 isActive={view === "home"}
                 selectedServer={selectedServer}

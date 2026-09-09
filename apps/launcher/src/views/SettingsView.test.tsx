@@ -81,13 +81,29 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     document.body.innerHTML = ""
   })
 
+  const mockTestServer: any = {
+    id: "default-game",
+    name: "Default Game",
+    sidebarLogo: { url: "/logo.png" },
+    accentColor: "#3ec4c0",
+  }
+
   async function renderComponent(ui: React.ReactElement, initialLang = "es") {
     localStorage.setItem("hikat_language", initialLang)
     const container = document.createElement("div")
     document.body.appendChild(container)
     const root = createRoot(container)
+
+    let finalUi = ui
+    if (React.isValidElement(ui) && (ui.props as any).servers === undefined) {
+      finalUi = React.cloneElement(ui as any, {
+        servers: [mockTestServer],
+        selectedGameId: (ui.props as any).selectedGameId || "default-game",
+      })
+    }
+
     await act(async () => {
-      root.render(<LanguageProvider>{ui}</LanguageProvider>)
+      root.render(<LanguageProvider>{finalUi}</LanguageProvider>)
     })
     unmountCurrent = () => {
       act(() => {
@@ -113,7 +129,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
 
   it("2. With valid manifest cache present, mounting Settings does NOT call checkGameManifest", async () => {
     localStorage.setItem(
-      "hikat_game_manifest",
+      "hikat_game_manifest_default-game",
       JSON.stringify({
         minecraftVersion: "1.21.1",
         modLoader: "NEOFORGE",
@@ -131,7 +147,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
   })
 
   it("3. WebSocket release event triggers checkGameManifest and updates manifest", async () => {
-    let releaseCallback: (() => Promise<void>) | null = null
+    let releaseCallback: ((ev?: any) => Promise<void>) | null = null
     vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
       releaseCallback = cb
       return () => {}
@@ -139,7 +155,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
 
     // Cache present so mount does not query
     localStorage.setItem(
-      "hikat_game_manifest",
+      "hikat_game_manifest_default-game",
       JSON.stringify({
         minecraftVersion: "1.21.1",
         modLoader: "NEOFORGE",
@@ -166,7 +182,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     })
 
     await act(async () => {
-      await releaseCallback?.()
+      await releaseCallback?.({ serverId: "default-game" })
     })
 
     expect(gameService.checkGameManifest).toHaveBeenCalledTimes(1)
@@ -211,7 +227,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     })
 
     // Game identity header: image with 48x48 contain and selected game name
-    const gameLogoImg = container.querySelector("img[alt='Apparatia']") as HTMLImageElement
+    const gameLogoImg = container.querySelector("img[alt='Default Game']") as HTMLImageElement
     expect(gameLogoImg).toBeDefined()
     expect(gameLogoImg.style.width).toBe("48px")
     expect(gameLogoImg.style.height).toBe("48px")
@@ -225,7 +241,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
   it("7. Discrete technical details footer is placed at the end with real values and fallback '—'", async () => {
     // Initial cached values
     localStorage.setItem(
-      "hikat_game_manifest",
+      "hikat_game_manifest_default-game",
       JSON.stringify({
         minecraftVersion: "1.21.1",
         modLoader: "NEOFORGE",
@@ -233,7 +249,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
         version: "1.4.2",
       }),
     )
-    localStorage.setItem("hikat_java_major_version", "21")
+    localStorage.setItem("hikat_java_major_version_default-game", "21")
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -267,7 +283,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
   it("9. RAM section provides automatic mode toggle that persists, calculates RAM, and disables slider when active", async () => {
     mockElectronAPI.getMemory.mockResolvedValue({ totalGb: 16 })
     mockElectronAPI.getRamAllocation.mockResolvedValue(4)
-    localStorage.setItem("hikat_ram_auto", "false")
+    localStorage.setItem("hikat_ram_auto_default-game", "false")
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -294,8 +310,8 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       autoRamToggle.click()
     })
 
-    expect(localStorage.getItem("hikat_ram_auto")).toBe("true")
-    expect(mockElectronAPI.setRamAllocation).toHaveBeenCalledWith(8)
+    expect(localStorage.getItem("hikat_ram_auto_default-game")).toBe("true")
+    expect(mockElectronAPI.setRamAllocation).toHaveBeenCalledWith(8, expect.anything())
     expect(slider.disabled).toBe(true)
 
     // 2. Toggle ON -> OFF: enables slider and preserves last RAM value
@@ -303,19 +319,19 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       autoRamToggle.click()
     })
 
-    expect(localStorage.getItem("hikat_ram_auto")).toBe("false")
+    expect(localStorage.getItem("hikat_ram_auto_default-game")).toBe("false")
     expect(slider.disabled).toBe(false)
     expect(slider.value).toBe("8")
 
     if (unmountCurrent) unmountCurrent()
 
     // 3. Mount with hikat_ram_auto = true calculates RAM on startup without triggering user save toast
-    localStorage.setItem("hikat_ram_auto", "true")
-    localStorage.setItem("hikat_ram_gb", "8")
+    localStorage.setItem("hikat_ram_auto_default-game", "true")
+    localStorage.setItem("hikat_ram_gb_default-game", "8")
     mockElectronAPI.getMemory.mockResolvedValue({ totalGb: 8 }) // calculateAutomaticRam(8) = 4
 
     const containerRestored = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
-    expect(localStorage.getItem("hikat_ram_gb")).toBe("4")
+    expect(localStorage.getItem("hikat_ram_gb_default-game")).toBe("4")
     // Should NOT show save toast message
     const toast = containerRestored.querySelector(".settings-live-toast")
     expect(toast).toBeNull()
@@ -343,12 +359,12 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       gpuToggle.click()
     })
 
-    expect(mockElectronAPI.setDedicatedGpu).toHaveBeenCalledWith(false)
-    expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("false")
+    expect(mockElectronAPI.setDedicatedGpu).toHaveBeenCalledWith(false, expect.anything())
+    expect(localStorage.getItem("hikat_dedicated_gpu_default-game")).toBe("false")
   })
 
   it("11. Administration card: Verify and Uninstall render descriptions and buttons have equal width (160px)", async () => {
-    localStorage.setItem("hikat_game_installed", "true")
+    localStorage.setItem("hikat_game_installed_default-game", "true")
     vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
@@ -380,7 +396,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
   })
 
   it("12. Verify & Uninstall in Settings dispatch CustomEvents without duplicate gameService logic", async () => {
-    localStorage.setItem("hikat_game_installed", "true")
+    localStorage.setItem("hikat_game_installed_default-game", "true")
     vi.spyOn(gameService, "isGameInstalled").mockReturnValue(true)
 
     const dispatchSpy = vi.spyOn(window, "dispatchEvent")
@@ -410,7 +426,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(dispatchSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "hikat:game-action-request",
-        detail: { action: "verify" },
+        detail: { action: "verify", gameId: "default-game" },
       }),
     )
 
@@ -423,7 +439,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     expect(dispatchSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "hikat:game-action-request",
-        detail: { action: "uninstall" },
+        detail: { action: "uninstall", gameId: "default-game" },
       }),
     )
 
@@ -431,7 +447,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "verify", state: "started" },
+          detail: { action: "verify", state: "started", gameId: "default-game" },
         }),
       )
     })
@@ -441,7 +457,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "verify", state: "finished" },
+          detail: { action: "verify", state: "finished", gameId: "default-game" },
         }),
       )
     })
@@ -541,8 +557,8 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
   })
 
   it("16. Missing technical information displays fallback '—'", async () => {
-    localStorage.removeItem("hikat_game_manifest")
-    localStorage.removeItem("hikat_java_major_version")
+    localStorage.removeItem("hikat_game_manifest_default-game")
+    localStorage.removeItem("hikat_java_major_version_default-game")
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(null)
     mockElectronAPI.getGameRuntimeInfo.mockResolvedValue({ javaMajorVersion: null })
 
@@ -616,7 +632,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
   })
 
   it("19. Action status: failed uninstall (success: false) does NOT clear Java cache", async () => {
-    localStorage.setItem("hikat_java_major_version", "21")
+    localStorage.setItem("hikat_java_major_version_default-game", "21")
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -628,17 +644,17 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "uninstall", state: "finished", success: false },
+          detail: { action: "uninstall", state: "finished", success: false, gameId: "default-game" },
         }),
       )
     })
 
-    expect(localStorage.getItem("hikat_java_major_version")).toBe("21")
+    expect(localStorage.getItem("hikat_java_major_version_default-game")).toBe("21")
     expect(container.textContent).toContain("Java 21")
   })
 
   it("20. Action status: successful uninstall (success: true) clears Java cache", async () => {
-    localStorage.setItem("hikat_java_major_version", "21")
+    localStorage.setItem("hikat_java_major_version_default-game", "21")
 
     const container = await renderComponent(<SettingsView theme="dark" setTheme={vi.fn()} />)
     const buttons = Array.from(container.querySelectorAll("button"))
@@ -650,12 +666,12 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "uninstall", state: "finished", success: true },
+          detail: { action: "uninstall", state: "finished", success: true, gameId: "default-game" },
         }),
       )
     })
 
-    expect(localStorage.getItem("hikat_java_major_version")).toBeNull()
+    expect(localStorage.getItem("hikat_java_major_version_default-game")).toBeNull()
   })
 
   it("21. GPU toggle reconciles state and localStorage with authoritative boolean response from IPC", async () => {
@@ -679,12 +695,12 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       gpuToggle.click()
     })
 
-    expect(mockElectronAPI.setDedicatedGpu).toHaveBeenCalledWith(false)
-    expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("false")
+    expect(mockElectronAPI.setDedicatedGpu).toHaveBeenCalledWith(false, expect.anything())
+    expect(localStorage.getItem("hikat_dedicated_gpu_default-game")).toBe("false")
   })
 
   it("22. GPU toggle reverts state and localStorage, does NOT show notice, and shows error toast when IPC rejects", async () => {
-    localStorage.setItem("hikat_dedicated_gpu", "true")
+    localStorage.setItem("hikat_dedicated_gpu_default-game", "true")
     mockElectronAPI.getDedicatedGpu = vi.fn().mockResolvedValue(true)
     mockElectronAPI.setDedicatedGpu = vi.fn().mockRejectedValue(new Error("Registry access denied"))
     mockElectronAPI.getLaunchStatus = vi.fn().mockResolvedValue({ status: "running", operationState: "IDLE" })
@@ -707,7 +723,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
     })
 
     // Reverted back to true
-    expect(localStorage.getItem("hikat_dedicated_gpu")).toBe("true")
+    expect(localStorage.getItem("hikat_dedicated_gpu_default-game")).toBe("true")
     expect(container.textContent).toContain("Error al guardar cambios")
     // Notice was NOT created
     expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).toBeNull()
@@ -820,7 +836,7 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
 
     // Game process terminates and launchStatus goes to 'idle'
     await act(async () => {
-      launchStatusCallback?.("idle")
+      launchStatusCallback?.("idle", { gameId: "default-game" })
     })
 
     expect(container.querySelector('[data-testid="settings-pending-restart-notice"]')).toBeNull()

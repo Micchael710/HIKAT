@@ -767,11 +767,11 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
 
     checkSyncPlanMock.mockClear()
 
-    // 3. Disparar hikat:game-action-status finished para verify
+    // 3. Disparar hikat:game-action-status finished para verify con gameId de Apparatia
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "verify", state: "finished", success: true },
+          detail: { action: "verify", state: "finished", success: true, gameId: APPARATIA_ID },
         })
       )
     })
@@ -799,7 +799,7 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
-          detail: { action: "verify", state: "finished", success: true },
+          detail: { action: "verify", state: "finished", success: true, gameId: APPARATIA_ID },
         })
       )
     })
