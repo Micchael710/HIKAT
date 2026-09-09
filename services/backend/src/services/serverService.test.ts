@@ -955,6 +955,10 @@ describe("ServerService & Multi-Server Provisioning", () => {
             },
           ],
         })),
+        listDirectory: vi.fn(async () => ({
+          object: "list",
+          data: [],
+        })),
         getFileContents: vi.fn(async (file: string) => {
           if (writtenFiles[file]) return writtenFiles[file]
           throw new Error("404 File not found")
@@ -1317,6 +1321,10 @@ describe("ServerService & Multi-Server Provisioning", () => {
               },
             ],
           })),
+          listDirectory: vi.fn(async () => ({
+            object: "list",
+            data: [],
+          })),
           getFileContents: vi.fn(async (file: string) => {
             if (writtenFiles[file]) return writtenFiles[file]
             throw new Error("404 File not found")
@@ -1391,6 +1399,10 @@ describe("ServerService & Multi-Server Provisioning", () => {
           object: "list",
           data: [{ object: "allocation", attributes: { id: 10, port: 25565, assigned: true } }],
         })),
+        listDirectory: vi.fn(async () => ({
+          object: "list",
+          data: [],
+        })),
         getFileContents: vi.fn(async () => ""),
         writeFile: vi.fn(async () => {
           throw new ServerInfrastructureError(
@@ -1413,6 +1425,223 @@ describe("ServerService & Multi-Server Provisioning", () => {
           serverId: server.id,
           pterodactylServerId: serverInDb?.pterodactylServerId,
           errorMessage: "Fallo de disco en Wings al escribir archivo.",
+        }),
+      )
+
+      // Server in D1 was NOT marked READY (remains PROVISIONING)
+      const inDb = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, server.id))
+        .get()
+      expect(inDb?.provisioningStatus).toBe("PROVISIONING")
+
+      consoleErrorSpy.mockRestore()
+    })
+
+    it("bootstrapServerPostInstall creates server.properties and eula.txt without attempting to read them when missing from root", async () => {
+      const getFileContentsSpy = vi.fn(async () => {
+        throw new Error("openat2: file does not exist")
+      })
+      const writtenFiles: Record<string, string> = {}
+      const writeFileSpy = vi.fn(async (path: string, content: string) => {
+        writtenFiles[path] = content
+      })
+      const listDirectorySpy = vi.fn(async () => ({
+        object: "list" as const,
+        data: [
+          {
+            object: "file_object" as const,
+            attributes: {
+              name: "logs",
+              mode: "drwxr-xr-x",
+              mode_bits: "0755",
+              size: 4096,
+              is_file: false,
+              is_symlink: false,
+              mimetype: "inode/directory",
+              created_at: new Date().toISOString(),
+              modified_at: new Date().toISOString(),
+            },
+          },
+        ],
+      }))
+
+      const mockAppClient = {
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [{ object: "allocation", attributes: { id: 10, port: 25565, assigned: true } }],
+        })),
+      } as unknown as IPterodactylClient
+
+      const mockFileClient = {
+        listDirectory: listDirectorySpy,
+        getFileContents: getFileContentsSpy,
+        writeFile: writeFileSpy,
+      } as unknown as IPterodactylClient
+
+      await bootstrapServerPostInstall(
+        { id: "srv-missing-files" } as schema.Server,
+        { id: 100, allocation: 10, node: 1 } as any,
+        mockAppClient,
+        mockFileClient,
+      )
+
+      // 1. listDirectory was called on root "/"
+      expect(listDirectorySpy).toHaveBeenCalledWith("/")
+      // 2. getFileContents was NEVER called (avoiding Wings 500 openat2 file does not exist)
+      expect(getFileContentsSpy).not.toHaveBeenCalled()
+      // 3. Both files were created directly with required configurations
+      expect(writtenFiles["eula.txt"]).toBe("eula=true\n")
+      expect(writtenFiles["server.properties"]).toContain("server-ip=0.0.0.0")
+      expect(writtenFiles["server.properties"]).toContain("server-port=25565")
+      expect(writtenFiles["server.properties"]).toContain("query.port=25565")
+    })
+
+    it("bootstrapServerPostInstall reads and preserves existing server.properties and eula.txt when present in root", async () => {
+      const getFileContentsSpy = vi.fn(async (file: string) => {
+        if (file === "server.properties") {
+          return "motd=Custom HiKAT Server\nview-distance=16\nserver-port=12345\n"
+        }
+        if (file === "eula.txt") {
+          return "eula=false\n# Agreement from installer\n"
+        }
+        throw new Error("unexpected file read")
+      })
+      const writtenFiles: Record<string, string> = {}
+      const writeFileSpy = vi.fn(async (path: string, content: string) => {
+        writtenFiles[path] = content
+      })
+      const listDirectorySpy = vi.fn(async () => ({
+        object: "list" as const,
+        data: [
+          {
+            object: "file_object" as const,
+            attributes: {
+              name: "server.properties",
+              mode: "-rw-r--r--",
+              mode_bits: "0644",
+              size: 50,
+              is_file: true,
+              is_symlink: false,
+              mimetype: "text/plain",
+              created_at: new Date().toISOString(),
+              modified_at: new Date().toISOString(),
+            },
+          },
+          {
+            object: "file_object" as const,
+            attributes: {
+              name: "eula.txt",
+              mode: "-rw-r--r--",
+              mode_bits: "0644",
+              size: 20,
+              is_file: true,
+              is_symlink: false,
+              mimetype: "text/plain",
+              created_at: new Date().toISOString(),
+              modified_at: new Date().toISOString(),
+            },
+          },
+        ],
+      }))
+
+      const mockAppClient = {
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [{ object: "allocation", attributes: { id: 10, port: 25565, assigned: true } }],
+        })),
+      } as unknown as IPterodactylClient
+
+      const mockFileClient = {
+        listDirectory: listDirectorySpy,
+        getFileContents: getFileContentsSpy,
+        writeFile: writeFileSpy,
+      } as unknown as IPterodactylClient
+
+      await bootstrapServerPostInstall(
+        { id: "srv-existing-files" } as schema.Server,
+        { id: 100, allocation: 10, node: 1 } as any,
+        mockAppClient,
+        mockFileClient,
+      )
+
+      // 1. Both existing files were read
+      expect(getFileContentsSpy).toHaveBeenCalledWith("server.properties")
+      expect(getFileContentsSpy).toHaveBeenCalledWith("eula.txt")
+      // 2. server.properties preserved existing non-default properties and updated required ones
+      expect(writtenFiles["server.properties"]).toContain("motd=Custom HiKAT Server")
+      expect(writtenFiles["server.properties"]).toContain("view-distance=16")
+      expect(writtenFiles["server.properties"]).toContain("server-ip=0.0.0.0")
+      expect(writtenFiles["server.properties"]).toContain("server-port=25565")
+      expect(writtenFiles["server.properties"]).toContain("query.port=25565")
+      expect(writtenFiles["server.properties"]).not.toContain("server-port=12345")
+      // 3. eula.txt preserved existing comment lines and updated eula=true
+      expect(writtenFiles["eula.txt"]).toContain("eula=true")
+      expect(writtenFiles["eula.txt"]).toContain("# Agreement from installer")
+    })
+
+    it("fails without marking server READY and keeps PROVISIONING when listDirectory fails", async () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "ListDir Fail Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      const serverInDb = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, server.id))
+        .get()
+
+      const failingListClient = {
+        getApplicationServer: vi.fn(async () => ({
+          object: "server",
+          attributes: {
+            id: Number(serverInDb?.pterodactylServerId),
+            identifier: "ptero_fail_listdir",
+            allocation: 10,
+            node: 1,
+            status: null,
+            container: { installed: 1 },
+          },
+        })),
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [{ object: "allocation", attributes: { id: 10, port: 25565, assigned: true } }],
+        })),
+        listDirectory: vi.fn(async () => {
+          throw new ServerInfrastructureError(
+            "SERVER_UNAVAILABLE",
+            "Fallo de conexión en Wings al listar archivos.",
+            "Wings HTTP 500: DaemonConnectionException",
+          )
+        }),
+      } as unknown as IPterodactylClient
+
+      // Direct sync call should throw and log
+      await expect(
+        syncServerProvisioningStatus(serverInDb!, mockDb, mockEnv, failingListClient),
+      ).rejects.toThrow("Fallo de conexión en Wings al listar archivos.")
+
+      // Error logged
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "[Pterodactyl Server Bootstrap Error]",
+        expect.objectContaining({
+          serverId: server.id,
+          pterodactylServerId: serverInDb?.pterodactylServerId,
+          errorMessage: "Fallo de conexión en Wings al listar archivos.",
         }),
       )
 

@@ -167,43 +167,26 @@ export async function bootstrapServerPostInstall(
 ): Promise<void> {
   const port = await resolveServerAllocationPort(client, pServer)
 
-  // 1. Read existing server.properties if present
-  let originalProperties = ""
-  try {
-    originalProperties = await fileClient.getFileContents("server.properties")
-  } catch (err: unknown) {
-    const errorStr = String(err).toLowerCase()
-    const internalMsg = String((err as any)?.internalMessage || "").toLowerCase()
-    const isNotFound =
-      errorStr.includes("404") ||
-      errorStr.includes("not found") ||
-      internalMsg.includes("404") ||
-      internalMsg.includes("not found")
-    if (!isNotFound) {
-      throw err
-    }
-  }
+  const rootList = await fileClient.listDirectory("/")
+  const fileNames = new Set(
+    (rootList?.data || [])
+      .map((item) => item.attributes?.name)
+      .filter(Boolean),
+  )
 
+  // 1. server.properties
+  let originalProperties = ""
+  if (fileNames.has("server.properties")) {
+    originalProperties = await fileClient.getFileContents("server.properties")
+  }
   const updatedProperties = updateServerPropertiesBootstrap(originalProperties, port)
   await fileClient.writeFile("server.properties", updatedProperties)
 
-  // 2. Read existing eula.txt if present
+  // 2. eula.txt
   let originalEula = ""
-  try {
+  if (fileNames.has("eula.txt")) {
     originalEula = await fileClient.getFileContents("eula.txt")
-  } catch (err: unknown) {
-    const errorStr = String(err).toLowerCase()
-    const internalMsg = String((err as any)?.internalMessage || "").toLowerCase()
-    const isNotFound =
-      errorStr.includes("404") ||
-      errorStr.includes("not found") ||
-      internalMsg.includes("404") ||
-      internalMsg.includes("not found")
-    if (!isNotFound) {
-      throw err
-    }
   }
-
   const updatedEula = updateEulaBootstrap(originalEula)
   await fileClient.writeFile("eula.txt", updatedEula)
 }
