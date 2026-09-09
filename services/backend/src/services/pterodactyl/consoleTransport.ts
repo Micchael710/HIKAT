@@ -472,12 +472,8 @@ export async function handleConsoleWebSocket(
     cleanup()
   })
 
-  try {
-    return new Response(null, {
-      status: 101,
-      webSocket: clientWs,
-    } as unknown as ResponseInit)
-  } catch {
-    return new Response(null, { status: 200 })
-  }
+  return new Response(null, {
+    status: 101,
+    webSocket: clientWs,
+  } as unknown as ResponseInit)
 }

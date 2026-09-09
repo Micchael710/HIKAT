@@ -5660,9 +5660,24 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           1 = new MockServerWs()
         }
 
+        const originalResponse = globalThis.Response
+        ;(globalThis as any).Response = class extends originalResponse {
+          constructor(body?: any, init?: any) {
+            if (init?.status === 101) {
+              super(null, { status: 200 })
+              Object.defineProperty(this, "status", { value: 101 })
+              if (init.webSocket) {
+                ;(this as any).webSocket = init.webSocket
+              }
+            } else {
+              super(body, init)
+            }
+          }
+        }
+
         const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url: any, init?: any) => {
           if (String(url).includes("/api/client/servers/")) {
-            return new Response(
+            return new originalResponse(
               JSON.stringify({
                 object: "token",
                 data: { socket: "wss://node.example.com:8443/api/servers/uuid-123/ws", token: "secret-token" },
@@ -5703,7 +5718,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           )
 
           const res = await worker.fetch(req, createServerEnv())
-          expect([101, 200]).toContain(res.status)
+          expect(res.status).toBe(101)
 
           // Verify that wss:// was converted to https:// preserving host, port, path
           expect(attemptedFetchUrl).toBe("https://node.example.com:8443/api/servers/uuid-123/ws")
@@ -5711,6 +5726,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
           expect(attemptedFetchHeaders?.Origin).toBe("https://panel.test.hikat.org")
         } finally {
           fetchSpy.mockRestore()
+          globalThis.Response = originalResponse
           if (originalWebSocketPair) {
             ;(globalThis as any).WebSocketPair = originalWebSocketPair
           } else {
