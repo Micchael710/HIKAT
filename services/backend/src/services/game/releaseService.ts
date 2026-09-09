@@ -258,10 +258,6 @@ export async function validateDraftReadiness(
   const realFiles = draftFiles.filter((f) => !f.isDirectory)
   const hasFiles = realFiles.length > 0
 
-  if (!hasFiles) {
-    issues.push("El borrador no contiene ningún archivo o mod descargable.")
-  }
-
   // 1. Version SemVer evaluation
   const versionToValidate = String(targetVersion || draft.version || "").trim()
   let validVersion = false
@@ -331,7 +327,7 @@ export async function validateDraftReadiness(
     }
   }
 
-  const isReady = validVersion && uniqueVersion && hasFiles && noConflicts && storageVerified
+  const isReady = validVersion && uniqueVersion && noConflicts && storageVerified
 
   return {
     isReady,
@@ -1267,6 +1263,7 @@ export async function publishGameRelease(
 
   if (shouldActivate) {
     await broadcastReleaseActivated(env, {
+      serverId: targetServerId || published.serverId || null,
       version: published.version,
       minecraftVersion: published.minecraftVersion,
       modLoader: published.modLoader || "NEOFORGE",

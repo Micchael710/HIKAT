@@ -776,8 +776,11 @@ export async function applyServerReleaseSync(
     ])
 
     await broadcastReleaseActivated(env, {
+      serverId: serverId || published.serverId || null,
       version: published.version,
       minecraftVersion: published.minecraftVersion,
+      modLoader: published.modLoader || "NEOFORGE",
+      modLoaderVersion: published.modLoaderVersion || null,
       neoForgeVersion: published.neoForgeVersion,
       mandatory: true,
     }).catch((err) => {

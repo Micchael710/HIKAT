@@ -281,7 +281,7 @@ export default function PublishReleaseModal({
     return f.changeStatus === changeFilter
   })
 
-  const isReady = currentReadiness ? currentReadiness.isReady : currentDraft.files.length > 0
+  const isReady = currentReadiness ? currentReadiness.isReady : Boolean(version && validateSemVer(version.trim()))
 
   // Final Publication Handler with review fingerprint & post-publication verification
   const handlePublish = async (e: React.FormEvent) => {

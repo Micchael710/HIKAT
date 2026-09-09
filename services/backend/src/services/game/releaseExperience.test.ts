@@ -528,6 +528,24 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
 
       expect(readiness.isReady).toBe(true)
     })
+
+    it("20b. permite release con 0 archivos cuando la versión es válida (ej. Vanilla puro)", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      await updateGameDraftMetadata(db, env, { version: "1.0.0" }, adminId)
+
+      const updatedDraft = (await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft.id)).get())!
+      const files = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft.id)).all()
+      expect(files.length).toBe(0)
+
+      const readiness = await validateDraftReadiness(env, updatedDraft, files, db)
+      expect(readiness.isReady).toBe(true)
+      expect(readiness.hasFiles).toBe(false)
+      expect(readiness.validVersion).toBe(true)
+      expect(readiness.uniqueVersion).toBe(true)
+      expect(readiness.noConflicts).toBe(true)
+      expect(readiness.storageVerified).toBe(true)
+      expect(readiness.issues.length).toBe(0)
+    })
   })
 
   describe("4. Change Tracking (computeDraftChanges)", () => {
@@ -913,6 +931,61 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
       expect(draft2.minecraftVersion).toBe("1.21.1")
       expect(draft2.modLoader).toBe("FABRIC")
       expect(draft2.modLoaderVersion).toBe("0.16.10")
+    })
+
+    it("44. publica exitosamente release con 0 archivos y broadcastReleaseActivated incluye serverId", async () => {
+      let broadcastBody: any = null
+      const mockNamespace: any = {
+        idFromName: vi.fn(() => "global-id"),
+        get: vi.fn(() => ({
+          fetch: vi.fn(async (_url: string, options: any) => {
+            broadcastBody = JSON.parse(options.body)
+            return new Response(null, { status: 204 })
+          }),
+        })),
+      }
+      const envWithBroadcast: Env = {
+        ...env,
+        RELEASE_EVENTS: mockNamespace,
+      }
+
+      // Create a dedicated server
+      const serverId = "srv-vanilla-01"
+      await db.insert(schema.servers).values({
+        id: serverId,
+        name: "Pure Vanilla",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Prepare draft for this server
+      const draft = await prepareGameDraft(db, adminId, undefined, envWithBroadcast, undefined, serverId)
+      // Do NOT add any files (0 files)
+      const published = await publishGameRelease(
+        db,
+        envWithBroadcast,
+        { version: "1.0.0", notes: "Pure vanilla release without mods" },
+        adminId,
+        undefined,
+        serverId,
+      )
+
+      expect(published.status).toBe("PUBLISHED")
+      expect(published.version).toBe("1.0.0")
+      expect(published.files.length).toBe(0)
+
+      // Verify server launcherActiveReleaseId was updated
+      const serverInDb = await db.select().from(schema.servers).where(eq(schema.servers.id, serverId)).get()
+      expect(serverInDb?.launcherActiveReleaseId).toBe(published.id)
+
+      // Verify broadcastReleaseActivated included serverId
+      expect(broadcastBody).toBeDefined()
+      expect(broadcastBody.type).toBe("RELEASE_ACTIVATED")
+      expect(broadcastBody.serverId).toBe(serverId)
+      expect(broadcastBody.version).toBe("1.0.0")
     })
   })
 })

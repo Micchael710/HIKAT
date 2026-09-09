@@ -2320,6 +2320,118 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.getByText(/No se pudo comprobar el estado del servidor en este momento/i)).toBeDefined()
     })
 
+    it("18b. publicación exitosa de release con 0 archivos: se revisa y publica normalmente", async () => {
+      const emptyDraft = {
+        ...mockDraftRelease,
+        files: [],
+      }
+      const emptyReadiness = {
+        isReady: true,
+        validVersion: true,
+        uniqueVersion: true,
+        hasFiles: false,
+        noConflicts: true,
+        storageVerified: true,
+        issues: [] as string[],
+      }
+      const emptyChanges = {
+        added: 0,
+        updated: 0,
+        removed: 0,
+        unchanged: 0,
+        total: 0,
+      }
+      vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({
+        ...emptyDraft,
+        version: "1.0.0",
+      })
+      const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview")
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: null,
+        draftRelease: { ...emptyDraft, version: "1.0.0" },
+        changes: emptyChanges,
+        readiness: emptyReadiness,
+        pendingChangesCount: 0,
+      })
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: null,
+        draftRelease: { ...emptyDraft, version: "1.0.0" },
+        changes: emptyChanges,
+        readiness: emptyReadiness,
+        pendingChangesCount: 0,
+      })
+      overviewSpy.mockResolvedValueOnce({
+        publishedRelease: { ...emptyDraft, version: "1.0.0", files: [] },
+        draftRelease: null,
+        pendingChangesCount: 0,
+      })
+      const publishSpy = vi.spyOn(gameApi, "publishGameRelease").mockResolvedValue({
+        ...emptyDraft,
+        status: "PUBLISHED",
+        version: "1.0.0",
+        files: [],
+      })
+      vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+        releaseId: "rel-vanilla-1",
+        releaseVersion: "1.0.1",
+        isPending: false,
+        items: [],
+        summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 0 },
+        serverStatus: "OFFLINE",
+        canApply: true,
+      })
+
+      const onClose = vi.fn()
+      const onPublished = vi.fn()
+
+      render(
+        <PublishReleaseModal
+          serverId="srv-1"
+          theme="dark"
+          draftRelease={emptyDraft}
+          publishedRelease={null}
+          changes={emptyChanges}
+          readiness={emptyReadiness}
+          onClose={onClose}
+          onPublished={onPublished}
+        />,
+      )
+
+      // Step 1 -> Step 2
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Revisar cambios →"))
+      })
+
+      // Step 2 shows no pending file changes
+      expect(screen.getByText(/No hay cambios de archivos pendientes respecto a la versión oficial/i)).toBeDefined()
+
+      // Step 2 -> Step 3
+      await act(async () => {
+        fireEvent.click(screen.getByText("Siguiente: Confirmación →"))
+      })
+
+      // Summary
+      expect(screen.getByText("v1.0.0")).toBeDefined()
+
+      // Publish button is enabled and works
+      const publishBtn = screen.getByRole("button", { name: /Publicar actualización oficial/i })
+      expect((publishBtn as HTMLButtonElement).disabled).toBe(false)
+      await act(async () => {
+        fireEvent.click(publishBtn)
+      })
+
+      expect(publishSpy).toHaveBeenCalledWith(
+        {
+          version: "1.0.0",
+          notes: "Notas iniciales del borrador",
+          coverMediaId: null,
+        },
+        "srv-1",
+      )
+      expect(onPublished).toHaveBeenCalledWith("1.0.0", 0)
+      expect(screen.getByRole("heading", { name: "Actualización publicada", level: 2 })).toBeDefined()
+    })
+
     it("19. post-publish card con servidor OFFLINE: muestra cambios pendientes y clic en revisar llama onReviewServerChanges", async () => {
       vi.spyOn(gameApi, "updateGameDraftMetadata").mockResolvedValue({ ...mockDraftRelease, version: "1.0.1" })
       const overviewSpy = vi.spyOn(gameApi, "getAdminGameOverview")

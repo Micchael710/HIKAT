@@ -44,6 +44,7 @@ export class ReleaseEventsDurableObject {
 }
 
 export interface ReleaseActivatedBroadcastData {
+  serverId?: string | null
   version: string
   minecraftVersion?: string | null
   modLoader?: string | null
@@ -61,6 +62,7 @@ export async function broadcastReleaseActivated(
 
   const payload = JSON.stringify({
     type: "RELEASE_ACTIVATED",
+    serverId: release.serverId || null,
     version: release.version,
     minecraftVersion: release.minecraftVersion || "1.21.1",
     modLoader: release.modLoader || "NEOFORGE",

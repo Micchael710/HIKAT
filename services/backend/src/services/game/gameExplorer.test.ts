@@ -427,7 +427,9 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
 
     let readiness = await validateDraftReadiness(env, draft, files)
     expect(readiness.isReady).toBe(false)
-    expect(readiness.issues).toContain("El borrador no contiene ningún archivo o mod descargable.")
+    expect(readiness.hasFiles).toBe(false)
+    expect(readiness.validVersion).toBe(false)
+    expect(readiness.issues).toContain("Se debe configurar una versión válida en formato SemVer antes de publicar.")
 
     // 2. Add a real downloadable file and set valid version -> readiness passes
     await saveGameFileContent(db, { logicalPath: "config/main.toml", content: "enabled = true" }, adminId, env)

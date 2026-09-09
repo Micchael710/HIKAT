@@ -155,6 +155,7 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
     const parsedBody = JSON.parse(broadcastReqOptions.body)
     expect(parsedBody).toEqual({
       type: "RELEASE_ACTIVATED",
+      serverId: null,
       version: "1.3.0",
       minecraftVersion: "1.21.1",
       modLoader: "NEOFORGE",
@@ -162,6 +163,20 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
       neoForgeVersion: "21.1.65",
       mandatory: true,
     })
+
+    // Also test with explicit serverId
+    await broadcastReleaseActivated(env, {
+      serverId: "srv-survival-01",
+      version: "1.4.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FABRIC",
+      modLoaderVersion: "0.15.7",
+      mandatory: true,
+    })
+    const parsedWithServer = JSON.parse(broadcastReqOptions.body)
+    expect(parsedWithServer.serverId).toBe("srv-survival-01")
+    expect(parsedWithServer.version).toBe("1.4.0")
+    expect(parsedWithServer.modLoader).toBe("FABRIC")
   })
 
   it("broadcastReleaseActivated does not fail if RELEASE_EVENTS is undefined", async () => {
