@@ -97,21 +97,14 @@ export async function resolveServerAllocationPort(
         }
       }
     } catch {
-      // Fall through to port heuristic or default
+      // Fall through to controlled error
     }
   }
 
-  // 3. If allocation is directly a valid port number (> 1024 and <= 65535)
-  if (
-    typeof pServer.allocation === "number" &&
-    pServer.allocation > 1024 &&
-    pServer.allocation <= 65535
-  ) {
-    return pServer.allocation
-  }
-
-  // 4. Default fallback: Minecraft standard port 25565
-  return 25565
+  throw createGraphQLError(
+    `No se pudo resolver el puerto real de la allocation (${pServer.allocation}) para el servidor.`,
+    "INTERNAL_ERROR",
+  )
 }
 
 export function updateServerPropertiesBootstrap(
@@ -688,19 +681,13 @@ export async function createServer(
   const pterodactylId = String(pterodactylRes.attributes.id)
   const pterodactylIdentifier = pterodactylRes.attributes.identifier
 
-  const isAlreadyInstalled =
-    pterodactylRes.attributes?.container?.installed === 1 ||
-    pterodactylRes.attributes?.status === null
-
-  const initialStatus = isAlreadyInstalled ? "READY" : "PROVISIONING"
-
   try {
     await db
       .update(schema.servers)
       .set({
         pterodactylServerId: pterodactylId,
         pterodactylIdentifier,
-        provisioningStatus: initialStatus,
+        provisioningStatus: "PROVISIONING",
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.servers.id, serverId))

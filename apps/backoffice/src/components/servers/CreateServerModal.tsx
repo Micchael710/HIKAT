@@ -844,10 +844,10 @@ export default function CreateServerModal({
                   <div>
                     <div style={{ fontWeight: 700, color: "#3ec4c0", marginBottom: 2 }}>Capacidad de Memoria</div>
                     <div style={{ color: isDark ? "#94a3b8" : "#64748b" }}>
-                      Total: {(nodeCapacity.totalMemoryMb / 1024).toFixed(1)} GB | Asignada: {(nodeCapacity.allocatedMemoryMb / 1024).toFixed(1)} GB
+                      RAM del Node: {nodeCapacity.totalMemoryMb % 1024 === 0 ? (nodeCapacity.totalMemoryMb / 1024).toFixed(0) : (nodeCapacity.totalMemoryMb / 1024).toFixed(1)} GB
                     </div>
                     <div style={{ fontWeight: 600, color: isDark ? "#ffffff" : "#111822", marginTop: 2 }}>
-                      Disponible: {(nodeCapacity.availableMemoryMb / 1024).toFixed(1)} GB
+                      RAM seleccionada: {ram % 1024 === 0 ? (ram / 1024).toFixed(0) : (ram / 1024).toFixed(1)} GB
                     </div>
                   </div>
                   <div>
@@ -941,8 +941,8 @@ export default function CreateServerModal({
               {/* RAM */}
               {(() => {
                 const maxRam =
-                  nodeCapacity && nodeCapacity.availableMemoryMb > 0
-                    ? Math.max(1024, nodeCapacity.availableMemoryMb)
+                  nodeCapacity && (nodeCapacity.totalMemoryMb > 0 || nodeCapacity.availableMemoryMb > 0)
+                    ? Math.max(1024, nodeCapacity.totalMemoryMb || nodeCapacity.availableMemoryMb)
                     : 32768
                 return (
                   <div

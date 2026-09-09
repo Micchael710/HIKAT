@@ -1182,12 +1182,55 @@ describe("ServerService & Multi-Server Provisioning", () => {
       } as any)
       expect(portFromNode).toBe(25590)
 
-      // 3. Fallback when allocation is directly a port number
-      const portDirect = await resolveServerAllocationPort({} as any, {
-        id: 3,
-        allocation: 25599,
-      } as any)
-      expect(portDirect).toBe(25599)
+      // 3. Throws controlled error when real allocation cannot be resolved
+      await expect(
+        resolveServerAllocationPort({} as any, {
+          id: 3,
+          allocation: 999,
+        } as any),
+      ).rejects.toThrow("No se pudo resolver el puerto real de la allocation (999) para el servidor.")
+    })
+
+    it("createServer always initializes status to PROVISIONING even if Pterodactyl indicates installed", async () => {
+      const installedClient = {
+        ...mockClient,
+        createApplicationServer: vi.fn(async (payload) => ({
+          attributes: {
+            id: 150,
+            identifier: "ptero_installed",
+            name: payload.name,
+            docker_image: payload.docker_image,
+            external_id: payload.external_id,
+            status: null,
+            container: { installed: 1 },
+          },
+        })),
+      } as unknown as IPterodactylClient
+
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Installed Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        installedClient,
+      )
+
+      expect(server.provisioningStatus).toBe("PROVISIONING")
+
+      const inDb = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, server.id))
+        .get()
+
+      expect(inDb?.provisioningStatus).toBe("PROVISIONING")
     })
 
     it("executes bootstrap across all 5 loaders (VANILLA, FORGE, NEOFORGE, FABRIC, QUILT) without touching loader internal files", async () => {
