@@ -125,7 +125,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
     this.appApiKey = options.appApiKey?.trim() || ""
     this.serverId = options.serverId?.trim() || ""
     this.timeoutMs = options.timeoutMs ?? 8000
-    this.fetchFn = options.fetchFn ?? fetch
+    this.fetchFn = options.fetchFn ?? fetch.bind(globalThis)
   }
 
   private async request<T>(
@@ -662,6 +662,15 @@ export class PterodactylHttpClient implements IPterodactylClient {
         signal: controller.signal,
       })
     } catch (err: unknown) {
+      console.error("[Pterodactyl Application fetch raw error]", {
+        name: err instanceof Error ? err.name : typeof err,
+        message: err instanceof Error ? err.message : String(err),
+        cause:
+          err instanceof Error && "cause" in err
+            ? String((err as any).cause)
+            : undefined,
+      })
+
       clearTimeout(timeoutId)
       if (err instanceof Error && (err.name === "AbortError" || err.message?.includes("aborted"))) {
         throw new ServerInfrastructureError(
@@ -715,7 +724,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
       try {
         const errJson = await response.json()
         errDetail = JSON.stringify(errJson)
-      } catch {}
+      } catch { }
       throw new ServerInfrastructureError(
         SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
         SERVER_PUBLIC_MESSAGES.SERVER_UNAVAILABLE,

@@ -8,8 +8,18 @@
     "nodejs_compat"
   ],
   "vars": {
+    "ENVIRONMENT": "production",
     "AUTH_ISSUER": "https://auth.hikat.org",
-    "AUTH_JWKS_URL": "https://auth.hikat.org/.well-known/jwks.json"
+    "AUTH_JWKS_URL": "https://auth.hikat.org/.well-known/jwks.json",
+    "PTERODACTYL_BASE_URL": "https://hikat-panel.ddns.net",
+    "CORS_ALLOW_ORIGIN": "http://localhost:5174,http://127.0.0.1:5174",
+    "PTERODACTYL_DEFAULT_OWNER_ID": "2",
+    "PTERODACTYL_DEFAULT_LOCATION_ID": "1",
+    "PTERODACTYL_EGG_VANILLA_ID": "3",
+    "PTERODACTYL_EGG_FORGE_ID": "1",
+    "PTERODACTYL_EGG_NEOFORGE_ID": "15",
+    "PTERODACTYL_EGG_FABRIC_ID": "16",
+    "PTERODACTYL_EGG_QUILT_ID": "18"
   },
   "d1_databases": [
     {
@@ -25,6 +35,12 @@
       "binding": "ASSETS",
       "bucket_name": "hikat-r2",
       "remote": true
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "api.hikat.org",
+      "custom_domain": true
     }
   ],
   "durable_objects": {
