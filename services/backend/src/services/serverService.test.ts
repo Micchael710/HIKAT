@@ -99,6 +99,50 @@ describe("ServerService & Multi-Server Provisioning", () => {
         deletedServersInPterodactyl.push(id)
         return true
       }),
+      listApplicationNodes: vi.fn(async () => ({
+        object: "list",
+        data: [
+          {
+            object: "node",
+            attributes: {
+              id: 1,
+              name: "Node-1",
+              location_id: 1,
+              memory: 32768,
+              memory_overallocate: 0,
+              disk: 102400,
+              disk_overallocate: 0,
+              allocated_resources: {
+                memory: 4096,
+                disk: 10240,
+              },
+            },
+          },
+        ],
+      })),
+      listApplicationNodeAllocations: vi.fn(async () => ({
+        object: "list",
+        data: [
+          {
+            object: "allocation",
+            attributes: {
+              id: 10,
+              ip: "127.0.0.1",
+              port: 25565,
+              assigned: false,
+            },
+          },
+          {
+            object: "allocation",
+            attributes: {
+              id: 11,
+              ip: "127.0.0.1",
+              port: 25566,
+              assigned: true,
+            },
+          },
+        ],
+      })),
       getServerDetails: vi.fn(),
       setPowerState: vi.fn(),
       getUtilization: vi.fn(),
@@ -471,7 +515,102 @@ describe("ServerService & Multi-Server Provisioning", () => {
       ).rejects.toThrow("La asignación de CPU debe ser un número entero entre 50% y 1200%")
     })
 
-    it("validates and normalizes accent colors", async () => {
+    it("rejects server creation when requested RAM exceeds Node capacity", async () => {
+      await expect(
+        createServer(
+          mockDb,
+          mockEnv,
+          {
+            name: "Excessive RAM Server",
+            minecraftVersion: "1.20.1",
+            modLoader: "VANILLA",
+            cpu: 200,
+            memoryMb: 65536, // Node has 32768
+            diskMb: 10240,
+          },
+          "user-1",
+          mockClient,
+        ),
+      ).rejects.toThrow("no puede superar la capacidad máxima del nodo (32768 MB)")
+    })
+
+    it("rejects server creation when requested disk exceeds available disk on Node", async () => {
+      await expect(
+        createServer(
+          mockDb,
+          mockEnv,
+          {
+            name: "Excessive Disk Server",
+            minecraftVersion: "1.20.1",
+            modLoader: "VANILLA",
+            cpu: 200,
+            memoryMb: 4096,
+            diskMb: 150000, // Available is 102400 - 10240 = 92160
+          },
+          "user-1",
+          mockClient,
+        ),
+      ).rejects.toThrow("supera el espacio disponible en el nodo")
+    })
+
+    it("rejects server creation when Node has no unassigned allocations", async () => {
+      const fullAllocationClient = {
+        ...mockClient,
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "allocation",
+              attributes: {
+                id: 10,
+                ip: "127.0.0.1",
+                port: 25565,
+                assigned: true,
+              },
+            },
+          ],
+        })),
+      } as unknown as IPterodactylClient
+
+      await expect(
+        createServer(
+          mockDb,
+          mockEnv,
+          {
+            name: "No Port Server",
+            minecraftVersion: "1.20.1",
+            modLoader: "VANILLA",
+            cpu: 200,
+            memoryMb: 4096,
+            diskMb: 10240,
+          },
+          "user-1",
+          fullAllocationClient,
+        ),
+      ).rejects.toThrow("No hay puertos/allocations disponibles en el nodo de Pterodactyl")
+    })
+
+    it("uses explicit Node allocation and does not use deploy.locations", async () => {
+      await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Allocation Test Server",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
+      expect(call.allocation).toEqual({ default: 10 })
+      expect(call.deploy).toBeUndefined()
+    })
+    it("creates server with custom accent color", async () => {
       const server = await createServer(
         mockDb,
         mockEnv,
@@ -495,6 +634,38 @@ describe("ServerService & Multi-Server Provisioning", () => {
   describe("Failure & Compensation Handling", () => {
     it("marks server as FAILED if Pterodactyl provisioning throws", async () => {
       const failingClient = {
+        listApplicationNodes: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "node",
+              attributes: {
+                id: 1,
+                name: "Node-1",
+                location_id: 1,
+                memory: 16384,
+                memory_overallocate: 0,
+                disk: 102400,
+                disk_overallocate: 0,
+                allocated_resources: { memory: 4096, disk: 10240 },
+              },
+            },
+          ],
+        })),
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "allocation",
+              attributes: {
+                id: 10,
+                ip: "127.0.0.1",
+                port: 25565,
+                assigned: false,
+              },
+            },
+          ],
+        })),
         createApplicationServer: vi.fn(async () => {
           throw new Error("Pterodactyl Node Unavailable")
         }),
@@ -537,6 +708,38 @@ describe("ServerService & Multi-Server Provisioning", () => {
       )
 
       const failingClient = {
+        listApplicationNodes: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "node",
+              attributes: {
+                id: 1,
+                name: "Node-1",
+                location_id: 1,
+                memory: 16384,
+                memory_overallocate: 0,
+                disk: 102400,
+                disk_overallocate: 0,
+                allocated_resources: { memory: 4096, disk: 10240 },
+              },
+            },
+          ],
+        })),
+        listApplicationNodeAllocations: vi.fn(async () => ({
+          object: "list",
+          data: [
+            {
+              object: "allocation",
+              attributes: {
+                id: 10,
+                ip: "127.0.0.1",
+                port: 25565,
+                assigned: false,
+              },
+            },
+          ],
+        })),
         createApplicationServer: vi.fn(async () => {
           throw mockError
         }),
@@ -787,7 +990,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
       expect(inDb?.provisioningStatus).toBe("FAILED")
     })
 
-    it("calculates real Node capacity respecting memory and disk overallocation", async () => {
+    it("calculates real Node capacity with RAM available as total node memory and cumulative disk", async () => {
       const nodeClient = {
         listApplicationNodes: vi.fn(async () => ({
           object: "list",
@@ -799,7 +1002,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
                 name: "Node-EU-1",
                 location_id: 1,
                 memory: 32768,
-                memory_overallocate: 20, // 32768 * 1.2 = 39321 MB
+                memory_overallocate: 20,
                 disk: 102400,
                 disk_overallocate: 10, // 102400 * 1.1 = 112640 MB
                 allocated_resources: {
@@ -813,9 +1016,9 @@ describe("ServerService & Multi-Server Provisioning", () => {
       } as unknown as IPterodactylClient
 
       const capacity = await getServerNodeCapacity(mockEnv, nodeClient)
-      expect(capacity.totalMemoryMb).toBe(39321)
+      expect(capacity.totalMemoryMb).toBe(32768)
       expect(capacity.allocatedMemoryMb).toBe(8192)
-      expect(capacity.availableMemoryMb).toBe(39321 - 8192)
+      expect(capacity.availableMemoryMb).toBe(32768) // RAM is max per server, not subtracted
 
       expect(capacity.totalDiskMb).toBe(112640)
       expect(capacity.allocatedDiskMb).toBe(20480)
@@ -839,7 +1042,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
                 disk_overallocate: -1, // Unlimited
                 allocated_resources: {
                   memory: 20480, // Even if allocated > memory
-                  disk: 60000,
+                  disk: 10240,
                 },
               },
             },
@@ -851,7 +1054,7 @@ describe("ServerService & Multi-Server Provisioning", () => {
       expect(capacity.totalMemoryMb).toBe(16384)
       expect(capacity.availableMemoryMb).toBe(16384)
       expect(capacity.totalDiskMb).toBe(51200)
-      expect(capacity.availableDiskMb).toBe(51200)
+      expect(capacity.availableDiskMb).toBe(51200 - 10240)
     })
 
     it("throws controlled SERVICE_UNAVAILABLE error when node capacity cannot be obtained", async () => {

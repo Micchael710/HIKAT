@@ -317,6 +317,7 @@ export async function createServer(
   }
 
   // 7. Validate Pterodactyl provisioning configuration
+  // 7. Resolve Pterodactyl Owner, Location, Node and Allocation
   const rawOwnerId = env.PTERODACTYL_DEFAULT_OWNER_ID
   const rawLocationId = env.PTERODACTYL_DEFAULT_LOCATION_ID
 
@@ -334,6 +335,75 @@ export async function createServer(
     throw createGraphQLError(
       "La configuración de aprovisionamiento de Pterodactyl está incompleta o es inválida (PTERODACTYL_DEFAULT_OWNER_ID, PTERODACTYL_DEFAULT_LOCATION_ID).",
       "VALIDATION_ERROR",
+    )
+  }
+
+  const client = clientOverride || createPterodactylApplicationClient(env)
+
+  let node: import("./pterodactyl/types").PterodactylNodeAttributes | undefined
+  try {
+    const nodesList = await client.listApplicationNodes()
+    if (nodesList?.data && nodesList.data.length > 0) {
+      const match = nodesList.data.find(
+        (n) => n.attributes.location_id === locationId,
+      )
+      node = match?.attributes || nodesList.data[0]?.attributes
+    }
+  } catch (err: unknown) {
+    const errorMsg =
+      err instanceof Error ? err.message : "Error al conectar con la API de Pterodactyl"
+    throw createGraphQLError(errorMsg, "INTERNAL_ERROR")
+  }
+
+  if (!node) {
+    throw createGraphQLError(
+      "No se encontró ningún nodo configurado en Pterodactyl para aprovisionar el servidor.",
+      "INTERNAL_ERROR",
+    )
+  }
+
+  // Validate memory against max node memory (non-cumulative across servers)
+  if (memoryMb > node.memory) {
+    throw createGraphQLError(
+      `La memoria RAM asignada (${memoryMb} MB) no puede superar la capacidad máxima del nodo (${node.memory} MB).`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  // Validate disk against real available disk on node (cumulative across servers)
+  const diskOverallocate = node.disk_overallocate ?? 0
+  const allocatedDiskMb = node.allocated_resources?.disk || 0
+  const maxDiskMb =
+    diskOverallocate === -1
+      ? node.disk
+      : Math.floor(node.disk * (1 + Math.max(0, diskOverallocate) / 100))
+  const availableDiskMb = Math.max(0, maxDiskMb - allocatedDiskMb)
+
+  if (diskMb > availableDiskMb) {
+    throw createGraphQLError(
+      `El espacio en disco asignado (${diskMb} MB) supera el espacio disponible en el nodo (${availableDiskMb} MB).`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  // Query free allocation on node
+  let freeAllocationId: number | undefined
+  try {
+    const allocationsRes = await client.listApplicationNodeAllocations(node.id)
+    const freeAlloc = allocationsRes?.data?.find((a) => !a.attributes.assigned)
+    if (freeAlloc) {
+      freeAllocationId = freeAlloc.attributes.id
+    }
+  } catch (err: unknown) {
+    const errorMsg =
+      err instanceof Error ? err.message : "Error al consultar puertos/allocations del nodo en Pterodactyl"
+    throw createGraphQLError(errorMsg, "INTERNAL_ERROR")
+  }
+
+  if (!freeAllocationId) {
+    throw createGraphQLError(
+      "No hay puertos/allocations disponibles en el nodo de Pterodactyl para crear el servidor.",
+      "INTERNAL_ERROR",
     )
   }
 
@@ -367,9 +437,7 @@ export async function createServer(
     updatedAt: now,
   })
 
-  // 9. Provision in Pterodactyl Application API
-  const client = clientOverride || createPterodactylApplicationClient(env)
-
+  // 9. Provision in Pterodactyl Application API using explicit node allocation
   let pterodactylRes: any
   try {
     pterodactylRes = await client.createApplicationServer({
@@ -391,10 +459,8 @@ export async function createServer(
         allocations: 1,
         backups: 10,
       },
-      deploy: {
-        locations: [locationId],
-        dedicated_ip: false,
-        port_range: [],
+      allocation: {
+        default: freeAllocationId,
       },
       external_id: serverId,
       start_on_completion: false,
@@ -566,18 +632,9 @@ export async function getServerNodeCapacity(
     )
   }
 
-  const memoryOverallocate = node.memory_overallocate ?? 0
+  const totalMemoryMb = node.memory
   const allocatedMemoryMb = node.allocated_resources?.memory || 0
-  let maxMemoryMb: number
-  let availableMemoryMb: number
-
-  if (memoryOverallocate === -1) {
-    maxMemoryMb = node.memory
-    availableMemoryMb = node.memory
-  } else {
-    maxMemoryMb = Math.floor(node.memory * (1 + Math.max(0, memoryOverallocate) / 100))
-    availableMemoryMb = Math.max(0, maxMemoryMb - allocatedMemoryMb)
-  }
+  const availableMemoryMb = node.memory
 
   const diskOverallocate = node.disk_overallocate ?? 0
   const allocatedDiskMb = node.allocated_resources?.disk || 0
@@ -586,14 +643,14 @@ export async function getServerNodeCapacity(
 
   if (diskOverallocate === -1) {
     maxDiskMb = node.disk
-    availableDiskMb = node.disk
+    availableDiskMb = Math.max(0, node.disk - allocatedDiskMb)
   } else {
     maxDiskMb = Math.floor(node.disk * (1 + Math.max(0, diskOverallocate) / 100))
     availableDiskMb = Math.max(0, maxDiskMb - allocatedDiskMb)
   }
 
   return {
-    totalMemoryMb: maxMemoryMb,
+    totalMemoryMb,
     allocatedMemoryMb,
     availableMemoryMb,
     totalDiskMb: maxDiskMb,

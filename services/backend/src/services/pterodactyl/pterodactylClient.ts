@@ -882,5 +882,14 @@ export class PterodactylHttpClient implements IPterodactylClient {
       { method: "GET" },
     )
   }
+
+  async listApplicationNodeAllocations(
+    nodeId: number | string,
+  ): Promise<import("./types").PterodactylAllocationListResponse> {
+    return this.applicationRequest<import("./types").PterodactylAllocationListResponse>(
+      `/api/application/nodes/${encodeURIComponent(String(nodeId))}/allocations`,
+      { method: "GET" },
+    )
+  }
 }
 

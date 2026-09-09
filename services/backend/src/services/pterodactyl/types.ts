@@ -252,6 +252,26 @@ export interface IPterodactylClient {
   getApplicationServer(serverId: number | string): Promise<PterodactylApplicationServerResponse>
   listApplicationNodes(): Promise<PterodactylNodeListResponse>
   getApplicationNode(nodeId: number | string): Promise<PterodactylNodeResponse>
+  listApplicationNodeAllocations(nodeId: number | string): Promise<PterodactylAllocationListResponse>
+}
+
+export interface PterodactylAllocationAttributes {
+  id: number
+  ip: string
+  alias: string | null
+  port: number
+  notes: string | null
+  assigned: boolean
+}
+
+export interface PterodactylAllocationResponse {
+  object: "allocation"
+  attributes: PterodactylAllocationAttributes
+}
+
+export interface PterodactylAllocationListResponse {
+  object: "list"
+  data: PterodactylAllocationResponse[]
 }
 
 export interface PterodactylNodeAllocatedResources {
