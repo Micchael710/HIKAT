@@ -692,6 +692,119 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
     })
   })
 
+  it("E7. Action status listener es game-specific: Warria -> Apparatia registra listener y ejecuta refreshOperationalState/checkSyncPlan ante finished verify; Apparatia -> Warria desuscribe listener", async () => {
+    const checkSyncPlanMock = vi.fn().mockResolvedValue({ success: true, isFullyInstalled: true })
+
+    ;(window as any).electronAPI = {
+      getMemory: vi.fn().mockResolvedValue({ totalGb: 16 }),
+      getStartWithSystem: vi.fn().mockResolvedValue(true),
+      getMinimizeToTray: vi.fn().mockResolvedValue(true),
+      getMinimizeOnGameLaunch: vi.fn().mockResolvedValue(true),
+      checkSyncPlan: checkSyncPlanMock,
+      getDedicatedGpu: vi.fn().mockResolvedValue(true),
+      getRamAllocation: vi.fn().mockResolvedValue(8),
+      getGameRuntimeInfo: vi.fn().mockResolvedValue({ javaMajorVersion: 21 }),
+      getLaunchStatus: vi.fn().mockResolvedValue({ status: "idle", operationState: "IDLE" }),
+    }
+
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          clientFiles: [
+            { path: "mods/apparatia.jar", sha256: "abc", sizeBytes: 1000, downloadUrl: "https://example.com/a.jar", policy: "MANAGED" },
+          ],
+        },
+      },
+    } as any)
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    unmountCurrent = () => root.unmount()
+
+    // 1. Montar Settings con Warria
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <SettingsView
+            theme="dark"
+            servers={[mockApparatia, mockWarria]}
+            selectedGameId={WARRIA_ID}
+            onSelectGameId={() => {}}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    checkSyncPlanMock.mockClear()
+
+    // Disparar acción con Warria montado -> no debe ejecutar checkSyncPlan
+    window.dispatchEvent(
+      new CustomEvent("hikat:game-action-status", {
+        detail: { action: "verify", state: "finished", success: true },
+      })
+    )
+    expect(checkSyncPlanMock).not.toHaveBeenCalled()
+
+    // 2. Cambiar a Apparatia
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <SettingsView
+            theme="dark"
+            servers={[mockApparatia, mockWarria]}
+            selectedGameId={APPARATIA_ID}
+            onSelectGameId={() => {}}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    checkSyncPlanMock.mockClear()
+
+    // 3. Disparar hikat:game-action-status finished para verify
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("hikat:game-action-status", {
+          detail: { action: "verify", state: "finished", success: true },
+        })
+      )
+    })
+
+    // Comprobar que Apparatia sí ejecuta su refreshOperationalState/checkSyncPlan
+    expect(checkSyncPlanMock).toHaveBeenCalled()
+
+    // 4. Cambiar de nuevo a Warria
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <SettingsView
+            theme="dark"
+            servers={[mockApparatia, mockWarria]}
+            selectedGameId={WARRIA_ID}
+            onSelectGameId={() => {}}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    checkSyncPlanMock.mockClear()
+
+    // 5. Disparar evento de nuevo -> el listener anterior quedó eliminado y no ejecuta checkSyncPlan
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("hikat:game-action-status", {
+          detail: { action: "verify", state: "finished", success: true },
+        })
+      )
+    })
+    expect(checkSyncPlanMock).not.toHaveBeenCalled()
+  })
+
   it("F. Cambiar seleccion: Apparatia -> Warria y recibir RELEASE_ACTIVATED de Warria debe refrescar Warria; evento de Apparatia se ignora", async () => {
     let wsCallback: ((ev: ReleaseActivatedEvent) => void) | null = null
     vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {

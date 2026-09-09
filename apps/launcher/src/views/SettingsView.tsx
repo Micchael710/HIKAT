@@ -371,73 +371,11 @@ export default function SettingsView({
         .catch(() => {})
     }
 
-    // Listen to game action status events from DownloadPlayButton
-    const handleActionStatus = (e: Event) => {
-      if (!isLegacyLocalRef.current) return
-      const customEvt = e as CustomEvent<{
-        action: "verify" | "uninstall"
-        state: "started" | "finished"
-        success?: boolean
-      }>
-      const { action, state, success } = customEvt.detail || {}
-      if (action === "verify") {
-        setIsVerifying(state === "started")
-        if (state === "started") {
-          notifySaved(t("settings.verifying"), "info")
-        } else if (state === "finished") {
-          refreshOperationalState()
-          if (success) {
-            notifySaved(t("settings.verifiedSuccess"), "success")
-          } else {
-            notifySaved(t("playButton.verifyError"), "error")
-          }
-          if (window.electronAPI?.getGameRuntimeInfo) {
-            window.electronAPI
-              .getGameRuntimeInfo()
-              .then((runtime: any) => {
-                if (
-                  isMounted &&
-                  runtime &&
-                  typeof runtime.javaMajorVersion === "number" &&
-                  runtime.javaMajorVersion > 0
-                ) {
-                  setRuntimeInfo(runtime)
-                  try {
-                    localStorage.setItem(
-                      STORAGE_KEYS.JAVA_MAJOR_VERSION,
-                      String(runtime.javaMajorVersion),
-                    )
-                  } catch (_) {}
-                }
-              })
-              .catch(() => {})
-          }
-        }
-      } else if (action === "uninstall") {
-        setIsUninstalling(state === "started")
-        if (state === "finished") {
-          refreshOperationalState()
-          if (success) {
-            setRuntimeInfo({ javaMajorVersion: null })
-            try {
-              localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
-            } catch (_) {}
-            notifySaved(t("playButton.uninstallSuccess"), "success")
-          } else {
-            notifySaved(t("playButton.uninstallError"), "error")
-          }
-        }
-      }
-    }
-
-    window.addEventListener("hikat:game-action-status", handleActionStatus)
-
     return () => {
       isMounted = false
       if (toastTimeoutRef.current) {
         clearTimeout(toastTimeoutRef.current)
       }
-      window.removeEventListener("hikat:game-action-status", handleActionStatus)
     }
   }, [])
 
@@ -516,10 +454,71 @@ export default function SettingsView({
       if (isMounted) setOperationState(phase)
     })
 
+    // Listen to game action status events from DownloadPlayButton
+    const handleActionStatus = (e: Event) => {
+      const customEvt = e as CustomEvent<{
+        action: "verify" | "uninstall"
+        state: "started" | "finished"
+        success?: boolean
+      }>
+      const { action, state, success } = customEvt.detail || {}
+      if (action === "verify") {
+        setIsVerifying(state === "started")
+        if (state === "started") {
+          notifySaved(t("settings.verifying"), "info")
+        } else if (state === "finished") {
+          refreshOperationalState()
+          if (success) {
+            notifySaved(t("settings.verifiedSuccess"), "success")
+          } else {
+            notifySaved(t("playButton.verifyError"), "error")
+          }
+          if (window.electronAPI?.getGameRuntimeInfo) {
+            window.electronAPI
+              .getGameRuntimeInfo()
+              .then((runtime: any) => {
+                if (
+                  isMounted &&
+                  runtime &&
+                  typeof runtime.javaMajorVersion === "number" &&
+                  runtime.javaMajorVersion > 0
+                ) {
+                  setRuntimeInfo(runtime)
+                  try {
+                    localStorage.setItem(
+                      STORAGE_KEYS.JAVA_MAJOR_VERSION,
+                      String(runtime.javaMajorVersion),
+                    )
+                  } catch (_) {}
+                }
+              })
+              .catch(() => {})
+          }
+        }
+      } else if (action === "uninstall") {
+        setIsUninstalling(state === "started")
+        if (state === "finished") {
+          refreshOperationalState()
+          if (success) {
+            setRuntimeInfo({ javaMajorVersion: null })
+            try {
+              localStorage.removeItem(STORAGE_KEYS.JAVA_MAJOR_VERSION)
+            } catch (_) {}
+            notifySaved(t("playButton.uninstallSuccess"), "success")
+          } else {
+            notifySaved(t("playButton.uninstallError"), "error")
+          }
+        }
+      }
+    }
+
+    window.addEventListener("hikat:game-action-status", handleActionStatus)
+
     return () => {
       isMounted = false
       unsubLaunch?.()
       unsubPhase?.()
+      window.removeEventListener("hikat:game-action-status", handleActionStatus)
     }
   }, [isLegacyLocal, selectedGameId])
 
