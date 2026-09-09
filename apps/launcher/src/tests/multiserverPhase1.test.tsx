@@ -303,8 +303,10 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
       )
     })
 
-    // checkSyncPlan, setRamAllocation, setDedicatedGpu must NOT be called for Warria
-    expect(checkSyncPlanMock).not.toHaveBeenCalled()
+    // checkSyncPlan is called with Warria's gameContext; setRamAllocation and setDedicatedGpu are not called without user edit
+    expect(checkSyncPlanMock).toHaveBeenCalledWith(
+      expect.objectContaining({ gameId: WARRIA_ID, gameName: "Warria" })
+    )
     expect(setRamMock).not.toHaveBeenCalled()
     expect(setGpuMock).not.toHaveBeenCalled()
 
@@ -585,14 +587,13 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
       )
     })
 
-    // Warria: no legacy APIs or subscriptions
-    expect(checkSyncPlanMock).not.toHaveBeenCalled()
-    expect(getGpuMock).not.toHaveBeenCalled()
-    expect(getRamMock).not.toHaveBeenCalled()
-    expect(getRuntimeMock).not.toHaveBeenCalled()
-    expect(getLaunchStatusMock).not.toHaveBeenCalled()
-    expect(onLaunchStatusMock).not.toHaveBeenCalled()
-    expect(onPhaseChangeMock).not.toHaveBeenCalled()
+    // Warria: now calls operations with Warria's gameContext
+    expect(getGpuMock).toHaveBeenCalledWith({ gameId: WARRIA_ID, gameName: "Warria" })
+    expect(getRamMock).toHaveBeenCalledWith({ gameId: WARRIA_ID, gameName: "Warria" })
+    expect(getRuntimeMock).toHaveBeenCalledWith({ gameId: WARRIA_ID, gameName: "Warria" })
+    expect(getLaunchStatusMock).toHaveBeenCalledWith({ gameId: WARRIA_ID, gameName: "Warria" })
+    expect(onLaunchStatusMock).toHaveBeenCalled()
+    expect(onPhaseChangeMock).toHaveBeenCalled()
 
     // 2. Change selectedGameId to Apparatia
     await act(async () => {
@@ -608,11 +609,11 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
       )
     })
 
-    // Apparatia: now legacy operations must run and listeners must subscribe
-    expect(getGpuMock).toHaveBeenCalled()
-    expect(getRamMock).toHaveBeenCalled()
-    expect(getRuntimeMock).toHaveBeenCalled()
-    expect(getLaunchStatusMock).toHaveBeenCalled()
+    // Apparatia: now operations run with Apparatia's gameContext
+    expect(getGpuMock).toHaveBeenCalledWith({ gameId: APPARATIA_ID, gameName: "Apparatia" })
+    expect(getRamMock).toHaveBeenCalledWith({ gameId: APPARATIA_ID, gameName: "Apparatia" })
+    expect(getRuntimeMock).toHaveBeenCalledWith({ gameId: APPARATIA_ID, gameName: "Apparatia" })
+    expect(getLaunchStatusMock).toHaveBeenCalledWith({ gameId: APPARATIA_ID, gameName: "Apparatia" })
     expect(onLaunchStatusMock).toHaveBeenCalled()
     expect(onPhaseChangeMock).toHaveBeenCalled()
   })

@@ -39,23 +39,113 @@ const {
 } = require("./client-files-sync.cjs")
 const { loadCoreState } = require("./minecraft-core.cjs")
 
-const instanceRoot = path.join(appDataRoot, "game files")
-const gameLauncher = new GameLauncher(app, { instanceRoot })
+const gamesRoot = path.join(appDataRoot, "games")
+const legacyInstanceRoot = path.join(appDataRoot, "game files")
+const instanceRoot = legacyInstanceRoot
+
+const WINDOWS_INVALID_CHARS = /[<>:"/\\|?*]/
+const WINDOWS_RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i
+
+function validateGameName(name) {
+  if (typeof name !== "string") {
+    throw new Error("Invalid gameName: must be a string.")
+  }
+  const trimmed = name.trim()
+  if (!trimmed) {
+    throw new Error("Invalid gameName: cannot be empty.")
+  }
+  if (trimmed === "." || trimmed === "..") {
+    throw new Error("Invalid gameName: '.' or '..' is not allowed.")
+  }
+  if (trimmed.includes("/") || trimmed.includes("\\")) {
+    throw new Error("Invalid gameName: directory separators are not allowed.")
+  }
+  if (trimmed.endsWith(".") || trimmed.endsWith(" ")) {
+    throw new Error("Invalid gameName: name cannot end with a period or space.")
+  }
+  if (WINDOWS_INVALID_CHARS.test(trimmed)) {
+    throw new Error("Invalid gameName: contains invalid filesystem characters.")
+  }
+  const baseName = trimmed.split(".")[0]
+  if (WINDOWS_RESERVED_NAMES.test(trimmed) || WINDOWS_RESERVED_NAMES.test(baseName)) {
+    throw new Error(`Invalid gameName: "${trimmed}" is a reserved system name.`)
+  }
+  const resolved = path.resolve(gamesRoot, trimmed)
+  const rel = path.relative(gamesRoot, resolved)
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("Invalid gameName: path escapes gamesRoot.")
+  }
+  return trimmed
+}
+
+function resolveGameContext(payload = {}) {
+  const hasGameId =
+    payload &&
+    payload.gameId !== undefined &&
+    payload.gameId !== null &&
+    String(payload.gameId).trim() !== ""
+  const hasGameName =
+    payload &&
+    payload.gameName !== undefined &&
+    payload.gameName !== null &&
+    String(payload.gameName).trim() !== ""
+
+  if (hasGameId && hasGameName) {
+    const gameId = String(payload.gameId).trim()
+    const validName = validateGameName(payload.gameName)
+    let resolvedInstanceRoot = path.join(gamesRoot, validName)
+
+    // Rule 5: Temporary Apparatia compatibility bridge
+    if (validName.toLowerCase() === "apparatia") {
+      if (fs.existsSync(resolvedInstanceRoot)) {
+        // Use games/Apparatia
+      } else if (fs.existsSync(legacyInstanceRoot)) {
+        resolvedInstanceRoot = legacyInstanceRoot
+      }
+    }
+
+    return {
+      gameId,
+      gameName: validName,
+      instanceRoot: resolvedInstanceRoot,
+    }
+  }
+
+  if (!hasGameId && !hasGameName) {
+    return {
+      gameId: null,
+      gameName: null,
+      instanceRoot: legacyInstanceRoot,
+    }
+  }
+
+  throw new Error("Invalid game context: gameId and gameName must be provided together or neither.")
+}
+
+const gameLauncher = new GameLauncher(app, {
+  instanceRoot,
+  javaStorageRoot: appDataRoot,
+  processStateRoot: app.getPath("userData"),
+})
 const operationManager = new GameOperationManager()
 const settingsStore = new SettingsStore(app.getPath("userData"))
 const authStore = new SecureAuthStore(app.getPath("userData"))
+let activeOperationGameId = null
 
 let mainWindow = null
 let splashWindow = null
-let instanceWatcher = null
+const instanceWatchers = new Map()
+const latestDirectoryPoliciesByGameId = new Map()
 let latestDirectoryPolicies = []
 
-function setupInstanceWatcher() {
-  if (instanceWatcher) return
-  if (!fs.existsSync(instanceRoot)) return
+function setupInstanceWatcher(gameId = null, targetInstanceRoot = instanceRoot) {
+  const key = gameId || "__legacy__"
+  const root = targetInstanceRoot || instanceRoot
+  if (instanceWatchers.has(key)) return
+  if (!fs.existsSync(root)) return
 
   try {
-    instanceWatcher = fs.watch(instanceRoot, { recursive: true }, async (_eventType, filename) => {
+    const watcher = fs.watch(root, { recursive: true }, async (_eventType, filename) => {
       try {
         if (!filename) return
         const relPath = String(filename).replace(/\\/g, "/")
@@ -73,38 +163,47 @@ function setupInstanceWatcher() {
           return
         }
 
-        // If currently syncing/downloading, ignore watcher
-        if (operationManager && operationManager.getState() !== "IDLE") {
+        // If currently syncing/downloading, ignore watcher only if it belongs to the SAME game
+        if (
+          operationManager &&
+          operationManager.getState() !== "IDLE" &&
+          activeOperationGameId === (gameId || null)
+        ) {
           return
         }
 
-        const installedManifest = await loadInstalledManifest(instanceRoot)
+        const installedManifest = await loadInstalledManifest(root)
         if (!installedManifest || !installedManifest.modpackVersion) return
 
+        const policies = latestDirectoryPoliciesByGameId.get(key) || latestDirectoryPolicies
         const decision = resolveWatcherDecision(
           relPath,
-          latestDirectoryPolicies,
+          policies,
           installedManifest.files || {},
-          instanceRoot,
+          root,
         )
 
         if (decision === "EMIT") {
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send("game-file-integrity-changed", { path: relPath })
+            mainWindow.webContents.send("game-file-integrity-changed", {
+              path: relPath,
+              gameId: gameId || null,
+            })
           }
         }
       } catch (_) {}
     })
 
-    instanceWatcher.on("error", () => {
+    watcher.on("error", () => {
       try {
-        instanceWatcher?.close()
+        watcher?.close()
       } catch (_) {}
-      instanceWatcher = null
+      instanceWatchers.delete(key)
     })
+
+    instanceWatchers.set(key, watcher)
   } catch (err) {
-    console.error("[Main] Failed to setup instance watcher:", err)
-    instanceWatcher = null
+    console.error(`[Main] Failed to setup instance watcher for ${key}:`, err)
   }
 }
 
@@ -1476,12 +1575,19 @@ ipcMain.on("setting-minimize-on-game-launch", (_event, enabled) => {
   minimizeOnGameLaunchEnabled = safeVal
 })
 
-ipcMain.handle("get-dedicated-gpu", async () => {
+ipcMain.handle("get-dedicated-gpu", async (_event, payload) => {
+  if (payload && payload.gameId) {
+    return settingsStore.getGameSetting(payload.gameId, "dedicatedGpu", { gameName: payload.gameName })
+  }
   return settingsStore.get("dedicatedGpu")
 })
 
-ipcMain.handle("setting-dedicated-gpu", async (_event, enabled) => {
+ipcMain.handle("setting-dedicated-gpu", async (_event, enabled, context) => {
   const safeVal = Boolean(enabled)
+  if (context && context.gameId) {
+    settingsStore.setGameSetting(context.gameId, "dedicatedGpu", safeVal)
+    return settingsStore.getGameSetting(context.gameId, "dedicatedGpu", { gameName: context.gameName })
+  }
   const saved = settingsStore.set("dedicatedGpu", safeVal)
   if (!saved) {
     throw new Error("Failed to persist dedicated GPU preference")
@@ -1490,25 +1596,40 @@ ipcMain.handle("setting-dedicated-gpu", async (_event, enabled) => {
   return dedicatedGpuEnabled
 })
 
-ipcMain.on("setting-dedicated-gpu", (_event, enabled) => {
+ipcMain.on("setting-dedicated-gpu", (_event, enabled, context) => {
   const safeVal = Boolean(enabled)
-  const saved = settingsStore.set("dedicatedGpu", safeVal)
-  if (saved) {
-    dedicatedGpuEnabled = safeVal
+  if (context && context.gameId) {
+    settingsStore.setGameSetting(context.gameId, "dedicatedGpu", safeVal)
+  } else {
+    const saved = settingsStore.set("dedicatedGpu", safeVal)
+    if (saved) {
+      dedicatedGpuEnabled = safeVal
+    }
   }
 })
 
-ipcMain.handle("get-ram-allocation", async () => {
+ipcMain.handle("get-ram-allocation", async (_event, payload) => {
+  if (payload && payload.gameId) {
+    return settingsStore.getGameSetting(payload.gameId, "ramGB", { gameName: payload.gameName })
+  }
   return settingsStore.get("ramGB")
 })
 
-ipcMain.handle("setting-ram-allocation", async (_event, ramGB) => {
+ipcMain.handle("setting-ram-allocation", async (_event, ramGB, context) => {
+  if (context && context.gameId) {
+    settingsStore.setGameSetting(context.gameId, "ramGB", ramGB)
+    return settingsStore.getGameSetting(context.gameId, "ramGB", { gameName: context.gameName })
+  }
   settingsStore.set("ramGB", ramGB)
   return settingsStore.get("ramGB")
 })
 
-ipcMain.on("setting-ram-allocation", (_event, ramGB) => {
-  settingsStore.set("ramGB", ramGB)
+ipcMain.on("setting-ram-allocation", (_event, ramGB, context) => {
+  if (context && context.gameId) {
+    settingsStore.setGameSetting(context.gameId, "ramGB", ramGB)
+  } else {
+    settingsStore.set("ramGB", ramGB)
+  }
 })
 
 // IPC Handlers for Secure Auth Session Storage (safeStorage)
@@ -1580,12 +1701,16 @@ ipcMain.on("open-external", (_event, url) => {
 // Game Download, Verification & Launch IPC Bridges
 ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
   try {
+    const ctx = resolveGameContext(payload)
+    const watcherKey = ctx.gameId || "__legacy__"
     if (Array.isArray(payload.directoryPolicies)) {
+      latestDirectoryPoliciesByGameId.set(watcherKey, payload.directoryPolicies)
       latestDirectoryPolicies = payload.directoryPolicies
     }
-    setupInstanceWatcher()
+    setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
     return await operationManager.checkPlan({
-      instanceRoot,
+      instanceRoot: ctx.instanceRoot,
+      javaStorageRoot: appDataRoot,
       clientFiles: payload.clientFiles,
       directoryPolicies: payload.directoryPolicies,
       modpackVersion: payload.modpackVersion,
@@ -1601,76 +1726,161 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
 })
 
 ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
+  const ctx = resolveGameContext(payload)
+
+  if (operationManager.getState() !== "IDLE") {
+    if (activeOperationGameId !== ctx.gameId) {
+      throw new Error("Another game operation is already in progress.")
+    }
+  }
+
+  const watcherKey = ctx.gameId || "__legacy__"
   if (Array.isArray(payload.directoryPolicies)) {
+    latestDirectoryPoliciesByGameId.set(watcherKey, payload.directoryPolicies)
     latestDirectoryPolicies = payload.directoryPolicies
   }
+
+  activeOperationGameId = ctx.gameId
+
   const onProgress = (data) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("game-download-progress", data)
+      mainWindow.webContents.send("game-download-progress", {
+        ...data,
+        gameId: ctx.gameId || null,
+      })
     }
   }
 
   const onPhaseChange = (phase) => {
+    if (phase === "IDLE") {
+      activeOperationGameId = null
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("game-phase-changed", phase)
+      mainWindow.webContents.send("game-phase-changed", phase, ctx.gameId || null)
     }
   }
 
-  const result = await operationManager.startSync({
-    instanceRoot,
-    clientFiles: payload.clientFiles,
-    directoryPolicies: payload.directoryPolicies,
-    modpackVersion: payload.modpackVersion,
-    minecraftVersion: payload.minecraftVersion,
-    modLoader: payload.modLoader,
-    modLoaderVersion: payload.modLoaderVersion,
-    neoForgeVersion: payload.neoForgeVersion,
-    apiBaseUrl: payload.apiBaseUrl,
-    isVerify: Boolean(payload.isVerify),
-    onProgress,
-    onPhaseChange,
-  })
-
-  setupInstanceWatcher()
-  return result
+  try {
+    const result = await operationManager.startSync({
+      instanceRoot: ctx.instanceRoot,
+      javaStorageRoot: appDataRoot,
+      clientFiles: payload.clientFiles,
+      directoryPolicies: payload.directoryPolicies,
+      modpackVersion: payload.modpackVersion,
+      minecraftVersion: payload.minecraftVersion,
+      modLoader: payload.modLoader,
+      modLoaderVersion: payload.modLoaderVersion,
+      neoForgeVersion: payload.neoForgeVersion,
+      apiBaseUrl: payload.apiBaseUrl,
+      isVerify: Boolean(payload.isVerify),
+      onProgress,
+      onPhaseChange,
+    })
+    if (operationManager.getState() === "IDLE") {
+      activeOperationGameId = null
+    }
+    setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
+    return result
+  } catch (err) {
+    if (operationManager.getState() === "IDLE") {
+      activeOperationGameId = null
+    }
+    throw err
+  }
 })
 
-ipcMain.handle("game-pause-sync", async () => {
+ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
+  if (payload && payload.gameId) {
+    if (activeOperationGameId && payload.gameId !== activeOperationGameId) {
+      throw new Error("Cannot pause operation for another game.")
+    }
+  }
   return await operationManager.pauseSync()
 })
 
-ipcMain.handle("game-cancel-sync", async () => {
-  return await operationManager.cancelSync(instanceRoot)
+ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
+  let targetInstanceRoot = instanceRoot
+  if (payload && payload.gameId) {
+    if (activeOperationGameId && payload.gameId !== activeOperationGameId) {
+      throw new Error("Cannot cancel operation for another game.")
+    }
+    const ctx = resolveGameContext(payload)
+    targetInstanceRoot = ctx.instanceRoot
+  }
+  try {
+    return await operationManager.cancelSync(targetInstanceRoot)
+  } finally {
+    activeOperationGameId = null
+  }
 })
 
-ipcMain.handle("game-uninstall", async () => {
-  return await operationManager.uninstallGame(instanceRoot, appDataRoot)
+ipcMain.handle("game-uninstall", async (_event, payload = {}) => {
+  const ctx = resolveGameContext(payload)
+  return await operationManager.uninstallGame(ctx.instanceRoot, appDataRoot)
 })
 
 ipcMain.handle("game-launch", async (_event, options = {}) => {
+  const ctx = resolveGameContext(options)
+
+  let effectiveRamGB = options.ramGB
+  let effectiveDedicatedGpu = dedicatedGpuEnabled
+
+  if (ctx.gameId) {
+    effectiveRamGB = settingsStore.getGameSetting(ctx.gameId, "ramGB", { gameName: ctx.gameName })
+    effectiveDedicatedGpu = settingsStore.getGameSetting(ctx.gameId, "dedicatedGpu", { gameName: ctx.gameName })
+  } else {
+    effectiveRamGB = options.ramGB || settingsStore.get("ramGB") || 4
+    effectiveDedicatedGpu = settingsStore.get("dedicatedGpu")
+  }
+
   return await operationManager.launchGame(gameLauncher, {
+    gameId: ctx.gameId,
+    instanceRoot: ctx.instanceRoot,
     playerName: options.playerName || "Player",
-    ramGB: options.ramGB || 4,
+    ramGB: effectiveRamGB,
     minecraftVersion: options.minecraftVersion,
     modLoader: options.modLoader,
     modLoaderVersion: options.modLoaderVersion,
     neoForgeVersion: options.neoForgeVersion,
-    dedicatedGpu: dedicatedGpuEnabled,
+    dedicatedGpu: effectiveDedicatedGpu,
     customJavaPath: options.customJavaPath,
     customArgs: options.customArgs || [],
   })
 })
 
-ipcMain.handle("game-get-status", async () => {
+ipcMain.handle("game-get-status", async (_event, payload = {}) => {
+  const launchStatus = gameLauncher.getLaunchStatus()
+  const runningGameId = launchStatus.gameId || null
+
+  if (payload && payload.gameId) {
+    const requestedGameId = payload.gameId
+    const isThisGameRunning = launchStatus.status !== "idle" && runningGameId === requestedGameId
+    const status = isThisGameRunning ? launchStatus.status : "idle"
+    const pid = isThisGameRunning ? launchStatus.pid : null
+    const operationState = activeOperationGameId === requestedGameId ? operationManager.getState() : "IDLE"
+
+    return {
+      status,
+      pid,
+      gameId: requestedGameId,
+      runningGameId,
+      operationState,
+      activeOperationGameId,
+    }
+  }
+
   return {
-    ...gameLauncher.getLaunchStatus(),
+    ...launchStatus,
+    runningGameId,
     operationState: operationManager.getState(),
+    activeOperationGameId,
   }
 })
 
-ipcMain.handle("game-get-runtime-info", async () => {
+ipcMain.handle("game-get-runtime-info", async (_event, payload = {}) => {
   try {
-    const state = await loadCoreState(instanceRoot)
+    const ctx = resolveGameContext(payload)
+    const state = await loadCoreState(ctx.instanceRoot)
     if (state && typeof state.javaMajorVersion === "number") {
       return { javaMajorVersion: state.javaMajorVersion }
     }

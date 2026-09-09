@@ -71,6 +71,10 @@ class GameLauncher {
   constructor(app, options = {}) {
     this.app = app
     this.instanceRoot = options.instanceRoot || path.join(process.env.APPDATA || "", "HiKAT", "game files")
+    this.javaStorageRoot = options.javaStorageRoot || null
+    this.processStateRoot = options.processStateRoot || null
+    this.runningGameId = null
+    this.runningInstanceRoot = null
     this.activeChildProcess = null
     this.launchStatus = "idle" // 'idle' | 'preparing' | 'running'
     this.onStatusChangeCallback = null
@@ -91,6 +95,9 @@ class GameLauncher {
   }
 
   getPidFilePath() {
+    if (this.processStateRoot) {
+      return path.join(this.processStateRoot, "game-process.json")
+    }
     return path.join(this.instanceRoot, ".hikat", "game-process.json")
   }
 
@@ -101,11 +108,15 @@ class GameLauncher {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true })
       }
+      this.runningGameId = metadata.gameId || null
+      this.runningInstanceRoot = metadata.instanceRoot || null
       fs.writeFileSync(
         filePath,
         JSON.stringify({
           pid,
           launchedAt: metadata.launchedAt || new Date().toISOString(),
+          gameId: metadata.gameId || null,
+          instanceRoot: metadata.instanceRoot || null,
           ...metadata,
         }),
         "utf8"
@@ -121,21 +132,41 @@ class GameLauncher {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath)
       }
+      if (this.processStateRoot) {
+        const legacyPath = path.join(this.instanceRoot, ".hikat", "game-process.json")
+        if (fs.existsSync(legacyPath)) {
+          try {
+            fs.unlinkSync(legacyPath)
+          } catch (_) {}
+        }
+      }
     } catch (e) {
       console.error("[GameLauncher] Failed to clear PID file:", e)
     }
+    this.runningGameId = null
+    this.runningInstanceRoot = null
   }
 
   readSavedProcessRecord() {
     try {
       const filePath = this.getPidFilePath()
-      if (!fs.existsSync(filePath)) return null
-      const content = fs.readFileSync(filePath, "utf8")
-      const parsed = JSON.parse(content)
-      if (!parsed || typeof parsed.pid !== "number" || parsed.pid <= 0) {
-        return null
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, "utf8")
+        const parsed = JSON.parse(content)
+        if (parsed && typeof parsed.pid === "number" && parsed.pid > 0) {
+          return parsed
+        }
+      } else if (this.processStateRoot) {
+        const legacyPath = path.join(this.instanceRoot, ".hikat", "game-process.json")
+        if (fs.existsSync(legacyPath)) {
+          const content = fs.readFileSync(legacyPath, "utf8")
+          const parsed = JSON.parse(content)
+          if (parsed && typeof parsed.pid === "number" && parsed.pid > 0) {
+            return parsed
+          }
+        }
       }
-      return parsed
+      return null
     } catch (_) {
       return null
     }
@@ -206,12 +237,16 @@ class GameLauncher {
         console.log(`[GameLauncher] Detected existing game process running with PID ${pid}`)
         this.launchStatus = "running"
         this.trackedPid = pid
+        this.runningGameId = savedRecord.gameId || null
+        this.runningInstanceRoot = savedRecord.instanceRoot || null
         this.startProcessPoll(pid)
       } else {
         console.log(`[GameLauncher] Cleaned stale PID file for inactive/mismatched process ${pid}`)
         this.clearProcessPid()
         this.launchStatus = "idle"
         this.trackedPid = null
+        this.runningGameId = null
+        this.runningInstanceRoot = null
       }
     }
   }
@@ -222,10 +257,11 @@ class GameLauncher {
     this.pollTimer = setInterval(() => {
       if (!this.isProcessRunning(pid)) {
         console.log(`[GameLauncher] Monitored game process ${pid} exited`)
+        const exitedGameId = this.runningGameId
         this.stopProcessPoll()
         this.clearProcessPid()
         this.activeChildProcess = null
-        this.setStatus("idle")
+        this.setStatus("idle", exitedGameId ? { gameId: exitedGameId } : null)
       }
     }, this.pollIntervalMs)
     if (this.pollTimer && this.pollTimer.unref) {
@@ -249,10 +285,14 @@ class GameLauncher {
   }
 
   getLaunchStatus() {
-    return {
+    const res = {
       status: this.launchStatus,
       pid: this.activeChildProcess?.pid || this.trackedPid || null,
     }
+    if (this.runningGameId) {
+      res.gameId = this.runningGameId
+    }
+    return res
   }
 
   /**
@@ -261,6 +301,8 @@ class GameLauncher {
    * NEVER downloads or installs anything.
    */
   async launch({
+    gameId,
+    instanceRoot,
     playerName = "Player",
     ramGB = DEFAULT_RAM_GB,
     minecraftVersion,
@@ -279,6 +321,10 @@ class GameLauncher {
       throw new Error("Cannot launch Minecraft: Missing required minecraftVersion.")
     }
 
+    const effectiveInstanceRoot = instanceRoot || this.instanceRoot
+    this.runningGameId = gameId || null
+    this.runningInstanceRoot = effectiveInstanceRoot
+
     // Resolve effective loader (supports legacy neoForgeVersion path)
     const resolvedLoader = (modLoader || (neoForgeVersion ? "NEOFORGE" : "VANILLA")).toUpperCase()
     const resolvedLoaderVersion = String(modLoaderVersion || neoForgeVersion || "").trim()
@@ -287,7 +333,7 @@ class GameLauncher {
       throw new Error(`Cannot launch Minecraft: Missing required loader version for ${resolvedLoader}.`)
     }
 
-    this.setStatus("preparing")
+    this.setStatus("preparing", { gameId: gameId || null })
 
     try {
       const cleanMc = String(minecraftVersion).trim()
@@ -296,7 +342,7 @@ class GameLauncher {
 
       // 1. Quick local readiness check (Strictly Local, NO Downloads)
       const readiness = await this.readinessChecker({
-        instanceRoot: this.instanceRoot,
+        instanceRoot: effectiveInstanceRoot,
         minecraftVersion: cleanMc,
         modLoader: resolvedLoader,
         modLoaderVersion: resolvedLoaderVersion,
@@ -312,7 +358,8 @@ class GameLauncher {
       const requiredJavaMajor = readiness.javaMajorVersion || 21
 
       // 2. Resolve & Validate Java Runtime (GUI javaw.exe)
-      const javaRuntime = this.javaResolver(this.instanceRoot, {
+      const effectiveJavaStorage = this.javaStorageRoot || effectiveInstanceRoot
+      const javaRuntime = this.javaResolver(effectiveJavaStorage, {
         isGui: true,
         customPath: customJavaPath,
         majorVersion: requiredJavaMajor,
@@ -340,7 +387,7 @@ class GameLauncher {
       }
 
       // 3. Resolve Installed Version Profile
-      const resolvedVersion = await this.versionParser(this.instanceRoot, readiness.resolvedVersionId)
+      const resolvedVersion = await this.versionParser(effectiveInstanceRoot, readiness.resolvedVersionId)
       if (!resolvedVersion) {
         throw new Error(`Failed to parse installed version profile: ${readiness.resolvedVersionId}`)
       }
@@ -362,8 +409,8 @@ class GameLauncher {
       ]
 
       const launchOptions = {
-        gamePath: this.instanceRoot,
-        resourcePath: this.instanceRoot,
+        gamePath: effectiveInstanceRoot,
+        resourcePath: effectiveInstanceRoot,
         javaPath: javawPath,
         version: resolvedVersion,
         gameProfile: {
@@ -392,11 +439,13 @@ class GameLauncher {
 
       this.activeChildProcess = child
       this.saveProcessPid(child.pid, {
+        gameId: gameId || null,
+        instanceRoot: effectiveInstanceRoot,
         minecraftVersion: cleanMc,
         modLoader: resolvedLoader,
         javaPath: javawPath,
       })
-      this.setStatus("running")
+      this.setStatus("running", gameId ? { gameId } : null)
 
       let terminationHandled = false
 
@@ -405,14 +454,16 @@ class GameLauncher {
         terminationHandled = true
 
         console.log(`[GameLauncher] Game process exited with code ${code}`)
+        const exitedGameId = this.runningGameId
         this.activeChildProcess = null
         this.clearProcessPid()
         this.stopProcessPoll()
         const isUnexpected = code !== 0
-        this.setStatus(
-          "idle",
-          isUnexpected ? { unexpected: true, code } : { unexpected: false, code: 0 },
-        )
+        const details = isUnexpected ? { unexpected: true, code } : { unexpected: false, code: 0 }
+        if (exitedGameId) {
+          details.gameId = exitedGameId
+        }
+        this.setStatus("idle", details)
       })
 
       child.on("error", (err) => {
@@ -420,10 +471,15 @@ class GameLauncher {
         terminationHandled = true
 
         console.error("[GameLauncher] Game process encountered an error:", err)
+        const exitedGameId = this.runningGameId
         this.activeChildProcess = null
         this.clearProcessPid()
         this.stopProcessPoll()
-        this.setStatus("idle", { unexpected: true, error: err })
+        const details = { unexpected: true, error: err }
+        if (exitedGameId) {
+          details.gameId = exitedGameId
+        }
+        this.setStatus("idle", details)
       })
 
       return {
@@ -431,10 +487,11 @@ class GameLauncher {
         pid: child.pid,
       }
     } catch (err) {
+      const exitedGameId = this.runningGameId
       this.activeChildProcess = null
       this.clearProcessPid()
       this.stopProcessPoll()
-      this.setStatus("idle")
+      this.setStatus("idle", exitedGameId ? { gameId: exitedGameId } : null)
       throw err
     }
   }

@@ -150,7 +150,8 @@ class GameOperationManager {
     })
 
     const javaMajor = core.javaMajorVersion || 21
-    const java = this.javaResolver(instanceRoot, { isGui: false, majorVersion: javaMajor })
+    const effectiveJavaRoot = payload.javaStorageRoot || instanceRoot
+    const java = this.javaResolver(effectiveJavaRoot, { isGui: false, majorVersion: javaMajor })
     const javaValid = java.cliJavaPath ? Boolean(this.javaValidator(java.cliJavaPath, javaMajor).valid) : false
 
     const releaseMatches = Boolean(
@@ -453,6 +454,7 @@ class GameOperationManager {
 
             await this.coreInstaller({
               instanceRoot,
+              javaStorageRoot: payload.javaStorageRoot,
               minecraftVersion,
               modLoader,
               modLoaderVersion,

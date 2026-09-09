@@ -188,6 +188,10 @@ export const gameService = {
     serverId?: string,
     options?: {
       allowLegacyLocalFilesystem?: boolean
+      gameContext?: {
+        gameId: string
+        gameName: string
+      }
     },
   ): Promise<GameManifest | null> {
     let isConnectivityFailure = false
@@ -195,6 +199,8 @@ export const gameService = {
     const allowLegacyLocal = serverId
       ? options?.allowLegacyLocalFilesystem === true
       : (options?.allowLegacyLocalFilesystem ?? true)
+    const allowSyncPlanCheck = options?.gameContext ? true : allowLegacyLocal
+    const effectiveGameId = options?.gameContext?.gameId || serverId
 
     try {
       const gqlRes = await graphqlClient<{ publishedModpack: PublishedModpack | null }>(
@@ -225,9 +231,9 @@ export const gameService = {
           let stagedBytes = 0
           let totalDownloadBytes = totalBytes
 
-          if (allowLegacyLocal && window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
+          if (allowSyncPlanCheck && window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
             try {
-              const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
+              const planPayload: any = {
                 clientFiles: modpack.clientFiles,
                 directoryPolicies: modpack.directoryPolicies || [],
                 modpackVersion: modpack.version,
@@ -235,7 +241,12 @@ export const gameService = {
                 modLoader: modpack.modLoader,
                 modLoaderVersion: modpack.modLoaderVersion ?? undefined,
                 neoForgeVersion: modpack.neoForgeVersion ?? undefined,
-              })
+              }
+              if (options?.gameContext) {
+                planPayload.gameId = options.gameContext.gameId
+                planPayload.gameName = options.gameContext.gameName
+              }
+              const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan(planPayload)
               if (planCheck.success) {
                 installedModpackVersion = planCheck.installedModpackVersion || null
                 hasUpdate = Boolean(
@@ -253,11 +264,11 @@ export const gameService = {
                 ) {
                   totalDownloadBytes = planCheck.totalDownloadBytes
                 }
-                gameService.setGameInstalled(isInstalled)
+                gameService.setGameInstalled(isInstalled, effectiveGameId)
               }
             } catch (_) {}
-          } else if (allowLegacyLocal) {
-            isInstalled = gameService.isGameInstalled()
+          } else if (allowSyncPlanCheck) {
+            isInstalled = gameService.isGameInstalled(effectiveGameId)
           }
 
           return {
@@ -322,9 +333,9 @@ export const gameService = {
           let offlineStagedBytes = 0
           let offlineTotalDownloadBytes = 0
 
-          if (allowLegacyLocal && window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
+          if (allowSyncPlanCheck && window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
             try {
-              const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan({
+              const offlinePayload: any = {
                 clientFiles: cachedFiles,
                 directoryPolicies: cachedDirectoryPolicies,
                 modpackVersion: parsed.version,
@@ -332,7 +343,12 @@ export const gameService = {
                 modLoader: parsed.modLoader,
                 modLoaderVersion: parsed.modLoaderVersion ?? undefined,
                 neoForgeVersion: parsed.neoForgeVersion ?? undefined,
-              })
+              }
+              if (options?.gameContext) {
+                offlinePayload.gameId = options.gameContext.gameId
+                offlinePayload.gameName = options.gameContext.gameName
+              }
+              const planCheck: SyncPlanCheckResult = await window.electronAPI.checkSyncPlan(offlinePayload)
               if (planCheck.success) {
                 offlineInstalledVersion = planCheck.installedModpackVersion || null
                 offlineHasUpdate = Boolean(
@@ -345,11 +361,11 @@ export const gameService = {
                 offlineHasPausedSession = Boolean(planCheck.hasPausedSession)
                 offlineStagedBytes = planCheck.stagedBytes || 0
                 offlineTotalDownloadBytes = planCheck.totalDownloadBytes || 0
-                gameService.setGameInstalled(offlineInstalled)
+                gameService.setGameInstalled(offlineInstalled, effectiveGameId)
               }
             } catch (_) {}
-          } else if (allowLegacyLocal) {
-            offlineInstalled = gameService.isGameInstalled()
+          } else if (allowSyncPlanCheck) {
+            offlineInstalled = gameService.isGameInstalled(effectiveGameId)
           }
 
           const totalBytes = cachedFiles.reduce(
@@ -383,36 +399,48 @@ export const gameService = {
     return null
   },
 
-  isGameInstalled(): boolean {
+  isGameInstalled(gameId?: string): boolean {
     try {
-      return localStorage.getItem("hikat_game_installed") === "true"
+      const key = gameId ? `hikat_game_installed_${gameId}` : "hikat_game_installed"
+      return localStorage.getItem(key) === "true"
     } catch (_) {
       return false
     }
   },
 
-  setGameInstalled(installed: boolean): void {
+  setGameInstalled(installed: boolean, gameId?: string): void {
     try {
-      localStorage.setItem("hikat_game_installed", String(installed))
+      const key = gameId ? `hikat_game_installed_${gameId}` : "hikat_game_installed"
+      localStorage.setItem(key, String(installed))
     } catch (_) {}
   },
 
-  async uninstallGame(): Promise<boolean> {
+  async uninstallGame(gameContext?: { gameId: string; gameName: string }): Promise<boolean> {
     try {
       if (window.electronAPI?.uninstallGame) {
-        const res = await window.electronAPI.uninstallGame()
+        const res = await window.electronAPI.uninstallGame(gameContext)
         if (res && res.success) {
           try {
-            localStorage.removeItem("hikat_game_installed")
-            localStorage.removeItem("hikat_game_manifest")
+            if (gameContext?.gameId) {
+              localStorage.removeItem(`hikat_game_installed_${gameContext.gameId}`)
+              localStorage.removeItem(`hikat_game_manifest_${gameContext.gameId}`)
+            } else {
+              localStorage.removeItem("hikat_game_installed")
+              localStorage.removeItem("hikat_game_manifest")
+            }
           } catch (_) {}
           return true
         }
         return false
       }
       try {
-        localStorage.removeItem("hikat_game_installed")
-        localStorage.removeItem("hikat_game_manifest")
+        if (gameContext?.gameId) {
+          localStorage.removeItem(`hikat_game_installed_${gameContext.gameId}`)
+          localStorage.removeItem(`hikat_game_manifest_${gameContext.gameId}`)
+        } else {
+          localStorage.removeItem("hikat_game_installed")
+          localStorage.removeItem("hikat_game_manifest")
+        }
       } catch (_) {}
       return true
     } catch (err) {
@@ -430,6 +458,7 @@ export const gameService = {
     neoForgeVersion?: string | null,
     isVerify?: boolean,
     directoryPolicies?: import("../vite-env").DirectoryPolicy[],
+    gameContext?: { gameId: string; gameName: string },
   ) {
     if (window.electronAPI?.startSync) {
       return await window.electronAPI.startSync({
@@ -442,19 +471,21 @@ export const gameService = {
         neoForgeVersion: neoForgeVersion ?? undefined,
         apiBaseUrl: getApiBaseUrl(),
         isVerify,
+        gameId: gameContext?.gameId,
+        gameName: gameContext?.gameName,
       })
     }
   },
 
-  async pauseSync() {
+  async pauseSync(gameContext?: { gameId: string; gameName: string }) {
     if (window.electronAPI?.pauseSync) {
-      return await window.electronAPI.pauseSync()
+      return await window.electronAPI.pauseSync(gameContext)
     }
   },
 
-  async cancelSync() {
+  async cancelSync(gameContext?: { gameId: string; gameName: string }) {
     if (window.electronAPI?.cancelSync) {
-      return await window.electronAPI.cancelSync()
+      return await window.electronAPI.cancelSync(gameContext)
     }
   },
 
@@ -467,12 +498,15 @@ export const gameService = {
     neoForgeVersion?: string | null
     customJavaPath?: string
     customArgs?: string[]
+    gameContext?: { gameId: string; gameName: string }
   }) {
     if (window.electronAPI?.launchGame) {
       return await window.electronAPI.launchGame({
         ...options,
         modLoaderVersion: options.modLoaderVersion ?? undefined,
         neoForgeVersion: options.neoForgeVersion ?? undefined,
+        gameId: options.gameContext?.gameId,
+        gameName: options.gameContext?.gameName,
       })
     }
   },

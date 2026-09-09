@@ -52,6 +52,7 @@ export interface DownloadProgressData {
   currentFile?: string
   filesToDownload?: number
   filesToPrune?: number
+  gameId?: string | null
 }
 
 export interface SyncPlanCheckResult {
@@ -72,6 +73,11 @@ export interface SyncPlanCheckResult {
   error?: string
 }
 
+export interface GameContext {
+  gameId: string
+  gameName: string
+}
+
 interface ElectronAPI {
   minimizeWindow: () => void
   maximizeWindow: () => void
@@ -87,9 +93,10 @@ interface ElectronAPI {
   setMinimizeToTray?: (enabled: boolean) => Promise<boolean> | void
   getMinimizeOnGameLaunch?: () => Promise<boolean>
   setMinimizeOnGameLaunch?: (enabled: boolean) => Promise<boolean> | void
-  getDedicatedGpu?: () => Promise<boolean>
-  setDedicatedGpu?: (enabled: boolean) => Promise<boolean> | void
-  setRamAllocation?: (ramGB: number) => void
+  getDedicatedGpu?: (gameContext?: GameContext) => Promise<boolean>
+  setDedicatedGpu?: (enabled: boolean, gameContext?: GameContext) => Promise<boolean> | void
+  getRamAllocation?: (gameContext?: GameContext) => Promise<number>
+  setRamAllocation?: (ramGB: number, gameContext?: GameContext) => void
   openExternal?: (url: string) => void
 
   checkSyncPlan?: (payload: {
@@ -100,6 +107,8 @@ interface ElectronAPI {
     modLoader?: GameModLoader
     modLoaderVersion?: string
     neoForgeVersion?: string
+    gameId?: string
+    gameName?: string
   }) => Promise<SyncPlanCheckResult>
   startSync?: (payload: {
     clientFiles: ClientFile[]
@@ -111,6 +120,8 @@ interface ElectronAPI {
     neoForgeVersion?: string
     apiBaseUrl?: string
     isVerify?: boolean
+    gameId?: string
+    gameName?: string
   }) => Promise<{
     success: boolean
     downloadedCount: number
@@ -118,9 +129,9 @@ interface ElectronAPI {
     paused?: boolean
     resolvedVersionId?: string
   }>
-  pauseSync?: () => Promise<boolean>
-  cancelSync?: () => Promise<boolean>
-  uninstallGame?: () => Promise<{ success: boolean }>
+  pauseSync?: (gameContext?: GameContext) => Promise<boolean>
+  cancelSync?: (gameContext?: GameContext) => Promise<boolean>
+  uninstallGame?: (gameContext?: GameContext) => Promise<{ success: boolean }>
   launchGame?: (options: {
     playerName?: string
     ramGB?: number
@@ -130,18 +141,27 @@ interface ElectronAPI {
     neoForgeVersion?: string
     customJavaPath?: string
     customArgs?: string[]
+    gameId?: string
+    gameName?: string
   }) => Promise<{ success: boolean; pid?: number }>
-  getLaunchStatus?: () => Promise<{ status: string; pid?: number | null; operationState?: string }>
-  getGameRuntimeInfo?: () => Promise<{ javaMajorVersion: number | null }>
+  getLaunchStatus?: (gameContext?: GameContext) => Promise<{
+    status: string
+    pid?: number | null
+    operationState?: string
+    gameId?: string | null
+    runningGameId?: string | null
+    activeOperationGameId?: string | null
+  }>
+  getGameRuntimeInfo?: (gameContext?: GameContext) => Promise<{ javaMajorVersion: number | null }>
   onDownloadProgress?: (callback: (data: DownloadProgressData) => void) => () => void
-  onPhaseChange?: (callback: (phase: string) => void) => () => void
+  onPhaseChange?: (callback: (phase: string, gameId?: string | null) => void) => () => void
   onLaunchStatus?: (
     callback: (
       status: "idle" | "preparing" | "running",
-      details?: { unexpected?: boolean; code?: number | null; error?: any }
+      details?: { unexpected?: boolean; code?: number | null; error?: any; gameId?: string | null }
     ) => void
   ) => () => void
-  onGameFileIntegrityChanged?: (callback: (data: { path: string }) => void) => () => void
+  onGameFileIntegrityChanged?: (callback: (data: { path: string; gameId?: string | null }) => void) => () => void
   onOAuthCallback?: (callback: (url: string) => void) => () => void
   getPendingOAuthCallback?: () => Promise<string | null>
   authSaveSession?: (session: any) => Promise<void>

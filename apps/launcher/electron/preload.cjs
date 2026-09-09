@@ -25,12 +25,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getMinimizeOnGameLaunch: () => ipcRenderer.invoke("get-minimize-on-game-launch"),
   setMinimizeOnGameLaunch: (enabled) =>
     ipcRenderer.invoke("setting-minimize-on-game-launch", enabled),
-  getDedicatedGpu: () => ipcRenderer.invoke("get-dedicated-gpu"),
-  setDedicatedGpu: (enabled) =>
-    ipcRenderer.invoke("setting-dedicated-gpu", enabled),
-  getRamAllocation: () => ipcRenderer.invoke("get-ram-allocation"),
-  setRamAllocation: (ramGB) =>
-    ipcRenderer.invoke("setting-ram-allocation", ramGB),
+  getDedicatedGpu: (gameContext) => ipcRenderer.invoke("get-dedicated-gpu", gameContext),
+  setDedicatedGpu: (enabled, gameContext) =>
+    ipcRenderer.invoke("setting-dedicated-gpu", enabled, gameContext),
+  getRamAllocation: (gameContext) => ipcRenderer.invoke("get-ram-allocation", gameContext),
+  setRamAllocation: (ramGB, gameContext) =>
+    ipcRenderer.invoke("setting-ram-allocation", ramGB, gameContext),
   openExternal: (url) => ipcRenderer.send("open-external", url),
 
   // Secure Auth Session Storage (Main Process Safe Storage)
@@ -53,19 +53,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Client Files Sync & Launch Engine
   checkSyncPlan: (payload) => ipcRenderer.invoke("game-check-plan", payload),
   startSync: (payload) => ipcRenderer.invoke("game-start-sync", payload),
-  pauseSync: () => ipcRenderer.invoke("game-pause-sync"),
-  cancelSync: () => ipcRenderer.invoke("game-cancel-sync"),
-  uninstallGame: () => ipcRenderer.invoke("game-uninstall"),
+  pauseSync: (gameContext) => ipcRenderer.invoke("game-pause-sync", gameContext),
+  cancelSync: (gameContext) => ipcRenderer.invoke("game-cancel-sync", gameContext),
+  uninstallGame: (gameContext) => ipcRenderer.invoke("game-uninstall", gameContext),
   launchGame: (options) => ipcRenderer.invoke("game-launch", options),
-  getLaunchStatus: () => ipcRenderer.invoke("game-get-status"),
-  getGameRuntimeInfo: () => ipcRenderer.invoke("game-get-runtime-info"),
+  getLaunchStatus: (gameContext) => ipcRenderer.invoke("game-get-status", gameContext),
+  getGameRuntimeInfo: (gameContext) => ipcRenderer.invoke("game-get-runtime-info", gameContext),
   onDownloadProgress: (callback) => {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on("game-download-progress", handler)
     return () => ipcRenderer.removeListener("game-download-progress", handler)
   },
   onPhaseChange: (callback) => {
-    const handler = (_event, phase) => callback(phase)
+    const handler = (_event, phase, gameId) => callback(phase, gameId)
     ipcRenderer.on("game-phase-changed", handler)
     return () => ipcRenderer.removeListener("game-phase-changed", handler)
   },

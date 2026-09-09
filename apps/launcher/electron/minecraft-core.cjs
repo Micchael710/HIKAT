@@ -115,6 +115,7 @@ async function checkCore({ instanceRoot, minecraftVersion, modLoader, modLoaderV
  */
 async function installCore({
   instanceRoot,
+  javaStorageRoot,
   minecraftVersion,
   modLoader,
   modLoaderVersion,
@@ -174,7 +175,8 @@ async function installCore({
 
   let effectiveJavaPath = javaPath
   if (!effectiveJavaPath) {
-    let javaInfo = resolveJavaRuntime(instanceRoot, {
+    const effectiveJavaStorageRoot = javaStorageRoot || instanceRoot
+    let javaInfo = resolveJavaRuntime(effectiveJavaStorageRoot, {
       isGui: false,
       majorVersion: requiredJavaMajor,
     })
@@ -184,7 +186,7 @@ async function installCore({
       !validateJavaBinary(javaInfo.cliJavaPath, requiredJavaMajor).valid
     ) {
       javaInfo = await ensureJavaRuntime({
-        appDataRoot: instanceRoot,
+        appDataRoot: effectiveJavaStorageRoot,
         majorVersion: requiredJavaMajor,
         component: requiredJavaComponent,
         signal,

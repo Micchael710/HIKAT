@@ -6,12 +6,13 @@ const DEFAULT_SETTINGS = {
   minimizeOnGameLaunch: true,
   dedicatedGpu: true,
   ramGB: 8,
+  games: {},
 }
 
 class SettingsStore {
   constructor(userDataPath) {
     this.filePath = path.join(userDataPath, "launcher-settings.json")
-    this.settings = { ...DEFAULT_SETTINGS }
+    this.settings = { ...DEFAULT_SETTINGS, games: {} }
     this.load()
   }
 
@@ -38,11 +39,35 @@ class SettingsStore {
           ) {
             this.settings.ramGB = Math.round(parsed.ramGB)
           }
+          if (parsed.games && typeof parsed.games === "object" && !Array.isArray(parsed.games)) {
+            this.settings.games = {}
+            for (const [gid, gSettings] of Object.entries(parsed.games)) {
+              if (gSettings && typeof gSettings === "object") {
+                const entry = {}
+                if (typeof gSettings.dedicatedGpu === "boolean") {
+                  entry.dedicatedGpu = gSettings.dedicatedGpu
+                } else {
+                  entry.dedicatedGpu = true
+                }
+                if (
+                  typeof gSettings.ramGB === "number" &&
+                  !isNaN(gSettings.ramGB) &&
+                  gSettings.ramGB >= 1 &&
+                  gSettings.ramGB <= 64
+                ) {
+                  entry.ramGB = Math.round(gSettings.ramGB)
+                } else {
+                  entry.ramGB = 8
+                }
+                this.settings.games[gid] = entry
+              }
+            }
+          }
         }
       }
     } catch (err) {
       console.warn("[SettingsStore] Failed to read settings, using safe defaults:", err)
-      this.settings = { ...DEFAULT_SETTINGS }
+      this.settings = { ...DEFAULT_SETTINGS, games: {} }
     }
   }
 
@@ -86,6 +111,81 @@ class SettingsStore {
     const saved = this.save()
     if (!saved) {
       this.settings[key] = previousValue
+      return false
+    }
+    return true
+  }
+
+  getGameSetting(gameId, key, options = {}) {
+    if (!gameId || typeof gameId !== "string") {
+      return this.get(key)
+    }
+
+    if (!this.settings.games) {
+      this.settings.games = {}
+    }
+
+    if (!this.settings.games[gameId]) {
+      const isApparatia =
+        options.gameName &&
+        typeof options.gameName === "string" &&
+        options.gameName.trim().toLowerCase() === "apparatia"
+
+      if (isApparatia) {
+        this.settings.games[gameId] = {
+          dedicatedGpu: this.get("dedicatedGpu"),
+          ramGB: this.get("ramGB"),
+        }
+        this.save()
+      } else {
+        return key === "dedicatedGpu" ? true : 8
+      }
+    }
+
+    const entry = this.settings.games[gameId]
+    if (key === "dedicatedGpu") {
+      return typeof entry.dedicatedGpu === "boolean" ? entry.dedicatedGpu : true
+    }
+    if (key === "ramGB") {
+      return typeof entry.ramGB === "number" ? entry.ramGB : 8
+    }
+    return this.get(key)
+  }
+
+  setGameSetting(gameId, key, value) {
+    if (!gameId || typeof gameId !== "string") {
+      return false
+    }
+
+    if (!this.settings.games) {
+      this.settings.games = {}
+    }
+
+    if (!this.settings.games[gameId]) {
+      this.settings.games[gameId] = {
+        dedicatedGpu: true,
+        ramGB: 8,
+      }
+    }
+
+    const previousEntry = { ...this.settings.games[gameId] }
+
+    if (key === "dedicatedGpu") {
+      this.settings.games[gameId].dedicatedGpu = Boolean(value)
+    } else if (key === "ramGB") {
+      const num = Number(value)
+      if (!isNaN(num) && num >= 1 && num <= 64) {
+        this.settings.games[gameId].ramGB = Math.round(num)
+      } else {
+        return false
+      }
+    } else {
+      return false
+    }
+
+    const saved = this.save()
+    if (!saved) {
+      this.settings.games[gameId] = previousEntry
       return false
     }
     return true
