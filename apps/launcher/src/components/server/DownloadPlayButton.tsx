@@ -68,10 +68,8 @@ export function formatDownloadSize(bytes: number): string {
   }
 
   const mb = value / MB
-  if (mb >= 100) {
-    return `${mb.toFixed(1)} MB`
-  }
-  return `${mb.toFixed(2)} MB`
+
+  return `${mb.toFixed(mb >= 100 ? 1 : 2)} MB`
 }
 
 export default function DownloadPlayButton({
@@ -148,125 +146,138 @@ export default function DownloadPlayButton({
     }
   }, [])
 
-  const showToast = useCallback(
-    (message: string, type: "success" | "error" | "info" = "success") => {
-      setToastState({ message, type })
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
-      toastTimeoutRef.current = setTimeout(() => {
-        setToastState({ message: null, type: "success" })
-      }, 3500)
-    },
-    [],
-  )
+  const showToast = useCallback((
+    msg: string,
+    type: "success" | "error" | "info" = "success",
+  ) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
+    setToastState({ message: msg, type })
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastState({ message: null, type: "success" })
+    }, 2800)
+  }, [])
 
-  const markSyncedVersionInstalled = useCallback(
-    (version: string) => {
-      setManifest((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          version,
-          installedModpackVersion: version,
-          installed: true,
-          hasExistingInstall: true,
-          hasUpdate: false,
-          hasIntegrityIssue: false,
-        }
-      })
-    },
-    [],
-  )
-
-  const triggerSync = useCallback(
-    async (targetManifest?: GameManifest | null) => {
-      if (!isLocalAllowed) return
-      const currentManifest = targetManifest || manifestRef.current
-      if (!currentManifest) return
-      if (!currentManifest.clientFiles || currentManifest.clientFiles.length === 0) {
-        showToast(t("playButton.noClientFiles"), "error")
-        return
+  const markSyncedVersionInstalled = useCallback((syncingVersion: string) => {
+    setManifest((current) => {
+      if (!current) {
+        return current
       }
 
-      if (isStartingSyncRef.current) return
-      const syncOpId = ++syncOpIdRef.current
-      isStartingSyncRef.current = true
-      setStatus("downloading")
-      setDownloadedBytes(0)
-      setProgress(0)
-      setSpeed(0)
-      setTimeRemainingMin(0)
+      const isCurrentVersion = current.version === syncingVersion
 
-      const syncingVersion = currentManifest.version
+      return {
+        ...current,
+        installed: isCurrentVersion,
+        hasUpdate: !isCurrentVersion,
+        hasExistingInstall: true,
+        installedModpackVersion: syncingVersion,
+        hasIntegrityIssue: false,
+      }
+    })
+  }, [])
 
-      gameService
-        .startSync(
-          currentManifest.clientFiles,
-          currentManifest.version,
-          currentManifest.minecraftVersion,
-          currentManifest.modLoader,
-          currentManifest.modLoaderVersion,
-          currentManifest.neoForgeVersion,
-          false,
-          ...(currentManifest.directoryPolicies ? [currentManifest.directoryPolicies] : []),
-        )
-        .then((res: any) => {
-          if (res?.paused) {
-            setStatus("paused")
-            return
-          }
-          if (res?.success) {
-            isIntegrityBlockedRef.current = false
+  const triggerSync = useCallback((targetManifest?: GameManifest | null) => {
+    if (!isLocalAllowed) return
+    const currentManifest = targetManifest || manifestRef.current
+    if (!currentManifest?.clientFiles || currentManifest.clientFiles.length === 0) {
+      showToast(t("playButton.noClientFiles"), "error")
+      return
+    }
+    if (isStartingSyncRef.current) return
+    const syncOpId = ++syncOpIdRef.current
+    isStartingSyncRef.current = true
+    setDownloadedBytes(0)
+    setProgress(0)
+    setSpeed(0)
+    setTimeRemainingMin(0)
+    if (currentManifest.hasExistingInstall || currentManifest.hasUpdate) {
+      setTotalBytes(currentManifest.totalDownloadBytes && currentManifest.totalDownloadBytes > 0 ? currentManifest.totalDownloadBytes : 0)
+    }
+    setStatus("downloading")
+
+    const syncingVersion = currentManifest.version
+
+    gameService
+      .startSync(
+        currentManifest.clientFiles,
+        currentManifest.version,
+        currentManifest.minecraftVersion,
+        currentManifest.modLoader,
+        currentManifest.modLoaderVersion,
+        currentManifest.neoForgeVersion,
+        false,
+        ...(currentManifest.directoryPolicies ? [currentManifest.directoryPolicies] : []),
+      )
+      .then((res: any) => {
+        if (res?.paused) {
+          setStatus("paused")
+          return
+        }
+        if (res?.success) {
+          isIntegrityBlockedRef.current = false
+          gameService.setGameInstalled(true)
+          markSyncedVersionInstalled(syncingVersion)
+
+          const hasNewerRelease = Boolean(
+            latestManifestVersionRef.current &&
+            latestManifestVersionRef.current !== syncingVersion
+          )
+          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+          const currentLatestManifest = manifestRef.current
+          const isGameBusy = statusRef.current === "launching" || statusRef.current === "running"
+
+          if (hasNewerRelease) {
+            if (
+              autoUpdatesEnabled &&
+              currentLatestManifest &&
+              currentLatestManifest.version === latestManifestVersionRef.current &&
+              currentLatestManifest.clientFiles &&
+              currentLatestManifest.clientFiles.length > 0 &&
+              !isGameBusy
+            ) {
+              showToast(t("playButton.syncSuccess"), "success")
+              const nextManifest: GameManifest = {
+                ...currentLatestManifest,
+                installedModpackVersion: syncingVersion,
+                hasUpdate: true,
+                hasExistingInstall: true,
+              }
+              setManifest(nextManifest)
+              isStartingSyncRef.current = false
+              triggerSync(nextManifest)
+              return
+            } else {
+              if (syncOpIdRef.current === syncOpId) {
+                isStartingSyncRef.current = false
+              }
+              setStatus("update")
+            }
+          } else {
             if (syncOpIdRef.current === syncOpId) {
               isStartingSyncRef.current = false
             }
-            gameService.setGameInstalled(true)
-            markSyncedVersionInstalled(syncingVersion)
-
-            const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
-            const hasNewerVersion = Boolean(
-              latestManifestVersionRef.current &&
-              latestManifestVersionRef.current !== syncingVersion
-            )
-
-            if (hasNewerVersion) {
-              const currentMan = manifestRef.current
-              if (
-                isLocalAllowed &&
-                autoUpdatesEnabled &&
-                currentMan &&
-                currentMan.version === latestManifestVersionRef.current &&
-                currentMan.clientFiles &&
-                currentMan.clientFiles.length > 0
-              ) {
-                triggerSync(currentMan)
-              } else {
-                setStatus("update")
-              }
-            } else {
-              setStatus("play")
-            }
-
-            showToast(t("playButton.syncSuccess"), "success")
+            setStatus("play")
           }
-        })
-        .catch((err: any) => {
-          const msg = String(err?.message || err || "").toLowerCase()
-          if (isCancellingRef.current || msg.includes("cancel") || msg.includes("abort")) {
-            return
-          }
-          console.error("Sync error:", err)
-          gameService.setGameInstalled(false)
-          setStatus(resolveIdleGameButtonState(currentManifest))
-          showToast(t("playButton.syncError"), "error")
-        })
-        .finally(() => {
-          if (syncOpIdRef.current === syncOpId) {
-            isStartingSyncRef.current = false
-          }
-        })
-    },
-    [isLocalAllowed, markSyncedVersionInstalled, setStatus, showToast, t],
-  )
+
+          showToast(t("playButton.syncSuccess"), "success")
+        }
+      })
+      .catch((err: any) => {
+        const msg = String(err?.message || err || "").toLowerCase()
+        if (isCancellingRef.current || msg.includes("cancel") || msg.includes("abort")) {
+          return
+        }
+        console.error("Sync error:", err)
+        gameService.setGameInstalled(false)
+        setStatus(resolveIdleGameButtonState(currentManifest))
+        showToast(t("playButton.syncError"), "error")
+      })
+      .finally(() => {
+        if (syncOpIdRef.current === syncOpId) {
+          isStartingSyncRef.current = false
+        }
+      })
+  }, [isLocalAllowed, markSyncedVersionInstalled, setStatus, showToast, t])
 
   // Close options menu on click outside
   useEffect(() => {
@@ -392,10 +403,6 @@ export default function DownloadPlayButton({
 
       const isInstalled = Boolean(manifest.installed || manifest.hasExistingInstall)
 
-      const installedVer =
-        manifest.installedModpackVersion || (manifest.installed ? manifest.version : null)
-      const hasUpdate = Boolean(isInstalled && installedVer && installedVer !== published.version)
-
       const freshManifest: GameManifest = {
         ...manifest,
         version: published.version,
@@ -407,10 +414,11 @@ export default function DownloadPlayButton({
         directoryPolicies,
         totalSizeGB,
         totalDownloadBytes: isInstalled ? 0 : totalBytes,
-        hasUpdate,
-        installed: isInstalled && installedVer === published.version,
+        hasUpdate: isInstalled,
+        installed: false,
         hasExistingInstall: isInstalled,
-        installedModpackVersion: installedVer,
+        installedModpackVersion:
+          manifest.installedModpackVersion || (manifest.installed ? manifest.version : null),
         hasIntegrityIssue: false,
       }
 
@@ -422,28 +430,32 @@ export default function DownloadPlayButton({
         return
       }
 
-      const isRunning = statusRef.current === "launching" || statusRef.current === "running"
-      if (isRunning) {
-        setStatus("running")
-        pendingAutoUpdateRef.current = true
-        return
-      }
-
-      const isDownloading = statusRef.current === "downloading"
-      if (isDownloading) {
-        return
-      }
-
-      if (isInstalled && installedVer === published.version) {
-        setStatus("play")
-      } else if (isInstalled) {
-        setStatus("update")
-      } else {
-        setStatus("download")
-      }
-
       const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
-      const shouldAutoUpdate = Boolean(
+      const isGameBusy = statusRef.current === "launching" || statusRef.current === "running"
+
+      if (isGameBusy) {
+        if (autoUpdatesEnabled) {
+          pendingAutoUpdateRef.current = true
+        }
+        return
+      }
+
+      setStatus((prevStatus: GameButtonState) => {
+        if (
+          prevStatus === "downloading" ||
+          prevStatus === "paused" ||
+          prevStatus === "installing" ||
+          prevStatus === "verifying" ||
+          prevStatus === "launching" ||
+          prevStatus === "running"
+        ) {
+          return prevStatus
+        }
+
+        return resolveIdleGameButtonState(freshManifest)
+      })
+
+      const hasUpdate = Boolean(
         freshManifest.installedModpackVersion &&
         freshManifest.installedModpackVersion !== freshManifest.version
       )
@@ -451,13 +463,16 @@ export default function DownloadPlayButton({
       if (
         isLocalAllowed &&
         autoUpdatesEnabled &&
-        shouldAutoUpdate &&
+        hasUpdate &&
         !isStartingSyncRef.current &&
         statusRef.current !== "downloading" &&
         statusRef.current !== "installing" &&
         statusRef.current !== "verifying" &&
+        statusRef.current !== "launching" &&
+        statusRef.current !== "running" &&
         statusRef.current !== "paused" &&
-        clientFiles.length > 0
+        freshManifest.clientFiles &&
+        freshManifest.clientFiles.length > 0
       ) {
         triggerSync(freshManifest)
       }
@@ -534,6 +549,11 @@ export default function DownloadPlayButton({
         launchStatus: "idle" | "preparing" | "running",
         details?: { unexpected?: boolean; code?: number | null; error?: any },
       ) => {
+        if (!isLocalAllowed) {
+          setStatus("unavailable")
+          return
+        }
+
         if (launchStatus === "preparing") {
           setStatus("launching")
           return
@@ -553,10 +573,6 @@ export default function DownloadPlayButton({
             statusRef.current === "launching" || statusRef.current === "running"
 
           if (wasRunningOrLaunching) {
-            if (!isLocalAllowed) {
-              setStatus("unavailable")
-              return
-            }
             const currentManifest = manifestRef.current
             const idleState = resolveIdleGameButtonState(currentManifest)
             setStatus(idleState)
@@ -568,7 +584,6 @@ export default function DownloadPlayButton({
             )
 
             if (
-              isLocalAllowed &&
               autoUpdatesEnabled &&
               (pendingAutoUpdateRef.current || hasUpdate) &&
               !isStartingSyncRef.current &&
@@ -591,6 +606,7 @@ export default function DownloadPlayButton({
 
   // Listen to IPC download progress and phase events if running in Electron
   useEffect(() => {
+    if (!isLocalAllowed) return
     const unsubProgress = window.electronAPI?.onDownloadProgress?.((data: any) => {
       if (!isStartingSyncRef.current) return
       setProgress(data.progress)

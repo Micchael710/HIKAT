@@ -303,8 +303,10 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
       )
     })
 
-    // checkSyncPlan must NOT be called for Warria
+    // checkSyncPlan, setRamAllocation, setDedicatedGpu must NOT be called for Warria
     expect(checkSyncPlanMock).not.toHaveBeenCalled()
+    expect(setRamMock).not.toHaveBeenCalled()
+    expect(setGpuMock).not.toHaveBeenCalled()
 
     // Switch to game tab
     const tabButtons = container.querySelectorAll(".launcher-tab-btn")
@@ -325,6 +327,220 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
     )
 
     expect(verifyUninstallMock).not.toHaveBeenCalled()
+  })
+
+  it("E2. Cold start fail-closed: servers=[] y propSelectedGameId=WARRIA_ID no ejecuta checkSyncPlan, setRamAllocation ni setDedicatedGpu", async () => {
+    const checkSyncPlanMock = vi.fn().mockResolvedValue({ success: true })
+    const setRamMock = vi.fn()
+    const setGpuMock = vi.fn().mockResolvedValue(true)
+
+    ;(window as any).electronAPI = {
+      checkSyncPlan: checkSyncPlanMock,
+      setRamAllocation: setRamMock,
+      setDedicatedGpu: setGpuMock,
+      getMemory: vi.fn().mockResolvedValue({ totalGb: 16 }),
+      getLaunchStatus: vi.fn().mockResolvedValue({ status: "idle", operationState: "IDLE" }),
+    }
+
+    localStorage.setItem("hikat_ram_auto", "true")
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    unmountCurrent = () => root.unmount()
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <SettingsView
+            theme="dark"
+            servers={[]}
+            selectedGameId={WARRIA_ID}
+            onSelectGameId={() => {}}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    expect(checkSyncPlanMock).not.toHaveBeenCalled()
+    expect(setRamMock).not.toHaveBeenCalled()
+    expect(setGpuMock).not.toHaveBeenCalled()
+  })
+
+  it("E3. Regresion critica DownloadPlayButton: 1.1 descargandose -> llega 1.2 por WS -> Auto Updates OFF -> termina 1.1 -> ACTUALIZAR instala 1.2", async () => {
+    let wsCallback: any = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+      wsCallback = cb
+      return () => {}
+    })
+
+    const manifest11 = {
+      version: "1.1",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      installed: false,
+      hasExistingInstall: false,
+      installedModpackVersion: null,
+      clientFiles: [
+        { path: "mods/mod-1.1.jar", sha256: "hash11", sizeBytes: 1000, downloadUrl: "https://example.com/11.jar", policy: "MANAGED" },
+      ],
+    }
+
+    const published12 = {
+      version: "1.2",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      clientFiles: [
+        { path: "mods/mod-1.2.jar", sha256: "hash12", sizeBytes: 2000, downloadUrl: "https://example.com/12.jar", policy: "MANAGED" },
+      ],
+    }
+
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(manifest11 as any)
+    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue(published12 as any)
+
+    let resolveFirstSync: any = null
+    const startSyncMock = vi.fn().mockImplementationOnce(() => {
+      return new Promise((resolve) => {
+        resolveFirstSync = resolve
+      })
+    }).mockImplementationOnce(() => {
+      return Promise.resolve({ success: true })
+    })
+
+    vi.spyOn(gameService, "startSync").mockImplementation(startSyncMock)
+
+    // Auto Updates is OFF
+    localStorage.setItem("hikat_auto_updates", "false")
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    unmountCurrent = () => root.unmount()
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            theme="dark"
+            serverId={APPARATIA_ID}
+            allowLegacyLocalOperations={true}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    const button = container.querySelector("button") as HTMLButtonElement
+    expect(button).not.toBeNull()
+
+    // 1. Click to start download of 1.1
+    await act(async () => {
+      button.click()
+    })
+
+    expect(startSyncMock).toHaveBeenCalledTimes(1)
+    expect(startSyncMock.mock.calls[0][1]).toBe("1.1")
+    expect(startSyncMock.mock.calls[0][0]).toEqual(manifest11.clientFiles)
+
+    // 2. While 1.1 is downloading, WebSocket receives release 1.2
+    await act(async () => {
+      await wsCallback?.({
+        type: "RELEASE_ACTIVATED",
+        version: "1.2",
+        minecraftVersion: "1.21.1",
+        serverId: APPARATIA_ID,
+      })
+    })
+
+    // 3. Download of 1.1 completes
+    await act(async () => {
+      resolveFirstSync({ success: true })
+    })
+
+    // 4. Button should now show ACTUALIZAR (update)
+    const updateButton = container.querySelector("button") as HTMLButtonElement
+    expect(updateButton.textContent).toMatch(/UPDATE|ACTUALIZAR/i)
+
+    // 5. User clicks ACTUALIZAR
+    await act(async () => {
+      updateButton.click()
+    })
+
+    // 6. startSync must be called second time with version 1.2 and clientFiles of 1.2
+    expect(startSyncMock).toHaveBeenCalledTimes(2)
+    expect(startSyncMock.mock.calls[1][1]).toBe("1.2")
+    expect(startSyncMock.mock.calls[1][0]).toEqual(published12.clientFiles)
+  })
+
+  it("E4. Lifecycle Electron secundario: Warria con allowLegacyLocalOperations=false ignora preparing/running y mantiene unavailable", async () => {
+    let launchStatusListener: any = null
+    ;(window as any).electronAPI = {
+      onLaunchStatus: vi.fn().mockImplementation((cb: any) => {
+        launchStatusListener = cb
+        return () => {}
+      }),
+      launchGame: vi.fn(),
+      startSync: vi.fn(),
+    }
+
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FABRIC",
+      installed: false,
+      hasExistingInstall: false,
+      clientFiles: [],
+    } as any)
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    unmountCurrent = () => root.unmount()
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            theme="dark"
+            serverId={WARRIA_ID}
+            allowLegacyLocalOperations={false}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    const button = container.querySelector("button") as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(button.textContent).toMatch(/UNAVAILABLE|NO DISPONIBLE/i)
+
+    // Emit preparing from Electron legacy
+    await act(async () => {
+      launchStatusListener?.("preparing")
+    })
+    expect(button.disabled).toBe(true)
+    expect(button.textContent).toMatch(/UNAVAILABLE|NO DISPONIBLE/i)
+
+    // Emit running from Electron legacy
+    await act(async () => {
+      launchStatusListener?.("running")
+    })
+    expect(button.disabled).toBe(true)
+    expect(button.textContent).toMatch(/UNAVAILABLE|NO DISPONIBLE/i)
+
+    // Emit idle from Electron legacy
+    await act(async () => {
+      launchStatusListener?.("idle")
+    })
+    expect(button.disabled).toBe(true)
+    expect(button.textContent).toMatch(/UNAVAILABLE|NO DISPONIBLE/i)
+
+    expect((window as any).electronAPI.launchGame).not.toHaveBeenCalled()
+    expect((window as any).electronAPI.startSync).not.toHaveBeenCalled()
   })
 
   it("F. Cambiar seleccion: Apparatia -> Warria y recibir RELEASE_ACTIVATED de Warria debe refrescar Warria; evento de Apparatia se ignora", async () => {

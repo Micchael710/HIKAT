@@ -103,20 +103,17 @@ export default function SettingsView({
     getStoredBoolean(STORAGE_KEYS.DEDICATED_GPU, true),
   )
 
-  const legacyLocalServerId = React.useMemo(() => {
-    if (!servers || servers.length === 0) {
-      return propSelectedGameId || "default"
-    }
-    return (
-      servers.find(
+  const hasServerCatalog = Boolean(servers && servers.length > 0)
+
+  const legacyLocalServerId = hasServerCatalog
+    ? servers?.find(
         (server) => server.name.trim().toLowerCase() === "apparatia",
       )?.id ?? null
-    )
-  }, [servers, propSelectedGameId])
+    : null
 
   const games: GameItem[] = React.useMemo(() => {
-    if (servers && servers.length > 0) {
-      return servers.map((s) => {
+    if (hasServerCatalog) {
+      return servers!.map((s) => {
         const logoUrl = s.sidebarLogo?.url
           ? resolveApiAssetUrl(s.sidebarLogo.url)
           : s.mainLogo?.url
@@ -132,12 +129,12 @@ export default function SettingsView({
     }
     return [
       {
-        id: legacyLocalServerId || "default",
+        id: propSelectedGameId || "default",
         name: "Apparatia",
         logo: apparatiaLogo,
       },
     ]
-  }, [servers, legacyLocalServerId])
+  }, [servers, hasServerCatalog, propSelectedGameId])
 
   const [internalSelectedGameId, setInternalSelectedGameId] = useState<string>(() => {
     return propSelectedGameId || games[0]?.id || ""
@@ -152,11 +149,16 @@ export default function SettingsView({
     onSelectGameId?.(id)
   }
 
-  const isLegacyLocal = Boolean(
-    !servers || servers.length === 0
-      ? true
-      : legacyLocalServerId && selectedGameId === legacyLocalServerId,
-  )
+  const isPureLegacyMode =
+    !hasServerCatalog &&
+    !propSelectedGameId
+
+  const isLegacyLocal =
+    isPureLegacyMode ||
+    Boolean(
+      legacyLocalServerId &&
+      selectedGameId === legacyLocalServerId
+    )
   const isLegacyLocalRef = useRef(isLegacyLocal)
   isLegacyLocalRef.current = isLegacyLocal
 
@@ -314,7 +316,9 @@ export default function SettingsView({
     let isMounted = true
 
     // Check operative state locally
-    refreshOperationalState()
+    if (isLegacyLocalRef.current) {
+      refreshOperationalState()
+    }
 
     if (window.electronAPI?.getMemory) {
       window.electronAPI
@@ -327,7 +331,9 @@ export default function SettingsView({
               const autoRam = calculateAutomaticRam(info.totalGb)
               setRamGBState(autoRam)
               setStoredNumber(STORAGE_KEYS.RAM_GB, autoRam)
-              window.electronAPI?.setRamAllocation?.(autoRam)
+              if (isLegacyLocalRef.current) {
+                window.electronAPI?.setRamAllocation?.(autoRam)
+              }
             }
           }
         })
@@ -370,7 +376,7 @@ export default function SettingsView({
         .catch(() => {})
     }
 
-    if (window.electronAPI?.getDedicatedGpu) {
+    if (isLegacyLocalRef.current && window.electronAPI?.getDedicatedGpu) {
       window.electronAPI
         .getDedicatedGpu()
         .then((realState: any) => {
@@ -382,7 +388,7 @@ export default function SettingsView({
         .catch(() => {})
     }
 
-    if (window.electronAPI?.getRamAllocation) {
+    if (isLegacyLocalRef.current && window.electronAPI?.getRamAllocation) {
       window.electronAPI
         .getRamAllocation()
         .then((realRam: any) => {
@@ -396,7 +402,7 @@ export default function SettingsView({
     }
 
     // Load Runtime Info
-    if (window.electronAPI?.getGameRuntimeInfo) {
+    if (isLegacyLocalRef.current && window.electronAPI?.getGameRuntimeInfo) {
       window.electronAPI
         .getGameRuntimeInfo()
         .then((info: any) => {
@@ -411,7 +417,7 @@ export default function SettingsView({
     }
 
     // Load Launch & Operation Status
-    if (window.electronAPI?.getLaunchStatus) {
+    if (isLegacyLocalRef.current && window.electronAPI?.getLaunchStatus) {
       window.electronAPI
         .getLaunchStatus()
         .then((st: any) => {
@@ -424,14 +430,18 @@ export default function SettingsView({
     }
 
     // Subscribe to Launch Status changes
-    const unsubLaunch = window.electronAPI?.onLaunchStatus?.((status: any) => {
-      if (isMounted) setLaunchStatus(status)
-    })
+    const unsubLaunch = isLegacyLocalRef.current
+      ? window.electronAPI?.onLaunchStatus?.((status: any) => {
+          if (isMounted) setLaunchStatus(status)
+        })
+      : undefined
 
     // Subscribe to Phase Changes
-    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: any) => {
-      if (isMounted) setOperationState(phase)
-    })
+    const unsubPhase = isLegacyLocalRef.current
+      ? window.electronAPI?.onPhaseChange?.((phase: any) => {
+          if (isMounted) setOperationState(phase)
+        })
+      : undefined
 
     // Listen to game action status events from DownloadPlayButton
     const handleActionStatus = (e: Event) => {
