@@ -762,4 +762,153 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
 
     expect(setViewSpy).toHaveBeenCalledWith("downloads")
   })
+
+  // 10. HOMESCREEN VINCULACIÓN: PAUSE / RESUME EN VIVO
+  it("10. HOMESCREEN VINCULACIÓN: Pausar descarga refleja PAUSADO (no descargando congelado), y reanudar refleja DESCARGANDO", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      installed: false,
+      hasExistingInstall: false,
+      installedModpackVersion: null,
+      clientFiles: [{ path: "mods/sample.jar", sha256: "hash", sizeBytes: 1000 }],
+    } as any)
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue({
+      active: {
+        gameId: "server-a",
+        phase: "DOWNLOADING",
+        progress: 40,
+        speedMBs: 15.5,
+        downloadedBytes: 400,
+        totalBytes: 1000,
+        remainingMinutes: 1,
+        isPaused: false,
+      },
+      queued: [],
+    })
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            theme="dark"
+            gameContext={{ gameId: "server-a", gameName: "Warria" }}
+            serverId="server-a"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    expect(container.textContent).toContain("DESCARGANDO")
+    expect(container.textContent).toContain("40%")
+
+    // Main / DownloadsView emits PAUSED
+    await act(async () => {
+      phaseChangeCallback?.("PAUSED", "server-a")
+    })
+
+    // Must show PAUSADO, not DESCARGANDO!
+    expect(container.textContent).toContain("PAUSADO")
+
+    // Main / DownloadsView emits DOWNLOADING (resume)
+    await act(async () => {
+      phaseChangeCallback?.("DOWNLOADING", "server-a")
+    })
+
+    expect(container.textContent).toContain("DESCARGANDO")
+  })
+
+  // 11. HOMESCREEN VINCULACIÓN: QUEUED PRESERVADO EN CAMBIO DE IDIOMA Y NAVEGACIÓN
+  it("11. HOMESCREEN VINCULACIÓN: Servidor en cola no se resetea a Descargar al cambiar idioma ni al re-montar", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      installed: false,
+      hasExistingInstall: false,
+      installedModpackVersion: null,
+      clientFiles: [{ path: "mods/sample.jar", sha256: "hash", sizeBytes: 1000 }],
+    } as any)
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue({
+      active: {
+        gameId: "server-a",
+        phase: "DOWNLOADING",
+        progress: 50,
+      },
+      queued: [
+        {
+          gameId: "server-b",
+          gameName: "Survival Realm",
+          position: 1,
+        },
+      ],
+    })
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            theme="dark"
+            gameContext={{ gameId: "server-b", gameName: "Survival Realm" }}
+            serverId="server-b"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    // Initially in Spanish: EN COLA
+    expect(container.textContent).toContain("EN COLA")
+    expect(container.textContent).not.toContain("DESCARGAR")
+
+    // Language change to English: must reflect IN QUEUE, NOT DOWNLOAD!
+    localStorage.setItem("hikat_language", "en")
+
+    await act(async () => {
+      root.unmount()
+      container = document.createElement("div")
+      document.body.appendChild(container)
+      root = createRoot(container)
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            theme="dark"
+            gameContext={{ gameId: "server-b", gameName: "Survival Realm" }}
+            serverId="server-b"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    expect(container.textContent).toContain("QUEUED")
+    expect(container.textContent).not.toContain("DOWNLOAD")
+
+    // Promotion in queue: Server B becomes active
+    await act(async () => {
+      queueChangeCallback?.({
+        active: {
+          gameId: "server-b",
+          phase: "DOWNLOADING",
+          progress: 10,
+          speedMBs: 8.5,
+          downloadedBytes: 100,
+          totalBytes: 1000,
+          remainingMinutes: 2,
+          isPaused: false,
+        },
+        queued: [],
+      })
+    })
+
+    expect(container.textContent).toContain("DOWNLOADING")
+    expect(container.textContent).toContain("10%")
+  })
 })

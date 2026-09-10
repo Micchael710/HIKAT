@@ -360,7 +360,10 @@ export default function DownloadPlayButton({
             return
           }
 
-          const launchInfo = await window.electronAPI?.getLaunchStatus?.(effectiveGameContext).catch(() => null)
+          const [launchInfo, queueSnap] = await Promise.all([
+            window.electronAPI?.getLaunchStatus?.(effectiveGameContext).catch(() => null),
+            window.electronAPI?.getDownloadQueue?.().catch(() => null),
+          ])
 
           const otherGameRunning = Boolean(
             launchInfo?.runningGameId &&
@@ -394,29 +397,48 @@ export default function DownloadPlayButton({
             return
           }
 
-          if (
-            gameContext?.gameId &&
-            launchInfo?.activeOperationGameId === gameContext.gameId &&
-            launchInfo?.operationState &&
-            launchInfo?.operationState !== "IDLE"
-          ) {
-            const opState = launchInfo.operationState
-            if (opState === "SYNCING") setStatus("downloading")
-            else if (opState === "INSTALLING") setStatus("installing")
-            else if (opState === "VERIFYING") setStatus("verifying")
-            else if (opState === "PAUSED") setStatus("paused")
-            else setStatus("downloading")
+          const currentTargetId = gameContext?.gameId || activeServerId
+          const isQueueActive = Boolean(
+            currentTargetId &&
+            (queueSnap?.active?.gameId === currentTargetId || launchInfo?.activeOperationGameId === currentTargetId)
+          )
 
-            isStartingSyncRef.current = opState !== "PAUSED"
-
-            if (launchInfo.operationSnapshot) {
-              const snap = launchInfo.operationSnapshot
-              setProgress(snap.progress || 0)
-              setSpeed(snap.speedMBs || 0)
-              setDownloadedBytes(snap.downloadedBytes || 0)
-              if (snap.totalBytes > 0) setTotalBytes(snap.totalBytes)
-              setTimeRemainingMin(snap.remainingMinutes || 0)
+          if (isQueueActive) {
+            const isPaused = Boolean(
+              queueSnap?.active?.isPaused ||
+              queueSnap?.active?.phase === "PAUSED" ||
+              launchInfo?.operationState === "PAUSED"
+            )
+            const opPhase = queueSnap?.active?.phase || launchInfo?.activeOperationPhase || launchInfo?.operationState
+            if (isPaused) {
+              setStatus("paused")
+            } else if (opPhase === "INSTALLING") {
+              setStatus("installing")
+            } else if (opPhase === "VERIFYING") {
+              setStatus("verifying")
+            } else {
+              setStatus("downloading")
             }
+
+            isStartingSyncRef.current = !isPaused
+
+            const activeSnap = queueSnap?.active || launchInfo?.operationSnapshot
+            if (activeSnap) {
+              if (typeof activeSnap.progress === "number") setProgress(activeSnap.progress)
+              if (typeof activeSnap.speedMBs === "number") setSpeed(activeSnap.speedMBs)
+              if (typeof activeSnap.downloadedBytes === "number") setDownloadedBytes(activeSnap.downloadedBytes)
+              if (typeof activeSnap.totalBytes === "number" && activeSnap.totalBytes > 0) setTotalBytes(activeSnap.totalBytes)
+              if (typeof activeSnap.remainingMinutes === "number") setTimeRemainingMin(activeSnap.remainingMinutes)
+            }
+            return
+          }
+
+          const isQueued = Boolean(
+            currentTargetId &&
+            queueSnap?.queued?.some((q: any) => q.gameId === currentTargetId)
+          )
+          if (isQueued) {
+            setStatus("queued")
             return
           }
 
@@ -786,9 +808,10 @@ export default function DownloadPlayButton({
 
       setStatus((prev) => {
         if (prev === "verifying") return prev
-        if (prev !== "downloading" && prev !== "installing") return prev
+        if (prev === "launching" || prev === "running") return prev
+        if (prev !== "downloading" && prev !== "installing" && prev !== "queued" && prev !== "paused") return prev
         if (data.phase === "INSTALLING") return "installing"
-        if (data.phase === "DOWNLOADING" && prev === "installing") return "downloading"
+        if (data.phase === "DOWNLOADING") return "downloading"
         return prev
       })
     })
@@ -819,12 +842,33 @@ export default function DownloadPlayButton({
         return
       }
 
-      if (gameContext) {
-        if (eventGameId !== gameContext.gameId) return
+      const currentTargetId = gameContext?.gameId || activeServerId
+      if (currentTargetId && eventGameId && eventGameId !== currentTargetId) {
+        return
+      }
+
+      if (statusRef.current === "launching" || statusRef.current === "running") {
+        return
+      }
+
+      if (phase === "PAUSED") {
+        setStatus("paused")
+        return
       }
 
       if (phase === "DOWNLOADING") {
-        setStatus((prev) => (prev === "queued" ? "downloading" : prev))
+        setStatus("downloading")
+        return
+      }
+
+      if (phase === "INSTALLING") {
+        setStatus("installing")
+        return
+      }
+
+      if (phase === "VERIFYING") {
+        setStatus("verifying")
+        return
       }
 
       if (phase === "IDLE") {
@@ -841,19 +885,67 @@ export default function DownloadPlayButton({
           })
         return
       }
-      setStatus((prev) => {
-        if (prev === "verifying") return prev
-        if (prev === "queued") return phase === "DOWNLOADING" ? "downloading" : prev
-        if (prev !== "downloading" && prev !== "installing") return prev
-        if (phase === "INSTALLING") return "installing"
-        if (phase === "DOWNLOADING" && prev === "installing") return "downloading"
-        return prev
-      })
+    })
+
+    const unsubQueue = window.electronAPI?.onDownloadQueueChanged?.((snap: any) => {
+      if (!isLocalAllowed || !snap || typeof snap !== "object") return
+      const currentTargetId = gameContext?.gameId || activeServerId
+      if (!currentTargetId) return
+
+      if (statusRef.current === "launching" || statusRef.current === "running") {
+        return
+      }
+
+      // 1. Active download matching this game
+      if (snap.active?.gameId === currentTargetId) {
+        const isPaused = Boolean(snap.active.isPaused || snap.active.phase === "PAUSED")
+        if (isPaused) {
+          setStatus("paused")
+        } else if (snap.active.phase === "INSTALLING") {
+          setStatus("installing")
+        } else if (snap.active.phase === "VERIFYING") {
+          setStatus("verifying")
+        } else {
+          setStatus("downloading")
+        }
+        if (typeof snap.active.progress === "number") setProgress(snap.active.progress)
+        if (typeof snap.active.speedMBs === "number") setSpeed(snap.active.speedMBs)
+        if (typeof snap.active.downloadedBytes === "number") setDownloadedBytes(snap.active.downloadedBytes)
+        if (typeof snap.active.totalBytes === "number" && snap.active.totalBytes > 0) setTotalBytes(snap.active.totalBytes)
+        if (typeof snap.active.remainingMinutes === "number") setTimeRemainingMin(snap.active.remainingMinutes)
+        return
+      }
+
+      // 2. Queued download matching this game
+      const isQueued = Boolean(snap.queued?.some((q: any) => q.gameId === currentTargetId))
+      if (isQueued) {
+        setStatus("queued")
+        return
+      }
+
+      // 3. Neither active nor queued: if it was previously active/queued, restore idle state
+      const wasInQueueOrActive =
+        statusRef.current === "queued" ||
+        statusRef.current === "downloading" ||
+        statusRef.current === "paused"
+
+      if (wasInQueueOrActive && !isStartingSyncRef.current) {
+        gameService
+          .checkGameManifest(activeServerId, {
+            allowLegacyLocalFilesystem: isLocalAllowed,
+            gameContext: effectiveGameContext,
+          })
+          .then((fresh) => {
+            setManifest(fresh)
+            setStatus(isLocalAllowed ? resolveIdleGameButtonState(fresh, activeServerId) : "unavailable")
+          })
+      }
     })
 
     return () => {
       unsubProgress?.()
       unsubPhase?.()
+      unsubQueue?.()
     }
   }, [isLocalAllowed, gameContext, activeServerId])
 
