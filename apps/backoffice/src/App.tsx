@@ -164,7 +164,11 @@ function BackofficeShell({
                 />
               )}
               {section === "server-settings" && (
-                <ServerSettingsView theme={theme} server={selectedServer} />
+                <ServerSettingsView
+                  theme={theme}
+                  server={selectedServer}
+                  onServerUpdated={setSelectedServer}
+                />
               )}
             </>
           )}

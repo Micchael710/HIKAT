@@ -4,6 +4,7 @@ import type {
   ContentMedia,
   ServerItem,
   CreateServerInput,
+  UpdateServerBrandingInput,
   ServerResources,
   ServerStatus,
   ServerActivityItem,
@@ -491,6 +492,24 @@ export const serverApi = {
     `
     const data = await executeGraphQL<{ createServer: ServerItem }>(mutation, { input })
     return data.createServer
+  },
+
+  async updateServerBranding(
+    serverId: string,
+    input: UpdateServerBrandingInput,
+  ): Promise<ServerItem> {
+    const mutation = /* GraphQL */ `
+      mutation UpdateServerBranding($serverId: ID!, $input: UpdateServerBrandingInput!) {
+        updateServerBranding(serverId: $serverId, input: $input) {
+          ${SERVER_FIELDS}
+        }
+      }
+    `
+    const data = await executeGraphQL<{ updateServerBranding: ServerItem }>(mutation, {
+      serverId,
+      input,
+    })
+    return data.updateServerBranding
   },
 
   async deleteServer(serverId: string, deletePterodactyl: boolean): Promise<boolean> {

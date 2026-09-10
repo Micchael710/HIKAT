@@ -3,6 +3,7 @@ import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
 import {
   createServer,
+  updateServerBranding,
   getServers,
   getServerById,
   getLauncherServers,
@@ -16,6 +17,7 @@ import {
   resolveServerAllocationPort,
   syncServerProvisioningStatus,
 } from "./serverService"
+import * as releaseEventsModule from "../releaseEvents"
 import { handleGameFileDownload } from "./game/gameStorageService"
 import {
   createPterodactylApplicationClient,
@@ -2558,6 +2560,110 @@ describe("ServerService & Multi-Server Provisioning", () => {
       expect(server.id).toBe("server-with-logo")
       expect(server.mainLogo).toBeDefined()
       expect(server.mainLogo?.id).toBe(mediaId)
+    })
+  })
+
+  describe("updateServerBranding", () => {
+    it("A. updates only mainLogoMediaId, sidebarLogoMediaId, accentColor, and does not touch Pterodactyl", async () => {
+      // Insert server
+      const serverId = "srv-brand-test"
+      await mockDb.insert(schema.servers).values({
+        id: serverId,
+        name: "Branded Server",
+        minecraftVersion: "1.21.1",
+        modLoader: "FABRIC",
+        cpu: 200,
+        memoryMb: 4096,
+        diskMb: 10240,
+        pterodactylServerId: "pterodactyl-uuid-123",
+        accentColor: "#ffffff",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      // Insert media
+      const mainId = "media-main-1"
+      const sideId = "media-side-1"
+      await mockDb.insert(schema.contentMedia).values([
+        {
+          id: mainId,
+          objectKey: "media/main.png",
+          mediaType: "IMAGE",
+          mimeType: "image/png",
+          sizeBytes: 1234,
+          createdBy: "user-1",
+          createdAt: "2026-09-01T00:00:00.000Z",
+        },
+        {
+          id: sideId,
+          objectKey: "media/side.png",
+          mediaType: "IMAGE",
+          mimeType: "image/png",
+          sizeBytes: 1234,
+          createdBy: "user-1",
+          createdAt: "2026-09-01T00:00:00.000Z",
+        },
+      ])
+
+      const broadcastSpy = vi.spyOn(releaseEventsModule, "broadcastServerUpdated").mockResolvedValue()
+
+      const result = await updateServerBranding(mockDb, mockEnv, serverId, {
+        mainLogoMediaId: mainId,
+        sidebarLogoMediaId: sideId,
+        accentColor: "#3366ff",
+      })
+
+      expect(result.id).toBe(serverId)
+      expect(result.accentColor).toBe("#3366FF")
+      expect(result.mainLogo?.id).toBe(mainId)
+      expect(result.sidebarLogo?.id).toBe(sideId)
+      expect(broadcastSpy).toHaveBeenCalledWith(mockEnv, serverId)
+
+      // Verify in DB that other fields (name, pterodactylServerId, cpu, etc) were NOT changed
+      const dbServer = await mockDb.select().from(schema.servers).where(eq(schema.servers.id, serverId)).get()
+      expect(dbServer?.name).toBe("Branded Server")
+      expect(dbServer?.pterodactylServerId).toBe("pterodactyl-uuid-123")
+      expect(dbServer?.cpu).toBe(200)
+      expect(dbServer?.accentColor).toBe("#3366FF")
+      expect(dbServer?.mainLogoMediaId).toBe(mainId)
+      expect(dbServer?.sidebarLogoMediaId).toBe(sideId)
+    })
+
+    it("B. throws NOT_FOUND when media ID does not exist", async () => {
+      const serverId = "srv-brand-test-2"
+      await mockDb.insert(schema.servers).values({
+        id: serverId,
+        name: "Branded Server 2",
+        minecraftVersion: "1.21.1",
+        modLoader: "FABRIC",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      await expect(
+        updateServerBranding(mockDb, mockEnv, serverId, {
+          mainLogoMediaId: "non-existent-media-id",
+          accentColor: "#3366ff",
+        }),
+      ).rejects.toThrow(/logo principal no fue encontrado/i)
+    })
+
+    it("C. throws validation error when accent color is invalid hex", async () => {
+      const serverId = "srv-brand-test-3"
+      await mockDb.insert(schema.servers).values({
+        id: serverId,
+        name: "Branded Server 3",
+        minecraftVersion: "1.21.1",
+        modLoader: "FABRIC",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      await expect(
+        updateServerBranding(mockDb, mockEnv, serverId, {
+          accentColor: "not-a-color",
+        }),
+      ).rejects.toThrow()
     })
   })
 })

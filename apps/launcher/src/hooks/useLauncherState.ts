@@ -126,14 +126,15 @@ export function useLauncherState() {
     }
 
     const unsubscribe = gameService.subscribeReleaseEvents((event) => {
-      if (event.type !== "RELEASE_ACTIVATED") {
+      if (event.type === "RELEASE_ACTIVATED") {
+        setLastReleaseEvent(event)
+        void loadServers()
         return
       }
 
-      setLastReleaseEvent(event)
-
-      // El catálogo GraphQL sigue siendo autoritativo.
-      void loadServers()
+      if (event.type === "SERVER_UPDATED") {
+        void loadServers()
+      }
     })
 
     return unsubscribe

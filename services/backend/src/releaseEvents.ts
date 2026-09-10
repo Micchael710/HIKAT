@@ -78,3 +78,23 @@ export async function broadcastReleaseActivated(
     body: payload,
   })
 }
+
+export async function broadcastServerUpdated(
+  env: Env,
+  serverId: string,
+): Promise<void> {
+  if (!env.RELEASE_EVENTS) return
+
+  const payload = JSON.stringify({
+    type: "SERVER_UPDATED",
+    serverId,
+  })
+
+  const id = env.RELEASE_EVENTS.idFromName("global")
+  const stub = env.RELEASE_EVENTS.get(id)
+  await stub.fetch("http://internal/broadcast", {
+    method: "POST",
+    body: payload,
+  })
+}
+

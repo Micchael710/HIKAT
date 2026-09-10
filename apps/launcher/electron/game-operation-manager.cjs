@@ -52,9 +52,6 @@ function validateSyncPayload(payload = {}, isStartSync = true) {
     if (!Array.isArray(clientFiles)) {
       throw new Error("Invalid payload: clientFiles must be an array.")
     }
-    if (isStartSync && !payload.isVerify && clientFiles.length === 0) {
-      throw new Error("Invalid payload: clientFiles cannot be empty for startSync.")
-    }
     const seenPaths = new Set()
     for (const file of clientFiles) {
       if (!file || typeof file !== "object") {

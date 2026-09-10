@@ -347,6 +347,12 @@ export interface CreateServerInputGql {
   accentColor?: string | null
 }
 
+export interface UpdateServerBrandingInputGql {
+  mainLogoMediaId?: string | null
+  sidebarLogoMediaId?: string | null
+  accentColor: string
+}
+
 export interface ServerNodeCapacityGql {
   totalMemoryMb: number
   allocatedMemoryMb: number

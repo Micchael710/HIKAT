@@ -1,5 +1,7 @@
-import React from "react"
+import React, { useState, useEffect, useRef } from "react"
 import type { ThemeMode, ServerItem } from "../../types"
+import { uploadMediaFile } from "../../services/mediaUploadService"
+import { serverApi } from "../../services/graphqlClient"
 import {
   IconServer,
   IconCpu,
@@ -13,14 +15,108 @@ import {
 interface ServerSettingsViewProps {
   theme: ThemeMode
   server: ServerItem
+  onServerUpdated?: (server: ServerItem) => void
 }
 
 export default function ServerSettingsView({
   theme,
   server,
+  onServerUpdated,
 }: ServerSettingsViewProps) {
   const isDark = theme === "dark"
-  const accent = server.accentColor || "#3ec4c0"
+  const [accentColor, setAccentColor] = useState(server.accentColor || "#3ec4c0")
+  const [mainLogoFile, setMainLogoFile] = useState<File | null>(null)
+  const [mainLogoPreview, setMainLogoPreview] = useState<string | null>(server.mainLogo?.url || null)
+  const [sidebarLogoFile, setSidebarLogoFile] = useState<File | null>(null)
+  const [sidebarLogoPreview, setSidebarLogoPreview] = useState<string | null>(server.sidebarLogo?.url || null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  const mainLogoInputRef = useRef<HTMLInputElement>(null)
+  const sidebarLogoInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setAccentColor(server.accentColor || "#3ec4c0")
+    setMainLogoFile(null)
+    setMainLogoPreview(server.mainLogo?.url || null)
+    setSidebarLogoFile(null)
+    setSidebarLogoPreview(server.sidebarLogo?.url || null)
+    setError(null)
+    setSuccessMessage(null)
+  }, [server.id, server.accentColor, server.mainLogo?.url, server.sidebarLogo?.url])
+
+  const handleMainLogoSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      setError("El logo principal debe ser una imagen (PNG, JPEG, WebP).")
+      return
+    }
+    setError(null)
+    setSuccessMessage(null)
+    setMainLogoFile(file)
+    if (typeof URL.createObjectURL === "function") {
+      setMainLogoPreview(URL.createObjectURL(file))
+    }
+  }
+
+  const handleSidebarLogoSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      setError("El logo lateral debe ser una imagen (PNG, JPEG, WebP).")
+      return
+    }
+    setError(null)
+    setSuccessMessage(null)
+    setSidebarLogoFile(file)
+    if (typeof URL.createObjectURL === "function") {
+      setSidebarLogoPreview(URL.createObjectURL(file))
+    }
+  }
+
+  const handleSaveBranding = async () => {
+    setError(null)
+    setSuccessMessage(null)
+
+    const trimmedAccent = accentColor.trim()
+    if (!/^#[0-9a-fA-F]{6}$/.test(trimmedAccent)) {
+      setError("El color de acento debe ser un código HEX válido (ej. #3ec4c0).")
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      let mainLogoMediaId: string | null = server.mainLogo?.id ?? null
+      let sidebarLogoMediaId: string | null = server.sidebarLogo?.id ?? null
+
+      if (mainLogoFile) {
+        const media = await uploadMediaFile(mainLogoFile, "IMAGE")
+        mainLogoMediaId = media.id
+      }
+
+      if (sidebarLogoFile) {
+        const media = await uploadMediaFile(sidebarLogoFile, "IMAGE")
+        sidebarLogoMediaId = media.id
+      }
+
+      const updated = await serverApi.updateServerBranding(server.id, {
+        mainLogoMediaId,
+        sidebarLogoMediaId,
+        accentColor: trimmedAccent,
+      })
+
+      setSuccessMessage("Branding actualizado correctamente.")
+      setMainLogoFile(null)
+      setSidebarLogoFile(null)
+      onServerUpdated?.(updated)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error al guardar el branding del servidor.")
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <div
@@ -326,10 +422,10 @@ export default function ServerSettingsView({
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {/* Logos Row */}
-            <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 20 }}>
               {/* Main logo (Horizontal Banner) */}
-              <div>
-                <span style={{ color: isDark ? "#94a3b8" : "#64748b", display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ color: isDark ? "#94a3b8" : "#64748b", display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase" }}>
                   Logo Principal (Horizontal)
                 </span>
                 <div
@@ -337,25 +433,49 @@ export default function ServerSettingsView({
                     width: 140,
                     height: 52,
                     borderRadius: 10,
-                    background: server.mainLogo?.url
-                      ? `url(${server.mainLogo.url}) center/cover no-repeat`
+                    background: mainLogoPreview
+                      ? `url(${mainLogoPreview}) center/cover no-repeat`
                       : isDark
                       ? "#0d141a"
                       : "#f1f5f9",
-                    border: `1.5px solid ${accent}`,
+                    border: `1.5px solid ${accentColor}`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: accent,
+                    color: accentColor,
                   }}
                 >
-                  {!server.mainLogo?.url && <span style={{ fontSize: 11, color: isDark ? "#64748b" : "#94a3b8" }}>Sin banner</span>}
+                  {!mainLogoPreview && <span style={{ fontSize: 11, color: isDark ? "#64748b" : "#94a3b8" }}>Sin banner</span>}
                 </div>
+                <input
+                  ref={mainLogoInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={handleMainLogoSelected}
+                />
+                <button
+                  type="button"
+                  onClick={() => mainLogoInputRef.current?.click()}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 6,
+                    border: isDark ? "1px solid rgba(255, 255, 255, 0.15)" : "1px solid rgba(0, 0, 0, 0.15)",
+                    background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)",
+                    color: isDark ? "#ffffff" : "#111822",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    alignSelf: "flex-start",
+                  }}
+                >
+                  Cambiar Logo
+                </button>
               </div>
 
               {/* Sidebar logo (Square) */}
-              <div>
-                <span style={{ color: isDark ? "#94a3b8" : "#64748b", display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ color: isDark ? "#94a3b8" : "#64748b", display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase" }}>
                   Logo Lateral (Cuadrado)
                 </span>
                 <div
@@ -363,20 +483,44 @@ export default function ServerSettingsView({
                     width: 52,
                     height: 52,
                     borderRadius: 12,
-                    background: server.sidebarLogo?.url
-                      ? `url(${server.sidebarLogo.url}) center/cover no-repeat`
+                    background: sidebarLogoPreview
+                      ? `url(${sidebarLogoPreview}) center/cover no-repeat`
                       : isDark
                       ? "#0d141a"
                       : "#f1f5f9",
-                    border: `1.5px solid ${accent}`,
+                    border: `1.5px solid ${accentColor}`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: accent,
+                    color: accentColor,
                   }}
                 >
-                  {!server.sidebarLogo?.url && <IconServer size={22} />}
+                  {!sidebarLogoPreview && <IconServer size={22} />}
                 </div>
+                <input
+                  ref={sidebarLogoInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={handleSidebarLogoSelected}
+                />
+                <button
+                  type="button"
+                  onClick={() => sidebarLogoInputRef.current?.click()}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 6,
+                    border: isDark ? "1px solid rgba(255, 255, 255, 0.15)" : "1px solid rgba(0, 0, 0, 0.15)",
+                    background: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)",
+                    color: isDark ? "#ffffff" : "#111822",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    alignSelf: "flex-start",
+                  }}
+                >
+                  Cambiar
+                </button>
               </div>
             </div>
 
@@ -385,12 +529,71 @@ export default function ServerSettingsView({
                 Color de Acento
               </span>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                <span style={{ width: 18, height: 18, borderRadius: 4, background: accent, display: "inline-block" }} />
-                <code style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: isDark ? "#ffffff" : "#111822" }}>
-                  {accent}
-                </code>
+                <input
+                  type="color"
+                  value={accentColor.startsWith("#") && accentColor.length === 7 ? accentColor : "#3ec4c0"}
+                  onChange={(e) => setAccentColor(e.target.value)}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    padding: 0,
+                    border: "none",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    background: "none",
+                  }}
+                />
+                <input
+                  type="text"
+                  value={accentColor}
+                  onChange={(e) => setAccentColor(e.target.value)}
+                  placeholder="#3ec4c0"
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: isDark ? "1.5px solid rgba(255, 255, 255, 0.12)" : "1.5px solid rgba(0, 0, 0, 0.15)",
+                    background: isDark ? "#0d141a" : "#f8fafc",
+                    color: isDark ? "#ffffff" : "#111822",
+                    fontFamily: "monospace",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    width: 100,
+                  }}
+                />
               </div>
             </div>
+
+            {error && (
+              <div style={{ fontSize: 12, color: "#ef4444", fontWeight: 600 }}>
+                {error}
+              </div>
+            )}
+            {successMessage && (
+              <div style={{ fontSize: 12, color: "#22c55e", fontWeight: 600 }}>
+                {successMessage}
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={handleSaveBranding}
+              style={{
+                marginTop: 6,
+                padding: "8px 16px",
+                borderRadius: 8,
+                background: accentColor,
+                color: "#000000",
+                fontWeight: 700,
+                fontSize: 12.5,
+                border: "none",
+                cursor: isSaving ? "not-allowed" : "pointer",
+                opacity: isSaving ? 0.7 : 1,
+                alignSelf: "flex-start",
+              }}
+            >
+              {isSaving ? "Guardando..." : "Guardar Branding"}
+            </button>
           </div>
         </div>
       </div>

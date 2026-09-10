@@ -424,6 +424,15 @@ export const serverTypeDefs = /* GraphQL */ `
     accentColor: String
   }
 
+  """
+  Input payload for updating server branding (logos and accent color)
+  """
+  input UpdateServerBrandingInput {
+    mainLogoMediaId: ID
+    sidebarLogoMediaId: ID
+    accentColor: String!
+  }
+
   extend type Query {
     """
     Public query discovering all available servers with active releases for Launcher
@@ -533,6 +542,11 @@ export const serverTypeDefs = /* GraphQL */ `
     Creates a new HiKAT server and automatically provisions infrastructure in Pterodactyl - requires ADMIN role
     """
     createServer(input: CreateServerInput!): Server!
+
+    """
+    Updates the branding (main logo, sidebar logo, accent color) of a server - requires ADMIN role
+    """
+    updateServerBranding(serverId: ID!, input: UpdateServerBrandingInput!): Server!
 
     """
     Deletes a HiKAT server with explicit upstream Pterodactyl deletion choice - requires ADMIN role

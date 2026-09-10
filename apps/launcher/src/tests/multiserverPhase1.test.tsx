@@ -974,13 +974,33 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
             s={1}
             theme="dark"
             activeSkinAccent={{ r: 62, g: 196, b: 192, css: "rgb(62, 196, 192)" }}
+            servers={[]}
           />
         </LanguageProvider>
       )
     })
 
-    const buttons = container.querySelectorAll("button")
-    expect(buttons.length).toBe(3)
+    const buttonsEmpty = container.querySelectorAll("button")
+    expect(buttonsEmpty.length).toBe(2) // Skins, Settings
+
+    act(() => {
+      root.render(
+        <LanguageProvider>
+          <LauncherSidebar
+            view="home"
+            setView={() => {}}
+            s={1}
+            theme="dark"
+            activeSkinAccent={{ r: 62, g: 196, b: 192, css: "rgb(62, 196, 192)" }}
+            servers={[mockWarria]}
+            selectedGameId={mockWarria.id}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    const buttonsWithServer = container.querySelectorAll("button")
+    expect(buttonsWithServer.length).toBe(3) // Warria, Skins, Settings
   })
 
   it("K. Settings mantiene la estructura existente: 1 servidor -> sin menu interno; >1 -> menu interno", async () => {

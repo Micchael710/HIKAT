@@ -1,6 +1,6 @@
 import React from "react"
 import { ThemeMode, LauncherView } from "../../types"
-import { IconHome, IconShirt, IconSettings } from "../../theme/icons"
+import { IconShirt, IconSettings } from "../../theme/icons"
 import { getThemeTokens } from "../../theme/tokens"
 import { useTranslation } from "../../context/LanguageContext"
 import type { LauncherServer } from "../../services/serverService"
@@ -39,8 +39,6 @@ export default function LauncherSidebar({
   const LOGO_SIZE = Math.round(48 * s)
   const defaultAccent = { r: 62, g: 196, b: 192, css: "62, 196, 192" }
   const effectiveHomeAccent = homeAccent || defaultAccent
-
-  const hasMultipleServers = Boolean(servers && servers.length > 1)
 
   return (
     <>
@@ -98,73 +96,9 @@ export default function LauncherSidebar({
             "sidebarNavSlideDown 0.52s cubic-bezier(0.16, 1, 0.3, 1) 0.34s both",
         }}
       >
-        {/* Home Button */}
-        {(() => {
-          const active = view === "home"
-          const itemColor = effectiveHomeAccent
-          return (
-            <div
-              key="home"
-              style={{
-                position: "relative",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {active && (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: -Math.round(14 * s),
-                    background: `radial-gradient(circle at 50% 50%, rgba(${itemColor.r}, ${itemColor.g}, ${itemColor.b}, 0.55) 0%, rgba(${itemColor.r}, ${itemColor.g}, ${itemColor.b}, 0.16) 45%, transparent 72%)`,
-                    filter: "blur(10px)",
-                    pointerEvents: "none",
-                    zIndex: 0,
-                    animation: "fadeIn 0.25s ease",
-                  }}
-                />
-              )}
-
-              <button
-                type="button"
-                onClick={() => setView("home")}
-                title={t("nav.home")}
-                className={`sidebar-nav-btn ${active ? "is-active" : ""}`}
-                style={{
-                  width: BTN_PX,
-                  height: BTN_PX,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  position: "relative",
-                  zIndex: 1,
-                  borderRadius: Math.round(15 * s),
-                  pointerEvents: "auto",
-                  flexShrink: 0,
-                  background: active
-                    ? `rgba(${itemColor.r}, ${itemColor.g}, ${itemColor.b}, 0.18)`
-                    : undefined,
-                  borderColor: active
-                    ? `rgba(${itemColor.css}, 0.5)`
-                    : undefined,
-                  boxShadow: active
-                    ? `0 0 16px rgba(${itemColor.css}, 0.35), 0 4px 14px rgba(0, 0, 0, 0.4)`
-                    : undefined,
-                  transition:
-                    "background 0.22s ease, border-color 0.22s ease, transform 0.18s ease, box-shadow 0.22s ease",
-                }}
-              >
-                <IconHome active={active} size={ICON_PX} />
-              </button>
-            </div>
-          )
-        })()}
-
-        {/* Dynamic Server Buttons (when servers.length > 1) */}
-        {hasMultipleServers &&
-          servers!.map((server) => {
+        {/* Dynamic Server Buttons */}
+        {servers &&
+          servers.map((server) => {
             const active = view === "home" && selectedGameId === server.id
             const itemColor = effectiveHomeAccent
             const logoRaw = server.sidebarLogo?.url || server.mainLogo?.url || null

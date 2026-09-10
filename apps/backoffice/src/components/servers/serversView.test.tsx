@@ -7,6 +7,7 @@ import DeleteServerModal from "./DeleteServerModal"
 import CreateServerModal from "./CreateServerModal"
 import ServerSettingsView from "./ServerSettingsView"
 import { serverApi, gameApi } from "../../services/graphqlClient"
+import * as mediaUploadService from "../../services/mediaUploadService"
 import type { ServerItem } from "../../types"
 
 const mockServers: ServerItem[] = [
@@ -351,6 +352,88 @@ describe("Multiserver Backoffice - ServerSettingsView", () => {
     expect(screen.getByText("200%")).toBeDefined()
     expect(screen.getByText("4 GB")).toBeDefined()
     expect(screen.getByText("10 GB")).toBeDefined()
-    expect(screen.getByText("#3ec4c0")).toBeDefined()
+    expect(screen.getByPlaceholderText("#3ec4c0")).toBeDefined()
+  })
+
+  it("D1. guardar sin cambiar un logo -> conserva su media ID", async () => {
+    const updateSpy = vi.spyOn(serverApi, "updateServerBranding").mockResolvedValue({
+      ...mockServers[0],
+      accentColor: "#112233",
+    })
+    const onUpdatedSpy = vi.fn()
+
+    const serverWithLogos = {
+      ...mockServers[0],
+      mainLogo: { id: "main-media-id", url: "https://example.com/main.png" } as any,
+      sidebarLogo: { id: "side-media-id", url: "https://example.com/side.png" } as any,
+    }
+
+    render(
+      <ServerSettingsView
+        theme="dark"
+        server={serverWithLogos}
+        onServerUpdated={onUpdatedSpy}
+      />,
+    )
+
+    const accentInput = screen.getByPlaceholderText("#3ec4c0")
+    fireEvent.change(accentInput, { target: { value: "#112233" } })
+
+    const saveBtn = screen.getByText("Guardar Branding")
+    await act(async () => {
+      fireEvent.click(saveBtn)
+    })
+
+    expect(updateSpy).toHaveBeenCalledWith("srv-1", {
+      mainLogoMediaId: "main-media-id",
+      sidebarLogoMediaId: "side-media-id",
+      accentColor: "#112233",
+    })
+    expect(onUpdatedSpy).toHaveBeenCalled()
+  })
+
+  it("D2. cambiar logo principal -> uploadMediaFile solo para ese archivo", async () => {
+    const uploadSpy = vi.spyOn(mediaUploadService, "uploadMediaFile").mockResolvedValue({
+      id: "new-main-id",
+      url: "https://example.com/new-main.png",
+    } as any)
+    const updateSpy = vi.spyOn(serverApi, "updateServerBranding").mockResolvedValue({
+      ...mockServers[0],
+    })
+
+    const serverWithLogos = {
+      ...mockServers[0],
+      mainLogo: { id: "old-main-id", url: "https://example.com/old.png" } as any,
+      sidebarLogo: { id: "keep-side-id", url: "https://example.com/side.png" } as any,
+    }
+
+    const { container } = render(
+      <ServerSettingsView
+        theme="dark"
+        server={serverWithLogos}
+      />,
+    )
+
+    const fileInputs = container.querySelectorAll('input[type="file"]')
+    const mainFileInput = fileInputs[0]
+    const dummyFile = new File(["dummy"], "logo.png", { type: "image/png" })
+
+    await act(async () => {
+      fireEvent.change(mainFileInput, { target: { files: [dummyFile] } })
+    })
+
+    const saveBtn = screen.getByText("Guardar Branding")
+    await act(async () => {
+      fireEvent.click(saveBtn)
+    })
+
+    expect(uploadSpy).toHaveBeenCalledTimes(1)
+    expect(uploadSpy).toHaveBeenCalledWith(dummyFile, "IMAGE")
+
+    expect(updateSpy).toHaveBeenCalledWith("srv-1", {
+      mainLogoMediaId: "new-main-id",
+      sidebarLogoMediaId: "keep-side-id",
+      accentColor: "#3ec4c0",
+    })
   })
 })

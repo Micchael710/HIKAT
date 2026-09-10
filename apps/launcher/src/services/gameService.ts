@@ -48,8 +48,17 @@ export interface ReleaseActivatedEvent {
   mandatory?: boolean
 }
 
+export interface ServerUpdatedEvent {
+  type: "SERVER_UPDATED"
+  serverId: string
+}
+
+export type LauncherEvent =
+  | ReleaseActivatedEvent
+  | ServerUpdatedEvent
+
 export function subscribeReleaseEvents(
-  callback: (event: ReleaseActivatedEvent) => void,
+  callback: (event: LauncherEvent) => void,
 ): () => void {
   let isClosed = false
   let socket: WebSocket | null = null
@@ -76,8 +85,8 @@ export function subscribeReleaseEvents(
       socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
-          if (data && data.type === "RELEASE_ACTIVATED") {
-            callback(data as ReleaseActivatedEvent)
+          if (data && (data.type === "RELEASE_ACTIVATED" || data.type === "SERVER_UPDATED")) {
+            callback(data as LauncherEvent)
           }
         } catch (_) {}
       }

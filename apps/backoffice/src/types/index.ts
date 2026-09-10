@@ -48,6 +48,12 @@ export interface CreateServerInput {
   accentColor?: string | null
 }
 
+export interface UpdateServerBrandingInput {
+  mainLogoMediaId?: string | null
+  sidebarLogoMediaId?: string | null
+  accentColor: string
+}
+
 export interface ContentMedia {
   id: string
 

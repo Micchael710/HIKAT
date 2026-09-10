@@ -66,6 +66,15 @@ export default function HomeView({
     setMediaError(false)
   }, [selectedServer?.id])
 
+  useEffect(() => {
+    setMainLogoFailed(false)
+    setSidebarLogoFailed(false)
+  }, [
+    selectedServer?.id,
+    selectedServer?.mainLogo?.url,
+    selectedServer?.sidebarLogo?.url,
+  ])
+
   const loadPublished = useCallback(async () => {
     if (!activeServerId) {
       setPublishedModpack(null)

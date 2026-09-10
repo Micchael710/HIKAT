@@ -12,6 +12,7 @@ import {
   gameService,
   GameButtonState,
   GameManifest,
+  ReleaseActivatedEvent,
 } from "../../services/gameService"
 import {
   STORAGE_KEYS,
@@ -206,7 +207,12 @@ export default function DownloadPlayButton({
   const triggerSync = useCallback((targetManifest?: GameManifest | null) => {
     if (!isLocalAllowed) return
     const currentManifest = targetManifest || manifestRef.current
-    if (!currentManifest?.clientFiles || currentManifest.clientFiles.length === 0) {
+    if (
+      !currentManifest ||
+      !Array.isArray(currentManifest.clientFiles) ||
+      !currentManifest.version ||
+      !currentManifest.minecraftVersion
+    ) {
       showToast(t("playButton.noClientFiles"), "error")
       return
     }
@@ -259,8 +265,7 @@ export default function DownloadPlayButton({
               autoUpdatesEnabled &&
               currentLatestManifest &&
               currentLatestManifest.version === latestManifestVersionRef.current &&
-              currentLatestManifest.clientFiles &&
-              currentLatestManifest.clientFiles.length > 0 &&
+              Array.isArray(currentLatestManifest.clientFiles) &&
               !isGameBusy
             ) {
               showToast(t("playButton.syncSuccess"), "success")
@@ -435,8 +440,7 @@ export default function DownloadPlayButton({
               hasUpdate &&
               !isStartingSyncRef.current &&
               statusRef.current !== "paused" &&
-              res.clientFiles &&
-              res.clientFiles.length > 0
+              Array.isArray(res.clientFiles)
             ) {
               triggerSync(res)
             }
@@ -455,10 +459,12 @@ export default function DownloadPlayButton({
     if (!manifest) return
 
     const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
+      if ((event as any).type === "SERVER_UPDATED") return
+      const releaseEvent = event as ReleaseActivatedEvent
       if (gameContext) {
-        if (event.serverId !== gameContext.gameId) return
-      } else if (event.serverId) {
-        if (!activeServerId || event.serverId !== activeServerId) {
+        if (releaseEvent.serverId !== gameContext.gameId) return
+      } else if (releaseEvent.serverId) {
+        if (!activeServerId || releaseEvent.serverId !== activeServerId) {
           return
         }
       } else {
@@ -466,7 +472,7 @@ export default function DownloadPlayButton({
           return
         }
       }
-      if (event.version === manifest.version) {
+      if (releaseEvent.version === manifest.version) {
         return
       }
 
@@ -549,8 +555,7 @@ export default function DownloadPlayButton({
         statusRef.current !== "launching" &&
         statusRef.current !== "running" &&
         statusRef.current !== "paused" &&
-        freshManifest.clientFiles &&
-        freshManifest.clientFiles.length > 0
+        Array.isArray(freshManifest.clientFiles)
       ) {
         triggerSync(freshManifest)
       }
@@ -607,8 +612,7 @@ export default function DownloadPlayButton({
       if (
         isLocalAllowed &&
         hasUpdate &&
-        currentManifest.clientFiles &&
-        currentManifest.clientFiles.length > 0
+        Array.isArray(currentManifest.clientFiles)
       ) {
         triggerSync(currentManifest)
       }
@@ -670,8 +674,7 @@ export default function DownloadPlayButton({
               (pendingAutoUpdateRef.current || hasUpdate) &&
               !isStartingSyncRef.current &&
               statusRef.current !== "paused" &&
-              currentManifest?.clientFiles &&
-              currentManifest.clientFiles.length > 0
+              Array.isArray(currentManifest?.clientFiles)
             ) {
               pendingAutoUpdateRef.current = false
               triggerSync(currentManifest)
@@ -807,7 +810,12 @@ export default function DownloadPlayButton({
       }
     } else if (status === "paused") {
       if (!isLocalAllowed || isStartingSyncRef.current) return
-      if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
+      if (
+        !manifest ||
+        !Array.isArray(manifest.clientFiles) ||
+        !manifest.version ||
+        !manifest.minecraftVersion
+      ) {
         showToast(t("playButton.noClientFiles"), "error")
         return
       }
@@ -935,7 +943,7 @@ export default function DownloadPlayButton({
     ) {
       return
     }
-    if (!manifest?.clientFiles || manifest.clientFiles.length === 0) {
+    if (!manifest || !Array.isArray(manifest.clientFiles) || !manifest.version) {
       showToast(t("playButton.verifyError"), "error")
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {

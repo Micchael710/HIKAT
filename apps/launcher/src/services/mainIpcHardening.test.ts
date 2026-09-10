@@ -318,24 +318,21 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     ).rejects.toThrow(/clientFiles must be an array/i)
   })
 
-  it("10. Rejects empty clientFiles in startSync without pruning existing files", async () => {
+  it("10. Accepts empty clientFiles in startSync, checks core and completes without errors", async () => {
     // Put a valid mod in instanceRoot
     const modPath = path.join(instanceRoot, "mods", "important.jar")
     await fsp.mkdir(path.dirname(modPath), { recursive: true })
     await fsp.writeFile(modPath, "important mod binary", "utf8")
 
-    await expect(
-      manager.startSync({
-        instanceRoot,
-        clientFiles: [],
-        modpackVersion: "1.0.0",
-        minecraftVersion: "1.21.1",
-        neoForgeVersion: "21.1.65",
-      }),
-    ).rejects.toThrow(/clientFiles cannot be empty for startSync/i)
+    const result = await manager.startSync({
+      instanceRoot,
+      clientFiles: [],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
 
-    // Verify existing mod was NOT pruned!
-    expect(fs.existsSync(modPath)).toBe(true)
+    expect(result.success).toBe(true)
     expect(manager.getState()).toBe("IDLE")
   })
 

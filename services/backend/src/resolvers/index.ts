@@ -95,6 +95,7 @@ import type {
   ServerGql,
   LauncherServerGql,
   CreateServerInputGql,
+  UpdateServerBrandingInputGql,
 } from "@hikat/graphql"
 
 import {
@@ -111,6 +112,7 @@ import {
   getServerById,
   getLauncherServers,
   createServer,
+  updateServerBranding,
   deleteServer,
   getServerNodeCapacity,
 } from "../services/serverService"
@@ -1020,6 +1022,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return deleteServer(context.db, context.env, args.serverId, args.deletePterodactyl)
+    },
+
+    updateServerBranding: async (
+      _parent: unknown,
+      args: { serverId: string; input: UpdateServerBrandingInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<ServerGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return updateServerBranding(context.db, context.env, args.serverId, args.input, context.request)
     },
 
     // --- Server Administration Mutations (Require ADMIN - Shard 06 & 06A) ---

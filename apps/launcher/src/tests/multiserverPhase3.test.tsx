@@ -807,7 +807,7 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       expect(btn.style.background).not.toContain("#efc436")
       expect(btn.style.background).not.toContain("239, 196, 54")
 
-      // LauncherSidebar receives homeAccent
+      // LauncherSidebar receives homeAccent for selected server
       act(() => {
         root?.render(
           <LanguageProvider>
@@ -818,6 +818,16 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
               theme="dark"
               activeSkinAccent={{ r: 62, g: 196, b: 192, css: "62, 196, 192" }}
               homeAccent={customAccent}
+              servers={[{
+                id: "warria-id",
+                name: "Warria",
+                minecraftVersion: "1.21.1",
+                modLoader: "NEOFORGE",
+                launcherActiveReleaseId: "rel-1",
+                createdAt: "",
+                updatedAt: "",
+              }]}
+              selectedGameId="warria-id"
             />
           </LanguageProvider>,
         )
@@ -1824,7 +1834,7 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       homeContainer.remove()
     })
 
-    it("H. SIDEBAR 1 SERVER: servers=[Warria] maintains only Home, Skins, Settings buttons without server selectors", () => {
+    it("H. SIDEBAR 1 SERVER: servers=[Warria] renders Warria, Skins, Settings without Home button", () => {
       const sidebarContainer = document.createElement("div")
       const sidebarRoot = createRoot(sidebarContainer)
 
@@ -1845,10 +1855,14 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       })
 
       const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
-      expect(buttons.length).toBe(3) // Exactly Home, Skins, Settings
-      expect(buttons[0].getAttribute("title")).toBe("Home")
+      expect(buttons.length).toBe(3) // Warria, Skins, Settings
+      expect(buttons[0].getAttribute("title")).toBe("Warria")
       expect(buttons[1].getAttribute("title")).toBe("Skins")
       expect(buttons[2].getAttribute("title")).toBe("Settings")
+
+      // Ensure NO button has title Home
+      const titles = Array.from(buttons).map((b) => b.getAttribute("title"))
+      expect(titles).not.toContain("Home")
 
       act(() => {
         sidebarRoot.unmount()
@@ -1856,7 +1870,7 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       sidebarContainer.remove()
     })
 
-    it("I. SIDEBAR 2 SERVERS: servers=[Warria, Server B] renders Home, Warria button, Server B button, Skins, Settings", () => {
+    it("I. SIDEBAR 2 SERVERS: servers=[Warria, Server B] renders Warria, Server B, Skins, Settings without Home button", () => {
       const sidebarContainer = document.createElement("div")
       const sidebarRoot = createRoot(sidebarContainer)
 
@@ -1877,19 +1891,22 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       })
 
       const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
-      expect(buttons.length).toBe(5) // Home, Warria, Server B, Skins, Settings
-      expect(buttons[0].getAttribute("title")).toBe("Home")
-      expect(buttons[1].getAttribute("title")).toBe("Warria")
-      expect(buttons[2].getAttribute("title")).toBe("Server B")
-      expect(buttons[3].getAttribute("title")).toBe("Skins")
-      expect(buttons[4].getAttribute("title")).toBe("Settings")
+      expect(buttons.length).toBe(4) // Warria, Server B, Skins, Settings
+      expect(buttons[0].getAttribute("title")).toBe("Warria")
+      expect(buttons[1].getAttribute("title")).toBe("Server B")
+      expect(buttons[2].getAttribute("title")).toBe("Skins")
+      expect(buttons[3].getAttribute("title")).toBe("Settings")
+
+      // Ensure NO button has title Home
+      const titles = Array.from(buttons).map((b) => b.getAttribute("title"))
+      expect(titles).not.toContain("Home")
 
       // Verify each server button uses its logo
-      const warriaImg = buttons[1].querySelector("img")
+      const warriaImg = buttons[0].querySelector("img")
       expect(warriaImg).not.toBeNull()
       expect(warriaImg?.getAttribute("src")).toContain("warria-sidebar.png")
 
-      const serverBImg = buttons[2].querySelector("img")
+      const serverBImg = buttons[1].querySelector("img")
       expect(serverBImg).not.toBeNull()
       expect(serverBImg?.getAttribute("src")).toContain("server-b-main.png")
 
@@ -1923,11 +1940,11 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       })
 
       const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
-      expect(buttons.length).toBe(5)
+      expect(buttons.length).toBe(4)
 
-      // Click Server B button (index 2)
+      // Click Server B button (index 1)
       act(() => {
-        buttons[2].dispatchEvent(new MouseEvent("click", { bubbles: true }))
+        buttons[1].dispatchEvent(new MouseEvent("click", { bubbles: true }))
       })
 
       expect(onSelectServerSpy).toHaveBeenCalledWith("server-b-id")
@@ -1937,6 +1954,244 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
         sidebarRoot.unmount()
       })
       sidebarContainer.remove()
+    })
+
+    it("K. SOLO SERVER ACTIVO: When Server B is selected in home view, only Server B has is-active", () => {
+      const sidebarContainer = document.createElement("div")
+      const sidebarRoot = createRoot(sidebarContainer)
+
+      act(() => {
+        sidebarRoot.render(
+          <LanguageProvider>
+            <LauncherSidebar
+              view="home"
+              setView={() => {}}
+              s={1}
+              theme="dark"
+              activeSkinAccent={{ r: 62, g: 196, b: 192, css: "62, 196, 192" }}
+              servers={[warriaServer, serverB]}
+              selectedGameId="server-b-id"
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      const activeButtons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn.is-active")
+      expect(activeButtons.length).toBe(1)
+      expect(activeButtons[0].getAttribute("title")).toBe("Server B")
+
+      act(() => {
+        sidebarRoot.unmount()
+      })
+      sidebarContainer.remove()
+    })
+
+    it("L. RELEASE SIN ARCHIVOS: DownloadPlayButton allows clientFiles=[] and calls startSync([])", async () => {
+      window.electronAPI = {
+        ...window.electronAPI,
+        getLaunchStatus: vi.fn().mockResolvedValue(null),
+        onDownloadProgress: vi.fn(() => () => {}),
+        onPhaseChange: vi.fn(() => () => {}),
+        onGameActionStatus: vi.fn(() => () => {}),
+        onGameFileIntegrityChanged: vi.fn(() => () => {}),
+        checkSyncPlan: vi.fn().mockResolvedValue({
+          success: true,
+          filesToDownload: 0,
+          filesToPrune: 0,
+          totalDownloadBytes: 0,
+          needsUpdate: false,
+          isFullyInstalled: false,
+          hasExistingInstall: false,
+        }),
+      } as any
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        totalSizeGB: 0,
+        installed: false,
+        hasExistingInstall: false,
+        hasUpdate: true,
+        clientFiles: [],
+      })
+
+      const btnContainer = document.createElement("div")
+      const btnRoot = createRoot(btnContainer)
+
+      await act(async () => {
+        btnRoot.render(
+          <LanguageProvider>
+            <DownloadPlayButton
+              left={0}
+              top={0}
+              gameContext={{ gameId: "warria-id", gameName: "Warria" }}
+            />
+          </LanguageProvider>,
+        )
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Must render download button (not disabled unavailable)
+      const actionBtn = btnContainer.querySelector("button")
+      expect(actionBtn).not.toBeNull()
+
+      await act(async () => {
+        actionBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        [],
+        "1.0.0",
+        "1.21.1",
+        "NEOFORGE",
+        undefined,
+        undefined,
+        false,
+        expect.objectContaining({ gameId: "warria-id" }),
+      )
+
+      act(() => {
+        btnRoot.unmount()
+      })
+      btnContainer.remove()
+    })
+
+    it("L2. UPDATE CON 0 FILES: DownloadPlayButton allows clientFiles=[] on update and calls startSync([])", async () => {
+      window.electronAPI = {
+        ...window.electronAPI,
+        getLaunchStatus: vi.fn().mockResolvedValue(null),
+        onDownloadProgress: vi.fn(() => () => {}),
+        onPhaseChange: vi.fn(() => () => {}),
+        onGameActionStatus: vi.fn(() => () => {}),
+        onGameFileIntegrityChanged: vi.fn(() => () => {}),
+        checkSyncPlan: vi.fn().mockResolvedValue({
+          success: true,
+          filesToDownload: 0,
+          filesToPrune: 0,
+          totalDownloadBytes: 0,
+          needsUpdate: true,
+          isFullyInstalled: false,
+          hasExistingInstall: true,
+        }),
+      } as any
+
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.1",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        totalSizeGB: 0,
+        installed: false,
+        hasExistingInstall: true,
+        hasUpdate: true,
+        installedModpackVersion: "1.0.0",
+        clientFiles: [],
+      })
+
+      const btnContainer = document.createElement("div")
+      const btnRoot = createRoot(btnContainer)
+
+      await act(async () => {
+        btnRoot.render(
+          <LanguageProvider>
+            <DownloadPlayButton
+              left={0}
+              top={0}
+              gameContext={{ gameId: "warria-id", gameName: "Warria" }}
+            />
+          </LanguageProvider>,
+        )
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      const actionBtn = btnContainer.querySelector("button")
+      expect(actionBtn).not.toBeNull()
+
+      await act(async () => {
+        actionBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(startSyncSpy).toHaveBeenCalledWith(
+        [],
+        "1.0.1",
+        "1.21.1",
+        "NEOFORGE",
+        undefined,
+        undefined,
+        false,
+        expect.objectContaining({ gameId: "warria-id" }),
+      )
+
+      act(() => {
+        btnRoot.unmount()
+      })
+      btnContainer.remove()
+    })
+
+    it("M. WEBSOCKET SERVER_UPDATED: triggers loadServers() and does NOT modify lastReleaseEvent", async () => {
+      let registeredCallback: ((event: any) => void) | null = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+        registeredCallback = cb
+        return () => {}
+      })
+
+      const loadServersSpy = vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([
+        warriaServer,
+        { ...serverB, accentColor: "#ff00ff" },
+      ])
+
+      const hookContainer = document.createElement("div")
+      const hookRoot = createRoot(hookContainer)
+      let latestState: any = null
+
+      function TestHookConsumer() {
+        latestState = useLauncherState()
+        return null
+      }
+
+      await act(async () => {
+        hookRoot.render(<TestHookConsumer />)
+      })
+      await act(async () => {
+        latestState.setScreen("home")
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Initial servers load
+      expect(loadServersSpy).toHaveBeenCalledTimes(1)
+      expect(latestState.lastReleaseEvent).toBeNull()
+
+      // Dispatch SERVER_UPDATED
+      await act(async () => {
+        registeredCallback?.({
+          type: "SERVER_UPDATED",
+          serverId: "warria-id",
+        })
+      })
+
+      // loadServers must be called again
+      expect(loadServersSpy).toHaveBeenCalledTimes(2)
+      // lastReleaseEvent MUST REMAIN NULL
+      expect(latestState.lastReleaseEvent).toBeNull()
+
+      act(() => {
+        hookRoot.unmount()
+      })
+      hookContainer.remove()
     })
   })
 })

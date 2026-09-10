@@ -5,6 +5,7 @@ import type {
   ServerGql,
   LauncherServerGql,
   CreateServerInputGql,
+  UpdateServerBrandingInputGql,
   GameModLoaderGql,
   ServerProvisioningStatusGql,
 } from "@hikat/graphql"
@@ -14,6 +15,7 @@ import {
   SERVER_MAX_CPU_PERCENT,
 } from "@hikat/shared"
 import type { Env } from "../types"
+import { broadcastServerUpdated } from "../releaseEvents"
 import { getContentMediaById, formatMediaGql } from "./mediaService"
 import { validateGameEnvironment, getMinecraftJavaMajorVersion } from "./game/gameEnvironmentService"
 import {
@@ -870,3 +872,86 @@ export async function getServerNodeCapacity(
     availableDiskMb,
   }
 }
+
+export async function updateServerBranding(
+  db: Database,
+  env: Env,
+  serverId: string,
+  input: UpdateServerBrandingInputGql,
+  request?: Request,
+): Promise<ServerGql> {
+  // 1. Find server by serverId
+  const server = await db
+    .select()
+    .from(schema.servers)
+    .where(eq(schema.servers.id, serverId))
+    .get()
+
+  if (!server) {
+    throw createGraphQLError("Servidor no encontrado.", "NOT_FOUND")
+  }
+
+  // 2. Validate and normalize accent color
+  const normalizedColor = normalizeHexColor(input.accentColor)
+
+  // 3. Verify mainLogoMediaId if provided
+  if (input.mainLogoMediaId) {
+    const mainMedia = await getContentMediaById(db, input.mainLogoMediaId)
+    if (!mainMedia) {
+      throw createGraphQLError(
+        "El medio del logo principal no fue encontrado.",
+        "NOT_FOUND",
+      )
+    }
+  }
+
+  // 4. Verify sidebarLogoMediaId if provided
+  if (input.sidebarLogoMediaId) {
+    const sideMedia = await getContentMediaById(db, input.sidebarLogoMediaId)
+    if (!sideMedia) {
+      throw createGraphQLError(
+        "El medio del logo de la barra lateral no fue encontrado.",
+        "NOT_FOUND",
+      )
+    }
+  }
+
+  const updatedAt = new Date().toISOString()
+
+  // 5. Update only branding fields and updatedAt
+  await db
+    .update(schema.servers)
+    .set({
+      mainLogoMediaId: input.mainLogoMediaId || null,
+      sidebarLogoMediaId: input.sidebarLogoMediaId || null,
+      accentColor: normalizedColor,
+      updatedAt,
+    })
+    .where(eq(schema.servers.id, serverId))
+
+  const updatedServer = await db
+    .select()
+    .from(schema.servers)
+    .where(eq(schema.servers.id, serverId))
+    .get()
+
+  if (!updatedServer) {
+    throw createGraphQLError("Error al recuperar servidor actualizado.", "INTERNAL_ERROR")
+  }
+
+  const result = await formatServerGql(updatedServer, db, env, request)
+
+  // 6. Broadcast SERVER_UPDATED via WebSocket (tolerant error handling)
+  try {
+    await broadcastServerUpdated(env, serverId)
+  } catch (err) {
+    console.error("[WebSocket Broadcast Error]", {
+      type: "SERVER_UPDATED",
+      serverId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+
+  return result
+}
+
