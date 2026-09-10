@@ -125,6 +125,8 @@ const settingsStore = new SettingsStore(app.getPath("userData"))
 const authStore = new SecureAuthStore(app.getPath("userData"))
 let activeOperationGameId = null
 let activeOperationSnapshot = null
+let downloadQueue = []
+let autoPausedDownloadGameId = null
 
 let mainWindow = null
 let splashWindow = null
@@ -224,10 +226,32 @@ gameLauncher.onStatusChangeCallback = (status, details) => {
     if (hiddenByGameLaunch) {
       focusMainWindow()
     }
+
+    const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
+    if (
+      pauseOnLaunch &&
+      autoPausedDownloadGameId &&
+      autoPausedDownloadGameId === activeOperationGameId &&
+      operationManager.getState() === "PAUSED"
+    ) {
+      autoPausedDownloadGameId = null
+      notifyDownloadQueueChanged()
+      operationManager.resumeSync().catch((err) => {
+        console.error("[Main] Error auto-resuming sync:", err)
+      })
+    } else if (operationManager.getState() === "IDLE") {
+      processNextQueuedSync()
+    }
   }
 
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("game-launch-status", status, details)
+    const launchStatus = gameLauncher.getLaunchStatus()
+    const enrichedDetails = {
+      ...(details || {}),
+      gameId: details?.gameId || launchStatus.gameId || null,
+      runningGameId: launchStatus.gameId || null,
+    }
+    mainWindow.webContents.send("game-launch-status", status, enrichedDetails)
   }
 }
 
@@ -1572,6 +1596,16 @@ ipcMain.on("setting-minimize-on-game-launch", (_event, enabled) => {
   minimizeOnGameLaunchEnabled = safeVal
 })
 
+ipcMain.handle("get-pause-downloads-on-game-launch", async () => {
+  return settingsStore.get("pauseDownloadsOnGameLaunch") !== false
+})
+
+ipcMain.handle("setting-pause-downloads-on-game-launch", async (_event, enabled) => {
+  const safeVal = Boolean(enabled)
+  settingsStore.set("pauseDownloadsOnGameLaunch", safeVal)
+  return safeVal
+})
+
 ipcMain.handle("get-dedicated-gpu", async (_event, payload) => {
   if (payload && payload.gameId) {
     return settingsStore.getGameSetting(payload.gameId, "dedicatedGpu", { gameName: payload.gameName })
@@ -1724,15 +1758,61 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
   }
 })
 
-ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
-  const ctx = resolveGameContext(payload)
-
-  if (operationManager.getState() !== "IDLE") {
-    if (activeOperationGameId !== ctx.gameId) {
-      throw new Error("Another game operation is already in progress.")
+function getDownloadQueueSnapshot() {
+  let active = null
+  if (activeOperationGameId) {
+    const opState = operationManager.getState()
+    active = {
+      gameId: activeOperationGameId,
+      state: opState,
+      phase: activeOperationSnapshot?.phase || (opState === "PAUSED" ? "PAUSED" : "DOWNLOADING"),
+      progress: activeOperationSnapshot?.progress ?? 0,
+      speedMBs: activeOperationSnapshot?.speedMBs ?? 0,
+      downloadedBytes: activeOperationSnapshot?.downloadedBytes ?? 0,
+      totalBytes: activeOperationSnapshot?.totalBytes ?? 0,
+      remainingMinutes: activeOperationSnapshot?.remainingMinutes ?? 0,
     }
   }
 
+  const queued = downloadQueue.map((item, index) => ({
+    gameId: item.gameId,
+    gameName: item.gameName,
+    position: index + 1,
+  }))
+
+  return { active, queued }
+}
+
+function notifyDownloadQueueChanged() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("game-download-queue-changed", getDownloadQueueSnapshot())
+  }
+}
+
+async function processNextQueuedSync() {
+  if (downloadQueue.length === 0) return
+  if (operationManager.getState() !== "IDLE") return
+
+  const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
+  const launchStatus = gameLauncher.getLaunchStatus()
+  if (pauseOnLaunch && launchStatus.status !== "idle") {
+    return
+  }
+
+  const nextItem = downloadQueue.shift()
+  if (!nextItem) return
+
+  notifyDownloadQueueChanged()
+
+  try {
+    const ctx = resolveGameContext(nextItem.payload)
+    await runGameSync(ctx, nextItem.payload)
+  } catch (err) {
+    console.error(`[Main] Error running queued sync for ${nextItem.gameId}:`, err)
+  }
+}
+
+async function runGameSync(ctx, payload) {
   const watcherKey = ctx.gameId || "__legacy__"
   if (Array.isArray(payload.directoryPolicies)) {
     latestDirectoryPoliciesByGameId.set(watcherKey, payload.directoryPolicies)
@@ -1751,6 +1831,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     totalBytes: 0,
     remainingMinutes: 0,
   }
+  notifyDownloadQueueChanged()
 
   const onProgress = (data) => {
     if (activeOperationSnapshot) {
@@ -1779,6 +1860,10 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     if (phase === "IDLE") {
       activeOperationGameId = null
       activeOperationSnapshot = null
+      notifyDownloadQueueChanged()
+      processNextQueuedSync()
+    } else {
+      notifyDownloadQueueChanged()
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("game-phase-changed", phase, ctx.gameId || null)
@@ -1804,6 +1889,8 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     if (operationManager.getState() === "IDLE") {
       activeOperationGameId = null
       activeOperationSnapshot = null
+      notifyDownloadQueueChanged()
+      processNextQueuedSync()
     }
     setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
     return result
@@ -1811,8 +1898,70 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     if (operationManager.getState() === "IDLE") {
       activeOperationGameId = null
       activeOperationSnapshot = null
+      notifyDownloadQueueChanged()
+      processNextQueuedSync()
     }
     throw err
+  }
+}
+
+ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
+  const ctx = resolveGameContext(payload)
+
+  if (payload.resume) {
+    if (activeOperationGameId !== ctx.gameId) {
+      throw new Error("Cannot resume sync for another game.")
+    }
+    if (operationManager.getState() !== "PAUSED") {
+      throw new Error("Cannot resume sync: operation is not paused.")
+    }
+    autoPausedDownloadGameId = null
+    const res = await operationManager.resumeSync()
+    notifyDownloadQueueChanged()
+    return res
+  }
+
+  if (payload.isVerify) {
+    if (operationManager.getState() !== "IDLE") {
+      if (activeOperationGameId !== ctx.gameId) {
+        throw new Error("Another game operation is already in progress.")
+      }
+    }
+    return await runGameSync(ctx, payload)
+  }
+
+  if (operationManager.getState() === "IDLE") {
+    return await runGameSync(ctx, payload)
+  }
+
+  if (activeOperationGameId === ctx.gameId) {
+    return {
+      success: true,
+      alreadyActive: true,
+    }
+  }
+
+  const existingIndex = downloadQueue.findIndex((item) => item.gameId === ctx.gameId)
+  if (existingIndex !== -1) {
+    return {
+      success: true,
+      queued: true,
+      position: existingIndex + 1,
+    }
+  }
+
+  downloadQueue.push({
+    gameId: ctx.gameId,
+    gameName: ctx.gameName || payload.gameName || ctx.gameId,
+    payload,
+    queuedAt: Date.now(),
+  })
+  notifyDownloadQueueChanged()
+
+  return {
+    success: true,
+    queued: true,
+    position: downloadQueue.length,
   }
 })
 
@@ -1826,17 +1975,32 @@ ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
     if (activeOperationGameId !== ctx.gameId) {
       throw new Error("Cannot pause operation for another game.")
     }
-    return await operationManager.pauseSync()
+    autoPausedDownloadGameId = null
+    const res = await operationManager.pauseSync()
+    notifyDownloadQueueChanged()
+    return res
   }
 
   if (activeOperationGameId !== null) {
     throw new Error("Cannot pause scoped game operation from legacy request.")
   }
-  return await operationManager.pauseSync()
+  autoPausedDownloadGameId = null
+  const res = await operationManager.pauseSync()
+  notifyDownloadQueueChanged()
+  return res
 })
 
 ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   const ctx = resolveGameContext(payload)
+
+  if (ctx.gameId) {
+    const queueIndex = downloadQueue.findIndex((item) => item.gameId === ctx.gameId)
+    if (queueIndex !== -1) {
+      downloadQueue.splice(queueIndex, 1)
+      notifyDownloadQueueChanged()
+      return { success: true, queuedRemoved: true }
+    }
+  }
 
   if (ctx.gameId) {
     if (operationManager.getState() === "IDLE") {
@@ -1850,6 +2014,9 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
     } finally {
       activeOperationGameId = null
       activeOperationSnapshot = null
+      autoPausedDownloadGameId = null
+      notifyDownloadQueueChanged()
+      processNextQueuedSync()
     }
   }
 
@@ -1861,6 +2028,9 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   } finally {
     activeOperationGameId = null
     activeOperationSnapshot = null
+    autoPausedDownloadGameId = null
+    notifyDownloadQueueChanged()
+    processNextQueuedSync()
   }
 })
 
@@ -1872,6 +2042,25 @@ ipcMain.handle("game-uninstall", async (_event, payload = {}) => {
 ipcMain.handle("game-launch", async (_event, options = {}) => {
   const ctx = resolveGameContext(options)
 
+  const opState = operationManager.getState()
+  const opPhase = activeOperationSnapshot?.phase
+  const isOtherOp = activeOperationGameId && activeOperationGameId !== ctx.gameId
+
+  if (isOtherOp) {
+    if (opPhase === "INSTALLING" || opPhase === "VERIFYING" || opState === "INSTALLING" || opState === "VERIFYING") {
+      throw new Error("Cannot launch Minecraft while another game is installing or verifying.")
+    }
+  }
+
+  const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
+  if (isOtherOp && (opState === "SYNCING" || opPhase === "DOWNLOADING")) {
+    if (pauseOnLaunch) {
+      autoPausedDownloadGameId = activeOperationGameId
+      await operationManager.pauseSync()
+      notifyDownloadQueueChanged()
+    }
+  }
+
   let effectiveRamGB = options.ramGB
   let effectiveDedicatedGpu = dedicatedGpuEnabled
 
@@ -1882,6 +2071,13 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
     effectiveRamGB = options.ramGB || settingsStore.get("ramGB") || 4
     effectiveDedicatedGpu = settingsStore.get("dedicatedGpu")
   }
+
+  const allowDuringOperation = Boolean(
+    isOtherOp &&
+    (opState === "SYNCING" || opState === "PAUSED") &&
+    opPhase !== "INSTALLING" &&
+    opPhase !== "VERIFYING"
+  )
 
   return await operationManager.launchGame(gameLauncher, {
     gameId: ctx.gameId,
@@ -1895,6 +2091,7 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
     dedicatedGpu: effectiveDedicatedGpu,
     customJavaPath: options.customJavaPath,
     customArgs: options.customArgs || [],
+    allowDuringOperation,
   })
 })
 
@@ -1917,6 +2114,8 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
       runningGameId,
       operationState,
       activeOperationGameId,
+      activeOperationState: operationManager.getState(),
+      activeOperationPhase: activeOperationSnapshot?.phase || null,
       operationSnapshot,
     }
   }
@@ -1926,8 +2125,14 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
     runningGameId,
     operationState: operationManager.getState(),
     activeOperationGameId,
+    activeOperationState: operationManager.getState(),
+    activeOperationPhase: activeOperationSnapshot?.phase || null,
     operationSnapshot: activeOperationSnapshot,
   }
+})
+
+ipcMain.handle("game-get-download-queue", async () => {
+  return getDownloadQueueSnapshot()
 })
 
 ipcMain.handle("game-get-runtime-info", async (_event, payload = {}) => {

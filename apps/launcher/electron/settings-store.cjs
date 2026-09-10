@@ -4,6 +4,7 @@ const path = require("path")
 const DEFAULT_SETTINGS = {
   minimizeToTray: true,
   minimizeOnGameLaunch: true,
+  pauseDownloadsOnGameLaunch: true,
   dedicatedGpu: true,
   ramGB: 8,
   games: {},
@@ -27,6 +28,9 @@ class SettingsStore {
           }
           if (typeof parsed.minimizeOnGameLaunch === "boolean") {
             this.settings.minimizeOnGameLaunch = parsed.minimizeOnGameLaunch
+          }
+          if (typeof parsed.pauseDownloadsOnGameLaunch === "boolean") {
+            this.settings.pauseDownloadsOnGameLaunch = parsed.pauseDownloadsOnGameLaunch
           }
           if (typeof parsed.dedicatedGpu === "boolean") {
             this.settings.dedicatedGpu = parsed.dedicatedGpu
@@ -95,6 +99,8 @@ class SettingsStore {
       this.settings.minimizeToTray = Boolean(value)
     } else if (key === "minimizeOnGameLaunch") {
       this.settings.minimizeOnGameLaunch = Boolean(value)
+    } else if (key === "pauseDownloadsOnGameLaunch") {
+      this.settings.pauseDownloadsOnGameLaunch = Boolean(value)
     } else if (key === "dedicatedGpu") {
       this.settings.dedicatedGpu = Boolean(value)
     } else if (key === "ramGB") {

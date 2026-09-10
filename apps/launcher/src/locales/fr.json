@@ -11,12 +11,14 @@
   "nav": {
     "home": "Accueil",
     "skins": "Skins",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "downloads": "Téléchargements"
   },
   "sidebar": {
     "home": "Accueil",
     "skins": "Skins",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "downloads": "Téléchargements"
   },
   "user": {
     "anonymous": "Joueur",
@@ -103,6 +105,7 @@
     "download": "TÉLÉCHARGER",
     "update": "METTRE À JOUR",
     "play": "JOUER",
+    "queued": "EN ATTENTE",
     "unavailable": "INDISPONIBLE",
     "downloading": "TÉLÉCHARGEMENT",
     "updating": "MISE À JOUR",
@@ -210,6 +213,9 @@
     "minimizeToTray": "Réduire dans la zone de notification",
     "minimizeOnGameLaunchTitle": "Réduire au lancement du jeu",
     "minimizeOnGameLaunchDesc": "Réduit le launcher dans la zone de notification lorsque le jeu démarre.",
+    "pauseDownloadsOnGameLaunchTitle": "Mettre les téléchargements en pause au lancement d’un jeu",
+    "pauseDownloadsOnGameLaunchDesc": "Met automatiquement en pause les téléchargements actifs lors du lancement d'un jeu pour privilégier les performances.",
+    "pauseDownloadsOnGameLaunch": "Mettre les téléchargements en pause au lancement d’un jeu",
     "updatesConnectivity": "Mises à jour et Connectivité",
     "autoUpdatesTitle": "Mises à jour automatiques",
     "autoUpdatesDesc": "Télécharge en arrière-plan les correctifs et les ressources de mods avant de lancer la partie.",
@@ -341,5 +347,22 @@
     "maximize": "Agrandir",
     "restore": "Restaurer",
     "close": "Fermer"
+  },
+  "downloads": {
+    "title": "Téléchargements",
+    "active": "Actif",
+    "queue": "En attente",
+    "queued": "En attente",
+    "downloading": "Téléchargement",
+    "paused": "En pause",
+    "installing": "Installation",
+    "verifying": "Vérification",
+    "position": "En attente · position {position}",
+    "empty": "Aucun téléchargement actif",
+    "emptySubtitle": "Les téléchargements et mises à jour en cours apparaîtront ici.",
+    "remaining": "restant",
+    "pause": "Pause",
+    "resume": "Reprendre",
+    "cancel": "Annuler"
   }
 }

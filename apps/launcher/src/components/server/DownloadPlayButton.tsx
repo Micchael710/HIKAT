@@ -149,6 +149,7 @@ export default function DownloadPlayButton({
   const isIntegrityBlockedRef = useRef(false)
   const pendingAutoUpdateRef = useRef(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const [isLaunchBlockedByOtherGame, setIsLaunchBlockedByOtherGame] = useState(false)
   const isDark = theme === "dark"
 
   useEffect(() => {
@@ -243,6 +244,11 @@ export default function DownloadPlayButton({
         ...(gameContext ? [gameContext] : []),
       )
       .then((res: any) => {
+        if (res?.queued) {
+          setStatus("queued")
+          isStartingSyncRef.current = false
+          return
+        }
         if (res?.paused) {
           setStatus("paused")
           return
@@ -356,6 +362,22 @@ export default function DownloadPlayButton({
 
           const launchInfo = await window.electronAPI?.getLaunchStatus?.(effectiveGameContext).catch(() => null)
 
+          const otherGameRunning = Boolean(
+            launchInfo?.runningGameId &&
+            gameContext?.gameId &&
+            launchInfo.runningGameId !== gameContext.gameId
+          )
+          const otherOpInstallingOrVerifying = Boolean(
+            launchInfo?.activeOperationGameId &&
+            gameContext?.gameId &&
+            launchInfo.activeOperationGameId !== gameContext.gameId &&
+            (launchInfo.activeOperationPhase === "INSTALLING" ||
+              launchInfo.activeOperationPhase === "VERIFYING" ||
+              launchInfo.activeOperationState === "INSTALLING" ||
+              launchInfo.activeOperationState === "VERIFYING")
+          )
+          setIsLaunchBlockedByOtherGame(otherGameRunning || otherOpInstallingOrVerifying)
+
           if (
             gameContext?.gameId &&
             launchInfo?.runningGameId === gameContext.gameId &&
@@ -409,9 +431,14 @@ export default function DownloadPlayButton({
             setProgress(pct)
             setStatus("paused")
           } else {
+            const isThisGameRunning =
+              (launchInfo?.runningGameId && gameContext?.gameId
+                ? launchInfo.runningGameId === gameContext.gameId
+                : true) &&
+              (launchInfo?.status === "running" || launchInfo?.status === "preparing")
+
             const isGameRunning =
-              launchInfo?.status === "running" ||
-              launchInfo?.status === "preparing" ||
+              isThisGameRunning ||
               statusRef.current === "launching" ||
               statusRef.current === "running"
 
@@ -629,11 +656,59 @@ export default function DownloadPlayButton({
     const unsubscribe = window.electronAPI?.onLaunchStatus?.(
       (
         launchStatus: "idle" | "preparing" | "running",
-        details?: { unexpected?: boolean; code?: number | null; error?: any; gameId?: string | null },
+        details?: { unexpected?: boolean; code?: number | null; error?: any; gameId?: string | null; runningGameId?: string | null },
       ) => {
         if (!isLocalAllowed) {
           setStatus("unavailable")
           return
+        }
+
+        const eventGameId = details?.gameId || details?.runningGameId || null
+        const isOtherGame = Boolean(gameContext?.gameId && eventGameId && eventGameId !== gameContext.gameId)
+
+        if (isOtherGame) {
+          if (launchStatus === "preparing" || launchStatus === "running") {
+            setIsLaunchBlockedByOtherGame(true)
+          } else if (launchStatus === "idle") {
+            window.electronAPI?.getLaunchStatus?.(effectiveGameContext).then((info: any) => {
+              const stillRunningOther = Boolean(
+                info?.runningGameId &&
+                gameContext?.gameId &&
+                info.runningGameId !== gameContext.gameId
+              )
+              const otherOpInstallingOrVerifying = Boolean(
+                info?.activeOperationGameId &&
+                gameContext?.gameId &&
+                info.activeOperationGameId !== gameContext.gameId &&
+                (info.activeOperationPhase === "INSTALLING" ||
+                  info.activeOperationPhase === "VERIFYING" ||
+                  info.activeOperationState === "INSTALLING" ||
+                  info.activeOperationState === "VERIFYING")
+              )
+              setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpInstallingOrVerifying)
+            }).catch(() => {})
+          }
+          return
+        }
+
+        if (launchStatus === "idle") {
+          window.electronAPI?.getLaunchStatus?.(effectiveGameContext).then((info: any) => {
+            const stillRunningOther = Boolean(
+              info?.runningGameId &&
+              gameContext?.gameId &&
+              info.runningGameId !== gameContext.gameId
+            )
+            const otherOpInstallingOrVerifying = Boolean(
+              info?.activeOperationGameId &&
+              gameContext?.gameId &&
+              info.activeOperationGameId !== gameContext.gameId &&
+              (info.activeOperationPhase === "INSTALLING" ||
+                info.activeOperationPhase === "VERIFYING" ||
+                info.activeOperationState === "INSTALLING" ||
+                info.activeOperationState === "VERIFYING")
+            )
+            setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpInstallingOrVerifying)
+          }).catch(() => {})
         }
 
         if (gameContext) {
@@ -719,9 +794,39 @@ export default function DownloadPlayButton({
     })
 
     const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string, eventGameId?: string | null) => {
+      if (gameContext && eventGameId && eventGameId !== gameContext.gameId) {
+        if (phase === "INSTALLING" || phase === "VERIFYING") {
+          setIsLaunchBlockedByOtherGame(true)
+        } else {
+          window.electronAPI?.getLaunchStatus?.(effectiveGameContext).then((info: any) => {
+            const stillRunningOther = Boolean(
+              info?.runningGameId &&
+              gameContext?.gameId &&
+              info.runningGameId !== gameContext.gameId
+            )
+            const otherOpInstallingOrVerifying = Boolean(
+              info?.activeOperationGameId &&
+              gameContext?.gameId &&
+              info.activeOperationGameId !== gameContext.gameId &&
+              (info.activeOperationPhase === "INSTALLING" ||
+                info.activeOperationPhase === "VERIFYING" ||
+                info.activeOperationState === "INSTALLING" ||
+                info.activeOperationState === "VERIFYING")
+            )
+            setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpInstallingOrVerifying)
+          }).catch(() => {})
+        }
+        return
+      }
+
       if (gameContext) {
         if (eventGameId !== gameContext.gameId) return
       }
+
+      if (phase === "DOWNLOADING") {
+        setStatus((prev) => (prev === "queued" ? "downloading" : prev))
+      }
+
       if (phase === "IDLE") {
         isStartingSyncRef.current = false
         syncOpIdRef.current++
@@ -738,6 +843,7 @@ export default function DownloadPlayButton({
       }
       setStatus((prev) => {
         if (prev === "verifying") return prev
+        if (prev === "queued") return phase === "DOWNLOADING" ? "downloading" : prev
         if (prev !== "downloading" && prev !== "installing") return prev
         if (phase === "INSTALLING") return "installing"
         if (phase === "DOWNLOADING" && prev === "installing") return "downloading"
@@ -838,6 +944,11 @@ export default function DownloadPlayButton({
           ...(gameContext ? [gameContext] : []),
         )
         .then((res: any) => {
+          if (res?.queued) {
+            setStatus("queued")
+            isStartingSyncRef.current = false
+            return
+          }
           if (res?.paused) {
             setStatus("paused")
             return
@@ -889,13 +1000,17 @@ export default function DownloadPlayButton({
       status === "installing" ||
       status === "verifying" ||
       status === "launching" ||
-      status === "running"
+      status === "running" ||
+      status === "queued"
     ) {
       return
     }
     if (status === "download" || status === "update") {
       triggerSync(manifest)
     } else if (status === "play") {
+      if (isLaunchBlockedByOtherGame) {
+        return
+      }
       if (isIntegrityBlockedRef.current) {
         showToast(t("playButton.launchVerifyHint"), "error")
         return
@@ -1100,19 +1215,23 @@ export default function DownloadPlayButton({
     }
   }, [handleVerifyInstallation, handleUninstallGame, isLocalAllowed, gameContext])
 
-  /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / PLAY ── */
+  /* ── IDLE / UNAVAILABLE / CHECKING / DOWNLOAD / UPDATE / PLAY / QUEUED ── */
   if (!isExpanded) {
     const isChecking = status === "checking"
     const isUnavailable = status === "unavailable"
     const isUpdate = status === "update"
     const isPlay = status === "play"
+    const isQueued = status === "queued"
     const isLaunching = status === "launching"
     const isRunning = status === "running"
+    const isBlockedPlay = isPlay && isLaunchBlockedByOtherGame
     const isDisabled =
       isChecking ||
       isUnavailable ||
       isLaunching ||
-      isRunning
+      isRunning ||
+      isQueued ||
+      isBlockedPlay
 
     return (
       <div
@@ -1163,7 +1282,7 @@ export default function DownloadPlayButton({
               color: "white",
               fontFamily: BASE_FONT,
               fontWeight: 800,
-              fontSize: isChecking || isLaunching || isRunning ? 16 : isUnavailable ? 19 : 23,
+              fontSize: isChecking || isLaunching || isRunning || isQueued ? 16 : isUnavailable ? 19 : 23,
               letterSpacing: ".06em",
               textShadow: "0 1px 6px rgba(0,0,0,0.35)",
               textTransform: "uppercase",
@@ -1176,18 +1295,20 @@ export default function DownloadPlayButton({
                 ? t("playButton.launching")
                 : isRunning
                   ? t("playButton.running")
-                  : isUnavailable
-                    ? t("playButton.unavailable")
-                    : isUpdate
-                      ? t("playButton.update")
-                      : isPlay
-                        ? t("playButton.play")
-                        : t("playButton.download")}
+                  : isQueued
+                    ? t("playButton.queued")
+                    : isUnavailable
+                      ? t("playButton.unavailable")
+                      : isUpdate
+                        ? t("playButton.update")
+                        : isPlay
+                          ? t("playButton.play")
+                          : t("playButton.download")}
           </span>
         </button>
 
         {/* ── Quick Action Options Button (When Ready to Play or Update) ── */}
-        {(isPlay || isUpdate) && (
+        {(isPlay || isUpdate) && !isBlockedPlay && (
           <div ref={menuRef} style={{ position: "relative" }}>
             <button
               type="button"

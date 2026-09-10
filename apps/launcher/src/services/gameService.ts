@@ -8,6 +8,7 @@ export type GameButtonState =
   | "download"
   | "update"
   | "play"
+  | "queued"
   | "downloading"
   | "paused"
   | "installing"
@@ -482,6 +483,16 @@ export const gameService = {
         isVerify,
         gameId: gameContext?.gameId,
         gameName: gameContext?.gameName,
+      })
+    }
+  },
+
+  async resumeSync(gameContext?: { gameId: string; gameName: string }) {
+    if (window.electronAPI?.startSync) {
+      return await window.electronAPI.startSync({
+        gameId: gameContext?.gameId,
+        gameName: gameContext?.gameName,
+        resume: true,
       })
     }
   },

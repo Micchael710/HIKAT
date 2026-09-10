@@ -64,6 +64,9 @@ export default function SettingsView({
   const [minimizeOnGameLaunch, setMinimizeOnGameLaunchState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.MINIMIZE_ON_GAME_LAUNCH, true),
   )
+  const [pauseDownloadsOnGameLaunch, setPauseDownloadsOnGameLaunchState] = useState<boolean>(() =>
+    getStoredBoolean(STORAGE_KEYS.PAUSE_DOWNLOADS_ON_GAME_LAUNCH, true),
+  )
   const [autoUpdates, setAutoUpdatesState] = useState<boolean>(() =>
     getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true),
   )
@@ -363,6 +366,18 @@ export default function SettingsView({
         .catch(() => {})
     }
 
+    if (window.electronAPI?.getPauseDownloadsOnGameLaunch) {
+      window.electronAPI
+        .getPauseDownloadsOnGameLaunch()
+        .then((realState: any) => {
+          if (isMounted && typeof realState === "boolean") {
+            setPauseDownloadsOnGameLaunchState(realState)
+            setStoredBoolean(STORAGE_KEYS.PAUSE_DOWNLOADS_ON_GAME_LAUNCH, realState)
+          }
+        })
+        .catch(() => {})
+    }
+
     return () => {
       isMounted = false
       if (toastTimeoutRef.current) {
@@ -621,6 +636,14 @@ export default function SettingsView({
     setStoredBoolean(STORAGE_KEYS.MINIMIZE_ON_GAME_LAUNCH, v)
     try {
       await window.electronAPI?.setMinimizeOnGameLaunch?.(v)
+    } catch (_) {}
+  }
+
+  const setPauseDownloadsOnGameLaunch = async (v: boolean) => {
+    setPauseDownloadsOnGameLaunchState(v)
+    setStoredBoolean(STORAGE_KEYS.PAUSE_DOWNLOADS_ON_GAME_LAUNCH, v)
+    try {
+      await window.electronAPI?.setPauseDownloadsOnGameLaunch?.(v)
     } catch (_) {}
   }
 
@@ -1210,13 +1233,7 @@ export default function SettingsView({
                 </div>
 
                 {/* Minimizar al iniciar el juego */}
-                <div
-                  className="settings-row"
-                  style={{
-                    borderBottom: "none",
-                    paddingBottom: 0,
-                  }}
-                >
+                <div className="settings-row">
                   <div>
                     <div
                       style={{
@@ -1246,6 +1263,46 @@ export default function SettingsView({
                       notifySaved()
                     }}
                     label={t("settings.minimizeOnGameLaunchTitle")}
+                  />
+                </div>
+
+                {/* Pausar descargas al iniciar un juego */}
+                <div
+                  className="settings-row"
+                  style={{
+                    borderBottom: "none",
+                    paddingBottom: 0,
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 17,
+                        fontWeight: 700,
+                        color: isDark ? "white" : "#111822",
+                        marginBottom: 2,
+                      }}
+                    >
+                      {t("settings.pauseDownloadsOnGameLaunchTitle")}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 14.5,
+                        color: isDark ? "#8899aa" : "#556677",
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {t("settings.pauseDownloadsOnGameLaunchDesc")}
+                    </div>
+                  </div>
+                  <LauncherToggle
+                    checked={pauseDownloadsOnGameLaunch}
+                    theme={theme}
+                    onChange={(v) => {
+                      setPauseDownloadsOnGameLaunch(v)
+                      notifySaved()
+                    }}
+                    label={t("settings.pauseDownloadsOnGameLaunchTitle")}
                   />
                 </div>
               </div>

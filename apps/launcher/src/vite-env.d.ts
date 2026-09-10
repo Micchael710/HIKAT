@@ -88,6 +88,28 @@ export interface OperationSnapshot {
   remainingMinutes: number
 }
 
+export interface ActiveDownloadSnapshot {
+  gameId: string
+  state: string
+  phase: string
+  progress: number
+  speedMBs: number
+  downloadedBytes: number
+  totalBytes: number
+  remainingMinutes: number
+}
+
+export interface QueuedDownloadItem {
+  gameId: string
+  gameName: string
+  position: number
+}
+
+export interface DownloadQueueSnapshot {
+  active: ActiveDownloadSnapshot | null
+  queued: QueuedDownloadItem[]
+}
+
 interface ElectronAPI {
   minimizeWindow: () => void
   maximizeWindow: () => void
@@ -103,6 +125,8 @@ interface ElectronAPI {
   setMinimizeToTray?: (enabled: boolean) => Promise<boolean> | void
   getMinimizeOnGameLaunch?: () => Promise<boolean>
   setMinimizeOnGameLaunch?: (enabled: boolean) => Promise<boolean> | void
+  getPauseDownloadsOnGameLaunch?: () => Promise<boolean>
+  setPauseDownloadsOnGameLaunch?: (enabled: boolean) => Promise<boolean> | void
   getDedicatedGpu?: (gameContext?: GameContext) => Promise<boolean>
   setDedicatedGpu?: (enabled: boolean, gameContext?: GameContext) => Promise<boolean> | void
   getRamAllocation?: (gameContext?: GameContext) => Promise<number>
@@ -121,7 +145,7 @@ interface ElectronAPI {
     gameName?: string
   }) => Promise<SyncPlanCheckResult>
   startSync?: (payload: {
-    clientFiles: ClientFile[]
+    clientFiles?: ClientFile[]
     directoryPolicies?: DirectoryPolicy[]
     modpackVersion?: string
     minecraftVersion?: string
@@ -132,15 +156,19 @@ interface ElectronAPI {
     isVerify?: boolean
     gameId?: string
     gameName?: string
+    resume?: boolean
   }) => Promise<{
     success: boolean
-    downloadedCount: number
-    prunedCount: number
+    downloadedCount?: number
+    prunedCount?: number
     paused?: boolean
+    queued?: boolean
+    position?: number
+    alreadyActive?: boolean
     resolvedVersionId?: string
   }>
   pauseSync?: (gameContext?: GameContext) => Promise<boolean>
-  cancelSync?: (gameContext?: GameContext) => Promise<boolean>
+  cancelSync?: (gameContext?: GameContext) => Promise<{ success: boolean; queuedRemoved?: boolean } | boolean>
   uninstallGame?: (gameContext?: GameContext) => Promise<{ success: boolean }>
   launchGame?: (options: {
     playerName?: string
@@ -162,15 +190,19 @@ interface ElectronAPI {
     gameId?: string | null
     runningGameId?: string | null
     activeOperationGameId?: string | null
+    activeOperationState?: string
+    activeOperationPhase?: string | null
     operationSnapshot?: OperationSnapshot | null
   }>
   getGameRuntimeInfo?: (gameContext?: GameContext) => Promise<{ javaMajorVersion: number | null }>
+  getDownloadQueue?: () => Promise<DownloadQueueSnapshot>
+  onDownloadQueueChanged?: (callback: (snapshot?: DownloadQueueSnapshot) => void) => () => void
   onDownloadProgress?: (callback: (data: DownloadProgressData) => void) => () => void
   onPhaseChange?: (callback: (phase: string, gameId?: string | null) => void) => () => void
   onLaunchStatus?: (
     callback: (
       status: "idle" | "preparing" | "running",
-      details?: { unexpected?: boolean; code?: number | null; error?: any; gameId?: string | null }
+      details?: { unexpected?: boolean; code?: number | null; error?: any; gameId?: string | null; runningGameId?: string | null }
     ) => void
   ) => () => void
   onGameFileIntegrityChanged?: (callback: (data: { path: string; gameId?: string | null }) => void) => () => void

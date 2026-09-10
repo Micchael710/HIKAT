@@ -573,7 +573,7 @@ class GameOperationManager {
   }
 
   async launchGame(gameLauncher, options = {}) {
-    if (this.state !== "IDLE") {
+    if (this.state !== "IDLE" && !options.allowDuringOperation) {
       throw new Error("Cannot launch Minecraft while game operation is in progress.")
     }
     if (!gameLauncher) throw new Error("GameLauncher instance required.")

@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getMinimizeOnGameLaunch: () => ipcRenderer.invoke("get-minimize-on-game-launch"),
   setMinimizeOnGameLaunch: (enabled) =>
     ipcRenderer.invoke("setting-minimize-on-game-launch", enabled),
+  getPauseDownloadsOnGameLaunch: () => ipcRenderer.invoke("get-pause-downloads-on-game-launch"),
+  setPauseDownloadsOnGameLaunch: (enabled) =>
+    ipcRenderer.invoke("setting-pause-downloads-on-game-launch", enabled),
   getDedicatedGpu: (gameContext) => ipcRenderer.invoke("get-dedicated-gpu", gameContext),
   setDedicatedGpu: (enabled, gameContext) =>
     ipcRenderer.invoke("setting-dedicated-gpu", enabled, gameContext),
@@ -59,6 +62,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   launchGame: (options) => ipcRenderer.invoke("game-launch", options),
   getLaunchStatus: (gameContext) => ipcRenderer.invoke("game-get-status", gameContext),
   getGameRuntimeInfo: (gameContext) => ipcRenderer.invoke("game-get-runtime-info", gameContext),
+  getDownloadQueue: () => ipcRenderer.invoke("game-get-download-queue"),
+  onDownloadQueueChanged: (callback) => {
+    const handler = () => callback()
+    ipcRenderer.on("game-download-queue-changed", handler)
+    return () => ipcRenderer.removeListener("game-download-queue-changed", handler)
+  },
   onDownloadProgress: (callback) => {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on("game-download-progress", handler)

@@ -1,6 +1,6 @@
 import React from "react"
 import { ThemeMode, LauncherView } from "../../types"
-import { IconShirt, IconSettings } from "../../theme/icons"
+import { IconShirt, IconSettings, IconDownload } from "../../theme/icons"
 import { getThemeTokens } from "../../theme/tokens"
 import { useTranslation } from "../../context/LanguageContext"
 import type { LauncherServer } from "../../services/serverService"
@@ -310,6 +310,73 @@ export default function LauncherSidebar({
           )
         })()}
       </div>
+
+      {/* Standalone Downloads Button at Bottom of Sidebar */}
+      {(() => {
+        const active = view === "downloads"
+        const itemColor = defaultAccent
+        return (
+          <div
+            key="downloads"
+            style={{
+              position: "absolute",
+              bottom: Math.round(24 * s),
+              left: Math.round(SIDEBAR_CENTER_X * s - BTN_PX / 2),
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 10,
+            }}
+          >
+            {active && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: -Math.round(14 * s),
+                  background: `radial-gradient(circle at 50% 50%, rgba(${itemColor.r}, ${itemColor.g}, ${itemColor.b}, 0.55) 0%, rgba(${itemColor.r}, ${itemColor.g}, ${itemColor.b}, 0.16) 45%, transparent 72%)`,
+                  filter: "blur(10px)",
+                  pointerEvents: "none",
+                  zIndex: 0,
+                  animation: "fadeIn 0.25s ease",
+                }}
+              />
+            )}
+
+            <button
+              type="button"
+              onClick={() => setView("downloads")}
+              title={t("nav.downloads")}
+              className={`sidebar-nav-btn ${active ? "is-active" : ""}`}
+              style={{
+                width: BTN_PX,
+                height: BTN_PX,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                position: "relative",
+                zIndex: 1,
+                borderRadius: Math.round(15 * s),
+                pointerEvents: "auto",
+                flexShrink: 0,
+                background: active
+                  ? `rgba(${itemColor.r}, ${itemColor.g}, ${itemColor.b}, 0.18)`
+                  : undefined,
+                borderColor: active
+                  ? `rgba(${itemColor.css}, 0.5)`
+                  : undefined,
+                boxShadow: active
+                  ? `0 0 16px rgba(${itemColor.css}, 0.35), 0 4px 14px rgba(0, 0, 0, 0.4)`
+                  : undefined,
+                transition:
+                  "background 0.22s ease, border-color 0.22s ease, transform 0.18s ease, box-shadow 0.22s ease",
+              }}
+            >
+              <IconDownload size={ICON_PX} />
+            </button>
+          </div>
+        )
+      })()}
     </>
   )
 }

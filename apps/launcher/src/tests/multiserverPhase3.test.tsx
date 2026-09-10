@@ -1855,10 +1855,11 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       })
 
       const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
-      expect(buttons.length).toBe(3) // Warria, Skins, Settings
+      expect(buttons.length).toBe(4) // Warria, Skins, Settings, Downloads
       expect(buttons[0].getAttribute("title")).toBe("Warria")
       expect(buttons[1].getAttribute("title")).toBe("Skins")
       expect(buttons[2].getAttribute("title")).toBe("Settings")
+      expect(buttons[3].getAttribute("title")).toBe("Downloads")
 
       // Ensure NO button has title Home
       const titles = Array.from(buttons).map((b) => b.getAttribute("title"))
@@ -1891,11 +1892,12 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       })
 
       const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
-      expect(buttons.length).toBe(4) // Warria, Server B, Skins, Settings
+      expect(buttons.length).toBe(5) // Warria, Server B, Skins, Settings, Downloads
       expect(buttons[0].getAttribute("title")).toBe("Warria")
       expect(buttons[1].getAttribute("title")).toBe("Server B")
       expect(buttons[2].getAttribute("title")).toBe("Skins")
       expect(buttons[3].getAttribute("title")).toBe("Settings")
+      expect(buttons[4].getAttribute("title")).toBe("Downloads")
 
       // Ensure NO button has title Home
       const titles = Array.from(buttons).map((b) => b.getAttribute("title"))
@@ -1940,7 +1942,7 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
       })
 
       const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
-      expect(buttons.length).toBe(4)
+      expect(buttons.length).toBe(5)
 
       // Click Server B button (index 1)
       act(() => {

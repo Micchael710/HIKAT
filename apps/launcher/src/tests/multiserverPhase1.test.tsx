@@ -981,7 +981,7 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
     })
 
     const buttonsEmpty = container.querySelectorAll("button")
-    expect(buttonsEmpty.length).toBe(2) // Skins, Settings
+    expect(buttonsEmpty.length).toBe(3) // Skins, Settings, Downloads
 
     act(() => {
       root.render(
@@ -1000,7 +1000,7 @@ describe("HiKAT Multi-Server Phase 1 Verification Suite", () => {
     })
 
     const buttonsWithServer = container.querySelectorAll("button")
-    expect(buttonsWithServer.length).toBe(3) // Warria, Skins, Settings
+    expect(buttonsWithServer.length).toBe(4) // Warria, Skins, Settings, Downloads
   })
 
   it("K. Settings mantiene la estructura existente: 1 servidor -> sin menu interno; >1 -> menu interno", async () => {

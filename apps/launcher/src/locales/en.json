@@ -11,12 +11,14 @@
   "nav": {
     "home": "Home",
     "skins": "Skins",
-    "settings": "Settings"
+    "settings": "Settings",
+    "downloads": "Downloads"
   },
   "sidebar": {
     "home": "Home",
     "skins": "Skins",
-    "settings": "Settings"
+    "settings": "Settings",
+    "downloads": "Downloads"
   },
   "user": {
     "anonymous": "Player",
@@ -103,6 +105,7 @@
     "download": "DOWNLOAD",
     "update": "UPDATE",
     "play": "PLAY",
+    "queued": "QUEUED",
     "unavailable": "UNAVAILABLE",
     "downloading": "DOWNLOADING",
     "updating": "UPDATING",
@@ -210,6 +213,9 @@
     "minimizeToTray": "Minimize to tray",
     "minimizeOnGameLaunchTitle": "Minimize when game starts",
     "minimizeOnGameLaunchDesc": "Minimizes the launcher to the system tray when the game starts.",
+    "pauseDownloadsOnGameLaunchTitle": "Pause downloads when launching a game",
+    "pauseDownloadsOnGameLaunchDesc": "Automatically pauses active downloads when launching a game to prioritize performance.",
+    "pauseDownloadsOnGameLaunch": "Pause downloads when launching a game",
     "updatesConnectivity": "Updates and Connectivity",
     "autoUpdatesTitle": "Automatic updates",
     "autoUpdatesDesc": "Download patches and mod assets in the background before launching the game.",
@@ -341,5 +347,22 @@
     "maximize": "Maximize",
     "restore": "Restore",
     "close": "Close"
+  },
+  "downloads": {
+    "title": "Downloads",
+    "active": "Active",
+    "queue": "Queued",
+    "queued": "Queued",
+    "downloading": "Downloading",
+    "paused": "Paused",
+    "installing": "Installing",
+    "verifying": "Verifying",
+    "position": "Queued · position {position}",
+    "empty": "No active downloads",
+    "emptySubtitle": "Ongoing downloads and updates will appear here.",
+    "remaining": "left",
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel"
   }
 }

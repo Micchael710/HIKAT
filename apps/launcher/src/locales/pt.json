@@ -11,12 +11,14 @@
   "nav": {
     "home": "Início",
     "skins": "Skins",
-    "settings": "Configurações"
+    "settings": "Configurações",
+    "downloads": "Downloads"
   },
   "sidebar": {
     "home": "Início",
     "skins": "Skins",
-    "settings": "Configurações"
+    "settings": "Configurações",
+    "downloads": "Downloads"
   },
   "user": {
     "anonymous": "Jogador",
@@ -103,6 +105,7 @@
     "download": "BAIXAR",
     "update": "ATUALIZAR",
     "play": "JOGAR",
+    "queued": "NA FILA",
     "unavailable": "INDISPONÍVEL",
     "downloading": "BAIXANDO",
     "updating": "ATUALIZANDO",
@@ -210,6 +213,9 @@
     "minimizeToTray": "Minimizar para a bandeja",
     "minimizeOnGameLaunchTitle": "Minimizar ao iniciar o jogo",
     "minimizeOnGameLaunchDesc": "Minimiza o launcher para a bandeja do sistema quando o jogo inicia.",
+    "pauseDownloadsOnGameLaunchTitle": "Pausar downloads ao iniciar um jogo",
+    "pauseDownloadsOnGameLaunchDesc": "Pausa automaticamente os downloads ativos ao iniciar um jogo para priorizar o desempenho.",
+    "pauseDownloadsOnGameLaunch": "Pausar downloads ao iniciar um jogo",
     "updatesConnectivity": "Atualizações e Conectividade",
     "autoUpdatesTitle": "Atualizações automáticas",
     "autoUpdatesDesc": "Baixa em segundo plano patches e recursos de mods antes de iniciar o jogo.",
@@ -341,5 +347,22 @@
     "maximize": "Maximizar",
     "restore": "Restaurar",
     "close": "Fechar"
+  },
+  "downloads": {
+    "title": "Downloads",
+    "active": "Ativo",
+    "queue": "Na fila",
+    "queued": "Na fila",
+    "downloading": "Baixando",
+    "paused": "Pausado",
+    "installing": "Instalando",
+    "verifying": "Verificando",
+    "position": "Na fila · posição {position}",
+    "empty": "Não há downloads ativos",
+    "emptySubtitle": "Downloads e atualizações em andamento aparecerão aqui.",
+    "remaining": "restante",
+    "pause": "Pausar",
+    "resume": "Retomar",
+    "cancel": "Cancelar"
   }
 }

@@ -9,6 +9,7 @@ import HomeView from "./views/HomeView"
 import SkinsView from "./views/SkinsView"
 import SettingsView from "./views/SettingsView"
 import ProfileView from "./views/ProfileView"
+import DownloadsView from "./views/DownloadsView"
 
 import { useServerAccent } from "./utils/dynamicAccent"
 
@@ -261,6 +262,12 @@ export default function App() {
                 onBack={() => setView("home")}
                 onLogout={handleLogout}
                 theme={theme}
+              />
+            )}
+            {view === "downloads" && (
+              <DownloadsView
+                theme={theme}
+                servers={servers}
               />
             )}
           </div>

@@ -1,7 +1,7 @@
 export type ThemeMode = "dark" | "light"
 
 export type LauncherScreen = "login" | "home"
-export type LauncherView = "home" | "skins" | "settings" | "profile"
+export type LauncherView = "home" | "skins" | "settings" | "profile" | "downloads"
 
 export interface UserAccount {
   id: string
