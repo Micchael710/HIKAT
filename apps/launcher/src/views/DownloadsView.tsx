@@ -57,6 +57,8 @@ export default function DownloadsView({
     phase: "DOWNLOADING",
   })
 
+  const activeGameIdRef = useRef<string | null>(null)
+
   const refreshQueue = useCallback(async () => {
     try {
       if (window.electronAPI?.getDownloadQueue) {
@@ -64,15 +66,28 @@ export default function DownloadsView({
         if (snap) {
           setQueueData(snap)
           if (snap.active) {
-            setActiveProgress((prev) => ({
-              progress: snap.active?.progress ?? prev.progress,
-              speedMBs: snap.active?.speedMBs ?? prev.speedMBs,
-              downloadedBytes: snap.active?.downloadedBytes ?? prev.downloadedBytes,
-              totalBytes: snap.active?.totalBytes ?? prev.totalBytes,
-              remainingMinutes: snap.active?.remainingMinutes ?? prev.remainingMinutes,
-              phase: snap.active?.phase || prev.phase,
-            }))
+            const rawProgress = snap.active.progress ?? 0
+            const gameChanged = snap.active.gameId !== activeGameIdRef.current
+            activeGameIdRef.current = snap.active.gameId || null
+
+            setActiveProgress((prev) => {
+              const isOngoing =
+                !gameChanged &&
+                (prev.phase === "DOWNLOADING" ||
+                  prev.phase === "INSTALLING" ||
+                  snap.active?.phase === "DOWNLOADING" ||
+                  snap.active?.phase === "INSTALLING")
+              return {
+                progress: isOngoing ? Math.max(prev.progress, rawProgress) : rawProgress,
+                speedMBs: snap.active?.speedMBs ?? prev.speedMBs,
+                downloadedBytes: snap.active?.downloadedBytes ?? prev.downloadedBytes,
+                totalBytes: snap.active?.totalBytes ?? prev.totalBytes,
+                remainingMinutes: snap.active?.remainingMinutes ?? prev.remainingMinutes,
+                phase: snap.active?.phase || prev.phase,
+              }
+            })
           } else {
+            activeGameIdRef.current = null
             setActiveProgress({
               progress: 0,
               speedMBs: 0,
@@ -96,15 +111,28 @@ export default function DownloadsView({
       if (snap && typeof snap === "object") {
         setQueueData(snap)
         if (snap.active) {
-          setActiveProgress((prev) => ({
-            progress: snap.active?.progress ?? prev.progress,
-            speedMBs: snap.active?.speedMBs ?? prev.speedMBs,
-            downloadedBytes: snap.active?.downloadedBytes ?? prev.downloadedBytes,
-            totalBytes: snap.active?.totalBytes ?? prev.totalBytes,
-            remainingMinutes: snap.active?.remainingMinutes ?? prev.remainingMinutes,
-            phase: snap.active?.phase || prev.phase,
-          }))
+          const rawProgress = snap.active.progress ?? 0
+          const gameChanged = snap.active.gameId !== activeGameIdRef.current
+          activeGameIdRef.current = snap.active.gameId || null
+
+          setActiveProgress((prev) => {
+            const isOngoing =
+              !gameChanged &&
+              (prev.phase === "DOWNLOADING" ||
+                prev.phase === "INSTALLING" ||
+                snap.active?.phase === "DOWNLOADING" ||
+                snap.active?.phase === "INSTALLING")
+            return {
+              progress: isOngoing ? Math.max(prev.progress, rawProgress) : rawProgress,
+              speedMBs: snap.active?.speedMBs ?? prev.speedMBs,
+              downloadedBytes: snap.active?.downloadedBytes ?? prev.downloadedBytes,
+              totalBytes: snap.active?.totalBytes ?? prev.totalBytes,
+              remainingMinutes: snap.active?.remainingMinutes ?? prev.remainingMinutes,
+              phase: snap.active?.phase || prev.phase,
+            }
+          })
         } else {
+          activeGameIdRef.current = null
           setActiveProgress({
             progress: 0,
             speedMBs: 0,
@@ -125,13 +153,22 @@ export default function DownloadsView({
         return
       }
 
-      setActiveProgress({
-        progress: typeof data.progress === "number" ? data.progress : 0,
-        speedMBs: typeof data.speedMBs === "number" ? data.speedMBs : 0,
-        downloadedBytes: typeof data.downloadedBytes === "number" ? data.downloadedBytes : 0,
-        totalBytes: typeof data.totalBytes === "number" ? data.totalBytes : 0,
-        remainingMinutes: typeof data.remainingMinutes === "number" ? data.remainingMinutes : 0,
-        phase: data.phase || "DOWNLOADING",
+      const rawProgress = typeof data.progress === "number" ? data.progress : 0
+      setActiveProgress((prev) => {
+        const isOngoing =
+          prev.phase === "DOWNLOADING" ||
+          prev.phase === "INSTALLING" ||
+          data.phase === "DOWNLOADING" ||
+          data.phase === "INSTALLING"
+        const effectiveProgress = isOngoing ? Math.max(prev.progress, rawProgress) : rawProgress
+        return {
+          progress: effectiveProgress,
+          speedMBs: typeof data.speedMBs === "number" ? data.speedMBs : 0,
+          downloadedBytes: typeof data.downloadedBytes === "number" ? data.downloadedBytes : 0,
+          totalBytes: typeof data.totalBytes === "number" ? data.totalBytes : 0,
+          remainingMinutes: typeof data.remainingMinutes === "number" ? data.remainingMinutes : 0,
+          phase: data.phase || prev.phase || "DOWNLOADING",
+        }
       })
     })
 

@@ -127,6 +127,7 @@ export default function DownloadPlayButton({
   manifestRef.current = manifest
 
   const [progress, setProgress] = useState(0)
+  const highWaterProgressRef = useRef(0)
   const [speed, setSpeed] = useState(0)
   const [totalBytes, setTotalBytes] = useState(0)
   const [downloadedBytes, setDownloadedBytes] = useState(0)
@@ -221,6 +222,7 @@ export default function DownloadPlayButton({
     const syncOpId = ++syncOpIdRef.current
     isStartingSyncRef.current = true
     setDownloadedBytes(0)
+    highWaterProgressRef.current = 0
     setProgress(0)
     setSpeed(0)
     setTimeRemainingMin(0)
@@ -424,7 +426,10 @@ export default function DownloadPlayButton({
 
             const activeSnap = queueSnap?.active || launchInfo?.operationSnapshot
             if (activeSnap) {
-              if (typeof activeSnap.progress === "number") setProgress(activeSnap.progress)
+              if (typeof activeSnap.progress === "number") {
+                highWaterProgressRef.current = Math.max(highWaterProgressRef.current, activeSnap.progress)
+                setProgress(highWaterProgressRef.current)
+              }
               if (typeof activeSnap.speedMBs === "number") setSpeed(activeSnap.speedMBs)
               if (typeof activeSnap.downloadedBytes === "number") setDownloadedBytes(activeSnap.downloadedBytes)
               if (typeof activeSnap.totalBytes === "number" && activeSnap.totalBytes > 0) setTotalBytes(activeSnap.totalBytes)
@@ -449,7 +454,10 @@ export default function DownloadPlayButton({
             const staged = res.stagedBytes || 0
             setDownloadedBytes(staged)
             const pct =
-              total > 0 && staged > 0 ? Math.min(100, Math.round((staged / total) * 100)) : 0
+              typeof res.pausedProgress === "number" && res.pausedProgress > 0
+                ? res.pausedProgress
+                : total > 0 && staged > 0 ? Math.min(100, Math.round((staged / total) * 100)) : 0
+            highWaterProgressRef.current = pct
             setProgress(pct)
             setStatus("paused")
           } else {
@@ -796,7 +804,11 @@ export default function DownloadPlayButton({
       if (!isStartingSyncRef.current) {
         isStartingSyncRef.current = true
       }
-      setProgress(data.progress)
+      const rawProgress = typeof data.progress === "number" ? data.progress : 0
+      const isOngoing = statusRef.current === "downloading" || statusRef.current === "installing"
+      const effectiveProgress = isOngoing ? Math.max(highWaterProgressRef.current, rawProgress) : rawProgress
+      highWaterProgressRef.current = effectiveProgress
+      setProgress(effectiveProgress)
       setSpeed(data.speedMBs || 0)
       if (Number.isFinite(data.downloadedBytes)) {
         setDownloadedBytes(data.downloadedBytes)
@@ -908,7 +920,12 @@ export default function DownloadPlayButton({
         } else {
           setStatus("downloading")
         }
-        if (typeof snap.active.progress === "number") setProgress(snap.active.progress)
+        if (typeof snap.active.progress === "number") {
+          const isOngoing = statusRef.current === "downloading" || statusRef.current === "installing"
+          const effectiveProgress = isOngoing ? Math.max(highWaterProgressRef.current, snap.active.progress) : snap.active.progress
+          highWaterProgressRef.current = effectiveProgress
+          setProgress(effectiveProgress)
+        }
         if (typeof snap.active.speedMBs === "number") setSpeed(snap.active.speedMBs)
         if (typeof snap.active.downloadedBytes === "number") setDownloadedBytes(snap.active.downloadedBytes)
         if (typeof snap.active.totalBytes === "number" && snap.active.totalBytes > 0) setTotalBytes(snap.active.totalBytes)
@@ -956,7 +973,7 @@ export default function DownloadPlayButton({
     status === "verifying"
 
   const cancel = async () => {
-    if (!isLocalAllowed || isTransitioning || status === "installing") return
+    if (!isLocalAllowed || isTransitioning || status === "verifying") return
     setIsTransitioning(true)
     isCancellingRef.current = true
     try {
@@ -970,6 +987,7 @@ export default function DownloadPlayButton({
         })
         setManifest(freshManifest)
         setStatus(isLocalAllowed ? resolveIdleGameButtonState(freshManifest, activeServerId) : "unavailable")
+        highWaterProgressRef.current = 0
         setProgress(0)
         setSpeed(0)
         setDownloadedBytes(0)
@@ -987,9 +1005,9 @@ export default function DownloadPlayButton({
   }
 
   const togglePauseResume = async () => {
-    if (!isLocalAllowed || isTransitioning || status === "installing" || status === "verifying") return
+    if (!isLocalAllowed || isTransitioning || status === "verifying") return
 
-    if (status === "downloading") {
+    if (status === "downloading" || status === "installing") {
       setIsTransitioning(true)
       try {
         const res: any = await gameService.pauseSync(effectiveGameContext)
@@ -1575,7 +1593,7 @@ export default function DownloadPlayButton({
           border: isDark
             ? "2.5px solid rgba(255, 255, 255, 0.12)"
             : "2.5px solid rgba(0, 0, 0, 0.1)",
-          cursor: isInstalling || isVerifying ? "default" : "pointer",
+          cursor: isVerifying ? "default" : "pointer",
           position: "relative",
           overflow: "hidden",
           display: "flex",
@@ -1669,7 +1687,7 @@ export default function DownloadPlayButton({
             zIndex: 2,
           }}
         >
-          {status === "downloading" && isHovered ? (
+          {(status === "downloading" || status === "installing") && isHovered ? (
             <div
               style={{
                 display: "flex",
@@ -1748,28 +1766,28 @@ export default function DownloadPlayButton({
         <button
           type="button"
           onClick={cancel}
-          disabled={isInstalling}
+          disabled={isTransitioning}
           title={t("playButton.cancel")}
           className="dl-cancel-btn"
-          style={{
-            width: 76,
-            height: 76,
-            borderRadius: 24,
-            flexShrink: 0,
-            background: isDark ? "rgba(255, 255, 255, 0.05)" : "#ffffff",
-            border: isDark
-              ? "1px solid rgba(255, 255, 255, 0.12)"
-              : "1px solid rgba(0, 0, 0, 0.12)",
-            color: isDark ? "rgba(255, 255, 255, 0.45)" : "#556677",
-            boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
-            cursor: isInstalling ? "not-allowed" : "pointer",
-            opacity: isInstalling ? 0.35 : 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "opacity 0.2s ease",
-          }}
-        >
+        style={{
+          width: 76,
+          height: 76,
+          borderRadius: 24,
+          flexShrink: 0,
+          background: isDark ? "rgba(255, 255, 255, 0.05)" : "#ffffff",
+          border: isDark
+            ? "1px solid rgba(255, 255, 255, 0.12)"
+            : "1px solid rgba(0, 0, 0, 0.12)",
+          color: isDark ? "rgba(255, 255, 255, 0.45)" : "#556677",
+          boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
+          cursor: isTransitioning ? "not-allowed" : "pointer",
+          opacity: isTransitioning ? 0.35 : 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          transition: "opacity 0.2s ease",
+        }}
+      >
           <svg
             width={20}
             height={20}

@@ -159,16 +159,16 @@ class GameOperationManager {
       clientPlan.toPrune.length === 0 &&
       releaseMatches
 
-    if (clientSynced && this.state === "IDLE") {
-      await cleanStaging(instanceRoot)
-    }
-
     const isFullyInstalled = clientSynced && Boolean(core.installed) && javaValid
     const hasUpdate = Boolean(
       installedManifest.modpackVersion && installedManifest.modpackVersion !== modpackVersion,
     )
     const hasExistingInstall = Boolean(core.resolvedVersionId)
     const hasIntegrityIssue = Boolean(releaseMatches && !isFullyInstalled)
+
+    if (clientSynced && this.state === "IDLE" && isFullyInstalled) {
+      await cleanStaging(instanceRoot)
+    }
 
     const session = await loadDownloadSession(instanceRoot)
     const isSessionInstalling =
@@ -206,6 +206,7 @@ class GameOperationManager {
       !isObsoleteSession
     ) {
       hasPausedSession = true
+      hasInterruptedDownload = true
     }
 
     return {
@@ -221,6 +222,8 @@ class GameOperationManager {
       isFullyInstalled,
       hasPausedSession,
       hasInterruptedDownload,
+      pausedProgress: typeof session?.progress === "number" ? session.progress : 0,
+      pausedPhase: session?.phase || (isSessionInstalling ? "INSTALLING" : "DOWNLOADING"),
       stagedBytes,
       stagedFilesCount,
       plan: {
@@ -401,6 +404,14 @@ class GameOperationManager {
 
         if (cancelSignal.isPaused) {
           this.state = "PAUSED"
+          await saveDownloadSession(instanceRoot, {
+            modpackVersion,
+            status: "PAUSED",
+            phase: currentPhaseName || "INSTALLING",
+            operationKind: isVerify ? "VERIFY" : "SYNC",
+            progress: maxReportedProgress,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {})
           if (typeof onPhaseChange === "function") onPhaseChange("PAUSED")
           return { success: false, paused: true, state: "PAUSED" }
         }
@@ -470,6 +481,14 @@ class GameOperationManager {
 
         if (cancelSignal.isPaused) {
           this.state = "PAUSED"
+          await saveDownloadSession(instanceRoot, {
+            modpackVersion,
+            status: "PAUSED",
+            phase: currentPhaseName || "INSTALLING",
+            operationKind: isVerify ? "VERIFY" : "SYNC",
+            progress: maxReportedProgress,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {})
           if (typeof onPhaseChange === "function") onPhaseChange("PAUSED")
           return { success: false, paused: true, state: "PAUSED" }
         }
@@ -496,6 +515,14 @@ class GameOperationManager {
       } catch (err) {
         if (cancelSignal.isPaused) {
           this.state = "PAUSED"
+          await saveDownloadSession(instanceRoot, {
+            modpackVersion,
+            status: "PAUSED",
+            phase: currentPhaseName || "INSTALLING",
+            operationKind: isVerify ? "VERIFY" : "SYNC",
+            progress: maxReportedProgress,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {})
           if (typeof onPhaseChange === "function") onPhaseChange("PAUSED")
           return { success: false, paused: true, state: "PAUSED" }
         }
@@ -518,9 +545,6 @@ class GameOperationManager {
   }
 
   async pauseSync() {
-    if (this.state === "INSTALLING") {
-      throw new Error("Cannot pause synchronization while installation phase is in progress.")
-    }
     if (this.activeCancelSignal) {
       this.activeCancelSignal.isPaused = true
     }
@@ -543,9 +567,6 @@ class GameOperationManager {
   }
 
   async cancelSync(instanceRoot) {
-    if (this.state === "INSTALLING") {
-      throw new Error("Cannot cancel synchronization while installation phase is in progress.")
-    }
     if (this.activeCancelSignal) {
       this.activeCancelSignal.isCancelled = true
     }

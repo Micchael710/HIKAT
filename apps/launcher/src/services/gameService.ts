@@ -33,6 +33,8 @@ export interface GameManifest {
   hasExistingInstall?: boolean
   hasInterruptedDownload?: boolean
   hasPausedSession?: boolean
+  pausedProgress?: number
+  pausedPhase?: string
   stagedBytes?: number
   totalDownloadBytes?: number
 }
@@ -262,6 +264,8 @@ export const gameService = {
           let hasPausedSession = false
           let hasIntegrityIssue = false
           let installedModpackVersion: string | null = null
+          let pausedProgress: number | undefined
+          let pausedPhase: string | undefined
           let stagedBytes = 0
           let totalDownloadBytes = totalBytes
 
@@ -291,6 +295,8 @@ export const gameService = {
                 isInstalled = Boolean(planCheck.isFullyInstalled)
                 hasInterruptedDownload = Boolean(planCheck.hasInterruptedDownload)
                 hasPausedSession = Boolean(planCheck.hasPausedSession)
+                pausedProgress = typeof planCheck.pausedProgress === "number" ? planCheck.pausedProgress : undefined
+                pausedPhase = planCheck.pausedPhase || undefined
                 stagedBytes = planCheck.stagedBytes || 0
                 if (
                   Number.isFinite(planCheck.totalDownloadBytes) &&
@@ -321,6 +327,8 @@ export const gameService = {
             hasExistingInstall,
             hasInterruptedDownload,
             hasPausedSession,
+            pausedProgress,
+            pausedPhase,
             stagedBytes,
             totalDownloadBytes,
           }
@@ -364,6 +372,8 @@ export const gameService = {
           let offlineHasExistingInstall = false
           let offlineHasInterruptedDownload = false
           let offlineHasPausedSession = false
+          let offlinePausedProgress: number | undefined
+          let offlinePausedPhase: string | undefined
           let offlineStagedBytes = 0
           let offlineTotalDownloadBytes = 0
 
@@ -393,6 +403,8 @@ export const gameService = {
                 offlineInstalled = Boolean(planCheck.isFullyInstalled)
                 offlineHasInterruptedDownload = Boolean(planCheck.hasInterruptedDownload)
                 offlineHasPausedSession = Boolean(planCheck.hasPausedSession)
+                offlinePausedProgress = typeof planCheck.pausedProgress === "number" ? planCheck.pausedProgress : undefined
+                offlinePausedPhase = planCheck.pausedPhase || undefined
                 offlineStagedBytes = planCheck.stagedBytes || 0
                 offlineTotalDownloadBytes = planCheck.totalDownloadBytes || 0
                 gameService.setGameInstalled(offlineInstalled, effectiveGameId)
@@ -423,6 +435,8 @@ export const gameService = {
             hasExistingInstall: offlineHasExistingInstall,
             hasInterruptedDownload: offlineHasInterruptedDownload,
             hasPausedSession: offlineHasPausedSession,
+            pausedProgress: offlinePausedProgress,
+            pausedPhase: offlinePausedPhase,
             stagedBytes: offlineStagedBytes,
             totalDownloadBytes: offlineTotalDownloadBytes || (offlineInstalled ? 0 : totalBytes),
           }

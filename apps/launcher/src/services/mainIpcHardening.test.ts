@@ -213,29 +213,25 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     expect(fs.existsSync(path.join(instanceRoot, ".hikat", "staging"))).toBe(false)
   })
 
-  it("4. Cancel during INSTALLING phase: strictly rejected and does not alter state", async () => {
+  it("4. Cancel during INSTALLING phase: succeeds, cleans staging, and resets state to IDLE", async () => {
     manager.state = "INSTALLING"
 
-    await expect(manager.cancelSync(instanceRoot)).rejects.toThrow(
-      /Cannot cancel synchronization while installation phase is in progress/i,
-    )
-
-    expect(manager.getState()).toBe("INSTALLING")
-
-    // Launch is also blocked during INSTALLING
+    // Launch is blocked during active INSTALLING
     await expect(manager.launchGame({ launch: vi.fn() }, {})).rejects.toThrow(
       /Cannot launch Minecraft while game operation is in progress/i,
     )
+
+    const res = await manager.cancelSync(instanceRoot)
+    expect(res).toEqual({ success: true, state: "IDLE" })
+    expect(manager.getState()).toBe("IDLE")
   })
 
-  it("5. Pause during INSTALLING phase: strictly rejected and does not alter state", async () => {
+  it("5. Pause during INSTALLING phase: succeeds and sets state to PAUSED", async () => {
     manager.state = "INSTALLING"
 
-    await expect(manager.pauseSync()).rejects.toThrow(
-      /Cannot pause synchronization while installation phase is in progress/i,
-    )
-
-    expect(manager.getState()).toBe("INSTALLING")
+    const res = await manager.pauseSync()
+    expect(res).toEqual({ success: true, paused: true, state: "PAUSED" })
+    expect(manager.getState()).toBe("PAUSED")
   })
 
   it("6. First operation finally does not nullify cancelSignal of newer operation", async () => {

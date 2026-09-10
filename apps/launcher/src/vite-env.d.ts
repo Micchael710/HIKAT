@@ -68,6 +68,8 @@ export interface SyncPlanCheckResult {
   isFullyInstalled?: boolean
   hasPausedSession?: boolean
   hasInterruptedDownload?: boolean
+  pausedProgress?: number
+  pausedPhase?: string
   stagedBytes?: number
   stagedFilesCount?: number
   error?: string
