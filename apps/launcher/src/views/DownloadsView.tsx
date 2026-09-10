@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import { ThemeMode } from "../types"
 import type { LauncherServer } from "../services/serverService"
-import { BASE_FONT } from "../theme/tokens"
+import { CANVAS_W, BASE_FONT } from "../theme/tokens"
 import { IconDownload, IconPause, IconResume } from "../theme/icons"
 import { useTranslation } from "../context/LanguageContext"
 import { parseFallbackAccent } from "../utils/dynamicAccent"
 import { resolveApiAssetUrl } from "../config/api"
 import { gameService } from "../services/gameService"
 import type { DownloadQueueSnapshot, ActiveDownloadSnapshot, QueuedDownloadItem } from "../vite-env"
+
+const CONTENT_LEFT = 184
 
 interface DownloadsViewProps {
   theme?: ThemeMode
@@ -35,6 +37,9 @@ export default function DownloadsView({
     active: null,
     queued: [],
   })
+
+  const queueDataRef = useRef(queueData)
+  queueDataRef.current = queueData
 
   const [activeProgress, setActiveProgress] = useState<{
     progress: number
@@ -67,6 +72,15 @@ export default function DownloadsView({
               remainingMinutes: snap.active?.remainingMinutes ?? prev.remainingMinutes,
               phase: snap.active?.phase || prev.phase,
             }))
+          } else {
+            setActiveProgress({
+              progress: 0,
+              speedMBs: 0,
+              downloadedBytes: 0,
+              totalBytes: 0,
+              remainingMinutes: 0,
+              phase: "DOWNLOADING",
+            })
           }
         }
       }
@@ -79,7 +93,7 @@ export default function DownloadsView({
     refreshQueue()
 
     const unsubQueue = window.electronAPI?.onDownloadQueueChanged?.((snap: any) => {
-      if (snap) {
+      if (snap && typeof snap === "object") {
         setQueueData(snap)
         if (snap.active) {
           setActiveProgress((prev) => ({
@@ -90,6 +104,15 @@ export default function DownloadsView({
             remainingMinutes: snap.active?.remainingMinutes ?? prev.remainingMinutes,
             phase: snap.active?.phase || prev.phase,
           }))
+        } else {
+          setActiveProgress({
+            progress: 0,
+            speedMBs: 0,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            remainingMinutes: 0,
+            phase: "DOWNLOADING",
+          })
         }
       } else {
         refreshQueue()
@@ -97,6 +120,11 @@ export default function DownloadsView({
     })
 
     const unsubProgress = window.electronAPI?.onDownloadProgress?.((data: any) => {
+      const currentActive = queueDataRef.current.active
+      if (data?.gameId && currentActive?.gameId && data.gameId !== currentActive.gameId) {
+        return
+      }
+
       setActiveProgress({
         progress: typeof data.progress === "number" ? data.progress : 0,
         speedMBs: typeof data.speedMBs === "number" ? data.speedMBs : 0,
@@ -113,6 +141,25 @@ export default function DownloadsView({
     }
   }, [refreshQueue])
 
+  // Ambient mouse offset parallax matching SettingsView
+  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
+
+  useEffect(() => {
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const relX = e.clientX / window.innerWidth - 0.5
+      const relY = e.clientY / window.innerHeight - 0.5
+      setMouseOffset({
+        x: Math.round(relX * 220),
+        y: Math.round(relY * 150),
+      })
+    }
+
+    window.addEventListener("mousemove", handleWindowMouseMove, {
+      passive: true,
+    })
+    return () => window.removeEventListener("mousemove", handleWindowMouseMove)
+  }, [])
+
   const getServerInfo = (gameId: string) => {
     const server = servers.find((s) => s.id === gameId)
     const name = server?.name || gameId
@@ -125,30 +172,46 @@ export default function DownloadsView({
     return { server, name, logoUrl, accent }
   }
 
-  const handlePause = async (active: ActiveDownloadSnapshot) => {
-    const info = getServerInfo(active.gameId)
+  const active = queueData.active
+  const queued = queueData.queued || []
+  const hasContent = Boolean(active || queued.length > 0)
+
+  // Determine ambient accent color: active -> queued[0] -> default neutral (#3ec4c0)
+  const activeServer = active ? servers.find((s) => s.id === active.gameId) : null
+  const firstQueuedServer = !active && queued.length > 0 ? servers.find((s) => s.id === queued[0].gameId) : null
+  const ambientTarget = activeServer || firstQueuedServer
+  const ambientAccent = ambientTarget?.accentColor
+    ? parseFallbackAccent(ambientTarget.accentColor)
+    : { r: 62, g: 196, b: 192, hex: "#3ec4c0", css: "62, 196, 192" }
+
+  const ambientR = ambientAccent.r
+  const ambientG = ambientAccent.g
+  const ambientB = ambientAccent.b
+
+  const handlePause = async (activeItem: ActiveDownloadSnapshot) => {
+    const info = getServerInfo(activeItem.gameId)
     try {
-      await gameService.pauseSync({ gameId: active.gameId, gameName: info.name })
+      await gameService.pauseSync({ gameId: activeItem.gameId, gameName: info.name })
       refreshQueue()
     } catch (err) {
       console.error("[DownloadsView] Pause failed:", err)
     }
   }
 
-  const handleResume = async (active: ActiveDownloadSnapshot) => {
-    const info = getServerInfo(active.gameId)
+  const handleResume = async (activeItem: ActiveDownloadSnapshot) => {
+    const info = getServerInfo(activeItem.gameId)
     try {
-      await gameService.resumeSync({ gameId: active.gameId, gameName: info.name })
+      await gameService.resumeSync({ gameId: activeItem.gameId, gameName: info.name })
       refreshQueue()
     } catch (err) {
       console.error("[DownloadsView] Resume failed:", err)
     }
   }
 
-  const handleCancelActive = async (active: ActiveDownloadSnapshot) => {
-    const info = getServerInfo(active.gameId)
+  const handleCancelActive = async (activeItem: ActiveDownloadSnapshot) => {
+    const info = getServerInfo(activeItem.gameId)
     try {
-      await gameService.cancelSync({ gameId: active.gameId, gameName: info.name })
+      await gameService.cancelSync({ gameId: activeItem.gameId, gameName: info.name })
       refreshQueue()
     } catch (err) {
       console.error("[DownloadsView] Cancel active failed:", err)
@@ -164,27 +227,21 @@ export default function DownloadsView({
     }
   }
 
-  const active = queueData.active
-  const queued = queueData.queued || []
-  const hasContent = Boolean(active || queued.length > 0)
-
   return (
     <div
       style={{
         position: "absolute",
         left: 0,
         top: 0,
-        width: 1920,
+        width: CANVAS_W,
         height: 1080,
         background: isDark ? "#090d12" : "#f5f7fa",
         overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
         userSelect: "none",
         fontFamily: BASE_FONT,
       }}
     >
-      {/* Dynamic Ambient Background Glow */}
+      {/* ── Dynamic Ambient Glow Background (Pattern identical to SettingsView) ── */}
       <div
         style={{
           position: "absolute",
@@ -192,64 +249,105 @@ export default function DownloadsView({
           pointerEvents: "none",
           zIndex: 0,
           background: isDark
-            ? "radial-gradient(1000px 600px at 40% 20%, rgba(56, 189, 248, 0.06), transparent 75%), radial-gradient(800px 500px at 80% 70%, rgba(120, 80, 220, 0.04), transparent 70%)"
-            : "radial-gradient(900px 500px at 40% 25%, rgba(56, 189, 248, 0.08), transparent 70%)",
+            ? `radial-gradient(1100px 700px at calc(38% + ${mouseOffset.x}px) calc(20% + ${mouseOffset.y}px), rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.08), transparent 75%),
+               radial-gradient(850px 600px at calc(85% - ${mouseOffset.x * 0.8}px) calc(65% - ${mouseOffset.y * 0.8}px), rgba(77, 166, 255, 0.06), transparent 70%),
+               radial-gradient(650px 500px at calc(20% + ${mouseOffset.x * 0.5}px) calc(80% + ${mouseOffset.y * 0.5}px), rgba(120, 80, 220, 0.04), transparent 65%),
+               #090d12`
+            : `radial-gradient(1000px 600px at calc(40% + ${mouseOffset.x}px) calc(25% + ${mouseOffset.y}px), rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.12), transparent 70%),
+               radial-gradient(800px 500px at calc(80% - ${mouseOffset.x * 0.6}px) calc(70% - ${mouseOffset.y * 0.6}px), rgba(77, 166, 255, 0.09), transparent 65%),
+               #f5f7fa`,
+          transition: "background 0.55s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       />
 
-      {/* Main Content Area */}
+      {/* ── Ambient Radial Atmosphere Overlay (Pattern identical to SettingsView) ── */}
       <div
         style={{
-          position: "relative",
+          position: "absolute",
+          top: -120,
+          right: 80,
+          width: 680,
+          height: 680,
+          borderRadius: "50%",
+          background: isDark
+            ? `radial-gradient(circle, rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.06) 0%, rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.015) 50%, transparent 75%)`
+            : `radial-gradient(circle, rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.12) 0%, rgba(${ambientR}, ${ambientG}, ${ambientB}, 0.03) 50%, transparent 75%)`,
+          filter: "blur(50px)",
+          pointerEvents: "none",
+          transform: `translate3d(${mouseOffset.x * 0.4}px, ${mouseOffset.y * 0.4}px, 0)`,
+          transition: "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.55s ease",
           zIndex: 1,
-          padding: "54px 80px 48px 120px",
-          width: "100%",
-          height: "100%",
-          boxSizing: "border-box",
+        }}
+      />
+
+      {/* ── Main Content Container (Aligned exactly to left: 184, top: 145, right: 80, bottom: 24 matching Settings/Skins) ── */}
+      <div
+        data-testid="downloads-view-container"
+        style={{
+          position: "absolute",
+          left: CONTENT_LEFT,
+          top: 145,
+          right: 80,
+          bottom: 24,
           display: "flex",
           flexDirection: "column",
-          gap: 28,
+          zIndex: 10,
+          animation: "viewFadeIn 0.24s ease",
         }}
       >
-        {/* Title */}
+        {/* ── Header Row (Identical structure and metrics with Settings/Skins) ── */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 14,
+            justifyContent: "space-between",
+            marginBottom: 22,
+            position: "relative",
+            minHeight: 48,
           }}
         >
-          <h1
-            style={{
-              margin: 0,
-              fontSize: 32,
-              fontWeight: 800,
-              letterSpacing: "-0.02em",
-              color: isDark ? "#ffffff" : "#111822",
-            }}
-          >
-            {t("downloads.title")}
-          </h1>
+          <div>
+            <div
+              style={{
+                fontSize: 32,
+                fontWeight: 800,
+                color: isDark ? "white" : "#111822",
+                letterSpacing: "-0.02em",
+                marginBottom: 4,
+              }}
+            >
+              {t("downloads.title")}
+            </div>
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 400,
+                color: isDark ? "#8899aa" : "#556677",
+              }}
+            >
+              {t("downloads.subtitle")}
+            </div>
+          </div>
         </div>
 
-        {/* Scrollable View Content */}
+        {/* ── View Content (Scrollable, full width between left: 184 and right: 80) ── */}
         <div
           style={{
             flex: 1,
             overflowY: "auto",
             display: "flex",
             flexDirection: "column",
-            gap: 32,
-            paddingRight: 16,
-            maxWidth: 1100,
+            gap: 24,
+            paddingRight: 8,
+            width: "100%",
           }}
         >
           {!hasContent ? (
-            /* ── EMPTY STATE ── */
+            /* ── EMPTY STATE (Centered across the entire available panel width) ── */
             <div
               style={{
                 flex: 1,
-                minHeight: 480,
+                width: "100%",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -260,9 +358,9 @@ export default function DownloadsView({
             >
               <div
                 style={{
-                  width: 72,
-                  height: 72,
-                  borderRadius: 22,
+                  width: 56,
+                  height: 56,
+                  borderRadius: 16,
                   background: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)",
                   border: isDark
                     ? "1px solid rgba(255, 255, 255, 0.08)"
@@ -273,11 +371,11 @@ export default function DownloadsView({
                   color: isDark ? "rgba(255, 255, 255, 0.4)" : "rgba(0, 0, 0, 0.4)",
                 }}
               >
-                <IconDownload size={32} />
+                <IconDownload size={26} />
               </div>
               <div
                 style={{
-                  fontSize: 20,
+                  fontSize: 18,
                   fontWeight: 700,
                   color: isDark ? "#ffffff" : "#111822",
                 }}
@@ -286,8 +384,8 @@ export default function DownloadsView({
               </div>
               <div
                 style={{
-                  fontSize: 15,
-                  color: isDark ? "#7a8a99" : "#64748b",
+                  fontSize: 14.5,
+                  color: isDark ? "#8899aa" : "#556677",
                   maxWidth: 380,
                   lineHeight: 1.45,
                 }}
@@ -299,10 +397,10 @@ export default function DownloadsView({
             <>
               {/* ── ACTIVE DOWNLOAD SECTION ── */}
               {active && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <div
                     style={{
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: 800,
                       letterSpacing: "0.08em",
                       textTransform: "uppercase",
@@ -343,18 +441,15 @@ export default function DownloadsView({
                     return (
                       <div
                         style={{
-                          background: isDark ? "#121820" : "#ffffff",
-                          borderRadius: 20,
+                          background: isDark ? "#0d1217" : "#ffffff",
+                          borderRadius: 16,
                           border: isDark
-                            ? "1px solid rgba(255, 255, 255, 0.08)"
-                            : "1px solid rgba(0, 0, 0, 0.08)",
-                          padding: "24px 28px",
-                          boxShadow: isDark
-                            ? "0 12px 36px rgba(0, 0, 0, 0.35)"
-                            : "0 12px 36px rgba(0, 0, 0, 0.06)",
+                            ? "1.5px solid rgba(255, 255, 255, 0.08)"
+                            : "1.5px solid rgba(0, 0, 0, 0.08)",
+                          padding: "20px 24px",
                           display: "flex",
                           flexDirection: "column",
-                          gap: 18,
+                          gap: 16,
                         }}
                       >
                         {/* Header Row: Server Info + Actions */}
@@ -365,14 +460,14 @@ export default function DownloadsView({
                             justifyContent: "space-between",
                           }}
                         >
-                          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                             {info.logoUrl ? (
                               <img
                                 src={info.logoUrl}
                                 alt={info.name}
                                 style={{
-                                  width: 48,
-                                  height: 48,
+                                  width: 44,
+                                  height: 44,
                                   borderRadius: 12,
                                   objectFit: "contain",
                                   background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
@@ -381,8 +476,8 @@ export default function DownloadsView({
                             ) : (
                               <div
                                 style={{
-                                  width: 48,
-                                  height: 48,
+                                  width: 44,
+                                  height: 44,
                                   borderRadius: 12,
                                   background: `rgba(${info.accent.css}, 0.15)`,
                                   color: info.accent.hex,
@@ -390,7 +485,7 @@ export default function DownloadsView({
                                   alignItems: "center",
                                   justifyContent: "center",
                                   fontWeight: 800,
-                                  fontSize: 20,
+                                  fontSize: 18,
                                 }}
                               >
                                 {info.name.charAt(0).toUpperCase()}
@@ -400,7 +495,7 @@ export default function DownloadsView({
                             <div>
                               <div
                                 style={{
-                                  fontSize: 18,
+                                  fontSize: 17,
                                   fontWeight: 700,
                                   color: isDark ? "#ffffff" : "#111822",
                                   marginBottom: 3,
@@ -410,7 +505,7 @@ export default function DownloadsView({
                               </div>
                               <div
                                 style={{
-                                  fontSize: 13.5,
+                                  fontSize: 14.5,
                                   fontWeight: 600,
                                   color: statusColor,
                                   display: "flex",
@@ -437,11 +532,12 @@ export default function DownloadsView({
                             {isPaused ? (
                               <button
                                 type="button"
+                                className="launcher-btn-secondary"
                                 onClick={() => handleResume(active)}
                                 title={t("downloads.resume")}
                                 style={{
-                                  padding: "9px 18px",
-                                  borderRadius: 12,
+                                  padding: "8px 16px",
+                                  borderRadius: 10,
                                   border: "none",
                                   background: `linear-gradient(135deg, ${info.accent.hex}, color-mix(in srgb, ${info.accent.hex} 75%, white))`,
                                   color: "white",
@@ -461,15 +557,16 @@ export default function DownloadsView({
                             ) : (
                               <button
                                 type="button"
+                                className="launcher-btn-secondary"
                                 onClick={() => handlePause(active)}
                                 title={t("downloads.pause")}
                                 style={{
-                                  padding: "9px 18px",
-                                  borderRadius: 12,
+                                  padding: "8px 16px",
+                                  borderRadius: 10,
                                   border: isDark
-                                    ? "1px solid rgba(255, 255, 255, 0.12)"
-                                    : "1px solid rgba(0, 0, 0, 0.12)",
-                                  background: isDark ? "rgba(255, 255, 255, 0.06)" : "#f1f5f9",
+                                    ? "1.5px solid rgba(255, 255, 255, 0.1)"
+                                    : "1.5px solid rgba(0, 0, 0, 0.1)",
+                                  background: isDark ? "rgba(255, 255, 255, 0.05)" : "#f1f5f9",
                                   color: isDark ? "#ffffff" : "#111822",
                                   fontSize: 14,
                                   fontWeight: 700,
@@ -487,14 +584,15 @@ export default function DownloadsView({
 
                             <button
                               type="button"
+                              className="launcher-btn-danger dl-cancel-btn"
                               onClick={() => handleCancelActive(active)}
                               title={t("downloads.cancel")}
                               style={{
-                                padding: "9px 18px",
-                                borderRadius: 12,
+                                padding: "8px 16px",
+                                borderRadius: 10,
                                 border: isDark
-                                  ? "1px solid rgba(239, 68, 68, 0.25)"
-                                  : "1px solid rgba(239, 68, 68, 0.3)",
+                                  ? "1.5px solid rgba(239, 68, 68, 0.25)"
+                                  : "1.5px solid rgba(239, 68, 68, 0.3)",
                                 background: isDark ? "rgba(239, 68, 68, 0.08)" : "rgba(239, 68, 68, 0.06)",
                                 color: "#ef4444",
                                 fontSize: 14,
@@ -512,8 +610,8 @@ export default function DownloadsView({
                         <div
                           style={{
                             width: "100%",
-                            height: 10,
-                            borderRadius: 6,
+                            height: 8,
+                            borderRadius: 4,
                             background: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
                             overflow: "hidden",
                             position: "relative",
@@ -523,7 +621,7 @@ export default function DownloadsView({
                             style={{
                               width: `${Math.min(100, Math.max(0, progress))}%`,
                               height: "100%",
-                              borderRadius: 6,
+                              borderRadius: 4,
                               background: isPaused
                                 ? "#f59e0b"
                                 : `linear-gradient(90deg, ${info.accent.hex}, color-mix(in srgb, ${info.accent.hex} 70%, white))`,
@@ -541,7 +639,7 @@ export default function DownloadsView({
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
-                            fontSize: 13.5,
+                            fontSize: 14.5,
                             color: isDark ? "#8899aa" : "#64748b",
                           }}
                         >
@@ -578,10 +676,10 @@ export default function DownloadsView({
 
               {/* ── QUEUED DOWNLOADS SECTION ── */}
               {queued.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <div
                     style={{
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: 800,
                       letterSpacing: "0.08em",
                       textTransform: "uppercase",
@@ -591,36 +689,33 @@ export default function DownloadsView({
                     {t("downloads.queue")}
                   </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {queued.map((item) => {
                       const info = getServerInfo(item.gameId)
                       return (
                         <div
                           key={item.gameId}
                           style={{
-                            background: isDark ? "#121820" : "#ffffff",
-                            borderRadius: 16,
+                            background: isDark ? "#0d1217" : "#ffffff",
+                            borderRadius: 14,
                             border: isDark
-                              ? "1px solid rgba(255, 255, 255, 0.06)"
-                              : "1px solid rgba(0, 0, 0, 0.06)",
-                            padding: "16px 20px",
+                              ? "1.5px solid rgba(255, 255, 255, 0.06)"
+                              : "1.5px solid rgba(0, 0, 0, 0.06)",
+                            padding: "14px 18px",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
-                            boxShadow: isDark
-                              ? "0 4px 16px rgba(0, 0, 0, 0.2)"
-                              : "0 4px 16px rgba(0, 0, 0, 0.03)",
                           }}
                         >
                           {/* Item Left: Logo + Title + Position */}
-                          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                             {info.logoUrl ? (
                               <img
                                 src={info.logoUrl}
                                 alt={info.name}
                                 style={{
-                                  width: 38,
-                                  height: 38,
+                                  width: 36,
+                                  height: 36,
                                   borderRadius: 10,
                                   objectFit: "contain",
                                   background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
@@ -629,8 +724,8 @@ export default function DownloadsView({
                             ) : (
                               <div
                                 style={{
-                                  width: 38,
-                                  height: 38,
+                                  width: 36,
+                                  height: 36,
                                   borderRadius: 10,
                                   background: `rgba(${info.accent.css}, 0.15)`,
                                   color: info.accent.hex,
@@ -638,7 +733,7 @@ export default function DownloadsView({
                                   alignItems: "center",
                                   justifyContent: "center",
                                   fontWeight: 800,
-                                  fontSize: 16,
+                                  fontSize: 15,
                                 }}
                               >
                                 {info.name.charAt(0).toUpperCase()}
@@ -648,7 +743,7 @@ export default function DownloadsView({
                             <div>
                               <div
                                 style={{
-                                  fontSize: 16,
+                                  fontSize: 17,
                                   fontWeight: 700,
                                   color: isDark ? "#ffffff" : "#111822",
                                   marginBottom: 2,
@@ -658,7 +753,7 @@ export default function DownloadsView({
                               </div>
                               <div
                                 style={{
-                                  fontSize: 13,
+                                  fontSize: 14.5,
                                   color: isDark ? "#8899aa" : "#64748b",
                                 }}
                               >
@@ -670,17 +765,18 @@ export default function DownloadsView({
                           {/* Cancel queued item button */}
                           <button
                             type="button"
+                            className="launcher-btn-danger dl-cancel-btn"
                             onClick={() => handleCancelQueued(item)}
                             title={t("downloads.cancel")}
                             style={{
                               padding: "7px 14px",
                               borderRadius: 10,
                               border: isDark
-                                ? "1px solid rgba(239, 68, 68, 0.25)"
-                                : "1px solid rgba(239, 68, 68, 0.3)",
+                                ? "1.5px solid rgba(239, 68, 68, 0.25)"
+                                : "1.5px solid rgba(239, 68, 68, 0.3)",
                               background: isDark ? "rgba(239, 68, 68, 0.08)" : "rgba(239, 68, 68, 0.06)",
                               color: "#ef4444",
-                              fontSize: 13,
+                              fontSize: 14,
                               fontWeight: 700,
                               cursor: "pointer",
                               transition: "all 0.18s ease",

@@ -350,6 +350,7 @@
   },
   "downloads": {
     "title": "Descargas",
+    "subtitle": "Administra tus descargas y actualizaciones",
     "active": "Activa",
     "queue": "En cola",
     "queued": "En cola",

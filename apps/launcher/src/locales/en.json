@@ -350,6 +350,7 @@
   },
   "downloads": {
     "title": "Downloads",
+    "subtitle": "Manage your downloads and updates",
     "active": "Active",
     "queue": "Queued",
     "queued": "Queued",

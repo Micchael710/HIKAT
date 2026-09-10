@@ -350,6 +350,7 @@
   },
   "downloads": {
     "title": "Téléchargements",
+    "subtitle": "Gérez vos téléchargements et mises à jour",
     "active": "Actif",
     "queue": "En attente",
     "queued": "En attente",

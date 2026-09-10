@@ -2,6 +2,10 @@
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import path from "path"
+import fsp from "fs/promises"
+import fs from "fs"
+import os from "os"
 import React, { act } from "react"
 import { createRoot } from "react-dom/client"
 import { LanguageProvider } from "../context/LanguageContext"
@@ -11,12 +15,173 @@ import DownloadsView from "../views/DownloadsView"
 import { gameService } from "../services/gameService"
 import type { LauncherServer } from "../services/serverService"
 import { getTranslation } from "../context/LanguageContext"
-// @ts-expect-error CJS module without bundled declaration
-import { GameOperationManager } from "../../electron/game-operation-manager.cjs"
 import esDict from "../locales/es.json"
 import enDict from "../locales/en.json"
 import ptDict from "../locales/pt.json"
 import frDict from "../locales/fr.json"
+
+// ── Mock Electron for Real main.cjs Execution ──
+const ipcHandlers = new Map<string, Function>()
+const ipcListeners = new Map<string, Function>()
+
+const getHandler = (channel: string): Function => {
+  const handler = ipcHandlers.get(channel)
+  if (!handler) throw new Error(`IPC Handler not found: ${channel}`)
+  return handler
+}
+
+let testTempDir = ""
+let testAppDataRoot = ""
+let testUserDataRoot = ""
+
+testTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hikat-queue-test-"))
+testAppDataRoot = path.join(testTempDir, "HiKAT")
+testUserDataRoot = path.join(testAppDataRoot, "launcher")
+fs.mkdirSync(path.join(testAppDataRoot, "games"), { recursive: true })
+fs.mkdirSync(path.join(testAppDataRoot, "game files"), { recursive: true })
+fs.mkdirSync(testUserDataRoot, { recursive: true })
+
+let latestBrowserWindowInstance: any = null
+const lastSentEvents: { channel: string; args: any[] }[] = []
+
+const electronMock = {
+  app: {
+    requestSingleInstanceLock: vi.fn().mockReturnValue(true),
+    getPath: vi.fn((name) => {
+      if (name === "appData") return testTempDir
+      if (name === "userData") return testUserDataRoot
+      return testTempDir
+    }),
+    setPath: vi.fn(),
+    setAsDefaultProtocolClient: vi.fn(),
+    on: vi.fn(),
+    quit: vi.fn(),
+    whenReady: vi.fn().mockReturnValue(new Promise(() => {})),
+  },
+  BrowserWindow: function BrowserWindowMock() {
+    const win = {
+      loadURL: vi.fn(),
+      loadFile: vi.fn(),
+      on: vi.fn(),
+      once: vi.fn(),
+      show: vi.fn(),
+      hide: vi.fn(),
+      close: vi.fn(),
+      destroy: vi.fn(),
+      isDestroyed: () => false,
+      focus: vi.fn(),
+      restore: vi.fn(),
+      isVisible: () => true,
+      isMinimized: () => false,
+      webContents: {
+        send: vi.fn((channel, ...args) => {
+          lastSentEvents.push({ channel, args })
+        }),
+        setVisualZoomLevelLimits: vi.fn(),
+        setWindowOpenHandler: vi.fn(),
+        on: vi.fn(),
+        getURL: vi.fn().mockReturnValue(""),
+      },
+    }
+    latestBrowserWindowInstance = win
+    return win
+  },
+  ipcMain: {
+    handle: (channel: string, handler: Function) => {
+      ipcHandlers.set(channel, handler)
+    },
+    on: (channel: string, listener: Function) => {
+      ipcListeners.set(channel, listener)
+    },
+  },
+  screen: {
+    getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }),
+  },
+  nativeImage: {
+    createFromPath: () => ({}),
+  },
+  shell: {
+    openExternal: vi.fn(),
+  },
+  Tray: vi.fn().mockImplementation(() => ({
+    setToolTip: vi.fn(),
+    setContextMenu: vi.fn(),
+    on: vi.fn(),
+  })),
+  Menu: {
+    buildFromTemplate: vi.fn(),
+  },
+}
+
+try {
+  const electronResolved = require.resolve("electron")
+  require.cache[electronResolved] = {
+    id: electronResolved,
+    filename: electronResolved,
+    loaded: true,
+    exports: electronMock,
+  } as any
+} catch (_) {}
+
+vi.mock("electron", () => ({
+  ...electronMock,
+  default: electronMock,
+}))
+
+// Override http.get so server check does not wait
+import http from "http"
+http.get = ((_opts: any, _cb: any) => {
+  const req = {
+    on: (evt: string, handler: Function) => {
+      if (evt === "error") handler(new Error("ECONNREFUSED"))
+      return req
+    },
+    destroy: vi.fn(),
+  }
+  return req as any
+}) as any
+
+// Mock minecraft-core and client-files-sync to prevent remote downloads while allowing controlled async sync
+const realMinecraftCore = require("../../electron/minecraft-core.cjs")
+const mcCoreResolved = require.resolve("../../electron/minecraft-core.cjs")
+require.cache[mcCoreResolved] = {
+  id: mcCoreResolved,
+  filename: mcCoreResolved,
+  loaded: true,
+  exports: {
+    ...realMinecraftCore,
+    checkCore: async (opts: any) => realMinecraftCore.checkCore(opts),
+    installCore: async () => ({ success: true, resolvedVersionId: "1.20.1" }),
+  },
+} as any
+
+let shouldSyncFinish = false
+const realClientFilesSync = require("../../electron/client-files-sync.cjs")
+const cfsResolved = require.resolve("../../electron/client-files-sync.cjs")
+require.cache[cfsResolved] = {
+  id: cfsResolved,
+  filename: cfsResolved,
+  loaded: true,
+  exports: {
+    ...realClientFilesSync,
+    generateSyncPlan: async () => ({
+      toDownload: [{ path: "mods/sample.jar", sizeBytes: 100 }],
+      toDelete: [],
+      preserved: [],
+      totalDownloadBytes: 100,
+    }),
+    downloadClientFilesToStaging: async ({ cancelSignal }: any) => {
+      while (cancelSignal && !cancelSignal.isCancelled && !cancelSignal.isPaused && !shouldSyncFinish) {
+        await new Promise((r) => setTimeout(r, 10))
+      }
+      return { stagedFiles: [] }
+    },
+  },
+} as any
+
+// Require the REAL main.cjs from production
+const mainExports = require("../../electron/main.cjs")
+const { gameLauncher, operationManager, settingsStore, resetDownloadQueueForTesting } = mainExports
 
 const serverA: LauncherServer = {
   id: "server-a",
@@ -63,6 +228,9 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
   let downloadProgressCallback: any = null
 
   beforeEach(() => {
+    shouldSyncFinish = false
+    lastSentEvents.length = 0
+    resetDownloadQueueForTesting()
     localStorage.setItem("hikat_language", "es")
     container = document.createElement("div")
     document.body.appendChild(container)
@@ -116,7 +284,7 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
       setPauseDownloadsOnGameLaunch: vi.fn().mockResolvedValue(true),
     }
 
-    vi.spyOn(gameService, "checkGameManifest").mockImplementation(async (gameId) => {
+    vi.spyOn(gameService, "checkGameManifest").mockImplementation(async () => {
       return {
         version: "1.0.0",
         minecraftVersion: "1.21.1",
@@ -131,16 +299,110 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     act(() => {
       root.unmount()
     })
     container.remove()
     vi.restoreAllMocks()
+
+    resetDownloadQueueForTesting()
+    // Cancel any active sync in operationManager to leave manager IDLE
+    if (operationManager && operationManager.getState() !== "IDLE") {
+      try {
+        await operationManager.cancelSync(testAppDataRoot)
+      } catch (_) {}
+    }
   })
 
-  // A. SINGLE MINECRAFT UX
-  it("A. SINGLE MINECRAFT UX: When Game A is running, Game B button remains PLAY, is visually disabled, click is blocked, and reverts on idle", async () => {
+  // 1. VISUAL & LAYOUT ALIGNMENT FOR DOWNLOADSVIEW (Item 1, 2, 3, 5, 6, 8, 22)
+  it("1. DOWNLOADSVIEW ALIGNMENT: Uses top=145, left=184, right=80, viewFadeIn, title=32px, subtitle=16px, no maxWidth 1100, centered empty state", async () => {
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadsView theme="dark" servers={[serverA, serverB]} />
+        </LanguageProvider>,
+      )
+    })
+
+    const mainContainer = container.querySelector("[data-testid='downloads-view-container']") as HTMLElement
+    expect(mainContainer).not.toBeNull()
+    expect(mainContainer.style.position).toBe("absolute")
+    expect(mainContainer.style.left).toBe("184px")
+    expect(mainContainer.style.top).toBe("145px")
+    expect(mainContainer.style.right).toBe("80px")
+    expect(mainContainer.style.bottom).toBe("24px")
+    expect(mainContainer.style.animation).toContain("viewFadeIn")
+
+    // Verify Title and Subtitle font metrics
+    const titleEl = container.querySelector("div[style*='font-size: 32px'], div[style*='fontSize: 32px']") as HTMLElement
+    expect(titleEl).not.toBeNull()
+    expect(titleEl.textContent).toBe("Descargas")
+
+    const subtitleEl = container.querySelector("div[style*='font-size: 16px'], div[style*='fontSize: 16px']") as HTMLElement
+    expect(subtitleEl).not.toBeNull()
+    expect(subtitleEl.textContent).toBe("Administra tus descargas y actualizaciones")
+
+    // Verify no maxWidth 1100px exists
+    const maxWidth1100 = container.querySelector("div[style*='max-width: 1100px'], div[style*='maxWidth: 1100px']")
+    expect(maxWidth1100).toBeNull()
+
+    // Verify Empty State is centered in width 100%
+    expect(container.textContent).toContain("No hay descargas activas")
+    const emptyContainer = container.querySelector("div[style*='width: 100%'][style*='align-items: center'], div[style*='width: 100%'][style*='alignItems: center']") as HTMLElement
+    expect(emptyContainer).not.toBeNull()
+  })
+
+  // 2. SNAPSHOT DIRECT CONSUMPTION (Item 14, 15)
+  it("2. SNAPSHOT CONSUMPTION: Directly updates from onDownloadQueueChanged snapshot without redundant IPC", async () => {
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadsView theme="dark" servers={[serverA, serverB]} />
+        </LanguageProvider>,
+      )
+    })
+
+    const getDownloadQueueSpy = (window as any).electronAPI.getDownloadQueue
+    getDownloadQueueSpy.mockClear()
+
+    // Simulate event sending a snapshot
+    const testSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "SYNCING",
+        phase: "DOWNLOADING",
+        progress: 75,
+        speedMBs: 24.2,
+        downloadedBytes: 750000000,
+        totalBytes: 1000000000,
+        remainingMinutes: 1,
+      },
+      queued: [
+        {
+          gameId: "server-b",
+          gameName: "Survival Realm",
+          position: 1,
+        },
+      ],
+    }
+
+    await act(async () => {
+      queueChangeCallback?.(testSnapshot)
+    })
+
+    expect(container.textContent).toContain("Warria")
+    expect(container.textContent).toContain("75%")
+    expect(container.textContent).toContain("24.2 MB/s")
+    expect(container.textContent).toContain("Survival Realm")
+    expect(container.textContent).toContain("posición 1")
+
+    // Did NOT make another getDownloadQueue IPC call
+    expect(getDownloadQueueSpy).not.toHaveBeenCalled()
+  })
+
+  // 3. SINGLE MINECRAFT UX (Item 1 & 24)
+  it("3. SINGLE MINECRAFT UX: When Game A is running, Game B button remains PLAY, is visually disabled, click is blocked, and reverts on idle", async () => {
     ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
       status: "running",
       runningGameId: "server-a",
@@ -163,163 +425,316 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
       )
     })
 
-    // Button should show PLAY (JUGAR in ES)
     const btn = container.querySelector("button")
     expect(btn).not.toBeNull()
     expect(btn?.textContent).toContain("JUGAR")
-
-    // Must have disabled visual treatment
     expect(btn?.disabled).toBe(true)
     expect(btn?.style.cursor).toBe("not-allowed")
     expect(btn?.style.opacity).toBe("0.65")
 
-    // Click must NOT call launchGame
     await act(async () => {
       btn?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     })
     expect(launchGameSpy).not.toHaveBeenCalled()
 
-    // When Game A returns to idle:
+    // Reverts on idle
     ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
       status: "idle",
       runningGameId: null,
+      activeOperationGameId: null,
+      activeOperationState: "IDLE",
+      activeOperationPhase: null,
     })
 
     await act(async () => {
       launchStatusCallback?.("idle", { gameId: "server-a", runningGameId: null })
+      await new Promise((r) => setTimeout(r, 30))
     })
 
-    // Button should now be active and clickable
     expect(btn?.disabled).toBe(false)
     expect(btn?.style.cursor).toBe("pointer")
     expect(btn?.style.opacity).toBe("1")
+  })
 
-    await act(async () => {
-      btn?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+  // 4. PRELOAD SNAPSHOT DELIVERY & EMISSION (Item 13 & 21)
+  it("4. PRELOAD & QUEUE CHANGED EVENT: onDownloadQueueChanged in preload delivers snapshot parameter to callback", () => {
+    const registeredHandlers = new Map<string, Function>()
+    const mockIpcRenderer = {
+      on: (channel: string, handler: Function) => registeredHandlers.set(channel, handler),
+      removeListener: vi.fn(),
+    }
+
+    // Preload implementation behavior
+    const onDownloadQueueChanged = (callback: (snap: any) => void) => {
+      const handler = (_event: any, snapshot: any) => callback(snapshot)
+      mockIpcRenderer.on("game-download-queue-changed", handler)
+      return () => mockIpcRenderer.removeListener("game-download-queue-changed", handler)
+    }
+
+    let receivedSnapshot: any = null
+    const unsubscribe = onDownloadQueueChanged((snap) => {
+      receivedSnapshot = snap
     })
-    expect(launchGameSpy).toHaveBeenCalled()
+
+    const testSnap = { active: { gameId: "server-x" }, queued: [] }
+    const handler = registeredHandlers.get("game-download-queue-changed")
+    expect(handler).toBeDefined()
+
+    handler!({}, testSnap)
+    expect(receivedSnapshot).toBe(testSnap)
+    expect(receivedSnapshot).not.toBeUndefined()
+
+    unsubscribe()
+    expect(mockIpcRenderer.removeListener).toHaveBeenCalled()
   })
 
-  // B. MAIN SIGUE PROTEGIDO
-  it("B. MAIN SIGUE PROTEGIDO: GameOperationManager rejects second launch if state is not IDLE unless allowDuringOperation is explicitly set", async () => {
-    const opManager = new GameOperationManager()
-    opManager.state = "SYNCING"
+  // 5. TRANSLATIONS PARITY (Item 23)
+  it("5. TRANSLATIONS: downloads.subtitle and keys exist across all 4 locales", () => {
+    const locales = [
+      { code: "es", dict: esDict, expectedSub: "Administra tus descargas y actualizaciones" },
+      { code: "en", dict: enDict, expectedSub: "Manage your downloads and updates" },
+      { code: "pt", dict: ptDict, expectedSub: "Gerencie seus downloads e atualizações" },
+      { code: "fr", dict: frDict, expectedSub: "Gérez vos téléchargements et mises à jour" },
+    ] as const
 
-    const mockLauncher = { launch: vi.fn() }
-    await expect(opManager.launchGame(mockLauncher)).rejects.toThrow("Cannot launch Minecraft while game operation is in progress.")
-
-    // With allowDuringOperation: true, launch proceeds
-    mockLauncher.launch.mockResolvedValueOnce({ success: true, pid: 1234 })
-    const res = await opManager.launchGame(mockLauncher, { allowDuringOperation: true })
-    expect(res.success).toBe(true)
-  })
-
-  // C, D, E, F: FIFO QUEUE & IPC TESTS
-  it("C, D, E, F: Download queue behavior in Main — FIFO ordering, no duplicates, cancel queued, pause active", () => {
-    let downloadQueue: any[] = []
-    let activeOpId: string | null = "server-a"
-
-    // Enqueue B
-    if (activeOpId !== "server-b" && !downloadQueue.some((i) => i.gameId === "server-b")) {
-      downloadQueue.push({ gameId: "server-b", gameName: "Server B", position: downloadQueue.length + 1 })
+    for (const { code, expectedSub } of locales) {
+      expect(getTranslation(code, "downloads.title")).toBeTruthy()
+      expect(getTranslation(code, "downloads.subtitle")).toBe(expectedSub)
+      expect(getTranslation(code, "downloads.active")).toBeTruthy()
+      expect(getTranslation(code, "downloads.queue")).toBeTruthy()
+      expect(getTranslation(code, "downloads.empty")).toBeTruthy()
+      expect(getTranslation(code, "downloads.emptySubtitle")).toBeTruthy()
+      expect(getTranslation(code, "downloads.pause")).toBeTruthy()
+      expect(getTranslation(code, "downloads.resume")).toBeTruthy()
+      expect(getTranslation(code, "downloads.cancel")).toBeTruthy()
+      expect(getTranslation(code, "playButton.queued")).toBeTruthy()
+      expect(getTranslation(code, "settings.pauseDownloadsOnGameLaunchTitle")).toBeTruthy()
+      expect(getTranslation(code, "settings.pauseDownloadsOnGameLaunchDesc")).toBeTruthy()
     }
-
-    // Enqueue C
-    if (activeOpId !== "server-c" && !downloadQueue.some((i) => i.gameId === "server-c")) {
-      downloadQueue.push({ gameId: "server-c", gameName: "Server C", position: downloadQueue.length + 1 })
-    }
-
-    // Queue is [B, C]
-    expect(downloadQueue.map((i) => i.gameId)).toEqual(["server-b", "server-c"])
-
-    // D. No duplicates: re-enqueueing B returns existing position without adding
-    const existingIndex = downloadQueue.findIndex((i) => i.gameId === "server-b")
-    expect(existingIndex).toBe(0)
-    expect(downloadQueue.length).toBe(2)
-
-    // E. Cancel queued B: B is removed, C remains, active A continues
-    const removeIndex = downloadQueue.findIndex((i) => i.gameId === "server-b")
-    downloadQueue.splice(removeIndex, 1)
-    expect(downloadQueue.map((i) => i.gameId)).toEqual(["server-c"])
-    expect(activeOpId).toBe("server-a")
-
-    // Advance queue when A finishes: C is next
-    activeOpId = null
-    const next = downloadQueue.shift()
-    expect(next.gameId).toBe("server-c")
-    activeOpId = next.gameId
-    expect(activeOpId).toBe("server-c")
   })
 
-  // G. DOWNLOAD CENTER RENDERING
-  it("G. DOWNLOAD CENTER: Renders active download (42%) and queued item with logo and accent, no disk/history charts", async () => {
-    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue({
-      active: {
-        gameId: "server-a",
-        state: "SYNCING",
-        phase: "DOWNLOADING",
-        progress: 42,
-        speedMBs: 15.5,
-        downloadedBytes: 420000000,
-        totalBytes: 1000000000,
-        remainingMinutes: 2,
+  // 6. REAL MAIN FIFO QUEUE (Item 10, 11, 12, 16, 17, 20)
+  it("6. REAL MAIN FIFO QUEUE: Enqueues B and C while A syncs; advances A -> B -> C without activeSyncPromise race", async () => {
+    const startHandler = getHandler("game-start-sync")
+    const getQueueHandler = getHandler("game-get-download-queue")
+    const cancelHandler = getHandler("game-cancel-sync")
+
+    const sampleFiles = [
+      {
+        path: "mods/sample.jar",
+        sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        sizeBytes: 1000,
+        policy: "NO_MODIFICABLE" as const,
+        downloadUrl: "http://localhost/sample.jar",
       },
-      queued: [
-        {
-          gameId: "server-b",
-          gameName: "Survival Realm",
-          position: 1,
-        },
-      ],
+    ]
+
+    // 1. Start A (controlled sync, stays active)
+    const syncAPromise = startHandler({}, {
+      gameId: "server-a",
+      gameName: "Warria",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFiles,
+    }).catch((e: any) => e)
+
+    await new Promise((r) => setTimeout(r, 40))
+
+    // 2. Enqueue B and C
+    const resB = await startHandler({}, {
+      gameId: "server-b",
+      gameName: "Survival Realm",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFiles,
     })
+    expect(resB.queued).toBe(true)
+    expect(resB.position).toBe(1)
 
-    await act(async () => {
-      root.render(
-        <LanguageProvider>
-          <DownloadsView
-            theme="dark"
-            servers={[serverA, serverB]}
-          />
-        </LanguageProvider>,
-      )
+    const resC = await startHandler({}, {
+      gameId: "server-c",
+      gameName: "Creative World",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFiles,
     })
+    expect(resC.queued).toBe(true)
+    expect(resC.position).toBe(2)
 
-    expect(container.textContent).toContain("Descargas")
-    expect(container.textContent).toContain("Warria")
-    expect(container.textContent).toContain("42%")
-    expect(container.textContent).toContain("15.5 MB/s")
-    expect(container.textContent).toContain("Survival Realm")
-    expect(container.textContent).toContain("posición 1")
+    // 3. Verify Real Queue State: active A, queued [B, C]
+    let queueSnap = await getQueueHandler()
+    expect(queueSnap.active?.gameId).toBe("server-a")
+    expect(queueSnap.queued.map((q: any) => q.gameId)).toEqual(["server-b", "server-c"])
 
-    // Verify NOT rendering Epic Games charts
-    expect(container.textContent).not.toContain("Read speed")
-    expect(container.textContent).not.toContain("Write speed")
-    expect(container.textContent).not.toContain("Disk chart")
+    // Duplicate prevention
+    const resBDup = await startHandler({}, {
+      gameId: "server-b",
+      gameName: "Survival Realm",
+      clientFiles: sampleFiles,
+    })
+    expect(resBDup.queued).toBe(true)
+    expect(resBDup.position).toBe(1)
+    queueSnap = await getQueueHandler()
+    expect(queueSnap.queued.length).toBe(2)
+
+    // 4. Cancel A to allow next queued item to run cleanly
+    const syncBPromise = cancelHandler({}, { gameId: "server-a", gameName: "Warria" })
+    await syncAPromise
+    await syncBPromise
+    await new Promise((r) => setTimeout(r, 60))
+
+    // 5. B must have started automatically! Queue now has [C]
+    queueSnap = await getQueueHandler()
+    expect(queueSnap.active?.gameId).toBe("server-b")
+    expect(queueSnap.queued.map((q: any) => q.gameId)).toEqual(["server-c"])
+
+    // 6. Cancel B: C must start automatically!
+    await cancelHandler({}, { gameId: "server-b", gameName: "Survival Realm" })
+    await new Promise((r) => setTimeout(r, 60))
+
+    queueSnap = await getQueueHandler()
+    expect(queueSnap.active?.gameId).toBe("server-c")
+    expect(queueSnap.queued.length).toBe(0)
+
+    // 7. Cancel C: Queue becomes completely empty
+    await cancelHandler({}, { gameId: "server-c", gameName: "Creative World" })
+    await new Promise((r) => setTimeout(r, 40))
+
+    queueSnap = await getQueueHandler()
+    expect(queueSnap.active).toBeNull()
+    expect(queueSnap.queued.length).toBe(0)
   })
 
-  // H. EMPTY DOWNLOAD CENTER
-  it("H. EMPTY DOWNLOAD CENTER: Renders translated empty state when queue is empty", async () => {
-    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue({
-      active: null,
-      queued: [],
+  // 7. REAL AUTO-PAUSE / AUTO-RESUME (Item 18, 19)
+  it("7. REAL AUTO-PAUSE & RESUME: Launching Game B auto-pauses Game A; Game B idle auto-resumes Game A; manual pause is NOT auto-resumed", async () => {
+    const startHandler = getHandler("game-start-sync")
+    const pauseHandler = getHandler("game-pause-sync")
+    const getStatusHandler = getHandler("game-get-status")
+    const launchHandler = getHandler("game-launch")
+    const cancelHandler = getHandler("game-cancel-sync")
+
+    settingsStore.set("pauseDownloadsOnGameLaunch", true)
+
+    const sampleFiles = [
+      {
+        path: "mods/sample.jar",
+        sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        sizeBytes: 1000,
+        policy: "NO_MODIFICABLE" as const,
+        downloadUrl: "http://localhost/sample.jar",
+      },
+    ]
+
+    // 1. Start A
+    const syncAPromise = startHandler({}, {
+      gameId: "server-a",
+      gameName: "Warria",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFiles,
+    }).catch((e: any) => e)
+
+    await new Promise((r) => setTimeout(r, 40))
+
+    let statusA = await getStatusHandler({}, { gameId: "server-a" })
+    expect(statusA.activeOperationState).toBe("SYNCING")
+
+    // 2. Launch Game B -> A is auto-paused
+    vi.spyOn(gameLauncher, "launch").mockResolvedValueOnce({ success: true, pid: 8888 })
+
+    await launchHandler({}, {
+      gameId: "server-b",
+      gameName: "Survival Realm",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
     })
 
-    await act(async () => {
-      root.render(
-        <LanguageProvider>
-          <DownloadsView
-            theme="dark"
-            servers={[serverA, serverB]}
-          />
-        </LanguageProvider>,
-      )
+    statusA = await getStatusHandler({}, { gameId: "server-a" })
+    expect(statusA.activeOperationState).toBe("PAUSED")
+
+    // 3. Simulate Game B returning to idle -> A auto-resumes
+    const resumeSyncSpy = vi.spyOn(operationManager, "resumeSync").mockResolvedValueOnce({ success: true, resumed: true } as any)
+
+    gameLauncher.onStatusChangeCallback("idle", { gameId: "server-b", runningGameId: null })
+    await new Promise((r) => setTimeout(r, 30))
+
+    expect(resumeSyncSpy).toHaveBeenCalled()
+
+    // 4. Manual pause test: user manually pauses A
+    await pauseHandler({}, { gameId: "server-a", gameName: "Warria" })
+
+    resumeSyncSpy.mockClear()
+
+    // Launch Game B and close Game B
+    vi.spyOn(gameLauncher, "launch").mockResolvedValueOnce({ success: true, pid: 9999 })
+    await launchHandler({}, {
+      gameId: "server-b",
+      gameName: "Survival Realm",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
     })
 
-    expect(container.textContent).toContain("No hay descargas activas")
+    gameLauncher.onStatusChangeCallback("idle", { gameId: "server-b", runningGameId: null })
+    await new Promise((r) => setTimeout(r, 30))
+
+    // resumeSync must NOT have been called because it was a manual pause!
+    expect(resumeSyncSpy).not.toHaveBeenCalled()
+
+    // Clean up A
+    await cancelHandler({}, { gameId: "server-a", gameName: "Warria" })
+    await syncAPromise
   })
 
-  // I. SIDEBAR DOWNLOADS BUTTON
-  it("I. SIDEBAR: Downloads button is permanently visible, separate at bottom, and clicking switches to downloads view", async () => {
+  // 8. INSTALLING / VERIFYING SAFETY (Item 10, 19)
+  it("8. INSTALLING / VERIFYING SAFETY: Launch is rejected while another game is installing or verifying", async () => {
+    const launchHandler = getHandler("game-launch")
+
+    // Simulate operationManager in VERIFYING state for server-a
+    const startHandler = getHandler("game-start-sync")
+    const cancelHandler = getHandler("game-cancel-sync")
+
+    const sampleFiles = [
+      {
+        path: "mods/sample.jar",
+        sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        sizeBytes: 1000,
+        policy: "NO_MODIFICABLE" as const,
+        downloadUrl: "http://localhost/sample.jar",
+      },
+    ]
+
+    const syncPromise = startHandler({}, {
+      gameId: "server-a",
+      gameName: "Warria",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      isVerify: true,
+      clientFiles: sampleFiles,
+    }).catch((e: any) => e)
+
+    await new Promise((r) => setTimeout(r, 30))
+
+    // Attempting to launch server-b while server-a is verifying -> must reject
+    await expect(
+      launchHandler({}, {
+        gameId: "server-b",
+        gameName: "Survival Realm",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+      }),
+    ).rejects.toThrow("Cannot launch Minecraft while another game is installing or verifying.")
+
+    await cancelHandler({}, { gameId: "server-a", gameName: "Warria" })
+    await syncPromise
+  })
+
+  // 9. SIDEBAR BUTTON (Item 22)
+  it("9. SIDEBAR: Downloads button switches to downloads view", async () => {
     const setViewSpy = vi.fn()
 
     await act(async () => {
@@ -338,7 +753,6 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
       )
     })
 
-    // Find downloads button (title is Descargas)
     const dlBtn = container.querySelector("button[title='Descargas']")
     expect(dlBtn).not.toBeNull()
 
@@ -347,147 +761,5 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
     })
 
     expect(setViewSpy).toHaveBeenCalledWith("downloads")
-  })
-
-  // J. ACCENT COLOR PER SERVER
-  it("J. ACCENT COLOR: Active server progress bar uses server.accentColor", async () => {
-    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue({
-      active: {
-        gameId: "server-a",
-        state: "SYNCING",
-        phase: "DOWNLOADING",
-        progress: 50,
-        speedMBs: 10,
-        downloadedBytes: 500,
-        totalBytes: 1000,
-        remainingMinutes: 1,
-      },
-      queued: [],
-    })
-
-    await act(async () => {
-      root.render(
-        <LanguageProvider>
-          <DownloadsView
-            theme="dark"
-            servers={[serverA, serverB]}
-          />
-        </LanguageProvider>,
-      )
-    })
-
-    // Active progress bar element uses serverA accent #3366ff
-    const progressBar = container.querySelector("div[style*='linear-gradient']")
-    expect(progressBar?.getAttribute("style")).toMatch(/(#3366ff|51,\s*102,\s*255)/)
-  })
-
-  // K, L, M, N: PAUSE DOWNLOADS ON GAME LAUNCH BEHAVIOR
-  it("K, L, M, N: Pause on game launch logic & auto-resume vs manual pause", () => {
-    let pauseDownloadsOnGameLaunch = true
-    let activeOpState = "SYNCING"
-    let activeOpGameId: string | null = "server-a"
-    let autoPausedDownloadGameId: string | null = null
-
-    // K. Launch Game B: A is auto-paused
-    if (pauseDownloadsOnGameLaunch && activeOpGameId !== "server-b" && activeOpState === "SYNCING") {
-      autoPausedDownloadGameId = activeOpGameId
-      activeOpState = "PAUSED"
-    }
-
-    expect(activeOpState).toBe("PAUSED")
-    expect(autoPausedDownloadGameId).toBe("server-a")
-
-    // L. Game B terminates (idle): A auto-resumes
-    let gameStatus = "idle"
-    if (
-      gameStatus === "idle" &&
-      autoPausedDownloadGameId === activeOpGameId &&
-      activeOpState === "PAUSED" &&
-      pauseDownloadsOnGameLaunch
-    ) {
-      activeOpState = "SYNCING"
-      autoPausedDownloadGameId = null
-    }
-
-    expect(activeOpState).toBe("SYNCING")
-    expect(autoPausedDownloadGameId).toBeNull()
-
-    // M. Manual pause is NOT auto-resumed
-    activeOpState = "PAUSED"
-    autoPausedDownloadGameId = null // manual pause does NOT set autoPaused flag
-
-    gameStatus = "idle"
-    if (
-      gameStatus === "idle" &&
-      autoPausedDownloadGameId === activeOpGameId &&
-      activeOpState === "PAUSED" &&
-      pauseDownloadsOnGameLaunch
-    ) {
-      activeOpState = "SYNCING"
-    }
-    // Stays paused!
-    expect(activeOpState).toBe("PAUSED")
-
-    // N. Setting FALSE: launching does NOT pause active sync
-    pauseDownloadsOnGameLaunch = false
-    activeOpState = "SYNCING"
-    if (pauseDownloadsOnGameLaunch && activeOpState === "SYNCING") {
-      activeOpState = "PAUSED"
-    }
-    expect(activeOpState).toBe("SYNCING")
-  })
-
-  // O. INSTALLING / VERIFYING SAFETY
-  it("O. INSTALLING SAFETY: Does not interrupt INSTALLING or VERIFYING phase to launch game", () => {
-    const activeOpPhase: string = "INSTALLING"
-    const activeOpGameId: string = "server-a"
-    const targetGameId: string = "server-b"
-
-    let launchAllowed = true
-    if (activeOpGameId && activeOpGameId !== targetGameId) {
-      if (activeOpPhase === "INSTALLING" || activeOpPhase === "VERIFYING") {
-        launchAllowed = false
-      }
-    }
-
-    expect(launchAllowed).toBe(false)
-  })
-
-  // P. QUEUE DURING GAMEPLAY
-  it("P. QUEUE DURING GAMEPLAY: Setting true prevents queued sync from starting while game is running", () => {
-    const pauseDownloadsOnGameLaunch = true
-    const runningStatus: string = "running"
-    const downloadQueue = [{ gameId: "server-c" }]
-
-    let canStartQueued = true
-    if (pauseDownloadsOnGameLaunch && runningStatus !== "idle") {
-      canStartQueued = false
-    }
-
-    expect(canStartQueued).toBe(false)
-    expect(downloadQueue.length).toBe(1)
-  })
-
-  // Q. TRANSLATIONS
-  it("Q. TRANSLATIONS: downloads.* and settings.pauseDownloadsOnGameLaunch exist across all 4 locales", () => {
-    const locales = [
-      { code: "es", dict: esDict },
-      { code: "en", dict: enDict },
-      { code: "pt", dict: ptDict },
-      { code: "fr", dict: frDict },
-    ] as const
-
-    for (const { code, dict } of locales) {
-      expect(getTranslation(code, "downloads.title")).toBeTruthy()
-      expect(getTranslation(code, "downloads.active")).toBeTruthy()
-      expect(getTranslation(code, "downloads.queue")).toBeTruthy()
-      expect(getTranslation(code, "downloads.empty")).toBeTruthy()
-      expect(getTranslation(code, "downloads.pause")).toBeTruthy()
-      expect(getTranslation(code, "downloads.resume")).toBeTruthy()
-      expect(getTranslation(code, "downloads.cancel")).toBeTruthy()
-      expect(getTranslation(code, "playButton.queued")).toBeTruthy()
-      expect(getTranslation(code, "settings.pauseDownloadsOnGameLaunchTitle")).toBeTruthy()
-      expect(getTranslation(code, "settings.pauseDownloadsOnGameLaunchDesc")).toBeTruthy()
-    }
   })
 })

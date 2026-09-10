@@ -1808,7 +1808,13 @@ async function processNextQueuedSync() {
     const ctx = resolveGameContext(nextItem.payload)
     await runGameSync(ctx, nextItem.payload)
   } catch (err) {
-    console.error(`[Main] Error running queued sync for ${nextItem.gameId}:`, err)
+    const isCancelled = err?.message?.includes("cancelled") || Boolean(operationManager.activeCancelSignal?.isCancelled)
+    if (!isCancelled) {
+      console.error(`[Main] Error running queued sync for ${nextItem.gameId}:`, err)
+      if (operationManager.getState() === "IDLE") {
+        processNextQueuedSync()
+      }
+    }
   }
 }
 
@@ -1858,10 +1864,11 @@ async function runGameSync(ctx, payload) {
       activeOperationSnapshot.phase = phase
     }
     if (phase === "IDLE") {
-      activeOperationGameId = null
-      activeOperationSnapshot = null
+      if (activeOperationGameId === ctx.gameId) {
+        activeOperationGameId = null
+        activeOperationSnapshot = null
+      }
       notifyDownloadQueueChanged()
-      processNextQueuedSync()
     } else {
       notifyDownloadQueueChanged()
     }
@@ -1887,18 +1894,23 @@ async function runGameSync(ctx, payload) {
       onPhaseChange,
     })
     if (operationManager.getState() === "IDLE") {
-      activeOperationGameId = null
-      activeOperationSnapshot = null
-      notifyDownloadQueueChanged()
+      if (activeOperationGameId === ctx.gameId) {
+        activeOperationGameId = null
+        activeOperationSnapshot = null
+        notifyDownloadQueueChanged()
+      }
       processNextQueuedSync()
     }
     setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
     return result
   } catch (err) {
-    if (operationManager.getState() === "IDLE") {
+    const isCancelled = err?.message?.includes("cancelled") || operationManager.activeCancelSignal?.isCancelled
+    if (activeOperationGameId === ctx.gameId) {
       activeOperationGameId = null
       activeOperationSnapshot = null
       notifyDownloadQueueChanged()
+    }
+    if (!isCancelled && operationManager.getState() === "IDLE") {
       processNextQueuedSync()
     }
     throw err
@@ -2012,10 +2024,12 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
     try {
       return await operationManager.cancelSync(ctx.instanceRoot)
     } finally {
-      activeOperationGameId = null
-      activeOperationSnapshot = null
-      autoPausedDownloadGameId = null
-      notifyDownloadQueueChanged()
+      if (activeOperationGameId === ctx.gameId) {
+        activeOperationGameId = null
+        activeOperationSnapshot = null
+        autoPausedDownloadGameId = null
+        notifyDownloadQueueChanged()
+      }
       processNextQueuedSync()
     }
   }
@@ -2026,10 +2040,12 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   try {
     return await operationManager.cancelSync(instanceRoot)
   } finally {
-    activeOperationGameId = null
-    activeOperationSnapshot = null
-    autoPausedDownloadGameId = null
-    notifyDownloadQueueChanged()
+    if (activeOperationGameId === ctx.gameId || !activeOperationGameId) {
+      activeOperationGameId = null
+      activeOperationSnapshot = null
+      autoPausedDownloadGameId = null
+      notifyDownloadQueueChanged()
+    }
     processNextQueuedSync()
   }
 })
@@ -2182,9 +2198,33 @@ app.on("window-all-closed", () => {
   }
 })
 
+function resetDownloadQueueForTesting() {
+  downloadQueue = []
+  activeOperationGameId = null
+  activeOperationSnapshot = null
+  autoPausedDownloadGameId = null
+  if (operationManager) {
+    if (operationManager.activeCancelSignal) {
+      operationManager.activeCancelSignal.isCancelled = true
+    }
+    if (operationManager.activeAbortController) {
+      operationManager.activeAbortController.abort()
+    }
+    operationManager.state = "IDLE"
+    operationManager.activeSyncPromise = null
+    operationManager.activeCancelSignal = null
+    operationManager.activeAbortController = null
+  }
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     resolveGameContext,
     validateGameName,
+    gameLauncher,
+    operationManager,
+    settingsStore,
+    getDownloadQueueSnapshot,
+    resetDownloadQueueForTesting,
   }
 }

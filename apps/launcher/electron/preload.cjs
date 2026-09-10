@@ -64,9 +64,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getGameRuntimeInfo: (gameContext) => ipcRenderer.invoke("game-get-runtime-info", gameContext),
   getDownloadQueue: () => ipcRenderer.invoke("game-get-download-queue"),
   onDownloadQueueChanged: (callback) => {
-    const handler = () => callback()
+    const handler = (_event, snapshot) => callback(snapshot)
     ipcRenderer.on("game-download-queue-changed", handler)
-    return () => ipcRenderer.removeListener("game-download-queue-changed", handler)
+    return () =>
+      ipcRenderer.removeListener(
+        "game-download-queue-changed",
+        handler
+      )
   },
   onDownloadProgress: (callback) => {
     const handler = (_event, data) => callback(data)
