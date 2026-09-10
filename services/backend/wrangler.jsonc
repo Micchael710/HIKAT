@@ -12,7 +12,7 @@
     "AUTH_ISSUER": "https://auth.hikat.org",
     "AUTH_JWKS_URL": "https://auth.hikat.org/.well-known/jwks.json",
     "PTERODACTYL_BASE_URL": "https://hikat-panel.ddns.net",
-    "CORS_ALLOW_ORIGIN": "http://localhost:5174,http://127.0.0.1:5174",
+    "CORS_ALLOW_ORIGIN": "http://localhost:5174,http://127.0.0.1:5174,http://127.0.0.1:8443,http://localhost:8443",
     "CLOUDFLARE_ACCOUNT_ID": "947763b6e2e22822ea37c64385dbe604",
     "R2_BUCKET_NAME": "hikat-r2",
     "PTERODACTYL_DEFAULT_OWNER_ID": "2",
