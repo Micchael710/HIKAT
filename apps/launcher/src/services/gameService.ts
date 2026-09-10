@@ -58,80 +58,104 @@ export type LauncherEvent =
   | ReleaseActivatedEvent
   | ServerUpdatedEvent
 
+const releaseEventListeners = new Set<(event: LauncherEvent) => void>()
+let sharedReleaseSocket: WebSocket | null = null
+let sharedReconnectTimer: any = null
+let sharedBackoffMs = 5000
+
+function connectSharedReleaseSocket() {
+  if (releaseEventListeners.size === 0) return
+  if (sharedReleaseSocket) return
+
+  const wsUrl =
+    getApiBaseUrl()
+      .replace(/^http:/, "ws:")
+      .replace(/^https:/, "wss:")
+      .replace(/\/$/, "") +
+    "/launcher/release-events"
+
+  try {
+    sharedReleaseSocket = new WebSocket(wsUrl)
+
+    sharedReleaseSocket.onopen = () => {
+      sharedBackoffMs = 5000
+    }
+
+    sharedReleaseSocket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data && (data.type === "RELEASE_ACTIVATED" || data.type === "SERVER_UPDATED")) {
+          for (const listener of [...releaseEventListeners]) {
+            try {
+              listener(data as LauncherEvent)
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+
+    sharedReleaseSocket.onclose = () => {
+      sharedReleaseSocket = null
+      if (releaseEventListeners.size > 0) {
+        scheduleSharedReconnect()
+      }
+    }
+
+    sharedReleaseSocket.onerror = () => {
+      try {
+        sharedReleaseSocket?.close()
+      } catch (_) {}
+    }
+  } catch (_) {
+    sharedReleaseSocket = null
+    scheduleSharedReconnect()
+  }
+}
+
+function scheduleSharedReconnect() {
+  if (releaseEventListeners.size === 0 || sharedReconnectTimer) return
+  sharedReconnectTimer = setTimeout(() => {
+    sharedReconnectTimer = null
+    connectSharedReleaseSocket()
+  }, sharedBackoffMs)
+  sharedBackoffMs = Math.min(sharedBackoffMs * 2, 60000)
+}
+
+function cleanupSharedReleaseSocket() {
+  if (sharedReconnectTimer) {
+    clearTimeout(sharedReconnectTimer)
+    sharedReconnectTimer = null
+  }
+  sharedBackoffMs = 5000
+  if (sharedReleaseSocket) {
+    const s = sharedReleaseSocket
+    sharedReleaseSocket = null
+    try {
+      s.close()
+    } catch (_) {}
+  }
+}
+
 export function subscribeReleaseEvents(
   callback: (event: LauncherEvent) => void,
 ): () => void {
-  let isClosed = false
-  let socket: WebSocket | null = null
-  let reconnectTimer: any = null
-  let backoffMs = 5000
+  releaseEventListeners.add(callback)
 
-  const connect = () => {
-    if (isClosed) return
-
-    const wsUrl =
-      getApiBaseUrl()
-        .replace(/^http:/, "ws:")
-        .replace(/^https:/, "wss:")
-        .replace(/\/$/, "") +
-      "/launcher/release-events"
-
-    try {
-      socket = new WebSocket(wsUrl)
-
-      socket.onopen = () => {
-        backoffMs = 5000
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data && (data.type === "RELEASE_ACTIVATED" || data.type === "SERVER_UPDATED")) {
-            callback(data as LauncherEvent)
-          }
-        } catch (_) {}
-      }
-
-      socket.onclose = () => {
-        if (!isClosed) {
-          scheduleReconnect()
-        }
-      }
-
-      socket.onerror = () => {
-        try {
-          socket?.close()
-        } catch (_) {}
-      }
-    } catch (_) {
-      scheduleReconnect()
-    }
+  if (releaseEventListeners.size === 1 || !sharedReleaseSocket) {
+    connectSharedReleaseSocket()
   }
-
-  const scheduleReconnect = () => {
-    if (isClosed || reconnectTimer) return
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null
-      connect()
-    }, backoffMs)
-    backoffMs = Math.min(backoffMs * 2, 60000)
-  }
-
-  connect()
 
   return () => {
-    isClosed = true
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
-    if (socket) {
-      try {
-        socket.close()
-      } catch (_) {}
-      socket = null
+    releaseEventListeners.delete(callback)
+    if (releaseEventListeners.size === 0) {
+      cleanupSharedReleaseSocket()
     }
   }
+}
+
+export function _resetReleaseEventsSubscriptionForTesting() {
+  releaseEventListeners.clear()
+  cleanupSharedReleaseSocket()
 }
 
 export const GET_PUBLISHED_MODPACK_QUERY = `

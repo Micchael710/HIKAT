@@ -370,6 +370,7 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
   })
 
   it("13. subscribeReleaseEvents connects to WebSocket, filters RELEASE_ACTIVATED, and cleans up cleanly", async () => {
+    ;(gameService as any)._resetReleaseEventsSubscriptionForTesting?.()
     let mockWsInstance: any = null
     const originalWebSocket = globalThis.WebSocket
 
@@ -434,6 +435,99 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
       expect(mockWsInstance.close).toHaveBeenCalled()
     } finally {
       globalThis.WebSocket = originalWebSocket
+      ;(gameService as any)._resetReleaseEventsSubscriptionForTesting?.()
+    }
+  })
+
+  it("13B. subscribeReleaseEvents multiplexes multiple subscribers onto ONE WebSocket connection, fans out events, and closes only when all unsubscribed", async () => {
+    ;(gameService as any)._resetReleaseEventsSubscriptionForTesting?.()
+    let wsInstanceCount = 0
+    let lastWs: any = null
+    const originalWebSocket = globalThis.WebSocket
+
+    const createMockWebSocket = (url: string) => {
+      wsInstanceCount++
+      const ws = {
+        url,
+        onopen: null as (() => void) | null,
+        onmessage: null as ((event: any) => void) | null,
+        onclose: null as (() => void) | null,
+        onerror: null as (() => void) | null,
+        close: vi.fn(() => {
+          ws.onclose?.()
+        }),
+      }
+      lastWs = ws
+      return ws
+    }
+
+    globalThis.WebSocket = vi.fn().mockImplementation(createMockWebSocket) as any
+
+    try {
+      const subscriber1Events: any[] = []
+      const subscriber2Events: any[] = []
+      const subscriber3Events: any[] = []
+
+      // 1. First subscriber (e.g. useLauncherState) connects
+      const unsub1 = gameService.subscribeReleaseEvents((event) => {
+        subscriber1Events.push(event)
+      })
+      expect(wsInstanceCount).toBe(1)
+      expect(lastWs).not.toBeNull()
+
+      // 2. Second subscriber (e.g. DownloadPlayButton) connects -> NO second WebSocket created!
+      const unsub2 = gameService.subscribeReleaseEvents((event) => {
+        subscriber2Events.push(event)
+      })
+      expect(wsInstanceCount).toBe(1)
+
+      // 3. Third subscriber (e.g. SettingsView) connects -> STILL only 1 WebSocket created!
+      const unsub3 = gameService.subscribeReleaseEvents((event) => {
+        subscriber3Events.push(event)
+      })
+      expect(wsInstanceCount).toBe(1)
+
+      // 4. Emit RELEASE_ACTIVATED -> all 3 subscribers receive it concurrently
+      lastWs.onmessage?.({
+        data: JSON.stringify({
+          type: "RELEASE_ACTIVATED",
+          serverId: "warria",
+          version: "1.2.0",
+          minecraftVersion: "1.21.1",
+        }),
+      })
+
+      expect(subscriber1Events).toHaveLength(1)
+      expect(subscriber2Events).toHaveLength(1)
+      expect(subscriber3Events).toHaveLength(1)
+      expect(subscriber1Events[0].version).toBe("1.2.0")
+      expect(subscriber2Events[0].version).toBe("1.2.0")
+      expect(subscriber3Events[0].version).toBe("1.2.0")
+
+      // 5. Emit SERVER_UPDATED -> all 3 subscribers receive it
+      lastWs.onmessage?.({
+        data: JSON.stringify({
+          type: "SERVER_UPDATED",
+          serverId: "warria",
+        }),
+      })
+
+      expect(subscriber1Events).toHaveLength(2)
+      expect(subscriber2Events).toHaveLength(2)
+      expect(subscriber3Events).toHaveLength(2)
+
+      // 6. Unsubscribe 1 & 2 -> WebSocket stays open for subscriber 3!
+      unsub1()
+      expect(lastWs.close).not.toHaveBeenCalled()
+      unsub2()
+      expect(lastWs.close).not.toHaveBeenCalled()
+
+      // 7. Unsubscribe last subscriber -> WebSocket cleanly closes!
+      unsub3()
+      expect(lastWs.close).toHaveBeenCalledTimes(1)
+    } finally {
+      globalThis.WebSocket = originalWebSocket
+      ;(gameService as any)._resetReleaseEventsSubscriptionForTesting?.()
     }
   })
 
