@@ -119,6 +119,61 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
     expect(ws3.send).toHaveBeenCalledWith(payload)
   })
 
+  it("does not overwrite latestReleaseEvent when SERVER_UPDATED is broadcast, but still sends live to WebSockets, and updates on next release", async () => {
+    const ws1 = { send: vi.fn() }
+    const storageMap = new Map<string, any>()
+    const mockCtx: any = {
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => [ws1]),
+      storage: {
+        get: vi.fn(async (k: string) => storageMap.get(k)),
+        put: vi.fn(async (k: string, v: any) => storageMap.set(k, v)),
+      },
+    }
+    const doInstance = new ReleaseEventsDurableObject(mockCtx)
+
+    // 1. Initial release 1.0.0
+    const release1 = JSON.stringify({
+      type: "RELEASE_ACTIVATED",
+      serverId: "warria-id",
+      version: "1.0.0",
+    })
+    await doInstance.fetch(new Request("http://internal/broadcast", {
+      method: "POST",
+      body: release1,
+    }))
+    expect(storageMap.get("latestReleaseEvent")).toBe(release1)
+    expect(ws1.send).toHaveBeenCalledWith(release1)
+
+    // 2. SERVER_UPDATED broadcast
+    const serverUpdated = JSON.stringify({
+      type: "SERVER_UPDATED",
+      serverId: "warria-id",
+    })
+    await doInstance.fetch(new Request("http://internal/broadcast", {
+      method: "POST",
+      body: serverUpdated,
+    }))
+    // Must NOT overwrite latestReleaseEvent
+    expect(storageMap.get("latestReleaseEvent")).toBe(release1)
+    // Must STILL send to active WebSockets in real time
+    expect(ws1.send).toHaveBeenCalledWith(serverUpdated)
+
+    // 3. Subsequent release 1.0.1
+    const release2 = JSON.stringify({
+      type: "RELEASE_ACTIVATED",
+      serverId: "warria-id",
+      version: "1.0.1",
+    })
+    await doInstance.fetch(new Request("http://internal/broadcast", {
+      method: "POST",
+      body: release2,
+    }))
+    // Now storage is updated to 1.0.1
+    expect(storageMap.get("latestReleaseEvent")).toBe(release2)
+    expect(ws1.send).toHaveBeenCalledWith(release2)
+  })
+
   it("broadcastReleaseActivated formats payload and calls Durable Object stub", async () => {
     let broadcastReqUrl = ""
     let broadcastReqOptions: any = null

@@ -848,6 +848,128 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     const manifestHttp = await gameService.checkGameManifest()
     expect(manifestHttp).toBeNull()
   })
+
+  it("25. checkGameManifest online with clientFiles=[] calls checkSyncPlan([]) and resolves installed=true", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          clientFiles: [],
+          directoryPolicies: [],
+        },
+      },
+    })
+
+    const checkSyncPlanMock = vi.fn().mockResolvedValue({
+      success: true,
+      installedModpackVersion: "1.0.0",
+      isFullyInstalled: true,
+      hasExistingInstall: true,
+      filesToDownload: 0,
+      filesToPrune: 0,
+      totalDownloadBytes: 0,
+      needsUpdate: false,
+    })
+    window.electronAPI = { checkSyncPlan: checkSyncPlanMock } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(checkSyncPlanMock).toHaveBeenCalledTimes(1)
+    expect(checkSyncPlanMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientFiles: [],
+        modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+      }),
+    )
+    expect(manifest).not.toBeNull()
+    expect(manifest?.installed).toBe(true)
+    expect(manifest?.installedModpackVersion).toBe("1.0.0")
+    expect(manifest?.clientFiles).toEqual([])
+  })
+
+  it("26. checkGameManifest online with clientFiles=[] calls checkSyncPlan([]) when not installed", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          clientFiles: [],
+          directoryPolicies: [],
+        },
+      },
+    })
+
+    const checkSyncPlanMock = vi.fn().mockResolvedValue({
+      success: true,
+      installedModpackVersion: null,
+      isFullyInstalled: false,
+      hasExistingInstall: false,
+      filesToDownload: 0,
+      filesToPrune: 0,
+      totalDownloadBytes: 0,
+      needsUpdate: false,
+    })
+    window.electronAPI = { checkSyncPlan: checkSyncPlanMock } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(checkSyncPlanMock).toHaveBeenCalledTimes(1)
+    expect(checkSyncPlanMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientFiles: [],
+      }),
+    )
+    expect(manifest).not.toBeNull()
+    expect(manifest?.installed).toBe(false)
+    expect(manifest?.installedModpackVersion).toBeNull()
+  })
+
+  it("27. checkGameManifest offline fallback with cached clientFiles=[] calls checkSyncPlan([])", async () => {
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [],
+        directoryPolicies: [],
+      }),
+    )
+
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "NETWORK_ERROR",
+      error: "Network offline",
+    })
+
+    const checkSyncPlanMock = vi.fn().mockResolvedValue({
+      success: true,
+      installedModpackVersion: "1.0.0",
+      isFullyInstalled: true,
+      hasExistingInstall: true,
+      filesToDownload: 0,
+      filesToPrune: 0,
+      totalDownloadBytes: 0,
+      needsUpdate: false,
+    })
+    window.electronAPI = { checkSyncPlan: checkSyncPlanMock } as any
+
+    const manifest = await gameService.checkGameManifest()
+    expect(checkSyncPlanMock).toHaveBeenCalledTimes(1)
+    expect(checkSyncPlanMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientFiles: [],
+        modpackVersion: "1.0.0",
+      }),
+    )
+    expect(manifest).not.toBeNull()
+    expect(manifest?.installed).toBe(true)
+    expect(manifest?.installedModpackVersion).toBe("1.0.0")
+  })
 })
 
 

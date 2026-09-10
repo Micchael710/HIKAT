@@ -240,7 +240,7 @@ export const gameService = {
           let stagedBytes = 0
           let totalDownloadBytes = totalBytes
 
-          if (allowSyncPlanCheck && window.electronAPI?.checkSyncPlan && modpack.clientFiles.length > 0) {
+          if (allowSyncPlanCheck && window.electronAPI?.checkSyncPlan && Array.isArray(modpack.clientFiles)) {
             try {
               const planPayload: any = {
                 clientFiles: modpack.clientFiles,
@@ -342,7 +342,7 @@ export const gameService = {
           let offlineStagedBytes = 0
           let offlineTotalDownloadBytes = 0
 
-          if (allowSyncPlanCheck && window.electronAPI?.checkSyncPlan && cachedFiles.length > 0) {
+          if (allowSyncPlanCheck && window.electronAPI?.checkSyncPlan && Array.isArray(cachedFiles)) {
             try {
               const offlinePayload: any = {
                 clientFiles: cachedFiles,

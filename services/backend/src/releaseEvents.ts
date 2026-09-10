@@ -9,7 +9,14 @@ export class ReleaseEventsDurableObject {
     if (url.pathname === "/broadcast" && request.method === "POST") {
       const message = await request.text()
 
-      await this.ctx.storage.put("latestReleaseEvent", message)
+      try {
+        const parsed = JSON.parse(message)
+        if (parsed?.type === "RELEASE_ACTIVATED") {
+          await this.ctx.storage.put("latestReleaseEvent", message)
+        }
+      } catch {
+        // no persistir mensajes inválidos
+      }
 
       for (const ws of this.ctx.getWebSockets()) {
         try {
