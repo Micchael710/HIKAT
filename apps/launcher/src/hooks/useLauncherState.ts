@@ -32,6 +32,7 @@ import {
 } from "../services/capeService"
 import { authService } from "../services/authService"
 import { serverService, LauncherServer } from "../services/serverService"
+import { gameService, ReleaseActivatedEvent } from "../services/gameService"
 
 export function useLauncherState() {
   const [screen, setScreen] = useState<LauncherScreen>("login")
@@ -113,9 +114,30 @@ export function useLauncherState() {
     }
   }, [])
 
+  const [lastReleaseEvent, setLastReleaseEvent] = useState<ReleaseActivatedEvent | null>(null)
+
   useEffect(() => {
     loadServers()
   }, [loadServers])
+
+  useEffect(() => {
+    if (screen === "login") {
+      return
+    }
+
+    const unsubscribe = gameService.subscribeReleaseEvents((event) => {
+      if (event.type !== "RELEASE_ACTIVATED") {
+        return
+      }
+
+      setLastReleaseEvent(event)
+
+      // El catálogo GraphQL sigue siendo autoritativo.
+      void loadServers()
+    })
+
+    return unsubscribe
+  }, [screen, loadServers])
 
   // Computed selected server
   const selectedServer = useMemo(() => {
@@ -666,5 +688,6 @@ export function useLauncherState() {
     setSelectedGameId,
     selectedServer,
     refreshServers: loadServers,
+    lastReleaseEvent,
   }
 }

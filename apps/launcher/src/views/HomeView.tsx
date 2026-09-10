@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { ThemeMode } from "../types"
 import { getThemeTokens, CANVAS_W, CANVAS_H } from "../theme/tokens"
 import DownloadPlayButton from "../components/server/DownloadPlayButton"
@@ -6,7 +6,7 @@ import NewsCarousel from "../components/news/NewsCarousel"
 import ServerStatsGrid from "../components/server/ServerStatsGrid"
 import CommunityHubGrid from "../components/server/CommunityHubGrid"
 import { useTranslation } from "../context/LanguageContext"
-import { gameService } from "../services/gameService"
+import { gameService, type ReleaseActivatedEvent } from "../services/gameService"
 import { resolveApiAssetUrl } from "../config/api"
 import { useServerAccent } from "../utils/dynamicAccent"
 import type { PublishedModpack } from "../vite-env"
@@ -19,6 +19,7 @@ interface HomeViewProps {
   selectedServer?: LauncherServer | null
   selectedGameId?: string | null
   servers?: LauncherServer[]
+  lastReleaseEvent?: ReleaseActivatedEvent | null
 }
 
 export default function HomeView({
@@ -27,6 +28,7 @@ export default function HomeView({
   isActive = true,
   selectedServer,
   servers: _servers,
+  lastReleaseEvent,
 }: HomeViewProps) {
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
@@ -64,48 +66,35 @@ export default function HomeView({
     setMediaError(false)
   }, [selectedServer?.id])
 
-  useEffect(() => {
+  const loadPublished = useCallback(async () => {
     if (!activeServerId) {
       setPublishedModpack(null)
       return
     }
-
-    let isMounted = true
-
-    const loadPublished = async () => {
-      try {
-        const data = await gameService.getPublishedModpack(activeServerId)
-        if (isMounted) {
-          setPublishedModpack(data)
-          setMediaError(false)
-        }
-      } catch {
-        // Leave publishedModpack null
-      }
-    }
-
-    loadPublished()
-
-    const unsubscribe = gameService.subscribeReleaseEvents((event) => {
-      if (event.type === "RELEASE_ACTIVATED") {
-        if (event.serverId) {
-          if (!activeServerId || event.serverId !== activeServerId) {
-            return
-          }
-        } else {
-          if (activeServerId) {
-            return
-          }
-        }
-        loadPublished()
-      }
-    })
-
-    return () => {
-      isMounted = false
-      unsubscribe()
+    try {
+      const data = await gameService.getPublishedModpack(activeServerId)
+      setPublishedModpack(data)
+      setMediaError(false)
+    } catch {
+      // Leave publishedModpack null
     }
   }, [activeServerId])
+
+  useEffect(() => {
+    loadPublished()
+  }, [loadPublished])
+
+  useEffect(() => {
+    if (!lastReleaseEvent || lastReleaseEvent.type !== "RELEASE_ACTIVATED") {
+      return
+    }
+    if (!lastReleaseEvent.serverId || !activeServerId) {
+      return
+    }
+    if (lastReleaseEvent.serverId === activeServerId) {
+      loadPublished()
+    }
+  }, [lastReleaseEvent, activeServerId, loadPublished])
 
   const cover = publishedModpack?.cover
   const coverUrl = cover?.url ? resolveApiAssetUrl(cover.url) : ""

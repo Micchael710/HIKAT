@@ -114,6 +114,7 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
   beforeEach(() => {
     localStorage.clear()
     vi.restoreAllMocks()
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockReturnValue(() => {})
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hikat-phase3-test-"))
     container = document.createElement("div")
     document.body.appendChild(container)
@@ -1491,6 +1492,451 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
         trackerRoot.unmount()
       })
       trackerContainer.remove()
+    })
+  })
+
+  describe("Phase 11: Real Multiserver Bugfixes & Architecture Verification", () => {
+    const warriaServer: LauncherServer = {
+      id: "warria-id",
+      name: "Warria",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      launcherActiveReleaseId: "rel-w",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      sidebarLogo: {
+        id: "logo-warria",
+        url: "/media/warria-sidebar.png",
+      },
+    }
+
+    const serverB: LauncherServer = {
+      id: "server-b-id",
+      name: "Server B",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      modLoaderVersion: "47.2.0",
+      launcherActiveReleaseId: "rel-b",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      mainLogo: {
+        id: "logo-server-b",
+        url: "/media/server-b-main.png",
+      },
+    }
+
+    it("A. CSP: index.html connect-src explicitly permits wss://api.hikat.org without wildcards", () => {
+      const htmlPath = path.resolve(__dirname, "../../index.html")
+      const htmlContent = fs.readFileSync(htmlPath, "utf-8")
+      const match = htmlContent.match(/Content-Security-Policy["']\s+content="([^"]+)"/i)
+      expect(match).toBeTruthy()
+      const csp = match![1]
+      expect(csp).toContain("connect-src")
+      expect(csp).toContain("wss://api.hikat.org")
+      expect(csp).not.toMatch(/connect-src[^;]*\bwss:\b/)
+      expect(csp).not.toMatch(/connect-src[^;]*\bwss:\/\/\*/)
+      expect(csp).not.toMatch(/connect-src[^;]*\s\*\s/)
+    })
+
+    it("B. DOWNLOAD SECURITY: validateUrlSecurity allows api.hikat.org and blocks foreign hosts & production localhost", () => {
+      const { validateUrlSecurity } = require("../../electron/client-files-sync.cjs")
+      const origEnv = process.env.NODE_ENV
+      try {
+        process.env.NODE_ENV = "production"
+        expect(validateUrlSecurity(new URL("https://api.hikat.org/game/client-files/1"))).toBe(true)
+        expect(() => validateUrlSecurity(new URL("https://evil.example.com/mod.jar"))).toThrow(
+          /Unauthorized external download host blocked/i,
+        )
+        expect(() => validateUrlSecurity(new URL("http://api.hikat.org/game/client-files/1"))).toThrow(
+          /strictly forbidden in production/i,
+        )
+        expect(() => validateUrlSecurity(new URL("http://localhost:3000/mod.jar"))).toThrow(
+          /Localhost download URLs are forbidden in production mode/i,
+        )
+
+        process.env.NODE_ENV = "development"
+        expect(validateUrlSecurity(new URL("http://localhost:8787/game/client-files/1"))).toBe(true)
+        expect(validateUrlSecurity(new URL("http://127.0.0.1:8787/game/client-files/1"))).toBe(true)
+        expect(validateUrlSecurity(new URL("https://api.hikat.org/game/client-files/1"))).toBe(true)
+        expect(() => validateUrlSecurity(new URL("https://foreign.org/file.jar"))).toThrow(
+          /Unauthorized external download host blocked/i,
+        )
+      } finally {
+        process.env.NODE_ENV = origEnv
+      }
+    })
+
+    it("C. GLOBAL WS: useLauncherState with [Warria] receives RELEASE_ACTIVATED for server-b-id and refreshes catalog to [Warria, Server B]", async () => {
+      localStorage.clear()
+      latestLauncherState = null
+
+      let releaseListener: ((e: ReleaseActivatedEvent) => void) | null = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseListener = cb
+        return () => {
+          releaseListener = null
+        }
+      })
+
+      let currentServers = [warriaServer]
+      const getServersSpy = vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentServers)
+
+      const hookContainer = document.createElement("div")
+      const hookRoot = createRoot(hookContainer)
+      await act(async () => {
+        hookRoot.render(<HookConsumer />)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      await act(async () => {
+        latestLauncherState.setScreen("home")
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(latestLauncherState.servers).toHaveLength(1)
+      expect(latestLauncherState.servers[0].name).toBe("Warria")
+      expect(releaseListener).not.toBeNull()
+
+      // Simulate backend publishing Server B and emitting RELEASE_ACTIVATED
+      currentServers = [warriaServer, serverB]
+      await act(async () => {
+        releaseListener?.({
+          type: "RELEASE_ACTIVATED",
+          serverId: "server-b-id",
+          version: "1.0.0",
+          minecraftVersion: "1.20.1",
+        })
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(getServersSpy).toHaveBeenCalledTimes(2)
+      expect(latestLauncherState.servers).toHaveLength(2)
+      expect(latestLauncherState.servers.map((s: any) => s.id)).toEqual(["warria-id", "server-b-id"])
+      expect(latestLauncherState.lastReleaseEvent).toEqual({
+        type: "RELEASE_ACTIVATED",
+        serverId: "server-b-id",
+        version: "1.0.0",
+        minecraftVersion: "1.20.1",
+      })
+
+      act(() => {
+        hookRoot.unmount()
+      })
+      hookContainer.remove()
+    })
+
+    it("D. PRIMER SERVIDOR: initial servers=[] -> RELEASE_ACTIVATED(warria-id) loads [Warria] and sets selectedGameId=warria-id", async () => {
+      localStorage.clear()
+      latestLauncherState = null
+
+      let releaseListener: ((e: ReleaseActivatedEvent) => void) | null = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseListener = cb
+        return () => {
+          releaseListener = null
+        }
+      })
+
+      let currentServers: LauncherServer[] = []
+      vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentServers)
+
+      const hookContainer = document.createElement("div")
+      const hookRoot = createRoot(hookContainer)
+      await act(async () => {
+        hookRoot.render(<HookConsumer />)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      await act(async () => {
+        latestLauncherState.setScreen("home")
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(latestLauncherState.servers).toEqual([])
+      expect(latestLauncherState.selectedGameId).toBeNull()
+
+      // First server published
+      currentServers = [warriaServer]
+      await act(async () => {
+        releaseListener?.({
+          type: "RELEASE_ACTIVATED",
+          serverId: "warria-id",
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+        })
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(latestLauncherState.servers).toHaveLength(1)
+      expect(latestLauncherState.servers[0].name).toBe("Warria")
+      expect(latestLauncherState.selectedGameId).toBe("warria-id")
+      expect(latestLauncherState.selectedServer?.name).toBe("Warria")
+
+      act(() => {
+        hookRoot.unmount()
+      })
+      hookContainer.remove()
+    })
+
+    it("E. NO CAMBIAR SELECCIÓN: servers=[Warria], selectedGameId=warria-id; on Server B event, selectedGameId remains warria-id", async () => {
+      localStorage.clear()
+      latestLauncherState = null
+
+      let releaseListener: ((e: ReleaseActivatedEvent) => void) | null = null
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+        releaseListener = cb
+        return () => {
+          releaseListener = null
+        }
+      })
+
+      let currentServers = [warriaServer]
+      vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentServers)
+
+      const hookContainer = document.createElement("div")
+      const hookRoot = createRoot(hookContainer)
+      await act(async () => {
+        hookRoot.render(<HookConsumer />)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      await act(async () => {
+        latestLauncherState.setScreen("home")
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(latestLauncherState.selectedGameId).toBe("warria-id")
+
+      // Server B arrives
+      currentServers = [warriaServer, serverB]
+      await act(async () => {
+        releaseListener?.({
+          type: "RELEASE_ACTIVATED",
+          serverId: "server-b-id",
+          version: "1.0.0",
+          minecraftVersion: "1.20.1",
+        })
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(latestLauncherState.servers).toHaveLength(2)
+      // Must NOT change selectedGameId since Warria still exists
+      expect(latestLauncherState.selectedGameId).toBe("warria-id")
+      expect(latestLauncherState.selectedServer?.name).toBe("Warria")
+
+      act(() => {
+        hookRoot.unmount()
+      })
+      hookContainer.remove()
+    })
+
+    it("F. UNA SOLA SUBSCRIPTION: HomeView does NOT create subscribeReleaseEvents; only useLauncherState owns subscription", async () => {
+      const subscribeSpy = vi.spyOn(gameService, "subscribeReleaseEvents").mockReturnValue(() => {})
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue(null)
+      vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({ items: [], isCached: false })
+      vi.spyOn(serverService, "getServerStatus").mockResolvedValue({ online: true, playersOnline: 0, maxPlayers: 10, latencyMs: 20 })
+
+      const homeContainer = document.createElement("div")
+      const homeRoot = createRoot(homeContainer)
+      await act(async () => {
+        homeRoot.render(
+          <LanguageProvider>
+            <HomeView theme="dark" selectedServer={warriaServer} />
+          </LanguageProvider>,
+        )
+      })
+
+      // HomeView does NOT create any subscription
+      expect(subscribeSpy).not.toHaveBeenCalled()
+
+      act(() => {
+        homeRoot.unmount()
+      })
+      homeContainer.remove()
+    })
+
+    it("G. HOMESERVER REFRESH: Home showing Warria only re-queries getPublishedModpack when event matches activeServerId", async () => {
+      const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        clientFiles: [],
+      })
+      vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({ items: [], isCached: false })
+      vi.spyOn(serverService, "getServerStatus").mockResolvedValue({ online: true, playersOnline: 0, maxPlayers: 10, latencyMs: 20 })
+
+      const homeContainer = document.createElement("div")
+      const homeRoot = createRoot(homeContainer)
+
+      let eventToPass: ReleaseActivatedEvent | null = null
+      const renderHome = async (ev: ReleaseActivatedEvent | null) => {
+        eventToPass = ev
+        await act(async () => {
+          homeRoot.render(
+            <LanguageProvider>
+              <HomeView theme="dark" selectedServer={warriaServer} lastReleaseEvent={eventToPass} />
+            </LanguageProvider>,
+          )
+        })
+      }
+
+      await renderHome(null)
+      expect(getPublishedSpy).toHaveBeenCalledTimes(1)
+      expect(getPublishedSpy).toHaveBeenCalledWith("warria-id")
+
+      // Event for Server B -> do NOT re-query Warria modpack
+      await renderHome({
+        type: "RELEASE_ACTIVATED",
+        serverId: "server-b-id",
+        version: "1.0.0",
+        minecraftVersion: "1.20.1",
+      })
+      expect(getPublishedSpy).toHaveBeenCalledTimes(1)
+
+      // Event for Warria -> DO re-query Warria modpack
+      await renderHome({
+        type: "RELEASE_ACTIVATED",
+        serverId: "warria-id",
+        version: "1.0.1",
+        minecraftVersion: "1.21.1",
+      })
+      expect(getPublishedSpy).toHaveBeenCalledTimes(2)
+
+      act(() => {
+        homeRoot.unmount()
+      })
+      homeContainer.remove()
+    })
+
+    it("H. SIDEBAR 1 SERVER: servers=[Warria] maintains only Home, Skins, Settings buttons without server selectors", () => {
+      const sidebarContainer = document.createElement("div")
+      const sidebarRoot = createRoot(sidebarContainer)
+
+      act(() => {
+        sidebarRoot.render(
+          <LanguageProvider>
+            <LauncherSidebar
+              view="home"
+              setView={() => {}}
+              s={1}
+              theme="dark"
+              activeSkinAccent={{ r: 62, g: 196, b: 192, css: "62, 196, 192" }}
+              servers={[warriaServer]}
+              selectedGameId="warria-id"
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
+      expect(buttons.length).toBe(3) // Exactly Home, Skins, Settings
+      expect(buttons[0].getAttribute("title")).toBe("Home")
+      expect(buttons[1].getAttribute("title")).toBe("Skins")
+      expect(buttons[2].getAttribute("title")).toBe("Settings")
+
+      act(() => {
+        sidebarRoot.unmount()
+      })
+      sidebarContainer.remove()
+    })
+
+    it("I. SIDEBAR 2 SERVERS: servers=[Warria, Server B] renders Home, Warria button, Server B button, Skins, Settings", () => {
+      const sidebarContainer = document.createElement("div")
+      const sidebarRoot = createRoot(sidebarContainer)
+
+      act(() => {
+        sidebarRoot.render(
+          <LanguageProvider>
+            <LauncherSidebar
+              view="home"
+              setView={() => {}}
+              s={1}
+              theme="dark"
+              activeSkinAccent={{ r: 62, g: 196, b: 192, css: "62, 196, 192" }}
+              servers={[warriaServer, serverB]}
+              selectedGameId="warria-id"
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
+      expect(buttons.length).toBe(5) // Home, Warria, Server B, Skins, Settings
+      expect(buttons[0].getAttribute("title")).toBe("Home")
+      expect(buttons[1].getAttribute("title")).toBe("Warria")
+      expect(buttons[2].getAttribute("title")).toBe("Server B")
+      expect(buttons[3].getAttribute("title")).toBe("Skins")
+      expect(buttons[4].getAttribute("title")).toBe("Settings")
+
+      // Verify each server button uses its logo
+      const warriaImg = buttons[1].querySelector("img")
+      expect(warriaImg).not.toBeNull()
+      expect(warriaImg?.getAttribute("src")).toContain("warria-sidebar.png")
+
+      const serverBImg = buttons[2].querySelector("img")
+      expect(serverBImg).not.toBeNull()
+      expect(serverBImg?.getAttribute("src")).toContain("server-b-main.png")
+
+      act(() => {
+        sidebarRoot.unmount()
+      })
+      sidebarContainer.remove()
+    })
+
+    it("J. SERVER SELECTION: Clicking Server B in sidebar calls onSelectServer(server-b-id) and setView(home)", () => {
+      const sidebarContainer = document.createElement("div")
+      const sidebarRoot = createRoot(sidebarContainer)
+      const onSelectServerSpy = vi.fn()
+      const setViewSpy = vi.fn()
+
+      act(() => {
+        sidebarRoot.render(
+          <LanguageProvider>
+            <LauncherSidebar
+              view="settings"
+              setView={setViewSpy}
+              s={1}
+              theme="dark"
+              activeSkinAccent={{ r: 62, g: 196, b: 192, css: "62, 196, 192" }}
+              servers={[warriaServer, serverB]}
+              selectedGameId="warria-id"
+              onSelectServer={onSelectServerSpy}
+            />
+          </LanguageProvider>,
+        )
+      })
+
+      const buttons = sidebarContainer.querySelectorAll("button.sidebar-nav-btn")
+      expect(buttons.length).toBe(5)
+
+      // Click Server B button (index 2)
+      act(() => {
+        buttons[2].dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      })
+
+      expect(onSelectServerSpy).toHaveBeenCalledWith("server-b-id")
+      expect(setViewSpy).toHaveBeenCalledWith("home")
+
+      act(() => {
+        sidebarRoot.unmount()
+      })
+      sidebarContainer.remove()
     })
   })
 })

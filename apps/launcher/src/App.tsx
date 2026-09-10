@@ -44,6 +44,7 @@ export default function App() {
     selectedGameId,
     setSelectedGameId,
     selectedServer,
+    lastReleaseEvent,
   } = useLauncherState()
 
   const serverLogoUrl = selectedServer?.mainLogo?.url || selectedServer?.sidebarLogo?.url || null
@@ -221,6 +222,7 @@ export default function App() {
                 selectedServer={selectedServer}
                 selectedGameId={selectedGameId}
                 servers={servers}
+                lastReleaseEvent={lastReleaseEvent}
               />
             </div>
             {view === "skins" && (
@@ -305,6 +307,9 @@ export default function App() {
             activeSkinAccent={activeSkinAccent}
             settingsAccent={settingsAccent}
             homeAccent={homeResolvedAccent}
+            servers={servers}
+            selectedGameId={selectedGameId}
+            onSelectServer={setSelectedGameId}
           />
 
           {/* Top-Right Profile Card / Menu (Positioned with clean breathing room beneath window controls) */}

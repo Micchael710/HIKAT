@@ -9,7 +9,7 @@ const { resolveSafePath } = require("./path-validator.cjs")
 
 const ENFORCED_DIRECTORIES = ["mods", "resourcepacks", "shaderpacks", "kubejs", "scripts"]
 const DOWNLOAD_TIMEOUT_MS = 60000
-const DEFAULT_API_BASE_URL = "https://api.apparatia.net/api/v1"
+const DEFAULT_API_BASE_URL = "https://api.hikat.org"
 
 /**
  * Calculates SHA-256 hash of a local file via stream.
@@ -27,7 +27,7 @@ async function calculateFileSha256(filePath) {
 /**
  * Resolves effective API base URL.
  * In development (NODE_ENV !== "production"): defaults to http://127.0.0.1:8787 unless overridden.
- * In production (NODE_ENV === "production"): defaults to https://api.apparatia.net/api/v1.
+ * In production (NODE_ENV === "production"): defaults to https://api.hikat.org.
  */
 function getEffectiveApiBaseUrl() {
   const envUrl =
@@ -49,8 +49,8 @@ function getEffectiveApiBaseUrl() {
 
 /**
  * Security: Validates and restricts download URLs to authorized origins only.
- * - In production: HTTPS only, localhost strictly blocked, only apparatia.net domains allowed.
- * - In dev/test: localhost (HTTP/HTTPS) allowed, external domains must be HTTPS and apparatia.net.
+ * - In production: HTTPS only, localhost strictly blocked, only api.hikat.org allowed.
+ * - In dev/test: localhost (HTTP/HTTPS) allowed, external domains must be HTTPS and api.hikat.org.
  */
 function validateUrlSecurity(parsedUrl) {
   const isProduction = process.env.NODE_ENV === "production"
@@ -71,14 +71,9 @@ function validateUrlSecurity(parsedUrl) {
       )
     }
     const allowedHosts = [
-      "api.apparatia.net",
-      "apparatia.net",
-      "assets.apparatia.net",
-      "cdn.apparatia.net",
-      "backend.apparatia.net",
+      "api.hikat.org",
     ]
-    const isAllowed =
-      allowedHosts.includes(hostname) || hostname.endsWith(".apparatia.net")
+    const isAllowed = allowedHosts.includes(hostname)
     if (!isAllowed) {
       throw new Error(`Unauthorized external download host blocked: "${hostname}"`)
     }
@@ -98,14 +93,9 @@ function validateUrlSecurity(parsedUrl) {
   }
 
   const allowedHosts = [
-    "api.apparatia.net",
-    "apparatia.net",
-    "assets.apparatia.net",
-    "cdn.apparatia.net",
-    "backend.apparatia.net",
+    "api.hikat.org",
   ]
-  const isAllowed =
-    allowedHosts.includes(hostname) || hostname.endsWith(".apparatia.net")
+  const isAllowed = allowedHosts.includes(hostname)
   if (!isAllowed) {
     throw new Error(`Unauthorized external download host blocked: "${hostname}"`)
   }

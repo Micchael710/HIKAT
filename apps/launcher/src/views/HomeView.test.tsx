@@ -217,35 +217,49 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
       .mockResolvedValueOnce(initialModpack)
       .mockResolvedValueOnce(updatedModpack)
 
-    await act(async () => {
-      root?.render(
-        <LanguageProvider>
-          <HomeView theme="dark" selectedServer={mockServer} />
-        </LanguageProvider>,
-      )
-    })
+    let currentEvent: ReleaseActivatedEvent | null = null
 
+    const renderWithEvent = async (event: ReleaseActivatedEvent | null) => {
+      currentEvent = event
+      await act(async () => {
+        root?.render(
+          <LanguageProvider>
+            <HomeView theme="dark" selectedServer={mockServer} lastReleaseEvent={currentEvent} />
+          </LanguageProvider>,
+        )
+      })
+    }
+
+    await renderWithEvent(null)
+
+    // HomeView itself must NOT create a subscription anymore
+    expect(gameService.subscribeReleaseEvents).not.toHaveBeenCalled()
     expect(container?.textContent).toContain("Initial v1.0 Notes")
 
     // Event for another server -> ignored
-    await act(async () => {
-      releaseSubscriber?.({
-        type: "RELEASE_ACTIVATED",
-        serverId: "other-server-id",
-        version: "3.0.0",
-        minecraftVersion: "1.21.1",
-      })
+    await renderWithEvent({
+      type: "RELEASE_ACTIVATED",
+      serverId: "other-server-id",
+      version: "3.0.0",
+      minecraftVersion: "1.21.1",
+    })
+    expect(getPublishedSpy).toHaveBeenCalledTimes(1)
+
+    // Event without serverId -> ignored
+    await renderWithEvent({
+      type: "RELEASE_ACTIVATED",
+      serverId: undefined as any,
+      version: "3.0.0",
+      minecraftVersion: "1.21.1",
     })
     expect(getPublishedSpy).toHaveBeenCalledTimes(1)
 
     // Event for this server -> refreshed
-    await act(async () => {
-      releaseSubscriber?.({
-        type: "RELEASE_ACTIVATED",
-        serverId: "test-server-id",
-        version: "2.0.0",
-        minecraftVersion: "1.21.1",
-      })
+    await renderWithEvent({
+      type: "RELEASE_ACTIVATED",
+      serverId: "test-server-id",
+      version: "2.0.0",
+      minecraftVersion: "1.21.1",
     })
 
     expect(getPublishedSpy).toHaveBeenCalledTimes(2)

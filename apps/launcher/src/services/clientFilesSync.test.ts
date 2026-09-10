@@ -895,12 +895,11 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
   // 5. Security: URL Validation & Environment Modes
   // ─────────────────────────────────────────────────────────────
   describe("Security: URL Environment Modes & Boundaries", () => {
-    it("17. Production mode: HTTPS apparatia.net allowed, localhost strictly blocked", () => {
+    it("17. Production mode: HTTPS api.hikat.org allowed, localhost strictly blocked", () => {
       const origEnv = process.env.NODE_ENV
       process.env.NODE_ENV = "production"
       try {
-        expect(validateUrlSecurity(new URL("https://api.apparatia.net/game/download/1"))).toBe(true)
-        expect(validateUrlSecurity(new URL("https://cdn.apparatia.net/files/mod.jar"))).toBe(true)
+        expect(validateUrlSecurity(new URL("https://api.hikat.org/game/download/1"))).toBe(true)
 
         // Localhost blocked in production
         expect(() => validateUrlSecurity(new URL("http://localhost:3000/mod.jar"))).toThrow(
@@ -911,12 +910,12 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         )
 
         // Non-HTTPS blocked in production
-        expect(() => validateUrlSecurity(new URL("http://api.apparatia.net/mod.jar"))).toThrow(
+        expect(() => validateUrlSecurity(new URL("http://api.hikat.org/mod.jar"))).toThrow(
           /strictly forbidden in production/i,
         )
 
         // Foreign domains blocked in production
-        expect(() => validateUrlSecurity(new URL("https://evil.com/mod.jar"))).toThrow(
+        expect(() => validateUrlSecurity(new URL("https://evil.example.com/mod.jar"))).toThrow(
           /Unauthorized external download host/i,
         )
       } finally {
@@ -930,6 +929,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       try {
         expect(validateUrlSecurity(new URL("http://localhost:8787/game/download/1"))).toBe(true)
         expect(validateUrlSecurity(new URL("http://127.0.0.1:8787/game/download/1"))).toBe(true)
+        expect(validateUrlSecurity(new URL("https://api.hikat.org/game/download/1"))).toBe(true)
 
         // Foreign domains still blocked in dev
         expect(() => validateUrlSecurity(new URL("https://unauthorized.org/mod.jar"))).toThrow(
@@ -967,7 +967,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         expect(getEffectiveApiBaseUrl()).toBe("http://127.0.0.1:8787")
 
         process.env.NODE_ENV = "production"
-        expect(getEffectiveApiBaseUrl()).toBe("https://api.apparatia.net/api/v1")
+        expect(getEffectiveApiBaseUrl()).toBe("https://api.hikat.org")
 
         // Override takes precedence
         process.env.HIKAT_API_URL = "http://localhost:9999"
