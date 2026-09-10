@@ -1929,6 +1929,13 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     }
     autoPausedDownloadGameId = null
     const res = await operationManager.resumeSync()
+    if (operationManager.getState() === "IDLE") {
+      if (activeOperationGameId === ctx.gameId) {
+        activeOperationGameId = null
+        activeOperationSnapshot = null
+      }
+      processNextQueuedSync()
+    }
     notifyDownloadQueueChanged()
     return res
   }
@@ -1942,13 +1949,16 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     return await runGameSync(ctx, payload)
   }
 
-  if (operationManager.getState() === "IDLE") {
+  if (
+    operationManager.getState() === "IDLE" ||
+    (activeOperationGameId === ctx.gameId && operationManager.getState() === "PAUSED")
+  ) {
+    autoPausedDownloadGameId = null
     return await runGameSync(ctx, payload)
   }
 
   if (activeOperationGameId === ctx.gameId) {
     return {
-      success: true,
       alreadyActive: true,
     }
   }

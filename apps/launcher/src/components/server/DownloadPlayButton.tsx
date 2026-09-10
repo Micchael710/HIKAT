@@ -255,6 +255,9 @@ export default function DownloadPlayButton({
           setStatus("paused")
           return
         }
+        if (res?.alreadyActive) {
+          return
+        }
         if (res?.success) {
           isIntegrityBlockedRef.current = false
           gameService.setGameInstalled(true, gameContext?.gameId)
@@ -1061,6 +1064,9 @@ export default function DownloadPlayButton({
           }
           if (res?.paused) {
             setStatus("paused")
+            return
+          }
+          if (res?.alreadyActive) {
             return
           }
           if (res?.success) {

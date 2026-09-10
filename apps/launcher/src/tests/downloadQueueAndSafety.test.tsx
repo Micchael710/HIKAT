@@ -911,4 +911,63 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
     expect(container.textContent).toContain("DOWNLOADING")
     expect(container.textContent).toContain("10%")
   })
+
+  // 12. HOMESCREEN: Reanudar desde PAUSADO no salta a JUGAR si la respuesta es alreadyActive o está en progreso
+  it("12. HOMESCREEN: Reanudar desde PAUSADO no salta a JUGAR prematuramente", async () => {
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      installed: false,
+      hasExistingInstall: false,
+      installedModpackVersion: null,
+      clientFiles: [{ path: "mods/sample.jar", sha256: "hash", sizeBytes: 1000 }],
+    } as any)
+
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({
+      alreadyActive: true,
+    } as any)
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue({
+      active: {
+        gameId: "server-a",
+        phase: "DOWNLOADING",
+        progress: 45,
+        speedMBs: 0,
+        downloadedBytes: 450,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        isPaused: true,
+      },
+      queued: [],
+    })
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            theme="dark"
+            gameContext={{ gameId: "server-a", gameName: "Warria" }}
+            serverId="server-a"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    expect(container.textContent).toContain("PAUSADO")
+
+    // Click the progress card to resume
+    const card = container.querySelector(".dl-progress-card")
+    await act(async () => {
+      card?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(startSyncSpy).toHaveBeenCalled()
+    // Must NOT jump to JUGAR / PLAY!
+    expect(container.textContent).not.toContain("JUGAR")
+    expect(container.textContent).not.toContain("PLAY")
+  })
 })
+
