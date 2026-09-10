@@ -1,4 +1,4 @@
-import { eq, and, desc } from "drizzle-orm"
+import { eq, and, desc, isNull } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
 import { validateGameFileBuffer } from "@hikat/shared"
@@ -152,7 +152,10 @@ export async function getServerReleaseSyncPlan(
     const matchedCurrent = currentRecords.find(
       (c) =>
         c.gameReleaseFileId === desired.id ||
-        (c.provider === desired.sourceProvider && c.projectId === desired.sourceProjectId) ||
+        (Boolean(c.projectId) &&
+          Boolean(desired.sourceProjectId) &&
+          c.projectId === desired.sourceProjectId &&
+          (c.provider || null) === (desired.sourceProvider || null)) ||
         c.targetPath === `mods/${desired.name}`,
     )
 
@@ -426,6 +429,22 @@ export async function applyServerReleaseSync(
       .all()
     const currentRecords = allManagedRecords.filter((m) => m.managementSource === "GAME_RELEASE")
 
+    const targetServerId = serverId || published.serverId || null
+
+    // Defensive repair: locate orphan GAME_RELEASE records created with server_id NULL for this exact release
+    const orphanConditions = [
+      isNull(schema.serverManagedContent.serverId),
+      eq(schema.serverManagedContent.managementSource, "GAME_RELEASE"),
+      eq(schema.serverManagedContent.gameReleaseId, published.id),
+    ]
+    const orphanedRecords = targetServerId
+      ? await db
+          .select()
+          .from(schema.serverManagedContent)
+          .where(and(...orphanConditions))
+          .all()
+      : []
+
     // 4. Pre-sync backup with strict timeout and failure abort semantics
     if (createBackup) {
       heartbeat.assertLeaseOwned()
@@ -507,9 +526,9 @@ export async function applyServerReleaseSync(
 
     for (const desired of desiredFiles) {
       if (physicalMods.has(desired.name)) {
-        const recordAtTargetPath = allManagedRecords.find(
-          (m) => m.targetPath === `mods/${desired.name}`,
-        )
+        const recordAtTargetPath =
+          allManagedRecords.find((m) => m.targetPath === `mods/${desired.name}`) ||
+          orphanedRecords.find((m) => m.targetPath === `mods/${desired.name}`)
 
         if (recordAtTargetPath) {
           if (recordAtTargetPath.managementSource === "SERVER_DIRECT") {
@@ -620,13 +639,17 @@ export async function applyServerReleaseSync(
     let keptCount = 0
 
     const matchedCurrentIds = new Set<string>()
+    const claimedOrphanIds = new Set<string>()
 
     for (const desired of desiredFiles) {
       heartbeat.assertLeaseOwned()
       const matchedCurrent = currentRecords.find(
         (c) =>
           c.gameReleaseFileId === desired.id ||
-          (c.provider === desired.sourceProvider && c.projectId === desired.sourceProjectId) ||
+          (Boolean(c.projectId) &&
+            Boolean(desired.sourceProjectId) &&
+            c.projectId === desired.sourceProjectId &&
+            (c.provider || null) === (desired.sourceProvider || null)) ||
           c.targetPath === `mods/${desired.name}`,
       )
 
@@ -674,6 +697,7 @@ export async function applyServerReleaseSync(
           await db
             .update(schema.serverManagedContent)
             .set({
+              serverId: targetServerId || matchedCurrent.serverId || null,
               managementSource: "GAME_RELEASE",
               provider: desired.sourceProvider,
               projectId: desired.sourceProjectId,
@@ -691,24 +715,58 @@ export async function applyServerReleaseSync(
             .where(eq(schema.serverManagedContent.id, matchedCurrent.id))
           updatedCount++
         } else {
-          await db.insert(schema.serverManagedContent).values({
-            id: crypto.randomUUID(),
-            managementSource: "GAME_RELEASE",
-            provider: desired.sourceProvider,
-            projectId: desired.sourceProjectId,
-            versionId: desired.sourceVersionId,
-            fileId: desired.sourceFileId || null,
-            contentType: "MOD",
-            environment: "BOTH",
-            targetPath: `mods/${desired.name}`,
-            sha256: desired.sha256,
-            sizeBytes: desired.sizeBytes,
-            gameReleaseId: published.id,
-            gameReleaseFileId: desired.id,
-            createdAt: now,
-            updatedAt: now,
-          })
-          installedCount++
+          // Self-heal: If an orphan GAME_RELEASE record with server_id NULL exists for this exact release, reuse and update it
+          const orphanToRepair = targetServerId
+            ? orphanedRecords.find(
+                (o) =>
+                  !claimedOrphanIds.has(o.id) &&
+                  (o.gameReleaseFileId === desired.id || o.targetPath === `mods/${desired.name}`),
+              )
+            : null
+
+          if (orphanToRepair) {
+            claimedOrphanIds.add(orphanToRepair.id)
+            await db
+              .update(schema.serverManagedContent)
+              .set({
+                serverId: targetServerId,
+                managementSource: "GAME_RELEASE",
+                provider: desired.sourceProvider,
+                projectId: desired.sourceProjectId,
+                versionId: desired.sourceVersionId,
+                fileId: desired.sourceFileId || null,
+                contentType: "MOD",
+                environment: "BOTH",
+                targetPath: `mods/${desired.name}`,
+                sha256: desired.sha256,
+                sizeBytes: desired.sizeBytes,
+                gameReleaseId: published.id,
+                gameReleaseFileId: desired.id,
+                updatedAt: now,
+              })
+              .where(eq(schema.serverManagedContent.id, orphanToRepair.id))
+            installedCount++
+          } else {
+            await db.insert(schema.serverManagedContent).values({
+              id: crypto.randomUUID(),
+              serverId: targetServerId,
+              managementSource: "GAME_RELEASE",
+              provider: desired.sourceProvider,
+              projectId: desired.sourceProjectId,
+              versionId: desired.sourceVersionId,
+              fileId: desired.sourceFileId || null,
+              contentType: "MOD",
+              environment: "BOTH",
+              targetPath: `mods/${desired.name}`,
+              sha256: desired.sha256,
+              sizeBytes: desired.sizeBytes,
+              gameReleaseId: published.id,
+              gameReleaseFileId: desired.id,
+              createdAt: now,
+              updatedAt: now,
+            })
+            installedCount++
+          }
         }
       } catch (d1Err: any) {
         // Attempt compensation for new install
@@ -746,14 +804,14 @@ export async function applyServerReleaseSync(
       toKeep: keptCount,
     }
 
-    const activateQuery = serverId
+    const activateQuery = targetServerId
       ? db
           .update(schema.servers)
           .set({
             launcherActiveReleaseId: published.id,
             updatedAt: nowEnd,
           })
-          .where(eq(schema.servers.id, serverId))
+          .where(eq(schema.servers.id, targetServerId))
       : db
           .update(schema.projectSettings)
           .set({
@@ -776,7 +834,7 @@ export async function applyServerReleaseSync(
     ])
 
     await broadcastReleaseActivated(env, {
-      serverId: serverId || published.serverId || null,
+      serverId: targetServerId,
       version: published.version,
       minecraftVersion: published.minecraftVersion,
       modLoader: published.modLoader || "NEOFORGE",
