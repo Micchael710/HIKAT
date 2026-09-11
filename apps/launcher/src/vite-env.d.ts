@@ -181,6 +181,7 @@ interface ElectronAPI {
   pauseSync?: (gameContext?: GameContext) => Promise<boolean>
   cancelSync?: (gameContext?: GameContext) => Promise<{ success: boolean; queuedRemoved?: boolean } | boolean>
   uninstallGame?: (gameContext?: GameContext) => Promise<{ success: boolean }>
+  getInstalledState?: (gameContext?: GameContext) => Promise<{ installedModpackVersion: string | null }>
   launchGame?: (options: {
     playerName?: string
     ramGB?: number

@@ -33,6 +33,13 @@ import {
 import { authService } from "../services/authService"
 import { serverService, LauncherServer } from "../services/serverService"
 import { gameService, ReleaseActivatedEvent } from "../services/gameService"
+import type { PublishedModpack } from "../vite-env"
+
+export type LauncherGameState = {
+  publishedModpack: PublishedModpack | null
+  installedVersion: string | null
+  integrityDirty: boolean
+}
 
 export function useLauncherState() {
   const [screen, setScreen] = useState<LauncherScreen>("login")
@@ -67,6 +74,7 @@ export function useLauncherState() {
 
   /* Multi-Server Catalog State */
   const [servers, setServers] = useState<LauncherServer[]>([])
+  const [gameStates, setGameStates] = useState<Record<string, LauncherGameState>>({})
 
   const [selectedGameId, setSelectedGameIdState] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
@@ -90,8 +98,42 @@ export function useLauncherState() {
   const loadServers = useCallback(async () => {
     try {
       const list = await serverService.getLauncherServers()
-      setServers(list)
       if (list.length > 0) {
+        // Parallel lightweight query for all servers (no checkSyncPlan)
+        const entries = await Promise.all(
+          list.map(async (server) => {
+            const [published, installedState] = await Promise.all([
+              gameService.getPublishedModpack(server.id).catch(() => null),
+              window.electronAPI?.getInstalledState
+                ? window.electronAPI.getInstalledState({ gameId: server.id, gameName: server.name }).catch(() => null)
+                : Promise.resolve(null),
+            ])
+            const installedVersion = installedState?.installedModpackVersion ?? null
+            return [
+              server.id,
+              {
+                publishedModpack: published,
+                installedVersion,
+                integrityDirty: false,
+              },
+            ] as const
+          })
+        )
+
+        setGameStates((prev) => {
+          const next = { ...prev }
+          for (const [id, state] of entries) {
+            next[id] = {
+              publishedModpack: state.publishedModpack,
+              installedVersion: state.installedVersion,
+              integrityDirty: prev[id]?.integrityDirty ?? false,
+            }
+          }
+          return next
+        })
+
+        setServers(list)
+
         setSelectedGameIdState((current) => {
           if (current && list.some((s) => s.id === current)) {
             return current
@@ -103,6 +145,7 @@ export function useLauncherState() {
           return fallbackId
         })
       } else {
+        setServers([])
         setSelectedGameIdState(null)
         try {
           localStorage.removeItem("hikat_selected_game_id")
@@ -120,6 +163,11 @@ export function useLauncherState() {
     loadServers()
   }, [loadServers])
 
+  const serversRef = useRef(servers)
+  useEffect(() => {
+    serversRef.current = servers
+  }, [servers])
+
   useEffect(() => {
     if (screen === "login") {
       return
@@ -128,7 +176,29 @@ export function useLauncherState() {
     const unsubscribe = gameService.subscribeReleaseEvents((event) => {
       if (event.type === "RELEASE_ACTIVATED") {
         setLastReleaseEvent(event)
-        void loadServers()
+        if (event.serverId) {
+          const isKnown = serversRef.current.some((s) => s.id === event.serverId)
+          if (!isKnown) {
+            void loadServers()
+            return
+          }
+
+          void gameService.getPublishedModpack(event.serverId).then((published) => {
+            setGameStates((prev) => {
+              const current = prev[event.serverId!]
+              return {
+                ...prev,
+                [event.serverId!]: {
+                  publishedModpack: published,
+                  installedVersion: current?.installedVersion ?? null,
+                  integrityDirty: current?.integrityDirty ?? false,
+                },
+              }
+            })
+          }).catch(() => {})
+        } else {
+          void loadServers()
+        }
         return
       }
 
@@ -139,6 +209,76 @@ export function useLauncherState() {
 
     return unsubscribe
   }, [screen, loadServers])
+
+  // Global listener for file integrity changes across any server
+  useEffect(() => {
+    const unsub = window.electronAPI?.onGameFileIntegrityChanged?.((data: any) => {
+      const gId = data?.gameId
+      if (gId) {
+        setGameStates((prev) => {
+          const current = prev[gId]
+          if (!current) {
+            return {
+              ...prev,
+              [gId]: {
+                publishedModpack: null,
+                installedVersion: null,
+                integrityDirty: true,
+              },
+            }
+          }
+          return {
+            ...prev,
+            [gId]: {
+              ...current,
+              integrityDirty: true,
+            },
+          }
+        })
+      }
+    })
+    return () => unsub?.()
+  }, [])
+
+  const updateInstalledVersion = useCallback((gameId: string, version: string | null) => {
+    setGameStates((prev) => {
+      const current = prev[gameId]
+      if (!current) return prev
+      return {
+        ...prev,
+        [gameId]: {
+          ...current,
+          installedVersion: version,
+          integrityDirty: false,
+        },
+      }
+    })
+  }, [])
+
+  const clearIntegrityDirty = useCallback((gameId: string) => {
+    setGameStates((prev) => {
+      const current = prev[gameId]
+      if (!current) return prev
+      return {
+        ...prev,
+        [gameId]: {
+          ...current,
+          integrityDirty: false,
+        },
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    const handleActionStatus = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail
+      if (detail?.action === "uninstall" && detail?.state === "finished" && detail?.success && detail?.gameId) {
+        updateInstalledVersion(detail.gameId, null)
+      }
+    }
+    window.addEventListener("hikat:game-action-status", handleActionStatus)
+    return () => window.removeEventListener("hikat:game-action-status", handleActionStatus)
+  }, [updateInstalledVersion])
 
   // Computed selected server
   const selectedServer = useMemo(() => {
@@ -690,5 +830,8 @@ export function useLauncherState() {
     selectedServer,
     refreshServers: loadServers,
     lastReleaseEvent,
+    gameStates,
+    updateInstalledVersion,
+    clearIntegrityDirty,
   }
 }

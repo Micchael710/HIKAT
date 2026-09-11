@@ -2485,6 +2485,20 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   }
 })
 
+ipcMain.handle("game-get-installed-state", async (_event, payload = {}) => {
+  try {
+    const ctx = resolveGameContext(payload)
+    const manifest = await loadInstalledManifest(ctx.instanceRoot)
+    return {
+      installedModpackVersion: manifest.modpackVersion || null,
+    }
+  } catch (_) {
+    return {
+      installedModpackVersion: null,
+    }
+  }
+})
+
 ipcMain.handle("game-uninstall", async (_event, payload = {}) => {
   const ctx = resolveGameContext(payload)
   return await operationManager.uninstallGame(ctx.instanceRoot, appDataRoot)

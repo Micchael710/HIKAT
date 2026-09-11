@@ -11,6 +11,7 @@ import { resolveApiAssetUrl } from "../config/api"
 import { useServerAccent } from "../utils/dynamicAccent"
 import type { PublishedModpack } from "../vite-env"
 import type { LauncherServer } from "../services/serverService"
+import type { LauncherGameState } from "../hooks/useLauncherState"
 
 interface HomeViewProps {
   theme?: ThemeMode
@@ -20,6 +21,9 @@ interface HomeViewProps {
   selectedGameId?: string | null
   servers?: LauncherServer[]
   lastReleaseEvent?: ReleaseActivatedEvent | null
+  serverGameState?: LauncherGameState
+  onInstalledVersionChange?: (version: string | null) => void
+  onClearIntegrityDirty?: () => void
 }
 
 export default function HomeView({
@@ -29,6 +33,9 @@ export default function HomeView({
   selectedServer,
   servers: _servers,
   lastReleaseEvent,
+  serverGameState,
+  onInstalledVersionChange,
+  onClearIntegrityDirty,
 }: HomeViewProps) {
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
@@ -53,14 +60,15 @@ export default function HomeView({
   const logoUrlForAccent = mainLogoUrl || sidebarLogoUrl || null
   const resolvedAccent = useServerAccent(selectedServer?.accentColor, logoUrlForAccent, "#3ec4c0")
 
-  const [publishedModpack, setPublishedModpack] = useState<PublishedModpack | null>(null)
+  const [localPublishedModpack, setLocalPublishedModpack] = useState<PublishedModpack | null>(null)
+  const publishedModpack = serverGameState !== undefined ? serverGameState.publishedModpack : localPublishedModpack
   const [mediaError, setMediaError] = useState(false)
   const [mainLogoFailed, setMainLogoFailed] = useState(false)
   const [sidebarLogoFailed, setSidebarLogoFailed] = useState(false)
 
   // Immediately clear previous server visual state when selectedServer changes
   useEffect(() => {
-    setPublishedModpack(null)
+    setLocalPublishedModpack(null)
     setMainLogoFailed(false)
     setSidebarLogoFailed(false)
     setMediaError(false)
@@ -76,24 +84,26 @@ export default function HomeView({
   ])
 
   const loadPublished = useCallback(async () => {
+    if (serverGameState !== undefined) return
     if (!activeServerId) {
-      setPublishedModpack(null)
+      setLocalPublishedModpack(null)
       return
     }
     try {
       const data = await gameService.getPublishedModpack(activeServerId)
-      setPublishedModpack(data)
+      setLocalPublishedModpack(data)
       setMediaError(false)
     } catch {
       // Leave publishedModpack null
     }
-  }, [activeServerId])
+  }, [activeServerId, serverGameState])
 
   useEffect(() => {
     loadPublished()
   }, [loadPublished])
 
   useEffect(() => {
+    if (serverGameState !== undefined) return
     if (!lastReleaseEvent || lastReleaseEvent.type !== "RELEASE_ACTIVATED") {
       return
     }
@@ -103,7 +113,7 @@ export default function HomeView({
     if (lastReleaseEvent.serverId === activeServerId) {
       loadPublished()
     }
-  }, [lastReleaseEvent, activeServerId, loadPublished])
+  }, [lastReleaseEvent, activeServerId, loadPublished, serverGameState])
 
   const cover = publishedModpack?.cover
   const coverUrl = cover?.url ? resolveApiAssetUrl(cover.url) : ""
@@ -260,6 +270,11 @@ export default function HomeView({
         gameId={activeServerId}
         gameContext={gameContext}
         accent={resolvedAccent}
+        publishedModpack={serverGameState !== undefined ? serverGameState.publishedModpack : localPublishedModpack}
+        installedVersion={serverGameState?.installedVersion}
+        integrityDirty={serverGameState?.integrityDirty}
+        onInstalledVersionChange={onInstalledVersionChange}
+        onClearIntegrityDirty={onClearIntegrityDirty}
       />
 
       {/* Description */}

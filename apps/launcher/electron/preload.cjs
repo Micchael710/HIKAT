@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   pauseSync: (gameContext) => ipcRenderer.invoke("game-pause-sync", gameContext),
   cancelSync: (gameContext) => ipcRenderer.invoke("game-cancel-sync", gameContext),
   uninstallGame: (gameContext) => ipcRenderer.invoke("game-uninstall", gameContext),
+  getInstalledState: (gameContext) => ipcRenderer.invoke("game-get-installed-state", gameContext),
   launchGame: (options) => ipcRenderer.invoke("game-launch", options),
   getLaunchStatus: (gameContext) => ipcRenderer.invoke("game-get-status", gameContext),
   getGameRuntimeInfo: (gameContext) => ipcRenderer.invoke("game-get-runtime-info", gameContext),

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from "react"
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import type { PublishedModpack } from "../../vite-env"
 import { ThemeMode } from "../../types"
 import {
   IconDownload,
@@ -35,6 +36,51 @@ interface DownloadPlayButtonProps {
   } | null
   accent?: AccentColor
   allowLegacyLocalOperations?: boolean
+  publishedModpack?: PublishedModpack | null
+  installedVersion?: string | null
+  integrityDirty?: boolean
+  onInstalledVersionChange?: (version: string | null) => void
+  onClearIntegrityDirty?: () => void
+}
+
+export function buildManifestFromPublished(
+  published: PublishedModpack | null | undefined,
+  installedVersion: string | null | undefined,
+  integrityDirty?: boolean,
+): GameManifest | null {
+  if (!published || !published.version) return null
+  const clientFiles = published.clientFiles || []
+  const totalBytes = manifestTotalBytes(clientFiles)
+  const totalSizeGB = Number((totalBytes / (1024 * 1024 * 1024)).toFixed(2))
+  const isInstalled = Boolean(installedVersion)
+  const hasUpdate = Boolean(isInstalled && installedVersion !== published.version)
+
+  return {
+    version: published.version,
+    minecraftVersion: published.minecraftVersion || "",
+    modLoader: (published.modLoader as any) || "NEOFORGE",
+    modLoaderVersion: published.modLoaderVersion || null,
+    neoForgeVersion: published.neoForgeVersion || null,
+    totalSizeGB,
+    hasUpdate,
+    hasIntegrityIssue: Boolean(integrityDirty),
+    installedModpackVersion: installedVersion || null,
+    clientFiles,
+    directoryPolicies: (published.directoryPolicies && published.directoryPolicies.length > 0) ? published.directoryPolicies : undefined,
+    installed: isInstalled && !hasUpdate,
+    hasExistingInstall: isInstalled,
+    totalDownloadBytes: isInstalled ? 0 : totalBytes,
+  }
+}
+
+export function deriveBaseGameButtonState(
+  published: PublishedModpack | null | undefined,
+  installedVersion: string | null | undefined,
+): GameButtonState {
+  if (!published || !published.version) return "unavailable"
+  if (!installedVersion) return "download"
+  if (installedVersion !== published.version) return "update"
+  return "play"
 }
 
 export function resolveIdleGameButtonState(
@@ -90,6 +136,11 @@ export default function DownloadPlayButton({
   gameContext,
   accent,
   allowLegacyLocalOperations,
+  publishedModpack,
+  installedVersion,
+  integrityDirty,
+  onInstalledVersionChange,
+  onClearIntegrityDirty,
 }: DownloadPlayButtonProps) {
   const { t } = useTranslation()
   const activeServerId = gameContext?.gameId || serverId || gameId || undefined
@@ -97,8 +148,14 @@ export default function DownloadPlayButton({
   const isLocalAllowed = gameContext !== undefined
     ? Boolean(gameContext?.gameId)
     : (allowLegacyLocalOperations ?? (!activeServerId))
-  const [status, setStatusState] = useState<GameButtonState>("checking")
-  const statusRef = useRef<GameButtonState>("checking")
+
+  const hasProvidedState = publishedModpack !== undefined
+  const initialBaseStatus: GameButtonState = hasProvidedState
+    ? deriveBaseGameButtonState(publishedModpack, installedVersion)
+    : "checking"
+
+  const [status, setStatusState] = useState<GameButtonState>(initialBaseStatus)
+  const statusRef = useRef<GameButtonState>(initialBaseStatus)
 
   const accentHex = accent?.hex || "#efc436"
   const accentCss = accent?.css || "239, 196, 54"
@@ -122,8 +179,12 @@ export default function DownloadPlayButton({
     statusRef.current = status
   }, [status])
 
-  const [manifest, setManifest] = useState<GameManifest | null>(null)
-  const manifestRef = useRef<GameManifest | null>(null)
+  const initialManifest = useMemo(
+    () => (hasProvidedState ? buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty) : null),
+    [],
+  )
+  const [manifest, setManifest] = useState<GameManifest | null>(initialManifest)
+  const manifestRef = useRef<GameManifest | null>(initialManifest)
   manifestRef.current = manifest
 
   const [progress, setProgress] = useState(0)
@@ -152,11 +213,36 @@ export default function DownloadPlayButton({
   const syncOpIdRef = useRef(0)
   const isCancellingRef = useRef(false)
   const latestManifestVersionRef = useRef<string | null>(null)
-  const isIntegrityBlockedRef = useRef(false)
+  const isIntegrityBlockedRef = useRef<boolean>(Boolean(integrityDirty))
   const pendingAutoUpdateRef = useRef(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [isLaunchBlockedByOtherGame, setIsLaunchBlockedByOtherGame] = useState(false)
   const isDark = theme === "dark"
+
+  useEffect(() => {
+    if (integrityDirty !== undefined) {
+      isIntegrityBlockedRef.current = integrityDirty
+    }
+  }, [integrityDirty])
+
+  useEffect(() => {
+    if (publishedModpack === undefined) return
+    const updated = buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
+    setManifest(updated)
+    const baseState = deriveBaseGameButtonState(publishedModpack, installedVersion)
+    setStatus((prev) => {
+      if (
+        prev === "download" ||
+        prev === "update" ||
+        prev === "play" ||
+        prev === "unavailable" ||
+        prev === "checking"
+      ) {
+        return baseState
+      }
+      return prev
+    })
+  }, [publishedModpack, installedVersion, integrityDirty])
 
   useEffect(() => {
     latestManifestVersionRef.current = manifest?.version ?? null
@@ -266,6 +352,8 @@ export default function DownloadPlayButton({
         }
         if (res?.success) {
           isIntegrityBlockedRef.current = false
+          onClearIntegrityDirty?.()
+          onInstalledVersionChange?.(syncingVersion)
           gameService.setGameInstalled(true, gameContext?.gameId)
           markSyncedVersionInstalled(syncingVersion)
 
@@ -347,6 +435,134 @@ export default function DownloadPlayButton({
       setStatus("unavailable")
       return
     }
+
+    if (hasProvidedState) {
+      let isMounted = true
+      const baseManifest = buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
+      setManifest(baseManifest)
+      const baseState = deriveBaseGameButtonState(publishedModpack, installedVersion)
+      setStatus(baseState)
+      if (baseManifest) {
+        const total = baseManifest.totalDownloadBytes || manifestTotalBytes(baseManifest.clientFiles)
+        setTotalBytes(total)
+      }
+
+      Promise.all([
+        Promise.resolve()
+          .then(() => window.electronAPI?.getLaunchStatus?.(effectiveGameContext))
+          .catch(() => null),
+        Promise.resolve()
+          .then(() => window.electronAPI?.getDownloadQueue?.())
+          .catch(() => null),
+      ]).then(([launchInfo, queueSnap]) => {
+        if (!isMounted) return
+
+        const currentTargetId = gameContext?.gameId || activeServerId
+
+        const otherGameRunning = Boolean(
+          launchInfo?.runningGameId &&
+          currentTargetId &&
+          launchInfo.runningGameId !== currentTargetId
+        )
+        const otherOpVerifying = Boolean(
+          launchInfo?.activeOperationGameId &&
+          currentTargetId &&
+          launchInfo.activeOperationGameId !== currentTargetId &&
+          (launchInfo.activeOperationPhase === "VERIFYING" ||
+            launchInfo.activeOperationState === "VERIFYING")
+        )
+        setIsLaunchBlockedByOtherGame(otherGameRunning || otherOpVerifying)
+
+        if (
+          currentTargetId &&
+          launchInfo?.runningGameId === currentTargetId &&
+          (launchInfo?.status === "running" || launchInfo?.status === "preparing")
+        ) {
+          setStatus(launchInfo.status === "preparing" ? "launching" : "running")
+          return
+        }
+        const isQueueActive = Boolean(
+          currentTargetId &&
+          (queueSnap?.active?.gameId === currentTargetId || launchInfo?.activeOperationGameId === currentTargetId)
+        )
+
+        if (isQueueActive) {
+          const isPaused = Boolean(
+            queueSnap?.active?.state === "PAUSED" ||
+            queueSnap?.active?.isPaused ||
+            queueSnap?.active?.phase === "PAUSED" ||
+            launchInfo?.operationState === "PAUSED"
+          )
+          const opPhase = queueSnap?.active?.phase || launchInfo?.activeOperationPhase || launchInfo?.operationState
+          const isPhaseChange = Boolean(
+            currentPhaseRef.current &&
+            opPhase &&
+            currentPhaseRef.current !== opPhase &&
+            opPhase !== "PAUSED" &&
+            currentPhaseRef.current !== "PAUSED"
+          )
+          if (isPhaseChange) {
+            highWaterProgressRef.current = 0
+          }
+          if (opPhase && opPhase !== "PAUSED") {
+            currentPhaseRef.current = opPhase
+          }
+          if (isPaused) {
+            if (opPhase === "INSTALLING") {
+              pausedPhaseRef.current = "installing"
+            } else {
+              pausedPhaseRef.current = "downloading"
+            }
+            setStatus("paused")
+          } else if (opPhase === "INSTALLING") {
+            pausedPhaseRef.current = "installing"
+            setStatus("installing")
+          } else if (opPhase === "VERIFYING") {
+            setStatus("verifying")
+          } else {
+            pausedPhaseRef.current = "downloading"
+            setStatus("downloading")
+          }
+
+          isStartingSyncRef.current = !isPaused
+
+          const activeSnap = queueSnap?.active || launchInfo?.operationSnapshot
+          if (activeSnap) {
+            if (activeSnap.isCommitting !== undefined) {
+              setIsCommitting(Boolean(activeSnap.isCommitting))
+            }
+            if (activeSnap.canPause !== undefined) {
+              setCanPauseState(Boolean(activeSnap.canPause))
+            }
+            if (activeSnap.canCancel !== undefined) {
+              setCanCancelState(Boolean(activeSnap.canCancel))
+            }
+            if (typeof activeSnap.progress === "number") {
+              setProgress(activeSnap.progress)
+            }
+            if (typeof activeSnap.speedMBs === "number") setSpeed(activeSnap.speedMBs)
+            if (typeof activeSnap.downloadedBytes === "number") setDownloadedBytes(activeSnap.downloadedBytes)
+            if (typeof activeSnap.totalBytes === "number" && activeSnap.totalBytes > 0) setTotalBytes(activeSnap.totalBytes)
+            if (typeof activeSnap.remainingMinutes === "number") setTimeRemainingMin(activeSnap.remainingMinutes)
+          }
+          return
+        }
+
+        const isQueued = Boolean(
+          currentTargetId &&
+          queueSnap?.queued?.some((q: any) => q.gameId === currentTargetId)
+        )
+        if (isQueued) {
+          setStatus("queued")
+          return
+        }
+      })
+
+      return () => {
+        isMounted = false
+      }
+    }
+
     let isMounted = true
     gameService
       .checkGameManifest(activeServerId, {
@@ -556,6 +772,7 @@ export default function DownloadPlayButton({
 
   // Real-time WebSocket subscription for release activation events
   useEffect(() => {
+    if (hasProvidedState) return
     if (!manifest) return
 
     const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
@@ -1266,9 +1483,39 @@ export default function DownloadPlayButton({
       if (isLaunchBlockedByOtherGame) {
         return
       }
-      if (isIntegrityBlockedRef.current) {
-        showToast(t("playButton.launchVerifyHint"), "error")
-        return
+      const isDirty = Boolean(integrityDirty || isIntegrityBlockedRef.current)
+      if (isDirty) {
+        if (window.electronAPI?.checkSyncPlan && manifest?.clientFiles) {
+          try {
+            const planPayload: any = {
+              clientFiles: manifest.clientFiles,
+              directoryPolicies: manifest.directoryPolicies || [],
+              modpackVersion: manifest.version,
+              minecraftVersion: manifest.minecraftVersion,
+              modLoader: manifest.modLoader,
+              modLoaderVersion: manifest.modLoaderVersion ?? undefined,
+              neoForgeVersion: manifest.neoForgeVersion ?? undefined,
+            }
+            if (gameContext) {
+              planPayload.gameId = gameContext.gameId
+              planPayload.gameName = gameContext.gameName
+            }
+            const planCheck = await window.electronAPI.checkSyncPlan(planPayload)
+            if (planCheck?.hasIntegrityIssue || !planCheck?.isFullyInstalled) {
+              isIntegrityBlockedRef.current = true
+              showToast(t("playButton.launchVerifyHint"), "error")
+              return
+            }
+            isIntegrityBlockedRef.current = false
+            onClearIntegrityDirty?.()
+          } catch {
+            showToast(t("playButton.launchVerifyHint"), "error")
+            return
+          }
+        } else {
+          showToast(t("playButton.launchVerifyHint"), "error")
+          return
+        }
       }
 
       let playerName = "Player"
@@ -1372,12 +1619,20 @@ export default function DownloadPlayButton({
 
         if (verified?.installed && !hasUpdate && !verified?.hasIntegrityIssue) {
           isIntegrityBlockedRef.current = false
+          onClearIntegrityDirty?.()
+          if (verified.version) {
+            onInstalledVersionChange?.(verified.version)
+          }
           gameService.setGameInstalled(true, gameContext?.gameId)
           setStatus("play")
           verifySuccess = true
           showToast(t("playButton.verifySuccess"), "success")
         } else if (hasUpdate && verified?.clientFiles && verified.clientFiles.length > 0) {
           isIntegrityBlockedRef.current = false
+          onClearIntegrityDirty?.()
+          if (verified.installedModpackVersion) {
+            onInstalledVersionChange?.(verified.installedModpackVersion)
+          }
           verifySuccess = true
           if (autoUpdatesEnabled) {
             if (syncOpIdRef.current === syncOpId) {
@@ -1424,6 +1679,9 @@ export default function DownloadPlayButton({
     try {
       success = await gameService.uninstallGame(effectiveGameContext)
       if (success) {
+        isIntegrityBlockedRef.current = false
+        onClearIntegrityDirty?.()
+        onInstalledVersionChange?.(null)
         const freshManifest = await gameService.checkGameManifest(activeServerId, {
           allowLegacyLocalFilesystem: isLocalAllowed,
           gameContext: effectiveGameContext,

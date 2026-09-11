@@ -7,9 +7,11 @@ import { createRoot } from "react-dom/client"
 import { LanguageProvider } from "../context/LanguageContext"
 import DownloadPlayButton from "../components/server/DownloadPlayButton"
 import DownloadsView from "../views/DownloadsView"
-import { gameService } from "../services/gameService"
-import type { LauncherServer } from "../services/serverService"
-import type { DownloadQueueSnapshot } from "../vite-env"
+import { gameService, type ReleaseActivatedEvent } from "../services/gameService"
+import { serverService, type LauncherServer } from "../services/serverService"
+import { useLauncherState } from "../hooks/useLauncherState"
+import HomeView from "../views/HomeView"
+import type { DownloadQueueSnapshot, PublishedModpack } from "../vite-env"
 
 const serverA: LauncherServer = {
   id: "server-a",
@@ -1023,3 +1025,430 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     expect(playBtn.disabled).toBe(false)
   })
 })
+
+describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integrity State", () => {
+  let container: HTMLDivElement
+  let root: any
+  let integrityChangeListeners: Function[] = []
+
+  const melioraServer: LauncherServer = {
+    id: "meliora",
+    name: "Meliora",
+    accentColor: "#3b82f6",
+    minecraftVersion: "1.20.1",
+    modLoader: "FORGE",
+    launcherActiveReleaseId: "rel-meliora",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+  }
+
+  const apparatiaServer: LauncherServer = {
+    id: "apparatia",
+    name: "Apparatia",
+    accentColor: "#10b981",
+    minecraftVersion: "1.21.1",
+    modLoader: "NEOFORGE",
+    launcherActiveReleaseId: "rel-apparatia",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+  }
+
+  const melioraModpack: PublishedModpack = {
+    version: "2.0.0",
+    minecraftVersion: "1.20.1",
+    modLoader: "FORGE",
+    notes: "Meliora Notes",
+    clientFiles: [],
+  }
+
+  const apparatiaModpack: PublishedModpack = {
+    version: "1.5.0",
+    minecraftVersion: "1.21.1",
+    modLoader: "NEOFORGE",
+    notes: "Apparatia Notes",
+    clientFiles: [],
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    localStorage.setItem("hikat_language", "es")
+    container = document.createElement("div")
+    document.body.appendChild(container)
+    root = createRoot(container)
+    integrityChangeListeners = []
+
+    ;(window as any).electronAPI = {
+      getInstalledState: vi.fn().mockImplementation(async (ctx: any) => {
+        if (ctx?.gameId === "meliora") {
+          return { installedModpackVersion: "2.0.0" }
+        }
+        if (ctx?.gameId === "apparatia") {
+          return { installedModpackVersion: null }
+        }
+        return { installedModpackVersion: null }
+      }),
+      getLaunchStatus: vi.fn().mockResolvedValue({
+        status: "idle",
+        runningGameId: null,
+        activeOperationGameId: null,
+        activeOperationState: "IDLE",
+        activeOperationPhase: null,
+      }),
+      getDownloadQueue: vi.fn().mockResolvedValue({ active: null, queued: [] }),
+      onLaunchStatus: vi.fn(() => () => {}),
+      onDownloadProgress: vi.fn(() => () => {}),
+      onPhaseChange: vi.fn(() => () => {}),
+      onDownloadQueueChanged: vi.fn(() => () => {}),
+      onGameFileIntegrityChanged: vi.fn((cb) => {
+        integrityChangeListeners.push(cb)
+        return () => {
+          integrityChangeListeners = integrityChangeListeners.filter((l) => l !== cb)
+        }
+      }),
+      checkSyncPlan: vi.fn().mockResolvedValue({
+        success: true,
+        isFullyInstalled: true,
+        hasExistingInstall: true,
+        needsUpdate: false,
+        filesToDownload: [],
+        hasIntegrityErrors: false,
+      }),
+      launchGame: vi.fn().mockResolvedValue({ success: true }),
+    }
+  })
+
+  afterEach(() => {
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it("1. Bootstrap Meliora + Apparatia: consulta published release y version instalada en paralelo SIN checkSyncPlan", async () => {
+    vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([melioraServer, apparatiaServer])
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockImplementation(async (id?: string) => {
+      if (id === "meliora") return melioraModpack
+      if (id === "apparatia") return apparatiaModpack
+      return null
+    })
+
+    let hookState: any = null
+    function Consumer() {
+      hookState = useLauncherState()
+      return null
+    }
+
+    await act(async () => {
+      root.render(<Consumer />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(hookState.servers).toHaveLength(2)
+    expect(getPublishedSpy).toHaveBeenCalledWith("meliora")
+    expect(getPublishedSpy).toHaveBeenCalledWith("apparatia")
+    expect((window as any).electronAPI.getInstalledState).toHaveBeenCalledWith(
+      expect.objectContaining({ gameId: "meliora" })
+    )
+    expect((window as any).electronAPI.getInstalledState).toHaveBeenCalledWith(
+      expect.objectContaining({ gameId: "apparatia" })
+    )
+
+    // NO checkSyncPlan called during lightweight bootstrap
+    expect((window as any).electronAPI.checkSyncPlan).not.toHaveBeenCalled()
+
+    // Meliora: 2.0.0 installed === 2.0.0 published -> play state
+    expect(hookState.gameStates.meliora).toEqual({
+      publishedModpack: melioraModpack,
+      installedVersion: "2.0.0",
+      integrityDirty: false,
+    })
+
+    // Apparatia: null installed, 1.5.0 published -> download state
+    expect(hookState.gameStates.apparatia).toEqual({
+      publishedModpack: apparatiaModpack,
+      installedVersion: null,
+      integrityDirty: false,
+    })
+  })
+
+  it("2. Meliora -> Apparatia -> Meliora: nunca aparece checking ni llama checkGameManifest ni checkSyncPlan", async () => {
+    const checkGameManifestSpy = vi.spyOn(gameService, "checkGameManifest")
+    const melioraState = {
+      publishedModpack: melioraModpack,
+      installedVersion: "2.0.0",
+      integrityDirty: false,
+    }
+    const apparatiaState = {
+      publishedModpack: apparatiaModpack,
+      installedVersion: null,
+      integrityDirty: false,
+    }
+
+    // Mount 1: Meliora
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <HomeView
+            theme="dark"
+            selectedServer={melioraServer}
+            serverGameState={melioraState}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    let button = container.querySelector("button") as HTMLButtonElement
+    expect(button.textContent).toContain("JUGAR")
+    expect(button.textContent).not.toContain("Buscando")
+    expect(checkGameManifestSpy).not.toHaveBeenCalled()
+    expect((window as any).electronAPI.checkSyncPlan).not.toHaveBeenCalled()
+
+    // Navigate to Apparatia
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <HomeView
+            theme="dark"
+            selectedServer={apparatiaServer}
+            serverGameState={apparatiaState}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    button = container.querySelector("button") as HTMLButtonElement
+    expect(button.textContent).toContain("DESCARGAR")
+    expect(button.textContent).not.toContain("Buscando")
+    expect(checkGameManifestSpy).not.toHaveBeenCalled()
+    expect((window as any).electronAPI.checkSyncPlan).not.toHaveBeenCalled()
+
+    // Navigate back to Meliora
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <HomeView
+            theme="dark"
+            selectedServer={melioraServer}
+            serverGameState={melioraState}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    button = container.querySelector("button") as HTMLButtonElement
+    expect(button.textContent).toContain("JUGAR")
+    expect(button.textContent).not.toContain("Buscando")
+    expect(checkGameManifestSpy).not.toHaveBeenCalled()
+    expect((window as any).electronAPI.checkSyncPlan).not.toHaveBeenCalled()
+  })
+
+  it("3. Running / downloading / queued recuperados inmediatamente mediante getLaunchStatus/getDownloadQueue", async () => {
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "running",
+      runningGameId: "meliora",
+      activeOperationGameId: null,
+      activeOperationState: "IDLE",
+      activeOperationPhase: null,
+    })
+
+    const melioraState = {
+      publishedModpack: melioraModpack,
+      installedVersion: "2.0.0",
+      integrityDirty: false,
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            serverId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={melioraState.publishedModpack}
+            installedVersion={melioraState.installedVersion}
+            integrityDirty={melioraState.integrityDirty}
+          />
+        </LanguageProvider>
+      )
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+    })
+
+    const button = container.querySelector("button") as HTMLButtonElement
+    expect(button.textContent).toContain("EN EJECUCIÓN")
+    expect(button.disabled).toBe(true)
+  })
+
+  it("4. RELEASE_ACTIVATED de Meliora: solo consulta Meliora, Apparatia no se consulta", async () => {
+    vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([melioraServer, apparatiaServer])
+    let releaseListener: ((e: ReleaseActivatedEvent) => void) | null = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb) => {
+      releaseListener = cb
+      return () => {
+        releaseListener = null
+      }
+    })
+
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockImplementation(async (id?: string) => {
+      if (id === "meliora") return melioraModpack
+      if (id === "apparatia") return apparatiaModpack
+      return null
+    })
+
+    let hookState: any = null
+    function Consumer() {
+      hookState = useLauncherState()
+      return null
+    }
+
+    await act(async () => {
+      root.render(<Consumer />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(hookState.servers).toHaveLength(2)
+    getPublishedSpy.mockClear()
+
+    // Switch to home screen to activate release listener
+    await act(async () => {
+      hookState.setScreen("home")
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Emit RELEASE_ACTIVATED for Meliora
+    const updatedMelioraModpack: PublishedModpack = {
+      ...melioraModpack,
+      version: "2.1.0",
+    }
+    getPublishedSpy.mockResolvedValueOnce(updatedMelioraModpack)
+
+    await act(async () => {
+      releaseListener?.({
+        type: "RELEASE_ACTIVATED",
+        serverId: "meliora",
+        version: "2.1.0",
+        minecraftVersion: "1.20.1",
+      })
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Only Meliora was queried! Apparatia was NOT queried!
+    expect(getPublishedSpy).toHaveBeenCalledWith("meliora")
+    expect(getPublishedSpy).not.toHaveBeenCalledWith("apparatia")
+    expect(hookState.gameStates.meliora.publishedModpack.version).toBe("2.1.0")
+  })
+
+  it("5 & 6. integrityDirty: watcher marca Meliora dirty mientras Apparatia está visible, y al pulsar JUGAR ejecuta checkSyncPlan", async () => {
+    vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([melioraServer, apparatiaServer])
+    vi.spyOn(gameService, "getPublishedModpack").mockImplementation(async (id?: string) => {
+      if (id === "meliora") return melioraModpack
+      if (id === "apparatia") return apparatiaModpack
+      return null
+    })
+
+    let hookState: any = null
+    function Consumer() {
+      hookState = useLauncherState()
+      return null
+    }
+
+    await act(async () => {
+      root.render(<Consumer />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Both servers loaded; Meliora is not dirty
+    expect(hookState.gameStates.meliora.integrityDirty).toBe(false)
+
+    // Watcher event arrives for Meliora
+    await act(async () => {
+      for (const cb of integrityChangeListeners) {
+        cb({ gameId: "meliora", changeType: "MODIFIED", filePath: "mods/test.jar" })
+      }
+    })
+
+    // Meliora is now integrityDirty
+    expect(hookState.gameStates.meliora.integrityDirty).toBe(true)
+
+    // Render DownloadPlayButton for Meliora with integrityDirty=true
+    let clearDirtyCalled = false
+    const clearDirty = () => {
+      clearDirtyCalled = true
+      hookState.clearIntegrityDirty("meliora")
+    }
+
+    // 6a: If checkSyncPlan fails integrity, launch is blocked
+    ;(window as any).electronAPI.checkSyncPlan = vi.fn().mockResolvedValue({
+      success: true,
+      hasIntegrityErrors: true,
+      filesToDownload: [{ path: "mods/test.jar", reason: "TAMPERED" }],
+    })
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            serverId="meliora"
+            publishedModpack={hookState.gameStates.meliora.publishedModpack}
+            installedVersion={hookState.gameStates.meliora.installedVersion}
+            integrityDirty={hookState.gameStates.meliora.integrityDirty}
+            onClearIntegrityDirty={clearDirty}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    let playBtn = container.querySelector("button") as HTMLButtonElement
+    expect(playBtn.textContent).toContain("JUGAR")
+
+    // Click JUGAR
+    await act(async () => {
+      playBtn.click()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // checkSyncPlan was called to verify integrity
+    expect((window as any).electronAPI.checkSyncPlan).toHaveBeenCalled()
+    // launchGame was NOT called because integrity failed!
+    expect((window as any).electronAPI.launchGame).not.toHaveBeenCalled()
+    expect(clearDirtyCalled).toBe(false)
+
+    // 6b: If checkSyncPlan passes integrity, clears dirty and launches
+    ;(window as any).electronAPI.checkSyncPlan = vi.fn().mockResolvedValue({
+      success: true,
+      hasIntegrityErrors: false,
+      filesToDownload: [],
+      isFullyInstalled: true,
+      needsUpdate: false,
+    })
+
+    await act(async () => {
+      playBtn.click()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(clearDirtyCalled).toBe(true)
+    expect((window as any).electronAPI.launchGame).toHaveBeenCalled()
+  })
+})
+

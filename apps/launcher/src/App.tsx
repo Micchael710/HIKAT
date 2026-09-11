@@ -46,7 +46,12 @@ export default function App() {
     setSelectedGameId,
     selectedServer,
     lastReleaseEvent,
+    gameStates,
+    updateInstalledVersion,
+    clearIntegrityDirty,
   } = useLauncherState()
+
+  const currentServerState = selectedServer ? gameStates[selectedServer.id] : undefined
 
   const serverLogoUrl = selectedServer?.mainLogo?.url || selectedServer?.sidebarLogo?.url || null
   const homeResolvedAccent = useServerAccent(selectedServer?.accentColor, serverLogoUrl, "#3ec4c0")
@@ -224,6 +229,9 @@ export default function App() {
                 selectedGameId={selectedGameId}
                 servers={servers}
                 lastReleaseEvent={lastReleaseEvent}
+                serverGameState={currentServerState}
+                onInstalledVersionChange={(v) => selectedServer && updateInstalledVersion(selectedServer.id, v)}
+                onClearIntegrityDirty={() => selectedServer && clearIntegrityDirty(selectedServer.id)}
               />
             </div>
             {view === "skins" && (

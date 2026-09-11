@@ -75,6 +75,16 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
       },
     ])
 
+    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      id: "rel-1",
+      version: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      publishedAt: new Date().toISOString(),
+      clientFiles: [],
+      totalDownloadBytes: 1000,
+    } as any)
     vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
       version: "1.0.0",
       minecraftVersion: "1.21.1",
@@ -95,7 +105,7 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
     vi.restoreAllMocks()
   })
 
-  it("HomeView remains mounted when navigating Home -> Skins -> Home, and checkGameManifest is called only on initial mount", async () => {
+  it("HomeView remains mounted when navigating Home -> Skins -> Home, and checkGameManifest is NOT called on mount or navigation", async () => {
     const checkGameManifestSpy = vi.spyOn(gameService, "checkGameManifest")
 
     const container = document.createElement("div")
@@ -113,7 +123,8 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
       await Promise.resolve()
     })
 
-    expect(checkGameManifestSpy).toHaveBeenCalledTimes(1)
+    // In Phase 11, checkGameManifest is NOT called on mount
+    expect(checkGameManifestSpy).toHaveBeenCalledTimes(0)
 
     // Find sidebar navigation buttons
     const navButtons = Array.from(container.querySelectorAll(".sidebar-nav-btn")) as HTMLElement[]
@@ -141,8 +152,8 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
       })
     }
 
-    // checkGameManifest was NOT called again because HomeView remained mounted!
-    expect(checkGameManifestSpy).toHaveBeenCalledTimes(1)
+    // checkGameManifest was NOT called when navigating back to Home!
+    expect(checkGameManifestSpy).toHaveBeenCalledTimes(0)
 
     act(() => {
       root.unmount()

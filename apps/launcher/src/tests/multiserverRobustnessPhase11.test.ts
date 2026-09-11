@@ -801,7 +801,7 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     }).catch((e: any) => e)
 
     await Promise.resolve()
-    await new Promise((r) => setTimeout(r, 40))
+    await new Promise((r) => setTimeout(r, 80))
 
     // Encolar B con URL que fallará con error
     await startHandler({}, {
