@@ -1080,12 +1080,12 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
     ;(window as any).electronAPI = {
       getInstalledState: vi.fn().mockImplementation(async (ctx: any) => {
         if (ctx?.gameId === "meliora") {
-          return { installedModpackVersion: "2.0.0" }
+          return { installedModpackVersion: "2.0.0", integrityDirty: false }
         }
         if (ctx?.gameId === "apparatia") {
-          return { installedModpackVersion: null }
+          return { installedModpackVersion: null, integrityDirty: false }
         }
-        return { installedModpackVersion: null }
+        return { installedModpackVersion: null, integrityDirty: false }
       }),
       getLaunchStatus: vi.fn().mockResolvedValue({
         status: "idle",
@@ -1173,6 +1173,31 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
       installedVersion: null,
       integrityDirty: false,
     })
+  })
+
+  it("1b. Bootstrap con integrityDirty=true: inicializa servidor como dirty sin checkSyncPlan", async () => {
+    vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([melioraServer])
+    vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue(melioraModpack)
+    ;(window as any).electronAPI.getInstalledState = vi.fn().mockResolvedValue({
+      installedModpackVersion: "2.0.0",
+      integrityDirty: true,
+    })
+
+    let hookState: any = null
+    function Consumer() {
+      hookState = useLauncherState()
+      return null
+    }
+
+    await act(async () => {
+      root.render(<Consumer />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(hookState.gameStates.meliora.integrityDirty).toBe(true)
+    expect((window as any).electronAPI.checkSyncPlan).not.toHaveBeenCalled()
   })
 
   it("2. Meliora -> Apparatia -> Meliora: nunca aparece checking ni llama checkGameManifest ni checkSyncPlan", async () => {

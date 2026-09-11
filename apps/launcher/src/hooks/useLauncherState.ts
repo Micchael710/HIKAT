@@ -117,12 +117,13 @@ export function useLauncherState() {
                   : Promise.resolve(null),
               ])
               const installedVersion = installedState?.installedModpackVersion ?? null
+              const integrityDirty = Boolean(installedState?.integrityDirty)
               return [
                 server.id,
                 {
                   publishedModpack: published,
                   installedVersion,
-                  integrityDirty: false,
+                  integrityDirty,
                 },
               ] as const
             })
@@ -134,7 +135,7 @@ export function useLauncherState() {
               next[id] = {
                 publishedModpack: state.publishedModpack,
                 installedVersion: state.installedVersion,
-                integrityDirty: prev[id]?.integrityDirty ?? false,
+                integrityDirty: prev[id]?.integrityDirty ?? state.integrityDirty,
               }
             }
             return next

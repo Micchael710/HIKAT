@@ -336,6 +336,138 @@ function resolvePathPolicy(relPath, filesMap) {
   return null
 }
 
+/**
+ * Fast startup integrity check ONLY for files and directories whose effective
+ * policy is "NO_MODIFICABLE".
+ * Does NOT calculate SHA-256 hashes.
+ * Does NOT use hardcoded default protected directories.
+ * Returns true if integrity is compromised (dirty), false if clean.
+ */
+async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
+  if (!instanceRoot || !installedManifest || typeof installedManifest !== "object") {
+    return false
+  }
+
+  const files = installedManifest.files
+  if (!files || typeof files !== "object") {
+    return false
+  }
+
+  const directoryPolicies = Array.isArray(installedManifest.directoryPolicies)
+    ? installedManifest.directoryPolicies
+    : []
+
+  // Helper: resolve effective policy based solely on installed-manifest.json
+  function getEffectivePolicy(normPath) {
+    // 1. Direct match on files
+    const item = files[normPath]
+    const p = item?.policy || (typeof item === "string" ? item : null)
+    if (p === "MODIFICABLE" || p === "NO_MODIFICABLE") {
+      return p
+    }
+
+    // 2. Direct match on directoryPolicies
+    for (const dp of directoryPolicies) {
+      if (!dp?.path) continue
+      const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+      if (dNorm === normPath) {
+        return dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
+      }
+    }
+
+    // 3. Ancestor search in files and directoryPolicies (closest parent wins)
+    const segments = normPath.split("/")
+    for (let i = segments.length - 1; i > 0; i--) {
+      const parentPath = segments.slice(0, i).join("/")
+      const parentItem = files[parentPath]
+      const parentPolicy = parentItem?.policy || (typeof parentItem === "string" ? parentItem : null)
+      if (parentPolicy === "MODIFICABLE" || parentPolicy === "NO_MODIFICABLE") {
+        return parentPolicy
+      }
+      for (const dp of directoryPolicies) {
+        if (!dp?.path) continue
+        const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+        if (dNorm === parentPath) {
+          return dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
+        }
+      }
+    }
+
+    return null
+  }
+
+  // 1. Check explicit NO_MODIFICABLE directory policies
+  for (const dp of directoryPolicies) {
+    if (!dp || !dp.path) continue
+    const policy = dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
+    if (policy !== "NO_MODIFICABLE") continue
+
+    const relPath = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+    if (!relPath) continue
+
+    const fullPath = path.join(instanceRoot, relPath)
+    try {
+      if (!fs.existsSync(fullPath)) {
+        return true
+      }
+      const stat = await fsp.stat(fullPath)
+      if (!stat.isDirectory()) {
+        return true
+      }
+    } catch (_) {
+      return true
+    }
+  }
+
+  // 2. Check entries in files
+  for (const [relPathRaw, item] of Object.entries(files)) {
+    if (!relPathRaw) continue
+    const norm = String(relPathRaw).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+    if (!norm) continue
+
+    const effectivePolicy = getEffectivePolicy(norm)
+    if (effectivePolicy !== "NO_MODIFICABLE") {
+      continue
+    }
+
+    const fullPath = path.join(instanceRoot, norm)
+
+    const isDirEntry = Boolean(
+      item &&
+      typeof item === "object" &&
+      !item.officialSha256 &&
+      !item.sha256 &&
+      (item.isDirectory || (item.sizeBytes === undefined && item.size === undefined))
+    )
+
+    try {
+      if (!fs.existsSync(fullPath)) {
+        return true
+      }
+      const stat = await fsp.stat(fullPath)
+      if (isDirEntry) {
+        if (!stat.isDirectory()) {
+          return true
+        }
+      } else {
+        if (!stat.isFile()) {
+          return true
+        }
+        const expectedSize = item?.sizeBytes ?? item?.size
+        if (typeof expectedSize === "number" && expectedSize >= 0) {
+          if (stat.size !== expectedSize) {
+            return true
+          }
+        }
+      }
+    } catch (_) {
+      return true
+    }
+  }
+
+  return false
+}
+
 function resolveWatcherDecision(
   relPath,
   directoryPolicies = [],
@@ -1131,6 +1263,7 @@ function buildInstalledManifestData(
     newManifestFiles[normalizedRelative] = {
       officialSha256: String(item.sha256 || "").toLowerCase().trim(),
       policy: item.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE",
+      sizeBytes: typeof item.sizeBytes === "number" ? item.sizeBytes : (typeof item.size === "number" ? item.size : undefined),
       lastSyncedAt: new Date().toISOString(),
     }
   }
@@ -1406,6 +1539,7 @@ module.exports = {
   resolvePathPolicy,
   resolveWatcherDecision,
   buildInstalledManifestData,
+  quickCheckProtectedIntegrity,
   ENFORCED_DIRECTORIES,
   getStagingPaths,
 }

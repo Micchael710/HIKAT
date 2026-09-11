@@ -36,6 +36,7 @@ if (process.defaultApp) {
 const {
   loadInstalledManifest,
   resolveWatcherDecision,
+  quickCheckProtectedIntegrity,
 } = require("./client-files-sync.cjs")
 const { loadCoreState } = require("./minecraft-core.cjs")
 
@@ -2489,15 +2490,19 @@ ipcMain.handle("game-get-installed-state", async (_event, payload = {}) => {
   try {
     const ctx = resolveGameContext(payload)
     const manifest = await loadInstalledManifest(ctx.instanceRoot)
+    let integrityDirty = false
     if (manifest && manifest.modpackVersion) {
       setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
+      integrityDirty = await quickCheckProtectedIntegrity(ctx.instanceRoot, manifest)
     }
     return {
       installedModpackVersion: manifest?.modpackVersion || null,
+      integrityDirty: Boolean(integrityDirty),
     }
   } catch (_) {
     return {
       installedModpackVersion: null,
+      integrityDirty: false,
     }
   }
 })

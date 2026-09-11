@@ -60,6 +60,7 @@ export declare function buildInstalledManifestData(
 ): any
 
 export declare function loadInstalledManifest(instanceRoot: string): Promise<any>
+export declare function quickCheckProtectedIntegrity(instanceRoot: string, installedManifest: any): Promise<boolean>
 export declare function saveInstalledManifest(instanceRoot: string, manifestData: any): Promise<void>
 export declare function loadDownloadSession(instanceRoot: string): Promise<any>
 export declare function saveDownloadSession(instanceRoot: string, sessionData: any): Promise<void>
