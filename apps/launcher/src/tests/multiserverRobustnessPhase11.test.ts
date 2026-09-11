@@ -27,6 +27,7 @@ import {
 
 const ipcHandlers = new Map<string, Function>()
 const ipcListeners = new Map<string, Function>()
+const appListeners = new Map<string, Function[]>()
 let activeUserDataDir = ""
 let activeAppDataDir = ""
 const lastSentEvents: { channel: string; args: any[] }[] = []
@@ -41,7 +42,11 @@ const electronMock = {
     }),
     setPath: vi.fn(),
     setAsDefaultProtocolClient: vi.fn(),
-    on: vi.fn(),
+    on: vi.fn((event: string, handler: Function) => {
+      const list = appListeners.get(event) || []
+      list.push(handler)
+      appListeners.set(event, list)
+    }),
     quit: vi.fn(),
     whenReady: vi.fn().mockReturnValue(new Promise(() => {})),
   },
@@ -2687,6 +2692,253 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     const resumeRes = await startHandler({}, { gameId: "server-a", gameName: "Server Alpha", resume: true })
     expect(startSyncSpy).toHaveBeenCalledTimes(1)
     expect(mainExports.isRestoredUserPauseForTesting()).toBe(false)
+
+    startSyncSpy.mockRestore()
+  })
+
+  // 61. Flujo real DOWNLOADING: iniciar -> avanzar progreso -> persistir -> simular restart -> recupera DOWNLOADING con progreso y bytes
+  it("61. Flujo real DOWNLOADING: persistencia de progreso y bytes reales durante operacion activa", async () => {
+    mainExports.resetDownloadQueueForTesting()
+
+    let capturedOnProgress: Function | null = null
+    let capturedOnPhaseChange: Function | null = null
+
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (opts: any) => {
+      capturedOnProgress = opts.onProgress
+      capturedOnPhaseChange = opts.onPhaseChange
+      mainExports.operationManager.state = "DOWNLOADING"
+      return new Promise(() => {}) // simula operación en curso
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const syncPromise = startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      clientFiles: [],
+    })
+
+    // Esperar a que startSync haya sido llamado y capturado los callbacks
+    await new Promise((r) => setTimeout(r, 10))
+    expect(capturedOnProgress).toBeDefined()
+
+    // Avanzar progreso en DOWNLOADING
+    capturedOnProgress!({
+      phase: "DOWNLOADING",
+      progress: 68,
+      downloadedBytes: 6800,
+      totalBytes: 10000,
+      speedMBs: 2.5,
+      remainingMinutes: 1,
+    })
+
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    expect(fs.existsSync(queueFilePath)).toBe(true)
+    const savedRaw = await fsp.readFile(queueFilePath, "utf8")
+    const savedData = JSON.parse(savedRaw)
+
+    expect(savedData.active).toBeDefined()
+    expect(savedData.active.gameId).toBe("server-a")
+    expect(savedData.active.phase).toBe("DOWNLOADING")
+    expect(savedData.active.progress).toBe(68)
+    expect(savedData.active.downloadedBytes).toBe(6800)
+    expect(savedData.active.totalBytes).toBe(10000)
+    expect(savedData.active.pausedByUser).toBe(false)
+
+    // Simular cierre / restart
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    // Comprobar que loadPersistentDownloadQueue recupera inmediatamente DOWNLOADING con progreso y bytes
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active).not.toBeNull()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.active?.state).toBe("SYNCING")
+    expect(snap.active?.phase).toBe("DOWNLOADING")
+    expect(snap.active?.progress).toBe(68)
+    expect(snap.active?.downloadedBytes).toBe(6800)
+    expect(snap.active?.totalBytes).toBe(10000)
+
+    const statusHandler = ipcHandlers.get("game-get-status")!
+    const status = await statusHandler({}, { gameId: "server-a" })
+    expect(status.operationState).toBe("SYNCING")
+    expect(status.activeOperationPhase).toBe("DOWNLOADING")
+
+    startSyncSpy.mockRestore()
+  })
+
+  // 62. Flujo real INSTALLING: iniciar -> cambiar a INSTALLING -> avanzar progreso -> persistir -> restart
+  it("62. Flujo real INSTALLING: persistencia de fase INSTALLING y progreso avanzado tras reinicio", async () => {
+    mainExports.resetDownloadQueueForTesting()
+
+    let capturedOnProgress: Function | null = null
+    let capturedOnPhaseChange: Function | null = null
+
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (opts: any) => {
+      capturedOnProgress = opts.onProgress
+      capturedOnPhaseChange = opts.onPhaseChange
+      mainExports.operationManager.state = "INSTALLING"
+      return new Promise(() => {})
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      clientFiles: [],
+    })
+
+    await new Promise((r) => setTimeout(r, 10))
+    expect(capturedOnPhaseChange).toBeDefined()
+
+    // Cambiar a INSTALLING
+    capturedOnPhaseChange!("INSTALLING")
+    capturedOnProgress!({
+      phase: "INSTALLING",
+      progress: 91,
+      downloadedBytes: 10000,
+      totalBytes: 10000,
+      speedMBs: 0,
+      remainingMinutes: 0,
+    })
+
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const savedRaw = await fsp.readFile(queueFilePath, "utf8")
+    const savedData = JSON.parse(savedRaw)
+
+    expect(savedData.active.phase).toBe("INSTALLING")
+    expect(savedData.active.progress).toBe(91)
+    expect(savedData.active.downloadedBytes).toBe(10000)
+    expect(savedData.active.totalBytes).toBe(10000)
+
+    // Simular reinicio
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.active?.state).toBe("SYNCING")
+    expect(snap.active?.phase).toBe("INSTALLING")
+    expect(snap.active?.progress).toBe(91)
+
+    startSyncSpy.mockRestore()
+  })
+
+  // 63. before-quit guarda el último snapshot activo en download-queue.json
+  it("63. before-quit asegura la persistencia del ultimo snapshot activo antes del cierre", async () => {
+    mainExports.resetDownloadQueueForTesting()
+
+    let capturedOnProgress: Function | null = null
+
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (opts: any) => {
+      capturedOnProgress = opts.onProgress
+      mainExports.operationManager.state = "DOWNLOADING"
+      return new Promise(() => {})
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      clientFiles: [],
+    })
+
+    await new Promise((r) => setTimeout(r, 10))
+    capturedOnProgress!({
+      phase: "DOWNLOADING",
+      progress: 77,
+      downloadedBytes: 7700,
+      totalBytes: 10000,
+    })
+
+    // Disparar handler de before-quit
+    const beforeQuitHandlers = appListeners.get("before-quit") || []
+    expect(beforeQuitHandlers.length).toBeGreaterThan(0)
+    for (const handler of beforeQuitHandlers) {
+      handler()
+    }
+
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const savedRaw = await fsp.readFile(queueFilePath, "utf8")
+    const savedData = JSON.parse(savedRaw)
+
+    expect(savedData.active.progress).toBe(77)
+    expect(savedData.active.downloadedBytes).toBe(7700)
+
+    startSyncSpy.mockRestore()
+  })
+
+  // 64. FIFO intacto con cola persistida al avanzar progreso y reiniciar
+  it("64. FIFO se preserva intacto con cola persistida al avanzar progreso y reiniciar", async () => {
+    mainExports.resetDownloadQueueForTesting()
+
+    let capturedOnProgress: Function | null = null
+
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (opts: any) => {
+      capturedOnProgress = opts.onProgress
+      mainExports.operationManager.state = "DOWNLOADING"
+      return new Promise(() => {})
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    // Iniciar A
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      clientFiles: [],
+    })
+
+    await new Promise((r) => setTimeout(r, 10))
+
+    // Encolar B y C
+    await startHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      clientFiles: [],
+    })
+    await startHandler({}, {
+      gameId: "server-c",
+      gameName: "Server Gamma",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      clientFiles: [],
+    })
+
+    // Avanzar A
+    capturedOnProgress!({
+      phase: "DOWNLOADING",
+      progress: 40,
+      downloadedBytes: 4000,
+      totalBytes: 10000,
+    })
+
+    // Simular reinicio
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.active?.progress).toBe(40)
+    expect(snap.queued.length).toBe(2)
+    expect(snap.queued[0].gameId).toBe("server-b")
+    expect(snap.queued[0].position).toBe(1)
+    expect(snap.queued[1].gameId).toBe("server-c")
+    expect(snap.queued[1].position).toBe(2)
 
     startSyncSpy.mockRestore()
   })

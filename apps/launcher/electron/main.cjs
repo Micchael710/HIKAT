@@ -173,8 +173,35 @@ function getQueueFilePath() {
   return path.join(app.getPath("userData"), "download-queue.json")
 }
 
+let lastPersistentQueueSaveTime = 0
+let lastPersistentQueueSaveProgress = -1
+let lastPersistentQueueSavePhase = null
+
+function savePersistentDownloadQueueThrottled(force = false) {
+  const now = Date.now()
+  const currentProgress = activeOperationSnapshot?.progress ?? 0
+  const currentPhase = activeOperationSnapshot?.phase ?? null
+
+  const isSignificantChange =
+    currentPhase !== lastPersistentQueueSavePhase ||
+    currentProgress !== lastPersistentQueueSaveProgress ||
+    currentProgress === 100 ||
+    currentProgress === 0
+
+  if (force || isSignificantChange || now - lastPersistentQueueSaveTime >= 500) {
+    lastPersistentQueueSaveTime = now
+    lastPersistentQueueSaveProgress = currentProgress
+    lastPersistentQueueSavePhase = currentPhase
+    savePersistentDownloadQueue()
+  }
+}
+
 function savePersistentDownloadQueue() {
   try {
+    lastPersistentQueueSaveTime = Date.now()
+    lastPersistentQueueSaveProgress = activeOperationSnapshot?.progress ?? 0
+    lastPersistentQueueSavePhase = activeOperationSnapshot?.phase ?? null
+
     const queueFile = getQueueFilePath()
     const isPaused = Boolean(
       pausedByUser ||
@@ -202,7 +229,7 @@ function savePersistentDownloadQueue() {
         queuedAt: item.queuedAt || Date.now(),
       })),
     }
-    const tempFile = `${queueFile}.${Date.now()}.tmp`
+    const tempFile = `${queueFile}.${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`
     fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf8")
     try {
       fs.renameSync(tempFile, queueFile)
@@ -2156,6 +2183,7 @@ async function runGameSync(ctx, payload) {
         totalBytes: typeof data.totalBytes === "number" ? data.totalBytes : 0,
         remainingMinutes: typeof data.remainingMinutes === "number" ? data.remainingMinutes : 0,
       }
+      savePersistentDownloadQueueThrottled()
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
       const opState = operationManager.getState()
@@ -2192,6 +2220,7 @@ async function runGameSync(ctx, payload) {
         activeOperationSnapshot.speedMBs = 0
         activeOperationSnapshot.remainingMinutes = 0
         activeOperationSnapshot.isCommitting = Boolean(operationManager.isCommitting)
+        savePersistentDownloadQueue()
         notifyDownloadQueueChanged()
         return
       } else {
@@ -2217,6 +2246,7 @@ async function runGameSync(ctx, payload) {
       }
       notifyDownloadQueueChanged()
     } else {
+      savePersistentDownloadQueue()
       notifyDownloadQueueChanged()
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2830,6 +2860,8 @@ app.whenReady().then(() => {
 app.on("before-quit", () => {
   isQuitRequested = true
 
+  savePersistentDownloadQueue()
+
   if (oauthLoopbackServer) {
     oauthLoopbackServer.close()
     oauthLoopbackServer = null
@@ -2863,6 +2895,9 @@ function resetDownloadQueueForTesting() {
   lastPayload = null
   lastPayloadByGameId.clear()
   resumeProgressFloor = null
+  lastPersistentQueueSaveTime = 0
+  lastPersistentQueueSaveProgress = -1
+  lastPersistentQueueSavePhase = null
   for (const [, w] of instanceWatchers) {
     try {
       w?.close()
@@ -2900,6 +2935,7 @@ if (typeof module !== "undefined" && module.exports) {
     getDownloadQueueSnapshot,
     resetDownloadQueueForTesting,
     savePersistentDownloadQueue,
+    savePersistentDownloadQueueThrottled,
     loadPersistentDownloadQueue,
     processNextQueuedSync,
     runGameSync,
