@@ -466,13 +466,7 @@ export default function DownloadsView({
                           ? t("downloads.verifying")
                           : t("downloads.downloading")
 
-                    const statusColor = isPaused
-                      ? "#f59e0b"
-                      : isInstalling
-                        ? "#38bdf8"
-                        : isVerifying
-                          ? "#a855f7"
-                          : info.accent.hex
+                    const statusColor = info.accent.hex
 
                     return (
                       <div
@@ -544,6 +538,7 @@ export default function DownloadsView({
                                   fontSize: 14.5,
                                   fontWeight: 600,
                                   color: statusColor,
+                                  opacity: isPaused ? 0.75 : 1,
                                   display: "flex",
                                   alignItems: "center",
                                   gap: 6,
@@ -555,7 +550,9 @@ export default function DownloadsView({
                                     height: 7,
                                     borderRadius: "50%",
                                     background: statusColor,
-                                    boxShadow: `0 0 8px ${statusColor}`,
+                                    boxShadow: isPaused
+                                      ? `0 0 6px rgba(${info.accent.css}, 0.35)`
+                                      : `0 0 8px ${statusColor}`,
                                   }}
                                 />
                                 {statusLabel}
@@ -665,11 +662,12 @@ export default function DownloadsView({
                               height: "100%",
                               borderRadius: 4,
                               background: isPaused
-                                ? "#f59e0b"
+                                ? `linear-gradient(90deg, rgba(${info.accent.css}, 0.5), rgba(${info.accent.css}, 0.7))`
                                 : `linear-gradient(90deg, ${info.accent.hex}, color-mix(in srgb, ${info.accent.hex} 70%, white))`,
                               boxShadow: isPaused
-                                ? "0 0 10px rgba(245, 158, 11, 0.5)"
+                                ? `0 0 6px rgba(${info.accent.css}, 0.25)`
                                 : `0 0 12px rgba(${info.accent.css}, 0.5)`,
+                              opacity: isPaused ? 0.8 : 1,
                               transition: "width 0.25s ease-out",
                             }}
                           />

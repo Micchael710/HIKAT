@@ -5143,6 +5143,185 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(cancelSpy).not.toHaveBeenCalled()
     })
   })
+
+  describe("Shard 8G: Visual Server Accent & Paused Phasing Suite", () => {
+    const purpleAccent = {
+      r: 168,
+      g: 85,
+      b: 247,
+      hex: "#a855f7",
+      rgb: [168, 85, 247] as [number, number, number],
+      css: "168, 85, 247",
+      isDark: false,
+    }
+
+    it("1. accent morado en DownloadPlayButton: idle usa ese accent y hover/glow no contiene el amarillo hardcodeado anterior", async () => {
+      const { container } = await mountButton({ accent: purpleAccent })
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn).not.toBeNull()
+
+      // Uses dynamic CSS variables for accent
+      expect(btn.style.getPropertyValue("--dl-accent-rgb")).toBe("168, 85, 247")
+      expect(btn.style.getPropertyValue("--dl-accent-hex")).toBe("#a855f7")
+
+      // Background and boxShadow use purple accent, not amber/yellow (#efc436, 239, 196, 54, 245, 208, 86)
+      expect(btn.style.background).toMatch(/#a855f7|168,\s*85,\s*247/)
+      expect(btn.style.background).not.toContain("#efc436")
+      expect(btn.style.background).not.toContain("239, 196, 54")
+      expect(btn.style.boxShadow).toMatch(/168,\s*85,\s*247/)
+      expect(btn.style.boxShadow).not.toContain("239, 196, 54")
+      expect(btn.style.boxShadow).not.toContain("245, 208, 86")
+    })
+
+    it("2. progress card: INSTALLING, VERIFYING y PAUSED usan accent del servidor", async () => {
+      let progressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+      const { container } = await mountButton({ accent: purpleAccent })
+      const btn = container.querySelector("button") as HTMLElement
+
+      await act(async () => {
+        btn.click()
+      })
+
+      // 1. Progress card has CSS variables with server accent
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card).not.toBeNull()
+      expect(card.style.getPropertyValue("--dl-accent-rgb")).toBe("168, 85, 247")
+      expect(card.style.getPropertyValue("--dl-accent-hex")).toBe("#a855f7")
+
+      // 2. INSTALLING uses server accent
+      await act(async () => {
+        progressCb?.({
+          progress: 50,
+          phase: "INSTALLING",
+        })
+      })
+      const statusSpan = container.querySelector(".dl-progress-card span[style*='letter-spacing']") as HTMLElement
+      expect(statusSpan).not.toBeNull()
+      expect(statusSpan.style.color).toMatch(/#a855f7|168,\s*85,\s*247/)
+      expect(statusSpan.style.color).not.toContain("#efc436")
+
+      // 3. PAUSED uses server accent
+      await act(async () => {
+        progressCb?.({
+          progress: 50,
+          phase: "PAUSED",
+        })
+      })
+      expect(statusSpan.style.color).toMatch(/#a855f7|168,\s*85,\s*247/)
+      expect(statusSpan.style.color).not.toContain("#efc436")
+
+      // 4. VERIFYING uses server accent
+      await act(async () => {
+        progressCb?.({
+          progress: 70,
+          phase: "VERIFYING",
+        })
+      })
+      expect(statusSpan.style.color).toMatch(/#a855f7|168,\s*85,\s*247/)
+      expect(statusSpan.style.color).not.toContain("#efc436")
+    })
+
+    it("3. PAUSED desde INSTALLING: muestra PAUSADO, no muestra MB/s, no muestra tamaño descargado/total, no muestra minutos, y hover muestra REANUDAR", async () => {
+      let progressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+      vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true } as any)
+
+      const { container } = await mountButton({ accent: purpleAccent })
+      const btn = container.querySelector("button") as HTMLElement
+
+      await act(async () => {
+        btn.click()
+      })
+
+      // Move into INSTALLING
+      await act(async () => {
+        progressCb?.({
+          progress: 60,
+          phase: "INSTALLING",
+          canPause: true,
+        })
+      })
+
+      // Pause while in INSTALLING
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      await act(async () => {
+        card.click()
+      })
+
+      // Shows PAUSADO and 60%
+      expect(container.textContent).toContain("PAUSADO")
+      expect(container.textContent).toContain("60%")
+
+      // Does NOT show MB/s, does NOT show downloaded/total size, does NOT show minutes remaining
+      expect(container.textContent).not.toContain("MB/s")
+      expect(container.textContent).not.toContain("MB")
+      expect(container.textContent).not.toContain("GB")
+      expect(container.textContent).not.toMatch(/\d+\s*min/i)
+
+      // On hover shows REANUDAR
+      await act(async () => {
+        card.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body }))
+      })
+      expect(container.textContent).toContain("REANUDAR")
+    })
+
+    it("4. PAUSED desde DOWNLOADING: puede mostrar descargado/total pero NO muestra velocidad", async () => {
+      let progressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+      vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true } as any)
+
+      const { container } = await mountButton({ accent: purpleAccent })
+      const btn = container.querySelector("button") as HTMLElement
+
+      await act(async () => {
+        btn.click()
+      })
+
+      // DOWNLOADING with bytes and speed
+      await act(async () => {
+        progressCb?.({
+          progress: 40,
+          phase: "DOWNLOADING",
+          downloadedBytes: 40 * 1024 * 1024,
+          totalBytes: 100 * 1024 * 1024,
+          speedMBs: 5.5,
+          remainingMinutes: 3,
+          canPause: true,
+        })
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      // Click card to pause
+      await act(async () => {
+        card.click()
+      })
+
+      // Shows PAUSADO
+      expect(container.textContent).toContain("PAUSADO")
+
+      // Can show downloaded/total
+      expect(container.textContent).toContain("40.00 MB / 100.0 MB")
+
+      // Must NOT show speed (MB/s) while paused
+      expect(container.textContent).not.toContain("MB/s")
+    })
+  })
 })
 
 

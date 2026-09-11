@@ -1024,6 +1024,91 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     playBtn = container.querySelector("button") as HTMLButtonElement
     expect(playBtn.disabled).toBe(false)
   })
+
+  it("28. DownloadsView: respeta accent propio en PAUSED, INSTALLING, VERIFYING y entre múltiples servidores", async () => {
+    const purpleServer: LauncherServer = {
+      id: "server-purple",
+      name: "Purple Realm",
+      accentColor: "#a855f7",
+      minecraftVersion: "1.21.1",
+      modLoader: "VANILLA",
+      launcherActiveReleaseId: "rel-purple",
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+    }
+    const cyanServer: LauncherServer = {
+      id: "server-cyan",
+      name: "Cyan Realm",
+      accentColor: "#06b6d4",
+      minecraftVersion: "1.21.1",
+      modLoader: "VANILLA",
+      launcherActiveReleaseId: "rel-cyan",
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+    }
+
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-purple",
+        state: "PAUSED",
+        phase: "DOWNLOADING",
+        progress: 40,
+        speedMBs: 0,
+        downloadedBytes: 400,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: true,
+        canCancel: true,
+      },
+      queued: [
+        {
+          gameId: "server-cyan",
+          gameName: "Cyan Realm",
+          position: 1,
+        },
+      ],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadsView theme="dark" servers={[purpleServer, cyanServer]} />
+        </LanguageProvider>,
+      )
+    })
+
+    // 1. Servidor morado pausado mantiene morado (no amarillo/naranja #f59e0b)
+    expect(container.textContent).toContain("Pausado")
+    expect(container.innerHTML).not.toContain("#f59e0b")
+    expect(container.innerHTML).not.toContain("245, 158, 11")
+    const statusText = container.querySelector("div[style*='color: #a855f7'], div[style*='color: rgb(168, 85, 247)']")
+    expect(statusText).not.toBeNull()
+
+    // 2. Transición a INSTALLING mantiene morado (no #38bdf8)
+    await act(async () => {
+      currentQueueSnapshot.active!.state = "SYNCING"
+      currentQueueSnapshot.active!.phase = "INSTALLING"
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(container.textContent).toContain("Instalando")
+    expect(container.innerHTML).not.toContain("#38bdf8")
+    const installingStatus = container.querySelector("div[style*='color: #a855f7'], div[style*='color: rgb(168, 85, 247)']")
+    expect(installingStatus).not.toBeNull()
+
+    // 3. Transición a VERIFYING mantiene morado (no #a855f7 fijo si fuera otro color, pero aquí es el accent del servidor)
+    await act(async () => {
+      currentQueueSnapshot.active!.phase = "VERIFYING"
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(container.textContent).toContain("Verificando")
+    const verifyingStatus = container.querySelector("div[style*='color: #a855f7'], div[style*='color: rgb(168, 85, 247)']")
+    expect(verifyingStatus).not.toBeNull()
+
+    // 4. Servidor en cola Cyan Realm usa su propio accent (#06b6d4), no morado
+    const queuedBadge = container.querySelector("div[style*='color: #06b6d4'], div[style*='color: rgb(6, 182, 212)']")
+    expect(queuedBadge).not.toBeNull()
+    expect(queuedBadge!.textContent).toBe("C")
+  })
 })
 
 describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integrity State", () => {

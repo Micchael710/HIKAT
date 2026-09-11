@@ -1848,13 +1848,17 @@ export default function DownloadPlayButton({
           display: "flex",
           alignItems: "center",
           gap: 12,
-        }}
+          "--dl-accent-rgb": accentCss,
+          "--dl-accent-hex": accentHex,
+        } as React.CSSProperties}
       >
         <button
           type="button"
           disabled={isDisabled}
           className={isDisabled ? "" : "dl-idle-btn"}
           style={{
+            "--dl-accent-rgb": accentCss,
+            "--dl-accent-hex": accentHex,
             width: 272,
             height: 76,
             borderRadius: 24,
@@ -1875,7 +1879,7 @@ export default function DownloadPlayButton({
             gap: 12,
             transition: "all 0.25s ease",
             userSelect: "none",
-          }}
+          } as React.CSSProperties}
           onClick={handleClick}
         >
           {isPlay || isLaunching || isRunning ? (
@@ -2108,7 +2112,9 @@ export default function DownloadPlayButton({
         display: "flex",
         alignItems: "center",
         gap: 12,
-      }}
+        "--dl-accent-rgb": accentCss,
+        "--dl-accent-hex": accentHex,
+      } as React.CSSProperties}
     >
       {/* Main Progress Card */}
       <div
@@ -2117,6 +2123,8 @@ export default function DownloadPlayButton({
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         style={{
+          "--dl-accent-rgb": accentCss,
+          "--dl-accent-hex": accentHex,
           width: 336,
           height: 76,
           borderRadius: 24,
@@ -2142,7 +2150,7 @@ export default function DownloadPlayButton({
             : "0 8px 24px rgba(0, 0, 0, 0.08)",
           userSelect: "none",
           transition: "width 0.25s ease",
-        }}
+        } as React.CSSProperties}
       >
         {/* Progress bar background fill */}
         <div
@@ -2224,7 +2232,20 @@ export default function DownloadPlayButton({
             zIndex: 2,
           }}
         >
-          {(status === "downloading" || status === "installing") && isHovered && effectiveCanPause ? (
+          {status === "paused" && pausedPhaseRef.current === "installing" ? (
+            <span />
+          ) : status === "paused" ? (
+            <span
+              style={{
+                color: isDark ? "rgba(255,255,255,.6)" : "#475569",
+                fontFamily: BASE_FONT,
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              {formatDownloadSize(currentDownloadedBytes)} / {totalBytes > 0 ? formatDownloadSize(totalBytes) : "--"}
+            </span>
+          ) : (status === "downloading" || status === "installing") && isHovered && effectiveCanPause ? (
             <div
               style={{
                 display: "flex",
@@ -2283,7 +2304,7 @@ export default function DownloadPlayButton({
             </span>
           )}
 
-          {!isInstalling && !isVerifying && (
+          {!isInstalling && !isVerifying && status !== "paused" && (
             <span
               style={{
                 color: isDark ? "rgba(255,255,255,.6)" : "#475569",
