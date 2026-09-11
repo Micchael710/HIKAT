@@ -337,6 +337,50 @@ function resolvePathPolicy(relPath, filesMap) {
 }
 
 /**
+ * Checks if a relative path or any of its directory ancestors within instanceRoot is a symbolic link or junction.
+ * Returns true if any component is a symlink/junction, false otherwise.
+ */
+async function hasSymlinkInPath(instanceRoot, relPath) {
+  if (!instanceRoot || !relPath) return false
+  const norm = String(relPath).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+  if (!norm || norm === ".") return false
+  const parts = norm.split("/")
+  for (let i = 1; i <= parts.length; i++) {
+    const subRel = parts.slice(0, i).join("/")
+    const full = path.join(instanceRoot, subRel)
+    try {
+      const st = await fsp.lstat(full)
+      if (st.isSymbolicLink()) {
+        return true
+      }
+    } catch (_) {
+      return false
+    }
+  }
+  return false
+}
+
+function hasSymlinkInPathSync(instanceRoot, relPath) {
+  if (!instanceRoot || !relPath) return false
+  const norm = String(relPath).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+  if (!norm || norm === ".") return false
+  const parts = norm.split("/")
+  for (let i = 1; i <= parts.length; i++) {
+    const subRel = parts.slice(0, i).join("/")
+    const full = path.join(instanceRoot, subRel)
+    try {
+      const st = fs.lstatSync(full)
+      if (st.isSymbolicLink()) {
+        return true
+      }
+    } catch (_) {
+      return false
+    }
+  }
+  return false
+}
+
+/**
  * Fast startup integrity check ONLY for files and directories whose effective
  * policy is "NO_MODIFICABLE".
  * Does NOT calculate SHA-256 hashes.
@@ -447,8 +491,11 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
       if (!fs.existsSync(fullPath)) {
         return true
       }
-      const stat = await fsp.stat(fullPath)
-      if (!stat.isDirectory()) {
+      if (await hasSymlinkInPath(instanceRoot, dirRelPath)) {
+        return true
+      }
+      const stat = await fsp.lstat(fullPath)
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
         return true
       }
     } catch (_) {
@@ -473,7 +520,13 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
       if (!fs.existsSync(fullPath)) {
         return true
       }
-      const stat = await fsp.stat(fullPath)
+      if (await hasSymlinkInPath(instanceRoot, norm)) {
+        return true
+      }
+      const stat = await fsp.lstat(fullPath)
+      if (stat.isSymbolicLink()) {
+        return true
+      }
       const isExplicitDir = Boolean(
         item &&
         typeof item === "object" &&
@@ -507,6 +560,10 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
     if (scannedDirs.has(dirRelPath)) return false
     scannedDirs.add(dirRelPath)
 
+    if (await hasSymlinkInPath(instanceRoot, dirRelPath)) {
+      return true
+    }
+
     const fullDirPath = path.join(instanceRoot, dirRelPath)
     let entries
     try {
@@ -527,6 +584,16 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
       if (entry.isSymbolicLink()) {
         return true // any symlink/junction under NO_MODIFICABLE is considered dirty directly
       }
+      const childFullPath = path.join(instanceRoot, childRelPath)
+      try {
+        const cStat = await fsp.lstat(childFullPath)
+        if (cStat.isSymbolicLink()) {
+          return true
+        }
+      } catch (_) {
+        return true
+      }
+
       let isDirectory = entry.isDirectory()
       let isFile = entry.isFile()
 
@@ -626,6 +693,9 @@ async function backgroundCheckProtectedSha(instanceRoot, installedManifest) {
       if (!fs.existsSync(fullPath)) {
         return { dirty: true, path: norm }
       }
+      if (await hasSymlinkInPath(instanceRoot, norm)) {
+        return { dirty: true, path: norm }
+      }
       const lstat = await fsp.lstat(fullPath)
       if (lstat.isSymbolicLink()) {
         return { dirty: true, path: norm }
@@ -697,13 +767,42 @@ function resolveWatcherDecision(
   const fullPath = instanceRoot ? path.join(instanceRoot, norm) : null
   let onDiskIsDir = false
   let onDiskExists = false
+  let onDiskIsSymlink = false
   if (fullPath) {
     try {
       if (fs.existsSync(fullPath)) {
         onDiskExists = true
-        onDiskIsDir = fs.statSync(fullPath).isDirectory()
+        const lst = fs.lstatSync(fullPath)
+        onDiskIsSymlink = lst.isSymbolicLink()
+        onDiskIsDir = !onDiskIsSymlink && lst.isDirectory()
       }
     } catch (_) {}
+  }
+
+  // If the path itself or any ancestor is a symlink/junction in a NO_MODIFICABLE location:
+  const hasSymlink = instanceRoot ? (onDiskIsSymlink || hasSymlinkInPathSync(instanceRoot, norm)) : false
+  if (hasSymlink) {
+    let effectivePolicy = exactPolicy
+    if (!effectivePolicy) {
+      if (Array.isArray(directoryPolicies) && directoryPolicies.length > 0) {
+        const dirMap = new Map()
+        for (const dp of directoryPolicies) {
+          if (dp && dp.path) {
+            const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+            if (dNorm) {
+              dirMap.set(dNorm, dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE")
+            }
+          }
+        }
+        effectivePolicy = resolvePathPolicy(norm, dirMap)
+      }
+    }
+    if (!effectivePolicy) {
+      effectivePolicy = resolvePathPolicy(norm, installedManifestFiles)
+    }
+    if (effectivePolicy === "NO_MODIFICABLE") {
+      return "EMIT"
+    }
   }
 
   const isDirEvent = isDirectory || isManifestDir || (onDiskExists && onDiskIsDir)
@@ -1812,6 +1911,8 @@ module.exports = {
   buildInstalledManifestData,
   quickCheckProtectedIntegrity,
   backgroundCheckProtectedSha,
+  hasSymlinkInPath,
+  hasSymlinkInPathSync,
   ENFORCED_DIRECTORIES,
   getStagingPaths,
 }

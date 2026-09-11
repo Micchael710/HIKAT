@@ -324,6 +324,19 @@ let splashWindow = null
 const instanceWatchers = new Map()
 const latestDirectoryPoliciesByGameId = new Map()
 let latestDirectoryPolicies = []
+const dirtyGameIds = new Set()
+
+function markGameIntegrityDirty(gameId) {
+  dirtyGameIds.add(gameId || "__default__")
+}
+
+function isGameIntegrityDirty(gameId) {
+  return dirtyGameIds.has(gameId || "__default__")
+}
+
+function clearGameIntegrityDirty(gameId) {
+  dirtyGameIds.delete(gameId || "__default__")
+}
 
 function setupInstanceWatcher(gameId = null, targetInstanceRoot = instanceRoot) {
   const key = gameId || "__legacy__"
@@ -374,6 +387,7 @@ function setupInstanceWatcher(gameId = null, targetInstanceRoot = instanceRoot) 
         )
 
         if (decision === "EMIT") {
+          markGameIntegrityDirty(gameId)
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send("game-file-integrity-changed", {
               path: relPath,
@@ -2038,8 +2052,16 @@ async function processNextQueuedSync() {
 
   const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
   const launchStatus = gameLauncher.getLaunchStatus()
-  if (pauseOnLaunch && launchStatus.status !== "idle") {
-    return
+  const isMinecraftActive = launchStatus.status !== "idle"
+  const runningGameId = launchStatus.gameId || null
+
+  if (isMinecraftActive) {
+    if (pauseOnLaunch) {
+      return
+    }
+    if (downloadQueue[0]?.gameId && downloadQueue[0].gameId === runningGameId) {
+      return
+    }
   }
 
   const nextItem = downloadQueue.shift()
@@ -2282,6 +2304,9 @@ async function runGameSync(ctx, payload) {
       onProgress,
       onPhaseChange,
     })
+    if (result && result.success !== false && !result.cancelled) {
+      clearGameIntegrityDirty(ctx.gameId)
+    }
     if (operationManager.getState() === "IDLE") {
       resumeProgressFloor = null
       if (activeOperationGameId === ctx.gameId) {
@@ -2454,7 +2479,21 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     return await runGameSync(effectiveCtx, effectivePayload)
   }
 
+  const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
+  const launchStatus = gameLauncher.getLaunchStatus()
+  const isMinecraftActive = launchStatus.status !== "idle"
+  const runningGameId = launchStatus.gameId || null
+  const isSameGameRunning = Boolean(isMinecraftActive && ctx.gameId && runningGameId && ctx.gameId === runningGameId)
+  const shouldBlockDueToGameLaunch = isMinecraftActive && (isSameGameRunning || pauseOnLaunch)
+
+  if (isSameGameRunning && (payload.resume || isRestoredTarget)) {
+    throw new Error("Cannot resume sync while game is running.")
+  }
+
   if (payload.isVerify) {
+    if (isSameGameRunning) {
+      throw new Error("Cannot verify files while game is running.")
+    }
     if (operationManager.getState() !== "IDLE" || isRestoredUserPause) {
       if (activeOperationGameId !== ctx.gameId) {
         throw new Error("Another game operation is already in progress.")
@@ -2505,7 +2544,13 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     downloadQueue.some((item) => item && (item.savedPhase || (typeof item.savedProgress === "number" && item.savedProgress > 0)))
   )
 
-  if (operationManager.getState() === "IDLE" && !isRestoredUserPause && !hasAnyPendingRecovery) {
+  if (
+    operationManager.getState() === "IDLE" &&
+    !isRestoredUserPause &&
+    !hasAnyPendingRecovery &&
+    downloadQueue.length === 0 &&
+    !shouldBlockDueToGameLaunch
+  ) {
     autoPausedDownloadGameId = null
     return await runGameSync(ctx, payload)
   }
@@ -2752,6 +2797,7 @@ function scheduleBackgroundShaCheck(gameId, targetInstanceRoot, manifest) {
         return { dirty: false }
       }
       if (result && result.dirty) {
+        markGameIntegrityDirty(gameId)
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("game-file-integrity-changed", {
             path: result.path || "",
@@ -2778,11 +2824,14 @@ ipcMain.handle("game-get-installed-state", async (_event, payload = {}) => {
   try {
     const ctx = resolveGameContext(payload)
     const manifest = await loadInstalledManifest(ctx.instanceRoot)
-    let integrityDirty = false
+    let integrityDirty = isGameIntegrityDirty(ctx.gameId)
     if (manifest && manifest.modpackVersion) {
       setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
-      integrityDirty = await quickCheckProtectedIntegrity(ctx.instanceRoot, manifest)
-      if (!integrityDirty) {
+      const quickDirty = await quickCheckProtectedIntegrity(ctx.instanceRoot, manifest)
+      if (quickDirty) {
+        markGameIntegrityDirty(ctx.gameId)
+        integrityDirty = true
+      } else if (!integrityDirty) {
         scheduleBackgroundShaCheck(ctx.gameId, ctx.instanceRoot, manifest)
       }
     }
@@ -2793,14 +2842,18 @@ ipcMain.handle("game-get-installed-state", async (_event, payload = {}) => {
   } catch (_) {
     return {
       installedModpackVersion: null,
-      integrityDirty: false,
+      integrityDirty: isGameIntegrityDirty(payload?.gameId),
     }
   }
 })
 
 ipcMain.handle("game-uninstall", async (_event, payload = {}) => {
   const ctx = resolveGameContext(payload)
-  return await operationManager.uninstallGame(ctx.instanceRoot, appDataRoot)
+  const res = await operationManager.uninstallGame(ctx.instanceRoot, appDataRoot)
+  if (res && res.success !== false) {
+    clearGameIntegrityDirty(ctx.gameId)
+  }
+  return res
 })
 
 ipcMain.handle("game-launch", async (_event, options = {}) => {
@@ -2873,8 +2926,13 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
   if (pendingShaCheck && pendingShaCheck.promise) {
     const checkRes = await pendingShaCheck.promise.catch(() => ({ dirty: false }))
     if (checkRes && checkRes.dirty) {
+      markGameIntegrityDirty(ctx.gameId)
       throw new Error("Integrity check failed. Please verify game files.")
     }
+  }
+
+  if (isGameIntegrityDirty(ctx.gameId)) {
+    throw new Error("Integrity check failed. Please verify game files.")
   }
 
   return await operationManager.launchGame(gameLauncher, {
@@ -3029,6 +3087,7 @@ function resetDownloadQueueForTesting() {
     } catch (_) {}
   }
   instanceWatchers.clear()
+  dirtyGameIds.clear()
   if (gameLauncher) {
     gameLauncher.runningGameId = null
     gameLauncher.setStatus("idle")
@@ -3084,5 +3143,8 @@ if (typeof module !== "undefined" && module.exports) {
       activeOperationGameId = id
     },
     getActiveOperationGameIdForTesting: () => activeOperationGameId,
+    markGameIntegrityDirty,
+    isGameIntegrityDirty,
+    clearGameIntegrityDirty,
   }
 }

@@ -27,6 +27,8 @@ import {
   getStagingPaths,
   quickCheckProtectedIntegrity,
   backgroundCheckProtectedSha,
+  hasSymlinkInPath,
+  hasSymlinkInPathSync,
   ENFORCED_DIRECTORIES,
   // @ts-expect-error CJS module without declaration
 } from "../../electron/client-files-sync.cjs"
@@ -127,6 +129,8 @@ vi.mock("electron", () => ({
 const {
   operationManager,
   gameLauncher,
+  settingsStore,
+  runGameSync,
   resetDownloadQueueForTesting,
   getDownloadQueue,
   scheduleBackgroundShaCheck,
@@ -136,6 +140,9 @@ const {
   getCurrentProcessingItemForTesting,
   setActiveOperationGameIdForTesting,
   setMainWindowForTesting,
+  markGameIntegrityDirty,
+  isGameIntegrityDirty,
+  clearGameIntegrityDirty,
 } = require("../../electron/main.cjs")
 
 describe("Closing Hardening Suite: Real Execution of Multi-Server Download & Integrity Robustness", () => {
@@ -170,6 +177,12 @@ describe("Closing Hardening Suite: Real Execution of Multi-Server Download & Int
 
     const mockWin = {
       isDestroyed: () => false,
+      isVisible: () => true,
+      hide: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+      restore: vi.fn(),
+      isMinimized: () => false,
       webContents: {
         send: vi.fn((channel, ...args) => {
           lastSentEvents.push({ channel, args })
@@ -754,5 +767,275 @@ describe("Closing Hardening Suite: Real Execution of Multi-Server Download & Int
       [],
       { gameId: "server-recovering", gameName: "Recovering Server" },
     )
+  })
+
+  it("13. Minecraft A running + update A: A se encola y NO comienza", async () => {
+    gameLauncher.runningGameId = "server-a"
+    gameLauncher.setStatus("running", { gameId: "server-a" })
+
+    const startSyncHandler = ipcHandlers.get("game-start-sync")
+    expect(startSyncHandler).toBeDefined()
+
+    const res = await startSyncHandler?.({}, {
+      gameId: "server-a",
+      gameName: "Server A",
+      clientFiles: [{ path: "mods/test.jar", sha256: "abc", sizeBytes: 100 }],
+      modpackVersion: "2.0.0",
+      minecraftVersion: "1.21.1",
+    })
+
+    expect(res).toEqual(expect.objectContaining({ success: true, queued: true }))
+    expect(operationManager.getState()).toBe("IDLE")
+    const q = getDownloadQueue()
+    expect(q.some((item: any) => item.gameId === "server-a")).toBe(true)
+  })
+
+  it("14. Al cerrar Minecraft A: A comienza automáticamente desde FIFO", async () => {
+    gameLauncher.runningGameId = "server-a"
+    gameLauncher.setStatus("running", { gameId: "server-a" })
+
+    const startSyncHandler = ipcHandlers.get("game-start-sync")
+    await startSyncHandler?.({}, {
+      gameId: "server-a",
+      gameName: "Server A",
+      clientFiles: [{ path: "mods/test.jar", sha256: "abc", sizeBytes: 100 }],
+      modpackVersion: "2.0.0",
+      minecraftVersion: "1.21.1",
+    })
+
+    expect(getDownloadQueue().length).toBe(1)
+    expect(operationManager.getState()).toBe("IDLE")
+
+    const startSyncSpy = vi.spyOn(operationManager, "startSync").mockResolvedValue({ success: true } as any)
+
+    // Minecraft A exits
+    gameLauncher.setStatus("idle", { gameId: "server-a" })
+
+    // Allow promise tick for processNextQueuedSync
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(startSyncSpy).toHaveBeenCalledWith(expect.objectContaining({
+      modpackVersion: "2.0.0",
+      minecraftVersion: "1.21.1",
+    }))
+  })
+
+  it("15. Minecraft A running + update B + pauseDownloadsOnGameLaunch = true: B se encola y no comienza hasta cerrar Minecraft", async () => {
+    settingsStore.set("pauseDownloadsOnGameLaunch", true)
+    gameLauncher.runningGameId = "server-a"
+    gameLauncher.setStatus("running", { gameId: "server-a" })
+
+    const startSyncSpy = vi.spyOn(operationManager, "startSync").mockResolvedValue({ success: true } as any)
+    const startSyncHandler = ipcHandlers.get("game-start-sync")
+
+    const res = await startSyncHandler?.({}, {
+      gameId: "server-b",
+      gameName: "Server B",
+      clientFiles: [{ path: "mods/b.jar", sha256: "bbb", sizeBytes: 100 }],
+      modpackVersion: "1.5.0",
+      minecraftVersion: "1.21.1",
+    })
+
+    expect(res).toEqual(expect.objectContaining({ success: true, queued: true }))
+    expect(operationManager.getState()).toBe("IDLE")
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    expect(getDownloadQueue().some((item: any) => item.gameId === "server-b")).toBe(true)
+
+    // Close Minecraft A
+    gameLauncher.setStatus("idle", { gameId: "server-a" })
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(startSyncSpy).toHaveBeenCalledWith(expect.objectContaining({
+      modpackVersion: "1.5.0",
+    }))
+  })
+
+  it("16. Minecraft A running + update B + pauseDownloadsOnGameLaunch = false: B puede comenzar normalmente", async () => {
+    settingsStore.set("pauseDownloadsOnGameLaunch", false)
+    gameLauncher.runningGameId = "server-a"
+    gameLauncher.setStatus("running", { gameId: "server-a" })
+
+    const startSyncSpy = vi.spyOn(operationManager, "startSync").mockResolvedValue({ success: true } as any)
+    const startSyncHandler = ipcHandlers.get("game-start-sync")
+
+    const res = await startSyncHandler?.({}, {
+      gameId: "server-b",
+      gameName: "Server B",
+      clientFiles: [{ path: "mods/b.jar", sha256: "bbb", sizeBytes: 100 }],
+      modpackVersion: "1.5.0",
+      minecraftVersion: "1.21.1",
+    })
+
+    // B starts immediately without being queued
+    expect(startSyncSpy).toHaveBeenCalledWith(expect.objectContaining({
+      modpackVersion: "1.5.0",
+    }))
+    expect(res).not.toEqual(expect.objectContaining({ queued: true }))
+  })
+
+  it("17. Descarga B activa + lanzar A + setting ON: auto-pause y auto-resume sigue intacto", async () => {
+    settingsStore.set("pauseDownloadsOnGameLaunch", true)
+
+    setActiveOperationGameIdForTesting("server-b")
+    operationManager.state = "SYNCING"
+
+    const pauseSpy = vi.spyOn(operationManager, "pauseSync").mockImplementation(async () => {
+      operationManager.state = "PAUSED"
+      return { paused: true }
+    })
+    const resumeSpy = vi.spyOn(operationManager, "resumeSync").mockImplementation(async () => {
+      operationManager.state = "SYNCING"
+      return { success: true }
+    })
+
+    const launchHandler = ipcHandlers.get("game-launch")
+    vi.spyOn(operationManager, "launchGame").mockResolvedValue({ pid: 1234 } as any)
+
+    // Launch Game A
+    await launchHandler?.({}, {
+      gameId: "server-a",
+      gameName: "Server A",
+      minecraftVersion: "1.21.1",
+      allowDuringOperation: true,
+    })
+
+    expect(pauseSpy).toHaveBeenCalled()
+
+    // Game A is running
+    gameLauncher.setStatus("running", { gameId: "server-a" })
+
+    // Game A closes -> status idle triggers resume
+    gameLauncher.setStatus("idle", { gameId: "server-a" })
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(resumeSpy).toHaveBeenCalled()
+  })
+
+  it("18. Directorio NO_MODIFICABLE que es symlink/junction: integrity dirty", async () => {
+    const targetFolder = path.join(tempDir, "external-mods")
+    await fsp.mkdir(targetFolder, { recursive: true })
+    const modsJunction = path.join(instanceRoot, "mods")
+
+    // Create junction
+    fs.symlinkSync(targetFolder, modsJunction, "junction")
+
+    const manifest = {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      files: {
+        "mods/core.jar": { policy: "NO_MODIFICABLE", officialSha256: "abc", sizeBytes: 100 },
+      },
+    }
+
+    const isDirty = await quickCheckProtectedIntegrity(instanceRoot, manifest)
+    expect(isDirty).toBe(true)
+
+    const symlinkResult = await hasSymlinkInPath(instanceRoot, "mods")
+    expect(symlinkResult).toBe(true)
+  })
+
+  it("19. Ancestro protegido con symlink/junction: integrity dirty", async () => {
+    const targetFolder = path.join(tempDir, "external-config")
+    await fsp.mkdir(path.join(targetFolder, "protected"), { recursive: true })
+    await fsp.writeFile(path.join(targetFolder, "protected", "secret.json"), "secret-content")
+
+    const configJunction = path.join(instanceRoot, "config-junction")
+    fs.symlinkSync(targetFolder, configJunction, "junction")
+
+    const manifest = {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [{ path: "config-junction/protected", policy: "NO_MODIFICABLE" }],
+      files: {
+        "config-junction/protected/secret.json": {
+          policy: "NO_MODIFICABLE",
+          officialSha256: computeSha("secret-content"),
+          sizeBytes: Buffer.byteLength("secret-content"),
+        },
+      },
+    }
+
+    const quickDirty = await quickCheckProtectedIntegrity(instanceRoot, manifest)
+    expect(quickDirty).toBe(true)
+
+    const shaResult = await backgroundCheckProtectedSha(instanceRoot, manifest)
+    expect(shaResult.dirty).toBe(true)
+  })
+
+  it("20. Background SHA dirty: Main guarda dirty aunque renderer todavía no procese el evento", async () => {
+    clearGameIntegrityDirty("server-corrupted-sha")
+    expect(isGameIntegrityDirty("server-corrupted-sha")).toBe(false)
+
+    const corruptFolder = path.join(tempDir, "corrupt-inst")
+    await fsp.mkdir(path.join(corruptFolder, "mods"), { recursive: true })
+    await fsp.writeFile(path.join(corruptFolder, "mods", "mod.jar"), "bad-content")
+
+    const manifest = {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      files: {
+        "mods/mod.jar": {
+          policy: "NO_MODIFICABLE",
+          officialSha256: "0000000000000000000000000000000000000000000000000000000000000000",
+          sizeBytes: 11,
+        },
+      },
+    }
+    await saveInstalledManifest(corruptFolder, manifest)
+
+    scheduleBackgroundShaCheck("server-corrupted-sha", corruptFolder, manifest)
+    const check = activeBackgroundShaChecks.get("server-corrupted-sha")
+    expect(check).toBeDefined()
+    await check.promise
+
+    // Main authoritative store MUST have recorded dirty
+    expect(isGameIntegrityDirty("server-corrupted-sha")).toBe(true)
+  })
+
+  it("21. PLAY con dirty autoritativo en Main: NO lanza Minecraft", async () => {
+    markGameIntegrityDirty("server-dirty-launch")
+    expect(isGameIntegrityDirty("server-dirty-launch")).toBe(true)
+
+    const launchHandler = ipcHandlers.get("game-launch")
+    const launchGameSpy = vi.spyOn(operationManager, "launchGame")
+
+    await expect(
+      launchHandler?.({}, {
+        gameId: "server-dirty-launch",
+        gameName: "Server Dirty Launch",
+        minecraftVersion: "1.21.1",
+      }),
+    ).rejects.toThrow(/Integrity check failed/i)
+
+    expect(launchGameSpy).not.toHaveBeenCalled()
+  })
+
+  it("22. Verify/sync exitoso: limpia dirty", async () => {
+    markGameIntegrityDirty("server-repaired")
+    expect(isGameIntegrityDirty("server-repaired")).toBe(true)
+
+    vi.spyOn(operationManager, "startSync").mockResolvedValue({ success: true } as any)
+
+    await runGameSync(
+      { gameId: "server-repaired", instanceRoot },
+      { clientFiles: [], modpackVersion: "1.0.0", isVerify: true },
+    )
+
+    expect(isGameIntegrityDirty("server-repaired")).toBe(false)
+  })
+
+  it("23. Verify/sync fallido: dirty permanece", async () => {
+    markGameIntegrityDirty("server-failing")
+    expect(isGameIntegrityDirty("server-failing")).toBe(true)
+
+    vi.spyOn(operationManager, "startSync").mockRejectedValue(new Error("Network disconnect"))
+
+    await expect(
+      runGameSync(
+        { gameId: "server-failing", instanceRoot },
+        { clientFiles: [], modpackVersion: "1.0.0", isVerify: true },
+      ),
+    ).rejects.toThrow("Network disconnect")
+
+    expect(isGameIntegrityDirty("server-failing")).toBe(true)
   })
 })
