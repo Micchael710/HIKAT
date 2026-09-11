@@ -33,6 +33,7 @@ import {
 import { authService } from "../services/authService"
 import { serverService, LauncherServer } from "../services/serverService"
 import { gameService, ReleaseActivatedEvent } from "../services/gameService"
+import { getStoredBoolean, STORAGE_KEYS } from "../utils/settingsStorage"
 import type { PublishedModpack } from "../vite-env"
 
 export type LauncherGameState = {
@@ -178,6 +179,47 @@ export function useLauncherState() {
     serversRef.current = servers
   }, [servers])
 
+  const triggerAutoUpdateIfNeeded = useCallback(
+    async (
+      serverId: string,
+      published: PublishedModpack,
+      installedVer: string | null,
+    ) => {
+      const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+      if (!autoUpdatesEnabled) return
+      if (!installedVer) return // No existing installation: do not auto-install fresh game
+      if (published.version === installedVer) return
+      if (!Array.isArray(published.clientFiles)) return
+
+      try {
+        const launchStatus = await window.electronAPI?.getLaunchStatus?.({ gameId: serverId })
+        const isSameActive =
+          launchStatus?.activeOperationGameId === serverId &&
+          launchStatus?.activeOperationState !== "IDLE"
+        if (isSameActive) {
+          // If the same server is currently active/recovering, do not interrupt; wait for IDLE
+          return
+        }
+
+        const server = serversRef.current.find((s) => s.id === serverId)
+        if (!server) return
+
+        await gameService.startSync(
+          published.clientFiles,
+          published.version,
+          published.minecraftVersion,
+          published.modLoader,
+          published.modLoaderVersion,
+          published.neoForgeVersion,
+          false,
+          published.directoryPolicies || [],
+          { gameId: server.id, gameName: server.name },
+        )
+      } catch (_) {}
+    },
+    [],
+  )
+
   useEffect(() => {
     if (screen === "login") {
       return
@@ -193,19 +235,25 @@ export function useLauncherState() {
             return
           }
 
-          void gameService.getPublishedModpack(event.serverId).then((published) => {
-            setGameStates((prev) => {
-              const current = prev[event.serverId!]
-              return {
-                ...prev,
-                [event.serverId!]: {
-                  publishedModpack: published,
-                  installedVersion: current?.installedVersion ?? null,
-                  integrityDirty: current?.integrityDirty ?? false,
-                },
-              }
+          void gameService
+            .getPublishedModpack(event.serverId)
+            .then((published) => {
+              if (!published) return
+              setGameStates((prev) => {
+                const current = prev[event.serverId!]
+                const installedVer = current?.installedVersion ?? null
+                void triggerAutoUpdateIfNeeded(event.serverId!, published, installedVer)
+                return {
+                  ...prev,
+                  [event.serverId!]: {
+                    publishedModpack: published,
+                    installedVersion: installedVer,
+                    integrityDirty: current?.integrityDirty ?? false,
+                  },
+                }
+              })
             })
-          }).catch(() => {})
+            .catch(() => {})
         } else {
           void loadServers()
         }
@@ -218,7 +266,43 @@ export function useLauncherState() {
     })
 
     return unsubscribe
-  }, [screen, loadServers])
+  }, [screen, loadServers, triggerAutoUpdateIfNeeded])
+
+  // Global listener for phase changes (updates installed state upon completion of any operation)
+  useEffect(() => {
+    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string, eventGameId?: string | null) => {
+      if (phase === "IDLE" && eventGameId) {
+        const targetServer = serversRef.current.find((s) => s.id === eventGameId)
+        const gameName = targetServer?.name
+        if (window.electronAPI?.getInstalledState) {
+          window.electronAPI
+            .getInstalledState({ gameId: eventGameId, gameName })
+            .then((installedState: { installedModpackVersion: string | null; integrityDirty?: boolean } | null | undefined) => {
+              if (!installedState) return
+              const installedVersion = installedState.installedModpackVersion ?? null
+              const integrityDirty = Boolean(installedState.integrityDirty)
+              setGameStates((prev) => {
+                const current = prev[eventGameId]
+                const pub = current?.publishedModpack
+                if (pub && installedVersion && pub.version !== installedVersion) {
+                  void triggerAutoUpdateIfNeeded(eventGameId, pub, installedVersion)
+                }
+                return {
+                  ...prev,
+                  [eventGameId]: {
+                    publishedModpack: pub ?? null,
+                    installedVersion,
+                    integrityDirty,
+                  },
+                }
+              })
+            })
+            .catch(() => {})
+        }
+      }
+    })
+    return () => unsubPhase?.()
+  }, [triggerAutoUpdateIfNeeded])
 
   // Global listener for file integrity changes across any server
   useEffect(() => {

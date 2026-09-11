@@ -683,4 +683,5 @@ class GameOperationManager {
 module.exports = {
   GameOperationManager,
   validateSyncPayload,
+  cleanFreshInstall,
 }

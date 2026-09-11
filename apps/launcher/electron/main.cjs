@@ -4,7 +4,7 @@ const http = require("http")
 const fs = require("fs")
 const os = require("os")
 const { GameLauncher } = require("./game-launcher.cjs")
-const { GameOperationManager } = require("./game-operation-manager.cjs")
+const { GameOperationManager, cleanFreshInstall } = require("./game-operation-manager.cjs")
 const { setJavaGpuPreference } = require("./gpu-manager.cjs")
 const { SettingsStore } = require("./settings-store.cjs")
 const { SecureAuthStore } = require("./secure-auth-store.cjs")
@@ -37,6 +37,8 @@ const {
   loadInstalledManifest,
   resolveWatcherDecision,
   quickCheckProtectedIntegrity,
+  backgroundCheckProtectedSha,
+  cleanStaging,
 } = require("./client-files-sync.cjs")
 const { loadCoreState } = require("./minecraft-core.cjs")
 
@@ -2599,9 +2601,30 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   if (ctx.gameId) {
     const queueIndex = downloadQueue.findIndex((item) => item.gameId === ctx.gameId)
     if (queueIndex !== -1) {
+      const targetItem = downloadQueue[queueIndex]
+      const isRecoveryItem = Boolean(
+        targetItem && (targetItem.savedPhase || (typeof targetItem.savedProgress === "number" && targetItem.savedProgress > 0))
+      )
       downloadQueue.splice(queueIndex, 1)
+
+      if (isRecoveryItem) {
+        try {
+          const manifest = await loadInstalledManifest(ctx.instanceRoot).catch(() => null)
+          if (manifest && manifest.modpackVersion) {
+            await cleanStaging(ctx.instanceRoot)
+          } else {
+            await cleanFreshInstall(ctx.instanceRoot)
+          }
+        } catch (_) {}
+      }
+
+      if (currentProcessingItem && currentProcessingItem.gameId === ctx.gameId) {
+        currentProcessingItem = null
+      }
+
       savePersistentDownloadQueue()
       notifyDownloadQueueChanged()
+      processNextQueuedSync()
       return { success: true, queuedRemoved: true }
     }
   }
@@ -2661,6 +2684,31 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   }
 })
 
+const activeBackgroundShaChecks = new Set()
+
+function scheduleBackgroundShaCheck(gameId, targetInstanceRoot, manifest) {
+  const key = gameId || "__default__"
+  if (activeBackgroundShaChecks.has(key)) return
+  activeBackgroundShaChecks.add(key)
+
+  setImmediate(async () => {
+    try {
+      const result = await backgroundCheckProtectedSha(targetInstanceRoot, manifest)
+      if (result && result.dirty) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("game-file-integrity-changed", {
+            path: result.path || "",
+            gameId: gameId || null,
+          })
+        }
+      }
+    } catch (_) {
+    } finally {
+      activeBackgroundShaChecks.delete(key)
+    }
+  })
+}
+
 ipcMain.handle("game-get-installed-state", async (_event, payload = {}) => {
   try {
     const ctx = resolveGameContext(payload)
@@ -2669,6 +2717,9 @@ ipcMain.handle("game-get-installed-state", async (_event, payload = {}) => {
     if (manifest && manifest.modpackVersion) {
       setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
       integrityDirty = await quickCheckProtectedIntegrity(ctx.instanceRoot, manifest)
+      if (!integrityDirty) {
+        scheduleBackgroundShaCheck(ctx.gameId, ctx.instanceRoot, manifest)
+      }
     }
     return {
       installedModpackVersion: manifest?.modpackVersion || null,

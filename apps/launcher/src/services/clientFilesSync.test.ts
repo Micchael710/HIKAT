@@ -845,6 +845,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
         executeSync({
           instanceRoot,
           clientFiles: [],
+          directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
           modpackVersion: "1.0.0",
           apiBaseUrl: serverBaseUrl,
         }),
@@ -876,6 +877,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       const res = await executeSync({
         instanceRoot,
         clientFiles,
+        directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
         modpackVersion: "3.0.0",
         onPhaseChange: (p: string) => phases.push(p),
         apiBaseUrl: serverBaseUrl,
@@ -1299,6 +1301,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       await saveInstalledManifest(instanceRoot, {
         modpackVersion: "1.0.0",
         lastSync: new Date().toISOString(),
+        directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
         files: {
           "mods/strict-mod.jar": {
             officialSha256: modOfficialSha,
@@ -1319,7 +1322,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       ]
 
       // Case A: Edited NO_MODIFICABLE -> toDownload, extra in strict directory -> toPrune
-      const planA = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0")
+      const planA = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", [{ path: "mods", policy: "NO_MODIFICABLE" }])
       expect(planA.toDownload).toHaveLength(1)
       expect(planA.toDownload[0].path).toBe("mods/strict-mod.jar")
       expect(planA.toPrune).toHaveLength(1)
@@ -1327,7 +1330,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
 
       // Case B: Deleted NO_MODIFICABLE
       await fsp.unlink(officialModPath)
-      const planB = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0")
+      const planB = await generateSyncPlan(instanceRoot, clientFiles, "1.0.0", [{ path: "mods", policy: "NO_MODIFICABLE" }])
       expect(planB.toDownload).toHaveLength(1)
       expect(planB.toDownload[0].path).toBe("mods/strict-mod.jar")
     })

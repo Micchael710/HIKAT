@@ -729,7 +729,7 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     // Extra file inside MODIFICABLE folder is NOT pruned
     expect(planWithPolicy.filesToPrune).toBe(0)
 
-    // Without directoryPolicies (default strict), extra file is flagged for pruning
+    // Without directoryPolicies (no protection without policy), extra file is not pruned
     const planWithoutPolicy = await manager.checkPlan({
       instanceRoot,
       clientFiles: [],
@@ -739,7 +739,20 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
     })
 
     expect(planWithoutPolicy.success).toBe(true)
-    expect(planWithoutPolicy.filesToPrune).toBe(1)
+    expect(planWithoutPolicy.filesToPrune).toBe(0)
+
+    // With explicit NO_MODIFICABLE policy, extra file is flagged for pruning
+    const planWithStrictPolicy = await manager.checkPlan({
+      instanceRoot,
+      clientFiles: [],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+    })
+
+    expect(planWithStrictPolicy.success).toBe(true)
+    expect(planWithStrictPolicy.filesToPrune).toBe(1)
   })
 
   it("30. Verification without damaged files: progress strictly non-decreasing, all in VERIFYING, reaches 100", async () => {

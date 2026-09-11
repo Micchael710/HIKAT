@@ -61,6 +61,10 @@ export declare function buildInstalledManifestData(
 
 export declare function loadInstalledManifest(instanceRoot: string): Promise<any>
 export declare function quickCheckProtectedIntegrity(instanceRoot: string, installedManifest: any): Promise<boolean>
+export declare function backgroundCheckProtectedSha(
+  instanceRoot: string,
+  installedManifest: any,
+): Promise<{ dirty: boolean; path?: string }>
 export declare function saveInstalledManifest(instanceRoot: string, manifestData: any): Promise<void>
 export declare function loadDownloadSession(instanceRoot: string): Promise<any>
 export declare function saveDownloadSession(instanceRoot: string, sessionData: any): Promise<void>

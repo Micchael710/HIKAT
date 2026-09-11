@@ -813,6 +813,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
 
     await saveInstalledManifest(instanceRoot, {
       modpackVersion: "1.0.0",
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
       files: {
         "mods/old-mod.jar": {
           officialSha256: "0".repeat(64),
@@ -839,6 +840,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
           downloadUrl: "http://127.0.0.1/kept.jar",
         },
       ],
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
       modpackVersion: "1.1.0",
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",

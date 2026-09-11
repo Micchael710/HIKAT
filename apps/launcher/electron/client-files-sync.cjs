@@ -7,7 +7,7 @@ const { pipeline } = require("stream/promises")
 const { Transform } = require("stream")
 const { resolveSafePath } = require("./path-validator.cjs")
 
-const ENFORCED_DIRECTORIES = ["mods", "resourcepacks", "shaderpacks", "kubejs", "scripts"]
+const ENFORCED_DIRECTORIES = []
 const DOWNLOAD_TIMEOUT_MS = 60000
 const DEFAULT_API_BASE_URL = "https://api.hikat.org"
 
@@ -558,6 +558,103 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
   return false
 }
 
+/**
+ * Background SHA-256 integrity check ONLY for files whose effective policy is "NO_MODIFICABLE".
+ * Does NOT block startup/Home.
+ * Compares against officialSha256.
+ * Respects MODIFICABLE child overrides and inheritance.
+ * Ignores files without protected policy.
+ * Handles symlinks/junctions safely.
+ * Returns { dirty: true, path } on mismatch or missing, or { dirty: false } if clean.
+ */
+async function backgroundCheckProtectedSha(instanceRoot, installedManifest) {
+  if (!instanceRoot || !installedManifest || typeof installedManifest !== "object") {
+    return { dirty: false }
+  }
+  const files = installedManifest.files
+  if (!files || typeof files !== "object") {
+    return { dirty: false }
+  }
+  const directoryPolicies = Array.isArray(installedManifest.directoryPolicies)
+    ? installedManifest.directoryPolicies
+    : []
+
+  function getEffectivePolicy(normPath) {
+    const item = files[normPath]
+    const p = item?.policy || (typeof item === "string" ? item : null)
+    if (p === "MODIFICABLE" || p === "NO_MODIFICABLE") {
+      return p
+    }
+    for (const dp of directoryPolicies) {
+      if (!dp?.path) continue
+      const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+      if (dNorm === normPath) {
+        return dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
+      }
+    }
+    const segments = normPath.split("/")
+    for (let i = segments.length - 1; i > 0; i--) {
+      const parentPath = segments.slice(0, i).join("/")
+      const parentItem = files[parentPath]
+      const parentPolicy = parentItem?.policy || (typeof parentItem === "string" ? parentItem : null)
+      if (parentPolicy === "MODIFICABLE" || parentPolicy === "NO_MODIFICABLE") {
+        return parentPolicy
+      }
+      for (const dp of directoryPolicies) {
+        if (!dp?.path) continue
+        const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+        if (dNorm === parentPath) {
+          return dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
+        }
+      }
+    }
+    return null
+  }
+
+  for (const [relPathRaw, item] of Object.entries(files)) {
+    if (!relPathRaw) continue
+    const norm = String(relPathRaw).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+    if (!norm || norm === ".") continue
+
+    const policy = getEffectivePolicy(norm)
+    if (policy !== "NO_MODIFICABLE") {
+      continue
+    }
+
+    const expectedSha = (item?.officialSha256 || item?.sha256 || "").toLowerCase().trim()
+    if (!expectedSha) continue
+
+    const fullPath = path.join(instanceRoot, norm)
+
+    try {
+      if (!fs.existsSync(fullPath)) {
+        return { dirty: true, path: norm }
+      }
+      const lstat = await fsp.lstat(fullPath)
+      if (lstat.isSymbolicLink()) {
+        try {
+          const realTarget = await fsp.realpath(fullPath)
+          const targetSha = await calculateFileSha256(realTarget)
+          if (targetSha !== expectedSha) {
+            return { dirty: true, path: norm }
+          }
+        } catch (_) {
+          return { dirty: true, path: norm }
+        }
+      } else {
+        const actualSha = await calculateFileSha256(fullPath)
+        if (actualSha !== expectedSha) {
+          return { dirty: true, path: norm }
+        }
+      }
+    } catch (_) {
+      return { dirty: true, path: norm }
+    }
+  }
+
+  return { dirty: false }
+}
+
 function resolveWatcherDecision(
   relPath,
   directoryPolicies = [],
@@ -756,7 +853,7 @@ async function generateSyncPlan(
       policy =
         resolvePathPolicy(normalizedRelative, dirPoliciesMap) ||
         resolvePathPolicy(normalizedRelative, previousFilesMap) ||
-        "NO_MODIFICABLE"
+        null
     }
 
     clientFilesMap.set(normalizedRelative, {
@@ -883,15 +980,17 @@ async function generateSyncPlan(
     }
   }
 
-  // Scan enforced directories and custom directoryPolicies for pruning unauthorized extra files, respecting MODIFICABLE folder policies
+  // Scan directories with explicit policies for pruning unauthorized extra files, respecting MODIFICABLE folder policies
   const scanDirsSet = new Set(ENFORCED_DIRECTORIES)
-  if (Array.isArray(directoryPolicies)) {
-    for (const dp of directoryPolicies) {
-      if (dp && dp.path) {
-        const norm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-        if (norm) {
-          scanDirsSet.add(norm)
-        }
+  const combinedPolicies = [
+    ...(Array.isArray(directoryPolicies) ? directoryPolicies : []),
+    ...(Array.isArray(installedManifest?.directoryPolicies) ? installedManifest.directoryPolicies : []),
+  ]
+  for (const dp of combinedPolicies) {
+    if (dp && dp.path) {
+      const norm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+      if (norm) {
+        scanDirsSet.add(norm)
       }
     }
   }
@@ -918,7 +1017,7 @@ async function generateSyncPlan(
               resolvePathPolicy(relative, dirPoliciesMap) ||
               resolvePathPolicy(relative, clientFilesMap) ||
               resolvePathPolicy(relative, previousFilesMap)
-            if (effPolicy !== "MODIFICABLE") {
+            if (effPolicy === "NO_MODIFICABLE") {
               plan.toPrune.push({ path: relative, safeAbsolute: fullPath })
             } else {
               plan.toPreserveUser.push({ path: relative, safeAbsolute: fullPath })
@@ -948,11 +1047,57 @@ async function generateSyncPlan(
   return plan
 }
 
+function isTransientNetworkError(err) {
+  if (!err) return false
+  if (err.isCancelled || err.isPaused) return false
+  const msg = String(err.message || "").toLowerCase()
+  if (msg.includes("cancelled") || msg.includes("paused") || msg.includes("mismatch") || msg.includes("security violation")) {
+    return false
+  }
+  const code = err.code || err.cause?.code
+  if (
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === "ECONNABORTED" ||
+    code === "ENOTFOUND" ||
+    code === "ECONNREFUSED" ||
+    code === "EAI_AGAIN" ||
+    code === "UND_ERR_CONNECT_TIMEOUT"
+  ) {
+    return true
+  }
+  if (msg.includes("timeout") || msg.includes("econnreset") || msg.includes("socket hang up")) {
+    return true
+  }
+  const status = err.response?.status
+  if (status === 408 || status === 429 || (status >= 500 && status <= 599)) {
+    return true
+  }
+  return false
+}
+
+async function waitBackoff(ms, cancelSignal) {
+  const step = 100
+  let elapsed = 0
+  while (elapsed < ms) {
+    if (cancelSignal?.isCancelled) {
+      throw new Error("Download cancelled")
+    }
+    if (cancelSignal?.isPaused) {
+      throw new Error("Download paused")
+    }
+    const chunk = Math.min(step, ms - elapsed)
+    await new Promise((resolve) => setTimeout(resolve, chunk))
+    elapsed += chunk
+  }
+}
+
 /**
  * Downloads a single file to staging path, streaming and validating SHA-256 and size on the fly.
  * Supports resuming from partial staging files via HTTP Range.
+ * Retries up to 3 times on transient network errors using 1s, 2s, 4s backoff.
  * On pause or generic network error: preserves partial file.
- * On explicit cancel or integrity mismatch: unlinks staging file.
+ * On explicit cancel or integrity mismatch: unlinks staging file without retry.
  */
 async function downloadToStaging(
   task,
@@ -962,155 +1107,176 @@ async function downloadToStaging(
   apiBaseUrl,
   onFallbackFullDownload,
 ) {
-  if (cancelSignal?.isCancelled) {
-    throw new Error("Download cancelled")
-  }
-  if (cancelSignal?.isPaused) {
-    throw new Error("Download paused")
-  }
-
   await fsp.mkdir(path.dirname(stagingPath), { recursive: true })
   const safeDownloadUrl = resolveAndValidateDownloadUrl(task.downloadUrl, apiBaseUrl)
 
-  // Inspect existing partial or complete staging file
-  let partialSize = 0
-  try {
-    if (fs.existsSync(stagingPath)) {
-      const stat = await fsp.stat(stagingPath)
-      if (task.sizeBytes > 0 && stat.size === task.sizeBytes) {
-        const existingSha = await calculateFileSha256(stagingPath)
-        if (existingSha === task.sha256.toLowerCase()) {
-          return { bytes: stat.size, sha256: existingSha }
+  const RETRY_DELAYS = [1000, 2000, 4000]
+  let attempt = 0
+
+  while (true) {
+    if (cancelSignal?.isCancelled) {
+      throw new Error("Download cancelled")
+    }
+    if (cancelSignal?.isPaused) {
+      throw new Error("Download paused")
+    }
+
+    // Inspect existing partial or complete staging file
+    let partialSize = 0
+    try {
+      if (fs.existsSync(stagingPath)) {
+        const stat = await fsp.stat(stagingPath)
+        if (task.sizeBytes > 0 && stat.size === task.sizeBytes) {
+          const existingSha = await calculateFileSha256(stagingPath)
+          if (existingSha === task.sha256.toLowerCase()) {
+            return { bytes: stat.size, sha256: existingSha }
+          } else {
+            await fsp.unlink(stagingPath).catch(() => {})
+          }
+        } else if (task.sizeBytes > 0 && stat.size > 0 && stat.size < task.sizeBytes) {
+          partialSize = stat.size
         } else {
           await fsp.unlink(stagingPath).catch(() => {})
         }
-      } else if (task.sizeBytes > 0 && stat.size > 0 && stat.size < task.sizeBytes) {
-        partialSize = stat.size
-      } else {
-        await fsp.unlink(stagingPath).catch(() => {})
       }
-    }
-  } catch (_) {
-    await fsp.unlink(stagingPath).catch(() => {})
-    partialSize = 0
-  }
-
-  const executeDownloadStream = async (useRange) => {
-    const headers = {}
-    if (useRange && partialSize > 0) {
-      headers["Range"] = `bytes=${partialSize}-`
+    } catch (_) {
+      await fsp.unlink(stagingPath).catch(() => {})
+      partialSize = 0
     }
 
-    let response
-    try {
-      response = await axios({
-        url: safeDownloadUrl,
-        method: "GET",
-        headers,
-        responseType: "stream",
-        timeout: DOWNLOAD_TIMEOUT_MS,
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-        maxRedirects: 5,
-        validateStatus: (status) => (status >= 200 && status < 300) || status === 416,
-        beforeRedirect: (options, responseDetails) => {
-          const redirectLocation = responseDetails.headers.location
-          if (redirectLocation) {
-            const redirectUrl = new URL(redirectLocation, options.href)
-            validateUrlSecurity(redirectUrl)
-          }
-        },
-      })
-    } catch (reqErr) {
-      if (cancelSignal?.isCancelled) {
-        await fsp.unlink(stagingPath).catch(() => {})
-        throw new Error("Download cancelled")
-      }
-      if (cancelSignal?.isPaused) {
-        throw new Error("Download paused")
-      }
-      throw reqErr
-    }
-
-    let isAppend = false
-    if (useRange && partialSize > 0) {
-      if (response.status === 206) {
-        const contentRange =
-          response.headers["content-range"] || response.headers["Content-Range"] || ""
-        const rangeMatch = contentRange.trim().match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i)
-        if (rangeMatch && parseInt(rangeMatch[1], 10) === partialSize) {
-          isAppend = true
-        }
+    const executeDownloadStream = async (useRange) => {
+      const headers = {}
+      if (useRange && partialSize > 0) {
+        headers["Range"] = `bytes=${partialSize}-`
       }
 
-      if (!isAppend) {
-        try {
-          if (response.data && typeof response.data.destroy === "function") {
-            response.data.destroy()
-          }
-        } catch (_) {}
-
-        if (typeof onFallbackFullDownload === "function") {
-          onFallbackFullDownload(partialSize)
-        }
-        await fsp.unlink(stagingPath).catch(() => {})
-        partialSize = 0
-
-        return executeDownloadStream(false)
-      }
-    }
-
-    const progressTransform = new Transform({
-      transform(chunk, _encoding, callback) {
+      let response
+      try {
+        response = await axios({
+          url: safeDownloadUrl,
+          method: "GET",
+          headers,
+          responseType: "stream",
+          timeout: DOWNLOAD_TIMEOUT_MS,
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          maxRedirects: 5,
+          validateStatus: (status) => (status >= 200 && status < 300) || status === 416,
+          beforeRedirect: (options, responseDetails) => {
+            const redirectLocation = responseDetails.headers.location
+            if (redirectLocation) {
+              const redirectUrl = new URL(redirectLocation, options.href)
+              validateUrlSecurity(redirectUrl)
+            }
+          },
+        })
+      } catch (reqErr) {
         if (cancelSignal?.isCancelled) {
-          callback(new Error("Download cancelled"))
-          return
+          await fsp.unlink(stagingPath).catch(() => {})
+          throw new Error("Download cancelled")
         }
         if (cancelSignal?.isPaused) {
-          callback(new Error("Download paused"))
-          return
+          throw new Error("Download paused")
         }
-        if (typeof onChunkBytes === "function") {
-          onChunkBytes(chunk.length)
-        }
-        callback(null, chunk)
-      },
-    })
+        throw reqErr
+      }
 
-    const fileWriteStream = fs.createWriteStream(stagingPath, {
-      flags: isAppend ? "a" : "w",
-    })
+      let isAppend = false
+      if (useRange && partialSize > 0) {
+        if (response.status === 206) {
+          const contentRange =
+            response.headers["content-range"] || response.headers["Content-Range"] || ""
+          const rangeMatch = contentRange.trim().match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i)
+          if (rangeMatch && parseInt(rangeMatch[1], 10) === partialSize) {
+            isAppend = true
+          }
+        }
+
+        if (!isAppend) {
+          try {
+            if (response.data && typeof response.data.destroy === "function") {
+              response.data.destroy()
+            }
+          } catch (_) {}
+
+          if (typeof onFallbackFullDownload === "function") {
+            onFallbackFullDownload(partialSize)
+          }
+          await fsp.unlink(stagingPath).catch(() => {})
+          partialSize = 0
+
+          return executeDownloadStream(false)
+        }
+      }
+
+      const progressTransform = new Transform({
+        transform(chunk, _encoding, callback) {
+          if (cancelSignal?.isCancelled) {
+            callback(new Error("Download cancelled"))
+            return
+          }
+          if (cancelSignal?.isPaused) {
+            callback(new Error("Download paused"))
+            return
+          }
+          if (typeof onChunkBytes === "function") {
+            onChunkBytes(chunk.length)
+          }
+          callback(null, chunk)
+        },
+      })
+
+      const fileWriteStream = fs.createWriteStream(stagingPath, {
+        flags: isAppend ? "a" : "w",
+      })
+
+      try {
+        await pipeline(response.data, progressTransform, fileWriteStream)
+      } catch (err) {
+        if (cancelSignal?.isCancelled) {
+          await fsp.unlink(stagingPath).catch(() => {})
+        }
+        throw err
+      }
+    }
 
     try {
-      await pipeline(response.data, progressTransform, fileWriteStream)
-    } catch (err) {
-      if (cancelSignal?.isCancelled) {
+      await executeDownloadStream(partialSize > 0)
+
+      // Validate complete file integrity at the end
+      const finalStat = await fsp.stat(stagingPath)
+      if (task.sizeBytes > 0 && finalStat.size !== task.sizeBytes) {
         await fsp.unlink(stagingPath).catch(() => {})
+        throw new Error(
+          `Size mismatch for ${task.path}. Expected: ${task.sizeBytes} bytes, Got: ${finalStat.size} bytes`,
+        )
+      }
+
+      const computedSha256 = await calculateFileSha256(stagingPath)
+      if (task.sha256 && computedSha256 !== task.sha256.toLowerCase()) {
+        await fsp.unlink(stagingPath).catch(() => {})
+        throw new Error(
+          `SHA-256 mismatch for ${task.path}. Expected: ${task.sha256}, Got: ${computedSha256}`,
+        )
+      }
+
+      return { bytes: finalStat.size, sha256: computedSha256 }
+    } catch (err) {
+      if (cancelSignal?.isCancelled || cancelSignal?.isPaused) {
+        throw err
+      }
+      const isMismatch =
+        String(err?.message || "").includes("mismatch") ||
+        String(err?.message || "").includes("Security violation")
+      if (!isMismatch && isTransientNetworkError(err) && attempt < RETRY_DELAYS.length) {
+        const delay = RETRY_DELAYS[attempt]
+        attempt++
+        await waitBackoff(delay, cancelSignal)
+        continue
       }
       throw err
     }
   }
-
-  await executeDownloadStream(partialSize > 0)
-
-  // Validate complete file integrity at the end
-  const finalStat = await fsp.stat(stagingPath)
-  if (task.sizeBytes > 0 && finalStat.size !== task.sizeBytes) {
-    await fsp.unlink(stagingPath).catch(() => {})
-    throw new Error(
-      `Size mismatch for ${task.path}. Expected: ${task.sizeBytes} bytes, Got: ${finalStat.size} bytes`,
-    )
-  }
-
-  const computedSha256 = await calculateFileSha256(stagingPath)
-  if (task.sha256 && computedSha256 !== task.sha256.toLowerCase()) {
-    await fsp.unlink(stagingPath).catch(() => {})
-    throw new Error(
-      `SHA-256 mismatch for ${task.path}. Expected: ${task.sha256}, Got: ${computedSha256}`,
-    )
-  }
-
-  return { bytes: finalStat.size, sha256: computedSha256 }
 }
 
 
@@ -1379,7 +1545,7 @@ function buildInstalledManifestData(
     if (item.policy === "MODIFICABLE" || item.policy === "NO_MODIFICABLE") {
       effectivePolicy = item.policy
     } else {
-      effectivePolicy = resolvePathPolicy(normalizedRelative, dirPoliciesMap) || "NO_MODIFICABLE"
+      effectivePolicy = resolvePathPolicy(normalizedRelative, dirPoliciesMap) || "MODIFICABLE"
     }
 
     newManifestFiles[normalizedRelative] = {
@@ -1394,6 +1560,7 @@ function buildInstalledManifestData(
     modpackVersion,
     lastSync: new Date().toISOString(),
     files: newManifestFiles,
+    directoryPolicies: Array.isArray(directoryPolicies) ? directoryPolicies : [],
   }
 }
 
@@ -1662,6 +1829,7 @@ module.exports = {
   resolveWatcherDecision,
   buildInstalledManifestData,
   quickCheckProtectedIntegrity,
+  backgroundCheckProtectedSha,
   ENFORCED_DIRECTORIES,
   getStagingPaths,
 }
