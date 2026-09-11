@@ -524,15 +524,11 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
         continue
       }
 
+      if (entry.isSymbolicLink()) {
+        return true // any symlink/junction under NO_MODIFICABLE is considered dirty directly
+      }
       let isDirectory = entry.isDirectory()
       let isFile = entry.isFile()
-      if (entry.isSymbolicLink()) {
-        try {
-          const s = await fsp.stat(path.join(fullDirPath, entry.name))
-          isDirectory = s.isDirectory()
-          isFile = s.isFile()
-        } catch (_) {}
-      }
 
       if (isDirectory) {
         if (!authorizedDirs.has(childRelPath)) {
@@ -632,20 +628,11 @@ async function backgroundCheckProtectedSha(instanceRoot, installedManifest) {
       }
       const lstat = await fsp.lstat(fullPath)
       if (lstat.isSymbolicLink()) {
-        try {
-          const realTarget = await fsp.realpath(fullPath)
-          const targetSha = await calculateFileSha256(realTarget)
-          if (targetSha !== expectedSha) {
-            return { dirty: true, path: norm }
-          }
-        } catch (_) {
-          return { dirty: true, path: norm }
-        }
-      } else {
-        const actualSha = await calculateFileSha256(fullPath)
-        if (actualSha !== expectedSha) {
-          return { dirty: true, path: norm }
-        }
+        return { dirty: true, path: norm }
+      }
+      const actualSha = await calculateFileSha256(fullPath)
+      if (actualSha !== expectedSha) {
+        return { dirty: true, path: norm }
       }
     } catch (_) {
       return { dirty: true, path: norm }
@@ -980,13 +967,10 @@ async function generateSyncPlan(
     }
   }
 
-  // Scan directories with explicit policies for pruning unauthorized extra files, respecting MODIFICABLE folder policies
+  // Scan directories with explicit policies from current release for pruning unauthorized extra files
   const scanDirsSet = new Set(ENFORCED_DIRECTORIES)
-  const combinedPolicies = [
-    ...(Array.isArray(directoryPolicies) ? directoryPolicies : []),
-    ...(Array.isArray(installedManifest?.directoryPolicies) ? installedManifest.directoryPolicies : []),
-  ]
-  for (const dp of combinedPolicies) {
+  const currentDirectoryPolicies = Array.isArray(directoryPolicies) ? directoryPolicies : []
+  for (const dp of currentDirectoryPolicies) {
     if (dp && dp.path) {
       const norm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
       if (norm) {
@@ -1013,10 +997,8 @@ async function generateSyncPlan(
           scannedPaths.add(relative)
 
           if (!clientFilesMap.has(relative)) {
-            const effPolicy =
-              resolvePathPolicy(relative, dirPoliciesMap) ||
-              resolvePathPolicy(relative, clientFilesMap) ||
-              resolvePathPolicy(relative, previousFilesMap)
+            // ONLY current directoryPolicies can decide if an extra file is NO_MODIFICABLE
+            const effPolicy = resolvePathPolicy(relative, dirPoliciesMap)
             if (effPolicy === "NO_MODIFICABLE") {
               plan.toPrune.push({ path: relative, safeAbsolute: fullPath })
             } else {

@@ -33,7 +33,7 @@ import {
 import { authService } from "../services/authService"
 import { serverService, LauncherServer } from "../services/serverService"
 import { gameService, ReleaseActivatedEvent } from "../services/gameService"
-import { getStoredBoolean, STORAGE_KEYS } from "../utils/settingsStorage"
+import { getStoredBoolean, STORAGE_KEYS, SETTINGS_CHANGED_EVENT } from "../utils/settingsStorage"
 import type { PublishedModpack } from "../vite-env"
 
 export type LauncherGameState = {
@@ -80,6 +80,53 @@ export function useLauncherState() {
   useEffect(() => {
     gameStatesRef.current = gameStates
   }, [gameStates])
+
+  const serversRef = useRef<LauncherServer[]>([])
+  useEffect(() => {
+    serversRef.current = servers
+  }, [servers])
+
+  const triggerAutoUpdateIfNeeded = useCallback(
+    async (
+      serverId: string,
+      published: PublishedModpack,
+      installedVer: string | null,
+      serverName?: string,
+    ) => {
+      const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+      if (!autoUpdatesEnabled) return
+      if (!installedVer) return // No existing installation: do not auto-install fresh game
+      if (published.version === installedVer) return
+      if (!Array.isArray(published.clientFiles)) return
+
+      try {
+        const launchStatus = await window.electronAPI?.getLaunchStatus?.({ gameId: serverId })
+        const isSameActive =
+          launchStatus?.activeOperationGameId === serverId &&
+          launchStatus?.activeOperationState !== "IDLE"
+        if (isSameActive) {
+          // If the same server is currently active/recovering, do not interrupt; wait for IDLE
+          return
+        }
+
+        const targetName = serverName || serversRef.current.find((s) => s.id === serverId)?.name
+        if (!targetName) return
+
+        await gameService.startSync(
+          published.clientFiles,
+          published.version,
+          published.minecraftVersion,
+          published.modLoader,
+          published.modLoaderVersion,
+          published.neoForgeVersion,
+          false,
+          published.directoryPolicies || [],
+          { gameId: serverId, gameName: targetName },
+        )
+      } catch (_) {}
+    },
+    [],
+  )
 
   const [selectedGameId, setSelectedGameIdState] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
@@ -141,6 +188,14 @@ export function useLauncherState() {
             }
             return next
           })
+
+          // Bootstrap auto-update check for servers with pending update
+          for (const server of list) {
+            const state = entries.find(([id]) => id === server.id)?.[1] || existingStates[server.id]
+            if (state?.publishedModpack && state.installedVersion && state.publishedModpack.version !== state.installedVersion) {
+              void triggerAutoUpdateIfNeeded(server.id, state.publishedModpack, state.installedVersion, server.name)
+            }
+          }
         }
 
         setServers(list)
@@ -166,7 +221,7 @@ export function useLauncherState() {
     } catch (_) {
       return []
     }
-  }, [])
+  }, [triggerAutoUpdateIfNeeded])
 
   const [lastReleaseEvent, setLastReleaseEvent] = useState<ReleaseActivatedEvent | null>(null)
 
@@ -174,51 +229,31 @@ export function useLauncherState() {
     loadServers()
   }, [loadServers])
 
-  const serversRef = useRef(servers)
+  // Listen for settings change: when AUTO_UPDATES is turned ON, re-evaluate all known servers
   useEffect(() => {
-    serversRef.current = servers
-  }, [servers])
+    const handleSettingsChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key: string; value: any }>
+      if (!customEvent.detail || customEvent.detail.key !== STORAGE_KEYS.AUTO_UPDATES) {
+        return
+      }
+      if (!Boolean(customEvent.detail.value)) {
+        return
+      }
 
-  const triggerAutoUpdateIfNeeded = useCallback(
-    async (
-      serverId: string,
-      published: PublishedModpack,
-      installedVer: string | null,
-    ) => {
-      const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
-      if (!autoUpdatesEnabled) return
-      if (!installedVer) return // No existing installation: do not auto-install fresh game
-      if (published.version === installedVer) return
-      if (!Array.isArray(published.clientFiles)) return
-
-      try {
-        const launchStatus = await window.electronAPI?.getLaunchStatus?.({ gameId: serverId })
-        const isSameActive =
-          launchStatus?.activeOperationGameId === serverId &&
-          launchStatus?.activeOperationState !== "IDLE"
-        if (isSameActive) {
-          // If the same server is currently active/recovering, do not interrupt; wait for IDLE
-          return
+      const currentStates = gameStatesRef.current
+      for (const server of serversRef.current) {
+        const state = currentStates[server.id]
+        if (state?.publishedModpack && state.installedVersion && state.publishedModpack.version !== state.installedVersion) {
+          void triggerAutoUpdateIfNeeded(server.id, state.publishedModpack, state.installedVersion, server.name)
         }
+      }
+    }
 
-        const server = serversRef.current.find((s) => s.id === serverId)
-        if (!server) return
-
-        await gameService.startSync(
-          published.clientFiles,
-          published.version,
-          published.minecraftVersion,
-          published.modLoader,
-          published.modLoaderVersion,
-          published.neoForgeVersion,
-          false,
-          published.directoryPolicies || [],
-          { gameId: server.id, gameName: server.name },
-        )
-      } catch (_) {}
-    },
-    [],
-  )
+    window.addEventListener(SETTINGS_CHANGED_EVENT, handleSettingsChange)
+    return () => {
+      window.removeEventListener(SETTINGS_CHANGED_EVENT, handleSettingsChange)
+    }
+  }, [triggerAutoUpdateIfNeeded])
 
   useEffect(() => {
     if (screen === "login") {

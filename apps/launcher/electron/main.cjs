@@ -2238,6 +2238,16 @@ async function runGameSync(ctx, payload) {
       activeOperationSnapshot.isCommitting = Boolean(operationManager.isCommitting)
     }
     if (phase === "IDLE") {
+      const deferredKey = ctx.gameId || "__default__"
+      if (deferredBackgroundShaChecks.has(deferredKey)) {
+        const deferred = deferredBackgroundShaChecks.get(deferredKey)
+        deferredBackgroundShaChecks.delete(deferredKey)
+        loadInstalledManifest(deferred.targetInstanceRoot).then((fresh) => {
+          if (fresh && fresh.modpackVersion) {
+            scheduleBackgroundShaCheck(ctx.gameId, deferred.targetInstanceRoot, fresh)
+          }
+        }).catch(() => {})
+      }
       resumeProgressFloor = null
       if (activeOperationGameId === ctx.gameId) {
         activeOperationGameId = null
@@ -2599,6 +2609,31 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   const ctx = resolveGameContext(payload)
 
   if (ctx.gameId) {
+    const isCurrentProcessing = Boolean(currentProcessingItem && currentProcessingItem.gameId === ctx.gameId)
+    if (isCurrentProcessing && operationManager.getState() === "IDLE") {
+      const isRecoveryItem = Boolean(
+        currentProcessingItem.savedPhase ||
+        (typeof currentProcessingItem.savedProgress === "number" && currentProcessingItem.savedProgress > 0)
+      )
+      currentProcessingItem = null
+
+      if (isRecoveryItem) {
+        try {
+          const manifest = await loadInstalledManifest(ctx.instanceRoot).catch(() => null)
+          if (manifest && manifest.modpackVersion) {
+            await cleanStaging(ctx.instanceRoot)
+          } else {
+            await cleanFreshInstall(ctx.instanceRoot)
+          }
+        } catch (_) {}
+      }
+
+      savePersistentDownloadQueue()
+      notifyDownloadQueueChanged()
+      processNextQueuedSync()
+      return { success: true, queuedRemoved: true }
+    }
+
     const queueIndex = downloadQueue.findIndex((item) => item.gameId === ctx.gameId)
     if (queueIndex !== -1) {
       const targetItem = downloadQueue[queueIndex]
@@ -2684,16 +2719,38 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   }
 })
 
-const activeBackgroundShaChecks = new Set()
+const activeBackgroundShaChecks = new Map()
+const deferredBackgroundShaChecks = new Map()
+
+function isGameOperatingOrSyncing(gameId) {
+  if (operationManager && operationManager.getState() !== "IDLE") {
+    if (!gameId || activeOperationGameId === gameId || currentProcessingItem?.gameId === gameId) {
+      return true
+    }
+  }
+  return false
+}
 
 function scheduleBackgroundShaCheck(gameId, targetInstanceRoot, manifest) {
   const key = gameId || "__default__"
+  if (isGameOperatingOrSyncing(gameId)) {
+    deferredBackgroundShaChecks.set(key, { targetInstanceRoot, manifest })
+    return
+  }
   if (activeBackgroundShaChecks.has(key)) return
-  activeBackgroundShaChecks.add(key)
 
-  setImmediate(async () => {
+  const checkingVersion = manifest?.modpackVersion
+
+  const checkPromise = (async () => {
     try {
       const result = await backgroundCheckProtectedSha(targetInstanceRoot, manifest)
+      if (isGameOperatingOrSyncing(gameId)) {
+        return { dirty: false }
+      }
+      const freshManifest = await loadInstalledManifest(targetInstanceRoot).catch(() => null)
+      if (!freshManifest || freshManifest.modpackVersion !== checkingVersion) {
+        return { dirty: false }
+      }
       if (result && result.dirty) {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("game-file-integrity-changed", {
@@ -2701,11 +2758,19 @@ function scheduleBackgroundShaCheck(gameId, targetInstanceRoot, manifest) {
             gameId: gameId || null,
           })
         }
+        return { dirty: true, path: result.path }
       }
+      return { dirty: false }
     } catch (_) {
+      return { dirty: false }
     } finally {
       activeBackgroundShaChecks.delete(key)
     }
+  })()
+
+  activeBackgroundShaChecks.set(key, {
+    promise: checkPromise,
+    modpackVersion: checkingVersion,
   })
 }
 
@@ -2802,6 +2867,15 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
     opPhase !== "VERIFYING" &&
     opState !== "VERIFYING"
   )
+
+  const shaCheckKey = ctx.gameId || "__default__"
+  const pendingShaCheck = activeBackgroundShaChecks.get(shaCheckKey)
+  if (pendingShaCheck && pendingShaCheck.promise) {
+    const checkRes = await pendingShaCheck.promise.catch(() => ({ dirty: false }))
+    if (checkRes && checkRes.dirty) {
+      throw new Error("Integrity check failed. Please verify game files.")
+    }
+  }
 
   return await operationManager.launchGame(gameLauncher, {
     gameId: ctx.gameId,
@@ -2999,5 +3073,16 @@ if (typeof module !== "undefined" && module.exports) {
     setMainWindowForTesting: (win) => {
       mainWindow = win
     },
+    scheduleBackgroundShaCheck,
+    activeBackgroundShaChecks,
+    deferredBackgroundShaChecks,
+    setCurrentProcessingItemForTesting: (item) => {
+      currentProcessingItem = item
+    },
+    getCurrentProcessingItemForTesting: () => currentProcessingItem,
+    setActiveOperationGameIdForTesting: (id) => {
+      activeOperationGameId = id
+    },
+    getActiveOperationGameIdForTesting: () => activeOperationGameId,
   }
 }
