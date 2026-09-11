@@ -205,7 +205,7 @@ export default function NewsCarousel({
     setOpenCard(card)
   }
 
-  if (contentState === "empty") {
+  if (contentState === "empty" || contentState === "loading") {
     return null
   }
 

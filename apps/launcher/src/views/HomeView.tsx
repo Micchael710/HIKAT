@@ -17,11 +17,14 @@ const NEWS_TITLE_TOP = 860
 const NEWS_CAROUSEL_TOP = 908
 
 const STATS_TOP_WITH_NEWS = 1410
-const STATS_TOP_EMPTY = 860
-const STATS_DELTA = STATS_TOP_WITH_NEWS - STATS_TOP_EMPTY // 550
+const STATS_TOP_EMPTY = 1120
+const STATS_DELTA = STATS_TOP_WITH_NEWS - STATS_TOP_EMPTY // 290
 
 const CUT_TOP_WITH_NEWS = 1310
-const CUT_TOP_EMPTY = CUT_TOP_WITH_NEWS - STATS_DELTA // 760
+const CUT_TOP_EMPTY = CUT_TOP_WITH_NEWS - STATS_DELTA // 1020
+
+export const CANVAS_H_NORMAL = 2460
+export const CANVAS_H_EMPTY = CANVAS_H_NORMAL - STATS_DELTA // 2170
 
 interface HomeViewProps {
   theme?: ThemeMode
@@ -34,6 +37,7 @@ interface HomeViewProps {
   serverGameState?: LauncherGameState
   onInstalledVersionChange?: (version: string | null) => void
   onClearIntegrityDirty?: () => void
+  onContentHeightChange?: (height: number) => void
 }
 
 export default function HomeView({
@@ -46,6 +50,7 @@ export default function HomeView({
   serverGameState,
   onInstalledVersionChange,
   onClearIntegrityDirty,
+  onContentHeightChange,
 }: HomeViewProps) {
   const { t } = useTranslation()
   const tokens = getThemeTokens(theme)
@@ -75,12 +80,36 @@ export default function HomeView({
   const [mediaError, setMediaError] = useState(false)
   const [mainLogoFailed, setMainLogoFailed] = useState(false)
   const [sidebarLogoFailed, setSidebarLogoFailed] = useState(false)
-  const [newsContentState, setNewsContentState] = useState<NewsContentState>("loading")
+  const [newsContentState, setNewsContentState] = useState<NewsContentState>(() => {
+    if (!activeServerId) return "empty"
+    try {
+      const cached = localStorage.getItem(`hikat_cached_news_${activeServerId}`)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed) && parsed.length > 0) return "content"
+      }
+    } catch (_) {}
+    return "loading"
+  })
   const [prevServerId, setPrevServerId] = useState(activeServerId)
 
   if (activeServerId !== prevServerId) {
     setPrevServerId(activeServerId)
-    setNewsContentState("loading")
+    let initialForNewServer: NewsContentState = "loading"
+    if (!activeServerId) {
+      initialForNewServer = "empty"
+    } else {
+      try {
+        const cached = localStorage.getItem(`hikat_cached_news_${activeServerId}`)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            initialForNewServer = "content"
+          }
+        }
+      } catch (_) {}
+    }
+    setNewsContentState(initialForNewServer)
   }
 
   // Immediately clear previous server visual state when selectedServer changes
@@ -89,10 +118,30 @@ export default function HomeView({
     setMainLogoFailed(false)
     setSidebarLogoFailed(false)
     setMediaError(false)
-    setNewsContentState("loading")
+    let initialForNewServer: NewsContentState = "loading"
+    if (!selectedServer?.id) {
+      initialForNewServer = "empty"
+    } else {
+      try {
+        const cached = localStorage.getItem(`hikat_cached_news_${selectedServer.id}`)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            initialForNewServer = "content"
+          }
+        }
+      } catch (_) {}
+    }
+    setNewsContentState(initialForNewServer)
   }, [selectedServer?.id])
 
   const isNewsEmpty = newsContentState === "empty"
+  const showNewsSection = newsContentState === "content" || newsContentState === "error"
+  const currentCanvasHeight = isNewsEmpty ? CANVAS_H_EMPTY : CANVAS_H_NORMAL
+
+  useEffect(() => {
+    onContentHeightChange?.(currentCanvasHeight)
+  }, [currentCanvasHeight, onContentHeightChange])
 
   useEffect(() => {
     setMainLogoFailed(false)
@@ -154,6 +203,7 @@ export default function HomeView({
 
   return (
     <div
+      data-home-canvas-height={currentCanvasHeight}
       style={{
         width: "100%",
         height: "100%",
@@ -208,7 +258,7 @@ export default function HomeView({
           left: 0,
           top: 1080,
           width: CANVAS_W,
-          height: CANVAS_H - 1080,
+          height: currentCanvasHeight - 1080,
           background: tokens.bgBase,
         }}
       />
@@ -246,7 +296,7 @@ export default function HomeView({
           left: 0,
           top: isNewsEmpty ? CUT_TOP_EMPTY : CUT_TOP_WITH_NEWS,
           width: CANVAS_W,
-          height: CANVAS_H - (isNewsEmpty ? CUT_TOP_EMPTY : CUT_TOP_WITH_NEWS),
+          height: currentCanvasHeight - (isNewsEmpty ? CUT_TOP_EMPTY : CUT_TOP_WITH_NEWS),
           background: tokens.homeBottomCutBg,
           clipPath: "polygon(0 32px, 100% 0, 100% 100%, 0 100%)",
           pointerEvents: "none",
@@ -315,7 +365,7 @@ export default function HomeView({
       </div>
 
       {/* ÚLTIMAS NOVEDADES (Positioned to peek smoothly at the bottom fold) */}
-      {!isNewsEmpty && (
+      {showNewsSection && (
         <div
           style={{
             position: "absolute",
@@ -332,27 +382,26 @@ export default function HomeView({
         </div>
       )}
 
-      {/* News carousel (Top ~170px of the thumbnail is visible before scrolling) */}
-      {!isNewsEmpty && (
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: NEWS_CAROUSEL_TOP,
-            height: 420,
-          }}
-        >
-          <NewsCarousel
-            canvasLeft={CONTENT_LEFT}
-            canvasWidth={CANVAS_W}
-            theme={theme}
-            isActive={isActive}
-            serverId={activeServerId}
-            onContentStateChange={setNewsContentState}
-          />
-        </div>
-      )}
+      {/* News carousel (Kept mounted to manage queries and state; visible only for content/error) */}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: NEWS_CAROUSEL_TOP,
+          height: 420,
+          display: showNewsSection ? "block" : "none",
+        }}
+      >
+        <NewsCarousel
+          canvasLeft={CONTENT_LEFT}
+          canvasWidth={CANVAS_W}
+          theme={theme}
+          isActive={isActive}
+          serverId={activeServerId}
+          onContentStateChange={setNewsContentState}
+        />
+      </div>
 
       {/* Server Stats & Community Hub Section */}
       <div

@@ -391,4 +391,43 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
     })
     container.remove()
   })
+
+  it("7. Dynamic Home Canvas Height in App: adapts to 2170px when empty and 2460px with news", async () => {
+    vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([
+      {
+        id: "server-empty",
+        name: "Servidor Vacío",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        launcherActiveReleaseId: "rel-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({ items: [], isCached: false })
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <App />
+        </LanguageProvider>,
+      )
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const canvasContainer = container.querySelector('[data-testid="home-canvas-container"]') as HTMLDivElement
+    expect(canvasContainer).toBeDefined()
+    expect(canvasContainer.style.height).toBe("2170px")
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
 })

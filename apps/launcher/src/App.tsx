@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react"
+import React, { useRef, useEffect, useState } from "react"
 import { useLauncherState } from "./hooks/useLauncherState"
 import { getThemeTokens, CANVAS_W, CANVAS_H, DEFAULT_ACCENT_HEX, DEFAULT_ACCENT_RGB } from "./theme/tokens"
 import LauncherTitlebar from "./components/layout/LauncherTitlebar"
@@ -65,6 +65,7 @@ export default function App() {
 
   const tokens = getThemeTokens(theme)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [homeCanvasHeight, setHomeCanvasHeight] = useState<number>(CANVAS_H)
 
   // Reset scroll to top (0) whenever switching views (Home, Skins, Settings, Profile)
   useEffect(() => {
@@ -78,6 +79,7 @@ export default function App() {
     if (view === "home" && scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0
     }
+    setHomeCanvasHeight(CANVAS_H)
   }, [selectedGameId, view])
 
   // Listen for auth deep links (/verify-email, /reset-password) when user is authenticated inside launcher
@@ -217,12 +219,13 @@ export default function App() {
           }}
         >
           <div
+            data-testid="home-canvas-container"
             ref={(el) => {
               if (el) el.style.zoom = String(scale)
             }}
             style={{
               width: CANVAS_W,
-              height: view === "home" ? CANVAS_H : 1080,
+              height: view === "home" ? homeCanvasHeight : 1080,
               position: "relative",
               overflow: "hidden",
             }}
@@ -239,6 +242,7 @@ export default function App() {
                 serverGameState={currentServerState}
                 onInstalledVersionChange={(v) => selectedServer && updateInstalledVersion(selectedServer.id, v)}
                 onClearIntegrityDirty={() => selectedServer && clearIntegrityDirty(selectedServer.id)}
+                onContentHeightChange={setHomeCanvasHeight}
               />
             </div>
             {view === "skins" && (
