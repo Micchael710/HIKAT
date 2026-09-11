@@ -96,6 +96,7 @@ class GameOperationManager {
     this.activeSyncPromise = null
     this.activeOperationPromise = null
     this.lastPayload = null
+    this.lastPausedPhase = null
     this.operationCounter = 0
 
     this.javaResolver = options.javaResolver || resolveJavaRuntime
@@ -271,14 +272,17 @@ class GameOperationManager {
     }
     this.activeCancelSignal = cancelSignal
 
-    const effectiveState = isVerify ? "VERIFYING" : "SYNCING"
+    const isPausedInstalling = this.lastPausedPhase === "INSTALLING"
+    const effectiveState = isVerify ? "VERIFYING" : (isPausedInstalling ? "INSTALLING" : "SYNCING")
+    const initialPhase = isVerify ? "VERIFYING" : (isPausedInstalling ? "INSTALLING" : "DOWNLOADING")
+    this.lastPausedPhase = null
     this.state = effectiveState
     if (typeof onPhaseChange === "function") {
-      onPhaseChange(isVerify ? "VERIFYING" : "DOWNLOADING")
+      onPhaseChange(initialPhase)
     }
 
     const runOperation = async () => {
-      let currentPhaseName = null
+      let currentPhaseName = initialPhase
       let maxReportedProgress = 0
       const safeProgress = (data) => {
         if (typeof onProgress !== "function" || !data) return
@@ -515,10 +519,11 @@ class GameOperationManager {
       } catch (err) {
         if (cancelSignal.isPaused) {
           this.state = "PAUSED"
+          this.lastPausedPhase = currentPhaseName || (this.state === "INSTALLING" ? "INSTALLING" : "DOWNLOADING")
           await saveDownloadSession(instanceRoot, {
             modpackVersion,
             status: "PAUSED",
-            phase: currentPhaseName || "INSTALLING",
+            phase: this.lastPausedPhase,
             operationKind: isVerify ? "VERIFY" : "SYNC",
             progress: maxReportedProgress,
             updatedAt: new Date().toISOString(),
@@ -581,6 +586,7 @@ class GameOperationManager {
         await cleanStaging(instanceRoot)
       } catch (_) {}
     }
+    this.lastPausedPhase = null
     this.state = "IDLE"
     return { success: true, state: "IDLE" }
   }

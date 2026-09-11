@@ -506,12 +506,18 @@ export const gameService = {
     neoForgeVersion?: string | null,
     isVerify?: boolean,
     directoryPolicies?: import("../vite-env").DirectoryPolicy[],
-    gameContext?: { gameId: string; gameName: string },
+    gameContext?: { gameId: string; gameName: string } | null,
   ) {
+    let actualDirectoryPolicies = directoryPolicies
+    let actualGameContext = gameContext
+    if (directoryPolicies && !Array.isArray(directoryPolicies) && (directoryPolicies as any).gameId) {
+      actualGameContext = directoryPolicies as any
+      actualDirectoryPolicies = []
+    }
     if (window.electronAPI?.startSync) {
       return await window.electronAPI.startSync({
         clientFiles,
-        directoryPolicies,
+        directoryPolicies: actualDirectoryPolicies,
         modpackVersion,
         minecraftVersion,
         modLoader,
@@ -519,13 +525,13 @@ export const gameService = {
         neoForgeVersion: neoForgeVersion ?? undefined,
         apiBaseUrl: getApiBaseUrl(),
         isVerify,
-        gameId: gameContext?.gameId,
-        gameName: gameContext?.gameName,
+        gameId: actualGameContext?.gameId,
+        gameName: actualGameContext?.gameName,
       })
     }
   },
 
-  async resumeSync(gameContext?: { gameId: string; gameName: string }) {
+  async resumeSync(gameContext?: { gameId: string; gameName: string } | null) {
     if (window.electronAPI?.startSync) {
       return await window.electronAPI.startSync({
         gameId: gameContext?.gameId,

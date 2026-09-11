@@ -1828,14 +1828,16 @@ async function runGameSync(ctx, payload) {
   }
 
   activeOperationGameId = ctx.gameId
-  activeOperationSnapshot = {
-    gameId: ctx.gameId || null,
-    phase: payload.isVerify ? "VERIFYING" : "DOWNLOADING",
-    progress: 0,
-    speedMBs: 0,
-    downloadedBytes: 0,
-    totalBytes: 0,
-    remainingMinutes: 0,
+  if (!activeOperationSnapshot || activeOperationSnapshot.gameId !== ctx.gameId) {
+    activeOperationSnapshot = {
+      gameId: ctx.gameId || null,
+      phase: payload.isVerify ? "VERIFYING" : "DOWNLOADING",
+      progress: 0,
+      speedMBs: 0,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      remainingMinutes: 0,
+    }
   }
   notifyDownloadQueueChanged()
 
@@ -1921,12 +1923,38 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
   const ctx = resolveGameContext(payload)
 
   if (payload.resume) {
-    if (activeOperationGameId !== ctx.gameId) {
-      throw new Error("Cannot resume sync for another game.")
+    if (operationManager.getState() === "PAUSED") {
+      if (activeOperationGameId && activeOperationGameId !== ctx.gameId) {
+        throw new Error("Cannot resume sync for another game.")
+      }
+      autoPausedDownloadGameId = null
+      const res = await operationManager.resumeSync()
+      if (operationManager.getState() === "IDLE") {
+        if (activeOperationGameId === ctx.gameId) {
+          activeOperationGameId = null
+          activeOperationSnapshot = null
+        }
+        processNextQueuedSync()
+      }
+      notifyDownloadQueueChanged()
+      return res
     }
-    if (operationManager.getState() !== "PAUSED") {
-      throw new Error("Cannot resume sync: operation is not paused.")
+    if (activeOperationGameId === ctx.gameId) {
+      return { alreadyActive: true }
     }
+    return await runGameSync(ctx, payload)
+  }
+
+  if (payload.isVerify) {
+    if (operationManager.getState() !== "IDLE") {
+      if (activeOperationGameId !== ctx.gameId) {
+        throw new Error("Another game operation is already in progress.")
+      }
+    }
+    return await runGameSync(ctx, payload)
+  }
+
+  if (activeOperationGameId === ctx.gameId && operationManager.getState() === "PAUSED") {
     autoPausedDownloadGameId = null
     const res = await operationManager.resumeSync()
     if (operationManager.getState() === "IDLE") {
@@ -1940,19 +1968,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     return res
   }
 
-  if (payload.isVerify) {
-    if (operationManager.getState() !== "IDLE") {
-      if (activeOperationGameId !== ctx.gameId) {
-        throw new Error("Another game operation is already in progress.")
-      }
-    }
-    return await runGameSync(ctx, payload)
-  }
-
-  if (
-    operationManager.getState() === "IDLE" ||
-    (activeOperationGameId === ctx.gameId && operationManager.getState() === "PAUSED")
-  ) {
+  if (operationManager.getState() === "IDLE") {
     autoPausedDownloadGameId = null
     return await runGameSync(ctx, payload)
   }

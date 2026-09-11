@@ -128,6 +128,7 @@ export default function DownloadPlayButton({
 
   const [progress, setProgress] = useState(0)
   const highWaterProgressRef = useRef(0)
+  const pausedPhaseRef = useRef<"downloading" | "installing">("downloading")
   const [speed, setSpeed] = useState(0)
   const [totalBytes, setTotalBytes] = useState(0)
   const [downloadedBytes, setDownloadedBytes] = useState(0)
@@ -416,12 +417,17 @@ export default function DownloadPlayButton({
             )
             const opPhase = queueSnap?.active?.phase || launchInfo?.activeOperationPhase || launchInfo?.operationState
             if (isPaused) {
+              if (opPhase === "INSTALLING") {
+                pausedPhaseRef.current = "installing"
+              }
               setStatus("paused")
             } else if (opPhase === "INSTALLING") {
+              pausedPhaseRef.current = "installing"
               setStatus("installing")
             } else if (opPhase === "VERIFYING") {
               setStatus("verifying")
             } else {
+              pausedPhaseRef.current = "downloading"
               setStatus("downloading")
             }
 
@@ -462,6 +468,9 @@ export default function DownloadPlayButton({
                 : total > 0 && staged > 0 ? Math.min(100, Math.round((staged / total) * 100)) : 0
             highWaterProgressRef.current = pct
             setProgress(pct)
+            if (res.pausedPhase === "INSTALLING") {
+              pausedPhaseRef.current = "installing"
+            }
             setStatus("paused")
           } else {
             const isThisGameRunning =
@@ -802,13 +811,16 @@ export default function DownloadPlayButton({
     if (!isLocalAllowed) return
     const unsubProgress = window.electronAPI?.onDownloadProgress?.((data: any) => {
       if (gameContext) {
-        if (data?.gameId !== gameContext.gameId) return
+        if (data?.gameId && data.gameId !== gameContext.gameId) return
       }
       if (!isStartingSyncRef.current) {
         isStartingSyncRef.current = true
       }
       const rawProgress = typeof data.progress === "number" ? data.progress : 0
-      const isOngoing = statusRef.current === "downloading" || statusRef.current === "installing"
+      const isOngoing =
+        statusRef.current === "downloading" ||
+        statusRef.current === "installing" ||
+        statusRef.current === "paused"
       const effectiveProgress = isOngoing ? Math.max(highWaterProgressRef.current, rawProgress) : rawProgress
       highWaterProgressRef.current = effectiveProgress
       setProgress(effectiveProgress)
@@ -825,8 +837,14 @@ export default function DownloadPlayButton({
         if (prev === "verifying") return prev
         if (prev === "launching" || prev === "running") return prev
         if (prev !== "downloading" && prev !== "installing" && prev !== "queued" && prev !== "paused") return prev
-        if (data.phase === "INSTALLING") return "installing"
-        if (data.phase === "DOWNLOADING") return "downloading"
+        if (data.phase === "INSTALLING") {
+          pausedPhaseRef.current = "installing"
+          return "installing"
+        }
+        if (data.phase === "DOWNLOADING") {
+          pausedPhaseRef.current = "downloading"
+          return "downloading"
+        }
         return prev
       })
     })
@@ -872,11 +890,13 @@ export default function DownloadPlayButton({
       }
 
       if (phase === "DOWNLOADING") {
+        pausedPhaseRef.current = "downloading"
         setStatus("downloading")
         return
       }
 
       if (phase === "INSTALLING") {
+        pausedPhaseRef.current = "installing"
         setStatus("installing")
         return
       }
@@ -915,16 +935,24 @@ export default function DownloadPlayButton({
       if (snap.active?.gameId === currentTargetId) {
         const isPaused = Boolean(snap.active.isPaused || snap.active.phase === "PAUSED")
         if (isPaused) {
+          if (snap.active.phase === "INSTALLING") {
+            pausedPhaseRef.current = "installing"
+          }
           setStatus("paused")
         } else if (snap.active.phase === "INSTALLING") {
+          pausedPhaseRef.current = "installing"
           setStatus("installing")
         } else if (snap.active.phase === "VERIFYING") {
           setStatus("verifying")
         } else {
+          pausedPhaseRef.current = "downloading"
           setStatus("downloading")
         }
         if (typeof snap.active.progress === "number") {
-          const isOngoing = statusRef.current === "downloading" || statusRef.current === "installing"
+          const isOngoing =
+            statusRef.current === "downloading" ||
+            statusRef.current === "installing" ||
+            statusRef.current === "paused"
           const effectiveProgress = isOngoing ? Math.max(highWaterProgressRef.current, snap.active.progress) : snap.active.progress
           highWaterProgressRef.current = effectiveProgress
           setProgress(effectiveProgress)
@@ -1012,9 +1040,11 @@ export default function DownloadPlayButton({
 
     if (status === "downloading" || status === "installing") {
       setIsTransitioning(true)
+      const currentPhase = status
       try {
         const res: any = await gameService.pauseSync(effectiveGameContext)
         if (res?.paused || res?.success || res === true) {
+          pausedPhaseRef.current = currentPhase
           setStatus("paused")
           syncOpIdRef.current++
           isStartingSyncRef.current = false
@@ -1040,7 +1070,8 @@ export default function DownloadPlayButton({
       }
       const syncOpId = ++syncOpIdRef.current
       isStartingSyncRef.current = true
-      setStatus("downloading")
+      const nextStatus = pausedPhaseRef.current === "installing" ? "installing" : "downloading"
+      setStatus(nextStatus)
 
       const syncingVersion = manifest.version
 
