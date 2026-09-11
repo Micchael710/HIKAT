@@ -2594,5 +2594,101 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     expect(snap.queued[1].gameId).toBe("server-c")
     expect(snap.queued[1].position).toBe(2)
   })
+
+  // 59. game-start-sync recibe mismo gameId mientras existe recovery pendiente: no ejecuta runGameSync nuevo, no duplica item, FIFO queda intacto
+  it("59. game-start-sync recibe mismo gameId mientras existe recovery pendiente: no ejecuta runGameSync nuevo, no duplica item y FIFO queda intacto", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "DOWNLOADING",
+        progress: 55,
+        downloadedBytes: 5500,
+        totalBytes: 10000,
+        pausedByUser: false,
+      },
+      queue: [
+        { gameId: "server-b", gameName: "Server Beta", payload: { gameId: "server-b", modpackVersion: "1.0.0", clientFiles: [] } },
+      ],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync")
+    const startHandler = ipcHandlers.get("game-start-sync")!
+
+    // Invocación redundante del renderer para el mismo server-a mientras está en recovery pendiente
+    const res = await startHandler({}, { gameId: "server-a", gameName: "Server Alpha", clientFiles: [] })
+
+    expect(res).toEqual({ alreadyActive: true })
+    expect(startSyncSpy).not.toHaveBeenCalled()
+
+    const queue = mainExports.getDownloadQueue()
+    expect(queue.length).toBe(2)
+    expect(queue[0].gameId).toBe("server-a")
+    expect(queue[0].savedPhase).toBe("DOWNLOADING")
+    expect(queue[0].savedProgress).toBe(55)
+    expect(queue[1].gameId).toBe("server-b")
+
+    // Si entra otro server-c mientras recovery está pendiente, se encola detrás en FIFO
+    const resC = await startHandler({}, { gameId: "server-c", gameName: "Server Gamma", clientFiles: [] })
+    expect(resC.queued).toBe(true)
+    expect(queue.length).toBe(3)
+    expect(queue[2].gameId).toBe("server-c")
+    expect(startSyncSpy).not.toHaveBeenCalled()
+
+    startSyncSpy.mockRestore()
+  })
+
+  // 60. PAUSED persistente sigue funcionando exactamente igual
+  it("60. PAUSED persistente sigue funcionando exactamente igual y no se altera con los cambios de recovery", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: {
+          gameId: "server-a",
+          gameName: "Server Alpha",
+          modpackVersion: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          clientFiles: [],
+        },
+        phase: "DOWNLOADING",
+        progress: 35,
+        downloadedBytes: 3500,
+        totalBytes: 10000,
+        pausedByUser: true,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    expect(mainExports.isRestoredUserPauseForTesting()).toBe(true)
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active?.state).toBe("PAUSED")
+    expect(snap.active?.progress).toBe(35)
+
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async () => {
+      mainExports.operationManager.state = "DOWNLOADING"
+      return { success: true }
+    })
+    const startHandler = ipcHandlers.get("game-start-sync")!
+
+    // Reanudar manualmente
+    const resumeRes = await startHandler({}, { gameId: "server-a", gameName: "Server Alpha", resume: true })
+    expect(startSyncSpy).toHaveBeenCalledTimes(1)
+    expect(mainExports.isRestoredUserPauseForTesting()).toBe(false)
+
+    startSyncSpy.mockRestore()
+  })
 })
 

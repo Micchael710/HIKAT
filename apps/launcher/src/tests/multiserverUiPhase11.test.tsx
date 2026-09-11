@@ -2121,5 +2121,200 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
 
     expect(container.textContent).toContain("ACTUALIZAR")
   })
+
+  // 39. Recovery pendiente DOWNLOADING + Auto Update ON: NO llama triggerSync adicional
+  it("39. Recovery pendiente DOWNLOADING + Auto Update ON: NO llama triggerSync adicional", async () => {
+    localStorage.setItem("hikat_auto_updates", "true")
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    const interruptedSnap = {
+      active: {
+        gameId: "meliora",
+        gameName: "Meliora",
+        state: "SYNCING",
+        phase: "DOWNLOADING",
+        progress: 45,
+        speedMBs: 0,
+        downloadedBytes: 450,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: true,
+        canCancel: true,
+        isPendingResume: true,
+      },
+      queued: [],
+    }
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue(interruptedSnap)
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "idle",
+      runningGameId: null,
+      activeOperationGameId: "meliora",
+      activeOperationState: "SYNCING",
+      activeOperationPhase: "DOWNLOADING",
+      operationState: "SYNCING",
+    })
+
+    const updatedModpack: PublishedModpack = {
+      ...melioraModpack,
+      version: "2.1.0",
+      clientFiles: [{
+        path: "mods/new.jar",
+        sha256: "abc",
+        sizeBytes: 100,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: "https://example.com/new.jar",
+      }],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            serverId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={updatedModpack}
+            installedVersion="1.9.0"
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    startSyncSpy.mockRestore()
+  })
+
+  // 40. Recovery pendiente INSTALLING + Auto Update ON: NO llama triggerSync adicional
+  it("40. Recovery pendiente INSTALLING + Auto Update ON: NO llama triggerSync adicional", async () => {
+    localStorage.setItem("hikat_auto_updates", "true")
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    const interruptedSnap = {
+      active: {
+        gameId: "meliora",
+        gameName: "Meliora",
+        state: "SYNCING",
+        phase: "INSTALLING",
+        progress: 85,
+        speedMBs: 0,
+        downloadedBytes: 1000,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: true,
+        canCancel: true,
+        isPendingResume: true,
+      },
+      queued: [],
+    }
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue(interruptedSnap)
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "idle",
+      runningGameId: null,
+      activeOperationGameId: "meliora",
+      activeOperationState: "INSTALLING",
+      activeOperationPhase: "INSTALLING",
+      operationState: "INSTALLING",
+    })
+
+    const updatedModpack: PublishedModpack = {
+      ...melioraModpack,
+      version: "2.1.0",
+      clientFiles: [{
+        path: "mods/new.jar",
+        sha256: "abc",
+        sizeBytes: 100,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: "https://example.com/new.jar",
+      }],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            serverId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={updatedModpack}
+            installedVersion="1.9.0"
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    startSyncSpy.mockRestore()
+  })
+
+  // 41. Cuando no existe recovery: Auto Update sigue funcionando normalmente
+  it("41. Cuando no existe recovery: Auto Update sigue funcionando normalmente llamando triggerSync", async () => {
+    localStorage.setItem("hikat_auto_updates", "true")
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue({
+      active: null,
+      queued: [],
+    })
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "idle",
+      runningGameId: null,
+      activeOperationGameId: null,
+      activeOperationState: "IDLE",
+      activeOperationPhase: null,
+      operationState: "IDLE",
+    })
+
+    const updatedModpack: PublishedModpack = {
+      ...melioraModpack,
+      version: "2.1.0",
+      clientFiles: [{
+        path: "mods/new.jar",
+        sha256: "abc",
+        sizeBytes: 100,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: "https://example.com/new.jar",
+      }],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            serverId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={updatedModpack}
+            installedVersion="1.9.0"
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(startSyncSpy).toHaveBeenCalledTimes(1)
+    startSyncSpy.mockRestore()
+  })
 })
 

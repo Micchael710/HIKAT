@@ -473,6 +473,19 @@ export default function DownloadPlayButton({
           return
         }
 
+        const isMainOpStateActive =
+          launchInfo?.operationState === "PAUSED" ||
+          launchInfo?.operationState === "SYNCING" ||
+          launchInfo?.operationState === "INSTALLING" ||
+          launchInfo?.operationState === "VERIFYING"
+
+        const isSameServerActiveOp =
+          (!currentTargetId || !launchInfo?.activeOperationGameId || launchInfo?.activeOperationGameId === currentTargetId) &&
+          (launchInfo?.activeOperationState === "PAUSED" ||
+            launchInfo?.activeOperationState === "SYNCING" ||
+            launchInfo?.activeOperationState === "INSTALLING" ||
+            launchInfo?.activeOperationState === "VERIFYING")
+
         const isOperationActive =
           isStartingSyncRef.current ||
           statusRef.current === "downloading" ||
@@ -481,8 +494,8 @@ export default function DownloadPlayButton({
           statusRef.current === "paused" ||
           statusRef.current === "launching" ||
           statusRef.current === "running" ||
-          launchInfo?.operationState === "PAUSED" ||
-          launchInfo?.activeOperationState === "PAUSED"
+          isMainOpStateActive ||
+          Boolean(isSameServerActiveOp)
 
         if (!isOperationActive) {
           autoUpdatedVersionRef.current = publishedModpack.version

@@ -2440,7 +2440,30 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     return res
   }
 
-  if (operationManager.getState() === "IDLE" && !isRestoredUserPause) {
+  const isTargetInRecovery = Boolean(
+    (currentProcessingItem &&
+      currentProcessingItem.gameId === ctx.gameId &&
+      (currentProcessingItem.savedPhase || (typeof currentProcessingItem.savedProgress === "number" && currentProcessingItem.savedProgress > 0))) ||
+    downloadQueue.some(
+      (item) =>
+        item &&
+        item.gameId === ctx.gameId &&
+        (item.savedPhase || (typeof item.savedProgress === "number" && item.savedProgress > 0))
+    )
+  )
+
+  if (isTargetInRecovery) {
+    return {
+      alreadyActive: true,
+    }
+  }
+
+  const hasAnyPendingRecovery = Boolean(
+    (currentProcessingItem && (currentProcessingItem.savedPhase || (typeof currentProcessingItem.savedProgress === "number" && currentProcessingItem.savedProgress > 0))) ||
+    downloadQueue.some((item) => item && (item.savedPhase || (typeof item.savedProgress === "number" && item.savedProgress > 0)))
+  )
+
+  if (operationManager.getState() === "IDLE" && !isRestoredUserPause && !hasAnyPendingRecovery) {
     autoPausedDownloadGameId = null
     return await runGameSync(ctx, payload)
   }
