@@ -659,51 +659,73 @@ export default function DownloadsView({
                           />
                         </div>
 
-                        {/* Progress Details Row: Stable CSS Grid */}
+                        {/* Progress Details: Two-Zone Layout (Left: Size & Speed, Right: Percent & ETA) */}
                         <div
                           style={{
-                            display: "grid",
-                            gridTemplateColumns: "minmax(160px, 1.2fr) minmax(60px, 0.8fr) minmax(110px, 1fr) minmax(140px, 1.2fr)",
-                            alignItems: "center",
-                            fontSize: 14.5,
-                            color: isDark ? "#8899aa" : "#64748b",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            gap: 16,
                           }}
                         >
-                          <div data-testid="download-metric-size" style={{ textAlign: "left", whiteSpace: "nowrap" }}>
-                            {total > 0 ? `${formatBytes(downloaded)} / ${formatBytes(total)}` : "--"}
-                          </div>
-
+                          {/* Bloque Izquierdo: tamaño descargado / total y velocidad */}
                           <div
-                            data-testid="download-metric-percent"
                             style={{
-                              textAlign: "center",
-                              fontWeight: 700,
-                              color: isDark ? "#ffffff" : "#111822",
-                              whiteSpace: "nowrap",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 16,
+                              fontSize: 14.5,
+                              color: isDark ? "#8899aa" : "#64748b",
                             }}
                           >
-                            {progress}%
+                            <div data-testid="download-metric-size" style={{ whiteSpace: "nowrap" }}>
+                              {total > 0 ? `${formatBytes(downloaded)} / ${formatBytes(total)}` : "--"}
+                            </div>
+
+                            <div
+                              data-testid="download-metric-speed"
+                              style={{
+                                fontWeight: 600,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {!isPaused && speedMBs > 0 ? `${speedMBs.toFixed(1)} MB/s` : ""}
+                            </div>
                           </div>
 
+                          {/* Bloque Derecho: porcentaje como dato principal a la derecha, ETA debajo */}
                           <div
-                            data-testid="download-metric-speed"
                             style={{
-                              textAlign: "center",
-                              fontWeight: 600,
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {!isPaused && speedMBs > 0 ? `${speedMBs.toFixed(1)} MB/s` : ""}
-                          </div>
-
-                          <div
-                            data-testid="download-metric-eta"
-                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "flex-end",
                               textAlign: "right",
-                              whiteSpace: "nowrap",
                             }}
                           >
-                            {!isPaused && remainingMin > 0 ? `${remainingMin} min ${t("downloads.remaining")}` : ""}
+                            <div
+                              data-testid="download-metric-percent"
+                              style={{
+                                fontWeight: 800,
+                                fontSize: 16,
+                                lineHeight: 1.1,
+                                color: isDark ? "#ffffff" : "#111822",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {progress}%
+                            </div>
+
+                            <div
+                              data-testid="download-metric-eta"
+                              style={{
+                                fontSize: 12.5,
+                                color: isDark ? "#8899aa" : "#64748b",
+                                whiteSpace: "nowrap",
+                                marginTop: !isPaused && remainingMin > 0 ? 3 : 0,
+                              }}
+                            >
+                              {!isPaused && remainingMin > 0 ? `${remainingMin} min ${t("downloads.remaining")}` : ""}
+                            </div>
                           </div>
                         </div>
                       </div>

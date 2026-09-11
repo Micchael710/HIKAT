@@ -1088,7 +1088,7 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     // 2. No se dibuja el punto/círculo junto al estado
     expect(statusText?.querySelector("span[style*='border-radius: 50%']")).toBeNull()
 
-    // 3. Métricas separadas en columnas propias
+    // 3. Métricas reorganizadas en dos zonas: izquierda (tamaño + velocidad) y derecha (porcentaje + ETA)
     const sizeEl = container.querySelector("[data-testid='download-metric-size']")
     const percentEl = container.querySelector("[data-testid='download-metric-percent']")
     const speedEl = container.querySelector("[data-testid='download-metric-speed']")
@@ -1101,6 +1101,10 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     // Durante pausa, velocidad y ETA no muestran información falsa
     expect(speedEl?.textContent).toBe("")
     expect(etaEl?.textContent).toBe("")
+    // Verificación estructural de dos zonas (izquierda vs derecha)
+    expect(sizeEl?.parentElement).toBe(speedEl?.parentElement)
+    expect(percentEl?.parentElement).toBe(etaEl?.parentElement)
+    expect(sizeEl?.parentElement).not.toBe(percentEl?.parentElement)
 
     // 4. Transición a DOWNLOADING con métricas activas
     await act(async () => {
