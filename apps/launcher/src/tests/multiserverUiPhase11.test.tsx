@@ -1405,6 +1405,7 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
             left={0}
             top={0}
             serverId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
             publishedModpack={hookState.gameStates.meliora.publishedModpack}
             installedVersion={hookState.gameStates.meliora.installedVersion}
             integrityDirty={hookState.gameStates.meliora.integrityDirty}
@@ -1449,6 +1450,235 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
 
     expect(clearDirtyCalled).toBe(true)
     expect((window as any).electronAPI.launchGame).toHaveBeenCalled()
+  })
+
+  it("7. DownloadPlayButton multiservidor NO registra listener propio de integridad; modo legacy sí", async () => {
+    let buttonRegisteredIntegrityListener = false
+    ;(window as any).electronAPI.onGameFileIntegrityChanged = vi.fn(() => {
+      buttonRegisteredIntegrityListener = true
+      return () => {}
+    })
+
+    // Mode multiservidor: integrityDirty passed as prop
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            serverId="meliora"
+            publishedModpack={melioraModpack}
+            installedVersion="2.0.0"
+            integrityDirty={false}
+          />
+        </LanguageProvider>
+      )
+    })
+    expect(buttonRegisteredIntegrityListener).toBe(false)
+
+    // Legacy mode: integrityDirty is undefined
+    buttonRegisteredIntegrityListener = false
+    vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+      version: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      installed: true,
+      hasUpdate: false,
+      hasExistingInstall: true,
+      totalSizeGB: 1,
+      clientFiles: [],
+    })
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            serverId="meliora"
+          />
+        </LanguageProvider>
+      )
+    })
+    expect(buttonRegisteredIntegrityListener).toBe(true)
+  })
+
+  it("8. Auto Update ON: versión instalada menor a publishedModpack inicia triggerSync automáticamente", async () => {
+    localStorage.setItem("hikat_auto_updates", "true")
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    const updatedModpack: PublishedModpack = {
+      ...melioraModpack,
+      version: "2.1.0",
+      clientFiles: [{
+        path: "mods/new.jar",
+        sha256: "abc",
+        sizeBytes: 100,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: "https://example.com/new.jar",
+      }],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            serverId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={updatedModpack}
+            installedVersion="2.0.0"
+            integrityDirty={false}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    expect(startSyncSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("9. Auto Update OFF: versión instalada menor a publishedModpack permanece en UPDATE y NO inicia triggerSync", async () => {
+    localStorage.setItem("hikat_auto_updates", "false")
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    const updatedModpack: PublishedModpack = {
+      ...melioraModpack,
+      version: "2.1.0",
+      clientFiles: [{
+        path: "mods/new.jar",
+        sha256: "abc",
+        sizeBytes: 100,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: "https://example.com/new.jar",
+      }],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            serverId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={updatedModpack}
+            installedVersion="2.0.0"
+            integrityDirty={false}
+          />
+        </LanguageProvider>
+      )
+    })
+
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    const btn = container.querySelector("button") as HTMLButtonElement
+    expect(btn.textContent).toContain("ACTUALIZAR")
+  })
+
+  it("10. Auto Update con juego running: no inicia mientras corre; al pasar a idle inicia sync", async () => {
+    localStorage.setItem("hikat_auto_updates", "true")
+    let launchStatusCb: Function | null = null
+    ;(window as any).electronAPI.onLaunchStatus = vi.fn((cb) => {
+      launchStatusCb = cb
+      return () => {}
+    })
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "running",
+      runningGameId: "meliora",
+      activeOperationGameId: null,
+      activeOperationState: "IDLE",
+      activeOperationPhase: null,
+    })
+
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    const updatedModpack: PublishedModpack = {
+      ...melioraModpack,
+      version: "2.1.0",
+      clientFiles: [{
+        path: "mods/new.jar",
+        sha256: "abc",
+        sizeBytes: 100,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: "https://example.com/new.jar",
+      }],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            serverId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={updatedModpack}
+            installedVersion="2.0.0"
+            integrityDirty={false}
+          />
+        </LanguageProvider>
+      )
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+    })
+
+    // Game is running -> sync should NOT be triggered yet
+    expect(startSyncSpy).not.toHaveBeenCalled()
+
+    // Now Minecraft closes -> emits idle
+    await act(async () => {
+      launchStatusCb?.("idle", { gameId: "meliora", runningGameId: null })
+    })
+
+    expect(startSyncSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("11. SERVER_UPDATED / recarga catálogo: servidores existentes conservan su estado; servidor nuevo hace bootstrap ligero", async () => {
+    let currentCatalog = [melioraServer]
+    vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentCatalog)
+
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockImplementation(async (id?: string) => {
+      if (id === "meliora") return melioraModpack
+      if (id === "apparatia") return apparatiaModpack
+      return null
+    })
+
+    let hookState: any = null
+    function Consumer() {
+      hookState = useLauncherState()
+      return null
+    }
+
+    await act(async () => {
+      root.render(<Consumer />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(hookState.servers).toHaveLength(1)
+    expect(getPublishedSpy).toHaveBeenCalledWith("meliora")
+    getPublishedSpy.mockClear()
+
+    // Simulate catalog reload with an updated Meliora name AND a new server Apparatia
+    const updatedMeliora = { ...melioraServer, name: "Meliora Renamed" }
+    currentCatalog = [updatedMeliora, apparatiaServer]
+
+    await act(async () => {
+      await hookState.refreshServers()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(hookState.servers).toHaveLength(2)
+    expect(hookState.servers[0].name).toBe("Meliora Renamed")
+
+    // Meliora was ALREADY in gameStates, so getPublishedModpack("meliora") was NOT called again!
+    expect(getPublishedSpy).not.toHaveBeenCalledWith("meliora")
+    // Apparatia is NEW, so it WAS queried!
+    expect(getPublishedSpy).toHaveBeenCalledWith("apparatia")
   })
 })
 

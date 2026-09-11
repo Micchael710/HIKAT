@@ -215,6 +215,7 @@ export default function DownloadPlayButton({
   const latestManifestVersionRef = useRef<string | null>(null)
   const isIntegrityBlockedRef = useRef<boolean>(Boolean(integrityDirty))
   const pendingAutoUpdateRef = useRef(false)
+  const autoUpdatedVersionRef = useRef<string | null>(null)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [isLaunchBlockedByOtherGame, setIsLaunchBlockedByOtherGame] = useState(false)
   const isDark = theme === "dark"
@@ -250,6 +251,8 @@ export default function DownloadPlayButton({
 
   // Listen to filesystem integrity changes while launcher is open (marks integrity lock silently)
   useEffect(() => {
+    if (integrityDirty !== undefined) return
+
     const unsubscribe = window.electronAPI?.onGameFileIntegrityChanged?.((data: any) => {
       if (gameContext) {
         if (data?.gameId !== gameContext.gameId) return
@@ -265,7 +268,7 @@ export default function DownloadPlayButton({
         clearTimeout(toastTimeoutRef.current)
       }
     }
-  }, [gameContext?.gameId])
+  }, [gameContext?.gameId, integrityDirty])
 
   const showToast = useCallback((
     msg: string,
@@ -428,6 +431,78 @@ export default function DownloadPlayButton({
     window.addEventListener("mousedown", handleClickOutside)
     return () => window.removeEventListener("mousedown", handleClickOutside)
   }, [isMenuOpen])
+
+  // Auto Update reaction for multiserver flow
+  useEffect(() => {
+    if (!isLocalAllowed || !hasProvidedState || !publishedModpack?.version || !installedVersion) return
+    if (installedVersion === publishedModpack.version) {
+      autoUpdatedVersionRef.current = null
+      return
+    }
+    if (autoUpdatedVersionRef.current === publishedModpack.version) return
+
+    const targetManifest =
+      manifest && manifest.version === publishedModpack.version
+        ? manifest
+        : buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
+    if (!targetManifest || !Array.isArray(targetManifest.clientFiles)) return
+
+    const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+    if (!autoUpdatesEnabled) return
+
+    let isMounted = true
+
+    Promise.resolve()
+      .then(() => window.electronAPI?.getLaunchStatus?.(effectiveGameContext))
+      .catch(() => null)
+      .then((launchInfo) => {
+        if (!isMounted) return
+
+        const currentTargetId = gameContext?.gameId || activeServerId
+        const isGameBusy =
+          Boolean(
+            currentTargetId &&
+            launchInfo?.runningGameId === currentTargetId &&
+            (launchInfo?.status === "running" || launchInfo?.status === "preparing")
+          ) ||
+          statusRef.current === "launching" ||
+          statusRef.current === "running"
+
+        if (isGameBusy) {
+          pendingAutoUpdateRef.current = true
+          return
+        }
+
+        const isOperationActive =
+          isStartingSyncRef.current ||
+          statusRef.current === "downloading" ||
+          statusRef.current === "installing" ||
+          statusRef.current === "verifying" ||
+          statusRef.current === "paused" ||
+          statusRef.current === "launching" ||
+          statusRef.current === "running"
+
+        if (!isOperationActive) {
+          autoUpdatedVersionRef.current = publishedModpack.version
+          triggerSync(targetManifest)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [
+    isLocalAllowed,
+    hasProvidedState,
+    publishedModpack,
+    installedVersion,
+    manifest,
+    integrityDirty,
+    triggerSync,
+    effectiveGameContext,
+    activeServerId,
+    gameContext?.gameId,
+  ])
 
   // Check manifest and authoritative filesystem state on mount
   useEffect(() => {

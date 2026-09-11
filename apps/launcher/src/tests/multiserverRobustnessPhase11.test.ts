@@ -771,6 +771,9 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     expect(restoredSnap.queued[2].gameId).toBe("server-c")
 
     // Limpieza
+    try {
+      await mainExports.operationManager?.cancelSync()
+    } catch (_) {}
     await cancelHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
     await syncPromiseA
   })
@@ -1829,4 +1832,45 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
 
     vi.restoreAllMocks()
   })
+
+  // 35. game-get-installed-state lee manifest e inicializa el watcher para detectar alteraciones
+  it("35. game-get-installed-state lee manifest e inicializa el watcher para detectar alteraciones", async () => {
+    const getInstalledStateHandler = ipcHandlers.get("game-get-installed-state")!
+    expect(getInstalledStateHandler).toBeDefined()
+
+    await saveInstalledManifest(instanceRootA, {
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      files: {
+        "mods/important.jar": {
+          sha256: computeSha("original"),
+          sizeBytes: 8,
+          policy: "NO_MODIFICABLE",
+        },
+      },
+    })
+
+    const state = await getInstalledStateHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+    })
+
+    expect(state.installedModpackVersion).toBe("1.0.0")
+
+    // El watcher debe haberse activado y detectar modificación en archivo NO_MODIFICABLE
+    lastSentEvents.length = 0
+    const testFilePath = path.join(instanceRootA, "mods", "important.jar")
+    await fsp.mkdir(path.dirname(testFilePath), { recursive: true })
+    await fsp.writeFile(testFilePath, "tampered-content")
+
+    await new Promise((r) => setTimeout(r, 120))
+
+    const integrityEvt = lastSentEvents.find(
+      (e) => e.channel === "game-file-integrity-changed" && e.args[0]?.gameId === "server-a"
+    )
+    expect(integrityEvt).toBeDefined()
+  })
 })
+

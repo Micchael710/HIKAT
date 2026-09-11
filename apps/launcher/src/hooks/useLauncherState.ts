@@ -75,6 +75,10 @@ export function useLauncherState() {
   /* Multi-Server Catalog State */
   const [servers, setServers] = useState<LauncherServer[]>([])
   const [gameStates, setGameStates] = useState<Record<string, LauncherGameState>>({})
+  const gameStatesRef = useRef<Record<string, LauncherGameState>>({})
+  useEffect(() => {
+    gameStatesRef.current = gameStates
+  }, [gameStates])
 
   const [selectedGameId, setSelectedGameIdState] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
@@ -99,38 +103,43 @@ export function useLauncherState() {
     try {
       const list = await serverService.getLauncherServers()
       if (list.length > 0) {
-        // Parallel lightweight query for all servers (no checkSyncPlan)
-        const entries = await Promise.all(
-          list.map(async (server) => {
-            const [published, installedState] = await Promise.all([
-              gameService.getPublishedModpack(server.id).catch(() => null),
-              window.electronAPI?.getInstalledState
-                ? window.electronAPI.getInstalledState({ gameId: server.id, gameName: server.name }).catch(() => null)
-                : Promise.resolve(null),
-            ])
-            const installedVersion = installedState?.installedModpackVersion ?? null
-            return [
-              server.id,
-              {
-                publishedModpack: published,
-                installedVersion,
-                integrityDirty: false,
-              },
-            ] as const
-          })
-        )
+        const existingStates = gameStatesRef.current
+        const serversToFetch = list.filter((server) => !existingStates[server.id])
 
-        setGameStates((prev) => {
-          const next = { ...prev }
-          for (const [id, state] of entries) {
-            next[id] = {
-              publishedModpack: state.publishedModpack,
-              installedVersion: state.installedVersion,
-              integrityDirty: prev[id]?.integrityDirty ?? false,
+        if (serversToFetch.length > 0) {
+          // Parallel lightweight query only for servers without gameState
+          const entries = await Promise.all(
+            serversToFetch.map(async (server) => {
+              const [published, installedState] = await Promise.all([
+                gameService.getPublishedModpack(server.id).catch(() => null),
+                window.electronAPI?.getInstalledState
+                  ? window.electronAPI.getInstalledState({ gameId: server.id, gameName: server.name }).catch(() => null)
+                  : Promise.resolve(null),
+              ])
+              const installedVersion = installedState?.installedModpackVersion ?? null
+              return [
+                server.id,
+                {
+                  publishedModpack: published,
+                  installedVersion,
+                  integrityDirty: false,
+                },
+              ] as const
+            })
+          )
+
+          setGameStates((prev) => {
+            const next = { ...prev }
+            for (const [id, state] of entries) {
+              next[id] = {
+                publishedModpack: state.publishedModpack,
+                installedVersion: state.installedVersion,
+                integrityDirty: prev[id]?.integrityDirty ?? false,
+              }
             }
-          }
-          return next
-        })
+            return next
+          })
+        }
 
         setServers(list)
 

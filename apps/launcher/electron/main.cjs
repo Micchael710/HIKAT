@@ -2489,8 +2489,11 @@ ipcMain.handle("game-get-installed-state", async (_event, payload = {}) => {
   try {
     const ctx = resolveGameContext(payload)
     const manifest = await loadInstalledManifest(ctx.instanceRoot)
+    if (manifest && manifest.modpackVersion) {
+      setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
+    }
     return {
-      installedModpackVersion: manifest.modpackVersion || null,
+      installedModpackVersion: manifest?.modpackVersion || null,
     }
   } catch (_) {
     return {
@@ -2685,6 +2688,12 @@ function resetDownloadQueueForTesting() {
   lastPayload = null
   lastPayloadByGameId.clear()
   resumeProgressFloor = null
+  for (const [, w] of instanceWatchers) {
+    try {
+      w?.close()
+    } catch (_) {}
+  }
+  instanceWatchers.clear()
   if (gameLauncher) {
     gameLauncher.runningGameId = null
     gameLauncher.setStatus("idle")
