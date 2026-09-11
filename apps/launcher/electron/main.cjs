@@ -46,6 +46,22 @@ const instanceRoot = legacyInstanceRoot
 const WINDOWS_INVALID_CHARS = /[<>:"/\\|?*]/
 const WINDOWS_RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i
 
+function getGamesRoot() {
+  try {
+    return path.join(app.getPath("appData"), "HiKAT", "games")
+  } catch (_) {
+    return gamesRoot
+  }
+}
+
+function getLegacyInstanceRoot() {
+  try {
+    return path.join(app.getPath("appData"), "HiKAT", "game files")
+  } catch (_) {
+    return legacyInstanceRoot
+  }
+}
+
 function validateGameName(name) {
   if (typeof name !== "string") {
     throw new Error("Invalid gameName: must be a string.")
@@ -72,8 +88,9 @@ function validateGameName(name) {
   if (WINDOWS_RESERVED_NAMES.test(name) || WINDOWS_RESERVED_NAMES.test(baseName)) {
     throw new Error(`Invalid gameName: "${name}" is a reserved system name.`)
   }
-  const resolved = path.resolve(gamesRoot, name)
-  const rel = path.relative(gamesRoot, resolved)
+  const currentGamesRoot = getGamesRoot()
+  const resolved = path.resolve(currentGamesRoot, name)
+  const rel = path.relative(currentGamesRoot, resolved)
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
     throw new Error("Invalid gameName: path escapes gamesRoot.")
   }
@@ -95,15 +112,12 @@ function resolveGameContext(payload = {}) {
   if (hasGameId && hasGameName) {
     const gameId = String(payload.gameId).trim()
     const validName = validateGameName(payload.gameName)
-    const resolvedInstanceRoot =
-      payload.instanceRoot && typeof payload.instanceRoot === "string"
-        ? payload.instanceRoot
-        : path.join(gamesRoot, validName)
+    const currentGamesRoot = getGamesRoot()
 
     return {
       gameId,
       gameName: validName,
-      instanceRoot: resolvedInstanceRoot,
+      instanceRoot: path.join(currentGamesRoot, validName),
     }
   }
 
@@ -111,10 +125,7 @@ function resolveGameContext(payload = {}) {
     return {
       gameId: null,
       gameName: null,
-      instanceRoot:
-        payload && payload.instanceRoot && typeof payload.instanceRoot === "string"
-          ? payload.instanceRoot
-          : legacyInstanceRoot,
+      instanceRoot: getLegacyInstanceRoot(),
     }
   }
 
@@ -339,7 +350,17 @@ gameLauncher.onStatusChangeCallback = (status, details) => {
     ) {
       autoPausedDownloadGameId = null
       notifyDownloadQueueChanged()
-      operationManager.resumeSync().catch((err) => {
+      operationManager.resumeSync().then(() => {
+        if (operationManager.getState() === "IDLE") {
+          activeOperationGameId = null
+          activeOperationGameName = null
+          activeOperationPayload = null
+          activeOperationSnapshot = null
+          savePersistentDownloadQueue()
+          processNextQueuedSync()
+        }
+        notifyDownloadQueueChanged()
+      }).catch((err) => {
         console.error("[Main] Error auto-resuming sync:", err)
       })
     } else if (operationManager.getState() === "IDLE") {
@@ -494,7 +515,7 @@ function focusMainWindow() {
 }
 
 function ensureTray() {
-  if (tray && !tray.isDestroyed()) {
+  if (tray && (typeof tray.isDestroyed !== "function" || !tray.isDestroyed())) {
     return tray
   }
   const trayIcon = getLauncherIcon()
@@ -1922,7 +1943,28 @@ async function processNextQueuedSync() {
   notifyDownloadQueueChanged()
 
   try {
-    const effectiveItemPayload = { ...nextItem.payload, gameId: nextItem.gameId, gameName: nextItem.gameName }
+    const isRestoredActive = Boolean(
+      nextItem.savedPhase &&
+      typeof nextItem.savedProgress === "number" &&
+      nextItem.savedProgress > 0
+    )
+    const effectiveItemPayload = {
+      ...nextItem.payload,
+      gameId: nextItem.gameId,
+      gameName: nextItem.gameName,
+      ...(isRestoredActive ? { resume: true } : {}),
+    }
+
+    if (isRestoredActive) {
+      resumeProgressFloor = {
+        gameId: nextItem.gameId,
+        targetPhase: nextItem.savedPhase,
+        phase: nextItem.savedPhase,
+        floor: nextItem.savedProgress,
+        isResume: true,
+      }
+    }
+
     const ctx = resolveGameContext(effectiveItemPayload)
     await runGameSync(ctx, effectiveItemPayload)
   } catch (err) {
@@ -2296,7 +2338,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     return res
   }
 
-  if (operationManager.getState() === "IDLE") {
+  if (operationManager.getState() === "IDLE" && !activeOperationGameId) {
     autoPausedDownloadGameId = null
     return await runGameSync(ctx, payload)
   }
@@ -2453,20 +2495,46 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
 
   const opState = operationManager.getState()
   const opPhase = activeOperationSnapshot?.phase
-  const isOtherOp = activeOperationGameId && activeOperationGameId !== ctx.gameId
+  const isSameOp = Boolean(
+    (activeOperationGameId && activeOperationGameId === ctx.gameId) ||
+    (!ctx.gameId && !activeOperationGameId)
+  )
+  const isOtherOp = Boolean(activeOperationGameId && activeOperationGameId !== ctx.gameId)
+
+  if (isSameOp && opState !== "IDLE") {
+    throw new Error("Cannot launch Minecraft while this game is updating or installing.")
+  }
 
   if (isOtherOp) {
-    if (opPhase === "INSTALLING" || opPhase === "VERIFYING" || opState === "INSTALLING" || opState === "VERIFYING") {
-      throw new Error("Cannot launch Minecraft while another game is installing or verifying.")
+    if (opPhase === "VERIFYING" || opState === "VERIFYING") {
+      throw new Error("Cannot launch Minecraft while another game is verifying.")
     }
   }
 
   const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
-  if (isOtherOp && opState === "SYNCING") {
-    if (pauseOnLaunch) {
-      autoPausedDownloadGameId = activeOperationGameId
-      await operationManager.pauseSync()
-      notifyDownloadQueueChanged()
+  const isCommitting = Boolean(operationManager.isCommitting)
+  const canPause = opState !== "PAUSED" && opState !== "IDLE" && !isCommitting && opPhase !== "VERIFYING" && opState !== "VERIFYING"
+
+  if (isOtherOp && (opState === "SYNCING" || opState === "INSTALLING")) {
+    if (pauseOnLaunch && canPause) {
+      try {
+        autoPausedDownloadGameId = activeOperationGameId
+        if (activeOperationSnapshot) {
+          const pausedPhase = activeOperationSnapshot.phase || (opState === "INSTALLING" ? "INSTALLING" : "DOWNLOADING")
+          resumeProgressFloor = {
+            gameId: activeOperationGameId,
+            targetPhase: pausedPhase,
+            phase: pausedPhase,
+            floor: typeof activeOperationSnapshot.progress === "number" ? activeOperationSnapshot.progress : 0,
+            isResume: true,
+          }
+        }
+        await operationManager.pauseSync()
+        notifyDownloadQueueChanged()
+      } catch (pauseErr) {
+        console.warn("[Main] Best-effort auto-pause before launch failed:", pauseErr)
+        autoPausedDownloadGameId = null
+      }
     }
   }
 
@@ -2483,9 +2551,8 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
 
   const allowDuringOperation = Boolean(
     isOtherOp &&
-    (opState === "SYNCING" || opState === "PAUSED") &&
-    opPhase !== "INSTALLING" &&
-    opPhase !== "VERIFYING"
+    opPhase !== "VERIFYING" &&
+    opState !== "VERIFYING"
   )
 
   return await operationManager.launchGame(gameLauncher, {
@@ -2604,6 +2671,10 @@ function resetDownloadQueueForTesting() {
   lastPayload = null
   lastPayloadByGameId.clear()
   resumeProgressFloor = null
+  if (gameLauncher) {
+    gameLauncher.runningGameId = null
+    gameLauncher.setStatus("idle")
+  }
   if (operationManager) {
     if (operationManager.activeCancelSignal) {
       operationManager.activeCancelSignal.isCancelled = true
@@ -2634,6 +2705,8 @@ if (typeof module !== "undefined" && module.exports) {
     loadPersistentDownloadQueue,
     processNextQueuedSync,
     runGameSync,
+    getGamesRoot,
+    getLegacyInstanceRoot,
     getResumeProgressFloor: () => resumeProgressFloor,
     getDownloadQueue: () => downloadQueue,
     setMainWindowForTesting: (win) => {

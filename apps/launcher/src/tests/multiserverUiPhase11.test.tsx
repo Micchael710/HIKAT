@@ -41,6 +41,7 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
   let downloadProgressListeners: Function[] = []
   let phaseChangeListeners: Function[] = []
   let queueChangeListeners: Function[] = []
+  let launchStatusListeners: Function[] = []
   let currentQueueSnapshot: DownloadQueueSnapshot = { active: null, queued: [] }
 
   beforeEach(() => {
@@ -53,6 +54,7 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     downloadProgressListeners = []
     phaseChangeListeners = []
     queueChangeListeners = []
+    launchStatusListeners = []
 
     currentQueueSnapshot = {
       active: null,
@@ -68,7 +70,12 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
         activeOperationState: "IDLE",
         activeOperationPhase: null,
       }),
-      onLaunchStatus: vi.fn(() => () => {}),
+      onLaunchStatus: vi.fn((cb) => {
+        launchStatusListeners.push(cb)
+        return () => {
+          launchStatusListeners = launchStatusListeners.filter((l) => l !== cb)
+        }
+      }),
       onDownloadProgress: vi.fn((cb) => {
         downloadProgressListeners.push(cb)
         return () => {
@@ -902,5 +909,117 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     expect(container.textContent).not.toContain("47%")
 
     ;(window.electronAPI as any).startSync = origStartSync
+  })
+
+  // 25. Server B instalado permanece habilitado para JUGAR mientras Server A está DOWNLOADING o INSTALLING
+  it("25. Server B instalado permanece habilitado para JUGAR mientras Server A está DOWNLOADING o INSTALLING", async () => {
+    vi.spyOn(gameService, "isGameInstalled").mockImplementation((id: any) => id === "server-b")
+    vi.spyOn(gameService, "checkGameManifest").mockImplementation(async (targetId: any, opts: any) => {
+      const gId = opts?.gameContext?.gameId || targetId
+      if (gId === "server-b") {
+        return {
+          version: "1.0.0",
+          installedModpackVersion: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "VANILLA",
+          installed: true,
+          hasUpdate: false,
+          hasExistingInstall: true,
+          totalSizeGB: 1,
+          clientFiles: [],
+        } as any
+      }
+      return {
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "VANILLA",
+        installed: false,
+        hasUpdate: true,
+        hasExistingInstall: false,
+        totalSizeGB: 1,
+        clientFiles: [],
+      } as any
+    })
+
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "SYNCING",
+        phase: "DOWNLOADING",
+        progress: 30,
+        speedMBs: 1,
+        downloadedBytes: 300,
+        totalBytes: 1000,
+        remainingMinutes: 1,
+        canPause: true,
+        canCancel: true,
+      },
+      queued: [],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <div>
+            <DownloadPlayButton
+              gameId="server-b"
+              gameContext={{ gameId: "server-b", gameName: "Aparatia" }}
+              left={0}
+              top={0}
+              theme="dark"
+            />
+          </div>
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+    })
+
+    // 1. Con Server A en DOWNLOADING, el botón de Server B está habilitado
+    let playBtn = container.querySelector("button") as HTMLButtonElement
+    expect(playBtn).not.toBeNull()
+    expect(playBtn.textContent).toContain("JUGAR")
+    expect(playBtn.disabled).toBe(false)
+
+    // 2. Server A pasa a INSTALLING -> Server B sigue habilitado
+    await act(async () => {
+      for (const cb of phaseChangeListeners) cb("INSTALLING", "server-a")
+    })
+    playBtn = container.querySelector("button") as HTMLButtonElement
+    expect(playBtn.disabled).toBe(false)
+
+    // 3. Server A pasa a VERIFYING -> Server B se bloquea
+    await act(async () => {
+      for (const cb of phaseChangeListeners) cb("VERIFYING", "server-a")
+    })
+    playBtn = container.querySelector("button") as HTMLButtonElement
+    expect(playBtn.disabled).toBe(true)
+
+    // 4. Server A termina VERIFYING y vuelve a IDLE -> Server B se desbloquea
+    await act(async () => {
+      for (const cb of phaseChangeListeners) cb("IDLE", "server-a")
+    })
+    playBtn = container.querySelector("button") as HTMLButtonElement
+    expect(playBtn.disabled).toBe(false)
+
+    // 5. Server A se está ejecutando (running) -> Server B se bloquea
+    await act(async () => {
+      for (const cb of launchStatusListeners) {
+        cb("running", { gameId: "server-a", runningGameId: "server-a" })
+      }
+    })
+    playBtn = container.querySelector("button") as HTMLButtonElement
+    expect(playBtn.disabled).toBe(true)
+
+    // 6. Server A se cierra (idle) -> Server B se desbloquea
+    await act(async () => {
+      for (const cb of launchStatusListeners) {
+        cb("idle", { gameId: "server-a", runningGameId: null })
+      }
+    })
+    playBtn = container.querySelector("button") as HTMLButtonElement
+    expect(playBtn.disabled).toBe(false)
   })
 })

@@ -727,7 +727,7 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
         minecraftVersion: "1.20.1",
         modLoader: "VANILLA",
       }),
-    ).rejects.toThrow("Cannot launch Minecraft while another game is installing or verifying.")
+    ).rejects.toThrow(/Cannot launch Minecraft while another game is (installing or )?verifying/)
 
     await cancelHandler({}, { gameId: "server-a", gameName: "Warria" })
     await syncPromise

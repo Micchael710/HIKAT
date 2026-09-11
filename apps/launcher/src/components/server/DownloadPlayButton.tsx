@@ -381,16 +381,14 @@ export default function DownloadPlayButton({
             gameContext?.gameId &&
             launchInfo.runningGameId !== gameContext.gameId
           )
-          const otherOpInstallingOrVerifying = Boolean(
+          const otherOpVerifying = Boolean(
             launchInfo?.activeOperationGameId &&
             gameContext?.gameId &&
             launchInfo.activeOperationGameId !== gameContext.gameId &&
-            (launchInfo.activeOperationPhase === "INSTALLING" ||
-              launchInfo.activeOperationPhase === "VERIFYING" ||
-              launchInfo.activeOperationState === "INSTALLING" ||
+            (launchInfo.activeOperationPhase === "VERIFYING" ||
               launchInfo.activeOperationState === "VERIFYING")
           )
-          setIsLaunchBlockedByOtherGame(otherGameRunning || otherOpInstallingOrVerifying)
+          setIsLaunchBlockedByOtherGame(otherGameRunning || otherOpVerifying)
 
           if (
             gameContext?.gameId &&
@@ -751,16 +749,14 @@ export default function DownloadPlayButton({
                 gameContext?.gameId &&
                 info.runningGameId !== gameContext.gameId
               )
-              const otherOpInstallingOrVerifying = Boolean(
+              const otherOpVerifying = Boolean(
                 info?.activeOperationGameId &&
                 gameContext?.gameId &&
                 info.activeOperationGameId !== gameContext.gameId &&
-                (info.activeOperationPhase === "INSTALLING" ||
-                  info.activeOperationPhase === "VERIFYING" ||
-                  info.activeOperationState === "INSTALLING" ||
+                (info.activeOperationPhase === "VERIFYING" ||
                   info.activeOperationState === "VERIFYING")
               )
-              setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpInstallingOrVerifying)
+              setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpVerifying)
             }).catch(() => {})
           }
           return
@@ -773,16 +769,14 @@ export default function DownloadPlayButton({
               gameContext?.gameId &&
               info.runningGameId !== gameContext.gameId
             )
-            const otherOpInstallingOrVerifying = Boolean(
+            const otherOpVerifying = Boolean(
               info?.activeOperationGameId &&
               gameContext?.gameId &&
               info.activeOperationGameId !== gameContext.gameId &&
-              (info.activeOperationPhase === "INSTALLING" ||
-                info.activeOperationPhase === "VERIFYING" ||
-                info.activeOperationState === "INSTALLING" ||
+              (info.activeOperationPhase === "VERIFYING" ||
                 info.activeOperationState === "VERIFYING")
             )
-            setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpInstallingOrVerifying)
+            setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpVerifying)
           }).catch(() => {})
         }
 
@@ -900,7 +894,7 @@ export default function DownloadPlayButton({
 
     const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string, eventGameId?: string | null, underlyingPhase?: string | null) => {
       if (gameContext && eventGameId && eventGameId !== gameContext.gameId) {
-        if (phase === "INSTALLING" || phase === "VERIFYING") {
+        if (phase === "VERIFYING") {
           setIsLaunchBlockedByOtherGame(true)
         } else {
           window.electronAPI?.getLaunchStatus?.(effectiveGameContext).then((info: any) => {
@@ -909,16 +903,14 @@ export default function DownloadPlayButton({
               gameContext?.gameId &&
               info.runningGameId !== gameContext.gameId
             )
-            const otherOpInstallingOrVerifying = Boolean(
+            const otherOpVerifying = Boolean(
               info?.activeOperationGameId &&
               gameContext?.gameId &&
               info.activeOperationGameId !== gameContext.gameId &&
-              (info.activeOperationPhase === "INSTALLING" ||
-                info.activeOperationPhase === "VERIFYING" ||
-                info.activeOperationState === "INSTALLING" ||
+              (info.activeOperationPhase === "VERIFYING" ||
                 info.activeOperationState === "VERIFYING")
             )
-            setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpInstallingOrVerifying)
+            setIsLaunchBlockedByOtherGame(stillRunningOther || otherOpVerifying)
           }).catch(() => {})
         }
         return

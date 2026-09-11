@@ -91,6 +91,8 @@ const electronMock = {
     setToolTip: vi.fn(),
     setContextMenu: vi.fn(),
     on: vi.fn(),
+    isDestroyed: () => false,
+    destroy: vi.fn(),
   })),
   Menu: {
     buildFromTemplate: vi.fn(),
@@ -136,15 +138,20 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
 
   beforeEach(async () => {
     tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "hikat-p11-core-"))
-    instanceRootA = path.join(tempDir, "games", "ServerA")
-    instanceRootB = path.join(tempDir, "games", "ServerB")
     userDataDir = path.join(tempDir, "userData")
-    await fsp.mkdir(instanceRootA, { recursive: true })
-    await fsp.mkdir(instanceRootB, { recursive: true })
-    await fsp.mkdir(userDataDir, { recursive: true })
-
     activeAppDataDir = tempDir
     activeUserDataDir = userDataDir
+
+    const gamesDir = path.join(tempDir, "HiKAT", "games")
+    instanceRootA = path.join(gamesDir, "Server Alpha")
+    instanceRootB = path.join(gamesDir, "Server Beta")
+    const instanceRootC = path.join(gamesDir, "Server Gamma")
+
+    await fsp.mkdir(instanceRootA, { recursive: true })
+    await fsp.mkdir(instanceRootB, { recursive: true })
+    await fsp.mkdir(instanceRootC, { recursive: true })
+    await fsp.mkdir(userDataDir, { recursive: true })
+
     mainExports.resetDownloadQueueForTesting()
     lastSentEvents.length = 0
     const mockWin = new (electronMock.BrowserWindow as any)()
@@ -644,7 +651,7 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     const resC = await startHandler({}, {
       gameId: "server-c",
       gameName: "Server Gamma",
-      instanceRoot: path.join(tempDir, "games", "ServerC"),
+      instanceRoot: path.join(tempDir, "HiKAT", "games", "Server Gamma"),
       modpackVersion: "1.0.0",
       minecraftVersion: "1.20.1",
       modLoader: "VANILLA",
@@ -736,7 +743,7 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     await startHandler({}, {
       gameId: "server-c",
       gameName: "Server Gamma",
-      instanceRoot: path.join(tempDir, "games", "ServerC"),
+      instanceRoot: path.join(tempDir, "HiKAT", "games", "Server Gamma"),
       modpackVersion: "3.0.0",
       minecraftVersion: "1.20.1",
       modLoader: "VANILLA",
@@ -1375,5 +1382,451 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
 
     // La cola persistente se limpió al completar
     expect(mainExports.getDownloadQueue().length).toBe(0)
+  })
+
+  // 25. resolveGameContext no acepta un instanceRoot arbitrario desde Renderer y deriva desde gamesRoot / validatedGameName
+  it("25. resolveGameContext no acepta un instanceRoot arbitrario desde Renderer y deriva desde gamesRoot / validatedGameName", () => {
+    const malicious = "C:\\evil\\directory\\escape"
+    const ctx = mainExports.resolveGameContext({
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: malicious,
+    })
+    expect(ctx.instanceRoot).not.toBe(malicious)
+    expect(ctx.instanceRoot).toBe(instanceRootA)
+
+    // Legacy no acepta instanceRoot arbitrario tampoco
+    const legacyCtx = mainExports.resolveGameContext({
+      instanceRoot: malicious,
+    })
+    expect(legacyCtx.instanceRoot).not.toBe(malicious)
+    expect(legacyCtx.instanceRoot).toBe(mainExports.getLegacyInstanceRoot())
+  })
+
+  // 26. Setting ON: lanzar B mientras A está DOWNLOADING pausa A, y al cerrar B reanuda A
+  it("26. Setting ON: lanzar B mientras A está DOWNLOADING pausa A, y al cerrar B reanuda A", async () => {
+    mainExports.settingsStore.set("pauseDownloadsOnGameLaunch", true)
+    const launchSpy = vi.spyOn(mainExports.gameLauncher, "launch").mockImplementation(async (opts: any) => {
+      mainExports.gameLauncher.runningGameId = opts.gameId || null
+      mainExports.gameLauncher.setStatus("running", { gameId: opts.gameId })
+      return { success: true, pid: 12345 }
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const launchHandler = ipcHandlers.get("game-launch")!
+
+    fileStore.set("/file/big.jar", Buffer.alloc(1000, "Z"))
+    urlDelays.set("/file/big.jar", 1000)
+
+    // Iniciar A
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: [{
+        path: "mods/big.jar",
+        sha256: computeSha(Buffer.alloc(1000, "Z")),
+        sizeBytes: 1000,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/big.jar`,
+      }],
+    }).catch(() => {})
+
+    await new Promise((r) => setTimeout(r, 40))
+    expect(mainExports.operationManager.state).toBe("SYNCING")
+
+    // Lanzar B (Aparatia)
+    const launchRes = await launchHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      minecraftVersion: "1.20.1",
+    })
+    expect(launchRes.success).toBe(true)
+    expect(launchSpy).toHaveBeenCalled()
+
+    // A fue auto-pausado
+    expect(mainExports.operationManager.state).toBe("PAUSED")
+    expect(mainExports.getDownloadQueueSnapshot().active?.state).toBe("PAUSED")
+
+    // Al cerrar B, A se auto-reanuda
+    mainExports.gameLauncher.setStatus("idle")
+    await new Promise((r) => setTimeout(r, 40))
+    expect(mainExports.operationManager.state).toBe("SYNCING")
+
+    launchSpy.mockRestore()
+  })
+
+  // 27. Setting OFF: lanzar B mientras A está DOWNLOADING lanza B y A sigue DOWNLOADING
+  it("27. Setting OFF: lanzar B mientras A está DOWNLOADING lanza B y A sigue DOWNLOADING", async () => {
+    mainExports.settingsStore.set("pauseDownloadsOnGameLaunch", false)
+    const launchSpy = vi.spyOn(mainExports.gameLauncher, "launch").mockImplementation(async (opts: any) => {
+      mainExports.gameLauncher.runningGameId = opts.gameId || null
+      mainExports.gameLauncher.setStatus("running", { gameId: opts.gameId })
+      return { success: true, pid: 12345 }
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const launchHandler = ipcHandlers.get("game-launch")!
+
+    fileStore.set("/file/big2.jar", Buffer.alloc(1000, "Y"))
+    urlDelays.set("/file/big2.jar", 1000)
+
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: [{
+        path: "mods/big2.jar",
+        sha256: computeSha(Buffer.alloc(1000, "Y")),
+        sizeBytes: 1000,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/big2.jar`,
+      }],
+    }).catch(() => {})
+
+    await new Promise((r) => setTimeout(r, 40))
+    expect(mainExports.operationManager.state).toBe("SYNCING")
+
+    // Lanzar B
+    await launchHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      minecraftVersion: "1.20.1",
+    })
+
+    // A sigue DOWNLOADING / SYNCING, no se pausó
+    expect(mainExports.operationManager.state).toBe("SYNCING")
+    expect(mainExports.getDownloadQueueSnapshot().active?.state).toBe("SYNCING")
+
+    mainExports.gameLauncher.setStatus("idle")
+    launchSpy.mockRestore()
+  })
+
+  // 28. A INSTALLING pausable + setting ON: lanzar B pausa A, lanza B y luego reanuda A conservando progress floor
+  it("28. A INSTALLING pausable + setting ON: lanzar B pausa A, lanza B y luego reanuda A conservando progress floor", async () => {
+    mainExports.settingsStore.set("pauseDownloadsOnGameLaunch", true)
+    const launchSpy = vi.spyOn(mainExports.gameLauncher, "launch").mockImplementation(async (opts: any) => {
+      mainExports.gameLauncher.runningGameId = opts.gameId || null
+      mainExports.gameLauncher.setStatus("running", { gameId: opts.gameId })
+      return { success: true, pid: 12345 }
+    })
+
+    let capturedOnProgress: any
+    let capturedOnPhaseChange: any
+    vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (payload: any) => {
+      capturedOnProgress = payload.onProgress
+      capturedOnPhaseChange = payload.onPhaseChange
+      mainExports.operationManager.state = "INSTALLING"
+      mainExports.operationManager.lastPayload = payload
+      mainExports.operationManager.lastPausedPhase = "INSTALLING"
+      return new Promise(() => {})
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const launchHandler = ipcHandlers.get("game-launch")!
+
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+    capturedOnPhaseChange("INSTALLING")
+    capturedOnProgress({ phase: "INSTALLING", progress: 47 })
+
+    expect(mainExports.getDownloadQueueSnapshot().active?.phase).toBe("INSTALLING")
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(47)
+
+    // Lanzar B mientras A está en INSTALLING 47%
+    await launchHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      minecraftVersion: "1.20.1",
+    })
+
+    // A se pausó
+    expect(mainExports.operationManager.state).toBe("PAUSED")
+    const floor = mainExports.getResumeProgressFloor()
+    expect(floor?.targetPhase).toBe("INSTALLING")
+    expect(floor?.floor).toBe(47)
+    expect(floor?.isResume).toBe(true)
+
+    // Al cerrar B, A se auto-reanuda
+    mainExports.gameLauncher.setStatus("idle")
+    await new Promise((r) => setTimeout(r, 20))
+
+    // Simular replay interno DOWNLOADING 20%
+    capturedOnPhaseChange("DOWNLOADING")
+    capturedOnProgress({ phase: "DOWNLOADING", progress: 20 })
+    expect(mainExports.getDownloadQueueSnapshot().active?.phase).toBe("INSTALLING")
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(47)
+
+    // Simular INSTALLING 30% -> mantiene floor 47%
+    capturedOnPhaseChange("INSTALLING")
+    capturedOnProgress({ phase: "INSTALLING", progress: 30 })
+    expect(mainExports.getDownloadQueueSnapshot().active?.phase).toBe("INSTALLING")
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(47)
+
+    // Simular INSTALLING 48% -> supera floor
+    capturedOnProgress({ phase: "INSTALLING", progress: 48 })
+    expect(mainExports.getDownloadQueueSnapshot().active?.phase).toBe("INSTALLING")
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(48)
+
+    launchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // 29. A INSTALLING + setting OFF: lanzar B lanza B y A sigue instalándose
+  it("29. A INSTALLING + setting OFF: lanzar B lanza B y A sigue instalándose", async () => {
+    mainExports.settingsStore.set("pauseDownloadsOnGameLaunch", false)
+    const launchSpy = vi.spyOn(mainExports.gameLauncher, "launch").mockImplementation(async (opts: any) => {
+      mainExports.gameLauncher.runningGameId = opts.gameId || null
+      mainExports.gameLauncher.setStatus("running", { gameId: opts.gameId })
+      return { success: true, pid: 12345 }
+    })
+
+    vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (payload: any) => {
+      mainExports.operationManager.state = "INSTALLING"
+      payload.onPhaseChange("INSTALLING")
+      payload.onProgress({ phase: "INSTALLING", progress: 60 })
+      return new Promise(() => {})
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const launchHandler = ipcHandlers.get("game-launch")!
+
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+    expect(mainExports.operationManager.state).toBe("INSTALLING")
+
+    // Lanzar B
+    await launchHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      minecraftVersion: "1.20.1",
+    })
+
+    // A sigue instalándose, no se pausó
+    expect(mainExports.operationManager.state).toBe("INSTALLING")
+    expect(mainExports.getDownloadQueueSnapshot().active?.state).toBe("INSTALLING")
+
+    mainExports.gameLauncher.setStatus("idle")
+    launchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // 30. A INSTALLING con isCommitting=true: B sigue pudiendo lanzarse y NO se intenta pausar A
+  it("30. A INSTALLING con isCommitting=true: B sigue pudiendo lanzarse y NO se intenta pausar A", async () => {
+    mainExports.settingsStore.set("pauseDownloadsOnGameLaunch", true)
+    const launchSpy = vi.spyOn(mainExports.gameLauncher, "launch").mockImplementation(async (opts: any) => {
+      mainExports.gameLauncher.runningGameId = opts.gameId || null
+      mainExports.gameLauncher.setStatus("running", { gameId: opts.gameId })
+      return { success: true, pid: 12345 }
+    })
+
+    vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (payload: any) => {
+      mainExports.operationManager.state = "INSTALLING"
+      mainExports.operationManager.isCommitting = true
+      payload.onPhaseChange("INSTALLING")
+      payload.onProgress({ phase: "INSTALLING", progress: 96, isCommitting: true })
+      return new Promise(() => {})
+    })
+
+    const pauseSpy = vi.spyOn(mainExports.operationManager, "pauseSync")
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const launchHandler = ipcHandlers.get("game-launch")!
+
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+
+    // Lanzar B mientras A está haciendo commit
+    const launchRes = await launchHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      minecraftVersion: "1.20.1",
+    })
+
+    expect(launchRes.success).toBe(true)
+    // NO intentó pausar A porque isCommitting=true
+    expect(pauseSpy).not.toHaveBeenCalled()
+    expect(mainExports.operationManager.state).toBe("INSTALLING")
+
+    mainExports.gameLauncher.setStatus("idle")
+    launchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // 31. Otro Minecraft realmente ejecutándose sigue bloqueando lanzar uno segundo
+  it("31. Otro Minecraft realmente ejecutándose sigue bloqueando lanzar uno segundo", async () => {
+    mainExports.gameLauncher.setStatus("running", { gameId: "server-b" })
+    const launchHandler = ipcHandlers.get("game-launch")!
+
+    await expect(
+      launchHandler({}, {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        minecraftVersion: "1.20.1",
+      })
+    ).rejects.toThrow("Game is already running or launching.")
+
+    mainExports.gameLauncher.setStatus("idle")
+  })
+
+  // 32. El mismo servidor que está sincronizándose o instalándose no puede lanzarse
+  it("32. El mismo servidor que está sincronizándose o instalándose no puede lanzarse", async () => {
+    vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (payload: any) => {
+      mainExports.operationManager.state = "INSTALLING"
+      payload.onPhaseChange("INSTALLING")
+      return new Promise(() => {})
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const launchHandler = ipcHandlers.get("game-launch")!
+
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+
+    await expect(
+      launchHandler({}, {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        minecraftVersion: "1.20.1",
+      })
+    ).rejects.toThrow("Cannot launch Minecraft while this game is updating or installing.")
+
+    vi.restoreAllMocks()
+  })
+
+  // 33. VERIFYING continúa bloqueando el lanzamiento de otro juego
+  it("33. VERIFYING continúa bloqueando el lanzamiento de otro juego", async () => {
+    vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (payload: any) => {
+      mainExports.operationManager.state = "VERIFYING"
+      payload.onPhaseChange("VERIFYING")
+      return new Promise(() => {})
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const launchHandler = ipcHandlers.get("game-launch")!
+
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      isVerify: true,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+
+    await expect(
+      launchHandler({}, {
+        gameId: "server-b",
+        gameName: "Server Beta",
+        minecraftVersion: "1.20.1",
+      })
+    ).rejects.toThrow("Cannot launch Minecraft while another game is verifying.")
+
+    vi.restoreAllMocks()
+  })
+
+  // 34. Restauración automática tras reinicio en INSTALLING 47% conserva 47% durante replay interno y avanza a 48%
+  it("34. Restauración automática tras reinicio en INSTALLING 47% conserva 47% durante replay interno y avanza a 48%", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: {
+          gameId: "server-a",
+          gameName: "Server Alpha",
+          modpackVersion: "1.0.0",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+        },
+        queuedAt: Date.now() - 3000,
+        phase: "INSTALLING",
+        progress: 47,
+      },
+      queue: [],
+    }
+    fs.writeFileSync(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    let capturedOnProgress: any
+    let capturedOnPhaseChange: any
+    vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (payload: any) => {
+      capturedOnProgress = payload.onProgress
+      capturedOnPhaseChange = payload.onPhaseChange
+      mainExports.operationManager.state = "INSTALLING"
+      return new Promise(() => {})
+    })
+
+    mainExports.loadPersistentDownloadQueue()
+    expect(mainExports.getDownloadQueue().length).toBe(1)
+
+    // Al procesar la cola restaurada
+    mainExports.processNextQueuedSync()
+    await new Promise((r) => setTimeout(r, 20))
+
+    // Snapshot activo inicial retiene 47% INSTALLING
+    const snapInit = mainExports.getDownloadQueueSnapshot().active
+    expect(snapInit?.phase).toBe("INSTALLING")
+    expect(snapInit?.progress).toBe(47)
+
+    // Replay interno de DOWNLOADING
+    capturedOnPhaseChange("DOWNLOADING")
+    capturedOnProgress({ phase: "DOWNLOADING", progress: 20 })
+    expect(mainExports.getDownloadQueueSnapshot().active?.phase).toBe("INSTALLING")
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(47)
+
+    // Catch-up 30, 40, 46, 47 -> mantiene 47%
+    capturedOnPhaseChange("INSTALLING")
+    capturedOnProgress({ phase: "INSTALLING", progress: 30 })
+    expect(mainExports.getDownloadQueueSnapshot().active?.phase).toBe("INSTALLING")
+    capturedOnProgress({ phase: "INSTALLING", progress: 46 })
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(47)
+    capturedOnProgress({ phase: "INSTALLING", progress: 47 })
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(47)
+
+    // Supera el floor -> 48%
+    capturedOnProgress({ phase: "INSTALLING", progress: 48 })
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(48)
+
+    vi.restoreAllMocks()
   })
 })
