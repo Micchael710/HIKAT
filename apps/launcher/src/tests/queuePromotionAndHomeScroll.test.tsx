@@ -244,7 +244,6 @@ describe("Queue Promotion and Home Scroll UX Improvements", () => {
     const queueData: DownloadQueueSnapshot = {
       active: {
         gameId: "server-a",
-        gameName: "Warria",
         state: "SYNCING",
         phase: "DOWNLOADING",
         progress: 40,
@@ -399,8 +398,8 @@ describe("Queue Promotion and Home Scroll UX Improvements", () => {
     mainExports.operationManager.state = "SYNCING"
     mainExports.operationManager.lastPausedPhase = "DOWNLOADING"
 
-    // Mock activeOperationSnapshot for A with 42% progress
-    const activeSnap = {
+    // Mock activeOperationSnapshot for A with exact 42% progress
+    mainExports.setActiveOperationSnapshotForTesting({
       gameId: "server-a",
       phase: "DOWNLOADING",
       progress: 42,
@@ -408,13 +407,20 @@ describe("Queue Promotion and Home Scroll UX Improvements", () => {
       totalBytes: 10000,
       speedMBs: 5,
       remainingMinutes: 2,
-    }
+    })
+    mainExports.setActiveOperationPayloadForTesting({
+      gameId: "server-a",
+      gameName: "Warria",
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+    })
+
     // Feed through queue with B queued
     const queue = mainExports.getDownloadQueue()
     queue.push({
       gameId: "server-b",
       gameName: "Survival Realm",
-      payload: { gameId: "server-b", gameName: "Survival Realm", modpackVersion: "1.0.0" },
+      payload: { gameId: "server-b", gameName: "Survival Realm", modpackVersion: "1.0.0", minecraftVersion: "1.21.1" },
       queuedAt: Date.now(),
       savedProgress: 0,
       savedPhase: null,
@@ -424,13 +430,12 @@ describe("Queue Promotion and Home Scroll UX Improvements", () => {
     const result = await mainExports.promoteQueuedSync({ gameId: "server-b" })
     expect(result.success).toBe(true)
 
-    // A must now be in downloadQueue with saved progress preserved
+    // A must now be in downloadQueue with EXACT saved progress 42 preserved
     const updatedQueue = mainExports.getDownloadQueue()
     const itemA = updatedQueue.find((item: any) => item.gameId === "server-a")
     expect(itemA).toBeDefined()
     expect(itemA.savedPhase).toBe("DOWNLOADING")
-    // Staging and progress preserved
-    expect(itemA.savedProgress).toBeGreaterThanOrEqual(0)
+    expect(itemA.savedProgress).toBe(42)
   })
 
   // ── TEST 6: SWAP BACK: SELECT A -> B TO QUEUE, A RESUMES FROM PRIOR PROGRESS ──
@@ -570,5 +575,226 @@ describe("Queue Promotion and Home Scroll UX Improvements", () => {
     const restoredB = restoredQueue.find((item: any) => item.gameId === "server-b")
     expect(restoredB).toBeDefined()
     expect(restoredB.savedProgress).toBe(0)
+  })
+
+  // ── TEST 10: CONCURRENCY LOCK - TWO CALLS: ONLY ONE EXECUTES, SECOND RETURNS BUSY: TRUE ──
+  it("10. Concurrency lock: two concurrent calls to promoteQueuedSync() -> second returns busy: true", async () => {
+    mainExports.setActiveOperationGameIdForTesting("server-a")
+    mainExports.operationManager.state = "SYNCING"
+
+    const queue = mainExports.getDownloadQueue()
+    queue.push({
+      gameId: "server-b",
+      gameName: "Survival Realm",
+      payload: { gameId: "server-b", gameName: "Survival Realm", modpackVersion: "1.0.0", minecraftVersion: "1.21.1" },
+      queuedAt: Date.now(),
+    })
+
+    // Simulate pause taking some time
+    const originalPauseSync = mainExports.operationManager.pauseSync
+    let resolvePause: () => void = () => {}
+    mainExports.operationManager.pauseSync = vi.fn().mockImplementation(
+      () =>
+        new Promise<any>((resolve) => {
+          resolvePause = () => {
+            mainExports.operationManager.state = "PAUSED"
+            resolve({ success: true, paused: true, state: "PAUSED" })
+          }
+        })
+    )
+
+    try {
+      // First call begins and waits on pauseSync
+      const call1Promise = mainExports.promoteQueuedSync({ gameId: "server-b" })
+      expect(mainExports.isPromotingQueuedSyncForTesting()).toBe(true)
+
+      // Second concurrent call arrives immediately while call1 is still running
+      const call2Result = await mainExports.promoteQueuedSync({ gameId: "server-b" })
+      expect(call2Result.success).toBe(false)
+      expect(call2Result.busy).toBe(true)
+
+      // Complete call 1
+      resolvePause()
+      const call1Result = await call1Promise
+      expect(call1Result.success).toBe(true)
+      expect(call1Result.promoted).toBe(true)
+
+      // Lock must be released
+      expect(mainExports.isPromotingQueuedSyncForTesting()).toBe(false)
+    } finally {
+      mainExports.operationManager.pauseSync = originalPauseSync
+    }
+  })
+
+  // ── TEST 11: LOCK RELEASES ON pauseSync FAILURE AND RECOVERS ──
+  it("11. Lock releases if pauseSync() fails, and subsequent promotion works normally", async () => {
+    mainExports.setActiveOperationGameIdForTesting("server-a")
+    mainExports.operationManager.state = "SYNCING"
+
+    const queue = mainExports.getDownloadQueue()
+    queue.push({
+      gameId: "server-b",
+      gameName: "Survival Realm",
+      payload: { gameId: "server-b", gameName: "Survival Realm", modpackVersion: "1.0.0", minecraftVersion: "1.21.1" },
+      queuedAt: Date.now(),
+    })
+
+    const originalPauseSync = mainExports.operationManager.pauseSync
+    // Simulate pauseSync failing abruptly
+    mainExports.operationManager.pauseSync = vi.fn().mockRejectedValueOnce(new Error("Disk error during pause"))
+
+    try {
+      await expect(mainExports.promoteQueuedSync({ gameId: "server-b" })).rejects.toThrow("Disk error during pause")
+
+      // Lock MUST be released despite the exception in pauseSync
+      expect(mainExports.isPromotingQueuedSyncForTesting()).toBe(false)
+
+      // Restore normal pauseSync
+      mainExports.operationManager.pauseSync = originalPauseSync
+
+      // Subsequent promotion must work normally without being stuck
+      const retryResult = await mainExports.promoteQueuedSync({ gameId: "server-b" })
+      expect(retryResult.success).toBe(true)
+      expect(retryResult.promoted).toBe(true)
+      expect(mainExports.isPromotingQueuedSyncForTesting()).toBe(false)
+    } finally {
+      mainExports.operationManager.pauseSync = originalPauseSync
+    }
+  })
+
+  // ── TEST 12: UI DOUBLE-CLICK PREVENTION IN DOWNLOADSVIEW ──
+  it("12. Rapid double-click in DownloadsView does not launch two promotions", async () => {
+    const queueData: DownloadQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "SYNCING",
+        phase: "DOWNLOADING",
+        progress: 10,
+        speedMBs: 5,
+        downloadedBytes: 100,
+        totalBytes: 1000,
+        remainingMinutes: 3,
+        canPause: true,
+        canCancel: true,
+        isCommitting: false,
+      },
+      queued: [
+        {
+          gameId: "server-b",
+          gameName: "Survival Realm",
+          position: 1,
+          hasStarted: false,
+          savedProgress: 0,
+          savedPhase: null,
+        },
+      ],
+    }
+
+    let promoteCallCount = 0
+    let promoteResolve: () => void = () => {}
+    const promotePromise = new Promise<any>((resolve) => {
+      promoteResolve = () => resolve({ success: true })
+    })
+
+    const promoteSpy = vi.spyOn(gameService, "promoteQueuedSync").mockImplementation(async () => {
+      promoteCallCount++
+      return await promotePromise
+    })
+
+    ;(window as any).electronAPI = {
+      getDownloadQueue: vi.fn().mockResolvedValue(queueData),
+      onDownloadQueueChanged: vi.fn().mockReturnValue(() => {}),
+      onDownloadProgress: vi.fn().mockReturnValue(() => {}),
+      onGamePhaseChanged: vi.fn().mockReturnValue(() => {}),
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadsView theme="dark" servers={sampleServers} />
+        </LanguageProvider>
+      )
+    })
+
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const actionButton = buttons.find((btn) => btn.textContent?.includes("Iniciar ahora"))
+    expect(actionButton).toBeDefined()
+
+    // Simulate fast double click
+    await act(async () => {
+      actionButton?.click()
+      actionButton?.click()
+    })
+
+    // Must only have been called ONCE due to isPromotingQueued guard
+    expect(promoteCallCount).toBe(1)
+
+    // Complete promotion
+    await act(async () => {
+      promoteResolve()
+    })
+
+    promoteSpy.mockRestore()
+  })
+
+  // ── TEST 13: A/B/C NOT LOST OR DUPLICATED AFTER CONCURRENT CALLS ──
+  it("13. A/B/C items are neither duplicated nor lost during concurrent promotion attempts", async () => {
+    mainExports.setActiveOperationGameIdForTesting("server-a")
+    mainExports.operationManager.state = "SYNCING"
+
+    const queue = mainExports.getDownloadQueue()
+    queue.push(
+      {
+        gameId: "server-b",
+        gameName: "Survival Realm",
+        payload: { gameId: "server-b", gameName: "Survival Realm", modpackVersion: "1.0.0", minecraftVersion: "1.21.1" },
+        queuedAt: Date.now(),
+      },
+      {
+        gameId: "server-c",
+        gameName: "Apparatia Core",
+        payload: { gameId: "server-c", gameName: "Apparatia Core", modpackVersion: "1.0.0", minecraftVersion: "1.21.1" },
+        queuedAt: Date.now() + 10,
+      }
+    )
+
+    const originalPauseSync = mainExports.operationManager.pauseSync
+    let resolvePause: () => void = () => {}
+    mainExports.operationManager.pauseSync = vi.fn().mockImplementation(
+      () =>
+        new Promise<any>((resolve) => {
+          resolvePause = () => {
+            mainExports.operationManager.state = "PAUSED"
+            resolve({ success: true, paused: true, state: "PAUSED" })
+          }
+        })
+    )
+
+    try {
+      // User concurrently clicks to promote B and C
+      const promB = mainExports.promoteQueuedSync({ gameId: "server-b" })
+      const promC = mainExports.promoteQueuedSync({ gameId: "server-c" })
+
+      const [resC] = await Promise.all([promC])
+      expect(resC.busy).toBe(true)
+
+      resolvePause()
+      const resB = await promB
+      expect(resB.success).toBe(true)
+
+      // Total items across queue + active must still be exactly 3
+      const updatedQueue = mainExports.getDownloadQueue()
+      const queueIds = updatedQueue.map((item: any) => item.gameId)
+      const allIds = ["server-b", ...queueIds]
+      const uniqueIds = new Set(allIds)
+
+      expect(allIds.length).toBe(3)
+      expect(uniqueIds.size).toBe(3)
+      expect(allIds).toContain("server-a")
+      expect(allIds).toContain("server-b")
+      expect(allIds).toContain("server-c")
+    } finally {
+      mainExports.operationManager.pauseSync = originalPauseSync
+    }
   })
 })

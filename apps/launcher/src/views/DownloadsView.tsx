@@ -63,6 +63,9 @@ export default function DownloadsView({
     canCancel: true,
   })
 
+  const [isPromotingQueued, setIsPromotingQueued] = useState(false)
+  const isPromotingQueuedRef = useRef(false)
+
   const activeGameIdRef = useRef<string | null>(null)
 
   const refreshQueue = useCallback(async () => {
@@ -261,20 +264,26 @@ export default function DownloadsView({
   }
 
   const handlePromoteQueued = async (item: QueuedDownloadItem) => {
+    if (isPromotingQueuedRef.current || isPromotingQueued) return
+    const isAnyActiveCommittingOrVerifying = Boolean(
+      active &&
+      (active.isCommitting || active.phase === "VERIFYING" || active.canPause === false || activeProgress.isCommitting || activeProgress.phase === "VERIFYING" || activeProgress.canPause === false) &&
+      active.state !== "PAUSED" &&
+      active.phase !== "PAUSED"
+    )
+    if (isAnyActiveCommittingOrVerifying) {
+      return
+    }
+    isPromotingQueuedRef.current = true
+    setIsPromotingQueued(true)
     try {
-      const isAnyActiveCommittingOrVerifying = Boolean(
-        active &&
-        (active.isCommitting || active.phase === "VERIFYING" || active.canPause === false || activeProgress.isCommitting || activeProgress.phase === "VERIFYING" || activeProgress.canPause === false) &&
-        active.state !== "PAUSED" &&
-        active.phase !== "PAUSED"
-      )
-      if (isAnyActiveCommittingOrVerifying) {
-        return
-      }
       await gameService.promoteQueuedSync({ gameId: item.gameId, gameName: item.gameName })
       refreshQueue()
     } catch (err) {
       console.error("[DownloadsView] Promote queued failed:", err)
+    } finally {
+      isPromotingQueuedRef.current = false
+      setIsPromotingQueued(false)
     }
   }
 
@@ -760,10 +769,11 @@ export default function DownloadsView({
                         (typeof item.savedProgress === "number" && item.savedProgress > 0)
                       )
                       const isCannotPromote = Boolean(
-                        active &&
+                        isPromotingQueued ||
+                        (active &&
                         (active.isCommitting || active.phase === "VERIFYING" || active.canPause === false || activeProgress.isCommitting || activeProgress.phase === "VERIFYING" || activeProgress.canPause === false) &&
                         active.state !== "PAUSED" &&
-                        active.phase !== "PAUSED"
+                        active.phase !== "PAUSED")
                       )
                       return (
                         <div
