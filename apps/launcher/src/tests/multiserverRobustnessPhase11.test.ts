@@ -24,6 +24,95 @@ import {
   // @ts-expect-error CJS module without declaration
 } from "../../electron/client-files-sync.cjs"
 
+const ipcHandlers = new Map<string, Function>()
+const ipcListeners = new Map<string, Function>()
+let activeUserDataDir = ""
+let activeAppDataDir = ""
+const lastSentEvents: { channel: string; args: any[] }[] = []
+
+const electronMock = {
+  app: {
+    requestSingleInstanceLock: vi.fn().mockReturnValue(true),
+    getPath: vi.fn((name) => {
+      if (name === "appData") return activeAppDataDir || os.tmpdir()
+      if (name === "userData") return activeUserDataDir || os.tmpdir()
+      return os.tmpdir()
+    }),
+    setPath: vi.fn(),
+    setAsDefaultProtocolClient: vi.fn(),
+    on: vi.fn(),
+    quit: vi.fn(),
+    whenReady: vi.fn().mockReturnValue(new Promise(() => {})),
+  },
+  BrowserWindow: function BrowserWindowMock() {
+    return {
+      loadURL: vi.fn(),
+      loadFile: vi.fn(),
+      on: vi.fn(),
+      once: vi.fn(),
+      show: vi.fn(),
+      hide: vi.fn(),
+      close: vi.fn(),
+      destroy: vi.fn(),
+      isDestroyed: () => false,
+      focus: vi.fn(),
+      restore: vi.fn(),
+      isVisible: () => true,
+      isMinimized: () => false,
+      webContents: {
+        send: vi.fn((channel, ...args) => {
+          lastSentEvents.push({ channel, args })
+        }),
+        setVisualZoomLevelLimits: vi.fn(),
+        setWindowOpenHandler: vi.fn(),
+        on: vi.fn(),
+        getURL: vi.fn().mockReturnValue(""),
+      },
+    }
+  },
+  ipcMain: {
+    handle: (channel: string, handler: Function) => {
+      ipcHandlers.set(channel, handler)
+    },
+    on: (channel: string, listener: Function) => {
+      ipcListeners.set(channel, listener)
+    },
+  },
+  screen: {
+    getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }),
+  },
+  nativeImage: {
+    createFromPath: () => ({}),
+  },
+  shell: {
+    openExternal: vi.fn(),
+  },
+  Tray: vi.fn().mockImplementation(() => ({
+    setToolTip: vi.fn(),
+    setContextMenu: vi.fn(),
+    on: vi.fn(),
+  })),
+  Menu: {
+    buildFromTemplate: vi.fn(),
+  },
+}
+
+try {
+  const electronResolved = require.resolve("electron")
+  require.cache[electronResolved] = {
+    id: electronResolved,
+    filename: electronResolved,
+    loaded: true,
+    exports: electronMock,
+  } as any
+} catch (_) {}
+
+vi.mock("electron", () => ({
+  ...electronMock,
+  default: electronMock,
+}))
+const mainExports = require("../../electron/main.cjs") as any
+
 function computeSha(content: Buffer | string): string {
   return crypto
     .createHash("sha256")
@@ -52,6 +141,13 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     await fsp.mkdir(instanceRootA, { recursive: true })
     await fsp.mkdir(instanceRootB, { recursive: true })
     await fsp.mkdir(userDataDir, { recursive: true })
+
+    activeAppDataDir = tempDir
+    activeUserDataDir = userDataDir
+    mainExports.resetDownloadQueueForTesting()
+    lastSentEvents.length = 0
+    const mockWin = new (electronMock.BrowserWindow as any)()
+    mainExports.setMainWindowForTesting(mockWin)
 
     requestedRanges = []
     fileStore = new Map<string, Buffer>()
@@ -98,6 +194,7 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
   })
 
   afterEach(async () => {
+    mainExports.resetDownloadQueueForTesting()
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
@@ -205,8 +302,8 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     }
   })
 
-  // 3. Update 1.2 -> 1.3 -> pause durante INSTALLING -> 1.2 intacta
-  it("3. Update 1.2 -> 1.3 -> pause durante INSTALLING -> 1.2 intacta", async () => {
+  // 3. Update con Core ya instalado -> Cancel antes de commit deja versión anterior intacta
+  it("3. Update con Core ya instalado -> Cancel antes de commit deja versión anterior intacta", async () => {
     fileStore.set("/file/v13.jar", Buffer.from("v13-content", "utf8"))
     await fsp.mkdir(path.join(instanceRootA, "mods"), { recursive: true })
     await fsp.writeFile(path.join(instanceRootA, "mods", "v12.jar"), "v12-content")
@@ -215,25 +312,63 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
       clientFiles: [{ path: "mods/v12.jar", sha256: computeSha("v12-content"), sizeBytes: 11, policy: "NO_MODIFICABLE" }],
     })
 
-    let pausedPhaseReported = ""
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({ installed: true }),
+    })
+
+    let cancelTriggered = false
+    const progressListener = (data: any) => {
+      if (data?.phase === "DOWNLOADING" && !cancelTriggered) {
+        cancelTriggered = true
+        manager.cancelSync(instanceRootA).catch(() => {})
+      }
+    }
+
+    const cancelPromise = manager.startSync({
+      instanceRoot: instanceRootA,
+      clientFiles: [{
+        path: "mods/v13.jar",
+        sha256: computeSha("v13-content"),
+        sizeBytes: 11,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/v13.jar`,
+      }],
+      modpackVersion: "1.3.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      onProgress: progressListener,
+    }).catch((e: any) => e)
+
+    await cancelPromise
+
+    expect(manager.getState()).toBe("IDLE")
+
+    const manifest = await loadInstalledManifest(instanceRootA)
+    expect(manifest?.modpackVersion).toBe("1.2.0")
+    expect(fs.existsSync(path.join(instanceRootA, "mods", "v12.jar"))).toBe(true)
+    expect(fs.existsSync(path.join(instanceRootA, "mods", "v13.jar"))).toBe(false)
+  })
+
+  // 4. Update que necesita Core/Loader -> una vez comienzan escrituras reales queda no cancelable y termina consistente
+  it("4. Update que necesita Core/Loader -> una vez comienzan escrituras reales queda no cancelable y termina consistente", async () => {
+    fileStore.set("/file/v13.jar", Buffer.from("v13-content", "utf8"))
+    await fsp.mkdir(path.join(instanceRootA, "mods"), { recursive: true })
+    await fsp.writeFile(path.join(instanceRootA, "mods", "v12.jar"), "v12-content")
+    await saveInstalledManifest(instanceRootA, {
+      modpackVersion: "1.2.0",
+      clientFiles: [{ path: "mods/v12.jar", sha256: computeSha("v12-content"), sizeBytes: 11, policy: "NO_MODIFICABLE" }],
+    })
+
+    let verifiedNonCancellable = false
+
     const manager = new GameOperationManager({
       coreChecker: async () => ({ installed: false }),
-      coreInstaller: async ({ signal }: any) => {
-        setTimeout(() => {
-          manager.pauseSync().catch(() => {})
-        }, 10)
-        return new Promise((_, reject) => {
-          if (signal?.aborted) {
-            const err = new Error("Aborted")
-            err.name = "AbortError"
-            return reject(err)
-          }
-          signal?.addEventListener?.("abort", () => {
-            const err = new Error("Aborted")
-            err.name = "AbortError"
-            reject(err)
-          })
-        })
+      coreInstaller: async () => {
+        verifiedNonCancellable = true
+        expect(manager.isCommitting).toBe(true)
+        await expect(manager.pauseSync()).rejects.toThrow("Cannot pause")
+        await expect(manager.cancelSync(instanceRootA)).rejects.toThrow("Cannot cancel")
+        return { success: true }
       },
     })
 
@@ -249,72 +384,63 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
       modpackVersion: "1.3.0",
       minecraftVersion: "1.20.1",
       modLoader: "VANILLA",
-      onPhaseChange: (ph: string, underlying: string) => {
-        if (ph === "PAUSED") pausedPhaseReported = underlying
-      },
     })
 
-    expect(res.paused).toBe(true)
-    expect(manager.getState()).toBe("PAUSED")
-    expect(pausedPhaseReported).toBe("INSTALLING")
-
-    const manifest = await loadInstalledManifest(instanceRootA)
-    expect(manifest?.modpackVersion).toBe("1.2.0")
-    expect(fs.existsSync(path.join(instanceRootA, "mods", "v12.jar"))).toBe(true)
-    expect(fs.existsSync(path.join(instanceRootA, "mods", "v13.jar"))).toBe(false)
-  })
-
-  // 4. Update 1.2 -> 1.3 -> cancel durante INSTALLING -> manifest y archivos siguen en 1.2
-  it("4. Update 1.2 -> 1.3 -> cancel durante INSTALLING -> manifest y archivos siguen en 1.2", async () => {
-    fileStore.set("/file/v13.jar", Buffer.from("v13-content", "utf8"))
-    await fsp.mkdir(path.join(instanceRootA, "mods"), { recursive: true })
-    await fsp.writeFile(path.join(instanceRootA, "mods", "v12.jar"), "v12-content")
-    await saveInstalledManifest(instanceRootA, {
-      modpackVersion: "1.2.0",
-      clientFiles: [{ path: "mods/v12.jar", sha256: computeSha("v12-content"), sizeBytes: 11, policy: "NO_MODIFICABLE" }],
-    })
-
-    const manager = new GameOperationManager({
-      coreChecker: async () => ({ installed: false }),
-      coreInstaller: async ({ signal }: any) => {
-        setTimeout(() => {
-          manager.cancelSync(instanceRootA).catch(() => {})
-        }, 10)
-        return new Promise((_, reject) => {
-          if (signal?.aborted) {
-            const err = new Error("Aborted")
-            err.name = "AbortError"
-            return reject(err)
-          }
-          signal?.addEventListener?.("abort", () => {
-            const err = new Error("Aborted")
-            err.name = "AbortError"
-            reject(err)
-          })
-        })
-      },
-    })
-
-    await manager.startSync({
-      instanceRoot: instanceRootA,
-      clientFiles: [{
-        path: "mods/v13.jar",
-        sha256: computeSha("v13-content"),
-        sizeBytes: 11,
-        policy: "NO_MODIFICABLE",
-        downloadUrl: `${serverBaseUrl}/file/v13.jar`,
-      }],
-      modpackVersion: "1.3.0",
-      minecraftVersion: "1.20.1",
-      modLoader: "VANILLA",
-    }).catch(() => {})
-
+    expect(res.success).toBe(true)
+    expect(verifiedNonCancellable).toBe(true)
     expect(manager.getState()).toBe("IDLE")
 
     const manifest = await loadInstalledManifest(instanceRootA)
-    expect(manifest?.modpackVersion).toBe("1.2.0")
-    expect(fs.existsSync(path.join(instanceRootA, "mods", "v12.jar"))).toBe(true)
-    expect(fs.existsSync(path.join(instanceRootA, "mods", "v13.jar"))).toBe(false)
+    expect(manifest?.modpackVersion).toBe("1.3.0")
+    expect(fs.existsSync(path.join(instanceRootA, "mods", "v13.jar"))).toBe(true)
+  })
+
+  // 4b. DOWNLOADING 100 -> INSTALLING progreso real menor de 100 en GameOperationManager real
+  it("4b. DOWNLOADING 100 -> INSTALLING progreso real menor de 100 en GameOperationManager real", async () => {
+    const fullContent = Buffer.alloc(500, "X")
+    const hash = computeSha(fullContent)
+    fileStore.set("/file/item.jar", fullContent)
+
+    const recordedProgress: { phase: string; progress: number }[] = []
+
+    const manager = new GameOperationManager({
+      coreChecker: async () => ({ installed: false }),
+      coreInstaller: async ({ onProgress }: any) => {
+        onProgress?.({ progress: 10 })
+        return { success: true }
+      },
+    })
+
+    const res = await manager.startSync({
+      instanceRoot: instanceRootA,
+      clientFiles: [{
+        path: "mods/item.jar",
+        sha256: hash,
+        sizeBytes: 500,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/item.jar`,
+      }],
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      onProgress: (p: any) => {
+        if (p?.phase && typeof p?.progress === "number") {
+          recordedProgress.push({ phase: p.phase, progress: p.progress })
+        }
+      },
+    })
+
+    expect(res.success).toBe(true)
+
+    // DOWNLOADING reached 100
+    const downloadEntries = recordedProgress.filter((p) => p.phase === "DOWNLOADING")
+    expect(downloadEntries.some((p) => p.progress === 100)).toBe(true)
+
+    // First INSTALLING entry must be strictly < 100 (monotonicity reset per phase)
+    const firstInstalling = recordedProgress.find((p) => p.phase === "INSTALLING")
+    expect(firstInstalling).toBeDefined()
+    expect(firstInstalling!.progress).toBeLessThan(100)
+    expect(firstInstalling!.progress).toBe(30)
   })
 
   // 5. Resume de INSTALLING termina correctamente en 1.3
@@ -441,105 +567,246 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     expect(finalManifest?.modpackVersion).toBe("1.3.0")
   })
 
-  // 8-11. FIFO Queue: Orden secuencial, avance determinista al terminar o cancelar
-  it("8-11. FIFO Queue: Orden secuencial, avance determinista al terminar o cancelar", async () => {
-    let active: any = null
-    let queue: any[] = []
-    let bStartCount = 0
+  // 8-11. FIFO Queue: Orden secuencial, avance determinista usando lógica productiva de main.cjs
+  it("8-11. FIFO Queue: Orden secuencial A -> B -> C, cancel A inicia B, cancel B mueve C a primero usando main.cjs real", async () => {
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const cancelHandler = ipcHandlers.get("game-cancel-sync")!
+    const getQueueHandler = ipcHandlers.get("game-get-download-queue")!
 
-    const simulateStart = (item: any) => {
-      if (!active) {
-        active = item
-        if (item.gameId === "B") bStartCount++
-      } else {
-        queue.push(item)
-      }
-    }
+    fileStore.set("/file/fileA.jar", Buffer.from("data-a"))
+    fileStore.set("/file/fileB.jar", Buffer.from("data-b"))
+    fileStore.set("/file/fileC.jar", Buffer.from("data-c"))
 
-    const simulateFinish = () => {
-      active = null
-      if (queue.length > 0) {
-        const next = queue.shift()
-        simulateStart(next)
-      }
-    }
+    const sampleFileA = [{
+      path: "mods/fileA.jar",
+      sha256: computeSha("data-a"),
+      sizeBytes: 6,
+      policy: "NO_MODIFICABLE" as const,
+      downloadUrl: `${serverBaseUrl}/file/fileA.jar`,
+    }]
+    const sampleFileB = [{
+      path: "mods/fileB.jar",
+      sha256: computeSha("data-b"),
+      sizeBytes: 6,
+      policy: "NO_MODIFICABLE" as const,
+      downloadUrl: `${serverBaseUrl}/file/fileB.jar`,
+    }]
+    const sampleFileC = [{
+      path: "mods/fileC.jar",
+      sha256: computeSha("data-c"),
+      sizeBytes: 6,
+      policy: "NO_MODIFICABLE" as const,
+      downloadUrl: `${serverBaseUrl}/file/fileC.jar`,
+    }]
 
-    const simulateCancelQueued = (gameId: string) => {
-      queue = queue.filter((q) => q.gameId !== gameId)
-    }
+    // 1. Iniciar A (permanece activo)
+    const syncAPromise = startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFileA,
+    }).catch((e: any) => e)
 
-    simulateStart({ gameId: "A" })
-    simulateStart({ gameId: "B" })
-    simulateStart({ gameId: "C" })
+    await new Promise((r) => setTimeout(r, 40))
 
-    expect(active.gameId).toBe("A")
-    expect(queue.map((q) => q.gameId)).toEqual(["B", "C"])
+    // 2. Encolar B y C
+    const resB = await startHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      instanceRoot: instanceRootB,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFileB,
+    })
+    expect(resB.queued).toBe(true)
+    expect(resB.position).toBe(1)
 
-    simulateCancelQueued("B")
-    expect(active.gameId).toBe("A")
-    expect(queue.map((q) => q.gameId)).toEqual(["C"])
+    const resC = await startHandler({}, {
+      gameId: "server-c",
+      gameName: "Server Gamma",
+      instanceRoot: path.join(tempDir, "games", "ServerC"),
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFileC,
+    })
+    expect(resC.queued).toBe(true)
+    expect(resC.position).toBe(2)
 
-    queue.push({ gameId: "B" })
-    expect(queue.map((q) => q.gameId)).toEqual(["C", "B"])
+    // Snapshot real: A activo, B #1, C #2
+    let snap = await getQueueHandler()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.queued.map((q: any) => q.gameId)).toEqual(["server-b", "server-c"])
 
-    simulateFinish()
-    expect(active.gameId).toBe("C")
-    expect(queue.map((q) => q.gameId)).toEqual(["B"])
+    // Mismo gameId enqueued actualiza payload sin duplicar
+    const resBDup = await startHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta Updated",
+      instanceRoot: instanceRootB,
+      modpackVersion: "1.0.1",
+      clientFiles: sampleFileB,
+    })
+    expect(resBDup.queued).toBe(true)
+    expect(resBDup.position).toBe(1)
+    snap = await getQueueHandler()
+    expect(snap.queued.length).toBe(2)
+    expect(snap.queued[0].gameName).toBe("Server Beta Updated")
 
-    simulateFinish()
-    expect(active.gameId).toBe("B")
-    expect(queue.length).toBe(0)
-    expect(bStartCount).toBe(1)
+    // Cancelar B encolado -> C pasa a posición 1
+    const cancelBRes = await cancelHandler({}, { gameId: "server-b", gameName: "Server Beta" })
+    expect(cancelBRes.queuedRemoved).toBe(true)
+    snap = await getQueueHandler()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.queued.map((q: any) => q.gameId)).toEqual(["server-c"])
+    expect(snap.queued[0].position).toBe(1)
+
+    // Cancelar A -> C inicia automáticamente (exactamente una vez)
+    await cancelHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
+    await syncAPromise
+    await new Promise((r) => setTimeout(r, 60))
+
+    snap = await getQueueHandler()
+    expect(snap.active?.gameId).toBe("server-c")
+    expect(snap.queued.length).toBe(0)
+
+    // Cancelar C para limpiar
+    await cancelHandler({}, { gameId: "server-c", gameName: "Server Gamma" })
+    await new Promise((r) => setTimeout(r, 40))
   })
 
   // 12. Cierre/reinicio restaura A/B/C y su orden
-  it("12. Cierre/reinicio restaura la operación activa y su orden FIFO en download-queue.json", async () => {
+  it("12. Persistencia y reinicio de cola en download-queue.json usando la lógica productiva de main.cjs", async () => {
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const getQueueHandler = ipcHandlers.get("game-get-download-queue")!
+    const cancelHandler = ipcHandlers.get("game-cancel-sync")!
+
+    fileStore.set("/file/fileP.jar", Buffer.from("persist-data"))
+
+    const sampleFiles = [{
+      path: "mods/fileP.jar",
+      sha256: computeSha("persist-data"),
+      sizeBytes: 12,
+      policy: "NO_MODIFICABLE" as const,
+      downloadUrl: `${serverBaseUrl}/file/fileP.jar`,
+    }]
+
+    // 1. Iniciar activo A y encolar B y C
+    const syncPromiseA = startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFiles,
+    }).catch((e: any) => e)
+
+    await new Promise((r) => setTimeout(r, 30))
+
+    await startHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      instanceRoot: instanceRootB,
+      modpackVersion: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFiles,
+    })
+
+    await startHandler({}, {
+      gameId: "server-c",
+      gameName: "Server Gamma",
+      instanceRoot: path.join(tempDir, "games", "ServerC"),
+      modpackVersion: "3.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: sampleFiles,
+    })
+
+    // savePersistentDownloadQueue se llama automáticamente en main.cjs, comprobamos el archivo real
     const queueFilePath = path.join(userDataDir, "download-queue.json")
+    expect(fs.existsSync(queueFilePath)).toBe(true)
 
-    const persistentData = {
-      active: {
-        gameId: "server-a",
-        gameName: "Server Alpha",
-        payload: { modpackVersion: "1.0.0", minecraftVersion: "1.20.1" },
-        queuedAt: Date.now() - 5000,
-      },
-      queue: [
-        {
-          gameId: "server-b",
-          gameName: "Server Beta",
-          payload: { modpackVersion: "2.0.0", minecraftVersion: "1.20.1" },
-          queuedAt: Date.now() - 3000,
-        },
-        {
-          gameId: "server-c",
-          gameName: "Server Gamma",
-          payload: { modpackVersion: "3.0.0", minecraftVersion: "1.20.1" },
-          queuedAt: Date.now() - 1000,
-        },
-      ],
-    }
+    // Simulamos reinicio: reset in-memory queue
+    mainExports.resetDownloadQueueForTesting()
+    const snapAfterReset = await getQueueHandler()
+    expect(snapAfterReset.active).toBeNull()
+    expect(snapAfterReset.queued.length).toBe(0)
 
-    await fsp.writeFile(queueFilePath, JSON.stringify(persistentData, null, 2), "utf8")
+    // Ejecutamos loadPersistentDownloadQueue productivo
+    mainExports.loadPersistentDownloadQueue()
 
-    const raw = await fsp.readFile(queueFilePath, "utf8")
-    const parsed = JSON.parse(raw)
-    const restoredQueue: any[] = []
+    const restoredSnap = await getQueueHandler()
+    // La operación activa previa y la cola se restauran en orden FIFO
+    expect(restoredSnap.queued.length).toBe(3)
+    expect(restoredSnap.queued[0].gameId).toBe("server-a")
+    expect(restoredSnap.queued[1].gameId).toBe("server-b")
+    expect(restoredSnap.queued[2].gameId).toBe("server-c")
 
-    if (parsed.active?.gameId) {
-      restoredQueue.push(parsed.active)
-    }
-    if (Array.isArray(parsed.queue)) {
-      for (const item of parsed.queue) {
-        if (!restoredQueue.some((q) => q.gameId === item.gameId)) {
-          restoredQueue.push(item)
-        }
-      }
-    }
+    // Limpieza
+    await cancelHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
+    await syncPromiseA
+  })
 
-    expect(restoredQueue.length).toBe(3)
-    expect(restoredQueue[0].gameId).toBe("server-a")
-    expect(restoredQueue[1].gameId).toBe("server-b")
-    expect(restoredQueue[2].gameId).toBe("server-c")
+  // 12b. Un queued que pasa a activo y falla emite game-phase-changed ERROR y no desaparece silenciosamente
+  it("12b. Un queued que pasa a activo y falla emite game-phase-changed ERROR y no desaparece silenciosamente", async () => {
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const cancelHandler = ipcHandlers.get("game-cancel-sync")!
+
+    fileStore.set("/file/fileOk.jar", Buffer.from("ok-data"))
+
+    // Iniciar A
+    const syncPromiseA = startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: [{
+        path: "mods/fileOk.jar",
+        sha256: computeSha("ok-data"),
+        sizeBytes: 7,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: `${serverBaseUrl}/file/fileOk.jar`,
+      }],
+    }).catch((e: any) => e)
+
+    await new Promise((r) => setTimeout(r, 30))
+
+    // Encolar B con URL que fallará con error
+    await startHandler({}, {
+      gameId: "server-b",
+      gameName: "Server Beta",
+      instanceRoot: instanceRootB,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: [{
+        path: "mods/fail.jar",
+        sha256: "invalidsha",
+        sizeBytes: 100,
+        policy: "NO_MODIFICABLE",
+        downloadUrl: "http://127.0.0.1:1/nonexistent.jar",
+      }],
+    })
+
+    // Cancelar A -> B pasa a activo y fallará
+    lastSentEvents.length = 0
+    await cancelHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
+    await syncPromiseA
+
+    await new Promise((r) => setTimeout(r, 100))
+
+    // Comprobar que se emitió "game-phase-changed" con "ERROR" para server-b
+    const errorEvent = lastSentEvents.find(
+      (e) => e.channel === "game-phase-changed" && e.args[0] === "ERROR" && e.args[1] === "server-b"
+    )
+    expect(errorEvent).toBeDefined()
   })
 
   // 13. La operación restaurada reutiliza staging existente

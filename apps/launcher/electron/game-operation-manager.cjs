@@ -399,13 +399,21 @@ class GameOperationManager {
         // 2. Ensure Minecraft & Loader Core (minecraft-core discovers required Java)
         // Staged modpack files remain isolated in .hikat/staging/ during this entire phase!
         if (needsCoreInstall) {
-          if (!isVerify && this.state !== "INSTALLING") {
-            this.state = "INSTALLING"
-            currentPhaseName = "INSTALLING"
-            if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
+          if (isUpdate) {
+            this.isCommitting = true
+          }
+
+          if (!isVerify) {
+            if (this.state !== "INSTALLING") {
+              this.state = "INSTALLING"
+              if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
+            }
             safeProgress({
               phase: "INSTALLING",
               progress: 30,
+              isCommitting: this.isCommitting,
+              canPause: !this.isCommitting,
+              canCancel: !this.isCommitting,
             })
           }
 
@@ -414,6 +422,9 @@ class GameOperationManager {
             safeProgress({
               phase: "VERIFYING",
               progress: 95,
+              isCommitting: this.isCommitting,
+              canPause: false,
+              canCancel: false,
             })
           } else {
             const coreProgressAdapter = (data) => {
@@ -427,9 +438,17 @@ class GameOperationManager {
                   ...data,
                   phase: isVerify ? "VERIFYING" : "INSTALLING",
                   progress: mapped,
+                  isCommitting: this.isCommitting,
+                  canPause: !this.isCommitting,
+                  canCancel: !this.isCommitting,
                 })
               } else {
-                safeProgress(data)
+                safeProgress({
+                  ...data,
+                  isCommitting: this.isCommitting,
+                  canPause: !this.isCommitting,
+                  canCancel: !this.isCommitting,
+                })
               }
             }
 
@@ -448,7 +467,6 @@ class GameOperationManager {
           // Core is already installed and healthy during update/install
           if (!isVerify && this.state !== "INSTALLING") {
             this.state = "INSTALLING"
-            currentPhaseName = "INSTALLING"
             if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
           }
           safeProgress({

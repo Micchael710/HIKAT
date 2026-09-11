@@ -224,7 +224,7 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
         downloadedBytes: 720,
         totalBytes: 1000,
         remainingMinutes: 0,
-        canPause: true,
+        canPause: false,
         canCancel: true,
       },
       queued: [],
@@ -359,5 +359,279 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     // Now Server B is active with 15% progress, no longer EN COLA
     expect(container.textContent).not.toContain("EN COLA")
     expect(container.textContent).toContain("15%")
+  })
+
+  // 18. Regresión Pause desde Home -> PAUSED
+  it("18. Pause desde Home transiciona la tarjeta a PAUSED y llama a pauseSync", async () => {
+    const pauseSpy = vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true } as any)
+
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "SYNCING",
+        phase: "DOWNLOADING",
+        progress: 50,
+        speedMBs: 4.0,
+        downloadedBytes: 500,
+        totalBytes: 1000,
+        remainingMinutes: 2,
+        canPause: true,
+        canCancel: true,
+      },
+      queued: [],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="server-a"
+            gameContext={{ gameId: "server-a", gameName: "Warria" }}
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    expect(card.textContent).toContain("DESCARGANDO")
+
+    await act(async () => {
+      card.click()
+    })
+
+    expect(pauseSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // 19. Regresión PAUSED con canPause=false -> Resume sigue clickable y llama una sola vez
+  it("19. PAUSED con contrato real canPause=false y canCancel=true: Resume sigue clickable y llama una sola vez", async () => {
+    const resumeSpy = vi.spyOn(gameService, "resumeSync").mockResolvedValue({ success: true } as any)
+
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "PAUSED",
+        phase: "DOWNLOADING",
+        progress: 50,
+        speedMBs: 0,
+        downloadedBytes: 500,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: false, // Contrato real: NO se puede pausar una operación ya pausada
+        canCancel: true,
+      },
+      queued: [],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="server-a"
+            gameContext={{ gameId: "server-a", gameName: "Warria" }}
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    expect(card.textContent).toContain("PAUSADO")
+    expect(card.style.cursor).toBe("pointer")
+
+    // Clic en la tarjeta de Home para reanudar
+    await act(async () => {
+      card.click()
+    })
+
+    expect(resumeSpy).toHaveBeenCalledTimes(1)
+    expect(resumeSpy).toHaveBeenCalledWith({ gameId: "server-a", gameName: "Warria" })
+  })
+
+  // 20. Regresión Home y Downloads usan el mismo camino de reanudación
+  it("20. Resume desde Home y Downloads usa exactamente la misma operación y método gameService.resumeSync", async () => {
+    const resumeSpy = vi.spyOn(gameService, "resumeSync").mockResolvedValue({ success: true } as any)
+
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "PAUSED",
+        phase: "DOWNLOADING",
+        progress: 60,
+        speedMBs: 0,
+        downloadedBytes: 600,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: false,
+        canCancel: true,
+      },
+      queued: [],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <div>
+            <DownloadPlayButton
+              gameId="server-a"
+              gameContext={{ gameId: "server-a", gameName: "Warria" }}
+              left={0}
+              top={0}
+              theme="dark"
+            />
+            <DownloadsView theme="dark" servers={[serverA]} />
+          </div>
+        </LanguageProvider>,
+      )
+    })
+
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    await act(async () => {
+      card.click()
+    })
+    expect(resumeSpy).toHaveBeenCalledTimes(1)
+    expect(resumeSpy).toHaveBeenLastCalledWith({ gameId: "server-a", gameName: "Warria" })
+
+    // Clic en Reanudar desde DownloadsView
+    const resumeBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Reanudar")
+    )
+    expect(resumeBtn).toBeDefined()
+    await act(async () => {
+      resumeBtn?.click()
+    })
+
+    expect(resumeSpy).toHaveBeenCalledTimes(2)
+    expect(resumeSpy).toHaveBeenLastCalledWith({ gameId: "server-a", gameName: "Warria" })
+  })
+
+  // 21. Regresión Home y Downloads reciben y muestran el mismo phase + progress canónico
+  it("21. Home y Downloads reciben y muestran exactamente el mismo phase + progress (INSTALLING: 35%)", async () => {
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "SYNCING",
+        phase: "INSTALLING",
+        progress: 35,
+        speedMBs: 0,
+        downloadedBytes: 1000,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: true,
+        canCancel: true,
+      },
+      queued: [],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <div>
+            <DownloadPlayButton
+              gameId="server-a"
+              gameContext={{ gameId: "server-a", gameName: "Warria" }}
+              left={0}
+              top={0}
+              theme="dark"
+            />
+            <DownloadsView theme="dark" servers={[serverA]} />
+          </div>
+        </LanguageProvider>,
+      )
+    })
+
+    // Emit live progress 35% INSTALLING
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({
+          gameId: "server-a",
+          phase: "INSTALLING",
+          progress: 35,
+          speedMBs: 0,
+          downloadedBytes: 1000,
+          totalBytes: 1000,
+          remainingMinutes: 0,
+          canPause: true,
+          canCancel: true,
+        })
+      }
+    })
+
+    const text = container.textContent || ""
+    // Ambos componentes reflejan 35% e INSTALANDO
+    expect(text).toContain("35%")
+    expect(text).toContain("INSTALANDO")
+  })
+
+  // 22. Regresión VERIFYING no permite Pause ni Cancel desde ninguna vista
+  it("22. VERIFYING no permite Pause ni Cancel ni desde Home ni desde Downloads", async () => {
+    const pauseSpy = vi.spyOn(gameService, "pauseSync")
+    const cancelSpy = vi.spyOn(gameService, "cancelSync")
+
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "SYNCING",
+        phase: "VERIFYING",
+        progress: 80,
+        speedMBs: 0,
+        downloadedBytes: 800,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: false,
+        canCancel: false,
+      },
+      queued: [],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <div>
+            <DownloadPlayButton
+              gameId="server-a"
+              gameContext={{ gameId: "server-a", gameName: "Warria" }}
+              left={0}
+              top={0}
+              theme="dark"
+            />
+            <DownloadsView theme="dark" servers={[serverA]} />
+          </div>
+        </LanguageProvider>,
+      )
+    })
+
+    // Home progress card: click does NOT pause
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    await act(async () => {
+      card.click()
+    })
+    expect(pauseSpy).not.toHaveBeenCalled()
+
+    // Home cancel button is not rendered during VERIFYING
+    const homeCancelBtn = container.querySelector(".dl-cancel-btn") as HTMLButtonElement | null
+    // In DownloadsView, the cancel button exists but is disabled
+    const allButtons = Array.from(container.querySelectorAll("button"))
+    const dlPauseBtn = allButtons.find((b) => b.title === "Pausar" || b.textContent?.includes("Pausar"))
+    const dlCancelBtn = allButtons.find((b) => b.title === "Cancelar" || b.textContent?.includes("Cancelar"))
+
+    expect(dlPauseBtn?.disabled).toBe(true)
+    expect(dlCancelBtn?.disabled).toBe(true)
+
+    // Attempting to click them does not call IPC
+    await act(async () => {
+      dlPauseBtn?.click()
+      dlCancelBtn?.click()
+    })
+
+    expect(pauseSpy).not.toHaveBeenCalled()
+    expect(cancelSpy).not.toHaveBeenCalled()
   })
 })

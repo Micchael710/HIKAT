@@ -1846,14 +1846,15 @@ function getDownloadQueueSnapshot() {
       operationManager.lastPausedPhase ||
       (opState === "INSTALLING" ? "INSTALLING" : "DOWNLOADING")
     const isCommitting = Boolean(operationManager.isCommitting)
+    const isVerifying = Boolean(currentIsVerify || realPhase === "VERIFYING")
     active = {
       gameId: activeOperationGameId,
       gameName: activeOperationGameName || activeOperationGameId,
       state: opState,
       phase: realPhase,
       isCommitting,
-      canPause: opState !== "PAUSED" && opState !== "IDLE" && !isCommitting && !currentIsVerify,
-      canCancel: opState !== "IDLE" && !isCommitting,
+      canPause: opState !== "PAUSED" && opState !== "IDLE" && !isCommitting && !isVerifying,
+      canCancel: opState !== "IDLE" && !isCommitting && !isVerifying,
       progress: activeOperationSnapshot?.progress ?? 0,
       speedMBs: activeOperationSnapshot?.speedMBs ?? 0,
       downloadedBytes: activeOperationSnapshot?.downloadedBytes ?? 0,
@@ -1905,6 +1906,9 @@ async function processNextQueuedSync() {
       Boolean(operationManager.activeCancelSignal?.isCancelled)
     if (!isCancelled) {
       console.error(`[Main] Error running queued sync for ${nextItem.gameId}:`, err)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("game-phase-changed", "ERROR", nextItem.gameId, err?.message || null)
+      }
     }
   } finally {
     isProcessingQueue = false
@@ -1959,12 +1963,13 @@ async function runGameSync(ctx, payload) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       const opState = operationManager.getState()
       const isCommitting = Boolean(operationManager.isCommitting)
+      const isVerifying = Boolean(currentIsVerify || data.phase === "VERIFYING")
       mainWindow.webContents.send("game-download-progress", {
         ...data,
         state: opState,
         isCommitting,
-        canPause: opState !== "PAUSED" && opState !== "IDLE" && !isCommitting && !currentIsVerify,
-        canCancel: opState !== "IDLE" && !isCommitting,
+        canPause: opState !== "PAUSED" && opState !== "IDLE" && !isCommitting && !isVerifying,
+        canCancel: opState !== "IDLE" && !isCommitting && !isVerifying,
         gameId: ctx.gameId || null,
       })
     }
@@ -2395,8 +2400,13 @@ app.on("window-all-closed", () => {
 function resetDownloadQueueForTesting() {
   downloadQueue = []
   activeOperationGameId = null
+  activeOperationGameName = null
+  activeOperationPayload = null
+  activeOperationQueuedAt = null
   activeOperationSnapshot = null
   autoPausedDownloadGameId = null
+  isProcessingQueue = false
+  currentIsVerify = false
   if (operationManager) {
     if (operationManager.activeCancelSignal) {
       operationManager.activeCancelSignal.isCancelled = true
@@ -2420,5 +2430,13 @@ if (typeof module !== "undefined" && module.exports) {
     settingsStore,
     getDownloadQueueSnapshot,
     resetDownloadQueueForTesting,
+    savePersistentDownloadQueue,
+    loadPersistentDownloadQueue,
+    processNextQueuedSync,
+    runGameSync,
+    getDownloadQueue: () => downloadQueue,
+    setMainWindowForTesting: (win) => {
+      mainWindow = win
+    },
   }
 }

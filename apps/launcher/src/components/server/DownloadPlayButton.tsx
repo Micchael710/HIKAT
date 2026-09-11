@@ -978,6 +978,27 @@ export default function DownloadPlayButton({
         return
       }
 
+      if (phase === "ERROR") {
+        currentPhaseRef.current = null
+        highWaterProgressRef.current = 0
+        isStartingSyncRef.current = false
+        setIsCommitting(false)
+        setCanPauseState(undefined)
+        setCanCancelState(undefined)
+        syncOpIdRef.current++
+        showToast(t("playButton.syncError"), "error")
+        gameService
+          .checkGameManifest(activeServerId, {
+            allowLegacyLocalFilesystem: isLocalAllowed,
+            gameContext: effectiveGameContext,
+          })
+          .then((fresh) => {
+            setManifest(fresh)
+            setStatus(isLocalAllowed ? resolveIdleGameButtonState(fresh, activeServerId) : "unavailable")
+          })
+        return
+      }
+
       if (phase === "IDLE") {
         currentPhaseRef.current = null
         highWaterProgressRef.current = 0
@@ -1093,7 +1114,11 @@ export default function DownloadPlayButton({
     status === "verifying"
 
   const effectiveCanPause = canPauseState !== false && !isCommitting && status !== "verifying"
-  const effectiveCanCancel = canCancelState !== false && !isCommitting
+  const effectiveCanCancel = canCancelState !== false && !isCommitting && status !== "verifying"
+  const isCardClickable =
+    !isCommitting &&
+    status !== "verifying" &&
+    (status === "paused" ? true : effectiveCanPause)
 
   const cancel = async () => {
     if (!isLocalAllowed || isTransitioning || status === "verifying" || isCommitting || !effectiveCanCancel) return
@@ -1153,34 +1178,15 @@ export default function DownloadPlayButton({
       }
     } else if (status === "paused") {
       if (!isLocalAllowed || isStartingSyncRef.current) return
-      if (
-        !manifest ||
-        !Array.isArray(manifest.clientFiles) ||
-        !manifest.version ||
-        !manifest.minecraftVersion
-      ) {
-        showToast(t("playButton.noClientFiles"), "error")
-        return
-      }
-      const syncOpId = ++syncOpIdRef.current
-      isStartingSyncRef.current = true
       const nextStatus = pausedPhaseRef.current === "installing" ? "installing" : "downloading"
       setStatus(nextStatus)
-
-      const syncingVersion = manifest.version
+      setCanPauseState(true)
+      setCanCancelState(true)
+      isStartingSyncRef.current = true
+      const syncOpId = ++syncOpIdRef.current
 
       gameService
-        .startSync(
-          manifest.clientFiles,
-          manifest.version,
-          manifest.minecraftVersion,
-          manifest.modLoader,
-          manifest.modLoaderVersion,
-          manifest.neoForgeVersion,
-          false,
-          ...(manifest.directoryPolicies ? [manifest.directoryPolicies] : []),
-          ...(gameContext ? [gameContext] : []),
-        )
+        .resumeSync(effectiveGameContext)
         .then((res: any) => {
           if (res?.queued) {
             setStatus("queued")
@@ -1200,11 +1206,14 @@ export default function DownloadPlayButton({
               isStartingSyncRef.current = false
             }
             gameService.setGameInstalled(true, gameContext?.gameId)
-            markSyncedVersionInstalled(syncingVersion)
+            if (manifest?.version) {
+              markSyncedVersionInstalled(manifest.version)
+            }
 
             if (
               latestManifestVersionRef.current &&
-              latestManifestVersionRef.current !== syncingVersion
+              manifest?.version &&
+              latestManifestVersionRef.current !== manifest.version
             ) {
               setStatus("update")
             } else {
@@ -1219,10 +1228,24 @@ export default function DownloadPlayButton({
           if (isCancellingRef.current || msg.includes("cancel") || msg.includes("abort")) {
             return
           }
-          console.error("Sync resume error:", err)
-          gameService.setGameInstalled(false, gameContext?.gameId)
-          setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest, activeServerId) : "unavailable")
-          showToast(t("playButton.syncError"), "error")
+          console.error("Resume sync error, trying fallback:", err)
+          // Fallback based on manifest/staging only if no active recoverable operation exists
+          if (
+            manifest &&
+            Array.isArray(manifest.clientFiles) &&
+            manifest.version &&
+            manifest.minecraftVersion
+          ) {
+            if (syncOpIdRef.current === syncOpId) {
+              isStartingSyncRef.current = false
+            }
+            triggerSync(manifest)
+          } else {
+            isStartingSyncRef.current = false
+            gameService.setGameInstalled(false, gameContext?.gameId)
+            setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest, activeServerId) : "unavailable")
+            showToast(t("playButton.syncError"), "error")
+          }
         })
         .finally(() => {
           if (syncOpIdRef.current === syncOpId) {
@@ -1749,7 +1772,7 @@ export default function DownloadPlayButton({
       {/* Main Progress Card */}
       <div
         className="dl-progress-card"
-        onClick={isCommitting || !effectiveCanPause ? undefined : togglePauseResume}
+        onClick={isCardClickable ? togglePauseResume : undefined}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         style={{
@@ -1766,7 +1789,7 @@ export default function DownloadPlayButton({
           border: isDark
             ? "2.5px solid rgba(255, 255, 255, 0.12)"
             : "2.5px solid rgba(0, 0, 0, 0.1)",
-          cursor: isVerifying || isCommitting || !effectiveCanPause ? "default" : "pointer",
+          cursor: isCardClickable ? "pointer" : "default",
           position: "relative",
           overflow: "hidden",
           display: "flex",
