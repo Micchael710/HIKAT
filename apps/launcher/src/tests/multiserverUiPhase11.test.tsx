@@ -768,4 +768,139 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
 
     ;(window.electronAPI as any).startSync = origStartSync
   })
+
+  // 24. Reanudar en INSTALLING 47 conserva visualmente 47% en Home y Downloads durante reconciliación DOWNLOADING y catch-up hasta 48%
+  it("24. Reanudar en INSTALLING 47 conserva visualmente 47% en Home y Downloads durante reconciliación DOWNLOADING y catch-up hasta 48%", async () => {
+    const origStartSync = window.electronAPI!.startSync
+    ;(window.electronAPI as any).startSync = vi.fn().mockImplementation((args: any) => {
+      if (args?.resume) {
+        return new Promise(() => {}) // keep active
+      }
+      return origStartSync(args)
+    })
+
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "PAUSED",
+        phase: "INSTALLING",
+        progress: 47,
+        speedMBs: 0,
+        downloadedBytes: 470,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: false,
+        canCancel: true,
+        isCommitting: false,
+      },
+      queued: [],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <div>
+            <DownloadPlayButton
+              gameId="server-a"
+              gameContext={{ gameId: "server-a", gameName: "Warria" }}
+              left={0}
+              top={0}
+              theme="dark"
+            />
+            <DownloadsView theme="dark" servers={[serverA]} />
+          </div>
+        </LanguageProvider>,
+      )
+    })
+
+    // 1. Inicialmente ambos muestran 47% PAUSADO
+    expect(container.textContent).toContain("47%")
+    expect(container.textContent).toContain("PAUSADO")
+
+    // 2. Pulsar Resume desde Home
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    await act(async () => {
+      card.click()
+    })
+
+    // 3. Evento interno DOWNLOADING emitido por Main como INSTALLING 47
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({
+          gameId: "server-a",
+          phase: "INSTALLING",
+          progress: 47,
+          speedMBs: 1.0,
+          downloadedBytes: 200,
+          totalBytes: 1000,
+          remainingMinutes: 1,
+          canPause: true,
+          canCancel: true,
+          isCommitting: false,
+          state: "INSTALLING",
+        })
+      }
+      currentQueueSnapshot.active = {
+        ...currentQueueSnapshot.active!,
+        state: "INSTALLING",
+        phase: "INSTALLING",
+        progress: 47,
+        canPause: true,
+        canCancel: true,
+      }
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(container.textContent).toContain("47%")
+    expect(container.textContent).not.toContain("DESCARGANDO")
+
+    // 4. Evento INSTALLING 30
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({ gameId: "server-a", phase: "INSTALLING", progress: 47, canPause: true, canCancel: true, state: "INSTALLING" })
+      }
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(container.textContent).toContain("47%")
+
+    // 5. Evento INSTALLING 40
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({ gameId: "server-a", phase: "INSTALLING", progress: 47, canPause: true, canCancel: true, state: "INSTALLING" })
+      }
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(container.textContent).toContain("47%")
+
+    // 6. Evento INSTALLING 46
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({ gameId: "server-a", phase: "INSTALLING", progress: 47, canPause: true, canCancel: true, state: "INSTALLING" })
+      }
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(container.textContent).toContain("47%")
+
+    // 7. Evento INSTALLING 47
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({ gameId: "server-a", phase: "INSTALLING", progress: 47, canPause: true, canCancel: true, state: "INSTALLING" })
+      }
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(container.textContent).toContain("47%")
+
+    // 8. Evento INSTALLING 48
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({ gameId: "server-a", phase: "INSTALLING", progress: 48, canPause: true, canCancel: true, state: "INSTALLING" })
+      }
+      currentQueueSnapshot.active!.progress = 48
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(container.textContent).toContain("48%")
+    expect(container.textContent).not.toContain("47%")
+
+    ;(window.electronAPI as any).startSync = origStartSync
+  })
 })

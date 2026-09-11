@@ -793,7 +793,8 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
       }],
     }).catch((e: any) => e)
 
-    await new Promise((r) => setTimeout(r, 30))
+    await Promise.resolve()
+    await new Promise((r) => setTimeout(r, 40))
 
     // Encolar B con URL que fallará con error
     await startHandler({}, {
@@ -1112,7 +1113,29 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     const evFloor85 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
     expect(evFloor85?.args[0]?.progress).toBe(85)
 
-    // 5. Cambio real de fase: DOWNLOADING 100 -> INSTALLING 30 muestra 30 (el floor no cruza fases)
+    // raw 86 supera 85 -> floor eliminado
+    capturedOnProgress({ phase: "INSTALLING", progress: 86 })
+    const ev86 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    expect(ev86?.args[0]?.progress).toBe(86)
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(86)
+
+    // 5. Transición normal de una operación nueva: DOWNLOADING 100 -> INSTALLING 30 muestra 30
+    capturedOnPhaseChange("IDLE")
+    mainExports.operationManager.state = "IDLE"
+    mainExports.operationManager.activeSyncPromise = null
+    expect(mainExports.getResumeProgressFloor()).toBeNull()
+
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: [],
+    })
+    await new Promise((r) => setTimeout(r, 20))
+
     capturedOnPhaseChange("DOWNLOADING")
     capturedOnProgress({ phase: "DOWNLOADING", progress: 100 })
     expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(100)
@@ -1122,6 +1145,143 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     const evPhaseChange = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
     expect(evPhaseChange?.args[0]?.progress).toBe(30)
     expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(30)
+
+    if (resolveSyncPromise) resolveSyncPromise({ success: true })
+    vi.restoreAllMocks()
+  })
+
+  // 24. Resume desde INSTALLING 47 absorbe evento interno DOWNLOADING y mantiene floor hasta superar 47
+  it("24. Resume desde INSTALLING 47 absorbe evento interno DOWNLOADING y mantiene floor hasta superar 47", async () => {
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const pauseHandler = ipcHandlers.get("game-pause-sync")!
+
+    let capturedOnProgress: any = null
+    let capturedOnPhaseChange: any = null
+    let resolveSyncPromise: any = null
+
+    vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (opts: any) => {
+      capturedOnProgress = opts.onProgress
+      capturedOnPhaseChange = opts.onPhaseChange
+      mainExports.operationManager.state = "INSTALLING"
+      mainExports.operationManager.lastPayload = opts
+      return new Promise((r) => {
+        resolveSyncPromise = r
+      })
+    })
+    vi.spyOn(mainExports.operationManager, "pauseSync").mockImplementation(async () => {
+      mainExports.operationManager.state = "PAUSED"
+      mainExports.operationManager.lastPausedPhase = "INSTALLING"
+      if (capturedOnPhaseChange) capturedOnPhaseChange("PAUSED", "INSTALLING")
+      return { success: true, paused: true, state: "PAUSED" }
+    })
+    vi.spyOn(mainExports.operationManager, "resumeSync").mockImplementation(async () => {
+      mainExports.operationManager.state = "INSTALLING"
+      return new Promise((r) => {
+        resolveSyncPromise = r
+      })
+    })
+
+    // 1. Iniciar sync para server-a y progresar hasta INSTALLING 47
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: [],
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+    capturedOnPhaseChange("INSTALLING")
+    capturedOnProgress({ phase: "INSTALLING", progress: 47 })
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(47)
+    expect(mainExports.getDownloadQueueSnapshot().active.phase).toBe("INSTALLING")
+
+    // 2. Pause en INSTALLING 47
+    await pauseHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
+    expect(mainExports.getDownloadQueueSnapshot().active.state).toBe("PAUSED")
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(47)
+    expect(mainExports.getDownloadQueueSnapshot().active.phase).toBe("INSTALLING")
+
+    // 3. Resume
+    lastSentEvents.length = 0
+    startHandler({}, { gameId: "server-a", gameName: "Server Alpha", resume: true })
+    await new Promise((r) => setTimeout(r, 20))
+
+    const emittedSnapshots: { phase: string; progress: number }[] = []
+
+    // 4. Evento interno DOWNLOADING durante la reconciliación del pipeline
+    capturedOnPhaseChange("DOWNLOADING")
+    capturedOnProgress({ phase: "DOWNLOADING", progress: 20 })
+    const evDl = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    const snapDl = mainExports.getDownloadQueueSnapshot().active
+    expect(evDl?.args[0]?.phase).toBe("INSTALLING")
+    expect(evDl?.args[0]?.progress).toBe(47)
+    expect(snapDl.phase).toBe("INSTALLING")
+    expect(snapDl.progress).toBe(47)
+    emittedSnapshots.push({ phase: evDl!.args[0].phase, progress: evDl!.args[0].progress })
+
+    // 5. Evento INSTALLING 30
+    capturedOnPhaseChange("INSTALLING")
+    capturedOnProgress({ phase: "INSTALLING", progress: 30 })
+    const ev30 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    const snap30 = mainExports.getDownloadQueueSnapshot().active
+    expect(ev30?.args[0]?.phase).toBe("INSTALLING")
+    expect(ev30?.args[0]?.progress).toBe(47)
+    expect(snap30.phase).toBe("INSTALLING")
+    expect(snap30.progress).toBe(47)
+    emittedSnapshots.push({ phase: ev30!.args[0].phase, progress: ev30!.args[0].progress })
+
+    // 6. Evento INSTALLING 40
+    capturedOnProgress({ phase: "INSTALLING", progress: 40 })
+    const ev40 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    const snap40 = mainExports.getDownloadQueueSnapshot().active
+    expect(ev40?.args[0]?.phase).toBe("INSTALLING")
+    expect(ev40?.args[0]?.progress).toBe(47)
+    expect(snap40.phase).toBe("INSTALLING")
+    expect(snap40.progress).toBe(47)
+    emittedSnapshots.push({ phase: ev40!.args[0].phase, progress: ev40!.args[0].progress })
+
+    // 7. Evento INSTALLING 46
+    capturedOnProgress({ phase: "INSTALLING", progress: 46 })
+    const ev46 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    const snap46 = mainExports.getDownloadQueueSnapshot().active
+    expect(ev46?.args[0]?.phase).toBe("INSTALLING")
+    expect(ev46?.args[0]?.progress).toBe(47)
+    expect(snap46.phase).toBe("INSTALLING")
+    expect(snap46.progress).toBe(47)
+    emittedSnapshots.push({ phase: ev46!.args[0].phase, progress: ev46!.args[0].progress })
+
+    // 8. Evento INSTALLING 47
+    capturedOnProgress({ phase: "INSTALLING", progress: 47 })
+    const ev47 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    const snap47 = mainExports.getDownloadQueueSnapshot().active
+    expect(ev47?.args[0]?.phase).toBe("INSTALLING")
+    expect(ev47?.args[0]?.progress).toBe(47)
+    expect(snap47.phase).toBe("INSTALLING")
+    expect(snap47.progress).toBe(47)
+    emittedSnapshots.push({ phase: ev47!.args[0].phase, progress: ev47!.args[0].progress })
+
+    // 9. Evento INSTALLING 48
+    capturedOnProgress({ phase: "INSTALLING", progress: 48 })
+    const ev48 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    const snap48 = mainExports.getDownloadQueueSnapshot().active
+    expect(ev48?.args[0]?.phase).toBe("INSTALLING")
+    expect(ev48?.args[0]?.progress).toBe(48)
+    expect(snap48.phase).toBe("INSTALLING")
+    expect(snap48.progress).toBe(48)
+    emittedSnapshots.push({ phase: ev48!.args[0].phase, progress: ev48!.args[0].progress })
+
+    // Verificar la secuencia exacta requerida emitida a Home/Downloads
+    expect(emittedSnapshots).toEqual([
+      { phase: "INSTALLING", progress: 47 },
+      { phase: "INSTALLING", progress: 47 },
+      { phase: "INSTALLING", progress: 47 },
+      { phase: "INSTALLING", progress: 47 },
+      { phase: "INSTALLING", progress: 47 },
+      { phase: "INSTALLING", progress: 48 },
+    ])
 
     if (resolveSyncPromise) resolveSyncPromise({ success: true })
     vi.restoreAllMocks()

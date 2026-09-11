@@ -1963,14 +1963,18 @@ async function runGameSync(ctx, payload) {
   }
   savePersistentDownloadQueue()
 
+  if (!payload.resume) {
+    resumeProgressFloor = null
+  }
+
   if (!activeOperationSnapshot || activeOperationSnapshot.gameId !== ctx.gameId) {
     const initialProgress =
       resumeProgressFloor && (!resumeProgressFloor.gameId || resumeProgressFloor.gameId === ctx.gameId)
         ? resumeProgressFloor.floor
         : 0
     const initialPhase =
-      resumeProgressFloor && (!resumeProgressFloor.gameId || resumeProgressFloor.gameId === ctx.gameId) && resumeProgressFloor.phase
-        ? resumeProgressFloor.phase
+      resumeProgressFloor && (!resumeProgressFloor.gameId || resumeProgressFloor.gameId === ctx.gameId) && (resumeProgressFloor.targetPhase || resumeProgressFloor.phase)
+        ? (resumeProgressFloor.targetPhase || resumeProgressFloor.phase)
         : (payload.isVerify ? "VERIFYING" : "DOWNLOADING")
 
     activeOperationSnapshot = {
@@ -1985,13 +1989,28 @@ async function runGameSync(ctx, payload) {
   }
   notifyDownloadQueueChanged()
 
+  const isIntermediateResumeReplay = (phase) => {
+    return Boolean(
+      resumeProgressFloor &&
+      resumeProgressFloor.isResume &&
+      (!resumeProgressFloor.gameId || resumeProgressFloor.gameId === ctx.gameId) &&
+      resumeProgressFloor.targetPhase === "INSTALLING" &&
+      (phase === "DOWNLOADING" || phase === "CHECKING")
+    )
+  }
+
   const onProgress = (data) => {
-    let effectiveProgress = typeof data.progress === "number" ? data.progress : 0
-    const phase = data.phase || activeOperationSnapshot?.phase || "DOWNLOADING"
+    const rawPhase = data.phase || activeOperationSnapshot?.phase || "DOWNLOADING"
+    const rawProgress = typeof data.progress === "number" ? data.progress : 0
+    let effectiveProgress = rawProgress
+    let effectivePhase = rawPhase
 
     if (resumeProgressFloor && (!resumeProgressFloor.gameId || resumeProgressFloor.gameId === ctx.gameId)) {
-      if (phase === resumeProgressFloor.phase) {
-        if (effectiveProgress < resumeProgressFloor.floor) {
+      if (isIntermediateResumeReplay(rawPhase)) {
+        effectivePhase = resumeProgressFloor.targetPhase
+        effectiveProgress = resumeProgressFloor.floor
+      } else if (rawPhase === (resumeProgressFloor.targetPhase || resumeProgressFloor.phase)) {
+        if (effectiveProgress <= resumeProgressFloor.floor) {
           effectiveProgress = resumeProgressFloor.floor
         } else {
           resumeProgressFloor = null
@@ -2004,7 +2023,7 @@ async function runGameSync(ctx, payload) {
     if (activeOperationSnapshot) {
       activeOperationSnapshot = {
         gameId: ctx.gameId || null,
-        phase,
+        phase: effectivePhase,
         isCommitting: Boolean(operationManager.isCommitting),
         progress: effectiveProgress,
         speedMBs: typeof data.speedMBs === "number" ? data.speedMBs : 0,
@@ -2016,10 +2035,10 @@ async function runGameSync(ctx, payload) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       const opState = operationManager.getState()
       const isCommitting = Boolean(operationManager.isCommitting)
-      const isVerifying = Boolean(currentIsVerify || data.phase === "VERIFYING")
+      const isVerifying = Boolean(currentIsVerify || effectivePhase === "VERIFYING")
       mainWindow.webContents.send("game-download-progress", {
         ...data,
-        phase,
+        phase: effectivePhase,
         progress: effectiveProgress,
         state: opState,
         isCommitting,
@@ -2037,14 +2056,24 @@ async function runGameSync(ctx, payload) {
         activeOperationSnapshot.phase = effectivePhase
         resumeProgressFloor = {
           gameId: ctx.gameId || activeOperationGameId || null,
+          targetPhase: effectivePhase,
           phase: effectivePhase,
           floor: typeof activeOperationSnapshot.progress === "number" ? activeOperationSnapshot.progress : 0,
+          isResume: true,
         }
+      } else if (isIntermediateResumeReplay(phase)) {
+        activeOperationSnapshot.phase = resumeProgressFloor.targetPhase
+        activeOperationSnapshot.progress = resumeProgressFloor.floor
+        activeOperationSnapshot.speedMBs = 0
+        activeOperationSnapshot.remainingMinutes = 0
+        activeOperationSnapshot.isCommitting = Boolean(operationManager.isCommitting)
+        notifyDownloadQueueChanged()
+        return
       } else {
         if (activeOperationSnapshot.phase !== phase) {
           activeOperationSnapshot.speedMBs = 0
           activeOperationSnapshot.remainingMinutes = 0
-          if (resumeProgressFloor && resumeProgressFloor.phase !== phase) {
+          if (resumeProgressFloor && (resumeProgressFloor.targetPhase || resumeProgressFloor.phase) !== phase) {
             resumeProgressFloor = null
           }
         }
@@ -2135,10 +2164,18 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
       }
       autoPausedDownloadGameId = null
       if (!resumeProgressFloor && activeOperationSnapshot) {
+        const pausedPhase = activeOperationSnapshot.phase || operationManager.lastPausedPhase || "DOWNLOADING"
         resumeProgressFloor = {
           gameId: activeOperationGameId,
-          phase: activeOperationSnapshot.phase || operationManager.lastPausedPhase || "DOWNLOADING",
+          targetPhase: pausedPhase,
+          phase: pausedPhase,
           floor: typeof activeOperationSnapshot.progress === "number" ? activeOperationSnapshot.progress : 0,
+          isResume: true,
+        }
+      } else if (resumeProgressFloor) {
+        resumeProgressFloor.isResume = true
+        if (!resumeProgressFloor.targetPhase) {
+          resumeProgressFloor.targetPhase = resumeProgressFloor.phase || "DOWNLOADING"
         }
       }
       const res = await operationManager.resumeSync()
@@ -2216,8 +2253,15 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     if (savedPhase && savedProgress > 0 && !resumeProgressFloor) {
       resumeProgressFloor = {
         gameId: ctx.gameId,
+        targetPhase: savedPhase,
         phase: savedPhase,
         floor: savedProgress,
+        isResume: true,
+      }
+    } else if (resumeProgressFloor) {
+      resumeProgressFloor.isResume = true
+      if (!resumeProgressFloor.targetPhase) {
+        resumeProgressFloor.targetPhase = resumeProgressFloor.phase || savedPhase || "DOWNLOADING"
       }
     }
 
@@ -2310,10 +2354,13 @@ ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
     }
     autoPausedDownloadGameId = null
     if (activeOperationSnapshot) {
+      const pausedPhase = activeOperationSnapshot.phase || "DOWNLOADING"
       resumeProgressFloor = {
         gameId: activeOperationGameId,
-        phase: activeOperationSnapshot.phase || "DOWNLOADING",
+        targetPhase: pausedPhase,
+        phase: pausedPhase,
         floor: typeof activeOperationSnapshot.progress === "number" ? activeOperationSnapshot.progress : 0,
+        isResume: true,
       }
     }
     const res = await operationManager.pauseSync()
@@ -2326,10 +2373,13 @@ ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
   }
   autoPausedDownloadGameId = null
   if (activeOperationSnapshot) {
+    const pausedPhase = activeOperationSnapshot.phase || "DOWNLOADING"
     resumeProgressFloor = {
       gameId: null,
-      phase: activeOperationSnapshot.phase || "DOWNLOADING",
+      targetPhase: pausedPhase,
+      phase: pausedPhase,
       floor: typeof activeOperationSnapshot.progress === "number" ? activeOperationSnapshot.progress : 0,
+      isResume: true,
     }
   }
   const res = await operationManager.pauseSync()
