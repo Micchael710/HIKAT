@@ -148,6 +148,8 @@ let activeOperationQueuedAt = null
 let activeOperationSnapshot = null
 let downloadQueue = []
 let autoPausedDownloadGameId = null
+let pausedByUser = false
+let isRestoredUserPause = false
 let isProcessingQueue = false
 let currentIsVerify = false
 let lastPayload = null
@@ -173,6 +175,11 @@ function getQueueFilePath() {
 function savePersistentDownloadQueue() {
   try {
     const queueFile = getQueueFilePath()
+    const isPaused = Boolean(
+      pausedByUser ||
+      isRestoredUserPause ||
+      operationManager.getState() === "PAUSED"
+    )
     const data = {
       active: activeOperationGameId && activeOperationPayload ? {
         gameId: activeOperationGameId,
@@ -181,6 +188,11 @@ function savePersistentDownloadQueue() {
         queuedAt: activeOperationQueuedAt || Date.now(),
         phase: activeOperationSnapshot?.phase || null,
         progress: activeOperationSnapshot?.progress ?? 0,
+        downloadedBytes: activeOperationSnapshot?.downloadedBytes ?? 0,
+        totalBytes: activeOperationSnapshot?.totalBytes ?? 0,
+        speedMBs: isPaused ? 0 : (activeOperationSnapshot?.speedMBs ?? 0),
+        remainingMinutes: isPaused ? 0 : (activeOperationSnapshot?.remainingMinutes ?? 0),
+        pausedByUser: Boolean(pausedByUser || isRestoredUserPause),
       } : null,
       queue: downloadQueue.map((item) => ({
         gameId: item.gameId,
@@ -212,19 +224,51 @@ function loadPersistentDownloadQueue() {
 
     const restoredQueue = []
     if (parsed.active && parsed.active.gameId && parsed.active.payload) {
-      restoredQueue.push({
-        gameId: parsed.active.gameId,
-        gameName: parsed.active.gameName || parsed.active.gameId,
-        payload: parsed.active.payload,
-        queuedAt: parsed.active.queuedAt || Date.now(),
-        savedPhase: parsed.active.phase || null,
-        savedProgress: typeof parsed.active.progress === "number" ? parsed.active.progress : 0,
-      })
+      if (parsed.active.pausedByUser === true) {
+        // Restaurar como ACTIVE + PAUSED sin meter en downloadQueue
+        activeOperationGameId = parsed.active.gameId
+        activeOperationGameName = parsed.active.gameName || parsed.active.gameId
+        activeOperationPayload = parsed.active.payload
+        activeOperationQueuedAt = parsed.active.queuedAt || Date.now()
+        pausedByUser = true
+        isRestoredUserPause = true
+        lastPayload = parsed.active.payload
+        if (parsed.active.gameId) {
+          lastPayloadByGameId.set(parsed.active.gameId, parsed.active.payload)
+        }
+        const savedPhase = parsed.active.phase || "DOWNLOADING"
+        const savedProgress = typeof parsed.active.progress === "number" ? parsed.active.progress : 0
+        activeOperationSnapshot = {
+          gameId: parsed.active.gameId,
+          phase: savedPhase,
+          progress: savedProgress,
+          downloadedBytes: parsed.active.downloadedBytes || 0,
+          totalBytes: parsed.active.totalBytes || 0,
+          speedMBs: 0,
+          remainingMinutes: 0,
+        }
+        resumeProgressFloor = {
+          gameId: parsed.active.gameId,
+          targetPhase: savedPhase,
+          phase: savedPhase,
+          floor: savedProgress,
+          isResume: true,
+        }
+      } else {
+        restoredQueue.push({
+          gameId: parsed.active.gameId,
+          gameName: parsed.active.gameName || parsed.active.gameId,
+          payload: parsed.active.payload,
+          queuedAt: parsed.active.queuedAt || Date.now(),
+          savedPhase: parsed.active.phase || null,
+          savedProgress: typeof parsed.active.progress === "number" ? parsed.active.progress : 0,
+        })
+      }
     }
     if (Array.isArray(parsed.queue)) {
       for (const item of parsed.queue) {
         if (item && item.gameId && item.payload) {
-          if (!restoredQueue.some((q) => q.gameId === item.gameId)) {
+          if (item.gameId !== activeOperationGameId && !restoredQueue.some((q) => q.gameId === item.gameId)) {
             restoredQueue.push({
               gameId: item.gameId,
               gameName: item.gameName || item.gameId,
@@ -1887,7 +1931,8 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
 function getDownloadQueueSnapshot() {
   let active = null
   if (activeOperationGameId) {
-    const opState = operationManager.getState()
+    const isRestoredPause = isRestoredUserPause && operationManager.getState() === "IDLE"
+    const opState = isRestoredPause ? "PAUSED" : operationManager.getState()
     const realPhase =
       activeOperationSnapshot?.phase ||
       operationManager.lastPausedPhase ||
@@ -1901,12 +1946,12 @@ function getDownloadQueueSnapshot() {
       phase: realPhase,
       isCommitting,
       canPause: opState !== "PAUSED" && opState !== "IDLE" && !isCommitting && !isVerifying,
-      canCancel: opState !== "IDLE" && !isCommitting && !isVerifying,
+      canCancel: (opState !== "IDLE" || isRestoredPause) && !isCommitting && !isVerifying,
       progress: activeOperationSnapshot?.progress ?? 0,
-      speedMBs: activeOperationSnapshot?.speedMBs ?? 0,
+      speedMBs: opState === "PAUSED" ? 0 : (activeOperationSnapshot?.speedMBs ?? 0),
       downloadedBytes: activeOperationSnapshot?.downloadedBytes ?? 0,
       totalBytes: activeOperationSnapshot?.totalBytes ?? 0,
-      remainingMinutes: activeOperationSnapshot?.remainingMinutes ?? 0,
+      remainingMinutes: opState === "PAUSED" ? 0 : (activeOperationSnapshot?.remainingMinutes ?? 0),
     }
   }
 
@@ -1928,6 +1973,7 @@ function notifyDownloadQueueChanged() {
 async function processNextQueuedSync() {
   if (isProcessingQueue) return
   if (downloadQueue.length === 0) return
+  if (isRestoredUserPause) return
   if (operationManager.getState() !== "IDLE") return
 
   const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
@@ -1987,6 +2033,8 @@ async function processNextQueuedSync() {
 }
 
 async function runGameSync(ctx, payload) {
+  isRestoredUserPause = false
+  pausedByUser = false
   const watcherKey = ctx.gameId || "__legacy__"
   if (Array.isArray(payload.directoryPolicies)) {
     latestDirectoryPoliciesByGameId.set(watcherKey, payload.directoryPolicies)
@@ -2200,12 +2248,20 @@ async function runGameSync(ctx, payload) {
 ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
   const ctx = resolveGameContext(payload)
 
-  if (payload.resume) {
+  const isRestoredTarget = Boolean(
+    isRestoredUserPause &&
+    activeOperationGameId &&
+    (!ctx.gameId || activeOperationGameId === ctx.gameId)
+  )
+
+  if (payload.resume || isRestoredTarget) {
     if (operationManager.getState() === "PAUSED") {
       if (activeOperationGameId && activeOperationGameId !== ctx.gameId) {
         throw new Error("Cannot resume sync for another game.")
       }
       autoPausedDownloadGameId = null
+      pausedByUser = false
+      isRestoredUserPause = false
       if (!resumeProgressFloor && activeOperationSnapshot) {
         const pausedPhase = activeOperationSnapshot.phase || operationManager.lastPausedPhase || "DOWNLOADING"
         resumeProgressFloor = {
@@ -2236,7 +2292,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
       notifyDownloadQueueChanged()
       return res
     }
-    if (activeOperationGameId === ctx.gameId) {
+    if (activeOperationGameId === ctx.gameId && !isRestoredTarget) {
       return { alreadyActive: true }
     }
 
@@ -2245,10 +2301,18 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     let savedPhase = null
     let savedProgress = 0
 
+    if (isRestoredTarget) {
+      savedPayload = activeOperationPayload
+      savedPhase = activeOperationSnapshot?.phase || "DOWNLOADING"
+      savedProgress = typeof activeOperationSnapshot?.progress === "number" ? activeOperationSnapshot.progress : 0
+      isRestoredUserPause = false
+      pausedByUser = false
+    }
+
     if (ctx.gameId && lastPayloadByGameId.has(ctx.gameId)) {
-      savedPayload = lastPayloadByGameId.get(ctx.gameId)
+      if (!savedPayload) savedPayload = lastPayloadByGameId.get(ctx.gameId)
     } else if (lastPayload && (!ctx.gameId || lastPayload.gameId === ctx.gameId)) {
-      savedPayload = lastPayload
+      if (!savedPayload) savedPayload = lastPayload
     }
 
     const queueIndex = downloadQueue.findIndex((q) => !ctx.gameId || q.gameId === ctx.gameId)
@@ -2309,12 +2373,13 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     }
 
     const effectivePayload = mergePersistedPayload(savedPayload, payload)
+    effectivePayload.resume = true
     const effectiveCtx = resolveGameContext(effectivePayload)
     return await runGameSync(effectiveCtx, effectivePayload)
   }
 
   if (payload.isVerify) {
-    if (operationManager.getState() !== "IDLE") {
+    if (operationManager.getState() !== "IDLE" || isRestoredUserPause) {
       if (activeOperationGameId !== ctx.gameId) {
         throw new Error("Another game operation is already in progress.")
       }
@@ -2324,6 +2389,8 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
 
   if (activeOperationGameId === ctx.gameId && operationManager.getState() === "PAUSED") {
     autoPausedDownloadGameId = null
+    pausedByUser = false
+    isRestoredUserPause = false
     const res = await operationManager.resumeSync()
     if (operationManager.getState() === "IDLE") {
       if (activeOperationGameId === ctx.gameId) {
@@ -2339,7 +2406,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     return res
   }
 
-  if (operationManager.getState() === "IDLE") {
+  if (operationManager.getState() === "IDLE" && !isRestoredUserPause) {
     autoPausedDownloadGameId = null
     return await runGameSync(ctx, payload)
   }
@@ -2389,6 +2456,9 @@ ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
   const ctx = resolveGameContext(payload)
 
   if (ctx.gameId) {
+    if (isRestoredUserPause && activeOperationGameId === ctx.gameId) {
+      return { success: true, paused: true, state: "PAUSED" }
+    }
     if (operationManager.getState() === "IDLE") {
       throw new Error("Cannot pause sync: operation manager is IDLE.")
     }
@@ -2396,6 +2466,8 @@ ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
       throw new Error("Cannot pause operation for another game.")
     }
     autoPausedDownloadGameId = null
+    pausedByUser = true
+    isRestoredUserPause = false
     if (activeOperationSnapshot) {
       const pausedPhase = activeOperationSnapshot.phase || "DOWNLOADING"
       resumeProgressFloor = {
@@ -2407,14 +2479,17 @@ ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
       }
     }
     const res = await operationManager.pauseSync()
+    savePersistentDownloadQueue()
     notifyDownloadQueueChanged()
     return res
   }
 
-  if (activeOperationGameId !== null) {
+  if (activeOperationGameId !== null && !isRestoredUserPause) {
     throw new Error("Cannot pause scoped game operation from legacy request.")
   }
   autoPausedDownloadGameId = null
+  pausedByUser = true
+  isRestoredUserPause = false
   if (activeOperationSnapshot) {
     const pausedPhase = activeOperationSnapshot.phase || "DOWNLOADING"
     resumeProgressFloor = {
@@ -2426,6 +2501,7 @@ ipcMain.handle("game-pause-sync", async (_event, payload = {}) => {
     }
   }
   const res = await operationManager.pauseSync()
+  savePersistentDownloadQueue()
   notifyDownloadQueueChanged()
   return res
 })
@@ -2443,8 +2519,13 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
     }
   }
 
+  const isRestoredPause = Boolean(
+    isRestoredUserPause &&
+    (!ctx.gameId || activeOperationGameId === ctx.gameId)
+  )
+
   if (ctx.gameId) {
-    if (operationManager.getState() === "IDLE") {
+    if (operationManager.getState() === "IDLE" && !isRestoredPause) {
       throw new Error("Cannot cancel sync: operation manager is IDLE.")
     }
     if (activeOperationGameId !== ctx.gameId) {
@@ -2454,6 +2535,8 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
       return await operationManager.cancelSync(ctx.instanceRoot)
     } finally {
       if (activeOperationGameId === ctx.gameId) {
+        isRestoredUserPause = false
+        pausedByUser = false
         activeOperationGameId = null
         activeOperationGameName = null
         activeOperationPayload = null
@@ -2467,13 +2550,18 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
     }
   }
 
-  if (activeOperationGameId !== null) {
+  if (activeOperationGameId !== null && !isRestoredPause) {
     throw new Error("Cannot cancel scoped game operation from legacy request.")
+  }
+  if (operationManager.getState() === "IDLE" && !isRestoredPause) {
+    throw new Error("Cannot cancel sync: operation manager is IDLE.")
   }
   try {
     return await operationManager.cancelSync(instanceRoot)
   } finally {
     if (activeOperationGameId === ctx.gameId || !activeOperationGameId) {
+      isRestoredUserPause = false
+      pausedByUser = false
       activeOperationGameId = null
       activeOperationGameName = null
       activeOperationPayload = null
@@ -2597,12 +2685,15 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
   const launchStatus = gameLauncher.getLaunchStatus()
   const runningGameId = launchStatus.gameId || null
 
+  const isRestoredPause = Boolean(isRestoredUserPause && operationManager.getState() === "IDLE")
+  const currentOpState = isRestoredPause ? "PAUSED" : operationManager.getState()
+
   if (payload && payload.gameId) {
     const requestedGameId = payload.gameId
     const isThisGameRunning = launchStatus.status !== "idle" && runningGameId === requestedGameId
     const status = isThisGameRunning ? launchStatus.status : "idle"
     const pid = isThisGameRunning ? launchStatus.pid : null
-    const operationState = activeOperationGameId === requestedGameId ? operationManager.getState() : "IDLE"
+    const operationState = activeOperationGameId === requestedGameId ? currentOpState : "IDLE"
     const operationSnapshot = activeOperationGameId === requestedGameId ? activeOperationSnapshot : null
 
     return {
@@ -2612,7 +2703,7 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
       runningGameId,
       operationState,
       activeOperationGameId,
-      activeOperationState: operationManager.getState(),
+      activeOperationState: currentOpState,
       activeOperationPhase: activeOperationSnapshot?.phase || null,
       operationSnapshot,
     }
@@ -2621,9 +2712,9 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
   return {
     ...launchStatus,
     runningGameId,
-    operationState: operationManager.getState(),
+    operationState: currentOpState,
     activeOperationGameId,
-    activeOperationState: operationManager.getState(),
+    activeOperationState: currentOpState,
     activeOperationPhase: activeOperationSnapshot?.phase || null,
     operationSnapshot: activeOperationSnapshot,
   }
@@ -2688,6 +2779,8 @@ function resetDownloadQueueForTesting() {
   activeOperationQueuedAt = null
   activeOperationSnapshot = null
   autoPausedDownloadGameId = null
+  pausedByUser = false
+  isRestoredUserPause = false
   isProcessingQueue = false
   currentIsVerify = false
   lastPayload = null
@@ -2737,6 +2830,8 @@ if (typeof module !== "undefined" && module.exports) {
     getLegacyInstanceRoot,
     getResumeProgressFloor: () => resumeProgressFloor,
     getDownloadQueue: () => downloadQueue,
+    isRestoredUserPauseForTesting: () => isRestoredUserPause,
+    isPausedByUserForTesting: () => pausedByUser,
     setMainWindowForTesting: (win) => {
       mainWindow = win
     },

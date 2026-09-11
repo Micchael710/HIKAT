@@ -480,7 +480,9 @@ export default function DownloadPlayButton({
           statusRef.current === "verifying" ||
           statusRef.current === "paused" ||
           statusRef.current === "launching" ||
-          statusRef.current === "running"
+          statusRef.current === "running" ||
+          launchInfo?.operationState === "PAUSED" ||
+          launchInfo?.activeOperationState === "PAUSED"
 
         if (!isOperationActive) {
           autoUpdatedVersionRef.current = publishedModpack.version

@@ -2113,5 +2113,383 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     expect(state.integrityDirty).toBe(false)
     expect(elapsed).toBeLessThan(200)
   })
+
+  // 46. User pause durante DOWNLOADING: guardar -> simular restart -> sigue PAUSED
+  it("46. User pause durante DOWNLOADING: guardar -> simular restart -> sigue PAUSED", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: {
+          gameId: "server-a",
+          gameName: "Server Alpha",
+          modpackVersion: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          clientFiles: [],
+        },
+        phase: "DOWNLOADING",
+        progress: 35,
+        downloadedBytes: 3500,
+        totalBytes: 10000,
+        pausedByUser: true,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active).not.toBeNull()
+    expect(snap.active.gameId).toBe("server-a")
+    expect(snap.active.state).toBe("PAUSED")
+    expect(snap.active.phase).toBe("DOWNLOADING")
+    expect(snap.active.progress).toBe(35)
+    expect(snap.active.canPause).toBe(false)
+    expect(snap.active.canCancel).toBe(true)
+
+    const getStatusHandler = ipcHandlers.get("game-get-status")!
+    const status = await getStatusHandler({}, { gameId: "server-a" })
+    expect(status.operationState).toBe("PAUSED")
+    expect(status.activeOperationState).toBe("PAUSED")
+  })
+
+  // 47. User pause durante INSTALLING: guardar -> restart -> sigue PAUSED y conserva fase INSTALLING
+  it("47. User pause durante INSTALLING: guardar -> restart -> sigue PAUSED y conserva fase INSTALLING", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: {
+          gameId: "server-a",
+          gameName: "Server Alpha",
+          modpackVersion: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          clientFiles: [],
+        },
+        phase: "INSTALLING",
+        progress: 75,
+        downloadedBytes: 10000,
+        totalBytes: 10000,
+        pausedByUser: true,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active).not.toBeNull()
+    expect(snap.active.gameId).toBe("server-a")
+    expect(snap.active.state).toBe("PAUSED")
+    expect(snap.active.phase).toBe("INSTALLING")
+    expect(snap.active.progress).toBe(75)
+  })
+
+  // 48. processNextQueuedSync() NO ejecuta una operación restaurada pausedByUser
+  it("48. processNextQueuedSync() NO ejecuta una operacion restaurada pausedByUser", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: {
+          gameId: "server-a",
+          gameName: "Server Alpha",
+          modpackVersion: "1.0.0",
+          clientFiles: [],
+        },
+        phase: "DOWNLOADING",
+        progress: 25,
+        pausedByUser: true,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync")
+
+    await mainExports.processNextQueuedSync()
+
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    expect(mainExports.operationManager.getState()).toBe("IDLE")
+    expect(mainExports.getDownloadQueueSnapshot().active?.state).toBe("PAUSED")
+    startSyncSpy.mockRestore()
+  })
+
+  // 49. B/C permanecen en FIFO detrás de A pausado
+  it("49. B y C permanecen en FIFO detras de A pausado sin iniciar automaticamente", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "DOWNLOADING",
+        progress: 10,
+        pausedByUser: true,
+      },
+      queue: [
+        { gameId: "server-b", gameName: "Server Beta", payload: { gameId: "server-b", modpackVersion: "1.0.0", clientFiles: [] } },
+        { gameId: "server-c", gameName: "Server Gamma", payload: { gameId: "server-c", modpackVersion: "1.0.0", clientFiles: [] } },
+      ],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.active?.state).toBe("PAUSED")
+    expect(snap.queued.length).toBe(2)
+    expect(snap.queued[0].gameId).toBe("server-b")
+    expect(snap.queued[0].position).toBe(1)
+    expect(snap.queued[1].gameId).toBe("server-c")
+    expect(snap.queued[1].position).toBe(2)
+
+    await mainExports.processNextQueuedSync()
+
+    const snapAfter = mainExports.getDownloadQueueSnapshot()
+    expect(snapAfter.active?.gameId).toBe("server-a")
+    expect(snapAfter.queued.length).toBe(2)
+    expect(snapAfter.queued[0].gameId).toBe("server-b")
+    expect(snapAfter.queued[1].gameId).toBe("server-c")
+  })
+
+  // 50. Resume manual después del restart: usa resume:true, conserva phase/progress floor, no duplica A
+  it("50. Resume manual despues del restart usa resume:true, conserva phase/progress floor y no duplica A", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: {
+          gameId: "server-a",
+          gameName: "Server Alpha",
+          modpackVersion: "1.0.0",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          clientFiles: [],
+        },
+        phase: "DOWNLOADING",
+        progress: 50,
+        pausedByUser: true,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    let capturedPayload: any = null
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (payload: any) => {
+      capturedPayload = payload
+      mainExports.operationManager.state = "DOWNLOADING"
+      return { success: true }
+    })
+
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    await startHandler({}, { gameId: "server-a", gameName: "Server Alpha", resume: true })
+
+    expect(startSyncSpy).toHaveBeenCalled()
+    expect(capturedPayload.isResume || capturedPayload.resume || mainExports.getResumeProgressFloor()?.isResume).toBeTruthy()
+    expect(mainExports.getResumeProgressFloor()?.floor).toBe(50)
+    expect(mainExports.getResumeProgressFloor()?.phase).toBe("DOWNLOADING")
+    expect(mainExports.getDownloadQueue().length).toBe(0)
+    expect(mainExports.isRestoredUserPauseForTesting()).toBe(false)
+    startSyncSpy.mockRestore()
+  })
+
+  // 51. Cancel manual después del restart: elimina A, permite continuar B, mantiene instalacion estable
+  it("51. Cancel manual despues del restart elimina A, inicia B en FIFO y mantiene instalacion estable", async () => {
+    await saveInstalledManifest(instanceRootA, {
+      modpackVersion: "1.0.0",
+      files: {},
+    })
+
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "2.0.0", clientFiles: [] },
+        phase: "DOWNLOADING",
+        progress: 30,
+        pausedByUser: true,
+      },
+      queue: [
+        { gameId: "server-b", gameName: "Server Beta", payload: { gameId: "server-b", gameName: "Server Beta", modpackVersion: "1.0.0", clientFiles: [] } },
+      ],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    let bStarted = false
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (payload: any) => {
+      if (payload.gameId === "server-b" || mainExports.getDownloadQueueSnapshot().active?.gameId === "server-b") {
+        bStarted = true
+      }
+      return { success: true }
+    })
+
+    const cancelHandler = ipcHandlers.get("game-cancel-sync")!
+    await cancelHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
+
+    expect(mainExports.isRestoredUserPauseForTesting()).toBe(false)
+    // Manifiesto estable sigue intacto
+    const manifestA = await loadInstalledManifest(instanceRootA)
+    expect(manifestA?.modpackVersion).toBe("1.0.0")
+
+    // B arranca automáticamente
+    await new Promise((r) => setTimeout(r, 20))
+    expect(bStarted).toBe(true)
+    startSyncSpy.mockRestore()
+  })
+
+  // 52. Cerrar durante DOWNLOADING SIN pausa: sigue recuperandose automaticamente como antes
+  it("52. Cerrar durante DOWNLOADING SIN pausa sigue recuperandose automaticamente", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "DOWNLOADING",
+        progress: 30,
+        pausedByUser: false,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    // Interrumpido se restaura en downloadQueue
+    expect(mainExports.getDownloadQueue().length).toBe(1)
+    expect(mainExports.getDownloadQueue()[0].gameId).toBe("server-a")
+
+    let autoResumed = false
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async () => {
+      autoResumed = true
+      return { success: true }
+    })
+
+    await mainExports.processNextQueuedSync()
+    expect(autoResumed).toBe(true)
+    startSyncSpy.mockRestore()
+  })
+
+  // 53. Cerrar durante INSTALLING SIN pausa: sigue recuperandose automaticamente como antes
+  it("53. Cerrar durante INSTALLING SIN pausa sigue recuperandose automaticamente conservando piso", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "INSTALLING",
+        progress: 80,
+        pausedByUser: false,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    expect(mainExports.getDownloadQueue().length).toBe(1)
+    expect(mainExports.getDownloadQueue()[0].savedPhase).toBe("INSTALLING")
+    expect(mainExports.getDownloadQueue()[0].savedProgress).toBe(80)
+
+    let autoResumed = false
+    let capturedFloor: any = null
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async () => {
+      autoResumed = true
+      capturedFloor = mainExports.getResumeProgressFloor()
+      return { success: true }
+    })
+
+    await mainExports.processNextQueuedSync()
+    expect(autoResumed).toBe(true)
+    expect(capturedFloor?.targetPhase).toBe("INSTALLING")
+    expect(capturedFloor?.floor).toBe(80)
+    startSyncSpy.mockRestore()
+  })
+
+  // 54. AUTO_UPDATES ON / OFF: operacion restaurada pausada manualmente NO se reanuda al startup
+  it("54. AUTO_UPDATES ON / OFF no reanuda una operacion restaurada pausada manualmente al startup", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "DOWNLOADING",
+        progress: 40,
+        pausedByUser: true,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const startSyncSpy = vi.spyOn(mainExports.operationManager, "startSync")
+    await mainExports.processNextQueuedSync()
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    expect(mainExports.getDownloadQueueSnapshot().active?.state).toBe("PAUSED")
+    startSyncSpy.mockRestore()
+  })
+
+  // 55. Reiniciar dos veces sin tocar una operación PAUSED: continúa PAUSED después de ambos reinicios
+  it("55. Reiniciar dos veces sin tocar una operacion PAUSED continua PAUSED despues de ambos reinicios", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "DOWNLOADING",
+        progress: 42,
+        downloadedBytes: 4200,
+        totalBytes: 10000,
+        pausedByUser: true,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    // Reinicio 1
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+    expect(mainExports.getDownloadQueueSnapshot().active?.state).toBe("PAUSED")
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(42)
+
+    // Guardado persistente automatico o manual
+    mainExports.savePersistentDownloadQueue()
+
+    // Reinicio 2
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+    expect(mainExports.getDownloadQueueSnapshot().active?.state).toBe("PAUSED")
+    expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(42)
+  })
 })
 

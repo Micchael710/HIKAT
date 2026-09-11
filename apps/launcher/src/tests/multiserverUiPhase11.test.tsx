@@ -1869,5 +1869,60 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
     // Apparatia is NEW, so it WAS queried!
     expect(getPublishedSpy).toHaveBeenCalledWith("apparatia")
   })
+
+  // 35. DownloadPlayButton recibiendo snapshot restaurado muestra PAUSADO y progreso correcto, no DOWNLOAD
+  it("35. DownloadPlayButton recibiendo snapshot restaurado muestra PAUSADO y progreso correcto, no DOWNLOAD", async () => {
+    const restoredSnap = {
+      active: {
+        gameId: "meliora",
+        gameName: "Meliora",
+        state: "PAUSED",
+        phase: "DOWNLOADING",
+        progress: 45,
+        speedMBs: 0,
+        downloadedBytes: 450,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: false,
+        canCancel: true,
+      },
+      queued: [],
+    }
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue(restoredSnap)
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "idle",
+      runningGameId: null,
+      activeOperationGameId: "meliora",
+      activeOperationState: "PAUSED",
+      activeOperationPhase: "DOWNLOADING",
+      operationState: "PAUSED",
+    })
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={melioraModpack}
+            installedVersion={null}
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const text = container.textContent || ""
+    expect(text).toContain("PAUSADO")
+    expect(text).toContain("45%")
+    expect(text).not.toContain("DESCARGAR")
+  })
 })
 
