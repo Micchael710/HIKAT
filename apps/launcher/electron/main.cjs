@@ -2338,7 +2338,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     return res
   }
 
-  if (operationManager.getState() === "IDLE" && !activeOperationGameId) {
+  if (operationManager.getState() === "IDLE") {
     autoPausedDownloadGameId = null
     return await runGameSync(ctx, payload)
   }
