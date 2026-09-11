@@ -1,7 +1,6 @@
 import { graphqlClient } from "./apiClient"
 import { getApiBaseUrl } from "../config/api"
 import type { PublishedModpack, ClientFile, SyncPlanCheckResult } from "../vite-env"
-import type { LauncherServer } from "./serverService"
 
 export type GameButtonState =
   | "checking"
@@ -40,22 +39,6 @@ export interface GameManifest {
   totalDownloadBytes?: number
 }
 
-export interface ServerOperativeState {
-  status: GameButtonState
-  manifest: GameManifest | null
-  integrityDirty: boolean
-  progress: number
-  speed: number
-  downloadedBytes: number
-  totalBytes: number
-  timeRemainingMin: number
-  currentPhase: string | null
-  pausedPhase: "downloading" | "installing"
-  canPause?: boolean
-  canCancel?: boolean
-  isCommitting?: boolean
-}
-
 export interface ReleaseActivatedEvent {
   type: "RELEASE_ACTIVATED"
   serverId?: string | null
@@ -81,27 +64,6 @@ const releaseEventListeners = new Set<(event: LauncherEvent) => void>()
 let sharedReleaseSocket: WebSocket | null = null
 let sharedReconnectTimer: any = null
 let sharedBackoffMs = 5000
-
-const serverStateMap = new Map<string, ServerOperativeState>()
-const integrityDirtyMap = new Map<string, boolean>()
-const serverStateListeners = new Set<(gameId: string, state: ServerOperativeState) => void>()
-
-function resolveStateKey(gameId?: string | null): string | null {
-  if (!gameId || typeof gameId !== "string") return null
-  const trimmed = gameId.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-try {
-  if (typeof Storage !== "undefined" && Storage.prototype && Storage.prototype.clear) {
-    const originalClear = Storage.prototype.clear
-    Storage.prototype.clear = function () {
-      serverStateMap.clear()
-      integrityDirtyMap.clear()
-      return originalClear.call(this)
-    }
-  }
-} catch (_) {}
 
 function connectSharedReleaseSocket() {
   if (releaseEventListeners.size === 0) return
@@ -348,21 +310,13 @@ export const gameService = {
                   totalDownloadBytes = planCheck.totalDownloadBytes
                 }
                 gameService.setGameInstalled(isInstalled, effectiveGameId)
-                if (installedModpackVersion) {
-                  gameService.setInstalledModpackVersion(effectiveGameId, installedModpackVersion)
-                }
-                if (!hasIntegrityIssue && isInstalled && !hasUpdate) {
-                  gameService.setServerIntegrityDirty(effectiveGameId, false)
-                } else if (hasIntegrityIssue) {
-                  gameService.setServerIntegrityDirty(effectiveGameId, true)
-                }
               }
             } catch (_) {}
           } else if (allowSyncPlanCheck) {
             isInstalled = gameService.isGameInstalled(effectiveGameId)
           }
 
-          const manifestResult: GameManifest = {
+          return {
             version: modpack.version,
             minecraftVersion: modpack.minecraftVersion,
             modLoader: modpack.modLoader || "NEOFORGE",
@@ -383,28 +337,6 @@ export const gameService = {
             stagedBytes,
             totalDownloadBytes,
           }
-
-          let calculatedStatus: GameButtonState = "download"
-          if (hasPausedSession || hasInterruptedDownload) {
-            calculatedStatus = "paused"
-          } else if (isInstalled) {
-            calculatedStatus = hasUpdate ? "update" : "play"
-          } else if (!modpack.clientFiles?.length && !modpack.version) {
-            calculatedStatus = "unavailable"
-          }
-
-          gameService.setServerState(effectiveGameId, {
-            status: calculatedStatus,
-            manifest: manifestResult,
-            integrityDirty: hasIntegrityIssue,
-            totalBytes: totalDownloadBytes,
-            downloadedBytes: stagedBytes,
-            progress: typeof pausedProgress === "number" ? pausedProgress : 0,
-            pausedPhase: pausedPhase === "INSTALLING" ? "installing" : "downloading",
-            currentPhase: pausedPhase || null,
-          })
-
-          return manifestResult
         }
 
         // B) GraphQL SUCCESS + publishedModpack === null
@@ -545,23 +477,9 @@ export const gameService = {
             if (gameContext?.gameId) {
               localStorage.removeItem(`hikat_game_installed_${gameContext.gameId}`)
               localStorage.removeItem(`hikat_game_manifest_${gameContext.gameId}`)
-              gameService.setInstalledModpackVersion(gameContext.gameId, null)
-              gameService.setServerIntegrityDirty(gameContext.gameId, false)
-              gameService.setServerState(gameContext.gameId, {
-                status: "download",
-                manifest: null,
-                progress: 0,
-              })
             } else {
               localStorage.removeItem("hikat_game_installed")
               localStorage.removeItem("hikat_game_manifest")
-              gameService.setInstalledModpackVersion(null, null)
-              gameService.setServerIntegrityDirty(null, false)
-              gameService.setServerState(null, {
-                status: "download",
-                manifest: null,
-                progress: 0,
-              })
             }
           } catch (_) {}
           return true
@@ -572,320 +490,15 @@ export const gameService = {
         if (gameContext?.gameId) {
           localStorage.removeItem(`hikat_game_installed_${gameContext.gameId}`)
           localStorage.removeItem(`hikat_game_manifest_${gameContext.gameId}`)
-          gameService.setInstalledModpackVersion(gameContext.gameId, null)
-          gameService.setServerIntegrityDirty(gameContext.gameId, false)
-          gameService.setServerState(gameContext.gameId, {
-            status: "download",
-            manifest: null,
-            progress: 0,
-          })
         } else {
           localStorage.removeItem("hikat_game_installed")
           localStorage.removeItem("hikat_game_manifest")
-          gameService.setInstalledModpackVersion(null, null)
-          gameService.setServerIntegrityDirty(null, false)
-          gameService.setServerState(null, {
-            status: "download",
-            manifest: null,
-            progress: 0,
-          })
         }
       } catch (_) {}
       return true
     } catch (err) {
       console.error("[GameService] Uninstall error:", err)
       return false
-    }
-  },
-
-  getServerState(gameId?: string | null): ServerOperativeState | null {
-    const key = resolveStateKey(gameId)
-    if (!key) return null
-    return serverStateMap.get(key) || null
-  },
-
-  setServerState(gameId: string | null | undefined, partial: Partial<ServerOperativeState>): ServerOperativeState | null {
-    const key = resolveStateKey(gameId)
-    if (!key) return null
-    const existing = serverStateMap.get(key)
-    const defaultState: ServerOperativeState = {
-      status: "checking",
-      manifest: null,
-      integrityDirty: false,
-      progress: 0,
-      speed: 0,
-      downloadedBytes: 0,
-      totalBytes: 0,
-      timeRemainingMin: 0,
-      currentPhase: null,
-      pausedPhase: "downloading",
-    }
-    const merged: ServerOperativeState = {
-      ...(existing || defaultState),
-      ...partial,
-      manifest: partial.manifest !== undefined ? partial.manifest : (existing?.manifest ?? null),
-      integrityDirty: partial.integrityDirty !== undefined
-        ? partial.integrityDirty
-        : (existing?.integrityDirty || Boolean(integrityDirtyMap.get(key))),
-    }
-    serverStateMap.set(key, merged)
-    for (const listener of serverStateListeners) {
-      try {
-        listener(key, merged)
-      } catch (_) {}
-    }
-    return merged
-  },
-
-  subscribeServerState(listener: (gameId: string, state: ServerOperativeState) => void): () => void {
-    serverStateListeners.add(listener)
-    return () => {
-      serverStateListeners.delete(listener)
-    }
-  },
-
-  isServerIntegrityDirty(gameId?: string | null): boolean {
-    const key = resolveStateKey(gameId)
-    if (!key) return false
-    return integrityDirtyMap.get(key) === true
-  },
-
-  setServerIntegrityDirty(gameId: string | null | undefined, dirty: boolean): void {
-    const key = resolveStateKey(gameId)
-    if (!key) return
-    if (dirty) {
-      integrityDirtyMap.set(key, true)
-    } else {
-      integrityDirtyMap.delete(key)
-    }
-    const current = serverStateMap.get(key)
-    if (current) {
-      current.integrityDirty = dirty
-      if (current.manifest) {
-        current.manifest.hasIntegrityIssue = dirty
-      }
-      for (const listener of serverStateListeners) {
-        try {
-          listener(key, current)
-        } catch (_) {}
-      }
-    }
-  },
-
-  getInstalledModpackVersion(gameId?: string | null): string | null {
-    const key = resolveStateKey(gameId)
-    if (!key) return null
-    try {
-      const stored = localStorage.getItem(`hikat_installed_version_${key}`)
-      if (stored) return stored
-      const cachedRaw = localStorage.getItem(gameId ? `hikat_game_manifest_${gameId}` : "hikat_game_manifest")
-      if (cachedRaw && gameService.isGameInstalled(gameId ?? undefined)) {
-        const parsed = JSON.parse(cachedRaw)
-        if (parsed?.version) return String(parsed.version)
-      }
-    } catch (_) {}
-    return null
-  },
-
-  setInstalledModpackVersion(gameId: string | null | undefined, version: string | null): void {
-    const key = resolveStateKey(gameId)
-    if (!key) return
-    try {
-      if (version) {
-        localStorage.setItem(`hikat_installed_version_${key}`, version)
-        gameService.setGameInstalled(true, gameId ?? undefined)
-      } else {
-        localStorage.removeItem(`hikat_installed_version_${key}`)
-      }
-    } catch (_) {}
-  },
-
-  clearAllServerState(): void {
-    serverStateMap.clear()
-    integrityDirtyMap.clear()
-  },
-
-  async initializeServersLightweight(servers: LauncherServer[]): Promise<void> {
-    if (!Array.isArray(servers) || servers.length === 0) return
-
-    const safeCall = async <T>(call?: () => any): Promise<T | null> => {
-      if (!call) return null
-      try {
-        const res = call()
-        return res ? await res : null
-      } catch {
-        return null
-      }
-    }
-
-    const [launchInfo, queueSnap] = await Promise.all([
-      safeCall<any>(() => window.electronAPI?.getLaunchStatus?.()),
-      safeCall<any>(() => window.electronAPI?.getDownloadQueue?.()),
-    ])
-
-    await Promise.all(
-      servers.map(async (server) => {
-        const serverId = server.id
-        try {
-          const published = await gameService.getPublishedModpack(serverId).catch(() => null)
-          const installedVersion = gameService.getInstalledModpackVersion(serverId)
-          const isInstalled = gameService.isGameInstalled(serverId) || Boolean(installedVersion)
-          const isIntegrityDirty = gameService.isServerIntegrityDirty(serverId)
-
-          let status: GameButtonState = "download"
-
-          const isRunning =
-            launchInfo?.runningGameId === serverId &&
-            (launchInfo.status === "running" || launchInfo.status === "preparing")
-
-          if (isRunning) {
-            status = launchInfo.status === "preparing" ? "launching" : "running"
-          } else if (
-            queueSnap?.active?.gameId === serverId ||
-            launchInfo?.activeOperationGameId === serverId
-          ) {
-            const activeSnap = queueSnap?.active || launchInfo?.operationSnapshot
-            const isPaused = Boolean(
-              activeSnap?.state === "PAUSED" ||
-              activeSnap?.isPaused ||
-              activeSnap?.phase === "PAUSED" ||
-              launchInfo?.operationState === "PAUSED"
-            )
-            const opPhase = activeSnap?.phase || launchInfo?.activeOperationPhase || launchInfo?.operationState
-            if (isPaused) {
-              status = "paused"
-            } else if (opPhase === "INSTALLING") {
-              status = "installing"
-            } else if (opPhase === "VERIFYING") {
-              status = "verifying"
-            } else {
-              status = "downloading"
-            }
-          } else if (queueSnap?.queued?.some((q: any) => q.gameId === serverId)) {
-            status = "queued"
-          } else if (isInstalled) {
-            if (installedVersion && published?.version && installedVersion !== published.version) {
-              status = "update"
-            } else {
-              status = "play"
-            }
-          } else if (published?.version || server.launcherActiveReleaseId) {
-            status = "download"
-          } else {
-            status = "unavailable"
-          }
-
-          const clientFiles = published?.clientFiles || []
-          const totalBytes = clientFiles.reduce((sum, f) => sum + (Number(f.sizeBytes) || 0), 0)
-          const totalSizeGB = Number((totalBytes / 1024 / 1024 / 1024).toFixed(2))
-
-          const manifest: GameManifest | null = published?.version
-            ? {
-                version: published.version,
-                minecraftVersion: published.minecraftVersion || "",
-                modLoader: (published.modLoader as any) || "NEOFORGE",
-                modLoaderVersion: published.modLoaderVersion || undefined,
-                neoForgeVersion: published.neoForgeVersion || undefined,
-                totalSizeGB,
-                hasUpdate: Boolean(isInstalled && installedVersion && published.version && installedVersion !== published.version),
-                hasIntegrityIssue: isIntegrityDirty,
-                installedModpackVersion: installedVersion || (isInstalled ? (published.version || null) : null),
-                clientFiles,
-                directoryPolicies: (published.directoryPolicies && published.directoryPolicies.length > 0) ? published.directoryPolicies : undefined,
-                installed: isInstalled && (!installedVersion || installedVersion === published.version),
-                hasExistingInstall: isInstalled,
-                totalDownloadBytes: isInstalled ? 0 : totalBytes,
-              }
-            : null
-
-          const opSnap = queueSnap?.active?.gameId === serverId ? queueSnap.active : null
-          gameService.setServerState(serverId, {
-            status,
-            manifest,
-            integrityDirty: isIntegrityDirty,
-            progress: typeof opSnap?.progress === "number" ? opSnap.progress : 0,
-            speed: typeof opSnap?.speedMBs === "number" ? opSnap.speedMBs : 0,
-            downloadedBytes: typeof opSnap?.downloadedBytes === "number" ? opSnap.downloadedBytes : 0,
-            totalBytes: typeof opSnap?.totalBytes === "number" && opSnap.totalBytes > 0 ? opSnap.totalBytes : totalBytes,
-            timeRemainingMin: typeof opSnap?.remainingMinutes === "number" ? opSnap.remainingMinutes : 0,
-            currentPhase: opSnap?.phase || null,
-            pausedPhase: opSnap?.phase === "INSTALLING" ? "installing" : "downloading",
-            canPause: opSnap?.canPause,
-            canCancel: opSnap?.canCancel,
-            isCommitting: opSnap?.isCommitting,
-          })
-        } catch (err) {
-          console.error(`Failed lightweight init for server ${serverId}:`, err)
-        }
-      })
-    )
-  },
-
-  async handleReleaseActivatedEvent(event: ReleaseActivatedEvent): Promise<void> {
-    const serverId = event.serverId
-    if (!serverId) return
-
-    try {
-      const published = await gameService.getPublishedModpack(serverId).catch(() => null)
-      const version = published?.version || event.version
-      const mcVersion = published?.minecraftVersion || event.minecraftVersion
-      const loader = published?.modLoader || event.modLoader || "NEOFORGE"
-
-      const installedVersion = gameService.getInstalledModpackVersion(serverId)
-      const isInstalled = gameService.isGameInstalled(serverId) || Boolean(installedVersion)
-      const existingState = gameService.getServerState(serverId)
-
-      const isBusy =
-        existingState?.status === "launching" ||
-        existingState?.status === "running" ||
-        existingState?.status === "downloading" ||
-        existingState?.status === "installing" ||
-        existingState?.status === "verifying" ||
-        existingState?.status === "paused"
-
-      let newStatus: GameButtonState = existingState?.status ?? "download"
-      if (!isBusy) {
-        if (isInstalled) {
-          const effectiveInstalledVer = installedVersion || existingState?.manifest?.installedModpackVersion || existingState?.manifest?.version
-          if (effectiveInstalledVer && effectiveInstalledVer !== version) {
-            newStatus = "update"
-          } else {
-            newStatus = "play"
-          }
-        } else {
-          newStatus = "download"
-        }
-      }
-
-      const clientFiles = published?.clientFiles || []
-      const totalBytes = clientFiles.reduce((sum, f) => sum + (Number(f.sizeBytes) || 0), 0)
-      const totalSizeGB = Number((totalBytes / 1024 / 1024 / 1024).toFixed(2))
-
-      const hasUpdate = Boolean(isInstalled && installedVersion && version && installedVersion !== version)
-
-      const updatedManifest: GameManifest = {
-        version,
-        minecraftVersion: mcVersion,
-        modLoader: (loader as any) || "NEOFORGE",
-        modLoaderVersion: published?.modLoaderVersion || event.modLoaderVersion || undefined,
-        neoForgeVersion: published?.neoForgeVersion || event.neoForgeVersion || undefined,
-        totalSizeGB,
-        hasUpdate,
-        hasIntegrityIssue: gameService.isServerIntegrityDirty(serverId),
-        installedModpackVersion: installedVersion || (isInstalled ? (existingState?.manifest?.version || null) : null),
-        clientFiles,
-        directoryPolicies: (published?.directoryPolicies && published.directoryPolicies.length > 0) ? published.directoryPolicies : undefined,
-        installed: isInstalled ? (installedVersion === version) : false,
-        hasExistingInstall: isInstalled,
-        totalDownloadBytes: isInstalled ? 0 : totalBytes,
-      }
-
-      gameService.setServerState(serverId, {
-        status: newStatus,
-        manifest: updatedManifest,
-      })
-    } catch (err) {
-      console.error(`Failed handling release event for server ${serverId}:`, err)
     }
   },
 

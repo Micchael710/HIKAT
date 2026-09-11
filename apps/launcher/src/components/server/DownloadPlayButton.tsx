@@ -97,9 +97,8 @@ export default function DownloadPlayButton({
   const isLocalAllowed = gameContext !== undefined
     ? Boolean(gameContext?.gameId)
     : (allowLegacyLocalOperations ?? (!activeServerId))
-  const cachedInitial = gameService.getServerState(activeServerId)
-  const [status, setStatusState] = useState<GameButtonState>(() => cachedInitial?.status ?? "checking")
-  const statusRef = useRef<GameButtonState>(cachedInitial?.status ?? "checking")
+  const [status, setStatusState] = useState<GameButtonState>("checking")
+  const statusRef = useRef<GameButtonState>("checking")
 
   const accentHex = accent?.hex || "#efc436"
   const accentCss = accent?.css || "239, 196, 54"
@@ -115,31 +114,30 @@ export default function DownloadPlayButton({
     setStatusState((prev: GameButtonState) => {
       const resolved = typeof next === "function" ? next(prev) : next
       statusRef.current = resolved
-      gameService.setServerState(activeServerId, { status: resolved })
       return resolved
     })
-  }, [activeServerId])
+  }, [])
 
   useEffect(() => {
     statusRef.current = status
   }, [status])
 
-  const [manifest, setManifest] = useState<GameManifest | null>(() => cachedInitial?.manifest ?? null)
-  const manifestRef = useRef<GameManifest | null>(cachedInitial?.manifest ?? null)
+  const [manifest, setManifest] = useState<GameManifest | null>(null)
+  const manifestRef = useRef<GameManifest | null>(null)
   manifestRef.current = manifest
 
-  const [progress, setProgress] = useState(() => cachedInitial?.progress ?? 0)
-  const highWaterProgressRef = useRef(cachedInitial?.progress ?? 0)
-  const currentPhaseRef = useRef<string | null>(cachedInitial?.currentPhase ?? null)
-  const pausedPhaseRef = useRef<"downloading" | "installing">(cachedInitial?.pausedPhase ?? "downloading")
-  const [speed, setSpeed] = useState(() => cachedInitial?.speed ?? 0)
-  const [totalBytes, setTotalBytes] = useState(() => cachedInitial?.totalBytes ?? 0)
-  const [downloadedBytes, setDownloadedBytes] = useState(() => cachedInitial?.downloadedBytes ?? 0)
-  const [timeRemainingMin, setTimeRemainingMin] = useState(() => cachedInitial?.timeRemainingMin ?? 0)
+  const [progress, setProgress] = useState(0)
+  const highWaterProgressRef = useRef(0)
+  const currentPhaseRef = useRef<string | null>(null)
+  const pausedPhaseRef = useRef<"downloading" | "installing">("downloading")
+  const [speed, setSpeed] = useState(0)
+  const [totalBytes, setTotalBytes] = useState(0)
+  const [downloadedBytes, setDownloadedBytes] = useState(0)
+  const [timeRemainingMin, setTimeRemainingMin] = useState(0)
   const [isHovered, setIsHovered] = useState(false)
-  const [isCommitting, setIsCommitting] = useState(() => cachedInitial?.isCommitting ?? false)
-  const [canPauseState, setCanPauseState] = useState<boolean | undefined>(() => cachedInitial?.canPause)
-  const [canCancelState, setCanCancelState] = useState<boolean | undefined>(() => cachedInitial?.canCancel)
+  const [isCommitting, setIsCommitting] = useState(false)
+  const [canPauseState, setCanPauseState] = useState<boolean | undefined>(undefined)
+  const [canCancelState, setCanCancelState] = useState<boolean | undefined>(undefined)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [toastState, setToastState] = useState<{
     message: string | null
@@ -154,37 +152,11 @@ export default function DownloadPlayButton({
   const syncOpIdRef = useRef(0)
   const isCancellingRef = useRef(false)
   const latestManifestVersionRef = useRef<string | null>(null)
-  const isIntegrityBlockedRef = useRef(Boolean(cachedInitial?.integrityDirty || gameService.isServerIntegrityDirty(activeServerId)))
+  const isIntegrityBlockedRef = useRef(false)
   const pendingAutoUpdateRef = useRef(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [isLaunchBlockedByOtherGame, setIsLaunchBlockedByOtherGame] = useState(false)
   const isDark = theme === "dark"
-
-  useEffect(() => {
-    const unsub = gameService.subscribeServerState((gId, s) => {
-      const currentTargetId = gameContext?.gameId || activeServerId || "__default__"
-      if (gId === currentTargetId) {
-        setStatusState(s.status)
-        statusRef.current = s.status
-        if (s.manifest) {
-          setManifest(s.manifest)
-          manifestRef.current = s.manifest
-        }
-        if (s.progress !== undefined) setProgress(s.progress)
-        if (s.speed !== undefined) setSpeed(s.speed)
-        if (s.totalBytes !== undefined && s.totalBytes > 0) setTotalBytes(s.totalBytes)
-        if (s.downloadedBytes !== undefined) setDownloadedBytes(s.downloadedBytes)
-        if (s.timeRemainingMin !== undefined) setTimeRemainingMin(s.timeRemainingMin)
-        if (s.currentPhase !== undefined) currentPhaseRef.current = s.currentPhase
-        if (s.pausedPhase !== undefined) pausedPhaseRef.current = s.pausedPhase
-        if (s.canPause !== undefined) setCanPauseState(s.canPause)
-        if (s.canCancel !== undefined) setCanCancelState(s.canCancel)
-        if (s.isCommitting !== undefined) setIsCommitting(s.isCommitting)
-        if (s.integrityDirty !== undefined) isIntegrityBlockedRef.current = s.integrityDirty
-      }
-    })
-    return unsub
-  }, [gameContext?.gameId, activeServerId])
 
   useEffect(() => {
     latestManifestVersionRef.current = manifest?.version ?? null
@@ -193,20 +165,12 @@ export default function DownloadPlayButton({
   // Listen to filesystem integrity changes while launcher is open (marks integrity lock silently)
   useEffect(() => {
     const unsubscribe = window.electronAPI?.onGameFileIntegrityChanged?.((data: any) => {
-      const eventGameId = data?.gameId || undefined
       if (gameContext) {
-        if (eventGameId && eventGameId !== gameContext.gameId) {
-          gameService.setServerIntegrityDirty(eventGameId, true)
-          return
-        }
+        if (data?.gameId !== gameContext.gameId) return
       } else {
-        if (eventGameId) {
-          gameService.setServerIntegrityDirty(eventGameId, true)
-          return
-        }
+        if (data?.gameId) return
       }
       isIntegrityBlockedRef.current = true
-      gameService.setServerIntegrityDirty(activeServerId, true)
     })
 
     return () => {
@@ -215,7 +179,7 @@ export default function DownloadPlayButton({
         clearTimeout(toastTimeoutRef.current)
       }
     }
-  }, [gameContext?.gameId, activeServerId])
+  }, [gameContext?.gameId])
 
   const showToast = useCallback((
     msg: string,
@@ -302,8 +266,6 @@ export default function DownloadPlayButton({
         }
         if (res?.success) {
           isIntegrityBlockedRef.current = false
-          gameService.setServerIntegrityDirty(gameContext?.gameId || activeServerId, false)
-          gameService.setInstalledModpackVersion(gameContext?.gameId || activeServerId, syncingVersion)
           gameService.setGameInstalled(true, gameContext?.gameId)
           markSyncedVersionInstalled(syncingVersion)
 
@@ -385,115 +347,6 @@ export default function DownloadPlayButton({
       setStatus("unavailable")
       return
     }
-
-    const cached = gameService.getServerState(activeServerId)
-    const isIntegrityDirty = gameService.isServerIntegrityDirty(activeServerId)
-
-    if (cached && cached.status !== "checking" && !isIntegrityDirty) {
-      let isMounted = true
-      const reconcile = async () => {
-        const safeCall = (fn?: () => any) => {
-          try {
-            const res = fn?.()
-            return res && typeof res.then === "function" ? res.catch(() => null) : Promise.resolve(res ?? null)
-          } catch {
-            return Promise.resolve(null)
-          }
-        }
-        const [launchInfo, queueSnap] = await Promise.all([
-          safeCall(() => (typeof window !== "undefined" ? window.electronAPI?.getLaunchStatus?.(effectiveGameContext) : null)),
-          safeCall(() => (typeof window !== "undefined" ? window.electronAPI?.getDownloadQueue?.() : null)),
-        ])
-
-        if (!isMounted || typeof window === "undefined") return
-
-        const otherGameRunning = Boolean(
-          launchInfo?.runningGameId &&
-          gameContext?.gameId &&
-          launchInfo.runningGameId !== gameContext.gameId
-        )
-        const otherOpVerifying = Boolean(
-          launchInfo?.activeOperationGameId &&
-          gameContext?.gameId &&
-          launchInfo.activeOperationGameId !== gameContext.gameId &&
-          (launchInfo.activeOperationPhase === "VERIFYING" ||
-            launchInfo.activeOperationState === "VERIFYING")
-        )
-        setIsLaunchBlockedByOtherGame(otherGameRunning || otherOpVerifying)
-
-        if (
-          gameContext?.gameId &&
-          launchInfo?.runningGameId === gameContext.gameId &&
-          (launchInfo?.status === "running" || launchInfo?.status === "preparing")
-        ) {
-          setStatus(launchInfo.status === "preparing" ? "launching" : "running")
-          return
-        }
-
-        const currentTargetId = gameContext?.gameId || activeServerId
-        const isQueueActive = Boolean(
-          currentTargetId &&
-          (queueSnap?.active?.gameId === currentTargetId || launchInfo?.activeOperationGameId === currentTargetId)
-        )
-
-        if (isQueueActive) {
-          const activeSnap = queueSnap?.active || launchInfo?.operationSnapshot
-          const isPaused = Boolean(
-            activeSnap?.state === "PAUSED" ||
-            activeSnap?.isPaused ||
-            activeSnap?.phase === "PAUSED" ||
-            launchInfo?.operationState === "PAUSED"
-          )
-          const opPhase = activeSnap?.phase || launchInfo?.activeOperationPhase || launchInfo?.operationState
-          if (isPaused) {
-            if (opPhase === "INSTALLING") {
-              pausedPhaseRef.current = "installing"
-            } else {
-              pausedPhaseRef.current = "downloading"
-            }
-            setStatus("paused")
-          } else if (opPhase === "INSTALLING") {
-            pausedPhaseRef.current = "installing"
-            setStatus("installing")
-          } else if (opPhase === "VERIFYING") {
-            setStatus("verifying")
-          } else {
-            pausedPhaseRef.current = "downloading"
-            setStatus("downloading")
-          }
-
-          if (activeSnap) {
-            if (activeSnap.isCommitting !== undefined) setIsCommitting(Boolean(activeSnap.isCommitting))
-            if (activeSnap.canPause !== undefined) setCanPauseState(Boolean(activeSnap.canPause))
-            if (activeSnap.canCancel !== undefined) setCanCancelState(Boolean(activeSnap.canCancel))
-            if (typeof activeSnap.progress === "number") setProgress(activeSnap.progress)
-            if (typeof activeSnap.speedMBs === "number") setSpeed(activeSnap.speedMBs)
-            if (typeof activeSnap.downloadedBytes === "number") setDownloadedBytes(activeSnap.downloadedBytes)
-            if (typeof activeSnap.totalBytes === "number" && activeSnap.totalBytes > 0) setTotalBytes(activeSnap.totalBytes)
-            if (typeof activeSnap.remainingMinutes === "number") setTimeRemainingMin(activeSnap.remainingMinutes)
-          }
-          return
-        }
-
-        const isQueued = Boolean(
-          currentTargetId &&
-          queueSnap?.queued?.some((q: any) => q.gameId === currentTargetId)
-        )
-        if (isQueued) {
-          setStatus("queued")
-          return
-        }
-
-        setStatus(cached.status)
-        if (cached.manifest) setManifest(cached.manifest)
-      }
-
-      void reconcile()
-      return () => {
-        isMounted = false
-      }
-    }
-
     let isMounted = true
     gameService
       .checkGameManifest(activeServerId, {
@@ -501,15 +354,13 @@ export default function DownloadPlayButton({
         gameContext: effectiveGameContext,
       })
       .then(async (res) => {
-        if (!isMounted || typeof window === "undefined") return
+        if (!isMounted) return
         setManifest(res)
         if (res) {
           if (res.hasIntegrityIssue) {
             isIntegrityBlockedRef.current = true
-            gameService.setServerIntegrityDirty(activeServerId, true)
           } else if (res.installedModpackVersion === res.version) {
             isIntegrityBlockedRef.current = false
-            gameService.setServerIntegrityDirty(activeServerId, false)
           }
 
           const total = res.totalDownloadBytes || manifestTotalBytes(res.clientFiles)
@@ -520,19 +371,10 @@ export default function DownloadPlayButton({
             return
           }
 
-          const safeCall = (fn?: () => any) => {
-            try {
-              const res = fn?.()
-              return res && typeof res.then === "function" ? res.catch(() => null) : Promise.resolve(res ?? null)
-            } catch {
-              return Promise.resolve(null)
-            }
-          }
           const [launchInfo, queueSnap] = await Promise.all([
-            safeCall(() => (typeof window !== "undefined" ? window.electronAPI?.getLaunchStatus?.(effectiveGameContext) : null)),
-            safeCall(() => (typeof window !== "undefined" ? window.electronAPI?.getDownloadQueue?.() : null)),
+            window.electronAPI?.getLaunchStatus?.(effectiveGameContext).catch(() => null),
+            window.electronAPI?.getDownloadQueue?.().catch(() => null),
           ])
-          if (!isMounted || typeof window === "undefined") return
 
           const otherGameRunning = Boolean(
             launchInfo?.runningGameId &&
@@ -714,14 +556,14 @@ export default function DownloadPlayButton({
 
   // Real-time WebSocket subscription for release activation events
   useEffect(() => {
-    // In multi-server context (HomeView), useLauncherState owns the WebSocket release subscription globally
-    if (gameContext) return
-    if (!manifest || !manifest.version) return
+    if (!manifest) return
 
     const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
       if ((event as any).type === "SERVER_UPDATED") return
       const releaseEvent = event as ReleaseActivatedEvent
-      if (releaseEvent.serverId) {
+      if (gameContext) {
+        if (releaseEvent.serverId !== gameContext.gameId) return
+      } else if (releaseEvent.serverId) {
         if (!activeServerId || releaseEvent.serverId !== activeServerId) {
           return
         }
@@ -1424,38 +1266,9 @@ export default function DownloadPlayButton({
       if (isLaunchBlockedByOtherGame) {
         return
       }
-      const isIntegrityBlocked = isIntegrityBlockedRef.current || gameService.isServerIntegrityDirty(gameContext?.gameId || activeServerId)
-      if (isIntegrityBlocked) {
-        if (window.electronAPI?.checkSyncPlan && manifest?.clientFiles) {
-          try {
-            const planPayload: any = {
-              clientFiles: manifest.clientFiles,
-              directoryPolicies: manifest.directoryPolicies || [],
-              modpackVersion: manifest.version,
-              minecraftVersion: manifest.minecraftVersion,
-              modLoader: manifest.modLoader,
-              modLoaderVersion: manifest.modLoaderVersion ?? undefined,
-              neoForgeVersion: manifest.neoForgeVersion ?? undefined,
-            }
-            if (gameContext) {
-              planPayload.gameId = gameContext.gameId
-              planPayload.gameName = gameContext.gameName
-            }
-            const planCheck = await window.electronAPI.checkSyncPlan(planPayload)
-            if (planCheck?.hasIntegrityIssue || !planCheck?.isFullyInstalled) {
-              showToast(t("playButton.launchVerifyHint"), "error")
-              return
-            }
-            isIntegrityBlockedRef.current = false
-            gameService.setServerIntegrityDirty(gameContext?.gameId || activeServerId, false)
-          } catch {
-            showToast(t("playButton.launchVerifyHint"), "error")
-            return
-          }
-        } else {
-          showToast(t("playButton.launchVerifyHint"), "error")
-          return
-        }
+      if (isIntegrityBlockedRef.current) {
+        showToast(t("playButton.launchVerifyHint"), "error")
+        return
       }
 
       let playerName = "Player"
@@ -1559,14 +1372,12 @@ export default function DownloadPlayButton({
 
         if (verified?.installed && !hasUpdate && !verified?.hasIntegrityIssue) {
           isIntegrityBlockedRef.current = false
-          gameService.setServerIntegrityDirty(gameContext?.gameId || activeServerId, false)
           gameService.setGameInstalled(true, gameContext?.gameId)
           setStatus("play")
           verifySuccess = true
           showToast(t("playButton.verifySuccess"), "success")
         } else if (hasUpdate && verified?.clientFiles && verified.clientFiles.length > 0) {
           isIntegrityBlockedRef.current = false
-          gameService.setServerIntegrityDirty(gameContext?.gameId || activeServerId, false)
           verifySuccess = true
           if (autoUpdatesEnabled) {
             if (syncOpIdRef.current === syncOpId) {
@@ -1613,8 +1424,6 @@ export default function DownloadPlayButton({
     try {
       success = await gameService.uninstallGame(effectiveGameContext)
       if (success) {
-        isIntegrityBlockedRef.current = false
-        gameService.setServerIntegrityDirty(gameContext?.gameId || activeServerId, false)
         const freshManifest = await gameService.checkGameManifest(activeServerId, {
           allowLegacyLocalFilesystem: isLocalAllowed,
           gameContext: effectiveGameContext,
