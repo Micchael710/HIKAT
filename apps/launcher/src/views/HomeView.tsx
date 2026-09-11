@@ -82,34 +82,13 @@ export default function HomeView({
   const [sidebarLogoFailed, setSidebarLogoFailed] = useState(false)
   const [newsContentState, setNewsContentState] = useState<NewsContentState>(() => {
     if (!activeServerId) return "empty"
-    try {
-      const cached = localStorage.getItem(`hikat_cached_news_${activeServerId}`)
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) return "content"
-      }
-    } catch (_) {}
     return "loading"
   })
   const [prevServerId, setPrevServerId] = useState(activeServerId)
 
   if (activeServerId !== prevServerId) {
     setPrevServerId(activeServerId)
-    let initialForNewServer: NewsContentState = "loading"
-    if (!activeServerId) {
-      initialForNewServer = "empty"
-    } else {
-      try {
-        const cached = localStorage.getItem(`hikat_cached_news_${activeServerId}`)
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            initialForNewServer = "content"
-          }
-        }
-      } catch (_) {}
-    }
-    setNewsContentState(initialForNewServer)
+    setNewsContentState(activeServerId ? "loading" : "empty")
   }
 
   // Immediately clear previous server visual state when selectedServer changes
@@ -118,21 +97,7 @@ export default function HomeView({
     setMainLogoFailed(false)
     setSidebarLogoFailed(false)
     setMediaError(false)
-    let initialForNewServer: NewsContentState = "loading"
-    if (!selectedServer?.id) {
-      initialForNewServer = "empty"
-    } else {
-      try {
-        const cached = localStorage.getItem(`hikat_cached_news_${selectedServer.id}`)
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            initialForNewServer = "content"
-          }
-        }
-      } catch (_) {}
-    }
-    setNewsContentState(initialForNewServer)
+    setNewsContentState(selectedServer?.id ? "loading" : "empty")
   }, [selectedServer?.id])
 
   const isNewsEmpty = newsContentState === "empty"

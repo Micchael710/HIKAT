@@ -10,9 +10,10 @@ import { LanguageProvider } from "../context/LanguageContext"
 import { newsService } from "../services/newsService"
 import { serverService } from "../services/serverService"
 import { gameService } from "../services/gameService"
+import * as apiClientModule from "../services/apiClient"
 import type { LauncherServer } from "../services/serverService"
 
-describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loading, Content, Error)", () => {
+describe("HomeView News Section & Cache Lifecycle Suite", () => {
   let container: HTMLDivElement | null = null
   let root: ReturnType<typeof createRoot> | null = null
 
@@ -78,7 +79,17 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     date: "2026-09-10T12:00:00Z",
   }
 
-  it("1, 2, 15. LOADING: NO aparece 'Últimas Novedades', NO aparece tarjeta offline, layout estable 1410/2460", async () => {
+  const oldCachedItem = {
+    id: "news-old",
+    img: "/img/old.png",
+    title: "Noticia Antigua Borrada",
+    desc: "Esta noticia fue eliminada",
+    content: "Contenido viejo",
+    accentColor: "#f43f5e",
+    date: "2026-08-01T00:00:00Z",
+  }
+
+  it("1. LOADING: NO aparece 'Últimas Novedades', NO aparece tarjeta offline, layout estable 1410/2460", async () => {
     let resolvePromise: ((val: any) => void) | null = null
     const pendingPromise = new Promise((resolve) => {
       resolvePromise = resolve
@@ -102,22 +113,17 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     })
 
     const textDuringLoading = container?.textContent || ""
-    // 1. NO aparece "Últimas Novedades"
     expect(textDuringLoading).not.toContain("Últimas Novedades")
     expect(textDuringLoading).not.toContain("Latest News")
-
-    // 2. NO aparece la tarjeta offline ni Reintentar
     expect(textDuringLoading).not.toContain("Sin conexión con las novedades")
     expect(textDuringLoading).not.toContain("Reintentar")
 
-    // 15. Loading inicial: wrapper no visible
     const elements = Array.from(container?.querySelectorAll("div") || [])
     const newsWrapper = elements.find(
       (el) => el.style.top === "908px" && el.style.height === "420px",
     )
     expect(newsWrapper?.style.display).toBe("none")
 
-    // Mantiene layout normal (1410px) y altura 2460 durante carga
     const statsContainer = elements.find(
       (el) => el.style.paddingBottom === "90px" && el.style.display === "flex",
     )
@@ -129,14 +135,13 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     expect(cutElement?.style.top).toBe("1310px")
     expect(reportedHeight).toBe(2460)
 
-    // Cleanup promise
     await act(async () => {
       resolvePromise?.({ items: [], isCached: false })
       await Promise.resolve()
     })
   })
 
-  it("3, 4, 5, 6. EMPTY: nunca aparece 'Últimas Novedades', Stats usa 1130, Cut usa 1030, Canvas usa 2180", async () => {
+  it("2. EMPTY: nunca aparece 'Últimas Novedades', Stats usa 1130, Cut usa 1030, Canvas usa 2180", async () => {
     vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({
       items: [],
       isCached: false,
@@ -162,36 +167,31 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     })
 
     const text = container?.textContent || ""
-    // 3. NUNCA muestra "Últimas Novedades" ni error
     expect(text).not.toContain("Últimas Novedades")
     expect(text).not.toContain("Sin conexión con las novedades")
 
     const elements = Array.from(container?.querySelectorAll("div") || [])
-    // Wrapper de NewsCarousel oculto (display: none)
     const newsWrapper = elements.find(
       (el) => el.style.top === "908px" && el.style.height === "420px",
     )
     expect(newsWrapper?.style.display).toBe("none")
 
-    // 4. Stats usa top = 1130
     const statsContainer = elements.find(
       (el) => el.style.paddingBottom === "90px" && el.style.display === "flex",
     )
     expect(statsContainer?.style.top).toBe("1130px")
 
-    // 5. Angular Cut usa top = 1030 (1310 - 280 = 1030)
     const cutElement = elements.find(
       (el) => el.style.clipPath && el.style.clipPath.includes("polygon"),
     )
     expect(cutElement?.style.top).toBe("1030px")
 
-    // 6. Canvas Home usa altura = 2180 (2460 - 280 = 2180)
     expect(reportedHeight).toBe(2180)
     const rootHome = container?.querySelector("[data-home-canvas-height]")
     expect(rootHome?.getAttribute("data-home-canvas-height")).toBe("2180")
   })
 
-  it("7, 8, 9, 10. CONTENT: título visible, Stats = 1410, Cut = 1310, Canvas = 2460", async () => {
+  it("3. CONTENT: título visible, Stats = 1410, Cut = 1310, Canvas = 2460", async () => {
     vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({
       items: [mockNewsItem],
       isCached: false,
@@ -217,7 +217,6 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     })
 
     const text = container?.textContent || ""
-    // 7. Título de noticias visible
     expect(text).toContain("Últimas Novedades")
     expect(text).toContain("Nueva Gran Actualización")
 
@@ -227,25 +226,22 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     )
     expect(newsWrapper?.style.display).toBe("block")
 
-    // 8. Stats = 1410
     const statsContainer = elements.find(
       (el) => el.style.paddingBottom === "90px" && el.style.display === "flex",
     )
     expect(statsContainer?.style.top).toBe("1410px")
 
-    // 9. Cut = 1310
     const cutElement = elements.find(
       (el) => el.style.clipPath && el.style.clipPath.includes("polygon"),
     )
     expect(cutElement?.style.top).toBe("1310px")
 
-    // 10. Canvas = 2460
     expect(reportedHeight).toBe(2460)
     const rootHome = container?.querySelector("[data-home-canvas-height]")
     expect(rootHome?.getAttribute("data-home-canvas-height")).toBe("2460")
   })
 
-  it("11 & 12. ERROR: muestra 'Sin conexión con las novedades' y Reintentar, mantiene Stats = 1410 y Canvas = 2460", async () => {
+  it("4. ERROR: muestra 'Sin conexión con las novedades' y Reintentar, mantiene Stats = 1410 y Canvas = 2460", async () => {
     vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({
       items: [],
       error: true,
@@ -271,11 +267,9 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     })
 
     const text = container?.textContent || ""
-    // 11. Muestra tarjeta offline y botón Reintentar
     expect(text).toContain("Sin conexión con las novedades")
     expect(text).toContain("Reintentar")
 
-    // 12. Mantiene Stats = 1410, Cut = 1310 y Canvas = 2460
     const elements = Array.from(container?.querySelectorAll("div") || [])
     const statsContainer = elements.find(
       (el) => el.style.paddingBottom === "90px" && el.style.display === "flex",
@@ -292,17 +286,199 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     expect(rootHome?.getAttribute("data-home-canvas-height")).toBe("2460")
   })
 
-  it("13 & 14. Cambio entre servidores: empty -> content actualiza layout y altura, y content -> empty vuelve a compacto sin leaks", async () => {
-    vi.spyOn(newsService, "getNewsArticles").mockImplementation(async (_lang, sId) => {
-      if (sId === "server-b") {
-        return { items: [mockNewsItem], isCached: false }
-      }
-      return { items: [], isCached: false }
+  it("5. Existe noticia en cache, pero backend responde []: la noticia vieja NUNCA aparece, estado = empty y cache eliminado", async () => {
+    // 1. Pre-cargar noticia vieja en localStorage
+    localStorage.setItem("hikat_cached_news_server-a", JSON.stringify([oldCachedItem]))
+
+    // 2. Simular respuesta exitosa GraphQL con items vacíos
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: { newsFeed: { items: [], totalCount: 0 } },
     })
 
     let reportedHeight: number | null = null
 
-    // 1. Montar Servidor A (sin noticias) -> compacto (1130 / 1030 / 2180)
+    await act(async () => {
+      root?.render(
+        <LanguageProvider>
+          <HomeView
+            theme="dark"
+            selectedServer={serverA}
+            onContentHeightChange={(h) => {
+              reportedHeight = h
+            }}
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    // Durante loading inicial: la noticia vieja NUNCA se muestra
+    expect(container?.textContent).not.toContain("Noticia Antigua Borrada")
+    expect(container?.textContent).not.toContain("Últimas Novedades")
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Al resolver: la noticia vieja NUNCA apareció y el estado es empty
+    expect(container?.textContent).not.toContain("Noticia Antigua Borrada")
+    expect(container?.textContent).not.toContain("Últimas Novedades")
+    expect(reportedHeight).toBe(2180)
+
+    // Cache viejo eliminado de localStorage
+    expect(localStorage.getItem("hikat_cached_news_server-a")).toBeNull()
+  })
+
+  it("6. Existe noticia en cache, backend responde con noticias nuevas: durante loading no aparece noticia vieja, luego aparecen nuevas y se reemplaza cache", async () => {
+    localStorage.setItem("hikat_cached_news_server-a", JSON.stringify([oldCachedItem]))
+
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        newsFeed: {
+          items: [
+            {
+              id: "news-new",
+              title: "Nueva Gran Actualización",
+              content: "Detalles",
+              type: "UPDATE",
+              createdAt: "2026-09-11T00:00:00Z",
+            },
+          ],
+          totalCount: 1,
+        },
+      },
+    })
+
+    await act(async () => {
+      root?.render(
+        <LanguageProvider>
+          <HomeView theme="dark" selectedServer={serverA} />
+        </LanguageProvider>,
+      )
+    })
+
+    // En ningún momento aparece la noticia vieja
+    expect(container?.textContent).not.toContain("Noticia Antigua Borrada")
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(container?.textContent).not.toContain("Noticia Antigua Borrada")
+    expect(container?.textContent).toContain("Nueva Gran Actualización")
+
+    // Cache reemplazado
+    const updatedCache = JSON.parse(localStorage.getItem("hikat_cached_news_server-a") || "[]")
+    expect(updatedCache.length).toBe(1)
+    expect(updatedCache[0].id).toBe("news-new")
+  })
+
+  it("7. Existe noticia en cache, backend falla: primero loading, luego aparecen noticias cacheadas (fallback offline)", async () => {
+    localStorage.setItem("hikat_cached_news_server-a", JSON.stringify([oldCachedItem]))
+
+    let rejectPromise: (() => void) | null = null
+    const pendingQuery = new Promise((_, reject) => {
+      rejectPromise = () => reject(new Error("Network offline"))
+    })
+    vi.spyOn(apiClientModule, "graphqlClient").mockReturnValue(pendingQuery as any)
+
+    await act(async () => {
+      root?.render(
+        <LanguageProvider>
+          <HomeView theme="dark" selectedServer={serverA} />
+        </LanguageProvider>,
+      )
+    })
+
+    // Durante loading: NADA visible (no se hidrata antes de consultar)
+    expect(container?.textContent).not.toContain("Noticia Antigua Borrada")
+    expect(container?.textContent).not.toContain("Últimas Novedades")
+
+    // Ahora la red falla
+    await act(async () => {
+      rejectPromise?.()
+      await Promise.resolve()
+    })
+
+    // Ahora SÍ aparece como fallback offline
+    expect(container?.textContent).toContain("Noticia Antigua Borrada")
+    expect(container?.textContent).toContain("Últimas Novedades")
+  })
+
+  it("8. HomeView & NewsCarousel: nunca inicializan content leyendo localStorage directamente", async () => {
+    localStorage.setItem("hikat_cached_news_server-a", JSON.stringify([oldCachedItem]))
+
+    // Retardamos la respuesta para verificar el estado de mount sincrónico
+    let resolveNews: any = null
+    vi.spyOn(newsService, "getNewsArticles").mockReturnValue(
+      new Promise((res) => {
+        resolveNews = res
+      }),
+    )
+
+    let capturedState: NewsContentState | null = null
+
+    await act(async () => {
+      root?.render(
+        <LanguageProvider>
+          <NewsCarousel
+            canvasLeft={184}
+            canvasWidth={1920}
+            theme="dark"
+            serverId="server-a"
+            onContentStateChange={(s) => {
+              capturedState = s
+            }}
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    // NewsCarousel no se hidrata desde localStorage: estado inicial es loading, contenedor vacío
+    expect(capturedState).toBe("loading")
+    expect(container?.textContent).not.toContain("Noticia Antigua Borrada")
+
+    await act(async () => {
+      resolveNews?.({ items: [], isCached: false })
+      await Promise.resolve()
+    })
+
+    expect(capturedState).toBe("empty")
+  })
+
+  it("9. Cambio entre servidores: A (cache viejo pero ahora 0 noticias) -> B (con noticias) -> A", async () => {
+    localStorage.setItem("hikat_cached_news_server-a", JSON.stringify([oldCachedItem]))
+
+    vi.spyOn(apiClientModule, "graphqlClient").mockImplementation(async (_query, vars) => {
+      if (vars?.serverId === "server-b") {
+        return {
+          success: true,
+          data: {
+            newsFeed: {
+              items: [
+                {
+                  id: "news-b",
+                  title: "Servidor B Noticias",
+                  content: "Contenido B",
+                  type: "UPDATE",
+                  createdAt: "2026-09-11T00:00:00Z",
+                },
+              ],
+              totalCount: 1,
+            },
+          },
+        }
+      }
+      return {
+        success: true,
+        data: { newsFeed: { items: [], totalCount: 0 } },
+      }
+    })
+
+    let reportedHeight: number | null = null
+
+    // 1. Montar en Servidor A:
     await act(async () => {
       root?.render(
         <LanguageProvider>
@@ -320,13 +496,12 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
       await Promise.resolve()
     })
 
-    let elements = Array.from(container?.querySelectorAll("div") || [])
-    let stats = elements.find((el) => el.style.paddingBottom === "90px" && el.style.display === "flex")
-    expect(stats?.style.top).toBe("1130px")
-    expect(reportedHeight).toBe(2180)
+    expect(container?.textContent).not.toContain("Noticia Antigua Borrada")
     expect(container?.textContent).not.toContain("Últimas Novedades")
+    expect(reportedHeight).toBe(2180)
+    expect(localStorage.getItem("hikat_cached_news_server-a")).toBeNull()
 
-    // 2. Cambiar a Servidor B (con noticias) -> normal (1410 / 1310 / 2460)
+    // 2. Cambiar a Servidor B:
     await act(async () => {
       root?.render(
         <LanguageProvider>
@@ -344,14 +519,11 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
       await Promise.resolve()
     })
 
-    elements = Array.from(container?.querySelectorAll("div") || [])
-    stats = elements.find((el) => el.style.paddingBottom === "90px" && el.style.display === "flex")
-    expect(stats?.style.top).toBe("1410px")
-    expect(reportedHeight).toBe(2460)
+    expect(container?.textContent).toContain("Servidor B Noticias")
     expect(container?.textContent).toContain("Últimas Novedades")
-    expect(container?.textContent).toContain("Nueva Gran Actualización")
+    expect(reportedHeight).toBe(2460)
 
-    // 3. Volver a Servidor A (sin noticias) -> vuelve a compacto (1130 / 1030 / 2180) sin contenido viejo
+    // 3. Volver a Servidor A:
     await act(async () => {
       root?.render(
         <LanguageProvider>
@@ -369,11 +541,9 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
       await Promise.resolve()
     })
 
-    elements = Array.from(container?.querySelectorAll("div") || [])
-    stats = elements.find((el) => el.style.paddingBottom === "90px" && el.style.display === "flex")
-    expect(stats?.style.top).toBe("1130px")
-    expect(reportedHeight).toBe(2180)
+    expect(container?.textContent).not.toContain("Servidor B Noticias")
+    expect(container?.textContent).not.toContain("Noticia Antigua Borrada")
     expect(container?.textContent).not.toContain("Últimas Novedades")
-    expect(container?.textContent).not.toContain("Nueva Gran Actualización")
+    expect(reportedHeight).toBe(2180)
   })
 })

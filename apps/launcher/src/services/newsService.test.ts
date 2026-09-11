@@ -84,7 +84,12 @@ describe("Launcher News Service (GraphQL newsFeed & Multimedia Caching)", () => 
     expect(parsed[1].img).toBe("https://img.youtube.com/vi/abc123xyz89/hqdefault.jpg")
   })
 
-  it("2. Empty feed (0 published articles) returns empty list with isCached: false and no fake news", async () => {
+  it("2. Empty feed (0 published articles) returns empty list with isCached: false, removes obsolete cache, and no fake news", async () => {
+    window.localStorage.setItem(
+      "hikat_cached_news",
+      JSON.stringify([{ id: "old-news", title: "Old" }]),
+    )
+
     vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
       success: true,
       data: { newsFeed: { items: [], totalCount: 0 } },
@@ -95,6 +100,7 @@ describe("Launcher News Service (GraphQL newsFeed & Multimedia Caching)", () => 
     expect(result.items).toEqual([])
     expect(result.isCached).toBe(false)
     expect(result.error).toBeUndefined()
+    expect(window.localStorage.getItem("hikat_cached_news")).toBeNull()
   })
 
   it("3. Network/API failure with existing cache falls back to cached news with isCached: true", async () => {

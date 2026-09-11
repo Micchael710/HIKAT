@@ -86,45 +86,53 @@ export const newsService = {
 
     const cacheKey = serverId ? `hikat_cached_news_${serverId}` : "hikat_cached_news"
 
-    const res = await graphqlClient<{
-      newsFeed: {
-        items: NewsItemResponse[]
-        totalCount: number
-      }
-    }>(query, { first: 20, ...(serverId ? { serverId } : {}) })
-
-    if (res.success && res.data?.newsFeed) {
-      const items = res.data.newsFeed.items || []
-      const formattedItems: NewsCardItem[] = items.map((item) => {
-        const snippet = item.content
-          ? item.content.length > 150
-            ? `${item.content.slice(0, 150)}...`
-            : item.content
-          : ""
-
-        return {
-          id: item.id,
-          img: resolveNewsPreview(item),
-          title: item.title,
-          desc: snippet,
-          content: item.content || "",
-          type: item.type,
-          accentColor: "#38bdf8",
-          date: item.publishedAt || item.createdAt,
-          youtubeVideoId: item.youtubeVideoId || null,
-          youtubeUrl: item.youtubeUrl || null,
-          videoUrl: item.video?.url ? resolveApiAssetUrl(item.video.url) : null,
-          videoMimeType: item.video?.mimeType || null,
+    try {
+      const res = await graphqlClient<{
+        newsFeed: {
+          items: NewsItemResponse[]
+          totalCount: number
         }
-      })
+      }>(query, { first: 20, ...(serverId ? { serverId } : {}) })
 
-      if (formattedItems.length > 0) {
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(formattedItems))
-        } catch (_) {}
+      if (res.success && res.data?.newsFeed) {
+        const items = res.data.newsFeed.items || []
+        const formattedItems: NewsCardItem[] = items.map((item) => {
+          const snippet = item.content
+            ? item.content.length > 150
+              ? `${item.content.slice(0, 150)}...`
+              : item.content
+            : ""
+
+          return {
+            id: item.id,
+            img: resolveNewsPreview(item),
+            title: item.title,
+            desc: snippet,
+            content: item.content || "",
+            type: item.type,
+            accentColor: "#38bdf8",
+            date: item.publishedAt || item.createdAt,
+            youtubeVideoId: item.youtubeVideoId || null,
+            youtubeUrl: item.youtubeUrl || null,
+            videoUrl: item.video?.url ? resolveApiAssetUrl(item.video.url) : null,
+            videoMimeType: item.video?.mimeType || null,
+          }
+        })
+
+        if (formattedItems.length > 0) {
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(formattedItems))
+          } catch (_) {}
+        } else {
+          try {
+            localStorage.removeItem(cacheKey)
+          } catch (_) {}
+        }
+
+        return { items: formattedItems, isCached: false }
       }
-
-      return { items: formattedItems, isCached: false }
+    } catch (_) {
+      // Network or API failure -> proceed to offline fallback
     }
 
     // Fallback: Check if the player previously saw news stored in localStorage for this server
