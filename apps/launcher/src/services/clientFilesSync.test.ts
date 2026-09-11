@@ -22,6 +22,7 @@ import {
   uninstallGame,
   resolvePathPolicy,
   ENFORCED_DIRECTORIES,
+  buildInstalledManifestData,
   // @ts-expect-error CJS module without bundled declaration
 } from "../../electron/client-files-sync.cjs"
 
@@ -1602,6 +1603,60 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       // config/custom/user.json is preserved
       expect(plan.toPrune.some((f: any) => f.path === "config/custom/user.json")).toBe(false)
       expect(plan.toPreserveUser.some((f: any) => f.path === "config/custom/user.json")).toBe(true)
+    })
+
+    // Effective Policy Inheritance in buildInstalledManifestData
+    it("66. buildInstalledManifestData: carpeta MODIFICABLE + archivo sin policy -> manifest guarda archivo como MODIFICABLE", () => {
+      const directoryPolicies = [{ path: "mods", policy: "MODIFICABLE" }]
+      const clientFiles = [
+        { path: "mods/user.jar", sha256: "aaa", sizeBytes: 100 },
+      ]
+      const manifest = buildInstalledManifestData(instanceRoot, clientFiles, "1.0.0", directoryPolicies)
+      expect(manifest.files["mods/user.jar"]).toBeDefined()
+      expect(manifest.files["mods/user.jar"].policy).toBe("MODIFICABLE")
+    })
+
+    it("67. buildInstalledManifestData: carpeta NO_MODIFICABLE + archivo sin policy -> manifest guarda archivo como NO_MODIFICABLE", () => {
+      const directoryPolicies = [{ path: "mods", policy: "NO_MODIFICABLE" }]
+      const clientFiles = [
+        { path: "mods/base.jar", sha256: "bbb", sizeBytes: 200 },
+      ]
+      const manifest = buildInstalledManifestData(instanceRoot, clientFiles, "1.0.0", directoryPolicies)
+      expect(manifest.files["mods/base.jar"]).toBeDefined()
+      expect(manifest.files["mods/base.jar"].policy).toBe("NO_MODIFICABLE")
+    })
+
+    it("68. buildInstalledManifestData: padre NO_MODIFICABLE + subcarpeta MODIFICABLE + archivo sin policy -> manifest guarda archivo como MODIFICABLE", () => {
+      const directoryPolicies = [
+        { path: "mods", policy: "NO_MODIFICABLE" },
+        { path: "mods/config", policy: "MODIFICABLE" },
+      ]
+      const clientFiles = [
+        { path: "mods/config/options.json", sha256: "ccc", sizeBytes: 50 },
+      ]
+      const manifest = buildInstalledManifestData(instanceRoot, clientFiles, "1.0.0", directoryPolicies)
+      expect(manifest.files["mods/config/options.json"]).toBeDefined()
+      expect(manifest.files["mods/config/options.json"].policy).toBe("MODIFICABLE")
+    })
+
+    it("69. buildInstalledManifestData: archivo con policy explicita NO_MODIFICABLE dentro de carpeta MODIFICABLE -> conserva NO_MODIFICABLE", () => {
+      const directoryPolicies = [{ path: "mods", policy: "MODIFICABLE" }]
+      const clientFiles = [
+        { path: "mods/core.jar", sha256: "ddd", sizeBytes: 300, policy: "NO_MODIFICABLE" },
+      ]
+      const manifest = buildInstalledManifestData(instanceRoot, clientFiles, "1.0.0", directoryPolicies)
+      expect(manifest.files["mods/core.jar"]).toBeDefined()
+      expect(manifest.files["mods/core.jar"].policy).toBe("NO_MODIFICABLE")
+    })
+
+    it("70. buildInstalledManifestData: archivo con policy explicita MODIFICABLE dentro de carpeta NO_MODIFICABLE -> conserva MODIFICABLE", () => {
+      const directoryPolicies = [{ path: "mods", policy: "NO_MODIFICABLE" }]
+      const clientFiles = [
+        { path: "mods/create.jar", sha256: "eee", sizeBytes: 400, policy: "MODIFICABLE" },
+      ]
+      const manifest = buildInstalledManifestData(instanceRoot, clientFiles, "1.0.0", directoryPolicies)
+      expect(manifest.files["mods/create.jar"]).toBeDefined()
+      expect(manifest.files["mods/create.jar"].policy).toBe("MODIFICABLE")
     })
   })
 })

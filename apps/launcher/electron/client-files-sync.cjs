@@ -1349,14 +1349,17 @@ function buildInstalledManifestData(
   directoryPolicies = [],
 ) {
   const newManifestFiles = {}
+  const dirPoliciesMap = new Map()
 
   if (Array.isArray(directoryPolicies)) {
     for (const dp of directoryPolicies) {
       if (!dp || !dp.path) continue
       const normalizedRelative = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
       if (normalizedRelative) {
+        const policy = dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
+        dirPoliciesMap.set(normalizedRelative, policy)
         newManifestFiles[normalizedRelative] = {
-          policy: dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE",
+          policy,
           lastSyncedAt: new Date().toISOString(),
         }
       }
@@ -1371,9 +1374,17 @@ function buildInstalledManifestData(
     const normalizedRelative = path
       .relative(instanceRoot, resolveSafePath(instanceRoot, item.path))
       .replace(/\\/g, "/")
+
+    let effectivePolicy = null
+    if (item.policy === "MODIFICABLE" || item.policy === "NO_MODIFICABLE") {
+      effectivePolicy = item.policy
+    } else {
+      effectivePolicy = resolvePathPolicy(normalizedRelative, dirPoliciesMap) || "NO_MODIFICABLE"
+    }
+
     newManifestFiles[normalizedRelative] = {
       officialSha256: String(item.sha256 || "").toLowerCase().trim(),
-      policy: item.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE",
+      policy: effectivePolicy,
       sizeBytes: typeof item.sizeBytes === "number" ? item.sizeBytes : (typeof item.size === "number" ? item.size : undefined),
       lastSyncedAt: new Date().toISOString(),
     }
