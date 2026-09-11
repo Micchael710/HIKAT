@@ -1,3 +1,5 @@
+const fs = require("fs")
+const fsp = fs.promises
 const path = require("path")
 const {
   generateSyncPlan,
@@ -7,12 +9,30 @@ const {
   saveInstalledManifest,
   buildInstalledManifestData,
   loadDownloadSession,
+  saveDownloadSession,
   reconcileStagingFiles,
   cleanStaging,
   uninstallGame,
 } = require("./client-files-sync.cjs")
 const { checkCore, installCore } = require("./minecraft-core.cjs")
 const { resolveJavaRuntime, ensureJavaRuntime, validateJavaBinary } = require("./java-runtime.cjs")
+
+/**
+ * Safely cleans an incomplete fresh install by removing all instance contents,
+ * leaving the instance directory pristine and virginal.
+ */
+async function cleanFreshInstall(instanceRoot) {
+  try {
+    await cleanStaging(instanceRoot)
+    if (fs.existsSync(instanceRoot)) {
+      const entries = await fsp.readdir(instanceRoot)
+      for (const entry of entries) {
+        const fullPath = path.join(instanceRoot, entry)
+        await fsp.rm(fullPath, { recursive: true, force: true }).catch(() => {})
+      }
+    }
+  } catch (_) {}
+}
 
 function validateSyncPayload(payload = {}, isStartSync = true) {
   if (!payload || typeof payload !== "object") {
@@ -98,6 +118,7 @@ class GameOperationManager {
     this.lastPayload = null
     this.lastPausedPhase = null
     this.operationCounter = 0
+    this.isCommitting = false
 
     this.javaResolver = options.javaResolver || resolveJavaRuntime
     this.javaValidator = options.javaValidator || validateJavaBinary
@@ -284,13 +305,15 @@ class GameOperationManager {
     const runOperation = async () => {
       let currentPhaseName = initialPhase
       let maxReportedProgress = 0
+      let isUpdate = false
       const safeProgress = (data) => {
-        if (typeof onProgress !== "function" || !data) return
+        if (!data) return
         const phase = data.phase || (isVerify ? "VERIFYING" : "DOWNLOADING")
         if (phase !== currentPhaseName) {
           currentPhaseName = phase
           maxReportedProgress = 0
         }
+        if (typeof onProgress !== "function") return
         const rawProgress = typeof data.progress === "number" ? data.progress : 0
         const progress = Math.max(maxReportedProgress, Math.min(100, Math.round(rawProgress)))
         maxReportedProgress = progress
@@ -312,120 +335,9 @@ class GameOperationManager {
           safeProgress,
         )
         const installedManifest = await loadInstalledManifest(instanceRoot)
+        isUpdate = Boolean(installedManifest && installedManifest.modpackVersion)
 
-        let downloadResult = null
-        if (syncPlan.toDownload.length > 0 || isVerify) {
-          const downloadProgressHandler = isVerify
-            ? (data) => {
-                if (!data) return
-                const rawProgress = typeof data.progress === "number" ? data.progress : 0
-                // Convert 0–100 download progress to 35–50 verification progress
-                const mappedProgress = Math.min(50, Math.max(35, Math.round(35 + (rawProgress / 100) * 15)))
-                safeProgress({
-                  ...data,
-                  phase: "VERIFYING",
-                  progress: mappedProgress,
-                })
-              }
-            : safeProgress
-
-          downloadResult = await downloadClientFilesToStaging({
-            instanceRoot,
-            clientFiles,
-            directoryPolicies,
-            modpackVersion,
-            onProgress: downloadProgressHandler,
-            onPhaseChange: isVerify ? undefined : onPhaseChange,
-            cancelSignal,
-            apiBaseUrl,
-            isVerify,
-          })
-        }
-
-        if (cancelSignal.isPaused) {
-          this.state = "PAUSED"
-          if (typeof onPhaseChange === "function") onPhaseChange("PAUSED")
-          return { success: false, paused: true, state: "PAUSED" }
-        }
-        if (cancelSignal.isCancelled) {
-          this.state = "IDLE"
-          if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
-          throw new Error("Operation was cancelled.")
-        }
-
-        // Check whether XMCL Core installation is required
-        const coreStatusPre = await this.coreChecker({
-          instanceRoot,
-          minecraftVersion,
-          modLoader,
-          modLoaderVersion,
-          neoForgeVersion,
-        })
-        const needsCoreInstall = !coreStatusPre.installed && !isVerify
-
-        let pendingManifestData = null
-
-        // Apply staged/pruned files to instanceRoot when needed
-        const needsClientApply =
-          syncPlan.toDownload.length > 0 ||
-          syncPlan.toPrune.length > 0 ||
-          installedManifest.modpackVersion !== modpackVersion
-
-        const progressRange = isVerify
-          ? { start: 50, end: 90 }
-          : needsCoreInstall
-            ? { start: 0, end: 30 }
-            : { start: 0, end: 90 }
-
-        if (needsClientApply) {
-          if (!isVerify) {
-            this.state = "INSTALLING"
-            if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
-          }
-          const applyResult = await applyStagingToInstance({
-            instanceRoot,
-            clientFiles,
-            directoryPolicies,
-            modpackVersion,
-            plan: syncPlan,
-            stagedFiles: downloadResult?.stagedFiles || [],
-            onProgress: safeProgress,
-            cancelSignal,
-            isVerify,
-            progressRange,
-          })
-          pendingManifestData = applyResult?.manifestData || null
-        }
-
-        if (!pendingManifestData) {
-          pendingManifestData = buildInstalledManifestData(
-            instanceRoot,
-            clientFiles,
-            modpackVersion,
-            directoryPolicies,
-          )
-        }
-
-        if (cancelSignal.isPaused) {
-          this.state = "PAUSED"
-          await saveDownloadSession(instanceRoot, {
-            modpackVersion,
-            status: "PAUSED",
-            phase: currentPhaseName || "INSTALLING",
-            operationKind: isVerify ? "VERIFY" : "SYNC",
-            progress: maxReportedProgress,
-            updatedAt: new Date().toISOString(),
-          }).catch(() => {})
-          if (typeof onPhaseChange === "function") onPhaseChange("PAUSED")
-          return { success: false, paused: true, state: "PAUSED" }
-        }
-        if (cancelSignal.isCancelled) {
-          this.state = "IDLE"
-          if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
-          throw new Error("Operation was cancelled.")
-        }
-
-        // 2. Ensure Minecraft & Loader Core (minecraft-core discovers required Java)
+        // Check Minecraft Core/Loader status early so progress mapping is completely deterministic
         const coreStatus = await this.coreChecker({
           instanceRoot,
           minecraftVersion,
@@ -433,11 +345,68 @@ class GameOperationManager {
           modLoaderVersion,
           neoForgeVersion,
         })
+        const needsCoreInstall = (!coreStatus.installed || isVerify) && !payload.skipCoreInstall
 
-        if (!coreStatus.installed || isVerify) {
+        let downloadResult = null
+        if (syncPlan.toDownload.length > 0 || isVerify) {
+          const downloadProgressHandler = (data) => {
+            if (!data) return
+            const rawProgress = typeof data.progress === "number" ? data.progress : 0
+            safeProgress({
+              ...data,
+              phase: isVerify ? "VERIFYING" : "DOWNLOADING",
+              progress: isVerify ? Math.min(50, Math.max(35, Math.round(35 + (rawProgress / 100) * 15))) : rawProgress,
+            })
+          }
+
+          downloadResult = await downloadClientFilesToStaging({
+            instanceRoot,
+            clientFiles,
+            directoryPolicies,
+            isVerify,
+            cancelSignal,
+            signal: abortController.signal,
+            apiBaseUrl: payload.apiBaseUrl,
+            onProgress: downloadProgressHandler,
+          })
+        }
+
+        if (cancelSignal.isPaused) {
+          this.state = "PAUSED"
+          this.lastPausedPhase = "DOWNLOADING"
+          await saveDownloadSession(instanceRoot, {
+            modpackVersion,
+            status: "PAUSED",
+            phase: "DOWNLOADING",
+            operationKind: isVerify ? "VERIFY" : "SYNC",
+            progress: maxReportedProgress,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {})
+          if (typeof onPhaseChange === "function") onPhaseChange("PAUSED", "DOWNLOADING")
+          return { success: false, paused: true, state: "PAUSED", phase: "DOWNLOADING" }
+        }
+        if (cancelSignal.isCancelled) {
+          if (isUpdate) {
+            await cleanStaging(instanceRoot).catch(() => {})
+          } else {
+            await cleanFreshInstall(instanceRoot).catch(() => {})
+          }
+          this.state = "IDLE"
+          if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
+          throw new Error("Operation was cancelled.")
+        }
+
+        // 2. Ensure Minecraft & Loader Core (minecraft-core discovers required Java)
+        // Staged modpack files remain isolated in .hikat/staging/ during this entire phase!
+        if (needsCoreInstall) {
           if (!isVerify && this.state !== "INSTALLING") {
             this.state = "INSTALLING"
+            currentPhaseName = "INSTALLING"
             if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
+            safeProgress({
+              phase: "INSTALLING",
+              progress: 30,
+            })
           }
 
           if (isVerify && coreStatus.installed) {
@@ -477,35 +446,82 @@ class GameOperationManager {
           }
         } else {
           // Core is already installed and healthy during update/install
+          if (!isVerify && this.state !== "INSTALLING") {
+            this.state = "INSTALLING"
+            currentPhaseName = "INSTALLING"
+            if (typeof onPhaseChange === "function") onPhaseChange("INSTALLING")
+          }
           safeProgress({
-            phase: "INSTALLING",
+            phase: isVerify ? "VERIFYING" : "INSTALLING",
             progress: 95,
           })
         }
 
         if (cancelSignal.isPaused) {
           this.state = "PAUSED"
+          this.lastPausedPhase = "INSTALLING"
           await saveDownloadSession(instanceRoot, {
             modpackVersion,
             status: "PAUSED",
-            phase: currentPhaseName || "INSTALLING",
+            phase: "INSTALLING",
             operationKind: isVerify ? "VERIFY" : "SYNC",
             progress: maxReportedProgress,
             updatedAt: new Date().toISOString(),
           }).catch(() => {})
-          if (typeof onPhaseChange === "function") onPhaseChange("PAUSED")
-          return { success: false, paused: true, state: "PAUSED" }
+          if (typeof onPhaseChange === "function") onPhaseChange("PAUSED", "INSTALLING")
+          return { success: false, paused: true, state: "PAUSED", phase: "INSTALLING" }
         }
         if (cancelSignal.isCancelled) {
+          if (isUpdate) {
+            await cleanStaging(instanceRoot).catch(() => {})
+          } else {
+            await cleanFreshInstall(instanceRoot).catch(() => {})
+          }
           this.state = "IDLE"
           if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
           throw new Error("Operation was cancelled.")
         }
 
-        // 3. Persist installed manifest and clean staging ONLY after Core and all stages succeed
-        if (pendingManifestData) {
-          await saveInstalledManifest(instanceRoot, pendingManifestData)
+        // 3. Final Atomic Commit (~1 second):
+        // Core is ready, client files are in staging.
+        // Copy/apply staging files to instanceRoot, prune obsolete files, save manifest, clean staging.
+        this.isCommitting = true
+        let pendingManifestData = null
+
+        const needsClientApply =
+          syncPlan.toDownload.length > 0 ||
+          syncPlan.toPrune.length > 0 ||
+          installedManifest.modpackVersion !== modpackVersion
+
+        const progressRange = isVerify
+          ? { start: 90, end: 99 }
+          : { start: 95, end: 99 }
+
+        if (needsClientApply) {
+          const applyResult = await applyStagingToInstance({
+            instanceRoot,
+            clientFiles,
+            directoryPolicies,
+            modpackVersion,
+            plan: syncPlan,
+            stagedFiles: downloadResult?.stagedFiles || [],
+            onProgress: safeProgress,
+            isVerify,
+            progressRange,
+          })
+          pendingManifestData = applyResult?.manifestData || null
         }
+
+        if (!pendingManifestData) {
+          pendingManifestData = buildInstalledManifestData(
+            instanceRoot,
+            clientFiles,
+            modpackVersion,
+            directoryPolicies,
+          )
+        }
+
+        await saveInstalledManifest(instanceRoot, pendingManifestData)
         await cleanStaging(instanceRoot)
 
         safeProgress({
@@ -513,28 +529,52 @@ class GameOperationManager {
           progress: 100,
         })
 
+        this.isCommitting = false
         this.state = "IDLE"
         if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
         return { success: true }
       } catch (err) {
+        this.isCommitting = false
         if (cancelSignal.isPaused) {
           this.state = "PAUSED"
-          this.lastPausedPhase = currentPhaseName || (this.state === "INSTALLING" ? "INSTALLING" : "DOWNLOADING")
+          const pausedPhase =
+            this.state === "INSTALLING" || currentPhaseName === "INSTALLING"
+              ? "INSTALLING"
+              : (currentPhaseName || "DOWNLOADING")
+          this.lastPausedPhase = pausedPhase
           await saveDownloadSession(instanceRoot, {
             modpackVersion,
             status: "PAUSED",
-            phase: this.lastPausedPhase,
+            phase: pausedPhase,
             operationKind: isVerify ? "VERIFY" : "SYNC",
             progress: maxReportedProgress,
             updatedAt: new Date().toISOString(),
           }).catch(() => {})
-          if (typeof onPhaseChange === "function") onPhaseChange("PAUSED")
-          return { success: false, paused: true, state: "PAUSED" }
+          if (typeof onPhaseChange === "function") onPhaseChange("PAUSED", pausedPhase)
+          return { success: false, paused: true, state: "PAUSED", phase: pausedPhase }
         }
+
+        const isCancelled =
+          cancelSignal.isCancelled ||
+          err?.name === "AbortError" ||
+          err?.message?.includes("aborted") ||
+          err?.message?.includes("cancelled")
+        if (isCancelled) {
+          if (isUpdate) {
+            await cleanStaging(instanceRoot).catch(() => {})
+          } else {
+            await cleanFreshInstall(instanceRoot).catch(() => {})
+          }
+          this.state = "IDLE"
+          if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
+          throw new Error("Operation was cancelled.")
+        }
+
         this.state = "IDLE"
         if (typeof onPhaseChange === "function") onPhaseChange("IDLE")
         throw err
       } finally {
+        this.isCommitting = false
         if (this.activeCancelSignal?.id === opId) {
           this.activeCancelSignal = null
           this.activeAbortController = null
@@ -550,6 +590,9 @@ class GameOperationManager {
   }
 
   async pauseSync() {
+    if (this.isCommitting) {
+      throw new Error("Cannot pause synchronization while finalizing installation.")
+    }
     if (this.activeCancelSignal) {
       this.activeCancelSignal.isPaused = true
     }
@@ -572,6 +615,10 @@ class GameOperationManager {
   }
 
   async cancelSync(instanceRoot) {
+    if (this.isCommitting) {
+      throw new Error("Cannot cancel while finalizing installation.")
+    }
+    const signalToCancel = this.activeCancelSignal
     if (this.activeCancelSignal) {
       this.activeCancelSignal.isCancelled = true
     }
@@ -583,11 +630,18 @@ class GameOperationManager {
     }
     if (instanceRoot) {
       try {
-        await cleanStaging(instanceRoot)
+        const manifest = await loadInstalledManifest(instanceRoot).catch(() => null)
+        if (manifest && manifest.modpackVersion) {
+          await cleanStaging(instanceRoot)
+        } else {
+          await cleanFreshInstall(instanceRoot)
+        }
       } catch (_) {}
     }
-    this.lastPausedPhase = null
-    this.state = "IDLE"
+    if (!this.activeCancelSignal || (signalToCancel && this.activeCancelSignal.id === signalToCancel.id)) {
+      this.lastPausedPhase = null
+      this.state = "IDLE"
+    }
     return { success: true, state: "IDLE" }
   }
 

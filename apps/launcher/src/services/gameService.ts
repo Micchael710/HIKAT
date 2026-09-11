@@ -77,13 +77,16 @@ function connectSharedReleaseSocket() {
     "/launcher/release-events"
 
   try {
-    sharedReleaseSocket = new WebSocket(wsUrl)
+    const socket = new WebSocket(wsUrl)
+    sharedReleaseSocket = socket
 
-    sharedReleaseSocket.onopen = () => {
+    socket.onopen = () => {
+      if (sharedReleaseSocket !== socket) return
       sharedBackoffMs = 5000
     }
 
-    sharedReleaseSocket.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (sharedReleaseSocket !== socket) return
       try {
         const data = JSON.parse(event.data)
         if (data && (data.type === "RELEASE_ACTIVATED" || data.type === "SERVER_UPDATED")) {
@@ -96,16 +99,18 @@ function connectSharedReleaseSocket() {
       } catch (_) {}
     }
 
-    sharedReleaseSocket.onclose = () => {
-      sharedReleaseSocket = null
-      if (releaseEventListeners.size > 0) {
-        scheduleSharedReconnect()
+    socket.onclose = () => {
+      if (sharedReleaseSocket === socket) {
+        sharedReleaseSocket = null
+        if (releaseEventListeners.size > 0) {
+          scheduleSharedReconnect()
+        }
       }
     }
 
-    sharedReleaseSocket.onerror = () => {
+    socket.onerror = () => {
       try {
-        sharedReleaseSocket?.close()
+        socket.close()
       } catch (_) {}
     }
   } catch (_) {

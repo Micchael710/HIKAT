@@ -124,9 +124,87 @@ const operationManager = new GameOperationManager()
 const settingsStore = new SettingsStore(app.getPath("userData"))
 const authStore = new SecureAuthStore(app.getPath("userData"))
 let activeOperationGameId = null
+let activeOperationGameName = null
+let activeOperationPayload = null
+let activeOperationQueuedAt = null
 let activeOperationSnapshot = null
 let downloadQueue = []
 let autoPausedDownloadGameId = null
+let isProcessingQueue = false
+let currentIsVerify = false
+
+function getQueueFilePath() {
+  return path.join(app.getPath("userData"), "download-queue.json")
+}
+
+function savePersistentDownloadQueue() {
+  try {
+    const queueFile = getQueueFilePath()
+    const data = {
+      active: activeOperationGameId && activeOperationPayload ? {
+        gameId: activeOperationGameId,
+        gameName: activeOperationGameName || activeOperationGameId,
+        payload: activeOperationPayload,
+        queuedAt: activeOperationQueuedAt || Date.now(),
+      } : null,
+      queue: downloadQueue.map((item) => ({
+        gameId: item.gameId,
+        gameName: item.gameName,
+        payload: item.payload,
+        queuedAt: item.queuedAt || Date.now(),
+      })),
+    }
+    const tempFile = `${queueFile}.${Date.now()}.tmp`
+    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf8")
+    try {
+      fs.renameSync(tempFile, queueFile)
+    } catch (_) {
+      if (fs.existsSync(queueFile)) fs.unlinkSync(queueFile)
+      fs.renameSync(tempFile, queueFile)
+    }
+  } catch (err) {
+    console.error("[Main] Error saving persistent download queue:", err)
+  }
+}
+
+function loadPersistentDownloadQueue() {
+  try {
+    const queueFile = getQueueFilePath()
+    if (!fs.existsSync(queueFile)) return
+    const raw = fs.readFileSync(queueFile, "utf8")
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== "object") return
+
+    const restoredQueue = []
+    if (parsed.active && parsed.active.gameId && parsed.active.payload) {
+      restoredQueue.push({
+        gameId: parsed.active.gameId,
+        gameName: parsed.active.gameName || parsed.active.gameId,
+        payload: parsed.active.payload,
+        queuedAt: parsed.active.queuedAt || Date.now(),
+      })
+    }
+    if (Array.isArray(parsed.queue)) {
+      for (const item of parsed.queue) {
+        if (item && item.gameId && item.payload) {
+          if (!restoredQueue.some((q) => q.gameId === item.gameId)) {
+            restoredQueue.push({
+              gameId: item.gameId,
+              gameName: item.gameName || item.gameId,
+              payload: item.payload,
+              queuedAt: item.queuedAt || Date.now(),
+            })
+          }
+        }
+      }
+    }
+    downloadQueue = restoredQueue
+  } catch (err) {
+    console.error("[Main] Error loading persistent download queue:", err)
+  }
+}
+
+loadPersistentDownloadQueue()
 
 let mainWindow = null
 let splashWindow = null
@@ -539,6 +617,7 @@ async function createWindow() {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.show()
         mainWindow.focus()
+        processNextQueuedSync()
       }
     }, remainingTime)
   })
@@ -1762,10 +1841,19 @@ function getDownloadQueueSnapshot() {
   let active = null
   if (activeOperationGameId) {
     const opState = operationManager.getState()
+    const realPhase =
+      activeOperationSnapshot?.phase ||
+      operationManager.lastPausedPhase ||
+      (opState === "INSTALLING" ? "INSTALLING" : "DOWNLOADING")
+    const isCommitting = Boolean(operationManager.isCommitting)
     active = {
       gameId: activeOperationGameId,
+      gameName: activeOperationGameName || activeOperationGameId,
       state: opState,
-      phase: activeOperationSnapshot?.phase || (opState === "PAUSED" ? "PAUSED" : "DOWNLOADING"),
+      phase: realPhase,
+      isCommitting,
+      canPause: opState !== "PAUSED" && opState !== "IDLE" && !isCommitting && !currentIsVerify,
+      canCancel: opState !== "IDLE" && !isCommitting,
       progress: activeOperationSnapshot?.progress ?? 0,
       speedMBs: activeOperationSnapshot?.speedMBs ?? 0,
       downloadedBytes: activeOperationSnapshot?.downloadedBytes ?? 0,
@@ -1790,6 +1878,7 @@ function notifyDownloadQueueChanged() {
 }
 
 async function processNextQueuedSync() {
+  if (isProcessingQueue) return
   if (downloadQueue.length === 0) return
   if (operationManager.getState() !== "IDLE") return
 
@@ -1802,18 +1891,25 @@ async function processNextQueuedSync() {
   const nextItem = downloadQueue.shift()
   if (!nextItem) return
 
+  isProcessingQueue = true
+  savePersistentDownloadQueue()
   notifyDownloadQueueChanged()
 
   try {
-    const ctx = resolveGameContext(nextItem.payload)
-    await runGameSync(ctx, nextItem.payload)
+    const effectiveItemPayload = { ...nextItem.payload, gameId: nextItem.gameId, gameName: nextItem.gameName }
+    const ctx = resolveGameContext(effectiveItemPayload)
+    await runGameSync(ctx, effectiveItemPayload)
   } catch (err) {
-    const isCancelled = err?.message?.includes("cancelled") || Boolean(operationManager.activeCancelSignal?.isCancelled)
+    const isCancelled =
+      err?.message?.includes("cancelled") ||
+      Boolean(operationManager.activeCancelSignal?.isCancelled)
     if (!isCancelled) {
       console.error(`[Main] Error running queued sync for ${nextItem.gameId}:`, err)
-      if (operationManager.getState() === "IDLE") {
-        processNextQueuedSync()
-      }
+    }
+  } finally {
+    isProcessingQueue = false
+    if (operationManager.getState() === "IDLE") {
+      processNextQueuedSync()
     }
   }
 }
@@ -1828,6 +1924,12 @@ async function runGameSync(ctx, payload) {
   }
 
   activeOperationGameId = ctx.gameId
+  activeOperationGameName = ctx.gameName || payload.gameName || ctx.gameId
+  activeOperationPayload = payload
+  activeOperationQueuedAt = Date.now()
+  currentIsVerify = Boolean(payload.isVerify)
+  savePersistentDownloadQueue()
+
   if (!activeOperationSnapshot || activeOperationSnapshot.gameId !== ctx.gameId) {
     activeOperationSnapshot = {
       gameId: ctx.gameId || null,
@@ -1846,6 +1948,7 @@ async function runGameSync(ctx, payload) {
       activeOperationSnapshot = {
         gameId: ctx.gameId || null,
         phase: data.phase || activeOperationSnapshot.phase || "DOWNLOADING",
+        isCommitting: Boolean(operationManager.isCommitting),
         progress: typeof data.progress === "number" ? data.progress : (activeOperationSnapshot.progress || 0),
         speedMBs: typeof data.speedMBs === "number" ? data.speedMBs : 0,
         downloadedBytes: typeof data.downloadedBytes === "number" ? data.downloadedBytes : 0,
@@ -1854,28 +1957,48 @@ async function runGameSync(ctx, payload) {
       }
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
+      const opState = operationManager.getState()
+      const isCommitting = Boolean(operationManager.isCommitting)
       mainWindow.webContents.send("game-download-progress", {
         ...data,
+        state: opState,
+        isCommitting,
+        canPause: opState !== "PAUSED" && opState !== "IDLE" && !isCommitting && !currentIsVerify,
+        canCancel: opState !== "IDLE" && !isCommitting,
         gameId: ctx.gameId || null,
       })
     }
   }
 
-  const onPhaseChange = (phase) => {
+  const onPhaseChange = (phase, underlyingPhase) => {
     if (activeOperationSnapshot) {
-      activeOperationSnapshot.phase = phase
+      if (phase === "PAUSED") {
+        if (underlyingPhase) {
+          activeOperationSnapshot.phase = underlyingPhase
+        }
+      } else {
+        if (activeOperationSnapshot.phase !== phase) {
+          activeOperationSnapshot.speedMBs = 0
+          activeOperationSnapshot.remainingMinutes = 0
+        }
+        activeOperationSnapshot.phase = phase
+      }
+      activeOperationSnapshot.isCommitting = Boolean(operationManager.isCommitting)
     }
     if (phase === "IDLE") {
       if (activeOperationGameId === ctx.gameId) {
         activeOperationGameId = null
+        activeOperationGameName = null
+        activeOperationPayload = null
         activeOperationSnapshot = null
+        savePersistentDownloadQueue()
       }
       notifyDownloadQueueChanged()
     } else {
       notifyDownloadQueueChanged()
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("game-phase-changed", phase, ctx.gameId || null)
+      mainWindow.webContents.send("game-phase-changed", phase, ctx.gameId || null, underlyingPhase || null)
     }
   }
 
@@ -1898,7 +2021,10 @@ async function runGameSync(ctx, payload) {
     if (operationManager.getState() === "IDLE") {
       if (activeOperationGameId === ctx.gameId) {
         activeOperationGameId = null
+        activeOperationGameName = null
+        activeOperationPayload = null
         activeOperationSnapshot = null
+        savePersistentDownloadQueue()
         notifyDownloadQueueChanged()
       }
       processNextQueuedSync()
@@ -1906,14 +2032,24 @@ async function runGameSync(ctx, payload) {
     setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
     return result
   } catch (err) {
-    const isCancelled = err?.message?.includes("cancelled") || operationManager.activeCancelSignal?.isCancelled
+    const isCancelled =
+      err?.name === "AbortError" ||
+      err?.message?.includes("aborted") ||
+      err?.message?.includes("cancelled") ||
+      Boolean(operationManager.activeCancelSignal?.isCancelled)
     if (activeOperationGameId === ctx.gameId) {
       activeOperationGameId = null
+      activeOperationGameName = null
+      activeOperationPayload = null
       activeOperationSnapshot = null
+      savePersistentDownloadQueue()
       notifyDownloadQueueChanged()
     }
-    if (!isCancelled && operationManager.getState() === "IDLE") {
+    if (operationManager.getState() === "IDLE") {
       processNextQueuedSync()
+    }
+    if (isCancelled) {
+      return { success: false, cancelled: true }
     }
     throw err
   }
@@ -1932,7 +2068,10 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
       if (operationManager.getState() === "IDLE") {
         if (activeOperationGameId === ctx.gameId) {
           activeOperationGameId = null
+          activeOperationGameName = null
+          activeOperationPayload = null
           activeOperationSnapshot = null
+          savePersistentDownloadQueue()
         }
         processNextQueuedSync()
       }
@@ -1942,7 +2081,15 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     if (activeOperationGameId === ctx.gameId) {
       return { alreadyActive: true }
     }
-    return await runGameSync(ctx, payload)
+    // If IDLE after restart, recover saved payload from queue/storage if available
+    let effectivePayload = payload
+    if (!payload.clientFiles || !payload.modpackVersion) {
+      const savedItem = downloadQueue.find((q) => q.gameId === ctx.gameId)
+      if (savedItem && savedItem.payload) {
+        effectivePayload = { ...savedItem.payload, ...payload }
+      }
+    }
+    return await runGameSync(ctx, effectivePayload)
   }
 
   if (payload.isVerify) {
@@ -1960,7 +2107,10 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     if (operationManager.getState() === "IDLE") {
       if (activeOperationGameId === ctx.gameId) {
         activeOperationGameId = null
+        activeOperationGameName = null
+        activeOperationPayload = null
         activeOperationSnapshot = null
+        savePersistentDownloadQueue()
       }
       processNextQueuedSync()
     }
@@ -1979,8 +2129,18 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     }
   }
 
+  // Requirement 7: If already queued, keep FIFO position but update payload
   const existingIndex = downloadQueue.findIndex((item) => item.gameId === ctx.gameId)
   if (existingIndex !== -1) {
+    downloadQueue[existingIndex].payload = {
+      ...downloadQueue[existingIndex].payload,
+      ...payload,
+    }
+    if (ctx.gameName) {
+      downloadQueue[existingIndex].gameName = ctx.gameName
+    }
+    savePersistentDownloadQueue()
+    notifyDownloadQueueChanged()
     return {
       success: true,
       queued: true,
@@ -1994,6 +2154,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
     payload,
     queuedAt: Date.now(),
   })
+  savePersistentDownloadQueue()
   notifyDownloadQueueChanged()
 
   return {
@@ -2035,6 +2196,7 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
     const queueIndex = downloadQueue.findIndex((item) => item.gameId === ctx.gameId)
     if (queueIndex !== -1) {
       downloadQueue.splice(queueIndex, 1)
+      savePersistentDownloadQueue()
       notifyDownloadQueueChanged()
       return { success: true, queuedRemoved: true }
     }
@@ -2052,11 +2214,14 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
     } finally {
       if (activeOperationGameId === ctx.gameId) {
         activeOperationGameId = null
+        activeOperationGameName = null
+        activeOperationPayload = null
         activeOperationSnapshot = null
         autoPausedDownloadGameId = null
+        savePersistentDownloadQueue()
         notifyDownloadQueueChanged()
+        processNextQueuedSync()
       }
-      processNextQueuedSync()
     }
   }
 
@@ -2068,11 +2233,14 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   } finally {
     if (activeOperationGameId === ctx.gameId || !activeOperationGameId) {
       activeOperationGameId = null
+      activeOperationGameName = null
+      activeOperationPayload = null
       activeOperationSnapshot = null
       autoPausedDownloadGameId = null
+      savePersistentDownloadQueue()
       notifyDownloadQueueChanged()
+      processNextQueuedSync()
     }
-    processNextQueuedSync()
   }
 })
 
@@ -2095,7 +2263,7 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
   }
 
   const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
-  if (isOtherOp && (opState === "SYNCING" || opPhase === "DOWNLOADING")) {
+  if (isOtherOp && opState === "SYNCING") {
     if (pauseOnLaunch) {
       autoPausedDownloadGameId = activeOperationGameId
       await operationManager.pauseSync()

@@ -78,7 +78,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("game-download-progress", handler)
   },
   onPhaseChange: (callback) => {
-    const handler = (_event, phase, gameId) => callback(phase, gameId)
+    const handler = (_event, phase, gameId, underlyingPhase) => callback(phase, gameId, underlyingPhase)
     ipcRenderer.on("game-phase-changed", handler)
     return () => ipcRenderer.removeListener("game-phase-changed", handler)
   },

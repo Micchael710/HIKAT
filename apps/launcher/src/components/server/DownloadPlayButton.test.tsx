@@ -4849,6 +4849,210 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       unmount()
     })
   })
+
+  /* ─────────────────────────────────────────────────────────────
+   * DownloadsView & HomeScreen Authority Synchronization & isCommitting Suite
+   * ───────────────────────────────────────────────────────────── */
+  describe("DownloadsView & HomeScreen Authority Synchronization & isCommitting Suite", () => {
+    it("1. Pausing externally via onPhaseChange('PAUSED') allows HomeScreen to resume via click", async () => {
+      let phaseChangeCb: any = null
+      let progressCb: any = null
+      window.electronAPI!.onPhaseChange = vi.fn((cb) => {
+        phaseChangeCb = cb
+        return () => {}
+      })
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCb = cb
+        return () => {}
+      })
+
+      const testContext = { gameId: "test-game", gameName: "Test Game" }
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      const { container } = await mountButton({ gameContext: testContext })
+      const btn = container.querySelector("button") as HTMLElement
+
+      // Start download
+      await act(async () => {
+        btn.click()
+      })
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+
+      // Simulate progress arriving
+      await act(async () => {
+        progressCb?.({ gameId: "test-game", progress: 25, phase: "DOWNLOADING" })
+      })
+
+      // Simulate pause triggered externally (e.g. from DownloadsView)
+      await act(async () => {
+        phaseChangeCb?.("PAUSED", "test-game")
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card.textContent).toContain("PAUSADO")
+
+      // Click card on HomeScreen to resume — authority must NOT be lost!
+      await act(async () => {
+        card.click()
+      })
+
+      // Must have called startSync again to resume
+      expect(startSyncSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it("2. Pausing externally via onDownloadQueueChanged allows HomeScreen to resume via click", async () => {
+      let queueChangeCb: any = null
+      let progressCb: any = null
+      window.electronAPI!.onDownloadQueueChanged = vi.fn((cb) => {
+        queueChangeCb = cb
+        return () => {}
+      })
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCb = cb
+        return () => {}
+      })
+
+      const testContext = { gameId: "test-game", gameName: "Test Game" }
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      const { container } = await mountButton({ gameContext: testContext })
+      const btn = container.querySelector("button") as HTMLElement
+
+      // Start download
+      await act(async () => {
+        btn.click()
+      })
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+
+      // Simulate progress
+      await act(async () => {
+        progressCb?.({ gameId: "test-game", progress: 50, phase: "DOWNLOADING" })
+      })
+
+      // Simulate queue change with paused state from DownloadsView
+      await act(async () => {
+        queueChangeCb?.({
+          active: {
+            gameId: "test-game",
+            gameName: "Test Game",
+            phase: "PAUSED",
+            isPaused: true,
+            progress: 50,
+          },
+          queued: [],
+        })
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card.textContent).toContain("PAUSADO")
+
+      // Click card on HomeScreen to resume
+      await act(async () => {
+        card.click()
+      })
+
+      expect(startSyncSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it("3. Pause and Cancel are supported during INSTALLING phase when isCommitting is false", async () => {
+      let progressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCb = cb
+        return () => {}
+      })
+
+      const testContext = { gameId: "test-game", gameName: "Test Game" }
+      vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+      const pauseSpy = vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true } as any)
+      const cancelSpy = vi.spyOn(gameService, "cancelSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton({ gameContext: testContext })
+      const btn = container.querySelector("button") as HTMLElement
+
+      await act(async () => {
+        btn.click()
+      })
+
+      // Progress in INSTALLING phase at 96% (libraries downloading)
+      await act(async () => {
+        progressCb?.({
+          gameId: "test-game",
+          progress: 96,
+          phase: "INSTALLING",
+          isCommitting: false,
+        })
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      const cancelBtn = container.querySelector(".dl-cancel-btn") as HTMLButtonElement
+
+      // Both card and cancel button must be interactive (not disabled)
+      expect(cancelBtn.disabled).toBe(false)
+      expect(card.style.cursor).toBe("pointer")
+
+      // Click card to pause during installing
+      await act(async () => {
+        card.click()
+      })
+      expect(pauseSpy).toHaveBeenCalledTimes(1)
+
+      // Click cancel button during installing
+      await act(async () => {
+        cancelBtn.click()
+      })
+      expect(cancelSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it("4. Pause, Resume, and Cancel are disabled when isCommitting is true", async () => {
+      let progressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        progressCb = cb
+        return () => {}
+      })
+
+      const testContext = { gameId: "test-game", gameName: "Test Game" }
+      vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+      const pauseSpy = vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true } as any)
+      const cancelSpy = vi.spyOn(gameService, "cancelSync").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton({ gameContext: testContext })
+      const btn = container.querySelector("button") as HTMLElement
+
+      await act(async () => {
+        btn.click()
+      })
+
+      // Progress in INSTALLING phase with isCommitting = true (atomic staging commit)
+      await act(async () => {
+        progressCb?.({
+          gameId: "test-game",
+          progress: 99,
+          phase: "INSTALLING",
+          isCommitting: true,
+        })
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      const cancelBtn = container.querySelector(".dl-cancel-btn") as HTMLButtonElement
+
+      // Cancel button must be disabled and cursor default
+      expect(cancelBtn.disabled).toBe(true)
+      expect(card.style.cursor).toBe("default")
+
+      // Clicking card or cancel must be ignored
+      await act(async () => {
+        card.click()
+        cancelBtn.click()
+      })
+
+      expect(pauseSpy).not.toHaveBeenCalled()
+      expect(cancelSpy).not.toHaveBeenCalled()
+    })
+  })
 })
 
 

@@ -43,6 +43,9 @@ export interface PublishedModpack {
 export interface DownloadProgressData {
   progress: number
   phase?: "DOWNLOADING" | "INSTALLING" | string
+  isCommitting?: boolean
+  canPause?: boolean
+  canCancel?: boolean
   downloadedGB?: number
   totalGB?: number
   downloadedBytes?: number
@@ -83,6 +86,9 @@ export interface GameContext {
 export interface OperationSnapshot {
   gameId: string | null
   phase: string
+  isCommitting?: boolean
+  canPause?: boolean
+  canCancel?: boolean
   progress: number
   speedMBs: number
   downloadedBytes: number
@@ -94,6 +100,9 @@ export interface ActiveDownloadSnapshot {
   gameId: string
   state: string
   phase: string
+  isCommitting?: boolean
+  canPause?: boolean
+  canCancel?: boolean
   progress: number
   speedMBs: number
   downloadedBytes: number
@@ -200,7 +209,7 @@ interface ElectronAPI {
   getDownloadQueue?: () => Promise<DownloadQueueSnapshot>
   onDownloadQueueChanged?: (callback: (snapshot?: DownloadQueueSnapshot) => void) => () => void
   onDownloadProgress?: (callback: (data: DownloadProgressData) => void) => () => void
-  onPhaseChange?: (callback: (phase: string, gameId?: string | null) => void) => () => void
+  onPhaseChange?: (callback: (phase: string, gameId?: string | null, underlyingPhase?: string | null) => void) => () => void
   onLaunchStatus?: (
     callback: (
       status: "idle" | "preparing" | "running",

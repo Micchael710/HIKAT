@@ -135,6 +135,9 @@ export default function DownloadPlayButton({
   const [downloadedBytes, setDownloadedBytes] = useState(0)
   const [timeRemainingMin, setTimeRemainingMin] = useState(0)
   const [isHovered, setIsHovered] = useState(false)
+  const [isCommitting, setIsCommitting] = useState(false)
+  const [canPauseState, setCanPauseState] = useState<boolean | undefined>(undefined)
+  const [canCancelState, setCanCancelState] = useState<boolean | undefined>(undefined)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [toastState, setToastState] = useState<{
     message: string | null
@@ -176,7 +179,7 @@ export default function DownloadPlayButton({
         clearTimeout(toastTimeoutRef.current)
       }
     }
-  }, [])
+  }, [gameContext?.gameId])
 
   const showToast = useCallback((
     msg: string,
@@ -413,20 +416,30 @@ export default function DownloadPlayButton({
 
           if (isQueueActive) {
             const isPaused = Boolean(
+              queueSnap?.active?.state === "PAUSED" ||
               queueSnap?.active?.isPaused ||
               queueSnap?.active?.phase === "PAUSED" ||
               launchInfo?.operationState === "PAUSED"
             )
             const opPhase = queueSnap?.active?.phase || launchInfo?.activeOperationPhase || launchInfo?.operationState
+            const isPhaseChange = Boolean(
+              currentPhaseRef.current &&
+              opPhase &&
+              currentPhaseRef.current !== opPhase &&
+              opPhase !== "PAUSED" &&
+              currentPhaseRef.current !== "PAUSED"
+            )
+            if (isPhaseChange) {
+              highWaterProgressRef.current = 0
+            }
             if (opPhase && opPhase !== "PAUSED") {
-              if (currentPhaseRef.current && currentPhaseRef.current !== opPhase && currentPhaseRef.current !== "PAUSED") {
-                highWaterProgressRef.current = 0
-              }
               currentPhaseRef.current = opPhase
             }
             if (isPaused) {
               if (opPhase === "INSTALLING") {
                 pausedPhaseRef.current = "installing"
+              } else {
+                pausedPhaseRef.current = "downloading"
               }
               setStatus("paused")
             } else if (opPhase === "INSTALLING") {
@@ -443,9 +456,17 @@ export default function DownloadPlayButton({
 
             const activeSnap = queueSnap?.active || launchInfo?.operationSnapshot
             if (activeSnap) {
+              if (activeSnap.isCommitting !== undefined) {
+                setIsCommitting(Boolean(activeSnap.isCommitting))
+              }
+              if (activeSnap.canPause !== undefined) {
+                setCanPauseState(Boolean(activeSnap.canPause))
+              }
+              if (activeSnap.canCancel !== undefined) {
+                setCanCancelState(Boolean(activeSnap.canCancel))
+              }
               if (typeof activeSnap.progress === "number") {
-                highWaterProgressRef.current = Math.max(highWaterProgressRef.current, activeSnap.progress)
-                setProgress(highWaterProgressRef.current)
+                setProgress(activeSnap.progress)
               }
               if (typeof activeSnap.speedMBs === "number") setSpeed(activeSnap.speedMBs)
               if (typeof activeSnap.downloadedBytes === "number") setDownloadedBytes(activeSnap.downloadedBytes)
@@ -828,28 +849,22 @@ export default function DownloadPlayButton({
       if (!isStartingSyncRef.current) {
         isStartingSyncRef.current = true
       }
+      if (data?.isCommitting !== undefined) {
+        setIsCommitting(Boolean(data.isCommitting))
+      }
+      if (data?.canPause !== undefined) {
+        setCanPauseState(Boolean(data.canPause))
+      }
+      if (data?.canCancel !== undefined) {
+        setCanCancelState(Boolean(data.canCancel))
+      }
       const rawProgress = typeof data.progress === "number" ? data.progress : 0
       const activePhase = data.phase || (statusRef.current === "installing" ? "INSTALLING" : "DOWNLOADING")
-      if (
-        currentPhaseRef.current &&
-        activePhase &&
-        currentPhaseRef.current !== activePhase &&
-        activePhase !== "PAUSED" &&
-        currentPhaseRef.current !== "PAUSED"
-      ) {
-        highWaterProgressRef.current = 0
-      }
       if (activePhase && activePhase !== "PAUSED") {
         currentPhaseRef.current = activePhase
       }
 
-      const isOngoing =
-        statusRef.current === "downloading" ||
-        statusRef.current === "installing" ||
-        statusRef.current === "paused"
-      const effectiveProgress = isOngoing ? Math.max(highWaterProgressRef.current, rawProgress) : rawProgress
-      highWaterProgressRef.current = effectiveProgress
-      setProgress(effectiveProgress)
+      setProgress(rawProgress)
       setSpeed(data.speedMBs || 0)
       if (Number.isFinite(data.downloadedBytes)) {
         setDownloadedBytes(data.downloadedBytes)
@@ -862,7 +877,15 @@ export default function DownloadPlayButton({
       setStatus((prev) => {
         if (prev === "verifying") return prev
         if (prev === "launching" || prev === "running") return prev
-        if (prev !== "downloading" && prev !== "installing" && prev !== "queued" && prev !== "paused") return prev
+        if (prev === "paused") {
+          if (data.phase === "INSTALLING") {
+            pausedPhaseRef.current = "installing"
+          } else if (data.phase === "DOWNLOADING") {
+            pausedPhaseRef.current = "downloading"
+          }
+          return prev
+        }
+        if (prev !== "downloading" && prev !== "installing" && prev !== "queued") return prev
         if (data.phase === "INSTALLING") {
           pausedPhaseRef.current = "installing"
           return "installing"
@@ -875,7 +898,7 @@ export default function DownloadPlayButton({
       })
     })
 
-    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string, eventGameId?: string | null) => {
+    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string, eventGameId?: string | null, underlyingPhase?: string | null) => {
       if (gameContext && eventGameId && eventGameId !== gameContext.gameId) {
         if (phase === "INSTALLING" || phase === "VERIFYING") {
           setIsLaunchBlockedByOtherGame(true)
@@ -911,12 +934,20 @@ export default function DownloadPlayButton({
       }
 
       if (phase === "PAUSED") {
+        isStartingSyncRef.current = false
+        if (underlyingPhase === "INSTALLING") {
+          pausedPhaseRef.current = "installing"
+          currentPhaseRef.current = "INSTALLING"
+        } else if (underlyingPhase === "DOWNLOADING") {
+          pausedPhaseRef.current = "downloading"
+          currentPhaseRef.current = "DOWNLOADING"
+        }
         setStatus("paused")
         return
       }
 
       if (phase === "DOWNLOADING") {
-        if (currentPhaseRef.current && currentPhaseRef.current !== "DOWNLOADING" && currentPhaseRef.current !== "PAUSED") {
+        if (!currentPhaseRef.current || (currentPhaseRef.current !== "DOWNLOADING" && currentPhaseRef.current !== "PAUSED")) {
           highWaterProgressRef.current = 0
           setProgress(0)
         }
@@ -927,7 +958,7 @@ export default function DownloadPlayButton({
       }
 
       if (phase === "INSTALLING") {
-        if (currentPhaseRef.current && currentPhaseRef.current !== "INSTALLING" && currentPhaseRef.current !== "PAUSED") {
+        if (!currentPhaseRef.current || (currentPhaseRef.current !== "INSTALLING" && currentPhaseRef.current !== "PAUSED")) {
           highWaterProgressRef.current = 0
           setProgress(0)
         }
@@ -938,7 +969,7 @@ export default function DownloadPlayButton({
       }
 
       if (phase === "VERIFYING") {
-        if (currentPhaseRef.current && currentPhaseRef.current !== "VERIFYING" && currentPhaseRef.current !== "PAUSED") {
+        if (!currentPhaseRef.current || (currentPhaseRef.current !== "VERIFYING" && currentPhaseRef.current !== "PAUSED")) {
           highWaterProgressRef.current = 0
           setProgress(0)
         }
@@ -951,6 +982,9 @@ export default function DownloadPlayButton({
         currentPhaseRef.current = null
         highWaterProgressRef.current = 0
         isStartingSyncRef.current = false
+        setIsCommitting(false)
+        setCanPauseState(undefined)
+        setCanCancelState(undefined)
         syncOpIdRef.current++
         gameService
           .checkGameManifest(activeServerId, {
@@ -976,36 +1010,41 @@ export default function DownloadPlayButton({
 
       // 1. Active download matching this game
       if (snap.active?.gameId === currentTargetId) {
-        const isPaused = Boolean(snap.active.isPaused || snap.active.phase === "PAUSED")
+        if (snap.active.isCommitting !== undefined) {
+          setIsCommitting(Boolean(snap.active.isCommitting))
+        }
+        if (snap.active.canPause !== undefined) {
+          setCanPauseState(Boolean(snap.active.canPause))
+        }
+        if (snap.active.canCancel !== undefined) {
+          setCanCancelState(Boolean(snap.active.canCancel))
+        }
+        const isPaused = Boolean(snap.active.state === "PAUSED" || snap.active.isPaused || snap.active.phase === "PAUSED")
+        if (isPaused) {
+          isStartingSyncRef.current = false
+        }
         const opPhase = snap.active.phase
         if (opPhase && opPhase !== "PAUSED") {
-          if (currentPhaseRef.current && currentPhaseRef.current !== opPhase && currentPhaseRef.current !== "PAUSED") {
-            highWaterProgressRef.current = 0
-          }
           currentPhaseRef.current = opPhase
         }
         if (isPaused) {
-          if (snap.active.phase === "INSTALLING") {
+          if (opPhase === "INSTALLING") {
             pausedPhaseRef.current = "installing"
+          } else {
+            pausedPhaseRef.current = "downloading"
           }
           setStatus("paused")
-        } else if (snap.active.phase === "INSTALLING") {
+        } else if (opPhase === "INSTALLING") {
           pausedPhaseRef.current = "installing"
           setStatus("installing")
-        } else if (snap.active.phase === "VERIFYING") {
+        } else if (opPhase === "VERIFYING") {
           setStatus("verifying")
         } else {
           pausedPhaseRef.current = "downloading"
           setStatus("downloading")
         }
         if (typeof snap.active.progress === "number") {
-          const isOngoing =
-            statusRef.current === "downloading" ||
-            statusRef.current === "installing" ||
-            statusRef.current === "paused"
-          const effectiveProgress = isOngoing ? Math.max(highWaterProgressRef.current, snap.active.progress) : snap.active.progress
-          highWaterProgressRef.current = effectiveProgress
-          setProgress(effectiveProgress)
+          setProgress(snap.active.progress)
         }
         if (typeof snap.active.speedMBs === "number") setSpeed(snap.active.speedMBs)
         if (typeof snap.active.downloadedBytes === "number") setDownloadedBytes(snap.active.downloadedBytes)
@@ -1053,8 +1092,11 @@ export default function DownloadPlayButton({
     status === "installing" ||
     status === "verifying"
 
+  const effectiveCanPause = canPauseState !== false && !isCommitting && status !== "verifying"
+  const effectiveCanCancel = canCancelState !== false && !isCommitting
+
   const cancel = async () => {
-    if (!isLocalAllowed || isTransitioning || status === "verifying") return
+    if (!isLocalAllowed || isTransitioning || status === "verifying" || isCommitting || !effectiveCanCancel) return
     setIsTransitioning(true)
     isCancellingRef.current = true
     try {
@@ -1087,9 +1129,10 @@ export default function DownloadPlayButton({
   }
 
   const togglePauseResume = async () => {
-    if (!isLocalAllowed || isTransitioning || status === "verifying") return
+    if (!isLocalAllowed || isTransitioning || status === "verifying" || isCommitting) return
 
     if (status === "downloading" || status === "installing") {
+      if (!effectiveCanPause) return
       setIsTransitioning(true)
       const currentPhase = status
       try {
@@ -1146,6 +1189,7 @@ export default function DownloadPlayButton({
           }
           if (res?.paused) {
             setStatus("paused")
+            isStartingSyncRef.current = false
             return
           }
           if (res?.alreadyActive) {
@@ -1505,6 +1549,47 @@ export default function DownloadPlayButton({
           </span>
         </button>
 
+        {/* ── Cancel Button (When Queued) ── */}
+        {isQueued && (
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={isTransitioning}
+            title={t("playButton.cancel")}
+            className="dl-cancel-btn"
+            style={{
+              width: 76,
+              height: 76,
+              borderRadius: 24,
+              flexShrink: 0,
+              background: isDark ? "rgba(255, 255, 255, 0.05)" : "#ffffff",
+              border: isDark
+                ? "1px solid rgba(255, 255, 255, 0.12)"
+                : "1px solid rgba(0, 0, 0, 0.12)",
+              color: isDark ? "rgba(255, 255, 255, 0.65)" : "#556677",
+              boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
+              cursor: isTransitioning ? "not-allowed" : "pointer",
+              opacity: isTransitioning ? 0.35 : 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "opacity 0.2s ease",
+            }}
+          >
+            <svg
+              width={20}
+              height={20}
+              viewBox="0 0 14 14"
+              stroke="currentColor"
+              strokeWidth={2.2}
+              strokeLinecap="round"
+            >
+              <line x1={2} y1={2} x2={12} y2={12} />
+              <line x1={12} y1={2} x2={2} y2={12} />
+            </svg>
+          </button>
+        )}
+
         {/* ── Quick Action Options Button (When Ready to Play or Update) ── */}
         {(isPlay || isUpdate) && !isBlockedPlay && (
           <div ref={menuRef} style={{ position: "relative" }}>
@@ -1664,7 +1749,7 @@ export default function DownloadPlayButton({
       {/* Main Progress Card */}
       <div
         className="dl-progress-card"
-        onClick={togglePauseResume}
+        onClick={isCommitting || !effectiveCanPause ? undefined : togglePauseResume}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         style={{
@@ -1681,7 +1766,7 @@ export default function DownloadPlayButton({
           border: isDark
             ? "2.5px solid rgba(255, 255, 255, 0.12)"
             : "2.5px solid rgba(0, 0, 0, 0.1)",
-          cursor: isVerifying ? "default" : "pointer",
+          cursor: isVerifying || isCommitting || !effectiveCanPause ? "default" : "pointer",
           position: "relative",
           overflow: "hidden",
           display: "flex",
@@ -1775,7 +1860,7 @@ export default function DownloadPlayButton({
             zIndex: 2,
           }}
         >
-          {(status === "downloading" || status === "installing") && isHovered ? (
+          {(status === "downloading" || status === "installing") && isHovered && effectiveCanPause ? (
             <div
               style={{
                 display: "flex",
@@ -1854,7 +1939,7 @@ export default function DownloadPlayButton({
         <button
           type="button"
           onClick={cancel}
-          disabled={isTransitioning}
+          disabled={isTransitioning || isCommitting || !effectiveCanCancel}
           title={t("playButton.cancel")}
           className="dl-cancel-btn"
         style={{
@@ -1868,8 +1953,8 @@ export default function DownloadPlayButton({
             : "1px solid rgba(0, 0, 0, 0.12)",
           color: isDark ? "rgba(255, 255, 255, 0.45)" : "#556677",
           boxShadow: isDark ? "none" : "0 2px 8px rgba(0, 0, 0, 0.06)",
-          cursor: isTransitioning ? "not-allowed" : "pointer",
-          opacity: isTransitioning ? 0.35 : 1,
+          cursor: isTransitioning || isCommitting || !effectiveCanCancel ? "not-allowed" : "pointer",
+          opacity: isTransitioning || isCommitting || !effectiveCanCancel ? 0.35 : 1,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

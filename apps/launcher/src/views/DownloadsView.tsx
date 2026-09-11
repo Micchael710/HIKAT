@@ -48,6 +48,9 @@ export default function DownloadsView({
     totalBytes: number
     remainingMinutes: number
     phase: string
+    isCommitting?: boolean
+    canPause?: boolean
+    canCancel?: boolean
   }>({
     progress: 0,
     speedMBs: 0,
@@ -55,6 +58,9 @@ export default function DownloadsView({
     totalBytes: 0,
     remainingMinutes: 0,
     phase: "DOWNLOADING",
+    isCommitting: false,
+    canPause: true,
+    canCancel: true,
   })
 
   const activeGameIdRef = useRef<string | null>(null)
@@ -87,6 +93,9 @@ export default function DownloadsView({
                 totalBytes: snap.active?.totalBytes ?? prev.totalBytes,
                 remainingMinutes: snap.active?.remainingMinutes ?? prev.remainingMinutes,
                 phase: snap.active?.phase || prev.phase,
+                isCommitting: snap.active?.isCommitting ?? prev.isCommitting,
+                canPause: snap.active?.canPause ?? prev.canPause,
+                canCancel: snap.active?.canCancel ?? prev.canCancel,
               }
             })
           } else {
@@ -98,6 +107,9 @@ export default function DownloadsView({
               totalBytes: 0,
               remainingMinutes: 0,
               phase: "DOWNLOADING",
+              isCommitting: false,
+              canPause: true,
+              canCancel: true,
             })
           }
         }
@@ -135,6 +147,9 @@ export default function DownloadsView({
               totalBytes: snap.active?.totalBytes ?? prev.totalBytes,
               remainingMinutes: snap.active?.remainingMinutes ?? prev.remainingMinutes,
               phase: snap.active?.phase || prev.phase,
+              isCommitting: snap.active?.isCommitting ?? prev.isCommitting,
+              canPause: snap.active?.canPause ?? prev.canPause,
+              canCancel: snap.active?.canCancel ?? prev.canCancel,
             }
           })
         } else {
@@ -146,6 +161,9 @@ export default function DownloadsView({
             totalBytes: 0,
             remainingMinutes: 0,
             phase: "DOWNLOADING",
+            isCommitting: false,
+            canPause: true,
+            canCancel: true,
           })
         }
       } else {
@@ -177,6 +195,9 @@ export default function DownloadsView({
           totalBytes: typeof data.totalBytes === "number" ? data.totalBytes : 0,
           remainingMinutes: typeof data.remainingMinutes === "number" ? data.remainingMinutes : 0,
           phase: data.phase || prev.phase || "DOWNLOADING",
+          isCommitting: data.isCommitting ?? prev.isCommitting,
+          canPause: data.canPause ?? prev.canPause,
+          canCancel: data.canCancel ?? prev.canCancel,
         }
       })
     })
@@ -458,10 +479,13 @@ export default function DownloadsView({
 
                   {(() => {
                     const info = getServerInfo(active.gameId)
-                    const isPaused = active.state === "PAUSED"
+                    const isPaused = active.state === "PAUSED" || active.phase === "PAUSED"
                     const phase = activeProgress.phase || active.phase || "DOWNLOADING"
                     const isInstalling = phase === "INSTALLING"
                     const isVerifying = phase === "VERIFYING"
+                    const isCommitting = Boolean(activeProgress.isCommitting || active.isCommitting)
+                    const canPause = active.canPause !== false && activeProgress.canPause !== false && !isCommitting && !isVerifying
+                    const canCancel = active.canCancel !== false && activeProgress.canCancel !== false && !isCommitting
                     const progress = activeProgress.progress ?? active.progress ?? 0
                     const speedMBs = activeProgress.speedMBs ?? active.speedMBs ?? 0
                     const downloaded = activeProgress.downloadedBytes ?? active.downloadedBytes ?? 0
@@ -580,6 +604,7 @@ export default function DownloadsView({
                                 type="button"
                                 className="launcher-btn-secondary"
                                 onClick={() => handleResume(active)}
+                                disabled={isCommitting}
                                 title={t("downloads.resume")}
                                 style={{
                                   padding: "8px 16px",
@@ -589,7 +614,8 @@ export default function DownloadsView({
                                   color: "white",
                                   fontSize: 14,
                                   fontWeight: 700,
-                                  cursor: "pointer",
+                                  cursor: isCommitting ? "not-allowed" : "pointer",
+                                  opacity: isCommitting ? 0.5 : 1,
                                   display: "flex",
                                   alignItems: "center",
                                   gap: 8,
@@ -605,6 +631,7 @@ export default function DownloadsView({
                                 type="button"
                                 className="launcher-btn-secondary"
                                 onClick={() => handlePause(active)}
+                                disabled={!canPause}
                                 title={t("downloads.pause")}
                                 style={{
                                   padding: "8px 16px",
@@ -616,7 +643,8 @@ export default function DownloadsView({
                                   color: isDark ? "#ffffff" : "#111822",
                                   fontSize: 14,
                                   fontWeight: 700,
-                                  cursor: "pointer",
+                                  cursor: !canPause ? "not-allowed" : "pointer",
+                                  opacity: !canPause ? 0.5 : 1,
                                   display: "flex",
                                   alignItems: "center",
                                   gap: 8,
@@ -632,6 +660,7 @@ export default function DownloadsView({
                               type="button"
                               className="launcher-btn-danger dl-cancel-btn"
                               onClick={() => handleCancelActive(active)}
+                              disabled={!canCancel}
                               title={t("downloads.cancel")}
                               style={{
                                 padding: "8px 16px",
@@ -643,7 +672,8 @@ export default function DownloadsView({
                                 color: "#ef4444",
                                 fontSize: 14,
                                 fontWeight: 700,
-                                cursor: "pointer",
+                                cursor: !canCancel ? "not-allowed" : "pointer",
+                                opacity: !canCancel ? 0.5 : 1,
                                 transition: "all 0.18s ease",
                               }}
                             >
