@@ -364,6 +364,8 @@
     "remaining": "restant",
     "pause": "Pause",
     "resume": "Reprendre",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "installationQueued": "Installation en file d'attente",
+    "startNow": "Démarrer maintenant"
   }
 }

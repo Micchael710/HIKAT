@@ -395,7 +395,8 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
     expect(container.textContent).toContain("75%")
     expect(container.textContent).toContain("24.2 MB/s")
     expect(container.textContent).toContain("Survival Realm")
-    expect(container.textContent).toContain("posición 1")
+    expect(container.textContent).toContain("Instalación en cola")
+    expect(container.textContent).not.toContain("posición 1")
 
     // Did NOT make another getDownloadQueue IPC call
     expect(getDownloadQueueSpy).not.toHaveBeenCalled()

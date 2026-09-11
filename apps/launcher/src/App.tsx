@@ -73,6 +73,13 @@ export default function App() {
     }
   }, [view])
 
+  // Reset scroll to top (0) whenever switching servers within Home view
+  useEffect(() => {
+    if (view === "home" && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0
+    }
+  }, [selectedGameId, view])
+
   // Listen for auth deep links (/verify-email, /reset-password) when user is authenticated inside launcher
   useEffect(() => {
     if (screen === "login") {

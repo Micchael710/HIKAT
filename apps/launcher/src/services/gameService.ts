@@ -558,6 +558,15 @@ export const gameService = {
     }
   },
 
+  async promoteQueuedSync(gameContext: { gameId: string; gameName?: string }) {
+    if (window.electronAPI?.promoteQueuedSync) {
+      return await window.electronAPI.promoteQueuedSync({
+        gameId: gameContext.gameId,
+        gameName: gameContext.gameName || gameContext.gameId,
+      })
+    }
+  },
+
   async launchGame(options: {
     playerName?: string
     ramGB?: number

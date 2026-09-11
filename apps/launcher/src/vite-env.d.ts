@@ -114,6 +114,9 @@ export interface QueuedDownloadItem {
   gameId: string
   gameName: string
   position: number
+  hasStarted?: boolean
+  savedProgress?: number
+  savedPhase?: string | null
 }
 
 export interface DownloadQueueSnapshot {
@@ -180,6 +183,7 @@ interface ElectronAPI {
   }>
   pauseSync?: (gameContext?: GameContext) => Promise<boolean>
   cancelSync?: (gameContext?: GameContext) => Promise<{ success: boolean; queuedRemoved?: boolean } | boolean>
+  promoteQueuedSync?: (gameContext?: GameContext) => Promise<{ success: boolean; promoted?: boolean; error?: string }>
   uninstallGame?: (gameContext?: GameContext) => Promise<{ success: boolean }>
   getInstalledState?: (gameContext?: GameContext) => Promise<{ installedModpackVersion: string | null; integrityDirty?: boolean }>
   launchGame?: (options: {

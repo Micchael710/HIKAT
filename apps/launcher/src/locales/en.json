@@ -364,6 +364,8 @@
     "remaining": "left",
     "pause": "Pause",
     "resume": "Resume",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "installationQueued": "Installation queued",
+    "startNow": "Start now"
   }
 }

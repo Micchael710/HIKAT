@@ -229,6 +229,10 @@ function savePersistentDownloadQueue() {
         gameName: item.gameName,
         payload: item.payload,
         queuedAt: item.queuedAt || Date.now(),
+        savedPhase: item.savedPhase || null,
+        savedProgress: typeof item.savedProgress === "number" ? item.savedProgress : 0,
+        savedDownloadedBytes: item.savedDownloadedBytes || 0,
+        savedTotalBytes: item.savedTotalBytes || 0,
       })),
     }
     const tempFile = `${queueFile}.${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`
@@ -306,6 +310,10 @@ function loadPersistentDownloadQueue() {
               gameName: item.gameName || item.gameId,
               payload: item.payload,
               queuedAt: item.queuedAt || Date.now(),
+              savedPhase: item.savedPhase || null,
+              savedProgress: typeof item.savedProgress === "number" ? item.savedProgress : 0,
+              savedDownloadedBytes: item.savedDownloadedBytes || 0,
+              savedTotalBytes: item.savedTotalBytes || 0,
             })
           }
         }
@@ -2029,11 +2037,21 @@ function getDownloadQueueSnapshot() {
     ? downloadQueue.filter((item) => item.gameId !== active.gameId)
     : downloadQueue
 
-  const queued = queuedSource.map((item, index) => ({
-    gameId: item.gameId,
-    gameName: item.gameName,
-    position: index + 1,
-  }))
+  const queued = queuedSource.map((item, index) => {
+    const hasStarted = Boolean(
+      item.savedPhase ||
+      (typeof item.savedProgress === "number" && item.savedProgress > 0) ||
+      (typeof item.savedDownloadedBytes === "number" && item.savedDownloadedBytes > 0)
+    )
+    return {
+      gameId: item.gameId,
+      gameName: item.gameName,
+      position: index + 1,
+      hasStarted,
+      savedProgress: typeof item.savedProgress === "number" ? item.savedProgress : 0,
+      savedPhase: item.savedPhase || null,
+    }
+  })
 
   return { active, queued }
 }
@@ -2074,9 +2092,8 @@ async function processNextQueuedSync() {
 
   try {
     const isRestoredActive = Boolean(
-      nextItem.savedPhase &&
-      typeof nextItem.savedProgress === "number" &&
-      nextItem.savedProgress > 0
+      nextItem.savedPhase ||
+      (typeof nextItem.savedProgress === "number" && nextItem.savedProgress > 0)
     )
     const effectiveItemPayload = {
       ...nextItem.payload,
@@ -2088,9 +2105,9 @@ async function processNextQueuedSync() {
     if (isRestoredActive) {
       resumeProgressFloor = {
         gameId: nextItem.gameId,
-        targetPhase: nextItem.savedPhase,
-        phase: nextItem.savedPhase,
-        floor: nextItem.savedProgress,
+        targetPhase: nextItem.savedPhase || "DOWNLOADING",
+        phase: nextItem.savedPhase || "DOWNLOADING",
+        floor: typeof nextItem.savedProgress === "number" ? nextItem.savedProgress : 0,
         isResume: true,
       }
     }
@@ -2764,6 +2781,102 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
   }
 })
 
+async function promoteQueuedSync(payload = {}) {
+  const targetGameId = payload?.gameId || payload?.id
+  if (!targetGameId) {
+    throw new Error("Missing gameId to promote.")
+  }
+
+  // 1. Locate the target item in downloadQueue
+  const targetIndex = downloadQueue.findIndex((item) => item.gameId === targetGameId)
+  if (targetIndex === -1) {
+    return { success: false, error: "Item not found in download queue." }
+  }
+  const targetItem = downloadQueue[targetIndex]
+  const gameName = payload?.gameName || targetItem.gameName || targetGameId
+  const ctx = resolveGameContext({ gameId: targetGameId, gameName })
+
+  // 2. Safe Commit / Verifying gate: do not interrupt if active operation is verifying or committing
+  const isCommitting = Boolean(operationManager.isCommitting)
+  const isVerifying = Boolean(currentIsVerify || activeOperationSnapshot?.phase === "VERIFYING")
+  const canPause = operationManager.canPause !== false && activeOperationSnapshot?.canPause !== false
+  const opState = isRestoredUserPause && operationManager.getState() === "IDLE" ? "PAUSED" : operationManager.getState()
+
+  if (activeOperationGameId && opState !== "PAUSED" && opState !== "IDLE") {
+    if (isCommitting || isVerifying || !canPause) {
+      return { success: false, error: "Cannot promote: active operation cannot be safely paused." }
+    }
+  }
+
+  // 3. Pause active operation safely if it's currently running
+  if (activeOperationGameId && opState !== "PAUSED" && opState !== "IDLE") {
+    pausedByUser = true
+    isRestoredUserPause = false
+    if (activeOperationSnapshot) {
+      const pausedPhase = activeOperationSnapshot.phase || "DOWNLOADING"
+      resumeProgressFloor = {
+        gameId: activeOperationGameId,
+        targetPhase: pausedPhase,
+        phase: pausedPhase,
+        floor: typeof activeOperationSnapshot.progress === "number" ? activeOperationSnapshot.progress : 0,
+        isResume: true,
+      }
+    }
+    await operationManager.pauseSync()
+  }
+
+  // 4. Demote active operation (if present) into downloadQueue
+  if (activeOperationGameId) {
+    const demotedItem = {
+      gameId: activeOperationGameId,
+      gameName: activeOperationGameName || activeOperationGameId,
+      payload: activeOperationPayload,
+      queuedAt: activeOperationQueuedAt || Date.now(),
+      savedPhase: activeOperationSnapshot?.phase || operationManager.lastPausedPhase || "DOWNLOADING",
+      savedProgress: typeof activeOperationSnapshot?.progress === "number" ? activeOperationSnapshot.progress : 0,
+      savedDownloadedBytes: activeOperationSnapshot?.downloadedBytes || 0,
+      savedTotalBytes: activeOperationSnapshot?.totalBytes || 0,
+    }
+
+    // Remove promoted item from queue
+    downloadQueue = downloadQueue.filter((item) => item.gameId !== targetItem.gameId)
+
+    // Ensure demoted item is not duplicated in queue and add it to front of queue
+    downloadQueue = downloadQueue.filter((item) => item.gameId !== demotedItem.gameId)
+    downloadQueue.unshift(demotedItem)
+
+    // Clear active state variables
+    activeOperationGameId = null
+    activeOperationGameName = null
+    activeOperationPayload = null
+    activeOperationSnapshot = null
+    isRestoredUserPause = false
+    pausedByUser = false
+    resumeProgressFloor = null
+    operationManager.lastPausedPhase = null
+    operationManager.state = "IDLE"
+
+    // Place promoted item at head of queue
+    downloadQueue.unshift(targetItem)
+  } else {
+    // If no active operation, move target item to front of queue
+    downloadQueue = downloadQueue.filter((item) => item.gameId !== targetItem.gameId)
+    downloadQueue.unshift(targetItem)
+  }
+
+  savePersistentDownloadQueue()
+  notifyDownloadQueueChanged()
+
+  // Process the promoted item at the front of the queue
+  processNextQueuedSync()
+
+  return { success: true, promoted: true, gameId: ctx.gameId }
+}
+
+ipcMain.handle("game-promote-queued-sync", async (_event, payload = {}) => {
+  return await promoteQueuedSync(payload)
+})
+
 const activeBackgroundShaChecks = new Map()
 const deferredBackgroundShaChecks = new Map()
 
@@ -3146,5 +3259,6 @@ if (typeof module !== "undefined" && module.exports) {
     markGameIntegrityDirty,
     isGameIntegrityDirty,
     clearGameIntegrityDirty,
+    promoteQueuedSync,
   }
 }

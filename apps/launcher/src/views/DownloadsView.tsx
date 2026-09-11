@@ -260,6 +260,24 @@ export default function DownloadsView({
     }
   }
 
+  const handlePromoteQueued = async (item: QueuedDownloadItem) => {
+    try {
+      const isAnyActiveCommittingOrVerifying = Boolean(
+        active &&
+        (active.isCommitting || active.phase === "VERIFYING" || active.canPause === false || activeProgress.isCommitting || activeProgress.phase === "VERIFYING" || activeProgress.canPause === false) &&
+        active.state !== "PAUSED" &&
+        active.phase !== "PAUSED"
+      )
+      if (isAnyActiveCommittingOrVerifying) {
+        return
+      }
+      await gameService.promoteQueuedSync({ gameId: item.gameId, gameName: item.gameName })
+      refreshQueue()
+    } catch (err) {
+      console.error("[DownloadsView] Promote queued failed:", err)
+    }
+  }
+
   return (
     <div
       style={{
@@ -428,22 +446,21 @@ export default function DownloadsView({
             </div>
           ) : (
             <>
-              {/* ── ACTIVE DOWNLOAD SECTION ── */}
-              {active && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 800,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      color: isDark ? "#657788" : "#778899",
-                    }}
-                  >
-                    {t("downloads.active")}
-                  </div>
+              {/* ── UNIFIED DOWNLOADS SECTION (ACTIVA) ── */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 800,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: isDark ? "#657788" : "#778899",
+                  }}
+                >
+                  {t("downloads.active")}
+                </div>
 
-                  {(() => {
+                {active && (() => {
                     const info = getServerInfo(active.gameId)
                     const isPaused = active.state === "PAUSED" || active.phase === "PAUSED"
                     const phase = activeProgress.phase || active.phase || "DOWNLOADING"
@@ -731,27 +748,23 @@ export default function DownloadsView({
                       </div>
                     )
                   })()}
-                </div>
-              )}
 
-              {/* ── QUEUED DOWNLOADS SECTION ── */}
-              {queued.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 800,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      color: isDark ? "#657788" : "#778899",
-                    }}
-                  >
-                    {t("downloads.queue")}
-                  </div>
-
+                {/* ── QUEUED DOWNLOADS (IMMEDIATELY BELOW ACTIVE) ── */}
+                {queued.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {queued.map((item) => {
                       const info = getServerInfo(item.gameId)
+                      const hasStarted = Boolean(
+                        item.hasStarted ||
+                        item.savedPhase ||
+                        (typeof item.savedProgress === "number" && item.savedProgress > 0)
+                      )
+                      const isCannotPromote = Boolean(
+                        active &&
+                        (active.isCommitting || active.phase === "VERIFYING" || active.canPause === false || activeProgress.isCommitting || activeProgress.phase === "VERIFYING" || activeProgress.canPause === false) &&
+                        active.state !== "PAUSED" &&
+                        active.phase !== "PAUSED"
+                      )
                       return (
                         <div
                           key={item.gameId}
@@ -817,39 +830,73 @@ export default function DownloadsView({
                                   color: isDark ? "#8899aa" : "#64748b",
                                 }}
                               >
-                                {t("downloads.position", { position: item.position })}
+                                {t("downloads.installationQueued")}
                               </div>
                             </div>
                           </div>
 
-                          {/* Cancel queued item button */}
-                          <button
-                            type="button"
-                            className="launcher-btn-danger dl-cancel-btn"
-                            onClick={() => handleCancelQueued(item)}
-                            title={t("downloads.cancel")}
-                            style={{
-                              padding: "7px 14px",
-                              borderRadius: 10,
-                              border: isDark
-                                ? "1.5px solid rgba(239, 68, 68, 0.25)"
-                                : "1.5px solid rgba(239, 68, 68, 0.3)",
-                              background: isDark ? "rgba(239, 68, 68, 0.08)" : "rgba(239, 68, 68, 0.06)",
-                              color: "#ef4444",
-                              fontSize: 14,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              transition: "all 0.18s ease",
-                            }}
-                          >
-                            {t("downloads.cancel")}
-                          </button>
+                          {/* Action Buttons: Start/Resume + Cancel */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <button
+                              type="button"
+                              className="launcher-btn-secondary"
+                              onClick={() => handlePromoteQueued(item)}
+                              disabled={isCannotPromote}
+                              title={hasStarted ? t("downloads.resume") : t("downloads.startNow")}
+                              style={{
+                                padding: "7px 14px",
+                                borderRadius: 10,
+                                border: "none",
+                                background: `linear-gradient(135deg, ${info.accent.hex}, color-mix(in srgb, ${info.accent.hex} 75%, white))`,
+                                color: "white",
+                                fontSize: 14,
+                                fontWeight: 700,
+                                cursor: isCannotPromote ? "not-allowed" : "pointer",
+                                opacity: isCannotPromote ? 0.5 : 1,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 7,
+                                boxShadow: `0 2px 10px rgba(${info.accent.css}, 0.35)`,
+                                transition: "all 0.18s ease",
+                              }}
+                            >
+                              {hasStarted ? (
+                                <IconResume size={14} color="white" />
+                              ) : (
+                                <IconDownload size={14} color="white" />
+                              )}
+                              {hasStarted ? t("downloads.resume") : t("downloads.startNow")}
+                            </button>
+
+                            {/* Cancel queued item button */}
+                            <button
+                              type="button"
+                              className="launcher-btn-danger dl-cancel-btn"
+                              onClick={() => handleCancelQueued(item)}
+                              title={t("downloads.cancel")}
+                              style={{
+                                padding: "7px 14px",
+                                borderRadius: 10,
+                                border: isDark
+                                  ? "1.5px solid rgba(239, 68, 68, 0.25)"
+                                  : "1.5px solid rgba(239, 68, 68, 0.3)",
+                                background: isDark ? "rgba(239, 68, 68, 0.08)" : "rgba(239, 68, 68, 0.06)",
+                                color: "#ef4444",
+                                fontSize: 14,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                                transition: "all 0.18s ease",
+                              }}
+                            >
+                              {t("downloads.cancel")}
+                            </button>
+                          </div>
                         </div>
                       )
                     })}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </>
           )}
         </div>
