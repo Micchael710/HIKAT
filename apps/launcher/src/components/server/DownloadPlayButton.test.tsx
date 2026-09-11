@@ -5269,11 +5269,14 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(container.textContent).not.toContain("GB")
       expect(container.textContent).not.toMatch(/\d+\s*min/i)
 
-      // On hover shows REANUDAR
+      // On hover shows REANUDAR below, while PAUSADO and 60% remain above
       await act(async () => {
         card.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body }))
       })
+      expect(container.textContent).toContain("PAUSADO")
+      expect(container.textContent).toContain("60%")
       expect(container.textContent).toContain("REANUDAR")
+      expect(container.textContent).not.toContain("MB/s")
     })
 
     it("4. PAUSED desde DOWNLOADING: puede mostrar descargado/total pero NO muestra velocidad", async () => {
@@ -5312,13 +5315,20 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         card.click()
       })
 
-      // Shows PAUSADO
+      // Shows PAUSADO above and downloaded/total below, without speed
       expect(container.textContent).toContain("PAUSADO")
-
-      // Can show downloaded/total
+      expect(container.textContent).toContain("40%")
       expect(container.textContent).toContain("40.00 MB / 100.0 MB")
+      expect(container.textContent).not.toContain("MB/s")
 
-      // Must NOT show speed (MB/s) while paused
+      // On hover: PAUSADO remains above, and REANUDAR replaces downloaded/total below
+      await act(async () => {
+        card.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body }))
+      })
+      expect(container.textContent).toContain("PAUSADO")
+      expect(container.textContent).toContain("40%")
+      expect(container.textContent).toContain("REANUDAR")
+      expect(container.textContent).not.toContain("40.00 MB / 100.0 MB")
       expect(container.textContent).not.toContain("MB/s")
     })
   })

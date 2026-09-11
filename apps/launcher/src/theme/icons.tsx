@@ -32,13 +32,19 @@ export const IconSettings = ({
   </svg>
 )
 
-export const IconDownload = ({ size = 40 }: { size?: number }) => (
+export const IconDownload = ({
+  size = 40,
+  color = "white",
+}: {
+  size?: number
+  color?: string
+}) => (
   <svg
     width={size}
     height={size}
     viewBox="0 0 24 24"
     fill="none"
-    stroke="white"
+    stroke={color}
     strokeWidth="2.2"
     strokeLinecap="round"
     strokeLinejoin="round"

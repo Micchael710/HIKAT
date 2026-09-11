@@ -2183,9 +2183,6 @@ export default function DownloadPlayButton({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            {status === "paused" && isHovered && (
-              <IconResume size={13} color={isDark ? accentHex : accentDarkForLight} />
-            )}
             <span
               style={{
                 color: isDark ? accentHex : accentDarkForLight,
@@ -2197,9 +2194,7 @@ export default function DownloadPlayButton({
               }}
             >
               {status === "paused"
-                ? isHovered
-                  ? t("playButton.resume")
-                  : t("playButton.paused")
+                ? t("playButton.paused")
                 : isVerifying
                   ? t("playButton.verifyingAction")
                   : isInstalling
@@ -2232,7 +2227,31 @@ export default function DownloadPlayButton({
             zIndex: 2,
           }}
         >
-          {status === "paused" && pausedPhaseRef.current === "installing" ? (
+          {status === "paused" && isHovered ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                color: isDark ? "rgba(255, 255, 255, 0.9)" : "#111822",
+              }}
+            >
+              <IconResume
+                size={12}
+                color={isDark ? "rgba(255, 255, 255, 0.9)" : "#111822"}
+              />
+              <span
+                style={{
+                  fontFamily: BASE_FONT,
+                  fontWeight: 800,
+                  fontSize: 13,
+                  letterSpacing: "0.05em",
+                }}
+              >
+                {t("playButton.resume")}
+              </span>
+            </div>
+          ) : status === "paused" && pausedPhaseRef.current === "installing" ? (
             <span />
           ) : status === "paused" ? (
             <span

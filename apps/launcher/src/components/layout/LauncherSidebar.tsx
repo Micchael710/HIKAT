@@ -372,7 +372,7 @@ export default function LauncherSidebar({
                   "background 0.22s ease, border-color 0.22s ease, transform 0.18s ease, box-shadow 0.22s ease",
               }}
             >
-              <IconDownload size={ICON_PX} />
+              <IconDownload size={ICON_PX} color="currentColor" />
             </button>
           </div>
         )

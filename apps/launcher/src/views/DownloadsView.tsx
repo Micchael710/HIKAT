@@ -539,22 +539,8 @@ export default function DownloadsView({
                                   fontWeight: 600,
                                   color: statusColor,
                                   opacity: isPaused ? 0.75 : 1,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 6,
                                 }}
                               >
-                                <span
-                                  style={{
-                                    width: 7,
-                                    height: 7,
-                                    borderRadius: "50%",
-                                    background: statusColor,
-                                    boxShadow: isPaused
-                                      ? `0 0 6px rgba(${info.accent.css}, 0.35)`
-                                      : `0 0 8px ${statusColor}`,
-                                  }}
-                                />
                                 {statusLabel}
                               </div>
                             </div>
@@ -673,40 +659,52 @@ export default function DownloadsView({
                           />
                         </div>
 
-                        {/* Progress Details Row */}
+                        {/* Progress Details Row: Stable CSS Grid */}
                         <div
                           style={{
-                            display: "flex",
+                            display: "grid",
+                            gridTemplateColumns: "minmax(160px, 1.2fr) minmax(60px, 0.8fr) minmax(110px, 1fr) minmax(140px, 1.2fr)",
                             alignItems: "center",
-                            justifyContent: "space-between",
                             fontSize: 14.5,
                             color: isDark ? "#8899aa" : "#64748b",
                           }}
                         >
-                          <div>
-                            {total > 0 ? (
-                              <>
-                                {formatBytes(downloaded)} / {formatBytes(total)}{" "}
-                                <span style={{ fontWeight: 700, color: isDark ? "#ffffff" : "#111822" }}>
-                                  ({progress}%)
-                                </span>
-                              </>
-                            ) : (
-                              <span>{progress}%</span>
-                            )}
+                          <div data-testid="download-metric-size" style={{ textAlign: "left", whiteSpace: "nowrap" }}>
+                            {total > 0 ? `${formatBytes(downloaded)} / ${formatBytes(total)}` : "--"}
                           </div>
 
-                          {!isPaused && speedMBs > 0 && (
-                            <div style={{ fontWeight: 600 }}>
-                              {speedMBs.toFixed(1)} MB/s
-                            </div>
-                          )}
+                          <div
+                            data-testid="download-metric-percent"
+                            style={{
+                              textAlign: "center",
+                              fontWeight: 700,
+                              color: isDark ? "#ffffff" : "#111822",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {progress}%
+                          </div>
 
-                          {!isPaused && remainingMin > 0 && (
-                            <div>
-                              {remainingMin} min {t("downloads.remaining")}
-                            </div>
-                          )}
+                          <div
+                            data-testid="download-metric-speed"
+                            style={{
+                              textAlign: "center",
+                              fontWeight: 600,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {!isPaused && speedMBs > 0 ? `${speedMBs.toFixed(1)} MB/s` : ""}
+                          </div>
+
+                          <div
+                            data-testid="download-metric-eta"
+                            style={{
+                              textAlign: "right",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {!isPaused && remainingMin > 0 ? `${remainingMin} min ${t("downloads.remaining")}` : ""}
+                          </div>
                         </div>
                       </div>
                     )

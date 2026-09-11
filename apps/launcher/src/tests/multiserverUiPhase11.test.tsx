@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client"
 import { LanguageProvider } from "../context/LanguageContext"
 import DownloadPlayButton from "../components/server/DownloadPlayButton"
 import DownloadsView from "../views/DownloadsView"
+import LauncherSidebar from "../components/layout/LauncherSidebar"
 import { gameService, type ReleaseActivatedEvent } from "../services/gameService"
 import { serverService, type LauncherServer } from "../services/serverService"
 import { useLauncherState } from "../hooks/useLauncherState"
@@ -1084,9 +1085,38 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     const statusText = container.querySelector("div[style*='color: #a855f7'], div[style*='color: rgb(168, 85, 247)']")
     expect(statusText).not.toBeNull()
 
-    // 2. Transición a INSTALLING mantiene morado (no #38bdf8)
+    // 2. No se dibuja el punto/círculo junto al estado
+    expect(statusText?.querySelector("span[style*='border-radius: 50%']")).toBeNull()
+
+    // 3. Métricas separadas en columnas propias
+    const sizeEl = container.querySelector("[data-testid='download-metric-size']")
+    const percentEl = container.querySelector("[data-testid='download-metric-percent']")
+    const speedEl = container.querySelector("[data-testid='download-metric-speed']")
+    const etaEl = container.querySelector("[data-testid='download-metric-eta']")
+    expect(sizeEl).not.toBeNull()
+    expect(percentEl).not.toBeNull()
+    expect(speedEl).not.toBeNull()
+    expect(etaEl).not.toBeNull()
+    expect(percentEl?.textContent).toBe("40%")
+    // Durante pausa, velocidad y ETA no muestran información falsa
+    expect(speedEl?.textContent).toBe("")
+    expect(etaEl?.textContent).toBe("")
+
+    // 4. Transición a DOWNLOADING con métricas activas
     await act(async () => {
       currentQueueSnapshot.active!.state = "SYNCING"
+      currentQueueSnapshot.active!.phase = "DOWNLOADING"
+      currentQueueSnapshot.active!.speedMBs = 9.9
+      currentQueueSnapshot.active!.remainingMinutes = 1
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+    expect(sizeEl?.textContent).toContain("MB")
+    expect(percentEl?.textContent).toBe("40%")
+    expect(speedEl?.textContent).toBe("9.9 MB/s")
+    expect(etaEl?.textContent).toContain("1 min")
+
+    // 5. Transición a INSTALLING mantiene morado (no #38bdf8)
+    await act(async () => {
       currentQueueSnapshot.active!.phase = "INSTALLING"
       for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
     })
@@ -1094,8 +1124,9 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     expect(container.innerHTML).not.toContain("#38bdf8")
     const installingStatus = container.querySelector("div[style*='color: #a855f7'], div[style*='color: rgb(168, 85, 247)']")
     expect(installingStatus).not.toBeNull()
+    expect(installingStatus?.querySelector("span[style*='border-radius: 50%']")).toBeNull()
 
-    // 3. Transición a VERIFYING mantiene morado (no #a855f7 fijo si fuera otro color, pero aquí es el accent del servidor)
+    // 6. Transición a VERIFYING mantiene morado (no #a855f7 fijo si fuera otro color, sino accent del servidor)
     await act(async () => {
       currentQueueSnapshot.active!.phase = "VERIFYING"
       for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
@@ -1104,10 +1135,54 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     const verifyingStatus = container.querySelector("div[style*='color: #a855f7'], div[style*='color: rgb(168, 85, 247)']")
     expect(verifyingStatus).not.toBeNull()
 
-    // 4. Servidor en cola Cyan Realm usa su propio accent (#06b6d4), no morado
+    // 7. Servidor en cola Cyan Realm usa su propio accent (#06b6d4), no morado
     const queuedBadge = container.querySelector("div[style*='color: #06b6d4'], div[style*='color: rgb(6, 182, 212)']")
     expect(queuedBadge).not.toBeNull()
     expect(queuedBadge!.textContent).toBe("C")
+  })
+
+  it("29. LauncherSidebar: IconDownload usa currentColor y hereda color en dark y light mode", async () => {
+    const skinAccent = { r: 62, g: 196, b: 192, css: "62, 196, 192" }
+
+    // Render LauncherSidebar in dark mode
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <LauncherSidebar
+            s={1}
+            view="downloads"
+            setView={() => {}}
+            theme="dark"
+            activeSkinAccent={skinAccent}
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    const downloadBtn = container.querySelector("button[title='Descargas']") as HTMLButtonElement
+    expect(downloadBtn).not.toBeNull()
+    const svgIcon = downloadBtn.querySelector("svg") as SVGElement
+    expect(svgIcon).not.toBeNull()
+    // stroke is set to currentColor (not hardcoded white)
+    expect(svgIcon.getAttribute("stroke")).toBe("currentColor")
+
+    // Render LauncherSidebar in light mode
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <LauncherSidebar
+            s={1}
+            view="downloads"
+            setView={() => {}}
+            theme="light"
+            activeSkinAccent={skinAccent}
+          />
+        </LanguageProvider>,
+      )
+    })
+    const lightDownloadBtn = container.querySelector("button[title='Descargas']") as HTMLButtonElement
+    const lightSvg = lightDownloadBtn.querySelector("svg") as SVGElement
+    expect(lightSvg.getAttribute("stroke")).toBe("currentColor")
   })
 })
 
