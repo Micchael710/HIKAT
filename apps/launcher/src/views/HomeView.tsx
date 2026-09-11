@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { ThemeMode } from "../types"
 import { getThemeTokens, CANVAS_W, CANVAS_H, DEFAULT_ACCENT_HEX } from "../theme/tokens"
 import DownloadPlayButton from "../components/server/DownloadPlayButton"
-import NewsCarousel from "../components/news/NewsCarousel"
+import NewsCarousel, { type NewsContentState } from "../components/news/NewsCarousel"
 import ServerStatsGrid from "../components/server/ServerStatsGrid"
 import CommunityHubGrid from "../components/server/CommunityHubGrid"
 import { useTranslation } from "../context/LanguageContext"
@@ -12,6 +12,16 @@ import { useServerAccent } from "../utils/dynamicAccent"
 import type { PublishedModpack } from "../vite-env"
 import type { LauncherServer } from "../services/serverService"
 import type { LauncherGameState } from "../hooks/useLauncherState"
+
+const NEWS_TITLE_TOP = 860
+const NEWS_CAROUSEL_TOP = 908
+
+const STATS_TOP_WITH_NEWS = 1410
+const STATS_TOP_EMPTY = 860
+const STATS_DELTA = STATS_TOP_WITH_NEWS - STATS_TOP_EMPTY // 550
+
+const CUT_TOP_WITH_NEWS = 1310
+const CUT_TOP_EMPTY = CUT_TOP_WITH_NEWS - STATS_DELTA // 760
 
 interface HomeViewProps {
   theme?: ThemeMode
@@ -65,6 +75,13 @@ export default function HomeView({
   const [mediaError, setMediaError] = useState(false)
   const [mainLogoFailed, setMainLogoFailed] = useState(false)
   const [sidebarLogoFailed, setSidebarLogoFailed] = useState(false)
+  const [newsContentState, setNewsContentState] = useState<NewsContentState>("loading")
+  const [prevServerId, setPrevServerId] = useState(activeServerId)
+
+  if (activeServerId !== prevServerId) {
+    setPrevServerId(activeServerId)
+    setNewsContentState("loading")
+  }
 
   // Immediately clear previous server visual state when selectedServer changes
   useEffect(() => {
@@ -72,7 +89,10 @@ export default function HomeView({
     setMainLogoFailed(false)
     setSidebarLogoFailed(false)
     setMediaError(false)
+    setNewsContentState("loading")
   }, [selectedServer?.id])
+
+  const isNewsEmpty = newsContentState === "empty"
 
   useEffect(() => {
     setMainLogoFailed(false)
@@ -224,9 +244,9 @@ export default function HomeView({
         style={{
           position: "absolute",
           left: 0,
-          top: 1310,
+          top: isNewsEmpty ? CUT_TOP_EMPTY : CUT_TOP_WITH_NEWS,
           width: CANVAS_W,
-          height: CANVAS_H - 1310,
+          height: CANVAS_H - (isNewsEmpty ? CUT_TOP_EMPTY : CUT_TOP_WITH_NEWS),
           background: tokens.homeBottomCutBg,
           clipPath: "polygon(0 32px, 100% 0, 100% 100%, 0 100%)",
           pointerEvents: "none",
@@ -295,46 +315,51 @@ export default function HomeView({
       </div>
 
       {/* ÚLTIMAS NOVEDADES (Positioned to peek smoothly at the bottom fold) */}
-      <div
-        style={{
-          position: "absolute",
-          left: CONTENT_LEFT,
-          top: 860,
-          color: tokens.textPrimary,
-          fontFamily: "Inter, sans-serif",
-          fontWeight: 800,
-          fontSize: 26,
-          letterSpacing: "-0.02em",
-        }}
-      >
-        {t("news.sectionTitle")}
-      </div>
+      {!isNewsEmpty && (
+        <div
+          style={{
+            position: "absolute",
+            left: CONTENT_LEFT,
+            top: NEWS_TITLE_TOP,
+            color: tokens.textPrimary,
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 800,
+            fontSize: 26,
+            letterSpacing: "-0.02em",
+          }}
+        >
+          {t("news.sectionTitle")}
+        </div>
+      )}
 
       {/* News carousel (Top ~170px of the thumbnail is visible before scrolling) */}
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          right: 0,
-          top: 908,
-          height: 420,
-        }}
-      >
-        <NewsCarousel
-          canvasLeft={CONTENT_LEFT}
-          canvasWidth={CANVAS_W}
-          theme={theme}
-          isActive={isActive}
-          serverId={activeServerId}
-        />
-      </div>
+      {!isNewsEmpty && (
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: NEWS_CAROUSEL_TOP,
+            height: 420,
+          }}
+        >
+          <NewsCarousel
+            canvasLeft={CONTENT_LEFT}
+            canvasWidth={CANVAS_W}
+            theme={theme}
+            isActive={isActive}
+            serverId={activeServerId}
+            onContentStateChange={setNewsContentState}
+          />
+        </div>
+      )}
 
       {/* Server Stats & Community Hub Section */}
       <div
         style={{
           position: "absolute",
           left: CONTENT_LEFT,
-          top: 1410,
+          top: isNewsEmpty ? STATS_TOP_EMPTY : STATS_TOP_WITH_NEWS,
           width: CANVAS_W - CONTENT_LEFT - 80,
           display: "flex",
           flexDirection: "column",

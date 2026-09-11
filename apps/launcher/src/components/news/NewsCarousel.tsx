@@ -7,6 +7,8 @@ import NewsModal from "./NewsModal"
 import { newsService } from "../../services/newsService"
 import { useTranslation } from "../../context/LanguageContext"
 
+export type NewsContentState = "loading" | "content" | "empty" | "error"
+
 interface NewsCarouselProps {
   canvasLeft: number
   canvasWidth?: number
@@ -14,6 +16,7 @@ interface NewsCarouselProps {
   news?: NewsCardItem[]
   isActive?: boolean
   serverId?: string | null
+  onContentStateChange?: (state: NewsContentState) => void
 }
 
 export default function NewsCarousel({
@@ -22,6 +25,7 @@ export default function NewsCarousel({
   news,
   isActive = true,
   serverId,
+  onContentStateChange,
 }: NewsCarouselProps) {
   const { t, language } = useTranslation()
   const isDark = theme === "dark"
@@ -41,7 +45,6 @@ export default function NewsCarousel({
   const [articles, setArticles] = useState<NewsCardItem[]>(() => {
     if (isNoServer) return []
     if (news && news.length > 0) return news
-    // Read from localStorage cache if available
     try {
       if (cacheKey) {
         const cached = localStorage.getItem(cacheKey)
@@ -53,28 +56,61 @@ export default function NewsCarousel({
     } catch (_) {}
     return []
   })
+
   const [isLoading, setIsLoading] = useState(false)
+  const [contentState, setContentState] = useState<NewsContentState>(() => {
+    if (isNoServer) return "empty"
+    if (news) return news.length > 0 ? "content" : "empty"
+    try {
+      if (cacheKey) {
+        const cached = localStorage.getItem(cacheKey)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (Array.isArray(parsed) && parsed.length > 0) return "content"
+        }
+      }
+    } catch (_) {}
+    return "loading"
+  })
+
+  useEffect(() => {
+    onContentStateChange?.(contentState)
+  }, [contentState, onContentStateChange])
 
   const fetchNews = async () => {
     if (isNoServer) {
       setArticles([])
+      setContentState("empty")
       setIsLoading(false)
       return
     }
-    if (news && news.length > 0) {
-      setArticles(news)
+    if (news) {
+      if (news.length > 0) {
+        setArticles(news)
+        setContentState("content")
+      } else {
+        setArticles([])
+        setContentState("empty")
+      }
+      setIsLoading(false)
       return
     }
     setIsLoading(true)
     try {
-      const res = await newsService.getNewsArticles(language, serverId)
+      const res = await newsService.getNewsArticles(language, serverId || undefined)
       if (res.items && res.items.length > 0) {
         setArticles(res.items)
+        setContentState("content")
+      } else if (res.error) {
+        setArticles([])
+        setContentState("error")
       } else {
         setArticles([])
+        setContentState("empty")
       }
     } catch (_) {
       setArticles([])
+      setContentState("error")
     } finally {
       setIsLoading(false)
     }
@@ -85,26 +121,39 @@ export default function NewsCarousel({
 
     if (isNoServer) {
       setArticles([])
+      setContentState("empty")
       setIsLoading(false)
       return
     }
 
-    if (news && news.length > 0) {
-      setArticles(news)
+    if (news) {
+      if (news.length > 0) {
+        setArticles(news)
+        setContentState("content")
+      } else {
+        setArticles([])
+        setContentState("empty")
+      }
     } else {
+      let hasCache = false
       try {
         if (cacheKey) {
           const cached = localStorage.getItem(cacheKey)
           if (cached) {
             const parsed = JSON.parse(cached)
-            if (Array.isArray(parsed)) {
+            if (Array.isArray(parsed) && parsed.length > 0) {
               setArticles(parsed)
+              setContentState("content")
+              hasCache = true
             }
-          } else {
-            setArticles([])
           }
         }
       } catch (_) {}
+
+      if (!hasCache) {
+        setArticles([])
+        setContentState("loading")
+      }
       fetchNews()
     }
   }, [news, language, isActive, serverId, cacheKey])
@@ -156,12 +205,16 @@ export default function NewsCarousel({
     setOpenCard(card)
   }
 
+  if (contentState === "empty") {
+    return null
+  }
+
   return (
     <>
       {/* Outer container covers full canvas width from left sidebar to right edge */}
       <div style={{ position: "absolute", left: 0, right: 0, top: 0 }}>
-        {articles.length === 0 ? (
-          /* Offline / Empty State Card */
+        {contentState === "error" ? (
+          /* Offline / Error State Card */
           <div
             style={{
               position: "absolute",
@@ -277,7 +330,7 @@ export default function NewsCarousel({
               )}
             </button>
           </div>
-        ) : (
+        ) : contentState === "content" ? (
           /* Scrollable area with news cards */
           <div
             ref={scrollRef}
@@ -310,10 +363,13 @@ export default function NewsCarousel({
               />
             ))}
           </div>
+        ) : (
+          /* Loading state: stable space without rendering error card */
+          <div style={{ height: CARD_H }} />
         )}
 
         {/* ── Left fade ── */}
-        {articles.length > 0 && (
+        {articles.length > 0 && contentState === "content" && (
           <div
             style={{
               position: "absolute",
@@ -329,7 +385,7 @@ export default function NewsCarousel({
         )}
 
         {/* ── Left arrow ── */}
-        {articles.length > 0 && canLeft && (
+        {articles.length > 0 && contentState === "content" && canLeft && (
           <button
             type="button"
             onClick={() => scroll("l")}
@@ -366,7 +422,7 @@ export default function NewsCarousel({
         )}
 
         {/* ── Right arrow ── */}
-        {articles.length > 0 && canRight && (
+        {articles.length > 0 && contentState === "content" && canRight && (
           <button
             type="button"
             onClick={() => scroll("r")}
