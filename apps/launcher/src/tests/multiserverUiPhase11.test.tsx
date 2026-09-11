@@ -1924,5 +1924,202 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
     expect(text).toContain("45%")
     expect(text).not.toContain("DESCARGAR")
   })
+
+  // 36. Operación interrumpida en DOWNLOADING: reconcilia directamente a DOWNLOADING con progreso guardado y sin mostrar DOWNLOAD
+  it("36. Operación interrumpida en DOWNLOADING: reconcilia directamente a DOWNLOADING con progreso guardado y sin mostrar DOWNLOAD", async () => {
+    const interruptedSnap = {
+      active: {
+        gameId: "meliora",
+        gameName: "Meliora",
+        state: "SYNCING",
+        phase: "DOWNLOADING",
+        progress: 52,
+        speedMBs: 0,
+        downloadedBytes: 520,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: true,
+        canCancel: true,
+        isPendingResume: true,
+      },
+      queued: [],
+    }
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue(interruptedSnap)
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "idle",
+      runningGameId: null,
+      activeOperationGameId: "meliora",
+      activeOperationState: "SYNCING",
+      activeOperationPhase: "DOWNLOADING",
+      operationState: "SYNCING",
+    })
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={melioraModpack}
+            installedVersion={null}
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const text = container.textContent || ""
+    expect(text).toContain("52%")
+    expect(text).not.toContain("DESCARGAR")
+    expect(text).not.toContain("PAUSADO")
+  })
+
+  // 37. Operación interrumpida en INSTALLING: reconcilia directamente a INSTALLING con progreso guardado
+  it("37. Operación interrumpida en INSTALLING: reconcilia directamente a INSTALLING con progreso guardado", async () => {
+    const interruptedSnap = {
+      active: {
+        gameId: "meliora",
+        gameName: "Meliora",
+        state: "SYNCING",
+        phase: "INSTALLING",
+        progress: 88,
+        speedMBs: 0,
+        downloadedBytes: 1000,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: true,
+        canCancel: true,
+        isPendingResume: true,
+      },
+      queued: [],
+    }
+
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue(interruptedSnap)
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "idle",
+      runningGameId: null,
+      activeOperationGameId: "meliora",
+      activeOperationState: "SYNCING",
+      activeOperationPhase: "INSTALLING",
+      operationState: "SYNCING",
+    })
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={melioraModpack}
+            installedVersion={null}
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const text = container.textContent || ""
+    expect(text).toContain("88%")
+    expect(text).not.toContain("DESCARGAR")
+    expect(text).not.toContain("PAUSADO")
+  })
+
+  // 38. Operación realmente idle sin recovery: muestra DESCARGAR / ACTUALIZAR / JUGAR normalmente
+  it("38. Operación realmente idle sin recovery: muestra DESCARGAR / ACTUALIZAR / JUGAR normalmente", async () => {
+    ;(window as any).electronAPI.getDownloadQueue = vi.fn().mockResolvedValue({
+      active: null,
+      queued: [],
+    })
+    ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+      status: "idle",
+      runningGameId: null,
+      activeOperationGameId: null,
+      activeOperationState: "IDLE",
+      activeOperationPhase: null,
+      operationState: "IDLE",
+    })
+
+    // Caso A: Sin instalar -> DESCARGAR
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={melioraModpack}
+            installedVersion={null}
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain("DESCARGAR")
+
+    // Caso B: Instalado igual que publicado -> JUGAR
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={melioraModpack}
+            installedVersion="2.0.0"
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain("JUGAR")
+
+    // Caso C: Instalado versión menor -> ACTUALIZAR
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton
+            gameId="meliora"
+            gameContext={{ gameId: "meliora", gameName: "Meliora" }}
+            publishedModpack={melioraModpack}
+            installedVersion="1.9.0"
+            left={0}
+            top={0}
+            theme="dark"
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain("ACTUALIZAR")
+  })
 })
 

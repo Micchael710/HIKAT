@@ -518,7 +518,6 @@ export default function DownloadPlayButton({
       const baseManifest = buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
       setManifest(baseManifest)
       const baseState = deriveBaseGameButtonState(publishedModpack, installedVersion)
-      setStatus(baseState)
       if (baseManifest) {
         const total = baseManifest.totalDownloadBytes || manifestTotalBytes(baseManifest.clientFiles)
         setTotalBytes(total)
@@ -616,12 +615,35 @@ export default function DownloadPlayButton({
             }
             if (typeof activeSnap.progress === "number") {
               setProgress(activeSnap.progress)
+              highWaterProgressRef.current = activeSnap.progress
             }
             if (typeof activeSnap.speedMBs === "number") setSpeed(activeSnap.speedMBs)
             if (typeof activeSnap.downloadedBytes === "number") setDownloadedBytes(activeSnap.downloadedBytes)
             if (typeof activeSnap.totalBytes === "number" && activeSnap.totalBytes > 0) setTotalBytes(activeSnap.totalBytes)
             if (typeof activeSnap.remainingMinutes === "number") setTimeRemainingMin(activeSnap.remainingMinutes)
           }
+          return
+        }
+
+        const queuedRecovery = queueSnap?.queued?.find(
+          (q: any) => q.gameId === currentTargetId && (q.savedPhase || (typeof q.savedProgress === "number" && q.savedProgress > 0))
+        )
+        if (queuedRecovery) {
+          const restoredPhase = queuedRecovery.savedPhase || "DOWNLOADING"
+          if (restoredPhase === "INSTALLING") {
+            pausedPhaseRef.current = "installing"
+            setStatus("installing")
+          } else {
+            pausedPhaseRef.current = "downloading"
+            setStatus("downloading")
+          }
+          if (typeof queuedRecovery.savedProgress === "number") {
+            setProgress(queuedRecovery.savedProgress)
+            highWaterProgressRef.current = queuedRecovery.savedProgress
+          }
+          if (typeof queuedRecovery.savedDownloadedBytes === "number") setDownloadedBytes(queuedRecovery.savedDownloadedBytes)
+          if (typeof queuedRecovery.savedTotalBytes === "number" && queuedRecovery.savedTotalBytes > 0) setTotalBytes(queuedRecovery.savedTotalBytes)
+          isStartingSyncRef.current = true
           return
         }
 
@@ -633,6 +655,8 @@ export default function DownloadPlayButton({
           setStatus("queued")
           return
         }
+
+        setStatus(baseState)
       })
 
       return () => {
@@ -758,6 +782,7 @@ export default function DownloadPlayButton({
               }
               if (typeof activeSnap.progress === "number") {
                 setProgress(activeSnap.progress)
+                highWaterProgressRef.current = activeSnap.progress
               }
               if (typeof activeSnap.speedMBs === "number") setSpeed(activeSnap.speedMBs)
               if (typeof activeSnap.downloadedBytes === "number") setDownloadedBytes(activeSnap.downloadedBytes)

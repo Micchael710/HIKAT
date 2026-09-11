@@ -765,17 +765,21 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     mainExports.loadPersistentDownloadQueue()
 
     const restoredSnap = await getQueueHandler()
-    // La operación activa previa y la cola se restauran en orden FIFO
-    expect(restoredSnap.queued.length).toBe(3)
-    expect(restoredSnap.queued[0].gameId).toBe("server-a")
-    expect(restoredSnap.queued[1].gameId).toBe("server-b")
-    expect(restoredSnap.queued[2].gameId).toBe("server-c")
+    // La operación activa previa se expone como active para evitar flicker y la cola en orden FIFO
+    expect(restoredSnap.active?.gameId).toBe("server-a")
+    expect(restoredSnap.queued.length).toBe(2)
+    expect(restoredSnap.queued[0].gameId).toBe("server-b")
+    expect(restoredSnap.queued[1].gameId).toBe("server-c")
+    expect(mainExports.getDownloadQueue().length).toBe(3)
+    expect(mainExports.getDownloadQueue()[0].gameId).toBe("server-a")
+    expect(mainExports.getDownloadQueue()[1].gameId).toBe("server-b")
+    expect(mainExports.getDownloadQueue()[2].gameId).toBe("server-c")
 
     // Limpieza
     try {
-      await mainExports.operationManager?.cancelSync()
+      await mainExports.operationManager?.cancelSync(instanceRootA)
     } catch (_) {}
-    await cancelHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
+    await cancelHandler({}, { gameId: "server-a", gameName: "Server Alpha", instanceRoot: instanceRootA })
     await syncPromiseA
   })
 
@@ -2490,6 +2494,105 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     mainExports.loadPersistentDownloadQueue()
     expect(mainExports.getDownloadQueueSnapshot().active?.state).toBe("PAUSED")
     expect(mainExports.getDownloadQueueSnapshot().active?.progress).toBe(42)
+  })
+
+  // 56. Operación interrumpida en DOWNLOADING sin pausa: getDownloadQueueSnapshot() expone active SYNCING antes de processNextQueuedSync
+  it("56. Operacion interrumpida en DOWNLOADING expone active SYNCING antes de processNextQueuedSync", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "DOWNLOADING",
+        progress: 60,
+        downloadedBytes: 6000,
+        totalBytes: 10000,
+        pausedByUser: false,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    // Antes de que processNextQueuedSync corra, el snapshot ya expone active con SYNCING
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active).not.toBeNull()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.active?.state).toBe("SYNCING")
+    expect(snap.active?.phase).toBe("DOWNLOADING")
+    expect(snap.active?.progress).toBe(60)
+    expect(snap.active?.downloadedBytes).toBe(6000)
+    expect(snap.active?.totalBytes).toBe(10000)
+
+    const getStatusHandler = ipcHandlers.get("game-get-status")!
+    const status = await getStatusHandler({}, { gameId: "server-a" })
+    expect(status.operationState).toBe("SYNCING")
+    expect(status.activeOperationState).toBe("SYNCING")
+    expect(status.activeOperationPhase).toBe("DOWNLOADING")
+  })
+
+  // 57. Operación interrumpida en INSTALLING sin pausa: getDownloadQueueSnapshot() expone active INSTALLING
+  it("57. Operacion interrumpida en INSTALLING expone active INSTALLING", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "INSTALLING",
+        progress: 90,
+        downloadedBytes: 10000,
+        totalBytes: 10000,
+        pausedByUser: false,
+      },
+      queue: [],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active).not.toBeNull()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.active?.state).toBe("SYNCING")
+    expect(snap.active?.phase).toBe("INSTALLING")
+    expect(snap.active?.progress).toBe(90)
+  })
+
+  // 58. Operación interrumpida A con B y C en cola: snapshot expone A como active y B/C como queued en FIFO
+  it("58. Operacion interrumpida A con B y C en cola expone A como active y B/C como queued", async () => {
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: { gameId: "server-a", gameName: "Server Alpha", modpackVersion: "1.0.0", clientFiles: [] },
+        phase: "DOWNLOADING",
+        progress: 25,
+        pausedByUser: false,
+      },
+      queue: [
+        { gameId: "server-b", gameName: "Server Beta", payload: { gameId: "server-b", modpackVersion: "1.0.0", clientFiles: [] } },
+        { gameId: "server-c", gameName: "Server Gamma", payload: { gameId: "server-c", modpackVersion: "1.0.0", clientFiles: [] } },
+      ],
+    }
+    await fsp.writeFile(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    mainExports.resetDownloadQueueForTesting()
+    mainExports.loadPersistentDownloadQueue()
+
+    const snap = mainExports.getDownloadQueueSnapshot()
+    expect(snap.active?.gameId).toBe("server-a")
+    expect(snap.active?.state).toBe("SYNCING")
+    expect(snap.queued.length).toBe(2)
+    expect(snap.queued[0].gameId).toBe("server-b")
+    expect(snap.queued[0].position).toBe(1)
+    expect(snap.queued[1].gameId).toBe("server-c")
+    expect(snap.queued[1].position).toBe(2)
   })
 })
 

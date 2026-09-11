@@ -150,6 +150,7 @@ let downloadQueue = []
 let autoPausedDownloadGameId = null
 let pausedByUser = false
 let isRestoredUserPause = false
+let currentProcessingItem = null
 let isProcessingQueue = false
 let currentIsVerify = false
 let lastPayload = null
@@ -262,6 +263,8 @@ function loadPersistentDownloadQueue() {
           queuedAt: parsed.active.queuedAt || Date.now(),
           savedPhase: parsed.active.phase || null,
           savedProgress: typeof parsed.active.progress === "number" ? parsed.active.progress : 0,
+          savedDownloadedBytes: parsed.active.downloadedBytes || 0,
+          savedTotalBytes: parsed.active.totalBytes || 0,
         })
       }
     }
@@ -1953,9 +1956,37 @@ function getDownloadQueueSnapshot() {
       totalBytes: activeOperationSnapshot?.totalBytes ?? 0,
       remainingMinutes: opState === "PAUSED" ? 0 : (activeOperationSnapshot?.remainingMinutes ?? 0),
     }
+  } else {
+    const pendingRecovery = (currentProcessingItem && (currentProcessingItem.savedPhase || currentProcessingItem.savedProgress))
+      ? currentProcessingItem
+      : downloadQueue.find((item) => item && (item.savedPhase || (typeof item.savedProgress === "number" && item.savedProgress > 0)))
+
+    if (pendingRecovery && operationManager.getState() === "IDLE") {
+      const savedPhase = pendingRecovery.savedPhase || "DOWNLOADING"
+      const savedProgress = typeof pendingRecovery.savedProgress === "number" ? pendingRecovery.savedProgress : 0
+      active = {
+        gameId: pendingRecovery.gameId,
+        gameName: pendingRecovery.gameName || pendingRecovery.gameId,
+        state: "SYNCING",
+        phase: savedPhase,
+        isCommitting: false,
+        canPause: true,
+        canCancel: true,
+        progress: savedProgress,
+        speedMBs: 0,
+        downloadedBytes: pendingRecovery.savedDownloadedBytes || 0,
+        totalBytes: pendingRecovery.savedTotalBytes || 0,
+        remainingMinutes: 0,
+        isPendingResume: true,
+      }
+    }
   }
 
-  const queued = downloadQueue.map((item, index) => ({
+  const queuedSource = active
+    ? downloadQueue.filter((item) => item.gameId !== active.gameId)
+    : downloadQueue
+
+  const queued = queuedSource.map((item, index) => ({
     gameId: item.gameId,
     gameName: item.gameName,
     position: index + 1,
@@ -1985,6 +2016,7 @@ async function processNextQueuedSync() {
   const nextItem = downloadQueue.shift()
   if (!nextItem) return
 
+  currentProcessingItem = nextItem
   isProcessingQueue = true
   savePersistentDownloadQueue()
   notifyDownloadQueueChanged()
@@ -2026,6 +2058,7 @@ async function processNextQueuedSync() {
     }
   } finally {
     isProcessingQueue = false
+    currentProcessingItem = null
     if (operationManager.getState() === "IDLE") {
       processNextQueuedSync()
     }
@@ -2035,6 +2068,7 @@ async function processNextQueuedSync() {
 async function runGameSync(ctx, payload) {
   isRestoredUserPause = false
   pausedByUser = false
+  currentProcessingItem = null
   const watcherKey = ctx.gameId || "__legacy__"
   if (Array.isArray(payload.directoryPolicies)) {
     latestDirectoryPoliciesByGameId.set(watcherKey, payload.directoryPolicies)
@@ -2686,15 +2720,34 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
   const runningGameId = launchStatus.gameId || null
 
   const isRestoredPause = Boolean(isRestoredUserPause && operationManager.getState() === "IDLE")
-  const currentOpState = isRestoredPause ? "PAUSED" : operationManager.getState()
+  const pendingRecovery = !activeOperationGameId && operationManager.getState() === "IDLE"
+    ? ((currentProcessingItem && (currentProcessingItem.savedPhase || currentProcessingItem.savedProgress))
+      ? currentProcessingItem
+      : downloadQueue.find((item) => item && (item.savedPhase || (typeof item.savedProgress === "number" && item.savedProgress > 0))))
+    : null
+
+  const effectiveActiveGameId = activeOperationGameId || pendingRecovery?.gameId || null
+  const currentOpState = isRestoredPause
+    ? "PAUSED"
+    : (pendingRecovery ? "SYNCING" : operationManager.getState())
+
+  const effectiveSnapshot = activeOperationSnapshot || (pendingRecovery ? {
+    gameId: pendingRecovery.gameId,
+    phase: pendingRecovery.savedPhase || "DOWNLOADING",
+    progress: pendingRecovery.savedProgress || 0,
+    downloadedBytes: pendingRecovery.savedDownloadedBytes || 0,
+    totalBytes: pendingRecovery.savedTotalBytes || 0,
+    speedMBs: 0,
+    remainingMinutes: 0,
+  } : null)
 
   if (payload && payload.gameId) {
     const requestedGameId = payload.gameId
     const isThisGameRunning = launchStatus.status !== "idle" && runningGameId === requestedGameId
     const status = isThisGameRunning ? launchStatus.status : "idle"
     const pid = isThisGameRunning ? launchStatus.pid : null
-    const operationState = activeOperationGameId === requestedGameId ? currentOpState : "IDLE"
-    const operationSnapshot = activeOperationGameId === requestedGameId ? activeOperationSnapshot : null
+    const operationState = effectiveActiveGameId === requestedGameId ? currentOpState : "IDLE"
+    const operationSnapshot = effectiveActiveGameId === requestedGameId ? effectiveSnapshot : null
 
     return {
       status,
@@ -2702,9 +2755,9 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
       gameId: requestedGameId,
       runningGameId,
       operationState,
-      activeOperationGameId,
+      activeOperationGameId: effectiveActiveGameId,
       activeOperationState: currentOpState,
-      activeOperationPhase: activeOperationSnapshot?.phase || null,
+      activeOperationPhase: effectiveSnapshot?.phase || null,
       operationSnapshot,
     }
   }
@@ -2713,10 +2766,10 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
     ...launchStatus,
     runningGameId,
     operationState: currentOpState,
-    activeOperationGameId,
+    activeOperationGameId: effectiveActiveGameId,
     activeOperationState: currentOpState,
-    activeOperationPhase: activeOperationSnapshot?.phase || null,
-    operationSnapshot: activeOperationSnapshot,
+    activeOperationPhase: effectiveSnapshot?.phase || null,
+    operationSnapshot: effectiveSnapshot,
   }
 })
 
@@ -2781,6 +2834,7 @@ function resetDownloadQueueForTesting() {
   autoPausedDownloadGameId = null
   pausedByUser = false
   isRestoredUserPause = false
+  currentProcessingItem = null
   isProcessingQueue = false
   currentIsVerify = false
   lastPayload = null
