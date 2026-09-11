@@ -630,6 +630,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
   it("Test 5 — Reanudar permite volver a Pausar", async () => {
     vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+    vi.spyOn(gameService, "resumeSync").mockImplementation(() => new Promise(() => {}))
     vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true })
 
     const { container } = await mountButton()
@@ -660,6 +661,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
   it("Test 6 — Reanudar permite Cancelar", async () => {
     vi.spyOn(gameService, "startSync").mockImplementation(() => new Promise(() => {}))
+    vi.spyOn(gameService, "resumeSync").mockImplementation(() => new Promise(() => {}))
     vi.spyOn(gameService, "pauseSync").mockResolvedValue({ success: true, paused: true })
     const cancelSpy = vi.spyOn(gameService, "cancelSync").mockResolvedValue({ success: true })
 
@@ -723,7 +725,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     expect(card.textContent).toContain("PAUSADO")
 
     const startSyncResumeSpy = vi
-      .spyOn(gameService, "startSync")
+      .spyOn(gameService, "resumeSync")
       .mockImplementation(() => new Promise(() => {}))
 
     // Rapid double click on Resume
@@ -2584,6 +2586,12 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
       let syncPromiseResolve: any = null
       vi.spyOn(gameService, "startSync").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            syncPromiseResolve = resolve
+          })
+      )
+      vi.spyOn(gameService, "resumeSync").mockImplementation(
         () =>
           new Promise((resolve) => {
             syncPromiseResolve = resolve
@@ -4870,6 +4878,9 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
         () => new Promise(() => {})
       )
+      const resumeSyncSpy = vi.spyOn(gameService, "resumeSync").mockImplementation(
+        () => new Promise(() => {})
+      )
 
       const { container } = await mountButton({ gameContext: testContext })
       const btn = container.querySelector("button") as HTMLElement
@@ -4898,8 +4909,9 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         card.click()
       })
 
-      // Must have called startSync again to resume
-      expect(startSyncSpy).toHaveBeenCalledTimes(2)
+      // Must have called resumeSync to resume
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(resumeSyncSpy).toHaveBeenCalledTimes(1)
     })
 
     it("2. Pausing externally via onDownloadQueueChanged allows HomeScreen to resume via click", async () => {
@@ -4916,6 +4928,9 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
 
       const testContext = { gameId: "test-game", gameName: "Test Game" }
       const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(
+        () => new Promise(() => {})
+      )
+      const resumeSyncSpy = vi.spyOn(gameService, "resumeSync").mockImplementation(
         () => new Promise(() => {})
       )
 
@@ -4955,7 +4970,8 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         card.click()
       })
 
-      expect(startSyncSpy).toHaveBeenCalledTimes(2)
+      expect(startSyncSpy).toHaveBeenCalledTimes(1)
+      expect(resumeSyncSpy).toHaveBeenCalledTimes(1)
     })
 
     it("3. Pause and Cancel are supported during INSTALLING phase when isCommitting is false", async () => {

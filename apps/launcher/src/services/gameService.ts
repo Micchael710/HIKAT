@@ -512,7 +512,6 @@ export const gameService = {
     isVerify?: boolean,
     directoryPolicies?: import("../vite-env").DirectoryPolicy[],
     gameContext?: { gameId: string; gameName: string } | null,
-    options?: { resume?: boolean },
   ) {
     let actualDirectoryPolicies = directoryPolicies
     let actualGameContext = gameContext
@@ -533,15 +532,11 @@ export const gameService = {
         isVerify,
         gameId: actualGameContext?.gameId,
         gameName: actualGameContext?.gameName,
-        ...(options?.resume ? { resume: true } : {}),
       })
     }
   },
 
   async resumeSync(gameContext?: { gameId: string; gameName: string } | null) {
-    if (typeof this.startSync === "function") {
-      return await this.startSync([], "", undefined, undefined, undefined, undefined, false, undefined, gameContext, { resume: true })
-    }
     if (window.electronAPI?.startSync) {
       return await window.electronAPI.startSync({
         gameId: gameContext?.gameId,

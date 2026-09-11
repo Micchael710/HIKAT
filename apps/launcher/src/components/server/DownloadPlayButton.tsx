@@ -1180,8 +1180,6 @@ export default function DownloadPlayButton({
       if (!isLocalAllowed || isStartingSyncRef.current) return
       const nextStatus = pausedPhaseRef.current === "installing" ? "installing" : "downloading"
       setStatus(nextStatus)
-      setCanPauseState(true)
-      setCanCancelState(true)
       isStartingSyncRef.current = true
       const syncOpId = ++syncOpIdRef.current
 

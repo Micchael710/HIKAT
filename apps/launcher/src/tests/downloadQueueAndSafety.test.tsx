@@ -924,7 +924,7 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
       clientFiles: [{ path: "mods/sample.jar", sha256: "hash", sizeBytes: 1000 }],
     } as any)
 
-    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({
+    const resumeSyncSpy = vi.spyOn(gameService, "resumeSync").mockResolvedValue({
       alreadyActive: true,
     } as any)
 
@@ -964,7 +964,7 @@ describe("HiKAT Phase 11 — Execution Reinforcement & Global Download Queue Sui
       card?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     })
 
-    expect(startSyncSpy).toHaveBeenCalled()
+    expect(resumeSyncSpy).toHaveBeenCalled()
     // Must NOT jump to JUGAR / PLAY!
     expect(container.textContent).not.toContain("JUGAR")
     expect(container.textContent).not.toContain("PLAY")

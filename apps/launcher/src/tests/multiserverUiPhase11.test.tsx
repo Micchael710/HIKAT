@@ -634,4 +634,138 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
     expect(pauseSpy).not.toHaveBeenCalled()
     expect(cancelSpy).not.toHaveBeenCalled()
   })
+
+  // 23. Home y Downloads muestran exactamente el mismo porcentaje durante el catch-up de Resume y no habilitan optimistamente capabilities
+  it("23. Home y Downloads muestran exactamente el mismo porcentaje durante el catch-up de Resume y no habilitan optimistamente capabilities", async () => {
+    const pauseSpy = vi.spyOn(gameService, "pauseSync")
+    let resumeCalled = false
+    let resumeArgs: any = null
+    const origStartSync = window.electronAPI!.startSync
+    ;(window.electronAPI as any).startSync = vi.fn().mockImplementation((args: any) => {
+      if (args?.resume) {
+        resumeCalled = true
+        resumeArgs = args
+        return new Promise(() => {}) // keep active
+      }
+      return origStartSync(args)
+    })
+
+    currentQueueSnapshot = {
+      active: {
+        gameId: "server-a",
+        state: "PAUSED",
+        phase: "INSTALLING",
+        progress: 82,
+        speedMBs: 0,
+        downloadedBytes: 820,
+        totalBytes: 1000,
+        remainingMinutes: 0,
+        canPause: false,
+        canCancel: true,
+        isCommitting: false,
+      },
+      queued: [],
+    }
+
+    await act(async () => {
+      root.render(
+        <LanguageProvider>
+          <div>
+            <DownloadPlayButton
+              gameId="server-a"
+              gameContext={{ gameId: "server-a", gameName: "Warria" }}
+              left={0}
+              top={0}
+              theme="dark"
+            />
+            <DownloadsView theme="dark" servers={[serverA]} />
+          </div>
+        </LanguageProvider>,
+      )
+    })
+
+    // Ambos muestran 82% inicialmente
+    expect(container.textContent).toContain("82%")
+    expect(container.textContent).toContain("PAUSADO")
+
+    // Pulsar Resume desde Home
+    const card = container.querySelector(".dl-progress-card") as HTMLElement
+    expect(card).not.toBeNull()
+    await act(async () => {
+      card.click()
+    })
+
+    // Resume fue llamado con sólo lo necesario
+    expect(resumeCalled).toBe(true)
+    expect(resumeArgs).toEqual({
+      gameId: "server-a",
+      gameName: "Warria",
+      resume: true,
+    })
+
+    // NO se deben haber habilitado optimistamente canPause ni canCancel antes de que Main lo emita
+    // En este instante, si el usuario hace clic en el card no debe pausar (pauseSpy no llamado)
+    await act(async () => {
+      card.click()
+    })
+    expect(pauseSpy).not.toHaveBeenCalled()
+
+    // Main publica progreso catch-up (raw 30 -> Main publica 82)
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({
+          gameId: "server-a",
+          phase: "INSTALLING",
+          progress: 82,
+          speedMBs: 1.5,
+          downloadedBytes: 300,
+          totalBytes: 1000,
+          remainingMinutes: 1,
+          canPause: true,
+          canCancel: true,
+          isCommitting: false,
+          state: "INSTALLING",
+        })
+      }
+      currentQueueSnapshot.active = {
+        ...currentQueueSnapshot.active!,
+        state: "INSTALLING",
+        phase: "INSTALLING",
+        progress: 82,
+        canPause: true,
+        canCancel: true,
+      }
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+
+    // Ambos muestran 82%
+    expect(container.textContent).toContain("82%")
+
+    // Main publica progreso raw 83 (supera floor -> 83)
+    await act(async () => {
+      for (const cb of downloadProgressListeners) {
+        cb({
+          gameId: "server-a",
+          phase: "INSTALLING",
+          progress: 83,
+          speedMBs: 2.0,
+          downloadedBytes: 830,
+          totalBytes: 1000,
+          remainingMinutes: 1,
+          canPause: true,
+          canCancel: true,
+          isCommitting: false,
+          state: "INSTALLING",
+        })
+      }
+      currentQueueSnapshot.active!.progress = 83
+      for (const cb of queueChangeListeners) cb(currentQueueSnapshot)
+    })
+
+    // Ambos muestran 83%
+    expect(container.textContent).toContain("83%")
+    expect(container.textContent).not.toContain("82%")
+
+    ;(window.electronAPI as any).startSync = origStartSync
+  })
 })

@@ -132,6 +132,7 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
   let requestedRanges: string[] = []
 
   let fileStore = new Map<string, Buffer>()
+  let urlDelays = new Map<string, number>()
 
   beforeEach(async () => {
     tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "hikat-p11-core-"))
@@ -151,6 +152,7 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
 
     requestedRanges = []
     fileStore = new Map<string, Buffer>()
+    urlDelays = new Map<string, number>()
 
     server = http.createServer((req, res) => {
       const url = req.url || ""
@@ -160,27 +162,39 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
       }
 
       const content = fileStore.get(url) || Buffer.alloc(1000, "X")
-      if (rangeHeader && rangeHeader.startsWith("bytes=")) {
-        const parts = rangeHeader.replace("bytes=", "").split("-")
-        const start = parseInt(parts[0], 10) || 0
-        const end = parts[1] ? parseInt(parts[1], 10) : content.length - 1
-        const slice = content.subarray(start, end + 1)
-        res.writeHead(206, {
-          "Content-Range": `bytes ${start}-${end}/${content.length}`,
+      const delayMs = urlDelays.get(url) || 0
+
+      const sendResponse = () => {
+        if (res.writableEnded || res.destroyed) return
+        if (rangeHeader && rangeHeader.startsWith("bytes=")) {
+          const parts = rangeHeader.replace("bytes=", "").split("-")
+          const start = parseInt(parts[0], 10) || 0
+          const end = parts[1] ? parseInt(parts[1], 10) : content.length - 1
+          const slice = content.subarray(start, end + 1)
+          res.writeHead(206, {
+            "Content-Range": `bytes ${start}-${end}/${content.length}`,
+            "Accept-Ranges": "bytes",
+            "Content-Length": slice.length,
+            "Content-Type": "application/octet-stream",
+          })
+          res.end(slice)
+          return
+        }
+
+        res.writeHead(200, {
+          "Content-Length": content.length,
           "Accept-Ranges": "bytes",
-          "Content-Length": slice.length,
           "Content-Type": "application/octet-stream",
         })
-        res.end(slice)
-        return
+        res.end(content)
       }
 
-      res.writeHead(200, {
-        "Content-Length": content.length,
-        "Accept-Ranges": "bytes",
-        "Content-Type": "application/octet-stream",
-      })
-      res.end(content)
+      if (delayMs > 0) {
+        const timer = setTimeout(sendResponse, delayMs)
+        req.on("close", () => clearTimeout(timer))
+      } else {
+        sendResponse()
+      }
     })
 
     await new Promise<void>((resolve) => {
@@ -576,6 +590,8 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     fileStore.set("/file/fileA.jar", Buffer.from("data-a"))
     fileStore.set("/file/fileB.jar", Buffer.from("data-b"))
     fileStore.set("/file/fileC.jar", Buffer.from("data-c"))
+    urlDelays.set("/file/fileA.jar", 800)
+    urlDelays.set("/file/fileC.jar", 800)
 
     const sampleFileA = [{
       path: "mods/fileA.jar",
@@ -758,6 +774,7 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
     const cancelHandler = ipcHandlers.get("game-cancel-sync")!
 
     fileStore.set("/file/fileOk.jar", Buffer.from("ok-data"))
+    urlDelays.set("/file/fileOk.jar", 800)
 
     // Iniciar A
     const syncPromiseA = startHandler({}, {
@@ -971,5 +988,232 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
 
     unsub1()
     unsub2()
+  })
+
+  // 20. gameService.resumeSync() no envía clientFiles ni versiones dummy
+  it("20. gameService.resumeSync() no envía clientFiles ni versiones dummy", async () => {
+    const mockStartSync = vi.fn().mockResolvedValue({ success: true })
+    ;(globalThis as any).window = {
+      electronAPI: {
+        startSync: mockStartSync,
+      },
+    }
+
+    await gameService.resumeSync({ gameId: "server-a", gameName: "Server Alpha" })
+
+    expect(mockStartSync).toHaveBeenCalledTimes(1)
+    const callArg = mockStartSync.mock.calls[0][0]
+    expect(callArg).toEqual({
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      resume: true,
+    })
+    expect(callArg.clientFiles).toBeUndefined()
+    expect(callArg.modpackVersion).toBeUndefined()
+    expect(callArg.minecraftVersion).toBeUndefined()
+  })
+
+  // 21. Main mantiene visualmente el progreso al reanudar (progress floor) sin cruzar cambios de fase
+  it("21. Main mantiene visualmente el progreso al reanudar sin cruzar cambios de fase y actualiza con múltiples pausas", async () => {
+    const startHandler = ipcHandlers.get("game-start-sync")!
+    const pauseHandler = ipcHandlers.get("game-pause-sync")!
+
+    let capturedOnProgress: any = null
+    let capturedOnPhaseChange: any = null
+    let resolveSyncPromise: any = null
+
+    vi.spyOn(mainExports.operationManager, "startSync").mockImplementation(async (opts: any) => {
+      capturedOnProgress = opts.onProgress
+      capturedOnPhaseChange = opts.onPhaseChange
+      mainExports.operationManager.state = "INSTALLING"
+      mainExports.operationManager.lastPayload = opts
+      return new Promise((r) => {
+        resolveSyncPromise = r
+      })
+    })
+    vi.spyOn(mainExports.operationManager, "pauseSync").mockImplementation(async () => {
+      mainExports.operationManager.state = "PAUSED"
+      mainExports.operationManager.lastPausedPhase = "INSTALLING"
+      if (capturedOnPhaseChange) capturedOnPhaseChange("PAUSED", "INSTALLING")
+      return { success: true, paused: true, state: "PAUSED" }
+    })
+    vi.spyOn(mainExports.operationManager, "resumeSync").mockImplementation(async () => {
+      mainExports.operationManager.state = "INSTALLING"
+      if (capturedOnPhaseChange) capturedOnPhaseChange("INSTALLING")
+      return new Promise((r) => {
+        resolveSyncPromise = r
+      })
+    })
+
+    // Iniciar sync para server-a
+    startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      instanceRoot: instanceRootA,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "VANILLA",
+      clientFiles: [],
+    })
+
+    await new Promise((r) => setTimeout(r, 20))
+    expect(capturedOnProgress).toBeDefined()
+
+    // 1. Progresa hasta 82% en INSTALLING
+    capturedOnProgress({ phase: "INSTALLING", progress: 82 })
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(82)
+
+    // 2. Pausar
+    await pauseHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
+    expect(mainExports.getDownloadQueueSnapshot().active.state).toBe("PAUSED")
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(82)
+
+    // 3. Reanudar
+    lastSentEvents.length = 0
+    startHandler({}, { gameId: "server-a", gameName: "Server Alpha", resume: true })
+    await new Promise((r) => setTimeout(r, 20))
+
+    // El trabajo interno emite raw 30 -> UI recibe 82
+    capturedOnProgress({ phase: "INSTALLING", progress: 30 })
+    const ev30 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    expect(ev30?.args[0]?.progress).toBe(82)
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(82)
+
+    // raw 50 -> UI recibe 82
+    capturedOnProgress({ phase: "INSTALLING", progress: 50 })
+    const ev50 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    expect(ev50?.args[0]?.progress).toBe(82)
+
+    // raw 81 -> UI recibe 82
+    capturedOnProgress({ phase: "INSTALLING", progress: 81 })
+    const ev81 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    expect(ev81?.args[0]?.progress).toBe(82)
+
+    // raw 82 -> UI recibe 82 (floor eliminado)
+    capturedOnProgress({ phase: "INSTALLING", progress: 82 })
+    const ev82 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    expect(ev82?.args[0]?.progress).toBe(82)
+
+    // raw 83 -> UI recibe 83
+    capturedOnProgress({ phase: "INSTALLING", progress: 83 })
+    const ev83 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    expect(ev83?.args[0]?.progress).toBe(83)
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(83)
+
+    // 4. Pausar y reanudar nuevamente a 85 actualiza el floor
+    capturedOnProgress({ phase: "INSTALLING", progress: 85 })
+    await pauseHandler({}, { gameId: "server-a", gameName: "Server Alpha" })
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(85)
+
+    startHandler({}, { gameId: "server-a", gameName: "Server Alpha", resume: true })
+    await new Promise((r) => setTimeout(r, 20))
+
+    capturedOnProgress({ phase: "INSTALLING", progress: 30 })
+    const evFloor85 = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    expect(evFloor85?.args[0]?.progress).toBe(85)
+
+    // 5. Cambio real de fase: DOWNLOADING 100 -> INSTALLING 30 muestra 30 (el floor no cruza fases)
+    capturedOnPhaseChange("DOWNLOADING")
+    capturedOnProgress({ phase: "DOWNLOADING", progress: 100 })
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(100)
+
+    capturedOnPhaseChange("INSTALLING")
+    capturedOnProgress({ phase: "INSTALLING", progress: 30 })
+    const evPhaseChange = lastSentEvents.filter((e) => e.channel === "game-download-progress").pop()
+    expect(evPhaseChange?.args[0]?.progress).toBe(30)
+    expect(mainExports.getDownloadQueueSnapshot().active.progress).toBe(30)
+
+    if (resolveSyncPromise) resolveSyncPromise({ success: true })
+    vi.restoreAllMocks()
+  })
+
+  // 22. Recuperación después de reinicio usa el payload persistido completo y no lo pisa con strings vacíos/undefined
+  it("22. Recuperación después de reinicio usa el payload persistido completo y no lo pisa con strings vacíos/undefined", async () => {
+    const startHandler = ipcHandlers.get("game-start-sync")!
+
+    const fileContent = Buffer.alloc(500, "Z")
+    const hash = computeSha(fileContent)
+    fileStore.set("/file/persistentMod.jar", fileContent)
+
+    const sampleFile = {
+      path: "mods/persistentMod.jar",
+      sha256: hash,
+      sizeBytes: 500,
+      policy: "NO_MODIFICABLE",
+      downloadUrl: `${serverBaseUrl}/file/persistentMod.jar`,
+    }
+
+    const targetInstanceRoot = path.join(tempDir, "HiKAT", "games", "Server Alpha")
+    await fsp.mkdir(targetInstanceRoot, { recursive: true })
+
+    mainExports.operationManager.coreChecker = async () => ({ installed: true })
+    mainExports.operationManager.coreInstaller = async () => ({ success: true })
+
+    // Staging parcial (200 bytes)
+    const { filesDir } = getStagingPaths(targetInstanceRoot)
+    await fsp.mkdir(filesDir, { recursive: true })
+    const stagingName = getDeterministicStagingFileName(sampleFile)
+    await fsp.writeFile(path.join(filesDir, stagingName), fileContent.subarray(0, 200))
+
+    await saveDownloadSession(targetInstanceRoot, {
+      modpackVersion: "1.0.0",
+      status: "PAUSED",
+      phase: "DOWNLOADING",
+      progress: 40,
+    })
+
+    // Simular que antes de cerrar la app había una descarga activa guardada en download-queue.json
+    const queueFilePath = path.join(userDataDir, "download-queue.json")
+    const queueData = {
+      active: {
+        gameId: "server-a",
+        gameName: "Server Alpha",
+        payload: {
+          instanceRoot: targetInstanceRoot,
+          modpackVersion: "1.0.0",
+          minecraftVersion: "1.20.1",
+          modLoader: "VANILLA",
+          clientFiles: [sampleFile],
+        },
+        queuedAt: Date.now() - 5000,
+        phase: "DOWNLOADING",
+        progress: 40,
+      },
+      queue: [],
+    }
+    fs.writeFileSync(queueFilePath, JSON.stringify(queueData, null, 2), "utf8")
+
+    // Cargar cola persistente
+    mainExports.loadPersistentDownloadQueue()
+    expect(mainExports.getDownloadQueue().length).toBe(1)
+    expect(mainExports.getDownloadQueue()[0].gameId).toBe("server-a")
+
+    // Llamar a resume enviando strings vacíos/undefined y clientFiles=[]
+    requestedRanges = []
+    const result = await startHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+      resume: true,
+      clientFiles: [],
+      modpackVersion: "",
+      minecraftVersion: undefined,
+    })
+
+    expect(result.success).toBe(true)
+    // Se reutilizó staging mediante HTTP Range (200-499)
+    expect(requestedRanges.some((r) => r.includes("bytes=200-"))).toBe(true)
+
+    // El archivo final fue instalado en la instancia
+    const finalFile = path.join(targetInstanceRoot, "mods", "persistentMod.jar")
+    expect(fs.existsSync(finalFile)).toBe(true)
+    const stats = await fsp.stat(finalFile)
+    expect(stats.size).toBe(500)
+
+    // El manifest instalado tiene la versión completa persistida
+    const installed = await loadInstalledManifest(targetInstanceRoot)
+    expect(installed?.modpackVersion).toBe("1.0.0")
+
+    // La cola persistente se limpió al completar
+    expect(mainExports.getDownloadQueue().length).toBe(0)
   })
 })
