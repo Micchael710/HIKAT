@@ -108,6 +108,26 @@ async function checkCore({ instanceRoot, minecraftVersion, modLoader, modLoaderV
 }
 
 /**
+ * Resolves and installs libraries declared in the version manifest of a mod loader (e.g. Fabric, Quilt)
+ * using XMCL Version.parse, resolveLibraryInstallFiles, and executeInstallManifest.
+ */
+async function installProfileLoaderLibraries(finalVersionId, folder, runtime, signal) {
+  const resolvedLoaderVersion = await Version.parse(folder, finalVersionId)
+  const libraries = resolvedLoaderVersion?.libraries || []
+  const loaderLibraryFiles = resolveLibraryInstallFiles(libraries, folder, { signal })
+  if (loaderLibraryFiles.length > 0) {
+    await executeInstallManifest(
+      {
+        schemaVersion: 1,
+        tasks: [{ id: `loader:${finalVersionId}:libraries`, type: "files", files: loaderLibraryFiles }],
+      },
+      runtime,
+      { signal }
+    )
+  }
+}
+
+/**
  * Install or repair Minecraft Vanilla and the configured mod loader using XMCL.
  * Accepts: { instanceRoot, minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion, javaPath, signal, onProgress }
  * modLoader: VANILLA | NEOFORGE | FORGE | FABRIC | QUILT
@@ -324,6 +344,7 @@ async function installCore({
       finalVersionId =
         (result && typeof result === "object" ? result.version : result) ||
         `${cleanMc}-fabric-${resolvedLoaderVersion}`
+      await installProfileLoaderLibraries(finalVersionId, folder, loaderRuntime, signal)
 
     } else if (resolvedLoader === "QUILT") {
       const workflow = createQuiltInstallWorkflow({
@@ -336,6 +357,7 @@ async function installCore({
       finalVersionId =
         (result && typeof result === "object" ? result.version : result) ||
         `${cleanMc}-quilt-${resolvedLoaderVersion}`
+      await installProfileLoaderLibraries(finalVersionId, folder, loaderRuntime, signal)
 
     } else {
       throw new Error(`Unsupported modLoader: ${resolvedLoader}`)
@@ -388,4 +410,5 @@ module.exports = {
   repairCore,
   loadCoreState,
   saveCoreState,
+  installProfileLoaderLibraries,
 }
