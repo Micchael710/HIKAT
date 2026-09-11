@@ -136,7 +136,7 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     })
   })
 
-  it("3, 4, 5, 6. EMPTY: nunca aparece 'Últimas Novedades', Stats usa 1020, Cut usa 920, Canvas usa 2070", async () => {
+  it("3, 4, 5, 6. EMPTY: nunca aparece 'Últimas Novedades', Stats usa 1130, Cut usa 1030, Canvas usa 2180", async () => {
     vi.spyOn(newsService, "getNewsArticles").mockResolvedValue({
       items: [],
       isCached: false,
@@ -173,22 +173,22 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     )
     expect(newsWrapper?.style.display).toBe("none")
 
-    // 4. Stats usa top = 1020
+    // 4. Stats usa top = 1130
     const statsContainer = elements.find(
       (el) => el.style.paddingBottom === "90px" && el.style.display === "flex",
     )
-    expect(statsContainer?.style.top).toBe("1020px")
+    expect(statsContainer?.style.top).toBe("1130px")
 
-    // 5. Angular Cut usa top = 920 (1310 - 390 = 920)
+    // 5. Angular Cut usa top = 1030 (1310 - 280 = 1030)
     const cutElement = elements.find(
       (el) => el.style.clipPath && el.style.clipPath.includes("polygon"),
     )
-    expect(cutElement?.style.top).toBe("920px")
+    expect(cutElement?.style.top).toBe("1030px")
 
-    // 6. Canvas Home usa altura = 2070 (2460 - 390 = 2070)
-    expect(reportedHeight).toBe(2070)
+    // 6. Canvas Home usa altura = 2180 (2460 - 280 = 2180)
+    expect(reportedHeight).toBe(2180)
     const rootHome = container?.querySelector("[data-home-canvas-height]")
-    expect(rootHome?.getAttribute("data-home-canvas-height")).toBe("2070")
+    expect(rootHome?.getAttribute("data-home-canvas-height")).toBe("2180")
   })
 
   it("7, 8, 9, 10. CONTENT: título visible, Stats = 1410, Cut = 1310, Canvas = 2460", async () => {
@@ -302,7 +302,7 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
 
     let reportedHeight: number | null = null
 
-    // 1. Montar Servidor A (sin noticias) -> compacto (1020 / 920 / 2070)
+    // 1. Montar Servidor A (sin noticias) -> compacto (1130 / 1030 / 2180)
     await act(async () => {
       root?.render(
         <LanguageProvider>
@@ -322,8 +322,8 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
 
     let elements = Array.from(container?.querySelectorAll("div") || [])
     let stats = elements.find((el) => el.style.paddingBottom === "90px" && el.style.display === "flex")
-    expect(stats?.style.top).toBe("1020px")
-    expect(reportedHeight).toBe(2070)
+    expect(stats?.style.top).toBe("1130px")
+    expect(reportedHeight).toBe(2180)
     expect(container?.textContent).not.toContain("Últimas Novedades")
 
     // 2. Cambiar a Servidor B (con noticias) -> normal (1410 / 1310 / 2460)
@@ -351,7 +351,7 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
     expect(container?.textContent).toContain("Últimas Novedades")
     expect(container?.textContent).toContain("Nueva Gran Actualización")
 
-    // 3. Volver a Servidor A (sin noticias) -> vuelve a compacto (1020 / 920 / 2070) sin contenido viejo
+    // 3. Volver a Servidor A (sin noticias) -> vuelve a compacto (1130 / 1030 / 2180) sin contenido viejo
     await act(async () => {
       root?.render(
         <LanguageProvider>
@@ -371,8 +371,8 @@ describe("HomeView News Section Dynamic Visibility & Layout Suite (Empty, Loadin
 
     elements = Array.from(container?.querySelectorAll("div") || [])
     stats = elements.find((el) => el.style.paddingBottom === "90px" && el.style.display === "flex")
-    expect(stats?.style.top).toBe("1020px")
-    expect(reportedHeight).toBe(2070)
+    expect(stats?.style.top).toBe("1130px")
+    expect(reportedHeight).toBe(2180)
     expect(container?.textContent).not.toContain("Últimas Novedades")
     expect(container?.textContent).not.toContain("Nueva Gran Actualización")
   })

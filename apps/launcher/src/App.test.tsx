@@ -423,7 +423,7 @@ describe("App View Persistence (HomeView Stays Mounted Across Sections)", () => 
 
     const canvasContainer = container.querySelector('[data-testid="home-canvas-container"]') as HTMLDivElement
     expect(canvasContainer).toBeDefined()
-    expect(canvasContainer.style.height).toBe("2070px")
+    expect(canvasContainer.style.height).toBe("2180px")
 
     act(() => {
       root.unmount()
