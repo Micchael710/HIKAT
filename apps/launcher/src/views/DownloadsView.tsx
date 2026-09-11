@@ -71,8 +71,11 @@ export default function DownloadsView({
             activeGameIdRef.current = snap.active.gameId || null
 
             setActiveProgress((prev) => {
+              const activePhase = snap.active?.phase || prev.phase
+              const isPhaseChange = Boolean(prev.phase && activePhase && prev.phase !== activePhase && activePhase !== "PAUSED" && prev.phase !== "PAUSED")
               const isOngoing =
                 !gameChanged &&
+                !isPhaseChange &&
                 (prev.phase === "DOWNLOADING" ||
                   prev.phase === "INSTALLING" ||
                   snap.active?.phase === "DOWNLOADING" ||
@@ -116,8 +119,11 @@ export default function DownloadsView({
           activeGameIdRef.current = snap.active.gameId || null
 
           setActiveProgress((prev) => {
+            const activePhase = snap.active?.phase || prev.phase
+            const isPhaseChange = Boolean(prev.phase && activePhase && prev.phase !== activePhase && activePhase !== "PAUSED" && prev.phase !== "PAUSED")
             const isOngoing =
               !gameChanged &&
+              !isPhaseChange &&
               (prev.phase === "DOWNLOADING" ||
                 prev.phase === "INSTALLING" ||
                 snap.active?.phase === "DOWNLOADING" ||
@@ -155,11 +161,14 @@ export default function DownloadsView({
 
       const rawProgress = typeof data.progress === "number" ? data.progress : 0
       setActiveProgress((prev) => {
+        const nextPhase = data.phase || prev.phase
+        const isPhaseChange = Boolean(prev.phase && nextPhase && prev.phase !== nextPhase && nextPhase !== "PAUSED" && prev.phase !== "PAUSED")
         const isOngoing =
-          prev.phase === "DOWNLOADING" ||
-          prev.phase === "INSTALLING" ||
-          data.phase === "DOWNLOADING" ||
-          data.phase === "INSTALLING"
+          !isPhaseChange &&
+          (prev.phase === "DOWNLOADING" ||
+            prev.phase === "INSTALLING" ||
+            data.phase === "DOWNLOADING" ||
+            data.phase === "INSTALLING")
         const effectiveProgress = isOngoing ? Math.max(prev.progress, rawProgress) : rawProgress
         return {
           progress: effectiveProgress,

@@ -2470,6 +2470,89 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       })
     })
 
+    it("16b. Transition from DOWNLOADING 100% to INSTALLING resets progress to actual installation percentage (e.g. 25%)", async () => {
+      let downloadProgressCb: any = null
+      window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
+        downloadProgressCb = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: null,
+        hasExistingInstall: false,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/example.jar",
+            sha256: "abc",
+            sizeBytes: 1024,
+            downloadUrl: "/game/1",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let resolveSyncPromise: any = null
+      vi.spyOn(gameService, "startSync").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSyncPromise = resolve
+          })
+      )
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("DESCARGAR")
+
+      await act(async () => {
+        btn.click()
+      })
+
+      const card = container.querySelector(".dl-progress-card") as HTMLElement
+      expect(card).not.toBeNull()
+
+      // 1. Download finishes at 100%
+      await act(async () => {
+        downloadProgressCb?.({
+          phase: "DOWNLOADING",
+          progress: 100,
+        })
+      })
+      expect(card.textContent).toContain("100%")
+
+      // 2. Transition to INSTALLING phase with progress: 25
+      await act(async () => {
+        downloadProgressCb?.({
+          phase: "INSTALLING",
+          progress: 25,
+        })
+      })
+
+      // Must display 25% (and INSTALANDO), NOT remain stuck at 100%!
+      expect(card.textContent).toContain("25%")
+      expect(card.textContent).toContain("INSTALANDO")
+
+      // 3. Further progress within INSTALLING phase progresses monotonically
+      await act(async () => {
+        downloadProgressCb?.({
+          phase: "INSTALLING",
+          progress: 60,
+        })
+      })
+      expect(card.textContent).toContain("60%")
+
+      await act(async () => {
+        resolveSyncPromise?.({ success: true })
+      })
+    })
+
     it("17. Resuming a paused download preserves current progress (does NOT reset to 0%)", async () => {
       let downloadProgressCb: any = null
       window.electronAPI!.onDownloadProgress = vi.fn((cb) => {
