@@ -1,4 +1,5 @@
 import React from "react"
+import { DEFAULT_ACCENT_HEX } from "../../theme/tokens"
 
 export interface LiveToastProps {
   message: string | null
@@ -14,7 +15,7 @@ export default function LiveToast({
   if (!message) return null
 
   const isError = type === "error"
-  const strokeColor = isError ? "#ef4444" : (accentColor || "#3ec4c0")
+  const strokeColor = isError ? "#ef4444" : (accentColor || DEFAULT_ACCENT_HEX)
 
   return (
     <div

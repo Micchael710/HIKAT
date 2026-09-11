@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react"
 import { ThemeMode, ServerSpecs } from "../../types"
+import { DEFAULT_ACCENT_HEX } from "../../theme/tokens"
 import { useTranslation } from "../../context/LanguageContext"
 import { serverService } from "../../services/serverService"
 import type { AccentColor } from "../../utils/dynamicAccent"
@@ -140,10 +141,10 @@ export default function ServerStatsGrid({
   const achievements = serverData.unlockedAchievements
   const totalAchievements = serverData.totalAchievements ?? 52
 
-  const accentHex = resolvedAccent?.hex || "#3ec4c0"
+  const accentHex = resolvedAccent?.hex || DEFAULT_ACCENT_HEX
   const accentLighter = resolvedAccent
     ? `color-mix(in srgb, ${resolvedAccent.hex} 55%, white)`
-    : "#7dd3fc"
+    : "#82c8e6"
 
   return (
     <div style={{ display: "flex", gap: 48 }}>

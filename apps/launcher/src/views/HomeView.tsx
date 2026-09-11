@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { ThemeMode } from "../types"
-import { getThemeTokens, CANVAS_W, CANVAS_H } from "../theme/tokens"
+import { getThemeTokens, CANVAS_W, CANVAS_H, DEFAULT_ACCENT_HEX } from "../theme/tokens"
 import DownloadPlayButton from "../components/server/DownloadPlayButton"
 import NewsCarousel from "../components/news/NewsCarousel"
 import ServerStatsGrid from "../components/server/ServerStatsGrid"
@@ -58,7 +58,7 @@ export default function HomeView({
   const mainLogoUrl = selectedServer?.mainLogo?.url
   const sidebarLogoUrl = selectedServer?.sidebarLogo?.url
   const logoUrlForAccent = mainLogoUrl || sidebarLogoUrl || null
-  const resolvedAccent = useServerAccent(selectedServer?.accentColor, logoUrlForAccent, "#3ec4c0")
+  const resolvedAccent = useServerAccent(selectedServer?.accentColor, logoUrlForAccent, DEFAULT_ACCENT_HEX)
 
   const [localPublishedModpack, setLocalPublishedModpack] = useState<PublishedModpack | null>(null)
   const publishedModpack = serverGameState !== undefined ? serverGameState.publishedModpack : localPublishedModpack

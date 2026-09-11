@@ -116,7 +116,7 @@ export default function LauncherSelect({
                       ? "#1e2c38"
                       : "#e6ebf0"
                     : "transparent",
-                  color: isSelected ? "#3ec4c0" : isDark ? "white" : "#111822",
+                  color: isSelected ? (isDark ? "#82c8e6" : "#295372") : isDark ? "white" : "#111822",
                   fontSize: 15,
                   fontWeight: isSelected ? 700 : 500,
                   fontFamily: BASE_FONT,
@@ -135,7 +135,7 @@ export default function LauncherSelect({
                     height={14}
                     viewBox="0 0 12 12"
                     fill="none"
-                    stroke="#3ec4c0"
+                    stroke={isDark ? "#82c8e6" : "#295372"}
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"

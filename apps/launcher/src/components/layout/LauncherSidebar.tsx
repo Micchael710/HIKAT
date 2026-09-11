@@ -1,7 +1,7 @@
 import React from "react"
 import { ThemeMode, LauncherView } from "../../types"
 import { IconShirt, IconSettings, IconDownload } from "../../theme/icons"
-import { getThemeTokens } from "../../theme/tokens"
+import { getThemeTokens, DEFAULT_ACCENT_RGB } from "../../theme/tokens"
 import { useTranslation } from "../../context/LanguageContext"
 import type { LauncherServer } from "../../services/serverService"
 import { resolveApiAssetUrl } from "../../config/api"
@@ -37,7 +37,7 @@ export default function LauncherSidebar({
   const BTN_PX = Math.round(48 * s)
   const ICON_PX = Math.round(24 * s)
   const LOGO_SIZE = Math.round(48 * s)
-  const defaultAccent = { r: 62, g: 196, b: 192, css: "62, 196, 192" }
+  const defaultAccent = DEFAULT_ACCENT_RGB
   const effectiveHomeAccent = homeAccent || defaultAccent
 
   return (

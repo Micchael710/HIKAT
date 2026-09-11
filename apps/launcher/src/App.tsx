@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from "react"
 import { useLauncherState } from "./hooks/useLauncherState"
-import { getThemeTokens, CANVAS_W, CANVAS_H } from "./theme/tokens"
+import { getThemeTokens, CANVAS_W, CANVAS_H, DEFAULT_ACCENT_HEX, DEFAULT_ACCENT_RGB } from "./theme/tokens"
 import LauncherTitlebar from "./components/layout/LauncherTitlebar"
 import LauncherSidebar from "./components/layout/LauncherSidebar"
 import UserProfileCard from "./components/layout/UserProfileCard"
@@ -54,14 +54,14 @@ export default function App() {
   const currentServerState = selectedServer ? gameStates[selectedServer.id] : undefined
 
   const serverLogoUrl = selectedServer?.mainLogo?.url || selectedServer?.sidebarLogo?.url || null
-  const homeResolvedAccent = useServerAccent(selectedServer?.accentColor, serverLogoUrl, "#3ec4c0")
+  const homeResolvedAccent = useServerAccent(selectedServer?.accentColor, serverLogoUrl, DEFAULT_ACCENT_HEX)
 
   const [settingsAccent, setSettingsAccent] = React.useState<{
     r: number
     g: number
     b: number
     css: string
-  }>({ r: 62, g: 196, b: 192, css: "62, 196, 192" })
+  }>(DEFAULT_ACCENT_RGB)
 
   const tokens = getThemeTokens(theme)
   const scrollContainerRef = useRef<HTMLDivElement>(null)

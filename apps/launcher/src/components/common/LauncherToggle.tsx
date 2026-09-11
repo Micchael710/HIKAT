@@ -1,5 +1,6 @@
 import React from "react"
 import { ThemeMode } from "../../types"
+import { DEFAULT_ACCENT_HEX } from "../../theme/tokens"
 
 interface LauncherToggleProps {
   checked: boolean
@@ -14,7 +15,7 @@ export default function LauncherToggle({
   onChange,
   label,
   theme = "dark",
-  accentColor = "#3ec4c0",
+  accentColor = DEFAULT_ACCENT_HEX,
 }: LauncherToggleProps) {
   const isDark = theme === "dark"
 

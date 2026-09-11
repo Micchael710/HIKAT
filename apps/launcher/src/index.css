@@ -601,14 +601,14 @@ img, svg, a {
 }
 
 .launcher-btn-primary.dynamic-accent {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb, 56, 189, 248), 0.38), rgba(var(--accent-rgb, 56, 189, 248), 0.68)) !important;
-  border: 2px solid rgba(var(--accent-rgb, 56, 189, 248), 0.5) !important;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb, 41, 83, 114), 0.38), rgba(var(--accent-rgb, 41, 83, 114), 0.68)) !important;
+  border: 2px solid rgba(var(--accent-rgb, 41, 83, 114), 0.5) !important;
 }
 
 .launcher-btn-primary.dynamic-accent:hover {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb, 56, 189, 248), 0.55), rgba(var(--accent-rgb, 56, 189, 248), 0.85)) !important;
-  border-color: rgba(var(--accent-rgb, 56, 189, 248), 0.9) !important;
-  box-shadow: 0 0 28px rgba(var(--accent-rgb, 56, 189, 248), 0.45) !important;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb, 41, 83, 114), 0.55), rgba(var(--accent-rgb, 41, 83, 114), 0.85)) !important;
+  border-color: rgba(var(--accent-rgb, 41, 83, 114), 0.9) !important;
+  box-shadow: 0 0 28px rgba(var(--accent-rgb, 41, 83, 114), 0.45) !important;
   transform: translateY(-2px);
 }
 
@@ -739,18 +739,18 @@ img, svg, a {
 
 .game-selector-item:hover {
   transform: translateY(-3px);
-  border-color: var(--game-border-color, rgba(62, 196, 192, 0.85)) !important;
-  box-shadow: 0 0 0 2px var(--card-glow-color, rgba(62, 196, 192, 0.2)), 0 10px 24px var(--card-glow-color, rgba(62, 196, 192, 0.3)) !important;
+  border-color: var(--game-border-color, rgba(130, 200, 230, 0.85)) !important;
+  box-shadow: 0 0 0 2px var(--card-glow-color, rgba(90, 180, 220, 0.2)), 0 10px 24px var(--card-glow-color, rgba(90, 180, 220, 0.3)) !important;
   animation: newsCardBreathe 2.4s ease-in-out infinite !important;
 }
 
 .game-selector-item.is-selected {
-  border: 2.5px solid var(--game-border-color, rgba(62, 196, 192, 0.9)) !important;
-  box-shadow: 0 4px 14px var(--game-glow-color, rgba(62, 196, 192, 0.2)) !important;
+  border: 2.5px solid var(--game-border-color, rgba(160, 230, 255, 0.9)) !important;
+  box-shadow: 0 4px 14px var(--game-glow-color, rgba(90, 180, 220, 0.2)) !important;
 }
 
 .game-selector-item.is-selected:hover {
-  box-shadow: 0 0 0 2.5px var(--card-glow-color, rgba(62, 196, 192, 0.35)), 0 12px 28px var(--card-glow-color, rgba(62, 196, 192, 0.35)) !important;
+  box-shadow: 0 0 0 2.5px var(--card-glow-color, rgba(90, 180, 220, 0.35)), 0 12px 28px var(--card-glow-color, rgba(90, 180, 220, 0.35)) !important;
 }
 
 /* Settings RAM range slider track & thumb */
@@ -770,7 +770,7 @@ img, svg, a {
   height: 18px;
   border-radius: 50%;
   background: #ffffff;
-  border: 2px solid var(--settings-accent, #3ec4c0);
+  border: 2px solid var(--settings-accent, #295372);
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -786,7 +786,7 @@ img, svg, a {
   height: 18px;
   border-radius: 50%;
   background: #ffffff;
-  border: 2px solid var(--settings-accent, #3ec4c0);
+  border: 2px solid var(--settings-accent, #295372);
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -974,7 +974,7 @@ img, svg, a {
   bottom: 28px;
   right: 28px;
   background: #12181f;
-  border: 1.5px solid rgba(62, 196, 192, 0.5);
+  border: 1.5px solid rgba(130, 200, 230, 0.5);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75);
   border-radius: 14px;
   padding: 12px 22px;
@@ -990,7 +990,7 @@ img, svg, a {
 
 [data-theme="light"] .settings-live-toast {
   background: #ffffff;
-  border: 1.5px solid rgba(62, 196, 192, 0.75);
+  border: 1.5px solid rgba(130, 200, 230, 0.75);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.15);
   color: #111822;
 }

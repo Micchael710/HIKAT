@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import { ThemeMode } from "../types"
 import type { LauncherServer } from "../services/serverService"
-import { CANVAS_W, BASE_FONT } from "../theme/tokens"
+import { CANVAS_W, BASE_FONT, DEFAULT_BLUE_ACCENT } from "../theme/tokens"
 import { IconDownload, IconPause, IconResume } from "../theme/icons"
 import { useTranslation } from "../context/LanguageContext"
 import { parseFallbackAccent } from "../utils/dynamicAccent"
@@ -209,13 +209,13 @@ export default function DownloadsView({
   const queued = queueData.queued || []
   const hasContent = Boolean(active || queued.length > 0)
 
-  // Determine ambient accent color: active -> queued[0] -> default neutral (#3ec4c0)
+  // Determine ambient accent color: active -> queued[0] -> default neutral blue
   const activeServer = active ? servers.find((s) => s.id === active.gameId) : null
   const firstQueuedServer = !active && queued.length > 0 ? servers.find((s) => s.id === queued[0].gameId) : null
   const ambientTarget = activeServer || firstQueuedServer
   const ambientAccent = ambientTarget?.accentColor
     ? parseFallbackAccent(ambientTarget.accentColor)
-    : { r: 62, g: 196, b: 192, hex: "#3ec4c0", css: "62, 196, 192" }
+    : DEFAULT_BLUE_ACCENT
 
   const ambientR = ambientAccent.r
   const ambientG = ambientAccent.g

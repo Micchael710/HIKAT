@@ -469,12 +469,12 @@ describe("Launcher SettingsView Suite (Restructured Games Tab & Multi-Language)"
       <SettingsView theme="dark" setTheme={vi.fn()} onSidebarAccentChange={onSidebarAccentChangeMock} />,
     )
 
-    // Initially in General tab -> reports turquoise
+    // Initially in General tab -> reports default blue
     expect(onSidebarAccentChangeMock).toHaveBeenCalledWith({
-      r: 62,
-      g: 196,
-      b: 192,
-      css: "62, 196, 192",
+      r: 41,
+      g: 83,
+      b: 114,
+      css: "41, 83, 114",
     })
 
     // Switch to Juegos tab -> reports gameAccent

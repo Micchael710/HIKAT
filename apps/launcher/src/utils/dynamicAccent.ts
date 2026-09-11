@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { hexToRGB } from "../theme/tokens"
+import { hexToRGB, DEFAULT_BLUE_ACCENT, DEFAULT_ACCENT_HEX } from "../theme/tokens"
 
 export interface AccentColor {
   r: number
@@ -10,11 +10,11 @@ export interface AccentColor {
 }
 
 export const DEFAULT_NEUTRAL_ACCENT: AccentColor = {
-  r: 56,
-  g: 189,
-  b: 248,
-  hex: "#38bdf8",
-  css: "56, 189, 248",
+  r: DEFAULT_BLUE_ACCENT.r,
+  g: DEFAULT_BLUE_ACCENT.g,
+  b: DEFAULT_BLUE_ACCENT.b,
+  hex: DEFAULT_BLUE_ACCENT.hex,
+  css: DEFAULT_BLUE_ACCENT.css,
 }
 
 const accentCache = new Map<string, AccentColor>()
@@ -253,12 +253,12 @@ export function useDynamicAccent(
  * Resolves accent color for a server following the exact priority:
  * 1. server.accentColor (if valid)
  * 2. Accent dynamically extracted from logo (via useDynamicAccent)
- * 3. Fallback visual accent (default #3ec4c0)
+ * 3. Fallback visual accent (default #295372)
  */
 export function useServerAccent(
   accentColor?: string | null,
   logoUrl?: string | null,
-  fallbackHex: string = "#3ec4c0",
+  fallbackHex: string = DEFAULT_ACCENT_HEX,
 ): AccentColor {
   const hasValidAccent = Boolean(
     accentColor &&

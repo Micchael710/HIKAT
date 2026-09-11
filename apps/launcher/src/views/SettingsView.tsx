@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react"
 import { ThemeMode, SettingsTab } from "../types"
 import { IconMoon, IconSun } from "../theme/icons"
-import { CANVAS_W, BASE_FONT } from "../theme/tokens"
+import { CANVAS_W, BASE_FONT, DEFAULT_ACCENT_HEX, DEFAULT_ACCENT_RGB } from "../theme/tokens"
 import LauncherToggle from "../components/common/LauncherToggle"
 import LauncherSelect from "../components/common/LauncherSelect"
 import LiveToast from "../components/common/LiveToast"
@@ -214,7 +214,7 @@ export default function SettingsView({
 
   // Extract dynamic accent color from selected game: server.accentColor -> dynamic logo -> fallback
   const selectedGame = games.find((g) => g.id === selectedGameId) || games[0]
-  const gameAccent = useServerAccent(selectedGame?.accentColor, selectedGame?.logo, "#3ec4c0")
+  const gameAccent = useServerAccent(selectedGame?.accentColor, selectedGame?.logo, DEFAULT_ACCENT_HEX)
   const showGameSidebar = games.length > 1
 
   // Inform sidebar of current active accent for Settings (general vs selected game)
@@ -228,12 +228,7 @@ export default function SettingsView({
           css: gameAccent.css,
         })
       } else {
-        onSidebarAccentChange({
-          r: 62,
-          g: 196,
-          b: 192,
-          css: "62, 196, 192",
-        })
+        onSidebarAccentChange(DEFAULT_ACCENT_RGB)
       }
     }
   }, [activeTab, gameAccent.r, gameAccent.g, gameAccent.b, gameAccent.css, onSidebarAccentChange])
@@ -779,9 +774,9 @@ export default function SettingsView({
   const CONTENT_LEFT = 184
 
   /* Dynamic ambient RGB channels based on tab and gameAccent */
-  const ambientR = activeTab === "game" ? gameAccent.r : 62
-  const ambientG = activeTab === "game" ? gameAccent.g : 196
-  const ambientB = activeTab === "game" ? gameAccent.b : 192
+  const ambientR = activeTab === "game" ? gameAccent.r : DEFAULT_ACCENT_RGB.r
+  const ambientG = activeTab === "game" ? gameAccent.g : DEFAULT_ACCENT_RGB.g
+  const ambientB = activeTab === "game" ? gameAccent.b : DEFAULT_ACCENT_RGB.b
 
   /* Smooth delayed mouse-following parallax */
   const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })

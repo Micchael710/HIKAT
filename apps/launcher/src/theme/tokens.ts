@@ -16,9 +16,31 @@ export const DEFAULT_WINDOW_H = 720
 
 export const BASE_FONT = "Inter, sans-serif"
 
+export const DEFAULT_BLUE_ACCENT = {
+  hex: "#295372",
+  r: 41,
+  g: 83,
+  b: 114,
+  css: "41, 83, 114",
+  gradientNormal: "linear-gradient(135deg, #1c384e, #295372)",
+  gradientHover: "linear-gradient(135deg, #234764, #33678e)",
+  border: "rgba(130, 200, 230, 0.5)",
+  borderHover: "rgba(160, 230, 255, 0.9)",
+  glow: "rgba(90, 180, 220, 0.45)",
+} as const
+
+export const DEFAULT_ACCENT_HEX = DEFAULT_BLUE_ACCENT.hex
+export const DEFAULT_ACCENT_CSS = DEFAULT_BLUE_ACCENT.css
+export const DEFAULT_ACCENT_RGB = {
+  r: DEFAULT_BLUE_ACCENT.r,
+  g: DEFAULT_BLUE_ACCENT.g,
+  b: DEFAULT_BLUE_ACCENT.b,
+  css: DEFAULT_BLUE_ACCENT.css,
+} as const
+
 export function hexToRGB(hex: string) {
   if (!hex || !hex.startsWith("#") || hex.length < 7) {
-    return { r: 130, g: 188, b: 208, css: "130, 188, 208" }
+    return { r: 41, g: 83, b: 114, css: "41, 83, 114" }
   }
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
