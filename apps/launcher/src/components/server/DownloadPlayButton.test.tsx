@@ -2105,6 +2105,80 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(launchSpy).toHaveBeenCalled()
     })
 
+    it("6b. Verification: while startSync is pending with progress 100 stays VERIFYING; when resolved passes to PLAY immediately and checkGameManifest is NOT called", async () => {
+      let resolveSync!: (value: any) => void
+      const syncPromise = new Promise((resolve) => {
+        resolveSync = resolve
+      })
+
+      const checkManifestSpy = vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: false,
+        hasUpdate: false,
+        hasIntegrityIssue: true,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [
+          {
+            path: "mods/fix.jar",
+            sha256: "a".repeat(64),
+            sizeBytes: 100,
+            downloadUrl: "/dl/fix",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+
+      let progressCallback: ((data: any) => void) | null = null
+      window.electronAPI!.onGameSyncProgress = vi.fn((cb) => {
+        progressCallback = cb
+        return () => {}
+      })
+
+      vi.spyOn(gameService, "startSync").mockReturnValue(syncPromise as any)
+
+      const { container } = await mountButton()
+      // checkGameManifest called once on mount
+      expect(checkManifestSpy).toHaveBeenCalledTimes(1)
+
+      // Open quick options menu and click "Verificar instalación"
+      const optionsBtn = container.querySelector("button[title='Opciones del juego']") as HTMLElement
+      await act(async () => {
+        optionsBtn.click()
+      })
+      const verifyOption = Array.from(container.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Verificar instalación"),
+      )
+      await act(async () => {
+        verifyOption!.click()
+      })
+
+      // 1. Simulate progress reaching 100% while startSync is still pending
+      await act(async () => {
+        progressCallback?.({ progress: 100, speedMBs: 0, downloadedBytes: 100, totalBytes: 100 })
+      })
+
+      // It must remain in "Verificando" (VERIFYING) because startSync is still pending
+      expect(container.textContent).toMatch(/verificando|verifying/i)
+
+      // 2. When startSync resolves with success
+      await act(async () => {
+        resolveSync({ success: true })
+        await Promise.resolve()
+      })
+
+      // 3. Transitions immediately to PLAY
+      const playBtn = container.querySelector("button") as HTMLElement
+      expect(playBtn.textContent).toContain("JUGAR")
+
+      // 4. checkGameManifest was NOT called again upon completing verify
+      expect(checkManifestSpy).toHaveBeenCalledTimes(1)
+    })
+
     it("7. Successful release update resets integrity lock", async () => {
       let watcherCallback: any = null
       window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {
@@ -3516,8 +3590,7 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       // 3. Arrival of 1.1 during Verify does NOT start a concurrent sync
       expect(startSyncSpy).toHaveBeenCalledTimes(1)
 
-      // 4. Verify of 1.0 finishes; checkGameManifest now returns manifest1_1
-      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue(manifest1_1)
+      // 4. Verify of 1.0 finishes without calling checkGameManifest
       await act(async () => {
         resolveVerify?.({ success: true })
       })
@@ -3529,9 +3602,10 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
         "1.1.0",
         "1.21.1",
         "NEOFORGE",
-        undefined,
+        null,
         "21.1.65",
-        false
+        false,
+        []
       )
     })
 

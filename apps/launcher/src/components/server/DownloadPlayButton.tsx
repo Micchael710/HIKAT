@@ -1676,50 +1676,68 @@ export default function DownloadPlayButton({
           setStatus("paused")
           return
         }
-        const verified = await gameService.checkGameManifest(activeServerId, {
-          allowLegacyLocalFilesystem: isLocalAllowed,
-          gameContext: effectiveGameContext,
-        })
 
-        if (verified) {
-          latestManifestVersionRef.current = verified.version
-          setManifest(verified)
-        }
-
-        const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
-        const hasUpdate = Boolean(
-          verified?.installedModpackVersion &&
-          verified?.installedModpackVersion !== verified?.version
+        const isSuccess = Boolean(
+          res?.success || res === true || (res && typeof res === "object" && !res.error && res.success !== false),
         )
 
-        if (verified?.installed && !hasUpdate && !verified?.hasIntegrityIssue) {
+        if (isSuccess) {
+          const verifiedVersion = manifest.version
           isIntegrityBlockedRef.current = false
           onClearIntegrityDirty?.()
-          if (verified.version) {
-            onInstalledVersionChange?.(verified.version)
+          if (verifiedVersion) {
+            onInstalledVersionChange?.(verifiedVersion)
           }
           gameService.setGameInstalled(true, gameContext?.gameId)
-          setStatus("play")
+          markSyncedVersionInstalled(verifiedVersion)
           verifySuccess = true
-          showToast(t("playButton.verifySuccess"), "success")
-        } else if (hasUpdate && verified?.clientFiles && verified.clientFiles.length > 0) {
-          isIntegrityBlockedRef.current = false
-          onClearIntegrityDirty?.()
-          if (verified.installedModpackVersion) {
-            onInstalledVersionChange?.(verified.installedModpackVersion)
-          }
-          verifySuccess = true
-          if (autoUpdatesEnabled) {
+
+          const currentLatestManifest = manifestRef.current || manifest
+          const hasNewerRelease = Boolean(
+            latestManifestVersionRef.current &&
+            latestManifestVersionRef.current !== verifiedVersion
+          )
+          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+          const isGameBusy = statusRef.current === "launching" || statusRef.current === "running"
+
+          if (hasNewerRelease) {
+            if (
+              autoUpdatesEnabled &&
+              currentLatestManifest &&
+              currentLatestManifest.version === latestManifestVersionRef.current &&
+              Array.isArray(currentLatestManifest.clientFiles) &&
+              !isGameBusy
+            ) {
+              showToast(t("playButton.verifySuccess"), "success")
+              const nextManifest: GameManifest = {
+                ...currentLatestManifest,
+                installedModpackVersion: verifiedVersion,
+                hasUpdate: true,
+                hasExistingInstall: true,
+                hasIntegrityIssue: false,
+              }
+              setManifest(nextManifest)
+              if (syncOpIdRef.current === syncOpId) {
+                isStartingSyncRef.current = false
+              }
+              triggerSync(nextManifest)
+              return
+            } else {
+              if (syncOpIdRef.current === syncOpId) {
+                isStartingSyncRef.current = false
+              }
+              setStatus("update")
+            }
+          } else {
             if (syncOpIdRef.current === syncOpId) {
               isStartingSyncRef.current = false
             }
-            triggerSync(verified)
-          } else {
-            setStatus("update")
+            setStatus("play")
+            showToast(t("playButton.verifySuccess"), "success")
           }
         } else {
           gameService.setGameInstalled(false, gameContext?.gameId)
-          setStatus(isLocalAllowed ? resolveIdleGameButtonState(verified, activeServerId) : "unavailable")
+          setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest, activeServerId) : "unavailable")
           showToast(t("playButton.verifyError"), "error")
         }
       })
