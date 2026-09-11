@@ -32,7 +32,7 @@ import {
 } from "../services/capeService"
 import { authService } from "../services/authService"
 import { serverService, LauncherServer } from "../services/serverService"
-import { gameService, ReleaseActivatedEvent } from "../services/gameService"
+import { gameService, ReleaseActivatedEvent, GameButtonState } from "../services/gameService"
 
 export function useLauncherState() {
   const [screen, setScreen] = useState<LauncherScreen>("login")
@@ -92,6 +92,7 @@ export function useLauncherState() {
       const list = await serverService.getLauncherServers()
       setServers(list)
       if (list.length > 0) {
+        void gameService.initializeServersLightweight(list)
         setSelectedGameIdState((current) => {
           if (current && list.some((s) => s.id === current)) {
             return current
@@ -128,6 +129,9 @@ export function useLauncherState() {
     const unsubscribe = gameService.subscribeReleaseEvents((event) => {
       if (event.type === "RELEASE_ACTIVATED") {
         setLastReleaseEvent(event)
+        if (event.serverId) {
+          void gameService.handleReleaseActivatedEvent(event)
+        }
         void loadServers()
         return
       }
@@ -139,6 +143,120 @@ export function useLauncherState() {
 
     return unsubscribe
   }, [screen, loadServers])
+
+  // Global event listeners to maintain server state even when Home is unmounted
+  useEffect(() => {
+    const unsubIntegrity = window.electronAPI?.onGameFileIntegrityChanged?.((data: any) => {
+      const gameId = data?.gameId || null
+      gameService.setServerIntegrityDirty(gameId, true)
+    })
+
+    const unsubLaunch = window.electronAPI?.onLaunchStatus?.((status: any, details: any) => {
+      const gameId = details?.gameId || details?.runningGameId || null
+      if (!gameId) return
+      if (status === "preparing") {
+        gameService.setServerState(gameId, { status: "launching" })
+      } else if (status === "running") {
+        gameService.setServerState(gameId, { status: "running" })
+      } else if (status === "idle") {
+        const cached = gameService.getServerState(gameId)
+        if (cached && (cached.status === "launching" || cached.status === "running")) {
+          const isInstalled = gameService.isGameInstalled(gameId)
+          const installedVersion = gameService.getInstalledModpackVersion(gameId)
+          const hasUpdate = Boolean(
+            cached.manifest?.version &&
+            installedVersion &&
+            installedVersion !== cached.manifest.version
+          )
+          gameService.setServerState(gameId, {
+            status: isInstalled ? (hasUpdate ? "update" : "play") : "download",
+          })
+        }
+      }
+    })
+
+    const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string, eventGameId?: string | null, underlyingPhase?: string | null) => {
+      if (!eventGameId) return
+      if (phase === "PAUSED") {
+        gameService.setServerState(eventGameId, {
+          status: "paused",
+          pausedPhase: underlyingPhase === "INSTALLING" ? "installing" : "downloading",
+          currentPhase: underlyingPhase || "DOWNLOADING",
+        })
+      } else if (phase === "DOWNLOADING") {
+        gameService.setServerState(eventGameId, {
+          status: "downloading",
+          currentPhase: "DOWNLOADING",
+          pausedPhase: "downloading",
+        })
+      } else if (phase === "INSTALLING") {
+        gameService.setServerState(eventGameId, {
+          status: "installing",
+          currentPhase: "INSTALLING",
+          pausedPhase: "installing",
+        })
+      } else if (phase === "VERIFYING") {
+        gameService.setServerState(eventGameId, {
+          status: "verifying",
+          currentPhase: "VERIFYING",
+        })
+      } else if (phase === "IDLE") {
+        const isInstalled = gameService.isGameInstalled(eventGameId)
+        gameService.setServerState(eventGameId, {
+          status: isInstalled ? "play" : "download",
+          currentPhase: null,
+          progress: 0,
+        })
+      }
+    })
+
+    const unsubQueue = window.electronAPI?.onDownloadQueueChanged?.((snap: any) => {
+      if (!snap || typeof snap !== "object") return
+      if (snap.active?.gameId) {
+        const gId = snap.active.gameId
+        const isPaused = Boolean(
+          snap.active.state === "PAUSED" ||
+          snap.active.isPaused ||
+          snap.active.phase === "PAUSED"
+        )
+        const opPhase = snap.active.phase
+        let s: GameButtonState = "downloading"
+        if (isPaused) s = "paused"
+        else if (opPhase === "INSTALLING") s = "installing"
+        else if (opPhase === "VERIFYING") s = "verifying"
+
+        gameService.setServerState(gId, {
+          status: s,
+          currentPhase: opPhase || null,
+          pausedPhase: opPhase === "INSTALLING" ? "installing" : "downloading",
+          progress: typeof snap.active.progress === "number" ? snap.active.progress : 0,
+          speed: typeof snap.active.speedMBs === "number" ? snap.active.speedMBs : 0,
+          downloadedBytes: typeof snap.active.downloadedBytes === "number" ? snap.active.downloadedBytes : 0,
+          totalBytes: typeof snap.active.totalBytes === "number" && snap.active.totalBytes > 0 ? snap.active.totalBytes : 0,
+          timeRemainingMin: typeof snap.active.remainingMinutes === "number" ? snap.active.remainingMinutes : 0,
+          canPause: snap.active.canPause,
+          canCancel: snap.active.canCancel,
+          isCommitting: snap.active.isCommitting,
+        })
+      }
+      if (Array.isArray(snap.queued)) {
+        for (const q of snap.queued) {
+          if (q?.gameId) {
+            gameService.setServerState(q.gameId, {
+              status: "queued",
+            })
+          }
+        }
+      }
+    })
+
+    return () => {
+      unsubIntegrity?.()
+      unsubLaunch?.()
+      unsubPhase?.()
+      unsubQueue?.()
+    }
+  }, [])
 
   // Computed selected server
   const selectedServer = useMemo(() => {
