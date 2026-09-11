@@ -21,6 +21,7 @@ import {
   applyStagingToInstance,
   getStagingPaths,
   getDeterministicStagingFileName,
+  quickCheckProtectedIntegrity,
   // @ts-expect-error CJS module without declaration
 } from "../../electron/client-files-sync.cjs"
 
@@ -1975,6 +1976,142 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
       gameName: "Server Alpha",
     })
     expect(state.integrityDirty).toBe(false)
+  })
+
+  // 41. carpeta NO_MODIFICABLE con archivo extra -> integrityDirty=true
+  it("41. startup quick check: carpeta NO_MODIFICABLE con archivo extra -> integrityDirty=true", async () => {
+    const getInstalledStateHandler = ipcHandlers.get("game-get-installed-state")!
+    const modsDir = path.join(instanceRootA, "mods")
+    await fsp.mkdir(modsDir, { recursive: true })
+    await fsp.writeFile(path.join(modsDir, "legit.jar"), "legit")
+    await fsp.writeFile(path.join(modsDir, "cheat.jar"), "cheat")
+
+    await saveInstalledManifest(instanceRootA, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      files: {
+        "mods/legit.jar": {
+          sizeBytes: 5,
+          policy: "NO_MODIFICABLE",
+        },
+      },
+    })
+
+    const state = await getInstalledStateHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+    })
+    expect(state.integrityDirty).toBe(true)
+  })
+
+  // 42. carpeta NO_MODIFICABLE con subcarpeta/archivo autorizado -> integrityDirty=false
+  it("42. startup quick check: carpeta NO_MODIFICABLE con subcarpeta/archivo autorizado -> integrityDirty=false", async () => {
+    const getInstalledStateHandler = ipcHandlers.get("game-get-installed-state")!
+    const subDir = path.join(instanceRootA, "mods", "subfolder")
+    await fsp.mkdir(subDir, { recursive: true })
+    await fsp.writeFile(path.join(subDir, "mod.jar"), "1234567890")
+
+    await saveInstalledManifest(instanceRootA, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [{ path: "mods", policy: "NO_MODIFICABLE" }],
+      files: {
+        "mods/subfolder/mod.jar": {
+          sizeBytes: 10,
+          policy: "NO_MODIFICABLE",
+        },
+      },
+    })
+
+    const state = await getInstalledStateHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+    })
+    expect(state.integrityDirty).toBe(false)
+  })
+
+  // 43. carpeta padre NO_MODIFICABLE pero subcarpeta MODIFICABLE con archivo extra -> integrityDirty=false
+  it("43. startup quick check: carpeta padre NO_MODIFICABLE pero subcarpeta MODIFICABLE con archivo extra -> integrityDirty=false", async () => {
+    const getInstalledStateHandler = ipcHandlers.get("game-get-installed-state")!
+    const modsDir = path.join(instanceRootA, "mods")
+    const configDir = path.join(modsDir, "config")
+    await fsp.mkdir(configDir, { recursive: true })
+    await fsp.writeFile(path.join(modsDir, "allowed.jar"), "12345")
+    await fsp.writeFile(path.join(configDir, "extra_user_file.txt"), "custom player content")
+
+    await saveInstalledManifest(instanceRootA, {
+      modpackVersion: "1.0.0",
+      directoryPolicies: [
+        { path: "mods", policy: "NO_MODIFICABLE" },
+        { path: "mods/config", policy: "MODIFICABLE" },
+      ],
+      files: {
+        "mods/allowed.jar": {
+          sizeBytes: 5,
+          policy: "NO_MODIFICABLE",
+        },
+      },
+    })
+
+    const state = await getInstalledStateHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+    })
+    expect(state.integrityDirty).toBe(false)
+  })
+
+  // 44. manifest antiguo sin sizeBytes: archivo existente correcto -> integrityDirty=false
+  it("44. startup quick check: manifest antiguo sin sizeBytes: archivo existente correcto -> integrityDirty=false", async () => {
+    const getInstalledStateHandler = ipcHandlers.get("game-get-installed-state")!
+    const oldFile = path.join(instanceRootA, "mods", "legacy-mod.jar")
+    await fsp.mkdir(path.dirname(oldFile), { recursive: true })
+    await fsp.writeFile(oldFile, "arbitrary content without size recorded")
+
+    // Manifest antiguo: no tiene sizeBytes ni size
+    await saveInstalledManifest(instanceRootA, {
+      modpackVersion: "1.0.0",
+      files: {
+        "mods/legacy-mod.jar": {
+          officialSha256: "some_sha_256",
+          policy: "NO_MODIFICABLE",
+        },
+      },
+    })
+
+    const state = await getInstalledStateHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+    })
+    expect(state.integrityDirty).toBe(false)
+  })
+
+  // 45. bootstrap sigue sin ejecutar checkSyncPlan ni hashes
+  it("45. bootstrap sigue sin ejecutar checkSyncPlan ni hashes durante comprobacion rapida de inicio", async () => {
+    const getInstalledStateHandler = ipcHandlers.get("game-get-installed-state")!
+    const testFile = path.join(instanceRootA, "mods", "quick.jar")
+    await fsp.mkdir(path.dirname(testFile), { recursive: true })
+    await fsp.writeFile(testFile, "fast_startup")
+
+    await saveInstalledManifest(instanceRootA, {
+      modpackVersion: "1.0.0",
+      files: {
+        "mods/quick.jar": {
+          officialSha256: "unhashed_dummy_official_sha",
+          sizeBytes: 12,
+          policy: "NO_MODIFICABLE",
+        },
+      },
+    })
+
+    const startTime = Date.now()
+    const state = await getInstalledStateHandler({}, {
+      gameId: "server-a",
+      gameName: "Server Alpha",
+    })
+    const elapsed = Date.now() - startTime
+
+    expect(state.installedModpackVersion).toBe("1.0.0")
+    expect(state.integrityDirty).toBe(false)
+    expect(elapsed).toBeLessThan(200)
   })
 })
 

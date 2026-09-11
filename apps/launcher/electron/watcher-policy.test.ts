@@ -115,7 +115,7 @@ describe("Launcher Watcher Policy Resolution", () => {
     expect(resolveWatcherDecision("resourcepacks/custom_pack.zip", directoryPolicies, installedFiles)).toBe("IGNORE")
   })
 
-  it("5. fallback ENFORCED_DIRECTORIES cuando no hay directoryPolicies ni entrada en manifest", () => {
+  it("5. carpeta mods sin política -> watcher NO la considera protegida automáticamente (no hardcoded fallback)", () => {
     const legacyInstalledFiles = {
       "config/options.txt": {
         officialSha256: "abc",
@@ -123,10 +123,40 @@ describe("Launcher Watcher Policy Resolution", () => {
       },
     }
 
-    // Sin directoryPolicies
-    expect(resolveWatcherDecision("mods", [], legacyInstalledFiles)).toBe("EMIT")
-    expect(resolveWatcherDecision("mods/extra.jar", [], legacyInstalledFiles)).toBe("EMIT")
-    expect(resolveWatcherDecision("shaderpacks", [], legacyInstalledFiles)).toBe("EMIT")
+    // Sin directoryPolicies para mods
+    expect(resolveWatcherDecision("mods", [], legacyInstalledFiles)).toBe("IGNORE")
+    expect(resolveWatcherDecision("mods/extra.jar", [], legacyInstalledFiles)).toBe("IGNORE")
+    expect(resolveWatcherDecision("shaderpacks", [], legacyInstalledFiles)).toBe("IGNORE")
     expect(resolveWatcherDecision("untracked_dir/some.txt", [], legacyInstalledFiles)).toBe("IGNORE")
+  })
+
+  it("6. carpeta mods MODIFICABLE -> watcher ignora cambios", () => {
+    const directoryPolicies = [
+      { path: "mods", policy: "MODIFICABLE" },
+    ]
+    const installedFiles = {
+      "mods": { policy: "MODIFICABLE" },
+      "mods/extra.jar": { policy: "MODIFICABLE" },
+    }
+
+    expect(resolveWatcherDecision("mods", directoryPolicies, installedFiles)).toBe("IGNORE")
+    expect(resolveWatcherDecision("mods/extra.jar", directoryPolicies, installedFiles)).toBe("IGNORE")
+    expect(resolveWatcherDecision("mods/new_mod.jar", directoryPolicies, installedFiles)).toBe("IGNORE")
+  })
+
+  it("7. carpeta mods NO_MODIFICABLE -> watcher detecta cambios", () => {
+    const directoryPolicies = [
+      { path: "mods", policy: "NO_MODIFICABLE" },
+    ]
+    const installedFiles = {
+      "mods": { policy: "NO_MODIFICABLE" },
+      "mods/base.jar": { policy: "NO_MODIFICABLE", officialSha256: "123" },
+    }
+
+    // Borrado de carpeta
+    expect(resolveWatcherDecision("mods", directoryPolicies, installedFiles)).toBe("EMIT")
+    // Archivo no registrado o modificado dentro de carpeta NO_MODIFICABLE
+    expect(resolveWatcherDecision("mods/extra.jar", directoryPolicies, installedFiles)).toBe("EMIT")
+    expect(resolveWatcherDecision("mods/base.jar", directoryPolicies, installedFiles)).toBe("EMIT")
   })
 })

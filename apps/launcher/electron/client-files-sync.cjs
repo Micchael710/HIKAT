@@ -396,16 +396,53 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
     return null
   }
 
-  // 1. Check explicit NO_MODIFICABLE directory policies
+  const authorizedFiles = new Set()
+  const authorizedDirs = new Set()
+  const noModifiableDirs = new Set()
+
   for (const dp of directoryPolicies) {
-    if (!dp || !dp.path) continue
-    const policy = dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE"
-    if (policy !== "NO_MODIFICABLE") continue
+    if (!dp?.path) continue
+    const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+    if (!dNorm || dNorm === ".") continue
+    authorizedDirs.add(dNorm)
+    const parts = dNorm.split("/")
+    for (let i = 1; i < parts.length; i++) {
+      authorizedDirs.add(parts.slice(0, i).join("/"))
+    }
+    if (getEffectivePolicy(dNorm) === "NO_MODIFICABLE") {
+      noModifiableDirs.add(dNorm)
+    }
+  }
 
-    const relPath = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-    if (!relPath) continue
+  for (const [relPathRaw, item] of Object.entries(files)) {
+    if (!relPathRaw) continue
+    const norm = String(relPathRaw).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+    if (!norm || norm === ".") continue
 
-    const fullPath = path.join(instanceRoot, relPath)
+    const isExplicitDir = Boolean(
+      item &&
+      typeof item === "object" &&
+      (item.isDirectory === true || (!item.officialSha256 && !item.sha256 && item.sizeBytes === undefined && item.size === undefined))
+    )
+
+    if (isExplicitDir) {
+      authorizedDirs.add(norm)
+      if (getEffectivePolicy(norm) === "NO_MODIFICABLE") {
+        noModifiableDirs.add(norm)
+      }
+    } else {
+      authorizedFiles.add(norm)
+    }
+
+    const parts = norm.split("/")
+    for (let i = 1; i < parts.length; i++) {
+      authorizedDirs.add(parts.slice(0, i).join("/"))
+    }
+  }
+
+  // 1. Check explicit NO_MODIFICABLE directory policies
+  for (const dirRelPath of noModifiableDirs) {
+    const fullPath = path.join(instanceRoot, dirRelPath)
     try {
       if (!fs.existsSync(fullPath)) {
         return true
@@ -423,7 +460,7 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
   for (const [relPathRaw, item] of Object.entries(files)) {
     if (!relPathRaw) continue
     const norm = String(relPathRaw).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-    if (!norm) continue
+    if (!norm || norm === ".") continue
 
     const effectivePolicy = getEffectivePolicy(norm)
     if (effectivePolicy !== "NO_MODIFICABLE") {
@@ -432,20 +469,18 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
 
     const fullPath = path.join(instanceRoot, norm)
 
-    const isDirEntry = Boolean(
-      item &&
-      typeof item === "object" &&
-      !item.officialSha256 &&
-      !item.sha256 &&
-      (item.isDirectory || (item.sizeBytes === undefined && item.size === undefined))
-    )
-
     try {
       if (!fs.existsSync(fullPath)) {
         return true
       }
       const stat = await fsp.stat(fullPath)
-      if (isDirEntry) {
+      const isExplicitDir = Boolean(
+        item &&
+        typeof item === "object" &&
+        (item.isDirectory === true || (!item.officialSha256 && !item.sha256 && item.sizeBytes === undefined && item.size === undefined && stat.isDirectory()))
+      )
+
+      if (isExplicitDir) {
         if (!stat.isDirectory()) {
           return true
         }
@@ -463,6 +498,61 @@ async function quickCheckProtectedIntegrity(instanceRoot, installedManifest) {
     } catch (_) {
       return true
     }
+  }
+
+  // 3. Scan NO_MODIFICABLE directories recursively for extra/unauthorized content
+  const scannedDirs = new Set()
+
+  async function scanNoModifiableDir(dirRelPath) {
+    if (scannedDirs.has(dirRelPath)) return false
+    scannedDirs.add(dirRelPath)
+
+    const fullDirPath = path.join(instanceRoot, dirRelPath)
+    let entries
+    try {
+      entries = await fsp.readdir(fullDirPath, { withFileTypes: true })
+    } catch (_) {
+      return true
+    }
+
+    for (const entry of entries) {
+      const childRelPath = `${dirRelPath}/${entry.name}`
+      const childPolicy = getEffectivePolicy(childRelPath)
+
+      // If this child (subfolder or file) has an explicit MODIFICABLE policy, respect it and allow
+      if (childPolicy === "MODIFICABLE") {
+        continue
+      }
+
+      let isDirectory = entry.isDirectory()
+      let isFile = entry.isFile()
+      if (entry.isSymbolicLink()) {
+        try {
+          const s = await fsp.stat(path.join(fullDirPath, entry.name))
+          isDirectory = s.isDirectory()
+          isFile = s.isFile()
+        } catch (_) {}
+      }
+
+      if (isDirectory) {
+        if (!authorizedDirs.has(childRelPath)) {
+          return true // unauthorized subfolder!
+        }
+        const subDirty = await scanNoModifiableDir(childRelPath)
+        if (subDirty) return true
+      } else if (isFile) {
+        if (!authorizedFiles.has(childRelPath)) {
+          return true // unauthorized extra file!
+        }
+      }
+    }
+
+    return false
+  }
+
+  for (const dirRelPath of noModifiableDirs) {
+    const dirty = await scanNoModifiableDir(dirRelPath)
+    if (dirty) return true
   }
 
   return false
@@ -498,33 +588,66 @@ function resolveWatcherDecision(
   let exactPolicy = null
   let isManifestDir = false
 
+  let item = null
   if (installedManifestFiles instanceof Map) {
     if (installedManifestFiles.has(norm)) {
-      const item = installedManifestFiles.get(norm)
-      exactPolicy = item?.policy || item
-      if (item && typeof item === "object" && !item.officialSha256) {
-        isManifestDir = true
-      }
+      item = installedManifestFiles.get(norm)
     }
   } else if (Object.prototype.hasOwnProperty.call(installedManifestFiles, norm)) {
-    const item = installedManifestFiles[norm]
-    exactPolicy = item?.policy || item
-    if (item && typeof item === "object" && !item.officialSha256) {
+    item = installedManifestFiles[norm]
+  }
+
+  if (item) {
+    exactPolicy = item?.policy || (typeof item === "string" ? item : null)
+    const isFile = Boolean(
+      item &&
+      typeof item === "object" &&
+      (item.officialSha256 || item.sha256 || typeof item.sizeBytes === "number" || typeof item.size === "number" || item.isDirectory === false)
+    )
+    if (!isFile && typeof item === "object") {
       isManifestDir = true
     }
   }
 
   // If it's a directory container event:
-  if (isDirectory || isManifestDir) {
-    const fullPath = instanceRoot ? path.join(instanceRoot, norm) : null
-    const dirStillExists = fullPath ? fs.existsSync(fullPath) : false
+  const fullPath = instanceRoot ? path.join(instanceRoot, norm) : null
+  let onDiskIsDir = false
+  let onDiskExists = false
+  if (fullPath) {
+    try {
+      if (fs.existsSync(fullPath)) {
+        onDiskExists = true
+        onDiskIsDir = fs.statSync(fullPath).isDirectory()
+      }
+    } catch (_) {}
+  }
 
-    if (dirStillExists) {
+  const isDirEvent = isDirectory || isManifestDir || (onDiskExists && onDiskIsDir)
+
+  if (isDirEvent && (!onDiskExists || onDiskIsDir)) {
+    if (onDiskExists && onDiskIsDir) {
       // Container directory modified because a child inside changed -> ignore container, child event decides
       return "IGNORE"
     } else {
       // Whole directory was deleted or checked without existing path
-      const effectiveDirPolicy = dirExplicitPolicy || exactPolicy || "NO_MODIFICABLE"
+      let effectiveDirPolicy = dirExplicitPolicy || exactPolicy
+      if (!effectiveDirPolicy) {
+        if (Array.isArray(directoryPolicies) && directoryPolicies.length > 0) {
+          const dirMap = new Map()
+          for (const dp of directoryPolicies) {
+            if (dp && dp.path) {
+              const dNorm = String(dp.path).trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+              if (dNorm) {
+                dirMap.set(dNorm, dp.policy === "MODIFICABLE" ? "MODIFICABLE" : "NO_MODIFICABLE")
+              }
+            }
+          }
+          effectiveDirPolicy = resolvePathPolicy(norm, dirMap)
+        }
+        if (!effectiveDirPolicy) {
+          effectiveDirPolicy = resolvePathPolicy(norm, installedManifestFiles)
+        }
+      }
       return effectiveDirPolicy === "NO_MODIFICABLE" ? "EMIT" : "IGNORE"
     }
   }
@@ -560,18 +683,6 @@ function resolveWatcherDecision(
     return "IGNORE"
   }
   if (dirPolicy === "NO_MODIFICABLE") {
-    return "EMIT"
-  }
-
-  // 5. Fallback to ENFORCED_DIRECTORIES
-  const enforcedDirs = Array.isArray(ENFORCED_DIRECTORIES)
-    ? ENFORCED_DIRECTORIES
-    : ["mods", "resourcepacks", "shaderpacks", "kubejs", "scripts"]
-  const isEnforcedDir = enforcedDirs.some(
-    (dir) => norm === dir || norm.startsWith(`${dir}/`),
-  )
-
-  if (isEnforcedDir) {
     return "EMIT"
   }
 
