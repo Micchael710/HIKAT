@@ -788,6 +788,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0024_users_display_name_unique_idx.sql",
       "0025_servers_multiserver_architecture.sql",
       "0026_game_releases_single_draft_per_server.sql",
+      "0027_users_display_name_immutable.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
