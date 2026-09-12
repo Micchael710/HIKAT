@@ -504,7 +504,7 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
       expect(subscriber2Events[0].version).toBe("1.2.0")
       expect(subscriber3Events[0].version).toBe("1.2.0")
 
-      // 5. Emit SERVER_UPDATED -> all 3 subscribers receive it
+      // 5. Emit SERVER_UPDATED and SERVER_STATUS_CHANGED -> all 3 subscribers receive it
       lastWs.onmessage?.({
         data: JSON.stringify({
           type: "SERVER_UPDATED",
@@ -512,9 +512,23 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
         }),
       })
 
-      expect(subscriber1Events).toHaveLength(2)
-      expect(subscriber2Events).toHaveLength(2)
-      expect(subscriber3Events).toHaveLength(2)
+      lastWs.onmessage?.({
+        data: JSON.stringify({
+          type: "SERVER_STATUS_CHANGED",
+          serverId: "warria",
+          status: "ONLINE",
+        }),
+      })
+
+      expect(subscriber1Events).toHaveLength(3)
+      expect(subscriber2Events).toHaveLength(3)
+      expect(subscriber3Events).toHaveLength(3)
+      expect(subscriber1Events[2]).toEqual({
+        type: "SERVER_STATUS_CHANGED",
+        serverId: "warria",
+        status: "ONLINE",
+      })
+      expect(wsInstanceCount).toBe(1) // Still strictly only 1 WebSocket!
 
       // 6. Unsubscribe 1 & 2 -> WebSocket stays open for subscriber 3!
       unsub1()

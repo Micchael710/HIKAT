@@ -44,6 +44,7 @@ export type LauncherGameState = {
   publishedModpack: PublishedModpack | null
   installedVersion: string | null
   integrityDirty: boolean
+  serverStatus?: string | null
 }
 
 export function useLauncherState() {
@@ -476,6 +477,22 @@ export function useLauncherState() {
 
       if (event.type === "COSMETICS_UPDATED") {
         void refreshCosmeticsSnapshot()
+        return
+      }
+
+      if (event.type === "SERVER_STATUS_CHANGED") {
+        if (event.serverId) {
+          setGameStates((prev) => {
+            const cur = prev[event.serverId]
+            return {
+              ...prev,
+              [event.serverId]: {
+                ...cur,
+                serverStatus: event.status,
+              },
+            }
+          })
+        }
         return
       }
     })

@@ -665,7 +665,73 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     unmount()
   })
+
+  it("Test 15 — SERVER_STATUS_CHANGED event updates serverStatus in gameStates for correct serverId", async () => {
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
+
+    let releaseEventListener: any = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+      releaseEventListener = cb
+      return () => {}
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      authCallback(
+        {
+          user: {
+            id: "u-test",
+            displayName: "TestUser",
+            email: "test@example.com",
+            role: "PLAYER",
+          },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.screen).toBe("home")
+    expect(releaseEventListener).toBeDefined()
+
+    // Simulate SERVER_STATUS_CHANGED event arriving from WebSocket
+    await act(async () => {
+      releaseEventListener?.({
+        type: "SERVER_STATUS_CHANGED",
+        serverId: "srv-mc-101",
+        status: "ONLINE",
+      })
+    })
+
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
+
+    // Another event for srv-mc-102
+    await act(async () => {
+      releaseEventListener?.({
+        type: "SERVER_STATUS_CHANGED",
+        serverId: "srv-mc-102",
+        status: "OFFLINE",
+      })
+    })
+
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
+    expect(result.current.gameStates["srv-mc-102"]?.serverStatus).toBe("OFFLINE")
+
+    unmount()
+  })
 })
+
+
 
 
 

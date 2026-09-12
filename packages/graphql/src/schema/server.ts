@@ -447,11 +447,25 @@ export const serverTypeDefs = /* GraphQL */ `
     accentColor: String!
   }
 
+  """
+  Lightweight live Minecraft server ping for launcher Home
+  """
+  type LauncherServerPing {
+    latencyMs: Int!
+    playersOnline: Int!
+    maxPlayers: Int!
+  }
+
   extend type Query {
     """
     Public query discovering all available servers with active releases for Launcher
     """
     launcherServers: [LauncherServer!]!
+
+    """
+    Lightweight Minecraft server list ping for launcher Home
+    """
+    launcherServerPing(serverId: ID!): LauncherServerPing
 
     """
     Lists all servers - requires ADMIN role

@@ -75,10 +75,17 @@ export interface CosmeticsUpdatedEvent {
   target?: "SKINS" | "CAPES" | "ALL"
 }
 
+export interface ServerStatusChangedEvent {
+  type: "SERVER_STATUS_CHANGED"
+  serverId: string
+  status: "ONLINE" | "STARTING" | "STOPPING" | "OFFLINE" | "DISCONNECTED" | "UNKNOWN"
+}
+
 export type LauncherEvent =
   | ReleaseActivatedEvent
   | ServerUpdatedEvent
   | CosmeticsUpdatedEvent
+  | ServerStatusChangedEvent
 
 const releaseEventListeners = new Set<(event: LauncherEvent) => void>()
 let sharedReleaseSocket: WebSocket | null = null
@@ -113,7 +120,8 @@ function connectSharedReleaseSocket() {
           data &&
           (data.type === "RELEASE_ACTIVATED" ||
             data.type === "SERVER_UPDATED" ||
-            data.type === "COSMETICS_UPDATED")
+            data.type === "COSMETICS_UPDATED" ||
+            data.type === "SERVER_STATUS_CHANGED")
         ) {
           for (const listener of [...releaseEventListeners]) {
             try {

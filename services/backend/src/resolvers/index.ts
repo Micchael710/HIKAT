@@ -94,6 +94,7 @@ import type {
   ServerReleaseSyncResultGql,
   ServerGql,
   LauncherServerGql,
+  LauncherServerPingGql,
   CreateServerInputGql,
   UpdateServerBrandingInputGql,
 } from "@hikat/graphql"
@@ -111,11 +112,13 @@ import {
   getServers,
   getServerById,
   getLauncherServers,
+  getLauncherServerPing,
   createServer,
   updateServerBranding,
   deleteServer,
   getServerNodeCapacity,
 } from "../services/serverService"
+import { ensureServerStatusWatcher } from "../services/pterodactyl/serverStatusWatcher"
 import {
   getPublicNewsFeed,
   getPublicNewsById,
@@ -826,7 +829,23 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return getLauncherServers(context.db, context.env, context.request)
+      const servers = await getLauncherServers(context.db, context.env, context.request)
+      for (const s of servers) {
+        void ensureServerStatusWatcher(context.env, s.id, context.db).catch(() => {})
+      }
+      return servers
+    },
+
+    launcherServerPing: async (
+      _parent: unknown,
+      args: { serverId: string },
+      context: BackendGraphQLContext,
+    ): Promise<LauncherServerPingGql | null> => {
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      void ensureServerStatusWatcher(context.env, args.serverId, context.db).catch(() => {})
+      return getLauncherServerPing(context.env, context.db, args.serverId)
     },
 
     publishedModpack: async (

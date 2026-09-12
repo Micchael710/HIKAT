@@ -12,6 +12,7 @@ interface ServerStatsGridProps {
   serverId?: string | null
   serverName?: string
   resolvedAccent?: AccentColor
+  serverStatus?: string | null
 }
 
 export default function ServerStatsGrid({
@@ -21,10 +22,17 @@ export default function ServerStatsGrid({
   serverId,
   serverName: propServerName,
   resolvedAccent,
+  serverStatus,
 }: ServerStatsGridProps) {
   const { t } = useTranslation()
   const isDark = theme === "dark"
   const cacheKey = serverId ? `hikat_cached_server_status_${serverId}` : null
+
+  const [livePing, setLivePing] = useState<{
+    playersOnline: number
+    maxPlayers: number
+    latencyMs: number
+  } | null>(null)
 
   const [serverData, setServerData] = useState<{
     online: boolean
@@ -78,8 +86,60 @@ export default function ServerStatsGrid({
     }
   })
 
+  const hasPropStatus = serverStatus !== undefined
+  const isOnlineFromProp = hasPropStatus && serverStatus?.toUpperCase() === "ONLINE"
+  const isOnlineFromStats = stats
+    ? stats.status === "online" || (stats.playersOnline !== undefined && stats.playersOnline > 0)
+    : false
+  const isOnline = hasPropStatus
+    ? isOnlineFromProp
+    : stats
+      ? isOnlineFromStats
+      : serverData.online
+
+  // Ping polling effect: runs only while isActive && isOnline && serverId
   useEffect(() => {
-    if (!isActive || stats) return
+    if (!isActive || !isOnline || !serverId) {
+      setLivePing(null)
+      return
+    }
+
+    let isCurrent = true
+    const currentServerId = serverId
+
+    const fetchPing = async () => {
+      try {
+        const ping = await serverService.getServerPing(currentServerId)
+        if (!isCurrent) return
+        if (ping) {
+          setLivePing({
+            playersOnline: ping.playersOnline,
+            maxPlayers: ping.maxPlayers,
+            latencyMs: ping.latencyMs,
+          })
+        }
+      } catch {
+        // Errors from Pterodactyl / Minecraft ping do not break Home
+      }
+    }
+
+    // 1. Immediate query when entering or becoming ONLINE
+    void fetchPing()
+
+    // 2. Poll every 15 seconds while isActive and isOnline
+    const interval = setInterval(() => {
+      void fetchPing()
+    }, 15000)
+
+    return () => {
+      isCurrent = false
+      clearInterval(interval)
+    }
+  }, [isActive, isOnline, serverId])
+
+  // Legacy status effect (runs only when serverStatus prop is not provided)
+  useEffect(() => {
+    if (!isActive || stats || hasPropStatus) return
     if (serverId === null) {
       setServerData((prev) => ({ ...prev, online: false }))
       return
@@ -108,7 +168,7 @@ export default function ServerStatsGrid({
     } catch (_) {}
 
     serverService
-      .getServerStatus(serverId)
+      .getServerStatus(serverId ?? undefined)
       .then((res) => {
         if (!isMounted) return
         if (res && res.online) {
@@ -130,13 +190,13 @@ export default function ServerStatsGrid({
     return () => {
       isMounted = false
     }
-  }, [stats, isActive, serverId, cacheKey])
+  }, [stats, isActive, serverId, cacheKey, hasPropStatus])
 
   const serverName = propServerName || stats?.name || ""
-  const isOnline = serverData.online
-  const playersOnline = serverData.playersOnline
-  const maxPlayers = serverData.maxPlayers
-  const latency = serverData.latencyMs
+  const playersOnline = isOnline ? (livePing?.playersOnline ?? serverData.playersOnline) : 0
+  const maxPlayers = isOnline ? (livePing?.maxPlayers ?? serverData.maxPlayers) : 0
+  const latency = isOnline ? (livePing?.latencyMs ?? serverData.latencyMs) : 0
+
   const playtime = serverData.playtimeHours
   const achievements = serverData.unlockedAchievements
   const totalAchievements = serverData.totalAchievements ?? 52
@@ -333,7 +393,7 @@ export default function ServerStatsGrid({
               height={16}
               viewBox="0 0 24 24"
               fill="none"
-              stroke={isOnline ? accentHex : isDark ? "#556677" : "#99aabb"}
+              stroke={isOnline && latency > 0 ? accentHex : isDark ? "#556677" : "#99aabb"}
               strokeWidth="2.2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -344,7 +404,7 @@ export default function ServerStatsGrid({
               {t("serverStats.latency")}{" "}
               <strong
                 style={{
-                  color: isOnline
+                  color: isOnline && latency > 0
                     ? isDark
                       ? "white"
                       : "#111822"
@@ -353,7 +413,7 @@ export default function ServerStatsGrid({
                       : "#778899",
                 }}
               >
-                {isOnline ? `${latency} ms` : "-- ms"}
+                {isOnline && latency > 0 ? `${latency} ms` : "-- ms"}
               </strong>
             </span>
           </div>

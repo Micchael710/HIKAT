@@ -93,6 +93,23 @@ export const serverService = {
   },
 
   /**
+   * Fetch lightweight live Minecraft server ping (latency & players) via GraphQL.
+   */
+  async getServerPing(serverId: string): Promise<LauncherServerPingResult | null> {
+    try {
+      const res = await graphqlClient<{ launcherServerPing: LauncherServerPingResult | null }>(
+        LAUNCHER_SERVER_PING_QUERY,
+        { serverId },
+      )
+      if (res.success && res.data?.launcherServerPing) {
+        return res.data.launcherServerPing
+      }
+    } catch (_) {}
+
+    return null
+  },
+
+  /**
    * Fetch live Minecraft server ping status & player count.
    * Returns cached per-server status if available, or null.
    * Does NOT use global cached status.
@@ -111,5 +128,21 @@ export const serverService = {
     return null
   },
 }
+
+export interface LauncherServerPingResult {
+  latencyMs: number
+  playersOnline: number
+  maxPlayers: number
+}
+
+export const LAUNCHER_SERVER_PING_QUERY = /* GraphQL */ `
+  query LauncherServerPing($serverId: ID!) {
+    launcherServerPing(serverId: $serverId) {
+      latencyMs
+      playersOnline
+      maxPlayers
+    }
+  }
+`
 
 

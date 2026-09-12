@@ -255,4 +255,95 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
       }),
     ).resolves.toBeUndefined()
   })
+
+  it("broadcastServerStatusChanged formats payload and calls Durable Object stub", async () => {
+    let broadcastReqUrl = ""
+    let broadcastReqOptions: any = null
+
+    const mockStub: any = {
+      fetch: vi.fn(async (url: string, options: any) => {
+        broadcastReqUrl = url
+        broadcastReqOptions = options
+        return new Response(null, { status: 204 })
+      }),
+    }
+
+    const mockNamespace: any = {
+      idFromName: vi.fn(() => "global-id"),
+      get: vi.fn(() => mockStub),
+    }
+
+    const env: Env = {
+      RELEASE_EVENTS: mockNamespace,
+    }
+
+    const { broadcastServerStatusChanged } = await import("./releaseEvents")
+    await broadcastServerStatusChanged(env, "srv-test-1", "ONLINE")
+
+    expect(mockNamespace.idFromName).toHaveBeenCalledWith("global")
+    expect(mockNamespace.get).toHaveBeenCalledWith("global-id")
+    expect(broadcastReqUrl).toBe("http://internal/broadcast")
+    expect(broadcastReqOptions.method).toBe("POST")
+
+    const parsedBody = JSON.parse(broadcastReqOptions.body)
+    expect(parsedBody).toEqual({
+      type: "SERVER_STATUS_CHANGED",
+      serverId: "srv-test-1",
+      status: "ONLINE",
+    })
+  })
+
+  it("stores server status by serverId and replays cached statuses to newly connected WebSockets", async () => {
+    const storageMap = new Map<string, any>()
+    const mockCtx: any = {
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => []),
+      storage: {
+        get: vi.fn(async (k: string) => storageMap.get(k)),
+        put: vi.fn(async (k: string, v: any) => storageMap.set(k, v)),
+        list: vi.fn(async (opts?: { prefix?: string }) => {
+          const results = new Map<string, any>()
+          for (const [k, v] of storageMap.entries()) {
+            if (!opts?.prefix || k.startsWith(opts.prefix)) {
+              results.set(k, v)
+            }
+          }
+          return results
+        }),
+      },
+    }
+    const doInstance = new ReleaseEventsDurableObject(mockCtx)
+
+    // Broadcast status change for two servers
+    const status1 = JSON.stringify({
+      type: "SERVER_STATUS_CHANGED",
+      serverId: "server-a",
+      status: "ONLINE",
+    })
+    const status2 = JSON.stringify({
+      type: "SERVER_STATUS_CHANGED",
+      serverId: "server-b",
+      status: "OFFLINE",
+    })
+
+    await doInstance.fetch(new Request("http://internal/broadcast", {
+      method: "POST",
+      body: status1,
+    }))
+    await doInstance.fetch(new Request("http://internal/broadcast", {
+      method: "POST",
+      body: status2,
+    }))
+
+    expect(storageMap.get("serverStatus_server-a")).toBe(status1)
+    expect(storageMap.get("serverStatus_server-b")).toBe(status2)
+
+    // New WebSocket connects -> receives replay of statuses
+    const res = await doInstance.fetch(new Request("http://localhost/launcher/release-events", {
+      headers: { Upgrade: "websocket" },
+    }))
+
+    expect(res.status).toBe(101)
+  })
 })
+

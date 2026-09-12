@@ -1,4 +1,5 @@
 import type { ContentMediaGql } from "@hikat/graphql"
+import type { ServerStatus } from "@hikat/shared"
 import type { Env } from "./types"
 
 export class ReleaseEventsDurableObject {
@@ -14,6 +15,8 @@ export class ReleaseEventsDurableObject {
         const parsed = JSON.parse(message)
         if (parsed?.type === "RELEASE_ACTIVATED") {
           await this.ctx.storage.put("latestReleaseEvent", message)
+        } else if (parsed?.type === "SERVER_STATUS_CHANGED" && parsed?.serverId) {
+          await this.ctx.storage.put(`serverStatus_${parsed.serverId}`, message)
         }
       } catch {
         // no persistir mensajes inválidos
@@ -41,6 +44,17 @@ export class ReleaseEventsDurableObject {
     if (latest) {
       try {
         server.send(latest)
+      } catch {}
+    }
+
+    if (this.ctx.storage.list) {
+      try {
+        const statuses = await this.ctx.storage.list<string>({ prefix: "serverStatus_" })
+        for (const [, statusMsg] of statuses) {
+          try {
+            server.send(statusMsg)
+          } catch {}
+        }
       } catch {}
     }
 
@@ -130,4 +144,26 @@ export async function broadcastCosmeticsUpdated(
     body: payload,
   })
 }
+
+export async function broadcastServerStatusChanged(
+  env: Env,
+  serverId: string,
+  status: ServerStatus,
+): Promise<void> {
+  if (!env.RELEASE_EVENTS) return
+
+  const payload = JSON.stringify({
+    type: "SERVER_STATUS_CHANGED",
+    serverId,
+    status,
+  })
+
+  const id = env.RELEASE_EVENTS.idFromName("global")
+  const stub = env.RELEASE_EVENTS.get(id)
+  await stub.fetch("http://internal/broadcast", {
+    method: "POST",
+    body: payload,
+  })
+}
+
 

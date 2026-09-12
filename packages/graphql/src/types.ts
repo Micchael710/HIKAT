@@ -345,6 +345,12 @@ export interface LauncherServerGql {
   updatedAt: string
 }
 
+export interface LauncherServerPingGql {
+  latencyMs: number
+  playersOnline: number
+  maxPlayers: number
+}
+
 export interface CreateServerInputGql {
   name: string
   minecraftVersion: string

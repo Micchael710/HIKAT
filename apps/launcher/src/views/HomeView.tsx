@@ -400,6 +400,7 @@ export default function HomeView({
           serverId={activeServerId}
           serverName={serverName}
           resolvedAccent={resolvedAccent}
+          serverStatus={serverGameState?.serverStatus}
         />
         <CommunityHubGrid theme={theme} />
       </div>

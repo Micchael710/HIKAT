@@ -4,6 +4,7 @@ import { createGraphQLError } from "@hikat/graphql"
 import type {
   ServerGql,
   LauncherServerGql,
+  LauncherServerPingGql,
   CreateServerInputGql,
   UpdateServerBrandingInputGql,
   GameModLoaderGql,
@@ -27,6 +28,7 @@ import type {
   PterodactylApplicationServerAttributes,
   PterodactylApplicationServerResponse,
 } from "./pterodactyl/types"
+import { getCachedServerPing } from "./minecraftPing"
 
 export async function formatServerGql(
   server: schema.Server,
@@ -981,5 +983,92 @@ export async function updateServerBranding(
   }
 
   return result
+}
+
+// In-memory cache for resolved server Minecraft addresses (5 min TTL)
+const addressCache = new Map<string, { host: string; port: number; timestamp: number }>()
+
+export function _clearServerAddressCacheForTesting(): void {
+  addressCache.clear()
+}
+
+export function _setServerAddressOverrideForTesting(
+  serverId: string,
+  host: string,
+  port: number,
+): void {
+  addressCache.set(serverId, { host, port, timestamp: Date.now() })
+}
+
+export async function resolveServerMinecraftAddress(
+  env: Env,
+  db: Database,
+  serverId: string,
+): Promise<{ host: string; port: number } | null> {
+  const cached = addressCache.get(serverId)
+  if (cached && Date.now() - cached.timestamp < 300000) {
+    return { host: cached.host, port: cached.port }
+  }
+
+  const server = await db
+    .select()
+    .from(schema.servers)
+    .where(eq(schema.servers.id, serverId))
+    .get()
+
+  if (!server) return null
+
+  if (server.pterodactylServerId) {
+    try {
+      const appClient = createPterodactylApplicationClient(env)
+      const pteroServer = await appClient.getApplicationServer(server.pterodactylServerId)
+      const allocations = pteroServer.attributes?.relationships?.allocations?.data || []
+      const primaryId = pteroServer.attributes?.allocation
+
+      const matchedAlloc =
+        allocations.find((a) => a.attributes.id === primaryId) || allocations[0]
+
+      if (matchedAlloc) {
+        let host = matchedAlloc.attributes.alias || matchedAlloc.attributes.ip
+        const port = matchedAlloc.attributes.port
+
+        if ((!host || host === "0.0.0.0" || host === "127.0.0.1") && env.PTERODACTYL_BASE_URL) {
+          try {
+            const parsedUrl = new URL(env.PTERODACTYL_BASE_URL)
+            if (parsedUrl.hostname) {
+              host = parsedUrl.hostname
+            }
+          } catch {}
+        }
+
+        if (host && port) {
+          addressCache.set(serverId, { host, port, timestamp: Date.now() })
+          return { host, port }
+        }
+      }
+    } catch (err) {
+      console.warn(`[ServerService] Failed resolving address for server ${serverId}:`, err)
+    }
+  }
+
+  return null
+}
+
+export async function getLauncherServerPing(
+  env: Env,
+  db: Database,
+  serverId: string,
+): Promise<LauncherServerPingGql | null> {
+  const address = await resolveServerMinecraftAddress(env, db, serverId)
+  if (!address) {
+    return null
+  }
+
+  try {
+    return await getCachedServerPing(serverId, address.host, address.port)
+  } catch (err) {
+    console.warn(`[ServerPing] Ping failed for server ${serverId}:`, err)
+    return null
+  }
 }
 
