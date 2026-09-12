@@ -70,12 +70,20 @@ export class ReleaseEventsDurableObject {
   private async restoreWatchedServers(): Promise<void> {
     try {
       const watched = await this.ctx.storage.get<string[]>("watchedServerIds")
-      if (Array.isArray(watched)) {
-        for (const serverId of watched) {
-          void this.ensureWatcher(serverId)
-        }
+      if (Array.isArray(watched) && watched.length > 0) {
+        await Promise.all(
+          watched.map(async (serverId) => {
+            try {
+              await this.ensureWatcher(serverId)
+            } catch (err) {
+              console.warn(`[ReleaseEventsDO] Failed restoring watcher for ${serverId}:`, err)
+            }
+          }),
+        )
       }
-    } catch {}
+    } catch (err) {
+      console.warn("[ReleaseEventsDO] Failed reading watchedServerIds from storage:", err)
+    }
   }
 
   async ensureWatcher(serverId: string): Promise<ServerStatus> {
@@ -129,7 +137,14 @@ export class ReleaseEventsDurableObject {
 
       // 3. Connect to Wings WebSocket for live status transitions
       if (this.env && !watcher.isClosed) {
-        void this.connectWingsWatcher(watcher, db)
+        const connectPromise = this.connectWingsWatcher(watcher, db).catch((err) => {
+          console.warn(`[ReleaseEventsDO] connectWingsWatcher error for ${serverId}:`, err)
+        })
+        if (this.ctx.waitUntil) {
+          this.ctx.waitUntil(connectPromise)
+        } else {
+          void connectPromise
+        }
       }
     } finally {
       this.startingWatchers.delete(serverId)

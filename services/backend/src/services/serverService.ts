@@ -835,7 +835,11 @@ export async function deleteServer(
   // Delete server record in D1 (CASCADE removes server-scoped records: releases, files, news, tasks, tickets, managed content)
   // Does NOT delete: users, auth, skins, capes, global settings, or other servers
   await db.delete(schema.servers).where(eq(schema.servers.id, serverId))
-  void notifyDurableObjectUnwatchServer(env, serverId)
+  try {
+    await notifyDurableObjectUnwatchServer(env, serverId)
+  } catch (err) {
+    console.warn(`[ServerService] Failed notifying DO to unwatch server ${serverId}:`, err)
+  }
   return true
 }
 

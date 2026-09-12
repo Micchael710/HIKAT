@@ -514,5 +514,61 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
     expect(doInstance.getActiveWatchersCount()).toBe(0)
     expect(storageMap.has("serverStatus_server-to-delete")).toBe(false)
   })
+
+  it("restoreWatchedServers awaits all stored watchers during blockConcurrencyWhile", async () => {
+    const storageMap = new Map<string, any>()
+    storageMap.set("watchedServerIds", ["srv-restore-1", "srv-restore-2"])
+
+    let blockConcurrencyPromise: Promise<void> | null = null
+    const mockCtx: any = {
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => []),
+      storage: {
+        get: vi.fn(async (k) => storageMap.get(k)),
+        put: vi.fn(async (k, v) => storageMap.set(k, v)),
+        list: vi.fn(async () => new Map()),
+      },
+      blockConcurrencyWhile: vi.fn((fn: () => Promise<void>) => {
+        blockConcurrencyPromise = fn()
+      }),
+    }
+
+    const doInstance = new ReleaseEventsDurableObject(mockCtx)
+    expect(mockCtx.blockConcurrencyWhile).toHaveBeenCalled()
+
+    await blockConcurrencyPromise
+    expect(doInstance.getActiveWatchersCount()).toBe(2)
+    expect(doInstance.getWatcherStatus("srv-restore-1")).toBe("UNKNOWN")
+    expect(doInstance.getWatcherStatus("srv-restore-2")).toBe("UNKNOWN")
+  })
+
+  it("ensureWatcher registers connectWingsWatcher via ctx.waitUntil without unhandled floating promises", async () => {
+    const storageMap = new Map<string, any>()
+    const waitUntilPromises: Promise<any>[] = []
+    const mockCtx: any = {
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => []),
+      waitUntil: vi.fn((p: Promise<any>) => {
+        waitUntilPromises.push(p)
+      }),
+      storage: {
+        get: vi.fn(async (k) => storageMap.get(k)),
+        put: vi.fn(async (k, v) => storageMap.set(k, v)),
+        list: vi.fn(async () => new Map()),
+      },
+    }
+
+    const env: any = {
+      PTERODACTYL_BASE_URL: "https://panel.test",
+    }
+
+    const doInstance = new ReleaseEventsDurableObject(mockCtx, env)
+    await doInstance.ensureWatcher("srv-wait-until")
+
+    expect(mockCtx.waitUntil).toHaveBeenCalled()
+    expect(waitUntilPromises.length).toBe(1)
+    // The registered promise must resolve cleanly without uncaught rejection
+    await expect(waitUntilPromises[0]).resolves.toBeUndefined()
+  })
 })
 
