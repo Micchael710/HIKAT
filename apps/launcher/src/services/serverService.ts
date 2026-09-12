@@ -6,7 +6,14 @@ export interface LauncherReleaseSummary {
   minecraftVersion: string
   modLoader: string
   modLoaderVersion?: string | null
+  neoForgeVersion?: string | null
   notes?: string | null
+  cover?: {
+    id: string
+    mediaType: "IMAGE" | "VIDEO"
+    mimeType: string
+    url: string
+  } | null
 }
 
 export interface LauncherServer {
@@ -62,7 +69,14 @@ export const serverService = {
             minecraftVersion
             modLoader
             modLoaderVersion
+            neoForgeVersion
             notes
+            cover {
+              id
+              mediaType
+              mimeType
+              url
+            }
           }
           createdAt
           updatedAt

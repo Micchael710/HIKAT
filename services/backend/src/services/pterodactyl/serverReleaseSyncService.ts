@@ -13,6 +13,7 @@ import type {
 } from "@hikat/graphql"
 import type { Env } from "../../types"
 import { broadcastReleaseActivated } from "../../releaseEvents"
+import { getContentMediaById, formatMediaGql } from "../mediaService"
 import type { IPterodactylClient } from "./types"
 import {
   resolvePterodactylClient,
@@ -833,6 +834,14 @@ export async function applyServerReleaseSync(
       activateQuery,
     ])
 
+    let cover = null
+    if (published.coverMediaId) {
+      const coverMedia = await getContentMediaById(db, published.coverMediaId)
+      if (coverMedia) {
+        cover = formatMediaGql(coverMedia, env)
+      }
+    }
+
     await broadcastReleaseActivated(env, {
       serverId: targetServerId,
       version: published.version,
@@ -841,6 +850,8 @@ export async function applyServerReleaseSync(
       modLoaderVersion: published.modLoaderVersion || null,
       neoForgeVersion: published.neoForgeVersion,
       mandatory: true,
+      notes: published.notes || null,
+      cover,
     }).catch((err) => {
       console.warn("[ReleaseEvents] Broadcast failed:", err)
     })

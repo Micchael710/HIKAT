@@ -325,7 +325,9 @@ export interface LauncherReleaseSummaryGql {
   minecraftVersion: string
   modLoader: GameModLoaderGql
   modLoaderVersion?: string | null
+  neoForgeVersion?: string | null
   notes?: string | null
+  cover?: ContentMediaGql | null
 }
 
 export interface LauncherServerGql {

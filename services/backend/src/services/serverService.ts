@@ -99,12 +99,21 @@ export async function formatLauncherServerGql(
       .where(eq(schema.gameReleases.id, server.launcherActiveReleaseId))
       .get()
     if (rel) {
+      let cover = null
+      if (rel.coverMediaId) {
+        const coverMedia = await getContentMediaById(db, rel.coverMediaId)
+        if (coverMedia) {
+          cover = formatMediaGql(coverMedia, env, request)
+        }
+      }
       activeRelease = {
         version: rel.version,
         minecraftVersion: rel.minecraftVersion,
         modLoader: (rel.modLoader || "NEOFORGE") as GameModLoaderGql,
         modLoaderVersion: rel.modLoaderVersion || null,
+        neoForgeVersion: rel.neoForgeVersion || null,
         notes: rel.notes || null,
+        cover,
       }
     }
   }

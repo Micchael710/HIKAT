@@ -1,3 +1,4 @@
+import type { ContentMediaGql } from "@hikat/graphql"
 import type { Env } from "./types"
 
 export class ReleaseEventsDurableObject {
@@ -59,6 +60,8 @@ export interface ReleaseActivatedBroadcastData {
   /** @deprecated kept for backwards compat with old launchers */
   neoForgeVersion?: string | null
   mandatory?: boolean
+  notes?: string | null
+  cover?: ContentMediaGql | null
 }
 
 export async function broadcastReleaseActivated(
@@ -76,6 +79,8 @@ export async function broadcastReleaseActivated(
     modLoaderVersion: release.modLoaderVersion || null,
     neoForgeVersion: release.neoForgeVersion || release.modLoaderVersion || "21.1.65",
     mandatory: true,
+    notes: release.notes || null,
+    cover: release.cover || null,
   })
 
   const id = env.RELEASE_EVENTS.idFromName("global")

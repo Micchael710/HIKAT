@@ -217,9 +217,11 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
       modLoaderVersion: null,
       neoForgeVersion: "21.1.65",
       mandatory: true,
+      notes: null,
+      cover: null,
     })
 
-    // Also test with explicit serverId
+    // Also test with explicit serverId, notes, and cover
     await broadcastReleaseActivated(env, {
       serverId: "srv-survival-01",
       version: "1.4.0",
@@ -227,11 +229,22 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
       modLoader: "FABRIC",
       modLoaderVersion: "0.15.7",
       mandatory: true,
+      notes: "Patch notes for 1.4.0",
+      cover: {
+        id: "media-cover-1",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 1024,
+        url: "http://cdn/cover.png",
+        createdAt: "2026-09-11T00:00:00Z",
+      },
     })
     const parsedWithServer = JSON.parse(broadcastReqOptions.body)
     expect(parsedWithServer.serverId).toBe("srv-survival-01")
     expect(parsedWithServer.version).toBe("1.4.0")
     expect(parsedWithServer.modLoader).toBe("FABRIC")
+    expect(parsedWithServer.notes).toBe("Patch notes for 1.4.0")
+    expect(parsedWithServer.cover.url).toBe("http://cdn/cover.png")
   })
 
   it("broadcastReleaseActivated does not fail if RELEASE_EVENTS is undefined", async () => {

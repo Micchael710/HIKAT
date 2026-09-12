@@ -1262,6 +1262,7 @@ export async function publishGameRelease(
   }
 
   if (shouldActivate) {
+    const formattedCover = targetCoverMedia ? formatMediaGql(targetCoverMedia, env, request) : null
     await broadcastReleaseActivated(env, {
       serverId: targetServerId || published.serverId || null,
       version: published.version,
@@ -1270,6 +1271,8 @@ export async function publishGameRelease(
       modLoaderVersion: published.modLoaderVersion || null,
       neoForgeVersion: published.neoForgeVersion,
       mandatory: true,
+      notes: published.notes || null,
+      cover: formattedCover,
     }).catch((err) => {
       console.warn("[ReleaseEvents] Broadcast failed:", err)
     })

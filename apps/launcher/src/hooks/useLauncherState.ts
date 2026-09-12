@@ -425,7 +425,9 @@ export function useLauncherState() {
             minecraftVersion: event.minecraftVersion,
             modLoader: event.modLoader || "NEOFORGE",
             modLoaderVersion: event.modLoaderVersion || null,
-            notes: null,
+            neoForgeVersion: event.neoForgeVersion || null,
+            notes: event.notes ?? null,
+            cover: event.cover ?? null,
           }
 
           const installedVer = serverState?.installedVersion ?? null

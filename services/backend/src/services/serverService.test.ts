@@ -2561,6 +2561,58 @@ describe("ServerService & Multi-Server Provisioning", () => {
       expect(server.mainLogo).toBeDefined()
       expect(server.mainLogo?.id).toBe(mediaId)
     })
+
+    it("populates activeRelease lightweight summary with cover, notes, and neoForgeVersion", async () => {
+      const coverId = "media-cover-test"
+      await mockDb.insert(schema.contentMedia).values({
+        id: coverId,
+        objectKey: "uploads/cover.jpg",
+        mediaType: "IMAGE",
+        mimeType: "image/jpeg",
+        sizeBytes: 2048,
+        createdBy: "user-1",
+        createdAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      const relId = "rel-with-cover"
+      await mockDb.insert(schema.gameReleases).values({
+        id: relId,
+        version: "2.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.90",
+        neoForgeVersion: "21.1.90",
+        status: "PUBLISHED",
+        notes: "Release notes for 2.0.0",
+        coverMediaId: coverId,
+        createdBy: "user-1",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      await mockDb.insert(schema.servers).values({
+        id: "server-active-with-cover",
+        name: "Cover Server",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.90",
+        launcherActiveReleaseId: relId,
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      })
+
+      const results = await getLauncherServers(mockDb, mockEnv)
+      const server = results.find((s) => s.id === "server-active-with-cover")
+      expect(server).toBeDefined()
+      expect(server?.activeRelease).toBeDefined()
+      expect(server?.activeRelease?.version).toBe("2.0.0")
+      expect(server?.activeRelease?.notes).toBe("Release notes for 2.0.0")
+      expect(server?.activeRelease?.neoForgeVersion).toBe("21.1.90")
+      expect(server?.activeRelease?.cover).toBeDefined()
+      expect(server?.activeRelease?.cover?.id).toBe(coverId)
+      expect(server?.activeRelease?.cover?.mediaType).toBe("IMAGE")
+      expect((server?.activeRelease as any)?.clientFiles).toBeUndefined()
+    })
   })
 
   describe("updateServerBranding", () => {

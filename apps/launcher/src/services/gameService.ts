@@ -37,6 +37,13 @@ export interface GameManifest {
   pausedPhase?: string
   stagedBytes?: number
   totalDownloadBytes?: number
+  isFullManifest?: boolean
+}
+
+export function isFullGameManifest(
+  manifest: GameManifest | null | undefined,
+): manifest is GameManifest & { isFullManifest: true } {
+  return Boolean(manifest && manifest.isFullManifest !== false)
 }
 
 export interface ReleaseActivatedEvent {
@@ -49,6 +56,13 @@ export interface ReleaseActivatedEvent {
   /** @deprecated */
   neoForgeVersion?: string | null
   mandatory?: boolean
+  notes?: string | null
+  cover?: {
+    id: string
+    mediaType: "IMAGE" | "VIDEO"
+    mimeType: string
+    url: string
+  } | null
 }
 
 export interface ServerUpdatedEvent {
@@ -347,6 +361,7 @@ export const gameService = {
             pausedPhase,
             stagedBytes,
             totalDownloadBytes,
+            isFullManifest: true,
           }
         }
 
@@ -455,6 +470,7 @@ export const gameService = {
             pausedPhase: offlinePausedPhase,
             stagedBytes: offlineStagedBytes,
             totalDownloadBytes: offlineTotalDownloadBytes || (offlineInstalled ? 0 : totalBytes),
+            isFullManifest: true,
           }
         }
       }

@@ -402,7 +402,9 @@ export const serverTypeDefs = /* GraphQL */ `
     minecraftVersion: String!
     modLoader: GameModLoader!
     modLoaderVersion: String
+    neoForgeVersion: String
     notes: String
+    cover: ContentMedia
   }
 
   """

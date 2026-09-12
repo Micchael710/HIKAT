@@ -269,4 +269,181 @@ describe("HomeView Active Release Cover & Notes Suite", () => {
     const newCoverImg = Array.from(imgs || []).find((img) => img.src === updatedModpack.cover?.url)
     expect(newCoverImg).toBeDefined()
   })
+
+  it("6. Home displays IMAGE cover and notes from serverGameState.releaseSummary without getPublishedModpack call", async () => {
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack")
+
+    const summaryImageCover = {
+      id: "summary-img-1",
+      mediaType: "IMAGE" as const,
+      mimeType: "image/png",
+      url: "http://127.0.0.1:8787/media/content/summary-img-1",
+    }
+
+    const serverGameState = {
+      releaseSummary: {
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        notes: "Summary Release Notes 1.0",
+        cover: summaryImageCover,
+      },
+      publishedModpack: null,
+      installedVersion: null,
+      integrityDirty: false,
+    }
+
+    await act(async () => {
+      root?.render(
+        <LanguageProvider>
+          <HomeView
+            theme="dark"
+            selectedServer={mockServer}
+            serverGameState={serverGameState}
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    expect(container?.textContent).toContain("Summary Release Notes 1.0")
+
+    const imgs = container?.querySelectorAll("img")
+    const coverImg = Array.from(imgs || []).find((img) => img.src === summaryImageCover.url)
+    expect(coverImg).toBeDefined()
+    expect(coverImg?.style.objectFit).toBe("cover")
+  })
+
+  it("7. Home displays VIDEO cover from serverGameState.releaseSummary without getPublishedModpack call", async () => {
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack")
+
+    const summaryVideoCover = {
+      id: "summary-vid-1",
+      mediaType: "VIDEO" as const,
+      mimeType: "video/mp4",
+      url: "http://127.0.0.1:8787/media/content/summary-vid-1",
+    }
+
+    const serverGameState = {
+      releaseSummary: {
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+        notes: "Video Cover Release",
+        cover: summaryVideoCover,
+      },
+      publishedModpack: null,
+      installedVersion: null,
+      integrityDirty: false,
+    }
+
+    await act(async () => {
+      root?.render(
+        <LanguageProvider>
+          <HomeView
+            theme="dark"
+            selectedServer={mockServer}
+            serverGameState={serverGameState}
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    const video = container?.querySelector("video")
+    expect(video).not.toBeNull()
+    expect(video?.src).toBe(summaryVideoCover.url)
+    expect(video?.loop).toBe(true)
+  })
+
+  it("8. serverGameState.releaseSummary has priority over selectedServer.activeRelease and dynamically updates with cover B / notes B", async () => {
+    const serverWithOldActiveRelease = {
+      ...mockServer,
+      activeRelease: {
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        notes: "Old Release Notes 1.0",
+        cover: {
+          id: "cover-a",
+          mediaType: "IMAGE" as const,
+          mimeType: "image/png",
+          url: "http://127.0.0.1:8787/media/content/cover-a",
+        },
+      },
+    }
+
+    const newCoverB = {
+      id: "cover-b",
+      mediaType: "IMAGE" as const,
+      mimeType: "image/png",
+      url: "http://127.0.0.1:8787/media/content/cover-b",
+    }
+
+    const initialGameState = {
+      releaseSummary: {
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        notes: "Old Release Notes 1.0",
+        cover: serverWithOldActiveRelease.activeRelease.cover,
+      },
+      publishedModpack: null,
+      installedVersion: null,
+      integrityDirty: false,
+    }
+
+    // Initial render
+    await act(async () => {
+      root?.render(
+        <LanguageProvider>
+          <HomeView
+            theme="dark"
+            selectedServer={serverWithOldActiveRelease}
+            serverGameState={initialGameState}
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    expect(container?.textContent).toContain("Old Release Notes 1.0")
+    let imgs = container?.querySelectorAll("img")
+    let coverImg = Array.from(imgs || []).find((img) => img.src === serverWithOldActiveRelease.activeRelease.cover.url)
+    expect(coverImg).toBeDefined()
+
+    // WebSocket delivers 1.1 with cover B and notes B -> serverGameState updates
+    const updatedGameState = {
+      releaseSummary: {
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        notes: "New Release Notes 1.1 Live",
+        cover: newCoverB,
+      },
+      publishedModpack: null,
+      installedVersion: null,
+      integrityDirty: false,
+    }
+
+    await act(async () => {
+      root?.render(
+        <LanguageProvider>
+          <HomeView
+            theme="dark"
+            selectedServer={serverWithOldActiveRelease}
+            serverGameState={updatedGameState}
+          />
+        </LanguageProvider>,
+      )
+    })
+
+    // Now Home displays New Release Notes 1.1 and cover B, not old release!
+    expect(container?.textContent).toContain("New Release Notes 1.1 Live")
+    expect(container?.textContent).not.toContain("Old Release Notes 1.0")
+    imgs = container?.querySelectorAll("img")
+    coverImg = Array.from(imgs || []).find((img) => img.src === newCoverB.url)
+    expect(coverImg).toBeDefined()
+  })
 })

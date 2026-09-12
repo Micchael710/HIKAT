@@ -61,7 +61,14 @@ describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite
         minecraftVersion: "1.20.1",
         modLoader: "FORGE",
         modLoaderVersion: "47.2.0",
+        neoForgeVersion: null,
         notes: "Meliora Notes",
+        cover: {
+          id: "cover-meliora",
+          mediaType: "IMAGE" as const,
+          mimeType: "image/png",
+          url: "http://cdn/meliora.png",
+        },
       },
       createdAt: "2026-01-01",
       updatedAt: "2026-01-01",
@@ -750,6 +757,314 @@ describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite
     )
     expect(state).toBe("play")
 
+    unmount()
+  })
+
+  // Helper to mount DownloadPlayButton
+  function renderButton(props: any) {
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    act(() => {
+      root.render(
+        <LanguageProvider>
+          <DownloadPlayButton left={0} top={0} theme="dark" {...props} />
+        </LanguageProvider>,
+      )
+    })
+    return {
+      container,
+      unmount: () => {
+        act(() => {
+          root.unmount()
+        })
+        container.remove()
+      },
+    }
+  }
+
+  // 16. Bootstrap ligero: activeRelease incluye cover + notes + loader data y no incluye clientFiles ni policies
+  it("16. Bootstrap ligero: activeRelease incluye cover + notes + loader data y no incluye clientFiles ni policies", () => {
+    const rel = mockServers[0].activeRelease
+    expect(rel).toBeDefined()
+    expect(rel?.version).toBe("2.0.0")
+    expect(rel?.notes).toBe("Meliora Notes")
+    expect(rel?.cover).toBeDefined()
+    expect(rel?.cover?.url).toBe("http://cdn/meliora.png")
+    expect((rel as any)?.clientFiles).toBeUndefined()
+    expect((rel as any)?.directoryPolicies).toBeUndefined()
+  })
+
+  // 17. Download: con solo summary ligero, click Descargar llama getPublishedModpack exactamente cuando se necesita y luego startSync
+  it("17. Download: con solo summary ligero, click Descargar llama getPublishedModpack exactamente cuando se necesita y luego startSync", async () => {
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      clientFiles: [{ path: "mods/file.jar", sha256: "123", sizeBytes: 50, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+    })
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    const { container, unmount } = renderButton({
+      serverId: "srv-meliora",
+      gameId: "srv-meliora",
+      gameContext: { gameId: "srv-meliora", gameName: "Meliora" },
+      releaseSummary: mockServers[0].activeRelease,
+      installedVersion: null,
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    const btn = container.querySelector("button")!
+    expect(btn.textContent).toMatch(/download|descargar/i)
+
+    await act(async () => {
+      btn.click()
+    })
+
+    expect(getPublishedSpy).toHaveBeenCalledWith("srv-meliora")
+    expect(startSyncSpy).toHaveBeenCalled()
+    expect(startSyncSpy.mock.calls[0][0]).toEqual([
+      { path: "mods/file.jar", sha256: "123", sizeBytes: 50, downloadUrl: "/dl", policy: "NO_MODIFICABLE" },
+    ])
+    unmount()
+  })
+
+  // 18. Update: con solo summary ligero, click Actualizar llama getPublishedModpack antes de startSync
+  it("18. Update: con solo summary ligero, click Actualizar llama getPublishedModpack antes de startSync", async () => {
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      clientFiles: [{ path: "mods/update.jar", sha256: "456", sizeBytes: 80, downloadUrl: "/dl2", policy: "NO_MODIFICABLE" }],
+    })
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    const { container, unmount } = renderButton({
+      serverId: "srv-meliora",
+      gameId: "srv-meliora",
+      gameContext: { gameId: "srv-meliora", gameName: "Meliora" },
+      releaseSummary: mockServers[0].activeRelease,
+      installedVersion: "1.9.0",
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    const btn = container.querySelector("button")!
+    expect(btn.textContent).toMatch(/update|actualizar/i)
+
+    await act(async () => {
+      btn.click()
+    })
+
+    expect(getPublishedSpy).toHaveBeenCalledWith("srv-meliora")
+    expect(startSyncSpy).toHaveBeenCalled()
+    expect(startSyncSpy.mock.calls[0][0]).toEqual([
+      { path: "mods/update.jar", sha256: "456", sizeBytes: 80, downloadUrl: "/dl2", policy: "NO_MODIFICABLE" },
+    ])
+    unmount()
+  })
+
+  // 19. Verify: con solo summary ligero, NO llama startSync con clientFiles=[], sino que obtiene primero full manifest
+  it("19. Verify: con solo summary ligero, NO llama startSync con clientFiles=[], sino que obtiene primero full manifest", async () => {
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      clientFiles: [{ path: "mods/verified.jar", sha256: "789", sizeBytes: 120, downloadUrl: "/dl3", policy: "NO_MODIFICABLE" }],
+    })
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+    const { container, unmount } = renderButton({
+      serverId: "srv-meliora",
+      gameId: "srv-meliora",
+      gameContext: { gameId: "srv-meliora", gameName: "Meliora" },
+      releaseSummary: mockServers[0].activeRelease,
+      installedVersion: "2.0.0",
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    const buttons = container.querySelectorAll("button")
+    expect(buttons.length).toBeGreaterThan(1)
+    const optionsBtn = buttons[1] as HTMLElement
+
+    await act(async () => {
+      optionsBtn.click()
+    })
+
+    const verifyOption = Array.from(document.querySelectorAll(".profile-menu-item")).find(
+      (el) => el.textContent?.toLowerCase().includes("verif")
+    ) as HTMLElement
+    expect(verifyOption).toBeDefined()
+
+    await act(async () => {
+      verifyOption.click()
+    })
+
+    expect(getPublishedSpy).toHaveBeenCalledWith("srv-meliora")
+    expect(startSyncSpy).toHaveBeenCalled()
+    expect(startSyncSpy.mock.calls[0][0]).not.toEqual([])
+    expect(startSyncSpy.mock.calls[0][0]).toEqual([
+      { path: "mods/verified.jar", sha256: "789", sizeBytes: 120, downloadUrl: "/dl3", policy: "NO_MODIFICABLE" },
+    ])
+    unmount()
+  })
+
+  // 20. Auto-update ON: WebSocket con versión nueva obtiene full manifest antes de auto-update
+  it("20. Auto-update ON: WebSocket con versión nueva obtiene full manifest antes de auto-update", async () => {
+    localStorage.setItem(STORAGE_KEYS.AUTO_UPDATES, "true")
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "2.1.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      clientFiles: [{ path: "mods/auto.jar", sha256: "abc", sizeBytes: 200, downloadUrl: "/dl", policy: "NO_MODIFICABLE" }],
+    })
+
+    ;(window as any).electronAPI.getInstalledState = vi.fn().mockImplementation(async ({ gameId }: { gameId: string }) => {
+      if (gameId === "srv-meliora") {
+        return { installedModpackVersion: "2.0.0", integrityDirty: false }
+      }
+      return { installedModpackVersion: null, integrityDirty: false }
+    })
+
+    const { unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+
+    await act(async () => {
+      releaseEventListener?.({
+        type: "RELEASE_ACTIVATED",
+        serverId: "srv-meliora",
+        version: "2.1.0",
+        minecraftVersion: "1.20.1",
+        modLoader: "FORGE",
+        notes: "Notes 2.1.0",
+        cover: {
+          id: "cover-2-1",
+          mediaType: "IMAGE",
+          mimeType: "image/png",
+          url: "http://cdn/cover-2-1.png",
+        },
+      })
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(getPublishedSpy).toHaveBeenCalledWith("srv-meliora")
+    unmount()
+  })
+
+  // 21. Auto-update OFF: WebSocket con versión nueva solo actualiza summary y no llama getPublishedModpack
+  it("21. Auto-update OFF: WebSocket con versión nueva solo actualiza summary y no llama getPublishedModpack", async () => {
+    localStorage.setItem(STORAGE_KEYS.AUTO_UPDATES, "false")
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack")
+
+    ;(window as any).electronAPI.getInstalledState = vi.fn().mockImplementation(async ({ gameId }: { gameId: string }) => {
+      if (gameId === "srv-meliora") {
+        return { installedModpackVersion: "2.0.0", integrityDirty: false }
+      }
+      return { installedModpackVersion: null, integrityDirty: false }
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+
+    await act(async () => {
+      releaseEventListener?.({
+        type: "RELEASE_ACTIVATED",
+        serverId: "srv-meliora",
+        version: "2.2.0",
+        minecraftVersion: "1.20.1",
+        modLoader: "FORGE",
+        notes: "Notes 2.2.0",
+      })
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    expect(result.current.gameStates["srv-meliora"]?.releaseSummary?.version).toBe("2.2.0")
+    expect(result.current.gameStates["srv-meliora"]?.releaseSummary?.notes).toBe("Notes 2.2.0")
+    unmount()
+  })
+
+  // 22. Activar AUTO_UPDATES desde Settings: si hay update y solo summary, obtiene full manifest
+  it("22. Activar AUTO_UPDATES desde Settings: si hay update y solo summary, obtiene full manifest", async () => {
+    localStorage.setItem(STORAGE_KEYS.AUTO_UPDATES, "false")
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      clientFiles: [],
+    })
+
+    ;(window as any).electronAPI.getInstalledState = vi.fn().mockImplementation(async ({ gameId }: { gameId: string }) => {
+      if (gameId === "srv-meliora") {
+        return { installedModpackVersion: "1.0.0", integrityDirty: false }
+      }
+      return { installedModpackVersion: null, integrityDirty: false }
+    })
+
+    const { unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+
+    // Toggle AUTO_UPDATES to true via settings event
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("hikat:settings-changed", {
+          detail: { key: STORAGE_KEYS.AUTO_UPDATES, value: true },
+        }),
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(getPublishedSpy).toHaveBeenCalledWith("srv-meliora")
+    unmount()
+  })
+
+  // 23. Play normal: si ya está instalado y saludable, Play no solicita full manifest
+  it("23. Play normal: si ya está instalado y saludable, Play no solicita full manifest", async () => {
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack")
+    const launchGameSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue(undefined as any)
+
+    const { container, unmount } = renderButton({
+      serverId: "srv-meliora",
+      gameId: "srv-meliora",
+      gameContext: { gameId: "srv-meliora", gameName: "Meliora" },
+      releaseSummary: mockServers[0].activeRelease,
+      installedVersion: "2.0.0",
+      integrityDirty: false,
+    })
+
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+    const btn = container.querySelector("button")!
+    expect(btn.textContent).toMatch(/play|jugar/i)
+
+    await act(async () => {
+      btn.click()
+    })
+
+    expect(launchGameSpy).toHaveBeenCalled()
+    expect(getPublishedSpy).not.toHaveBeenCalled()
     unmount()
   })
 })

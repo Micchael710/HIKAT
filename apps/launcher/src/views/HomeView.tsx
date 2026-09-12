@@ -149,8 +149,13 @@ export default function HomeView({
     }
   }, [lastReleaseEvent, activeServerId, loadPublished, serverGameState])
 
-  const cover = publishedModpack?.cover
+  const activeSummary = serverGameState?.releaseSummary || selectedServer?.activeRelease
+  const cover = activeSummary?.cover || publishedModpack?.cover
   const coverUrl = cover?.url ? resolveApiAssetUrl(cover.url) : ""
+
+  useEffect(() => {
+    setMediaError(false)
+  }, [cover?.url])
 
   const hasMainLogo = Boolean(!mainLogoFailed && mainLogoUrl)
   const hasSidebarLogo = Boolean(!sidebarLogoFailed && sidebarLogoUrl)
@@ -327,10 +332,10 @@ export default function HomeView({
           lineHeight: 1.55,
         }}
       >
-        {selectedServer?.activeRelease?.notes?.trim()
-          ? selectedServer.activeRelease.notes
-          : serverGameState?.releaseSummary?.notes?.trim()
+        {serverGameState?.releaseSummary?.notes?.trim()
           ? serverGameState.releaseSummary.notes
+          : selectedServer?.activeRelease?.notes?.trim()
+          ? selectedServer.activeRelease.notes
           : publishedModpack?.notes?.trim()
           ? publishedModpack.notes
           : ""}

@@ -14,6 +14,7 @@ import {
   GameButtonState,
   GameManifest,
   ReleaseActivatedEvent,
+  isFullGameManifest,
 } from "../../services/gameService"
 import {
   STORAGE_KEYS,
@@ -72,6 +73,7 @@ export function buildManifestFromPublished(
     installed: isInstalled && !hasUpdate,
     hasExistingInstall: isInstalled,
     totalDownloadBytes: isInstalled ? 0 : totalBytes,
+    isFullManifest: true,
   }
 }
 
@@ -193,7 +195,7 @@ export default function DownloadPlayButton({
         minecraftVersion: releaseSummary.minecraftVersion || "",
         modLoader: (releaseSummary.modLoader as any) || "NEOFORGE",
         modLoaderVersion: releaseSummary.modLoaderVersion || null,
-        neoForgeVersion: null,
+        neoForgeVersion: releaseSummary.neoForgeVersion || null,
         totalSizeGB: 0,
         hasUpdate: Boolean(installedVersion && installedVersion !== releaseSummary.version),
         hasIntegrityIssue: Boolean(integrityDirty),
@@ -202,6 +204,7 @@ export default function DownloadPlayButton({
         installed: Boolean(installedVersion && installedVersion === releaseSummary.version),
         hasExistingInstall: Boolean(installedVersion),
         totalDownloadBytes: 0,
+        isFullManifest: false,
       }
     }
     return null
@@ -209,6 +212,46 @@ export default function DownloadPlayButton({
   const [manifest, setManifest] = useState<GameManifest | null>(initialManifest)
   const manifestRef = useRef<GameManifest | null>(initialManifest)
   manifestRef.current = manifest
+
+  const fullManifestPromiseRef = useRef<Record<string, Promise<GameManifest | null> | undefined>>({})
+
+  const ensureFullManifest = useCallback(
+    async (targetServerId?: string | null): Promise<GameManifest | null> => {
+      const sId = targetServerId || activeServerId
+      const current = manifestRef.current
+      if (isFullGameManifest(current) && (!sId || !current.version || (effectiveRelease?.version && current.version === effectiveRelease.version))) {
+        return current
+      }
+      if (!sId) return null
+
+      const existingPromise = fullManifestPromiseRef.current[sId]
+      if (existingPromise) {
+        return existingPromise
+      }
+
+      const p = (async () => {
+        try {
+          const published = await gameService.getPublishedModpack(sId)
+          if (!published) return null
+          const fullManifest = buildManifestFromPublished(published, installedVersion, integrityDirty)
+          if (fullManifest) {
+            setManifest(fullManifest)
+            manifestRef.current = fullManifest
+          }
+          return fullManifest
+        } catch (err) {
+          console.error("Failed to ensure full manifest for", sId, err)
+          return null
+        } finally {
+          delete fullManifestPromiseRef.current[sId]
+        }
+      })()
+
+      fullManifestPromiseRef.current[sId] = p
+      return p
+    },
+    [activeServerId, effectiveRelease?.version, installedVersion, integrityDirty],
+  )
 
   const [progress, setProgress] = useState(0)
   const highWaterProgressRef = useRef(0)
@@ -251,6 +294,9 @@ export default function DownloadPlayButton({
 
   useEffect(() => {
     if (publishedModpack === undefined && releaseSummary === undefined) return
+    if (!publishedModpack && isFullGameManifest(manifestRef.current) && manifestRef.current.version === releaseSummary?.version) {
+      return
+    }
     const updated: GameManifest | null = publishedModpack
       ? buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
       : releaseSummary?.version
@@ -259,7 +305,7 @@ export default function DownloadPlayButton({
           minecraftVersion: releaseSummary.minecraftVersion || "",
           modLoader: (releaseSummary.modLoader as any) || "NEOFORGE",
           modLoaderVersion: releaseSummary.modLoaderVersion || null,
-          neoForgeVersion: null,
+          neoForgeVersion: releaseSummary.neoForgeVersion || null,
           totalSizeGB: 0,
           hasUpdate: Boolean(installedVersion && installedVersion !== releaseSummary.version),
           hasIntegrityIssue: Boolean(integrityDirty),
@@ -268,6 +314,7 @@ export default function DownloadPlayButton({
           installed: Boolean(installedVersion && installedVersion === releaseSummary.version),
           hasExistingInstall: Boolean(installedVersion),
           totalDownloadBytes: 0,
+          isFullManifest: false,
         }
       : null
     setManifest(updated)
@@ -415,19 +462,24 @@ export default function DownloadPlayButton({
               autoUpdatesEnabled &&
               currentLatestManifest &&
               currentLatestManifest.version === latestManifestVersionRef.current &&
-              Array.isArray(currentLatestManifest.clientFiles) &&
               !isGameBusy
             ) {
               showToast(t("playButton.syncSuccess"), "success")
-              const nextManifest: GameManifest = {
-                ...currentLatestManifest,
-                installedModpackVersion: syncingVersion,
-                hasUpdate: true,
-                hasExistingInstall: true,
-              }
-              setManifest(nextManifest)
               isStartingSyncRef.current = false
-              triggerSync(nextManifest)
+              void ensureFullManifest(activeServerId).then((fullLatestManifest) => {
+                if (fullLatestManifest && isFullGameManifest(fullLatestManifest)) {
+                  const nextManifest: GameManifest = {
+                    ...fullLatestManifest,
+                    installedModpackVersion: syncingVersion,
+                    hasUpdate: true,
+                    hasExistingInstall: true,
+                  }
+                  setManifest(nextManifest)
+                  triggerSync(nextManifest)
+                } else {
+                  setStatus("update")
+                }
+              })
               return
             } else {
               if (syncOpIdRef.current === syncOpId) {
@@ -484,10 +536,10 @@ export default function DownloadPlayButton({
     if (autoUpdatedVersionRef.current === publishedModpack.version) return
 
     const targetManifest =
-      manifest && manifest.version === publishedModpack.version
+      manifest && manifest.version === publishedModpack.version && isFullGameManifest(manifest)
         ? manifest
         : buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
-    if (!targetManifest || !Array.isArray(targetManifest.clientFiles)) return
+    if (!targetManifest || !isFullGameManifest(targetManifest)) return
 
     const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
     if (!autoUpdatesEnabled) return
@@ -578,7 +630,7 @@ export default function DownloadPlayButton({
             minecraftVersion: releaseSummary.minecraftVersion || "",
             modLoader: (releaseSummary.modLoader as any) || "NEOFORGE",
             modLoaderVersion: releaseSummary.modLoaderVersion || null,
-            neoForgeVersion: null,
+            neoForgeVersion: releaseSummary.neoForgeVersion || null,
             totalSizeGB: 0,
             hasUpdate: Boolean(installedVersion && installedVersion !== releaseSummary.version),
             hasIntegrityIssue: Boolean(integrityDirty),
@@ -587,6 +639,7 @@ export default function DownloadPlayButton({
             installed: Boolean(installedVersion && installedVersion === releaseSummary.version),
             hasExistingInstall: Boolean(installedVersion),
             totalDownloadBytes: 0,
+            isFullManifest: false,
           }
         : null
       setManifest(baseManifest)
@@ -1209,11 +1262,14 @@ export default function DownloadPlayButton({
               autoUpdatesEnabled &&
               (pendingAutoUpdateRef.current || hasUpdate) &&
               !isStartingSyncRef.current &&
-              statusRef.current !== "paused" &&
-              Array.isArray(currentManifest?.clientFiles)
+              statusRef.current !== "paused"
             ) {
               pendingAutoUpdateRef.current = false
-              triggerSync(currentManifest)
+              void ensureFullManifest(activeServerId).then((fullManifest) => {
+                if (fullManifest && isFullGameManifest(fullManifest)) {
+                  triggerSync(fullManifest)
+                }
+              })
             } else {
               pendingAutoUpdateRef.current = false
             }
@@ -1612,22 +1668,24 @@ export default function DownloadPlayButton({
           }
           console.error("Resume sync error, trying fallback:", err)
           // Fallback based on manifest/staging only if no active recoverable operation exists
-          if (
-            manifest &&
-            Array.isArray(manifest.clientFiles) &&
-            manifest.version &&
-            manifest.minecraftVersion
-          ) {
-            if (syncOpIdRef.current === syncOpId) {
+          void ensureFullManifest(activeServerId).then((fullManifest) => {
+            if (
+              fullManifest &&
+              isFullGameManifest(fullManifest) &&
+              fullManifest.version &&
+              fullManifest.minecraftVersion
+            ) {
+              if (syncOpIdRef.current === syncOpId) {
+                isStartingSyncRef.current = false
+              }
+              triggerSync(fullManifest)
+            } else {
               isStartingSyncRef.current = false
+              gameService.setGameInstalled(false, gameContext?.gameId)
+              setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest, activeServerId) : "unavailable")
+              showToast(t("playButton.syncError"), "error")
             }
-            triggerSync(manifest)
-          } else {
-            isStartingSyncRef.current = false
-            gameService.setGameInstalled(false, gameContext?.gameId)
-            setStatus(isLocalAllowed ? resolveIdleGameButtonState(manifest, activeServerId) : "unavailable")
-            showToast(t("playButton.syncError"), "error")
-          }
+          })
         })
         .finally(() => {
           if (syncOpIdRef.current === syncOpId) {
@@ -1654,24 +1712,14 @@ export default function DownloadPlayButton({
     }
     if (status === "download" || status === "update") {
       let targetManifest = manifest
-      const isMissingFiles = !targetManifest?.clientFiles || targetManifest.clientFiles.length === 0
-      if (releaseSummary && isMissingFiles && activeServerId) {
-        try {
-          setIsTransitioning(true)
-          const fullModpack = await gameService.getPublishedModpack(activeServerId)
-          if (!fullModpack) {
-            showToast(t("playButton.noClientFiles"), "error")
-            setIsTransitioning(false)
-            return
-          }
-          targetManifest = buildManifestFromPublished(fullModpack, installedVersion, integrityDirty)
-          setManifest(targetManifest)
-          setIsTransitioning(false)
-        } catch {
-          showToast(t("playButton.noClientFiles"), "error")
-          setIsTransitioning(false)
-          return
-        }
+      if (!isFullGameManifest(targetManifest) && activeServerId) {
+        setIsTransitioning(true)
+        targetManifest = await ensureFullManifest(activeServerId)
+        setIsTransitioning(false)
+      }
+      if (!targetManifest || !isFullGameManifest(targetManifest)) {
+        showToast(t("playButton.noClientFiles"), "error")
+        return
       }
       triggerSync(targetManifest)
     } else if (status === "play") {
@@ -1681,13 +1729,8 @@ export default function DownloadPlayButton({
       const isDirty = Boolean(integrityDirty || isIntegrityBlockedRef.current)
       if (isDirty) {
         let playManifest = manifest
-        const isMissingFiles = !playManifest?.clientFiles || playManifest.clientFiles.length === 0
-        if (releaseSummary && isMissingFiles && activeServerId) {
-          const fullModpack = await gameService.getPublishedModpack(activeServerId).catch(() => null)
-          if (fullModpack) {
-            playManifest = buildManifestFromPublished(fullModpack, installedVersion, integrityDirty)
-            setManifest(playManifest)
-          }
+        if (!isFullGameManifest(playManifest) && activeServerId) {
+          playManifest = await ensureFullManifest(activeServerId)
         }
         if (window.electronAPI?.checkSyncPlan && playManifest?.clientFiles) {
           try {
@@ -1764,7 +1807,15 @@ export default function DownloadPlayButton({
     ) {
       return
     }
-    if (!manifest || !Array.isArray(manifest.clientFiles) || !manifest.version) {
+
+    let targetManifest = manifest
+    if (!isFullGameManifest(targetManifest) && activeServerId) {
+      setIsTransitioning(true)
+      targetManifest = await ensureFullManifest(activeServerId)
+      setIsTransitioning(false)
+    }
+
+    if (!targetManifest || !isFullGameManifest(targetManifest) || !targetManifest.version) {
       showToast(t("playButton.verifyError"), "error")
       window.dispatchEvent(
         new CustomEvent("hikat:game-action-status", {
@@ -1790,14 +1841,14 @@ export default function DownloadPlayButton({
     let verifySuccess = false
     gameService
       .startSync(
-        manifest.clientFiles,
-        manifest.version,
-        manifest.minecraftVersion,
-        manifest.modLoader,
-        manifest.modLoaderVersion,
-        manifest.neoForgeVersion,
+        targetManifest.clientFiles,
+        targetManifest.version,
+        targetManifest.minecraftVersion,
+        targetManifest.modLoader,
+        targetManifest.modLoaderVersion,
+        targetManifest.neoForgeVersion,
         true,
-        ...(manifest.directoryPolicies ? [manifest.directoryPolicies] : []),
+        ...(targetManifest.directoryPolicies ? [targetManifest.directoryPolicies] : []),
         ...(gameContext ? [gameContext] : []),
       )
       .then(async (res: any) => {
@@ -1811,7 +1862,7 @@ export default function DownloadPlayButton({
         )
 
         if (isSuccess) {
-          const verifiedVersion = manifest.version
+          const verifiedVersion = targetManifest.version
           isIntegrityBlockedRef.current = false
           onClearIntegrityDirty?.()
           if (verifiedVersion) {
@@ -1821,7 +1872,7 @@ export default function DownloadPlayButton({
           markSyncedVersionInstalled(verifiedVersion)
           verifySuccess = true
 
-          const currentLatestManifest = manifestRef.current || manifest
+          const currentLatestManifest = manifestRef.current || targetManifest
           const hasNewerRelease = Boolean(
             latestManifestVersionRef.current &&
             latestManifestVersionRef.current !== verifiedVersion
@@ -1834,22 +1885,27 @@ export default function DownloadPlayButton({
               autoUpdatesEnabled &&
               currentLatestManifest &&
               currentLatestManifest.version === latestManifestVersionRef.current &&
-              Array.isArray(currentLatestManifest.clientFiles) &&
               !isGameBusy
             ) {
               showToast(t("playButton.verifySuccess"), "success")
-              const nextManifest: GameManifest = {
-                ...currentLatestManifest,
-                installedModpackVersion: verifiedVersion,
-                hasUpdate: true,
-                hasExistingInstall: true,
-                hasIntegrityIssue: false,
-              }
-              setManifest(nextManifest)
               if (syncOpIdRef.current === syncOpId) {
                 isStartingSyncRef.current = false
               }
-              triggerSync(nextManifest)
+              void ensureFullManifest(activeServerId).then((fullLatestManifest) => {
+                if (fullLatestManifest && isFullGameManifest(fullLatestManifest)) {
+                  const nextManifest: GameManifest = {
+                    ...fullLatestManifest,
+                    installedModpackVersion: verifiedVersion,
+                    hasUpdate: true,
+                    hasExistingInstall: true,
+                    hasIntegrityIssue: false,
+                  }
+                  setManifest(nextManifest)
+                  triggerSync(nextManifest)
+                } else {
+                  setStatus("update")
+                }
+              })
               return
             } else {
               if (syncOpIdRef.current === syncOpId) {
