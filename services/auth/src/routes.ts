@@ -27,7 +27,7 @@ import {
   requestPasswordReset,
   resetPasswordWithToken,
   changePassword,
-  changeUsername,
+  setInitialUsername,
   getOrCreateOAuthUser,
   resolveOAuthUser,
   getAuthMethods,
@@ -1066,8 +1066,8 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
       return jsonResponse({ success: true, message: "Password updated successfully" })
     }
 
-    // 8b. Change Username (authenticated)
-    if (pathname === "/auth/change-username" && method === "POST") {
+    // 8b. Set Initial Username (authenticated, only allowed when display_name is NULL)
+    if (pathname === "/auth/set-username" && method === "POST") {
       const session = await extractAuthenticatedSession(request, keyManager)
       const isSessionActive = await validateActiveSession(db, session.sessionId, session.userId)
       if (!isSessionActive) {
@@ -1076,31 +1076,44 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
       const body = (await request.json().catch(() => ({}))) as {
         username?: string
-        newUsername?: string
       }
 
-      const targetUsername = body.username || body.newUsername
+      const targetUsername = body.username
       if (!targetUsername) {
         return errorResponse(AuthErrorCode.INVALID_USERNAME, "username is required", 400)
       }
 
-      const result = await changeUsername(
-        db,
-        session.userId,
-        session.sessionId,
-        targetUsername,
-      )
+      try {
+        const result = await setInitialUsername(
+          db,
+          session.userId,
+          session.sessionId,
+          targetUsername,
+        )
 
-      return jsonResponse({
-        ok: true,
-        success: true,
-        user: {
-          id: result.user.id,
-          role: result.user.role,
-          displayName: result.user.displayName,
-          createdAt: result.user.createdAt,
-        },
-      })
+        return jsonResponse({
+          ok: true,
+          success: true,
+          user: {
+            id: result.user.id,
+            role: result.user.role,
+            displayName: result.user.displayName,
+            createdAt: result.user.createdAt,
+          },
+        })
+      } catch (err: any) {
+        const msg = String(err?.message || err)
+        if (msg === AuthErrorCode.FORBIDDEN) {
+          return errorResponse(AuthErrorCode.FORBIDDEN, "Username is already set and cannot be modified", 403)
+        }
+        if (msg === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
+          return errorResponse(AuthErrorCode.USERNAME_ALREADY_EXISTS, "Username is already taken", 409)
+        }
+        if (msg === AuthErrorCode.INVALID_USERNAME) {
+          return errorResponse(AuthErrorCode.INVALID_USERNAME, "Invalid username format", 400)
+        }
+        throw err
+      }
     }
 
     // 9. Session Refresh Token Rotation (atomic & race-condition-safe)

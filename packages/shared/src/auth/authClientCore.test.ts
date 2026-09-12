@@ -983,7 +983,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
       expect(backofficeClient.getUser()?.email).toBe("admin@hikat.org")
     })
 
-    it("30. changeUsername updates session user displayName, saves to storage, and notifies listeners", async () => {
+    it("30. setUsername updates session user displayName, saves to storage, and notifies listeners", async () => {
       const storage = createMemoryStorageAdapter()
       const client = new AuthClientCore({
         authServiceUrl: "http://localhost:8788",
@@ -995,7 +995,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
       await client.setSession({
         accessToken: "access-token-123",
         refreshToken: "refresh-token-123",
-        user: { id: "u-user", email: "user@hikat.org", role: "PLAYER", displayName: "OldName" },
+        user: { id: "u-user", email: "user@hikat.org", role: "PLAYER", displayName: null },
       })
 
       const listener = vi.fn()
@@ -1016,7 +1016,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
         }),
       })
 
-      const updatedUser = await client.changeUsername("NewName_99")
+      const updatedUser = await client.setUsername("NewName_99")
 
       expect(updatedUser.displayName).toBe("NewName_99")
       expect(client.getUser()?.displayName).toBe("NewName_99")
@@ -1029,7 +1029,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
       )
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "http://localhost:8788/auth/change-username",
+        "http://localhost:8788/auth/set-username",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
@@ -1040,7 +1040,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
       )
     })
 
-    it("31. changeUsername propagates USERNAME_ALREADY_EXISTS and INVALID_USERNAME errors", async () => {
+    it("31. setUsername propagates USERNAME_ALREADY_EXISTS, INVALID_USERNAME, and FORBIDDEN errors", async () => {
       const client = new AuthClientCore({
         authServiceUrl: "http://localhost:8788",
         allowedRole: "PLAYER",
@@ -1050,7 +1050,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
       await client.setSession({
         accessToken: "access-token-123",
         refreshToken: "refresh-token-123",
-        user: { id: "u-user", email: "user@hikat.org", role: "PLAYER", displayName: "Brayan" },
+        user: { id: "u-user", email: "user@hikat.org", role: "PLAYER", displayName: null },
       })
 
       mockFetch.mockResolvedValueOnce({
@@ -1059,7 +1059,7 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
         json: async () => ({ error: "USERNAME_ALREADY_EXISTS", message: "This username is already taken" }),
       })
 
-      await expect(client.changeUsername("TakenName")).rejects.toThrow("USERNAME_ALREADY_EXISTS")
+      await expect(client.setUsername("TakenName")).rejects.toThrow("USERNAME_ALREADY_EXISTS")
 
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -1067,7 +1067,15 @@ describe("Unified AuthClientCore Test Suite (Shard 8F Auth Parity & Hardening)",
         json: async () => ({ error: "INVALID_USERNAME", message: "Invalid username format" }),
       })
 
-      await expect(client.changeUsername("ab")).rejects.toThrow("INVALID_USERNAME")
+      await expect(client.setUsername("ab")).rejects.toThrow("INVALID_USERNAME")
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "FORBIDDEN", message: "Username already set and cannot be modified" }),
+      })
+
+      await expect(client.setUsername("AlreadySet")).rejects.toThrow("FORBIDDEN")
     })
   })
 })

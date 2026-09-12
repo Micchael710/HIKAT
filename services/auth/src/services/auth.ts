@@ -1067,11 +1067,14 @@ export async function issueGameToken(
  * - Format: ^[A-Za-z0-9_]{3,16}$
  * - Global case-insensitive uniqueness (excluding current user)
  * - Same-user casing changes allowed (e.g. brayan06 -> Brayan06)
- * - Race-condition safe via database constraint
- * - Updates only display_name and updated_at
- * - Preserves users.id and authentication method
+/**
+ * Set Initial Username
+ * - ONLY allowed when display_name IS NULL (e.g. OAuth newly created account)
+ * - Once set, permanent and immutable
+ * - Format: ^[A-Za-z0-9_]{3,16}$
+ * - Case-insensitive uniqueness enforced via SQLite index & check
  */
-export async function changeUsername(
+export async function setInitialUsername(
   db: Database,
   userId: string,
   sessionId: string,
@@ -1089,7 +1092,7 @@ export async function changeUsername(
     throw new Error(AuthErrorCode.INVALID_USERNAME)
   }
 
-  // 3. Verify user exists
+  // 3. Verify user exists and display_name IS NULL
   const currentUser = await db
     .select()
     .from(schema.users)
@@ -1098,6 +1101,11 @@ export async function changeUsername(
 
   if (!currentUser) {
     throw new Error(AuthErrorCode.UNAUTHORIZED)
+  }
+
+  // Permanent rule: If display_name is already set, it cannot be modified
+  if (currentUser.displayName !== null) {
+    throw new Error(AuthErrorCode.FORBIDDEN)
   }
 
   // 4. Case-insensitive conflict check with OTHER users:
@@ -1116,7 +1124,7 @@ export async function changeUsername(
     throw new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
   }
 
-  // 5. Update users table with new username (casing preserved) and updated_at
+  // 5. Update users table with initial username (casing preserved) and updated_at
   const now = new Date().toISOString()
   try {
     await db
@@ -1125,12 +1133,15 @@ export async function changeUsername(
         displayName: trimmed,
         updatedAt: now,
       })
-      .where(eq(schema.users.id, userId))
+      .where(and(eq(schema.users.id, userId), sql`${schema.users.displayName} IS NULL`))
       .run()
   } catch (err: any) {
     const errMsg = String(err?.message || err)
     if (errMsg.includes("UNIQUE") || errMsg.includes("constraint")) {
       throw new Error(AuthErrorCode.USERNAME_ALREADY_EXISTS)
+    }
+    if (errMsg.includes("USERNAME_IMMUTABLE") || errMsg.includes("permanent")) {
+      throw new Error(AuthErrorCode.FORBIDDEN)
     }
     throw err
   }
@@ -1143,3 +1154,4 @@ export async function changeUsername(
 
   return { user: updatedUser! }
 }
+

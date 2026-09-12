@@ -1087,40 +1087,40 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(authService.getRemainingCooldown("reset", "independent@hikat.org")).toBeGreaterThan(0)
   })
 
-  it("34. changeUsername strictly validates input and rejects spaces or invalid formats without silent alteration", async () => {
-    const clientSpy = vi.spyOn((authService as any).client, "changeUsername")
+  it("34. setUsername strictly validates input and rejects spaces or invalid formats without silent alteration", async () => {
+    const clientSpy = vi.spyOn((authService as any).client, "setUsername")
 
     // Space in username -> REJECTED without transforming to "BrayanMateo"
-    const resSpace = await authService.changeUsername("Brayan Mateo")
+    const resSpace = await authService.setUsername("Brayan Mateo")
     expect(resSpace.success).toBe(false)
     expect(resSpace.code).toBe("INVALID_USERNAME")
     expect(clientSpy).not.toHaveBeenCalled()
 
     // 2 chars -> REJECTED
-    const resShort = await authService.changeUsername("ab")
+    const resShort = await authService.setUsername("ab")
     expect(resShort.success).toBe(false)
     expect(resShort.code).toBe("INVALID_USERNAME")
 
     // 17 chars -> REJECTED
-    const resLong = await authService.changeUsername("a".repeat(17))
+    const resLong = await authService.setUsername("a".repeat(17))
     expect(resLong.success).toBe(false)
     expect(resLong.code).toBe("INVALID_USERNAME")
 
     // Invalid symbol -> REJECTED
-    const resSymbol = await authService.changeUsername("User-Name!")
+    const resSymbol = await authService.setUsername("User-Name!")
     expect(resSymbol.success).toBe(false)
     expect(resSymbol.code).toBe("INVALID_USERNAME")
   })
 
-  it("35. changeUsername passes trimmed valid username preserving exact casing to client", async () => {
-    const clientSpy = vi.spyOn((authService as any).client, "changeUsername").mockResolvedValueOnce({
+  it("35. setUsername passes trimmed valid username preserving exact casing to client", async () => {
+    const clientSpy = vi.spyOn((authService as any).client, "setUsername").mockResolvedValueOnce({
       id: "u-1",
       displayName: "Brayan_06",
       email: "brayan@hikat.org",
       role: "PLAYER",
     })
 
-    const res = await authService.changeUsername("  Brayan_06  ")
+    const res = await authService.setUsername("  Brayan_06  ")
     expect(clientSpy).toHaveBeenCalledWith("Brayan_06")
     expect(res.success).toBe(true)
     expect(res.user?.displayName).toBe("Brayan_06")

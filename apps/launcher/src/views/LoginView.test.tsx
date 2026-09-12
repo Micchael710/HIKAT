@@ -1319,7 +1319,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
     expect(onLogin).not.toHaveBeenCalled()
   })
 
-  it("36. Confirming chosen username in choose-username mode calls authService.changeUsername and calls onLogin", async () => {
+  it("36. Confirming chosen username in choose-username mode calls authService.setUsername and calls onLogin", async () => {
     const onLogin = vi.fn()
     vi.spyOn(authService, "getStatus").mockReturnValue("AUTHENTICATED")
     vi.spyOn(authService, "getUser").mockReturnValue({
@@ -1331,7 +1331,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       role: "PLAYER",
     })
 
-    const changeUsernameSpy = vi.spyOn(authService, "changeUsername").mockResolvedValue({
+    const setUsernameSpy = vi.spyOn(authService, "setUsername").mockResolvedValue({
       success: true,
       user: {
         id: "u-oauth-1",
@@ -1339,6 +1339,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
         displayName: "CustomName_99",
         email: "brayan@gmail.com",
         role: "PLAYER",
+        createdAt: "2024-01-01T00:00:00.000Z",
       },
     })
 
@@ -1362,7 +1363,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       submitBtn?.click()
     })
 
-    expect(changeUsernameSpy).toHaveBeenCalledWith("CustomName_99")
+    expect(setUsernameSpy).toHaveBeenCalledWith("CustomName_99")
 
     await act(async () => {
       await new Promise((r) => setTimeout(r, 400))
@@ -1382,7 +1383,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
       role: "PLAYER",
     })
 
-    const changeUsernameSpy = vi.spyOn(authService, "changeUsername")
+    const setUsernameSpy = vi.spyOn(authService, "setUsername")
 
     const container = await renderComponent(
       <LanguageProvider>
@@ -1405,7 +1406,7 @@ describe("Launcher LoginView Component (OAuth, Layout Order & i18n)", () => {
 
     // Validation error displayed
     expect(container.textContent).toContain("El nombre de usuario debe tener entre 3 y 16 caracteres y solo contener letras, números y guion bajo.")
-    expect(changeUsernameSpy).not.toHaveBeenCalled()
+    expect(setUsernameSpy).not.toHaveBeenCalled()
     expect(onLogin).not.toHaveBeenCalled()
     expect(input.value).toBe("Brayan Mateo") // NOT silently transformed to "BrayanMateo"
   })

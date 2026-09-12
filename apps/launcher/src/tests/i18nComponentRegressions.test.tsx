@@ -372,8 +372,8 @@ describe("i18n Component Regressions & Error Rendering Test Suite", () => {
     })
   })
 
-  describe("3. ProfileView: Username error mapping renders localized copy", () => {
-    it("enters edit mode and renders localized usernameTakenError in English when changeUsername returns USERNAME_ALREADY_EXISTS", async () => {
+  describe("3. ProfileView: Username is read-only and cannot be changed", () => {
+    it("renders username as read-only text without edit button or input", async () => {
       vi.spyOn(authService, "getUser").mockReturnValue({
         id: "u-1",
         username: "CurrentName",
@@ -381,47 +381,16 @@ describe("i18n Component Regressions & Error Rendering Test Suite", () => {
         email: "user@test.com",
       })
 
-      vi.spyOn(authService, "changeUsername").mockResolvedValueOnce({
-        success: false,
-        error: "USERNAME_ALREADY_EXISTS",
-        code: AuthErrorCode.USERNAME_ALREADY_EXISTS,
-      })
-
       const container = await renderComponent(
         <ProfileView username="CurrentName" onBack={vi.fn()} theme="dark" />,
         "en",
       )
 
-      // Enter edit mode by clicking the pencil button
-      const editBtn = container.querySelector('button[aria-label="Change Username"], button[title="Change Username"]') as HTMLButtonElement
-      expect(editBtn).not.toBeNull()
-
-      await act(async () => {
-        editBtn.click()
-      })
-
-      const input = container.querySelector("input") as HTMLInputElement
-      expect(input).not.toBeNull()
-
-      await act(async () => {
-        changeInput(input, "TakenUsername")
-      })
-
-      const saveBtn = Array.from(container.querySelectorAll("button")).find(
-        (b) => b.textContent?.includes("Save") || b.textContent?.includes("Guardar"),
-      )
-      expect(saveBtn).toBeDefined()
-
-      await act(async () => {
-        saveBtn?.click()
-      })
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      })
-
-      expect(container.textContent).toContain("This username is already taken.")
-      expect(container.textContent).not.toContain("USERNAME_ALREADY_EXISTS")
-      expect(container.textContent).not.toContain("Este nombre de usuario ya está en uso")
+      expect(container.textContent).toContain("CurrentName")
+      const editBtn = container.querySelector('button[aria-label="Change Username"], button[title="Change Username"]')
+      expect(editBtn).toBeNull()
+      const input = container.querySelector("input")
+      expect(input).toBeNull()
     })
   })
 

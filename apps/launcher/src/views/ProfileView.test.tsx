@@ -611,34 +611,20 @@ describe("Launcher ProfileView Component", () => {
       await new Promise((r) => setTimeout(r, 10))
     })
 
-    // Normal view before edit
+    // Normal view
     expect(container.textContent).toContain("StevePlayer")
 
-    // The pencil button is strictly inside the "NOMBRE DE USUARIO" tile
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    expect(editBtn).not.toBeNull()
+    // No pencil button anywhere
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]')
+    expect(editBtn).toBeNull()
 
-    // Verify edit button is inside the tile that contains "Nombre de Usuario" label
-    const usernameTile = editBtn.closest("div")?.parentElement
-    expect(usernameTile?.textContent?.toLowerCase()).toContain("usuario")
-
-    // No edit input rendered initially
+    // No edit input rendered
     expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).toBeNull()
+    expect(container.querySelector("input")).toBeNull()
 
-    // Strict rule: No mentioning "Minecraft" in username change UI
+    // Strict rule: No mentioning "Minecraft" in username UI
     expect(container.textContent?.toLowerCase()).not.toContain("minecraft uuid")
     expect(container.textContent?.toLowerCase()).not.toContain("mojang")
-
-    // Click pencil to open inline edit mode
-    await act(async () => {
-      editBtn.click()
-    })
-
-    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
-    expect(input).not.toBeNull()
-    expect(input.title).toContain("Debe tener entre 3 y 16 caracteres (letras, números y guion bajo).")
-    expect(container.textContent).toContain("Guardar")
-    expect(container.textContent).toContain("Cancelar")
   })
 
   function changeInput(input: HTMLInputElement, value: string) {
@@ -651,36 +637,24 @@ describe("Launcher ProfileView Component", () => {
     input.dispatchEvent(new Event("change", { bubbles: true }))
   }
 
-  it("16. User can open inline edit, input new valid username and successfully save, updating UI and displaying toast", async () => {
+  it("16. Username is displayed strictly as read-only with no edit button, inputs or edit forms", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-16",
-      username: "OldName",
-      displayName: "OldName",
-      email: "oldname@hikat.org",
+      username: "PermanentPlayer",
+      displayName: "PermanentPlayer",
+      email: "player@hikat.org",
       role: "PLAYER",
       createdAt: "2024-01-01T00:00:00.000Z",
     })
     vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
       success: true,
-      methods: [{ type: "PASSWORD", email: "oldname@hikat.org" }],
-    })
-
-    const changeUsernameSpy = vi.spyOn(authService, "changeUsername").mockResolvedValue({
-      success: true,
-      user: {
-        id: "u-16",
-        username: "NewAwesomeName",
-        displayName: "NewAwesomeName",
-        email: "oldname@hikat.org",
-        role: "PLAYER",
-        createdAt: "2024-01-01T00:00:00.000Z",
-      },
+      methods: [{ type: "PASSWORD", email: "player@hikat.org" }],
     })
 
     const container = await renderComponent(
       <LanguageProvider>
         <ProfileView
-          username="OldName"
+          username="PermanentPlayer"
           onBack={vi.fn()}
           theme="dark"
         />
@@ -691,194 +665,13 @@ describe("Launcher ProfileView Component", () => {
       await new Promise((r) => setTimeout(r, 10))
     })
 
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    expect(editBtn).not.toBeNull()
-
-    await act(async () => {
-      editBtn.click()
-    })
-
-    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
-    expect(input).not.toBeNull()
-
-    // Enter new valid username
-    await act(async () => {
-      changeInput(input, "NewAwesomeName")
-    })
-
-    const form = container.querySelector("form")
-    expect(form).not.toBeNull()
-
-    await act(async () => {
-      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
-    })
-
-    expect(changeUsernameSpy).toHaveBeenCalledWith("NewAwesomeName")
-    expect(container.textContent).toContain("Nombre de usuario actualizado correctamente.")
-    expect(container.textContent).toContain("NewAwesomeName")
-    // Form is closed
+    expect(container.textContent).toContain("PermanentPlayer")
+    expect(container.querySelector('button[aria-label="Cambiar nombre de usuario"]')).toBeNull()
     expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).toBeNull()
+    expect(container.querySelector("form")).toBeNull()
   })
 
-  it("17. Handles taken username error by displaying inline error and error toast in inline edit mode", async () => {
-    vi.spyOn(authService, "getCachedUser").mockReturnValue({
-      id: "u-17",
-      username: "PlayerA",
-      displayName: "PlayerA",
-      email: "a@hikat.org",
-      role: "PLAYER",
-    })
-    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
-      success: true,
-      methods: [{ type: "PASSWORD", email: "a@hikat.org" }],
-    })
-    vi.spyOn(authService, "changeUsername").mockResolvedValue({
-      success: false,
-      code: "USERNAME_ALREADY_EXISTS",
-      error: "This username is already taken",
-    })
-
-    const container = await renderComponent(
-      <LanguageProvider>
-        <ProfileView
-          username="PlayerA"
-          onBack={vi.fn()}
-          theme="dark"
-        />
-      </LanguageProvider>,
-    )
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10))
-    })
-
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    await act(async () => {
-      editBtn.click()
-    })
-
-    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
-    await act(async () => {
-      changeInput(input, "TakenName")
-    })
-
-    const form = container.querySelector("form")
-    await act(async () => {
-      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
-    })
-
-    expect(container.textContent).toContain("Este nombre de usuario ya está en uso.")
-  })
-
-  it("18. Allows casing-only change for same user (e.g. steve -> Steve)", async () => {
-    vi.spyOn(authService, "getCachedUser").mockReturnValue({
-      id: "u-18",
-      username: "steve",
-      displayName: "steve",
-      email: "steve@hikat.org",
-      role: "PLAYER",
-    })
-    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
-      success: true,
-      methods: [{ type: "PASSWORD", email: "steve@hikat.org" }],
-    })
-
-    const changeUsernameSpy = vi.spyOn(authService, "changeUsername").mockResolvedValue({
-      success: true,
-      user: {
-        id: "u-18",
-        username: "Steve",
-        displayName: "Steve",
-        email: "steve@hikat.org",
-        role: "PLAYER",
-      },
-    })
-
-    const container = await renderComponent(
-      <LanguageProvider>
-        <ProfileView
-          username="steve"
-          onBack={vi.fn()}
-          theme="dark"
-        />
-      </LanguageProvider>,
-    )
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10))
-    })
-
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    await act(async () => {
-      editBtn.click()
-    })
-
-    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
-    await act(async () => {
-      changeInput(input, "Steve")
-    })
-
-    const form = container.querySelector("form")
-    await act(async () => {
-      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
-    })
-
-    expect(changeUsernameSpy).toHaveBeenCalledWith("Steve")
-    expect(container.textContent).toContain("Nombre de usuario actualizado correctamente.")
-  })
-
-  it("19. Clicking cancel exits inline edit mode without calling changeUsername", async () => {
-    vi.spyOn(authService, "getCachedUser").mockReturnValue({
-      id: "u-19",
-      username: "CancelPlayer",
-      displayName: "CancelPlayer",
-      email: "cancel@hikat.org",
-      role: "PLAYER",
-    })
-    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
-      success: true,
-      methods: [{ type: "PASSWORD", email: "cancel@hikat.org" }],
-    })
-    const changeUsernameSpy = vi.spyOn(authService, "changeUsername")
-
-    const container = await renderComponent(
-      <LanguageProvider>
-        <ProfileView
-          username="CancelPlayer"
-          onBack={vi.fn()}
-          theme="dark"
-        />
-      </LanguageProvider>,
-    )
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10))
-    })
-
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    await act(async () => {
-      editBtn.click()
-    })
-
-    expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).not.toBeNull()
-
-    const saveBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Guardar")
-    const cancelBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Cancelar")
-    expect(saveBtn).toBeDefined()
-    expect(cancelBtn).toBeDefined()
-    expect(saveBtn?.classList.contains("launcher-btn-primary")).toBe(true)
-    expect(cancelBtn?.classList.contains("launcher-btn-secondary")).toBe(true)
-
-    await act(async () => {
-      cancelBtn?.click()
-    })
-
-    expect(container.querySelector('input[placeholder="3 a 16 caracteres"]')).toBeNull()
-    expect(container.textContent).toContain("CancelPlayer")
-    expect(changeUsernameSpy).not.toHaveBeenCalled()
-  })
-
-  it("20. ProfileView applies dynamic skin accent to background orbs and inline edit Guardar button", async () => {
+  it("17. ProfileView applies dynamic skin accent to background orbs", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-20",
       username: "GreenGamer",
@@ -917,21 +710,9 @@ describe("Launcher ProfileView Component", () => {
     const orb1 = container.querySelector(".skins-bg-orb-1") as HTMLElement
     expect(orb1).not.toBeNull()
     expect(orb1.style.background).toContain("16, 185, 129")
-
-    // Enter edit mode
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    await act(async () => {
-      editBtn.click()
-    })
-
-    const saveBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Guardar") as HTMLButtonElement
-    expect(saveBtn).toBeDefined()
-    expect(saveBtn.classList.contains("launcher-btn-primary")).toBe(true)
-    expect(saveBtn.classList.contains("dynamic-accent")).toBe(true)
-    expect(saveBtn.style.getPropertyValue("--accent-rgb")).toBe("16, 185, 129")
   })
 
-  it("21. Username edit textbox preserves invalid characters, disables save, and triggers error toast without silent alterations", async () => {
+  it("21. Username cannot be edited and no edit controls or inputs exist in ProfileView", async () => {
     vi.spyOn(authService, "getCachedUser").mockReturnValue({
       id: "u-21",
       username: "AlphaUser",
@@ -958,36 +739,11 @@ describe("Launcher ProfileView Component", () => {
       await new Promise((r) => setTimeout(r, 10))
     })
 
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    await act(async () => {
-      editBtn.click()
-    })
-
-    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
-    expect(input).not.toBeNull()
-
-    // 1. Partial input with only 2 valid characters: does NOT show error toast
-    await act(async () => {
-      changeInput(input, "Br")
-    })
-    expect(input.value).toBe("Br")
-    expect(container.textContent).not.toContain("El nombre de usuario debe tener entre 3 y 16 caracteres")
-
-    // 2. Typing invalid characters (spaces and symbols): "Brayan Mateo"
-    await act(async () => {
-      changeInput(input, "Brayan Mateo")
-    })
-
-    // Value in input MUST NOT be altered/sanitized to "BrayanMateo"
-    expect(input.value).toBe("Brayan Mateo")
-
-    // Error toast must be displayed with localized message
-    expect(container.textContent).toContain("El nombre de usuario debe tener entre 3 y 16 caracteres y solo contener letras, números y guion bajo.")
-
-    // Save button must be disabled
-    const saveBtn = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Guardar") as HTMLButtonElement
-    expect(saveBtn).toBeDefined()
-    expect(saveBtn.disabled).toBe(true)
+    expect(container.textContent).toContain("AlphaUser")
+    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]')
+    expect(editBtn).toBeNull()
+    const input = container.querySelector("input")
+    expect(input).toBeNull()
   })
 
   it("22. ProfileView displays OAuth access method (Discord/Google) with launcher button styling, non-clickable (cursor default) and no hover actions", async () => {
@@ -1026,59 +782,6 @@ describe("Launcher ProfileView Component", () => {
     expect(badge?.style.borderRadius).toBe("14px")
   })
 
-  it("23. ProfileView translates backend USERNAME_ALREADY_EXISTS and INVALID_USERNAME without exposing raw technical error codes", async () => {
-    vi.spyOn(authService, "getCachedUser").mockReturnValue({
-      id: "u-23",
-      username: "ErrorPlayer",
-      displayName: "ErrorPlayer",
-      email: "err@hikat.org",
-      role: "PLAYER",
-    })
-    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
-      success: true,
-      methods: [{ type: "PASSWORD", email: "err@hikat.org" }],
-    })
-    vi.spyOn(authService, "changeUsername").mockResolvedValue({
-      success: false,
-      code: "USERNAME_ALREADY_EXISTS",
-      error: "USERNAME_ALREADY_EXISTS",
-    })
-
-    const container = await renderComponent(
-      <LanguageProvider>
-        <ProfileView
-          username="ErrorPlayer"
-          onBack={vi.fn()}
-          theme="dark"
-        />
-      </LanguageProvider>,
-    )
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10))
-    })
-
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    await act(async () => {
-      editBtn.click()
-    })
-
-    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
-    await act(async () => {
-      changeInput(input, "ValidTakenName")
-    })
-
-    const form = container.querySelector("form")
-    await act(async () => {
-      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
-    })
-
-    // Must show friendly translation
-    expect(container.textContent).toContain("Este nombre de usuario ya está en uso.")
-    // Must NOT contain technical error code
-    expect(container.textContent).not.toContain("USERNAME_ALREADY_EXISTS")
-  })
-
   it("24. Integrated Back button uses launcher-btn-secondary and executes onBack", async () => {
     const onBackSpy = vi.fn()
     const container = await renderComponent(
@@ -1100,74 +803,6 @@ describe("Launcher ProfileView Component", () => {
       backBtn.click()
     })
     expect(onBackSpy).toHaveBeenCalledTimes(1)
-  })
-
-  it("25. LiveToast for successful username change uses skin dynamic accent color", async () => {
-    vi.spyOn(authService, "getCachedUser").mockReturnValue({
-      id: "u-25",
-      username: "OldEmerald",
-      displayName: "OldEmerald",
-      email: "emerald@hikat.org",
-      role: "PLAYER",
-    })
-    vi.spyOn(authService, "getAuthMethods").mockResolvedValue({
-      success: true,
-      methods: [{ type: "PASSWORD", email: "emerald@hikat.org" }],
-    })
-    vi.spyOn(authService, "changeUsername").mockResolvedValue({
-      success: true,
-      user: {
-        id: "u-25",
-        username: "NewEmerald",
-        displayName: "NewEmerald",
-        email: "emerald@hikat.org",
-        role: "PLAYER",
-      },
-    })
-
-    const emeraldSkin: any = {
-      id: "skin-emerald",
-      name: "Emerald Skin",
-      shirt: "#10b981", // rgb(16, 185, 129)
-      skinUrl: "/media/emerald_skin.png",
-    }
-
-    const container = await renderComponent(
-      <LanguageProvider>
-        <ProfileView
-          username="OldEmerald"
-          activeSkinData={emeraldSkin}
-          onBack={vi.fn()}
-          theme="dark"
-        />
-      </LanguageProvider>,
-    )
-
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10))
-    })
-
-    const editBtn = container.querySelector('button[aria-label="Cambiar nombre de usuario"]') as HTMLButtonElement
-    await act(async () => {
-      editBtn.click()
-    })
-
-    const input = container.querySelector('input[placeholder="3 a 16 caracteres"]') as HTMLInputElement
-    await act(async () => {
-      changeInput(input, "NewEmerald")
-    })
-
-    const form = container.querySelector("form")
-    await act(async () => {
-      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
-    })
-
-    const toast = container.querySelector(".settings-live-toast") as HTMLElement
-    expect(toast).not.toBeNull()
-    expect(toast.textContent).toContain("Nombre de usuario actualizado correctamente.")
-    // LiveToast checkmark or border should reflect emerald accent (#10b981)
-    const checkSvg = toast.querySelector("svg")
-    expect(checkSvg?.getAttribute("stroke")?.toLowerCase()).toBe("#10b981")
   })
 })
 

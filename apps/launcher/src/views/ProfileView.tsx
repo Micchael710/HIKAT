@@ -7,8 +7,6 @@ import { useTranslation } from "../context/LanguageContext"
 import { useDynamicAccent } from "../utils/dynamicAccent"
 
 import { authService, AuthMethodSummary } from "../services/authService"
-import { isValidUsername, AuthErrorCode } from "@hikat/shared"
-import { mapAuthErrorToKey } from "../utils/authErrorMapper"
 
 interface ProfileViewProps {
   username: string
@@ -37,13 +35,6 @@ export default function ProfileView({
   const [currentUsername, setCurrentUsername] = useState(
     user?.displayName || user?.username || username || t("user.anonymous"),
   )
-  const [newUsernameInput, setNewUsernameInput] = useState(
-    user?.displayName || user?.username || username || "",
-  )
-  const [isEditingUsername, setIsEditingUsername] = useState(false)
-  const [isSavingUsername, setIsSavingUsername] = useState(false)
-  const [usernameError, setUsernameError] = useState<string | null>(null)
-  const lastInvalidCharsRef = useRef(false)
 
   // Listen to authService state updates
   useEffect(() => {
@@ -54,54 +45,6 @@ export default function ProfileView({
     })
     return unsub
   }, [])
-
-  const canSubmitUsername = useMemo(() => {
-    const trimmed = newUsernameInput.trim()
-    if (!trimmed) return false
-    if (trimmed === currentUsername) return false
-    return isValidUsername(trimmed)
-  }, [newUsernameInput, currentUsername])
-
-  const handleChangeUsername = async () => {
-    const trimmed = newUsernameInput.trim()
-    if (!trimmed || trimmed === currentUsername) {
-      setIsEditingUsername(false)
-      return
-    }
-
-    if (!isValidUsername(trimmed)) {
-      setUsernameError(t("profile.usernameInvalidError"))
-      showToast(t("profile.usernameInvalidError"), "error")
-      return
-    }
-
-    setIsSavingUsername(true)
-    setUsernameError(null)
-
-    try {
-      const res = await authService.changeUsername(trimmed)
-      setIsSavingUsername(false)
-      if (res.success && res.user) {
-        const updatedName = res.user.displayName || trimmed
-        setCurrentUsername(updatedName)
-        setNewUsernameInput(updatedName)
-        setIsEditingUsername(false)
-        lastInvalidCharsRef.current = false
-        showToast(t("profile.usernameChangeSuccess"), "success")
-      } else {
-        const errKey = mapAuthErrorToKey(res.code || res.error, "profile.usernameChangeError")
-        const msg = t(errKey)
-        setUsernameError(msg)
-        showToast(msg, "error")
-      }
-    } catch (err: any) {
-      setIsSavingUsername(false)
-      const errKey = mapAuthErrorToKey(err?.code || err?.message, "profile.usernameChangeError")
-      const msg = t(errKey)
-      setUsernameError(msg)
-      showToast(msg, "error")
-    }
-  }
 
   const [email] = useState(
     user?.email ||
@@ -573,214 +516,29 @@ export default function ProfileView({
                   {t("profile.username")}
                 </div>
 
-                {!isEditingUsername ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-end",
+                    justifyContent: "space-between",
+                    height: 44,
+                    paddingBottom: 4,
+                  }}
+                >
                   <div
                     style={{
-                      display: "flex",
-                      alignItems: "flex-end",
-                      justifyContent: "space-between",
-                      height: 44,
-                      paddingBottom: 4,
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: isDark ? "#d6e0ea" : "#1e293b",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      lineHeight: "22px",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: 16,
-                        fontWeight: 600,
-                        color: isDark ? "#d6e0ea" : "#1e293b",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        lineHeight: "22px",
-                      }}
-                    >
-                      {currentUsername}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewUsernameInput(currentUsername)
-                        setUsernameError(null)
-                        lastInvalidCharsRef.current = false
-                        setIsEditingUsername(true)
-                      }}
-                      title={t("profile.changeUsernameTitle")}
-                      aria-label={t("profile.changeUsernameTitle")}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        background: "transparent",
-                        border: "none",
-                        boxShadow: "none",
-                        cursor: "pointer",
-                        padding: "2px",
-                        borderRadius: 8,
-                        color: isDark ? "#8899aa" : "#667788",
-                        transition: "color 0.15s ease",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <svg
-                        width={18}
-                        height={18}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                        <path d="m15 5 4 4" />
-                      </svg>
-                    </button>
+                    {currentUsername}
                   </div>
-                ) : (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      handleChangeUsername()
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      height: 44,
-                      margin: 0,
-                      padding: 0,
-                    }}
-                  >
-                    <input
-                      type="text"
-                      maxLength={16}
-                      spellCheck={false}
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      autoFocus
-                      title={t("profile.usernameRulesHint")}
-                      placeholder={t("profile.newUsernamePlaceholder")}
-                      value={newUsernameInput}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setNewUsernameInput(val)
-
-                        const hasInvalidChars = /[^a-zA-Z0-9_]/.test(val)
-                        if (hasInvalidChars) {
-                          setUsernameError(t("profile.usernameInvalidError"))
-                          if (!lastInvalidCharsRef.current) {
-                            showToast(t("profile.usernameInvalidError"), "error")
-                            lastInvalidCharsRef.current = true
-                          }
-                        } else {
-                          lastInvalidCharsRef.current = false
-                          if (usernameError) {
-                            setUsernameError(null)
-                          }
-                        }
-                      }}
-                      className="launcher-input"
-                      style={{
-                        flex: "1 1 100px",
-                        minWidth: 0,
-                        height: 44,
-                        padding: "0 12px",
-                        borderRadius: 12,
-                        background: isDark ? "#0d1217" : "#ffffff",
-                        border: isDark
-                          ? usernameError
-                            ? "1.5px solid #ef4444"
-                            : "1.5px solid rgba(255, 255, 255, 0.14)"
-                          : usernameError
-                            ? "1.5px solid #ef4444"
-                            : "1.5px solid rgba(0, 0, 0, 0.14)",
-                        color: isDark ? "white" : "#111822",
-                        fontFamily: BASE_FONT,
-                        fontSize: 16,
-                        fontWeight: 600,
-                        transition: "all 0.16s ease",
-                        boxSizing: "border-box",
-                      }}
-                    />
-
-                    <button
-                      type="submit"
-                      disabled={isSavingUsername || !canSubmitUsername}
-                      className="launcher-btn-primary dynamic-accent"
-                      style={
-                        {
-                          "--accent-rgb": `${currentAccent.r}, ${currentAccent.g}, ${currentAccent.b}`,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 6,
-                          height: 44,
-                          padding: "0 16px",
-                          borderRadius: 12,
-                          fontSize: 14,
-                          fontWeight: 700,
-                          fontFamily: BASE_FONT,
-                          color: "white",
-                          cursor:
-                            isSavingUsername || !canSubmitUsername
-                              ? "default"
-                              : "pointer",
-                          opacity:
-                            isSavingUsername || !canSubmitUsername ? 0.6 : 1,
-                          flexShrink: 0,
-                        } as React.CSSProperties
-                      }
-                    >
-                      {isSavingUsername ? (
-                        <>
-                          <svg
-                            width={13}
-                            height={13}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
-                            strokeLinecap="round"
-                            style={{ animation: "spin 1s linear infinite" }}
-                          >
-                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                          </svg>
-                          <span>{t("profile.savingUsername")}</span>
-                        </>
-                      ) : (
-                        <span>{t("profile.saveUsername")}</span>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isSavingUsername}
-                      onClick={() => {
-                        setIsEditingUsername(false)
-                        setNewUsernameInput(currentUsername)
-                        setUsernameError(null)
-                        lastInvalidCharsRef.current = false
-                      }}
-                      className="launcher-btn-secondary"
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        height: 44,
-                        padding: "0 16px",
-                        borderRadius: 12,
-                        fontSize: 14,
-                        fontWeight: 700,
-                        fontFamily: BASE_FONT,
-                        cursor: isSavingUsername ? "default" : "pointer",
-                        opacity: isSavingUsername ? 0.5 : 1,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {t("common.cancel")}
-                    </button>
-                  </form>
-                )}
+                </div>
               </div>
 
               {/* Tile 2: Correo */}

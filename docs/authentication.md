@@ -136,7 +136,7 @@ Launcher (Electron)             HiKAT Auth Service            External Provider 
 | `POST` | `/auth/forgot-password` | Solicitud de token de recuperación de contraseña | Pública |
 | `POST` | `/auth/reset-password` | Restablecimiento de contraseña con token | Pública |
 | `POST` | `/auth/change-password` | Cambio de contraseña con sesión activa | Bearer JWT + D1 sid check |
-| `POST` | `/auth/change-username` | Cambio de nombre de usuario con sesión activa | Bearer JWT + D1 sid check |
+| `POST` | `/auth/set-username` | Asignación inicial de nombre de usuario para cuentas OAuth (display_name IS NULL, permanente) | Bearer JWT + D1 sid check |
 | `POST` | `/auth/refresh` | Rotación de refresh token | Refresh Token |
 | `POST` | `/auth/logout` | Revocación de sesión en D1 | Bearer JWT |
 | `POST` | `/auth/game-token` | Emisión de Game JWT de corta duración (3 min) | Bearer JWT + D1 sid check |

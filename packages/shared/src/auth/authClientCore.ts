@@ -684,7 +684,7 @@ export class AuthClientCore {
     return `${this.authServiceUrl}/oauth/authorize?${query.toString()}`
   }
 
-  public async changeUsername(newUsername: string): Promise<AuthUser> {
+  public async setUsername(username: string): Promise<AuthUser> {
     if (!this.session) {
       const err: any = new Error("No active session")
       err.code = "NO_SESSION"
@@ -703,13 +703,13 @@ export class AuthClientCore {
       throw err
     }
 
-    const res = await this.fetcher(`${this.authServiceUrl}/auth/change-username`, {
+    const res = await this.fetcher(`${this.authServiceUrl}/auth/set-username`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ username: newUsername }),
+      body: JSON.stringify({ username }),
     })
 
     const data = (await res.json().catch(() => ({}))) as Record<string, any>
@@ -722,24 +722,32 @@ export class AuthClientCore {
           ? AuthErrorCode.INVALID_USERNAME
           : data.message === AuthErrorCode.USERNAME_ALREADY_EXISTS
             ? AuthErrorCode.USERNAME_ALREADY_EXISTS
-            : res.status === 409
-              ? AuthErrorCode.USERNAME_ALREADY_EXISTS
-              : res.status === 400
-                ? AuthErrorCode.INVALID_USERNAME
-                : `HTTP_${res.status}`)
+            : data.message === AuthErrorCode.FORBIDDEN
+              ? AuthErrorCode.FORBIDDEN
+              : res.status === 409
+                ? AuthErrorCode.USERNAME_ALREADY_EXISTS
+                : res.status === 400
+                  ? AuthErrorCode.INVALID_USERNAME
+                  : res.status === 403
+                    ? AuthErrorCode.FORBIDDEN
+                    : `HTTP_${res.status}`)
 
-      if (errCode === AuthErrorCode.INVALID_USERNAME || errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS) {
+      if (
+        errCode === AuthErrorCode.INVALID_USERNAME ||
+        errCode === AuthErrorCode.USERNAME_ALREADY_EXISTS ||
+        errCode === AuthErrorCode.FORBIDDEN
+      ) {
         const err: any = new Error(errCode)
         err.code = errCode
         throw err
       }
 
-      const err: any = new Error(data.message || data.error || "Error al cambiar el nombre de usuario")
+      const err: any = new Error(data.message || data.error || "Error al establecer el nombre de usuario")
       err.code = errCode
       throw err
     }
 
-    const updatedDisplayName = data.user?.displayName || newUsername
+    const updatedDisplayName = data.user?.displayName || username
 
     this.session = {
       ...this.session,

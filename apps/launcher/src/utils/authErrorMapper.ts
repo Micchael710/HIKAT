@@ -69,12 +69,6 @@ export function mapAuthErrorToKey(
     case "RESET_EMAIL_ERROR":
       return "profile.emailError"
 
-    case "USERNAME_SAME_ERROR":
-      return "profile.usernameSameError"
-
-    case "USERNAME_CHANGE_ERROR":
-      return "profile.usernameChangeError"
-
     default:
       // Pattern inspection for errors from legacy/shared layers
       if (

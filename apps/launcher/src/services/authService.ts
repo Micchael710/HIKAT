@@ -860,14 +860,14 @@ class LauncherAuthService {
     }
   }
 
-  public async changeUsername(newUsername: string): Promise<{
+  public async setUsername(username: string): Promise<{
     success: boolean
     user?: UserProfile
     error?: string
     code?: string
     errorCode?: string
   }> {
-    const trimmed = typeof newUsername === "string" ? newUsername.trim() : ""
+    const trimmed = typeof username === "string" ? username.trim() : ""
     if (!trimmed || !isValidUsername(trimmed)) {
       return {
         success: false,
@@ -877,7 +877,7 @@ class LauncherAuthService {
       }
     }
     try {
-      const user = await this.client.changeUsername(trimmed)
+      const user = await this.client.setUsername(trimmed)
       return {
         success: true,
         user: {
@@ -905,8 +905,14 @@ class LauncherAuthService {
         rawMessage.includes("INVALID_USERNAME")
       ) {
         code = AuthErrorCode.INVALID_USERNAME
+      } else if (
+        rawMessage === AuthErrorCode.FORBIDDEN ||
+        rawCode === AuthErrorCode.FORBIDDEN ||
+        rawMessage.includes("FORBIDDEN")
+      ) {
+        code = AuthErrorCode.FORBIDDEN
       } else if (!code) {
-        code = "USERNAME_CHANGE_ERROR"
+        code = "SET_USERNAME_ERROR"
       }
       return {
         success: false,

@@ -580,7 +580,7 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     unmount()
   })
 
-  it("Test 13 — When displayName is set via changeUsername notification, transitions screen from 'login' to 'home'", async () => {
+  it("Test 13 — When displayName is set via setUsername onboarding notification, transitions screen from 'login' to 'home'", async () => {
     let authCallback: any
     vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
       authCallback = cb

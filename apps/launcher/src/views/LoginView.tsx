@@ -539,10 +539,10 @@ export default function LoginView({
 
     setIsSubmittingUsername(true)
     try {
-      const res = await authService.changeUsername(trimmed)
+      const res = await authService.setUsername(trimmed)
       setIsSubmittingUsername(false)
       if (!res.success) {
-        const errKey = mapAuthErrorToKey(res.code || res.error, "profile.usernameChangeError")
+        const errKey = mapAuthErrorToKey(res.code || res.error, "auth.genericAuthError")
         setErrorMessage(t(errKey))
         return
       }
@@ -552,8 +552,8 @@ export default function LoginView({
       }, 350)
     } catch (err: any) {
       setIsSubmittingUsername(false)
-      console.error("Change username error:", err)
-      const errKey = mapAuthErrorToKey(err?.code || err?.message, "profile.usernameChangeError")
+      console.error("Set username error:", err)
+      const errKey = mapAuthErrorToKey(err?.code || err?.message, "auth.genericAuthError")
       setErrorMessage(t(errKey))
     }
   }
