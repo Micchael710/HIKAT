@@ -570,5 +570,64 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
     // The registered promise must resolve cleanly without uncaught rejection
     await expect(waitUntilPromises[0]).resolves.toBeUndefined()
   })
+
+  it("concurrent /watch-servers and ensureWatcher calls merge all serverIds into watchedServerIds without losing any", async () => {
+    const storageMap = new Map<string, any>()
+    const mockCtx: any = {
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => []),
+      storage: {
+        get: vi.fn(async (k) => {
+          // Simulate non-zero async delay in DO storage
+          await new Promise((r) => setTimeout(r, 10))
+          return storageMap.get(k)
+        }),
+        put: vi.fn(async (k, v) => {
+          // Simulate non-zero async delay in DO storage
+          await new Promise((r) => setTimeout(r, 10))
+          storageMap.set(k, v)
+        }),
+        list: vi.fn(async () => new Map()),
+        delete: vi.fn(async (k) => {
+          storageMap.delete(k)
+        }),
+      },
+    }
+
+    const doInstance = new ReleaseEventsDurableObject(mockCtx)
+
+    // Simulate concurrent batch requests and direct calls with overlapping and duplicate IDs
+    const req1 = doInstance.fetch(
+      new Request("http://internal/watch-servers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverIds: ["srv-batch-1", "srv-batch-2", "srv-batch-1"] }),
+      }),
+    )
+
+    const req2 = doInstance.fetch(
+      new Request("http://internal/watch-servers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverIds: ["srv-batch-2", "srv-batch-3", "srv-batch-4"] }),
+      }),
+    )
+
+    const req3 = doInstance.ensureWatcher("srv-direct-5")
+    const req4 = doInstance.ensureWatcher("srv-direct-6")
+
+    const [res1, res2] = await Promise.all([req1, req2, req3, req4])
+    expect(res1.status).toBe(200)
+    expect(res2.status).toBe(200)
+
+    const watched = storageMap.get("watchedServerIds")
+    expect(watched).toBeDefined()
+    expect(Array.isArray(watched)).toBe(true)
+    expect(watched.sort()).toEqual(
+      ["srv-batch-1", "srv-batch-2", "srv-batch-3", "srv-batch-4", "srv-direct-5", "srv-direct-6"].sort(),
+    )
+    expect(doInstance.getActiveWatchersCount()).toBe(6)
+  })
 })
+
 

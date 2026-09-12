@@ -21,6 +21,7 @@ export interface ServerWatcherState {
 export class ReleaseEventsDurableObject {
   private activeWatchers = new Map<string, ServerWatcherState>()
   private startingWatchers = new Set<string>()
+  private watchedStorageLock: Promise<void> = Promise.resolve()
   private clientOverride?: IPterodactylClient
   private dbOverride?: Database
   private db?: Database
@@ -67,6 +68,41 @@ export class ReleaseEventsDurableObject {
     return this.activeWatchers.size
   }
 
+  private async persistWatchedServerIds(serverIds: string[]): Promise<void> {
+    const nextLock = this.watchedStorageLock.then(async () => {
+      try {
+        const watched = (await this.ctx.storage.get<string[]>("watchedServerIds")) || []
+        const watchedSet = new Set(watched)
+        const hasNew = serverIds.some((id) => !watchedSet.has(id))
+        if (hasNew || watched.length !== watchedSet.size) {
+          const merged = Array.from(new Set([...watched, ...serverIds]))
+          await this.ctx.storage.put("watchedServerIds", merged)
+        }
+      } catch (err) {
+        console.warn("[ReleaseEventsDO] Failed persisting watchedServerIds:", err)
+      }
+    })
+    this.watchedStorageLock = nextLock.catch(() => {})
+    await nextLock
+  }
+
+  private async unpersistWatchedServerId(serverId: string): Promise<void> {
+    const nextLock = this.watchedStorageLock.then(async () => {
+      try {
+        await this.ctx.storage.delete(`serverStatus_${serverId}`)
+        const watched = (await this.ctx.storage.get<string[]>("watchedServerIds")) || []
+        const next = watched.filter((id) => id !== serverId)
+        if (next.length !== watched.length) {
+          await this.ctx.storage.put("watchedServerIds", next)
+        }
+      } catch (err) {
+        console.warn(`[ReleaseEventsDO] Failed unpersisting watchedServerId for ${serverId}:`, err)
+      }
+    })
+    this.watchedStorageLock = nextLock.catch(() => {})
+    await nextLock
+  }
+
   private async restoreWatchedServers(): Promise<void> {
     try {
       const watched = await this.ctx.storage.get<string[]>("watchedServerIds")
@@ -74,7 +110,7 @@ export class ReleaseEventsDurableObject {
         await Promise.all(
           watched.map(async (serverId) => {
             try {
-              await this.ensureWatcher(serverId)
+              await this.ensureWatcher(serverId, { skipPersist: true })
             } catch (err) {
               console.warn(`[ReleaseEventsDO] Failed restoring watcher for ${serverId}:`, err)
             }
@@ -86,7 +122,10 @@ export class ReleaseEventsDurableObject {
     }
   }
 
-  async ensureWatcher(serverId: string): Promise<ServerStatus> {
+  async ensureWatcher(
+    serverId: string,
+    options?: { skipPersist?: boolean },
+  ): Promise<ServerStatus> {
     const existing = this.activeWatchers.get(serverId)
     if (existing) {
       return existing.currentStatus
@@ -108,14 +147,10 @@ export class ReleaseEventsDurableObject {
     }
     this.activeWatchers.set(serverId, watcher)
 
-    // Persist in watchedServerIds list
-    try {
-      const watched = (await this.ctx.storage.get<string[]>("watchedServerIds")) || []
-      if (!watched.includes(serverId)) {
-        watched.push(serverId)
-        await this.ctx.storage.put("watchedServerIds", watched)
-      }
-    } catch {}
+    // Persist in watchedServerIds list unless skipPersist is requested
+    if (!options?.skipPersist) {
+      await this.persistWatchedServerIds([serverId])
+    }
 
     const db = this.dbOverride ?? this.db ?? (this.env?.DB ? createDatabase(this.env.DB) : undefined)
 
@@ -363,12 +398,23 @@ export class ReleaseEventsDurableObject {
     if (url.pathname === "/watch-servers" && request.method === "POST") {
       try {
         const body = (await request.json().catch(() => ({}))) as { serverIds?: string[] }
-        const serverIds = body.serverIds || []
-        const promises = serverIds.map((id) => this.ensureWatcher(id))
+        const rawServerIds = Array.isArray(body.serverIds) ? body.serverIds : []
+        const uniqueServerIds = Array.from(new Set(rawServerIds.filter(Boolean)))
+
+        if (uniqueServerIds.length > 0) {
+          await this.persistWatchedServerIds(uniqueServerIds)
+        }
+
+        const promises = uniqueServerIds.map((id) =>
+          this.ensureWatcher(id, { skipPersist: true }),
+        )
+        const batchPromise = Promise.all(promises).catch((err) => {
+          console.warn("[ReleaseEventsDO] Batch ensureWatcher error in /watch-servers:", err)
+        })
         if (this.ctx.waitUntil) {
-          this.ctx.waitUntil(Promise.all(promises))
+          this.ctx.waitUntil(batchPromise)
         } else {
-          await Promise.all(promises)
+          await batchPromise
         }
         return new Response(
           JSON.stringify({ ok: true, watchingCount: this.activeWatchers.size }),
@@ -389,12 +435,7 @@ export class ReleaseEventsDurableObject {
       const body = (await request.json().catch(() => ({}))) as { serverId?: string }
       if (body.serverId) {
         this.stopWatcher(body.serverId)
-        try {
-          await this.ctx.storage.delete(`serverStatus_${body.serverId}`)
-          const watched = (await this.ctx.storage.get<string[]>("watchedServerIds")) || []
-          const next = watched.filter((id) => id !== body.serverId)
-          await this.ctx.storage.put("watchedServerIds", next)
-        } catch {}
+        await this.unpersistWatchedServerId(body.serverId)
       }
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
