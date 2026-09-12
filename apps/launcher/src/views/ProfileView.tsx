@@ -518,26 +518,20 @@ export default function ProfileView({
 
                 <div
                   style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: isDark ? "#8899aa" : "#334455",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    lineHeight: "22px",
+                    height: 44,
                     display: "flex",
                     alignItems: "flex-end",
-                    justifyContent: "space-between",
-                    height: 44,
                     paddingBottom: 4,
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 16,
-                      fontWeight: 600,
-                      color: isDark ? "#d6e0ea" : "#1e293b",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      lineHeight: "22px",
-                    }}
-                  >
-                    {currentUsername}
-                  </div>
+                  {currentUsername}
                 </div>
               </div>
 
