@@ -503,6 +503,7 @@ export function useLauncherState() {
                 return {
                   ...prev,
                   [eventGameId]: {
+                    ...current,
                     publishedModpack: pub ?? null,
                     installedVersion,
                     integrityDirty,

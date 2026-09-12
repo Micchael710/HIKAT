@@ -46,6 +46,7 @@ function renderCustomHook<T>(hook: () => T) {
 
 describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite", () => {
   let releaseEventListener: ((event: any) => void) | null = null
+  let phaseChangeListener: ((phase: string, eventGameId?: string | null) => void) | null = null
 
   const mockServers: LauncherServer[] = [
     {
@@ -170,7 +171,10 @@ describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite
       getDownloadQueue: vi.fn().mockResolvedValue({ active: null, queued: [] }),
       onLaunchStatus: vi.fn(() => () => {}),
       onDownloadProgress: vi.fn(() => () => {}),
-      onPhaseChange: vi.fn(() => () => {}),
+      onPhaseChange: vi.fn((cb: any) => {
+        phaseChangeListener = cb
+        return () => {}
+      }),
       onDownloadQueueChanged: vi.fn(() => () => {}),
       onGameFileIntegrityChanged: vi.fn(() => () => {}),
     }
@@ -680,6 +684,71 @@ describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite
     expect(result.current.playerSkin).toBeNull()
     expect(result.current.playerCapes).toEqual([])
     expect(result.current.gameStates["srv-meliora"].installedVersion).toBe("2.0.0")
+
+    unmount()
+  })
+
+  // 15. onPhaseChange con phase === "IDLE" conserva releaseSummary existente y actualiza installedVersion sin indicar actualización falsa.
+  it("15. onPhaseChange con phase === 'IDLE' conserva releaseSummary existente y actualiza installedVersion sin indicar actualización falsa", async () => {
+    // Servidor inicialmente publicado en 1.0 (srv-warria tiene activeRelease.version === "1.0.0")
+    ;(window as any).electronAPI.getInstalledState = vi.fn().mockImplementation(async ({ gameId }: { gameId: string }) => {
+      if (gameId === "srv-warria") {
+        return { installedModpackVersion: "1.0.0", integrityDirty: false }
+      }
+      return { installedModpackVersion: null, integrityDirty: false }
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.gameStates["srv-warria"]?.releaseSummary?.version).toBe("1.0.0")
+    expect(result.current.gameStates["srv-warria"]?.installedVersion).toBe("1.0.0")
+
+    // Llega RELEASE_ACTIVATED 1.1
+    await act(async () => {
+      releaseEventListener?.({
+        type: "RELEASE_ACTIVATED",
+        serverId: "srv-warria",
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+      })
+    })
+
+    // releaseSummary.version === 1.1
+    expect(result.current.gameStates["srv-warria"]?.releaseSummary?.version).toBe("1.1.0")
+
+    // Se simula finalización de operación con phase = IDLE y se actualiza installedVersion a 1.1
+    ;(window as any).electronAPI.getInstalledState = vi.fn().mockImplementation(async ({ gameId }: { gameId: string }) => {
+      if (gameId === "srv-warria") {
+        return { installedModpackVersion: "1.1.0", integrityDirty: false }
+      }
+      return { installedModpackVersion: null, integrityDirty: false }
+    })
+
+    await act(async () => {
+      phaseChangeListener?.("IDLE", "srv-warria")
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Después de IDLE: releaseSummary.version debe seguir siendo 1.1
+    expect(result.current.gameStates["srv-warria"]?.releaseSummary?.version).toBe("1.1.0")
+
+    // Comprueba también que installedVersion === 1.1
+    expect(result.current.gameStates["srv-warria"]?.installedVersion).toBe("1.1.0")
+
+    // Comprueba que el estado resultante no vuelva a indicar una actualización inexistente
+    const state = deriveBaseGameButtonState(
+      result.current.gameStates["srv-warria"]?.releaseSummary,
+      result.current.gameStates["srv-warria"]?.installedVersion,
+    )
+    expect(state).toBe("play")
 
     unmount()
   })
