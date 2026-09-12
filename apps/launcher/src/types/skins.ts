@@ -47,9 +47,15 @@ export interface SkinUploadTicket {
 export interface ActiveSkinSelection {
   type: "GLOBAL" | "CUSTOM"
   skinId?: string | null
+  imageUrl?: string
+  name?: string | null
   skin?: {
     id: string
     name?: string | null
+    imageUrl: string
+  } | null
+  playerSkin?: {
+    id: string
     imageUrl: string
   } | null
 }

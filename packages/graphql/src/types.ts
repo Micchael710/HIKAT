@@ -320,6 +320,14 @@ export interface ServerGql {
   updatedAt: string
 }
 
+export interface LauncherReleaseSummaryGql {
+  version: string
+  minecraftVersion: string
+  modLoader: GameModLoaderGql
+  modLoaderVersion?: string | null
+  notes?: string | null
+}
+
 export interface LauncherServerGql {
   id: string
   name: string
@@ -330,6 +338,7 @@ export interface LauncherServerGql {
   sidebarLogo?: ContentMediaGql | null
   accentColor?: string | null
   launcherActiveReleaseId: string
+  activeRelease?: LauncherReleaseSummaryGql | null
   createdAt: string
   updatedAt: string
 }

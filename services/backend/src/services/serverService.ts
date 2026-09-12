@@ -91,6 +91,24 @@ export async function formatLauncherServerGql(
     }
   }
 
+  let activeRelease = null
+  if (server.launcherActiveReleaseId) {
+    const rel = await db
+      .select()
+      .from(schema.gameReleases)
+      .where(eq(schema.gameReleases.id, server.launcherActiveReleaseId))
+      .get()
+    if (rel) {
+      activeRelease = {
+        version: rel.version,
+        minecraftVersion: rel.minecraftVersion,
+        modLoader: (rel.modLoader || "NEOFORGE") as GameModLoaderGql,
+        modLoaderVersion: rel.modLoaderVersion || null,
+        notes: rel.notes || null,
+      }
+    }
+  }
+
   return {
     id: server.id,
     name: server.name,
@@ -101,6 +119,7 @@ export async function formatLauncherServerGql(
     sidebarLogo,
     accentColor: server.accentColor || null,
     launcherActiveReleaseId: server.launcherActiveReleaseId!,
+    activeRelease,
     createdAt: server.createdAt,
     updatedAt: server.updatedAt,
   }

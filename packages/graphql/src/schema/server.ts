@@ -395,6 +395,17 @@ export const serverTypeDefs = /* GraphQL */ `
   }
 
   """
+  Lightweight active release summary for launcher server discovery
+  """
+  type LauncherReleaseSummary {
+    version: String!
+    minecraftVersion: String!
+    modLoader: GameModLoader!
+    modLoaderVersion: String
+    notes: String
+  }
+
+  """
   Public Server entity for HiKAT Launcher discovery (strictly excludes infrastructure details)
   """
   type LauncherServer {
@@ -407,6 +418,7 @@ export const serverTypeDefs = /* GraphQL */ `
     sidebarLogo: ContentMedia
     accentColor: String
     launcherActiveReleaseId: ID!
+    activeRelease: LauncherReleaseSummary
     createdAt: DateTime!
     updatedAt: DateTime!
   }

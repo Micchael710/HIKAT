@@ -246,6 +246,7 @@ import {
   deleteGamePaths,
   setGamePathPolicy,
 } from "../services/game"
+import { broadcastCosmeticsUpdated } from "../releaseEvents"
 
 import {
   getGameEnvironmentCatalog,
@@ -1536,7 +1537,9 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return createSkin(context.db, context.env, args.input, identity.userId)
+      const result = await createSkin(context.db, context.env, args.input, identity.userId)
+      await broadcastCosmeticsUpdated(context.env, "SKINS")
+      return result
     },
 
     updateSkin: async (
@@ -1548,7 +1551,9 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return updateSkin(context.db, context.env, args.id, args.input)
+      const result = await updateSkin(context.db, context.env, args.id, args.input)
+      await broadcastCosmeticsUpdated(context.env, "SKINS")
+      return result
     },
 
     deleteSkin: async (
@@ -1560,7 +1565,9 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return deleteSkin(context.db, args.id, context.env)
+      const result = await deleteSkin(context.db, args.id, context.env)
+      await broadcastCosmeticsUpdated(context.env, "SKINS")
+      return result
     },
 
     // --- Player Custom Skins Mutations (Shard 06.6) ---
@@ -1654,7 +1661,9 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return createCape(context.db, context.env, args.input, identity.userId)
+      const result = await createCape(context.db, context.env, args.input, identity.userId)
+      await broadcastCosmeticsUpdated(context.env, "CAPES")
+      return result
     },
 
     updateCape: async (
@@ -1666,7 +1675,9 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return updateCape(context.db, context.env, args.id, args.input)
+      const result = await updateCape(context.db, context.env, args.id, args.input)
+      await broadcastCosmeticsUpdated(context.env, "CAPES")
+      return result
     },
 
     deleteCape: async (
@@ -1678,7 +1689,9 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      return deleteCape(context.db, args.id, context.env)
+      const result = await deleteCape(context.db, args.id, context.env)
+      await broadcastCosmeticsUpdated(context.env, "CAPES")
+      return result
     },
 
     createPlayerCapeUpload: async (

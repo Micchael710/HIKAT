@@ -305,6 +305,7 @@ export default function HomeView({
         gameId={activeServerId}
         gameContext={gameContext}
         accent={resolvedAccent}
+        releaseSummary={serverGameState?.releaseSummary || selectedServer?.activeRelease}
         publishedModpack={serverGameState !== undefined ? serverGameState.publishedModpack : localPublishedModpack}
         installedVersion={serverGameState?.installedVersion}
         integrityDirty={serverGameState?.integrityDirty}
@@ -326,7 +327,13 @@ export default function HomeView({
           lineHeight: 1.55,
         }}
       >
-        {publishedModpack?.notes?.trim() ? publishedModpack.notes : ""}
+        {selectedServer?.activeRelease?.notes?.trim()
+          ? selectedServer.activeRelease.notes
+          : serverGameState?.releaseSummary?.notes?.trim()
+          ? serverGameState.releaseSummary.notes
+          : publishedModpack?.notes?.trim()
+          ? publishedModpack.notes
+          : ""}
       </div>
 
       {/* ÚLTIMAS NOVEDADES (Positioned to peek smoothly at the bottom fold) */}

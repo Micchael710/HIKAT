@@ -1325,18 +1325,18 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
     expect((window as any).electronAPI.checkSyncPlan).not.toHaveBeenCalled()
 
     // Meliora: 2.0.0 installed === 2.0.0 published -> play state
-    expect(hookState.gameStates.meliora).toEqual({
+    expect(hookState.gameStates.meliora).toEqual(expect.objectContaining({
       publishedModpack: melioraModpack,
       installedVersion: "2.0.0",
       integrityDirty: false,
-    })
+    }))
 
     // Apparatia: null installed, 1.5.0 published -> download state
-    expect(hookState.gameStates.apparatia).toEqual({
+    expect(hookState.gameStates.apparatia).toEqual(expect.objectContaining({
       publishedModpack: apparatiaModpack,
       installedVersion: null,
       integrityDirty: false,
-    })
+    }))
   })
 
   it("1b. Bootstrap con integrityDirty=true: inicializa servidor como dirty sin checkSyncPlan", async () => {

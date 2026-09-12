@@ -56,9 +56,15 @@ export interface ServerUpdatedEvent {
   serverId: string
 }
 
+export interface CosmeticsUpdatedEvent {
+  type: "COSMETICS_UPDATED"
+  target?: "SKINS" | "CAPES" | "ALL"
+}
+
 export type LauncherEvent =
   | ReleaseActivatedEvent
   | ServerUpdatedEvent
+  | CosmeticsUpdatedEvent
 
 const releaseEventListeners = new Set<(event: LauncherEvent) => void>()
 let sharedReleaseSocket: WebSocket | null = null
@@ -89,7 +95,12 @@ function connectSharedReleaseSocket() {
       if (sharedReleaseSocket !== socket) return
       try {
         const data = JSON.parse(event.data)
-        if (data && (data.type === "RELEASE_ACTIVATED" || data.type === "SERVER_UPDATED")) {
+        if (
+          data &&
+          (data.type === "RELEASE_ACTIVATED" ||
+            data.type === "SERVER_UPDATED" ||
+            data.type === "COSMETICS_UPDATED")
+        ) {
           for (const listener of [...releaseEventListeners]) {
             try {
               listener(data as LauncherEvent)

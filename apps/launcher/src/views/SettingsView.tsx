@@ -543,7 +543,7 @@ export default function SettingsView({
     const activeServerId = gameContext.gameId
 
     const unsubscribe = gameService.subscribeReleaseEvents(async (event) => {
-      if (!event?.serverId || event.serverId !== activeServerId) {
+      if (!("serverId" in event) || !event?.serverId || event.serverId !== activeServerId) {
         return
       }
 

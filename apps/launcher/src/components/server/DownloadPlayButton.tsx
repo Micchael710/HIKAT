@@ -22,6 +22,7 @@ import {
 } from "../../utils/settingsStorage"
 import LiveToast from "../common/LiveToast"
 import type { AccentColor } from "../../utils/dynamicAccent"
+import type { LauncherReleaseSummary } from "../../services/serverService"
 
 interface DownloadPlayButtonProps {
   left: number
@@ -36,6 +37,7 @@ interface DownloadPlayButtonProps {
   } | null
   accent?: AccentColor
   allowLegacyLocalOperations?: boolean
+  releaseSummary?: LauncherReleaseSummary | null
   publishedModpack?: PublishedModpack | null
   installedVersion?: string | null
   integrityDirty?: boolean
@@ -74,7 +76,7 @@ export function buildManifestFromPublished(
 }
 
 export function deriveBaseGameButtonState(
-  published: PublishedModpack | null | undefined,
+  published: { version?: string | null } | null | undefined,
   installedVersion: string | null | undefined,
 ): GameButtonState {
   if (!published || !published.version) return "unavailable"
@@ -136,6 +138,7 @@ export default function DownloadPlayButton({
   gameContext,
   accent,
   allowLegacyLocalOperations,
+  releaseSummary,
   publishedModpack,
   installedVersion,
   integrityDirty,
@@ -149,9 +152,10 @@ export default function DownloadPlayButton({
     ? Boolean(gameContext?.gameId)
     : (allowLegacyLocalOperations ?? (!activeServerId))
 
-  const hasProvidedState = publishedModpack !== undefined
+  const hasProvidedState = releaseSummary !== undefined || publishedModpack !== undefined
+  const effectiveRelease = releaseSummary !== undefined ? releaseSummary : publishedModpack
   const initialBaseStatus: GameButtonState = hasProvidedState
-    ? deriveBaseGameButtonState(publishedModpack, installedVersion)
+    ? deriveBaseGameButtonState(effectiveRelease, installedVersion)
     : "checking"
 
   const [status, setStatusState] = useState<GameButtonState>(initialBaseStatus)
@@ -179,10 +183,29 @@ export default function DownloadPlayButton({
     statusRef.current = status
   }, [status])
 
-  const initialManifest = useMemo(
-    () => (hasProvidedState ? buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty) : null),
-    [],
-  )
+  const initialManifest = useMemo(() => {
+    if (publishedModpack) {
+      return buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
+    }
+    if (releaseSummary?.version) {
+      return {
+        version: releaseSummary.version,
+        minecraftVersion: releaseSummary.minecraftVersion || "",
+        modLoader: (releaseSummary.modLoader as any) || "NEOFORGE",
+        modLoaderVersion: releaseSummary.modLoaderVersion || null,
+        neoForgeVersion: null,
+        totalSizeGB: 0,
+        hasUpdate: Boolean(installedVersion && installedVersion !== releaseSummary.version),
+        hasIntegrityIssue: Boolean(integrityDirty),
+        installedModpackVersion: installedVersion || null,
+        clientFiles: [],
+        installed: Boolean(installedVersion && installedVersion === releaseSummary.version),
+        hasExistingInstall: Boolean(installedVersion),
+        totalDownloadBytes: 0,
+      }
+    }
+    return null
+  }, [])
   const [manifest, setManifest] = useState<GameManifest | null>(initialManifest)
   const manifestRef = useRef<GameManifest | null>(initialManifest)
   manifestRef.current = manifest
@@ -227,10 +250,29 @@ export default function DownloadPlayButton({
   }, [integrityDirty])
 
   useEffect(() => {
-    if (publishedModpack === undefined) return
-    const updated = buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
+    if (publishedModpack === undefined && releaseSummary === undefined) return
+    const updated: GameManifest | null = publishedModpack
+      ? buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
+      : releaseSummary?.version
+      ? {
+          version: releaseSummary.version,
+          minecraftVersion: releaseSummary.minecraftVersion || "",
+          modLoader: (releaseSummary.modLoader as any) || "NEOFORGE",
+          modLoaderVersion: releaseSummary.modLoaderVersion || null,
+          neoForgeVersion: null,
+          totalSizeGB: 0,
+          hasUpdate: Boolean(installedVersion && installedVersion !== releaseSummary.version),
+          hasIntegrityIssue: Boolean(integrityDirty),
+          installedModpackVersion: installedVersion || null,
+          clientFiles: [],
+          installed: Boolean(installedVersion && installedVersion === releaseSummary.version),
+          hasExistingInstall: Boolean(installedVersion),
+          totalDownloadBytes: 0,
+        }
+      : null
     setManifest(updated)
-    const baseState = deriveBaseGameButtonState(publishedModpack, installedVersion)
+    const activeRef = releaseSummary !== undefined ? releaseSummary : publishedModpack
+    const baseState = deriveBaseGameButtonState(activeRef, installedVersion)
     setStatus((prev) => {
       if (
         prev === "download" ||
@@ -243,7 +285,7 @@ export default function DownloadPlayButton({
       }
       return prev
     })
-  }, [publishedModpack, installedVersion, integrityDirty])
+  }, [publishedModpack, releaseSummary, installedVersion, integrityDirty])
 
   useEffect(() => {
     latestManifestVersionRef.current = manifest?.version ?? null
@@ -528,9 +570,27 @@ export default function DownloadPlayButton({
 
     if (hasProvidedState) {
       let isMounted = true
-      const baseManifest = buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
+      const baseManifest = publishedModpack
+        ? buildManifestFromPublished(publishedModpack, installedVersion, integrityDirty)
+        : releaseSummary?.version
+        ? {
+            version: releaseSummary.version,
+            minecraftVersion: releaseSummary.minecraftVersion || "",
+            modLoader: (releaseSummary.modLoader as any) || "NEOFORGE",
+            modLoaderVersion: releaseSummary.modLoaderVersion || null,
+            neoForgeVersion: null,
+            totalSizeGB: 0,
+            hasUpdate: Boolean(installedVersion && installedVersion !== releaseSummary.version),
+            hasIntegrityIssue: Boolean(integrityDirty),
+            installedModpackVersion: installedVersion || null,
+            clientFiles: [],
+            installed: Boolean(installedVersion && installedVersion === releaseSummary.version),
+            hasExistingInstall: Boolean(installedVersion),
+            totalDownloadBytes: 0,
+          }
+        : null
       setManifest(baseManifest)
-      const baseState = deriveBaseGameButtonState(publishedModpack, installedVersion)
+      const baseState = deriveBaseGameButtonState(effectiveRelease, installedVersion)
       if (baseManifest) {
         const total = baseManifest.totalDownloadBytes || manifestTotalBytes(baseManifest.clientFiles)
         setTotalBytes(total)
@@ -1593,23 +1653,52 @@ export default function DownloadPlayButton({
       return
     }
     if (status === "download" || status === "update") {
-      triggerSync(manifest)
+      let targetManifest = manifest
+      const isMissingFiles = !targetManifest?.clientFiles || targetManifest.clientFiles.length === 0
+      if (releaseSummary && isMissingFiles && activeServerId) {
+        try {
+          setIsTransitioning(true)
+          const fullModpack = await gameService.getPublishedModpack(activeServerId)
+          if (!fullModpack) {
+            showToast(t("playButton.noClientFiles"), "error")
+            setIsTransitioning(false)
+            return
+          }
+          targetManifest = buildManifestFromPublished(fullModpack, installedVersion, integrityDirty)
+          setManifest(targetManifest)
+          setIsTransitioning(false)
+        } catch {
+          showToast(t("playButton.noClientFiles"), "error")
+          setIsTransitioning(false)
+          return
+        }
+      }
+      triggerSync(targetManifest)
     } else if (status === "play") {
       if (isLaunchBlockedByOtherGame) {
         return
       }
       const isDirty = Boolean(integrityDirty || isIntegrityBlockedRef.current)
       if (isDirty) {
-        if (window.electronAPI?.checkSyncPlan && manifest?.clientFiles) {
+        let playManifest = manifest
+        const isMissingFiles = !playManifest?.clientFiles || playManifest.clientFiles.length === 0
+        if (releaseSummary && isMissingFiles && activeServerId) {
+          const fullModpack = await gameService.getPublishedModpack(activeServerId).catch(() => null)
+          if (fullModpack) {
+            playManifest = buildManifestFromPublished(fullModpack, installedVersion, integrityDirty)
+            setManifest(playManifest)
+          }
+        }
+        if (window.electronAPI?.checkSyncPlan && playManifest?.clientFiles) {
           try {
             const planPayload: any = {
-              clientFiles: manifest.clientFiles,
-              directoryPolicies: manifest.directoryPolicies || [],
-              modpackVersion: manifest.version,
-              minecraftVersion: manifest.minecraftVersion,
-              modLoader: manifest.modLoader,
-              modLoaderVersion: manifest.modLoaderVersion ?? undefined,
-              neoForgeVersion: manifest.neoForgeVersion ?? undefined,
+              clientFiles: playManifest.clientFiles,
+              directoryPolicies: playManifest.directoryPolicies || [],
+              modpackVersion: playManifest.version,
+              minecraftVersion: playManifest.minecraftVersion,
+              modLoader: playManifest.modLoader,
+              modLoaderVersion: playManifest.modLoaderVersion ?? undefined,
+              neoForgeVersion: playManifest.neoForgeVersion ?? undefined,
             }
             if (gameContext) {
               planPayload.gameId = gameContext.gameId

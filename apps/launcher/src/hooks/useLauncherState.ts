@@ -21,6 +21,9 @@ import {
   setMyActiveSkin,
   uploadPlayerSkin,
   deleteMyPlayerSkin,
+  fetchPlayerActiveSkinPreview,
+  fetchCosmeticsSnapshot,
+  type PlayerActiveSkinPreview,
 } from "../services/skinService"
 import {
   fetchGlobalCapes,
@@ -31,12 +34,13 @@ import {
   deleteMyPlayerCape,
 } from "../services/capeService"
 import { authService } from "../services/authService"
-import { serverService, LauncherServer } from "../services/serverService"
+import { serverService, LauncherServer, LauncherReleaseSummary } from "../services/serverService"
 import { gameService, ReleaseActivatedEvent } from "../services/gameService"
 import { getStoredBoolean, STORAGE_KEYS, SETTINGS_CHANGED_EVENT } from "../utils/settingsStorage"
 import type { PublishedModpack } from "../vite-env"
 
 export type LauncherGameState = {
+  releaseSummary?: LauncherReleaseSummary | null
   publishedModpack: PublishedModpack | null
   installedVersion: string | null
   integrityDirty: boolean
@@ -155,33 +159,55 @@ export function useLauncherState() {
         const serversToFetch = list.filter((server) => !existingStates[server.id])
 
         if (serversToFetch.length > 0) {
-          // Parallel lightweight query only for servers without gameState
+          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
           const entries = await Promise.all(
             serversToFetch.map(async (server) => {
-              const [published, installedState] = await Promise.all([
-                gameService.getPublishedModpack(server.id).catch(() => null),
-                window.electronAPI?.getInstalledState
-                  ? window.electronAPI.getInstalledState({ gameId: server.id, gameName: server.name }).catch(() => null)
-                  : Promise.resolve(null),
-              ])
+              const installedState = window.electronAPI?.getInstalledState
+                ? await window.electronAPI
+                    .getInstalledState({ gameId: server.id, gameName: server.name })
+                    .catch(() => null)
+                : null
               const installedVersion = installedState?.installedModpackVersion ?? null
               const integrityDirty = Boolean(installedState?.integrityDirty)
+              let releaseSummary: LauncherReleaseSummary | null = null
+              let publishedModpack: PublishedModpack | null = null
+
+              if (server.activeRelease !== undefined) {
+                // Modern lightweight bootstrap: NO getPublishedModpack() call!
+                releaseSummary = server.activeRelease
+              } else {
+                // Legacy mock fallback when activeRelease was not provided in server object
+                const full = await gameService.getPublishedModpack(server.id).catch(() => null)
+                if (full) {
+                  publishedModpack = full
+                  releaseSummary = {
+                    version: full.version,
+                    minecraftVersion: full.minecraftVersion,
+                    modLoader: (full.modLoader as any) || "NEOFORGE",
+                    modLoaderVersion: full.modLoaderVersion ?? null,
+                    notes: full.notes ?? null,
+                  }
+                }
+              }
+
               return [
                 server.id,
                 {
-                  publishedModpack: published,
+                  releaseSummary,
+                  publishedModpack,
                   installedVersion,
                   integrityDirty,
                 },
               ] as const
-            })
+            }),
           )
 
           setGameStates((prev) => {
             const next = { ...prev }
             for (const [id, state] of entries) {
               next[id] = {
-                publishedModpack: state.publishedModpack,
+                releaseSummary: state.releaseSummary,
+                publishedModpack: prev[id]?.publishedModpack ?? state.publishedModpack,
                 installedVersion: state.installedVersion,
                 integrityDirty: prev[id]?.integrityDirty ?? state.integrityDirty,
               }
@@ -189,11 +215,27 @@ export function useLauncherState() {
             return next
           })
 
-          // Bootstrap auto-update check for servers with pending update
-          for (const server of list) {
-            const state = entries.find(([id]) => id === server.id)?.[1] || existingStates[server.id]
-            if (state?.publishedModpack && state.installedVersion && state.publishedModpack.version !== state.installedVersion) {
-              void triggerAutoUpdateIfNeeded(server.id, state.publishedModpack, state.installedVersion, server.name)
+          // Bootstrap auto-update check ONLY for servers with pending update and AUTO_UPDATES is ON
+          if (autoUpdatesEnabled) {
+            for (const server of list) {
+              const state = entries.find(([id]) => id === server.id)?.[1] || existingStates[server.id]
+              const pubVersion = server.activeRelease?.version || state?.releaseSummary?.version || state?.publishedModpack?.version
+              if (pubVersion && state?.installedVersion && pubVersion !== state.installedVersion) {
+                let fullModpack = state?.publishedModpack
+                if (!fullModpack) {
+                  fullModpack = await gameService.getPublishedModpack(server.id).catch(() => null)
+                }
+                if (fullModpack) {
+                  setGameStates((prev) => ({
+                    ...prev,
+                    [server.id]: {
+                      ...prev[server.id],
+                      publishedModpack: fullModpack,
+                    },
+                  }))
+                  void triggerAutoUpdateIfNeeded(server.id, fullModpack, state.installedVersion, server.name)
+                }
+              }
             }
           }
         }
@@ -229,6 +271,89 @@ export function useLauncherState() {
     loadServers()
   }, [loadServers])
 
+  /* Skins Domain State */
+  const [appliedSkin, setAppliedSkin] = useState<string>("player-custom")
+  const [globalSkins, setGlobalSkins] = useState<GlobalSkin[]>([])
+  const [playerSkin, setPlayerSkin] = useState<PlayerSkin | null>(null)
+  const [activeSkinPreview, setActiveSkinPreview] = useState<PlayerActiveSkinPreview | null>(null)
+  const cosmeticsLoadedRef = useRef(false)
+  const isCosmeticsRefreshingRef = useRef(false)
+  const [skinsLoading, setSkinsLoading] = useState<boolean>(false)
+  const [skinsError, setSkinsError] = useState<string | null>(null)
+
+  /* Capes Domain State */
+  const [appliedCape, setAppliedCape] = useState<string>("none")
+  const [globalCapes, setGlobalCapes] = useState<GlobalCape[]>([])
+  const [playerCapes, setPlayerCapes] = useState<PlayerCape[]>([])
+  const [capesLoading, setCapesLoading] = useState<boolean>(false)
+  const [capesError, setCapesError] = useState<string | null>(null)
+
+  const refreshCosmeticsSnapshot = useCallback(async () => {
+    if (isCosmeticsRefreshingRef.current) return
+    isCosmeticsRefreshingRef.current = true
+    try {
+      setSkinsLoading(true)
+      setCapesLoading(true)
+      const snapshot = await fetchCosmeticsSnapshot()
+      setGlobalSkins(snapshot.globalSkins)
+      setGlobalCapes(snapshot.globalCapes)
+      setPlayerSkin(snapshot.playerSkin)
+      setPlayerCapes(snapshot.playerCapes)
+
+      if (snapshot.activeSkin) {
+        if (snapshot.activeSkin.type === "CUSTOM") {
+          setAppliedSkin("player-custom")
+        } else if (snapshot.activeSkin.type === "GLOBAL" && snapshot.activeSkin.skinId) {
+          setAppliedSkin(snapshot.activeSkin.skinId)
+        }
+        setActiveSkinPreview({
+          type: snapshot.activeSkin.type,
+          skinId: snapshot.activeSkin.skinId,
+          imageUrl: snapshot.activeSkin.imageUrl || snapshot.activeSkin.skin?.imageUrl || snapshot.activeSkin.playerSkin?.imageUrl || "",
+          name: snapshot.activeSkin.name || snapshot.activeSkin.skin?.name || null,
+        })
+      }
+
+      if (snapshot.activeCape) {
+        if (snapshot.activeCape.type === "NONE") {
+          setAppliedCape("none")
+        } else if (snapshot.activeCape.type === "CUSTOM" && snapshot.activeCape.playerCapeId) {
+          setAppliedCape(snapshot.activeCape.playerCapeId)
+        } else if (snapshot.activeCape.type === "GLOBAL" && snapshot.activeCape.capeId) {
+          setAppliedCape(snapshot.activeCape.capeId)
+        }
+      }
+
+      setSkinsError(null)
+      setCapesError(null)
+      cosmeticsLoadedRef.current = true
+    } catch (err: any) {
+      setSkinsError(err?.message || "No se pudo sincronizar cosméticos.")
+    } finally {
+      setSkinsLoading(false)
+      setCapesLoading(false)
+      isCosmeticsRefreshingRef.current = false
+    }
+  }, [])
+
+  const loadPlayerActiveSkinPreview = useCallback(async () => {
+    if (!authService.getAccessToken()) {
+      setActiveSkinPreview(null)
+      return
+    }
+    try {
+      const preview = await fetchPlayerActiveSkinPreview()
+      if (preview) {
+        setActiveSkinPreview(preview)
+        if (preview.type === "CUSTOM") {
+          setAppliedSkin("player-custom")
+        } else if (preview.type === "GLOBAL" && preview.skinId) {
+          setAppliedSkin(preview.skinId)
+        }
+      }
+    } catch (_) {}
+  }, [])
+
   // Listen for settings change: when AUTO_UPDATES is turned ON, re-evaluate all known servers
   useEffect(() => {
     const handleSettingsChange = (e: Event) => {
@@ -243,8 +368,20 @@ export function useLauncherState() {
       const currentStates = gameStatesRef.current
       for (const server of serversRef.current) {
         const state = currentStates[server.id]
-        if (state?.publishedModpack && state.installedVersion && state.publishedModpack.version !== state.installedVersion) {
-          void triggerAutoUpdateIfNeeded(server.id, state.publishedModpack, state.installedVersion, server.name)
+        const pubVer = server.activeRelease?.version || state?.releaseSummary?.version || state?.publishedModpack?.version
+        if (pubVer && state?.installedVersion && pubVer !== state.installedVersion) {
+          void gameService.getPublishedModpack(server.id).then((fullModpack) => {
+            if (fullModpack) {
+              setGameStates((prev) => ({
+                ...prev,
+                [server.id]: {
+                  ...prev[server.id],
+                  publishedModpack: fullModpack,
+                },
+              }))
+              void triggerAutoUpdateIfNeeded(server.id, fullModpack, state.installedVersion, server.name)
+            }
+          }).catch(() => {})
         }
       }
     }
@@ -270,25 +407,60 @@ export function useLauncherState() {
             return
           }
 
-          void gameService
-            .getPublishedModpack(event.serverId)
-            .then((published) => {
-              if (!published) return
-              setGameStates((prev) => {
-                const current = prev[event.serverId!]
-                const installedVer = current?.installedVersion ?? null
-                void triggerAutoUpdateIfNeeded(event.serverId!, published, installedVer)
-                return {
+          const currentStates = gameStatesRef.current
+          const serverState = currentStates[event.serverId]
+          const knownPublishedVersion =
+            serverState?.releaseSummary?.version ||
+            serverState?.publishedModpack?.version ||
+            serversRef.current.find((s) => s.id === event.serverId)?.activeRelease?.version
+
+          // 1. If event.version === knownPublishedVersion: do NOT do unnecessary GraphQL query!
+          if (knownPublishedVersion && event.version === knownPublishedVersion) {
+            return
+          }
+
+          // 2. New version: update lightweight summary immediately in memory
+          const newSummary: LauncherReleaseSummary = {
+            version: event.version,
+            minecraftVersion: event.minecraftVersion,
+            modLoader: event.modLoader || "NEOFORGE",
+            modLoaderVersion: event.modLoaderVersion || null,
+            notes: null,
+          }
+
+          const installedVer = serverState?.installedVersion ?? null
+          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+
+          setGameStates((prev) => {
+            const cur = prev[event.serverId!]
+            return {
+              ...prev,
+              [event.serverId!]: {
+                releaseSummary: newSummary,
+                publishedModpack: null,
+                installedVersion: cur?.installedVersion ?? null,
+                integrityDirty: cur?.integrityDirty ?? false,
+              },
+            }
+          })
+
+          // 3. Auto-update check: only if enabled and installedVer exists and differs
+          if (autoUpdatesEnabled && installedVer && event.version !== installedVer) {
+            void gameService
+              .getPublishedModpack(event.serverId)
+              .then((published) => {
+                if (!published) return
+                setGameStates((prev) => ({
                   ...prev,
                   [event.serverId!]: {
+                    ...prev[event.serverId!],
                     publishedModpack: published,
-                    installedVersion: installedVer,
-                    integrityDirty: current?.integrityDirty ?? false,
                   },
-                }
+                }))
+                void triggerAutoUpdateIfNeeded(event.serverId!, published, installedVer)
               })
-            })
-            .catch(() => {})
+              .catch(() => {})
+          }
         } else {
           void loadServers()
         }
@@ -297,11 +469,17 @@ export function useLauncherState() {
 
       if (event.type === "SERVER_UPDATED") {
         void loadServers()
+        return
+      }
+
+      if (event.type === "COSMETICS_UPDATED") {
+        void refreshCosmeticsSnapshot()
+        return
       }
     })
 
     return unsubscribe
-  }, [screen, loadServers, triggerAutoUpdateIfNeeded])
+  }, [screen, loadServers, triggerAutoUpdateIfNeeded, refreshCosmeticsSnapshot])
 
   // Global listener for phase changes (updates installed state upon completion of any operation)
   useEffect(() => {
@@ -419,20 +597,6 @@ export function useLauncherState() {
     return servers[0] || null
   }, [servers, selectedGameId])
 
-  /* Skins Domain State */
-  const [appliedSkin, setAppliedSkin] = useState<string>("player-custom")
-  const [globalSkins, setGlobalSkins] = useState<GlobalSkin[]>([])
-  const [playerSkin, setPlayerSkin] = useState<PlayerSkin | null>(null)
-  const [skinsLoading, setSkinsLoading] = useState<boolean>(false)
-  const [skinsError, setSkinsError] = useState<string | null>(null)
-
-  /* Capes Domain State */
-  const [appliedCape, setAppliedCape] = useState<string>("none")
-  const [globalCapes, setGlobalCapes] = useState<GlobalCape[]>([])
-  const [playerCapes, setPlayerCapes] = useState<PlayerCape[]>([])
-  const [capesLoading, setCapesLoading] = useState<boolean>(false)
-  const [capesError, setCapesError] = useState<string | null>(null)
-
   const [pendingAuthDeepLink, setPendingAuthDeepLink] = useState<string | null>(null)
   const pendingAuthActionRef = useRef<boolean>(false)
 
@@ -491,6 +655,8 @@ export function useLauncherState() {
         setScreen("login")
         setPlayerSkin(null)
         setPlayerCapes([])
+        setActiveSkinPreview(null)
+        cosmeticsLoadedRef.current = false
       }
     })
 
@@ -673,31 +839,24 @@ export function useLauncherState() {
     [appliedCape, playerCapes],
   )
 
-  // Initial load: fetch global catalog on mount
-  useEffect(() => {
-    loadGlobalCatalog()
-  }, [loadGlobalCatalog])
-
-  // Automatically refresh player skin when transitioning to home with active session
+  // Automatically refresh player skin preview when transitioning to home with active session
   useEffect(() => {
     if (
       screen === "home" &&
       authService.getAccessToken()
     ) {
-      refreshPlayerSkin()
+      void loadPlayerActiveSkinPreview()
     }
-  }, [screen, refreshPlayerSkin])
+  }, [screen, loadPlayerActiveSkinPreview])
 
-  // Refresh catalogs & player cosmetics on entry to "skins" view
+  // Refresh complete cosmetics snapshot on first entry to "skins" view
   useEffect(() => {
     if (view === "skins") {
-      loadGlobalCatalog()
-      if (authService.getAccessToken()) {
-        refreshPlayerSkin()
-        refreshPlayerCapes()
+      if (!cosmeticsLoadedRef.current) {
+        void refreshCosmeticsSnapshot()
       }
     }
-  }, [view, loadGlobalCatalog, refreshPlayerSkin, refreshPlayerCapes])
+  }, [view, refreshCosmeticsSnapshot])
 
   /**
    * Unified derived skins list (No model interpretation)
@@ -747,6 +906,16 @@ export function useLauncherState() {
           skinUrl: playerSkin.imageUrl,
         }
       }
+      if (activeSkinPreview?.imageUrl) {
+        return {
+          id: "player-custom",
+          name: activeSkinPreview.name || "",
+          badge: (activeSkinPreview.type === "CUSTOM" ? "CUSTOM" : "OFFICIAL") as any,
+          accent: activeSkinPreview.type === "CUSTOM" ? "#38bdf8" : "#6366f1",
+          customImgUrl: activeSkinPreview.imageUrl,
+          skinUrl: activeSkinPreview.imageUrl,
+        }
+      }
       return {
         id: "player-custom",
         name: "",
@@ -757,13 +926,24 @@ export function useLauncherState() {
       }
     }
     const found = allSkins.find((s) => s.id === appliedSkin)
-    return found || allSkins[0] || DEFAULT_SKINS[0]
-  }, [allSkins, appliedSkin, playerSkin])
+    if (found) return found
+    if (activeSkinPreview?.imageUrl) {
+      return {
+        id: activeSkinPreview.skinId || appliedSkin,
+        name: activeSkinPreview.name || "",
+        badge: (activeSkinPreview.type === "CUSTOM" ? "CUSTOM" : "OFFICIAL") as any,
+        accent: activeSkinPreview.type === "CUSTOM" ? "#38bdf8" : "#6366f1",
+        customImgUrl: activeSkinPreview.imageUrl,
+        skinUrl: activeSkinPreview.imageUrl,
+      }
+    }
+    return allSkins[0] || DEFAULT_SKINS[0]
+  }, [allSkins, appliedSkin, playerSkin, activeSkinPreview])
 
   const activeSkinTexture =
     activeSkinData?.customImgUrl || activeSkinData?.skinUrl
   const activeSkinFallback =
-    activeSkinData?.accent || activeSkinData?.shirt || "#38bdf8"
+    activeSkinData?.accent || (activeSkinData as any)?.shirt || "#38bdf8"
   const activeSkinAccent = useDynamicAccent(
     activeSkinTexture,
     activeSkinFallback,
@@ -896,9 +1076,7 @@ export function useLauncherState() {
     setUsername(name)
     setScreen("home")
     setView("home")
-    refreshPlayerCapes()
-    loadGlobalCatalog()
-  }, [refreshPlayerCapes, loadGlobalCatalog])
+  }, [])
 
   /**
    * Handle user logout cleanly
@@ -907,6 +1085,8 @@ export function useLauncherState() {
     authService.logout()
     setPlayerSkin(null)
     setPlayerCapes([])
+    setActiveSkinPreview(null)
+    cosmeticsLoadedRef.current = false
     setUsername("")
     setScreen("login")
     setView("home")
@@ -962,5 +1142,6 @@ export function useLauncherState() {
     gameStates,
     updateInstalledVersion,
     clearIntegrityDirty,
+    refreshCosmeticsSnapshot,
   }
 }

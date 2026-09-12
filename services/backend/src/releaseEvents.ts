@@ -105,3 +105,24 @@ export async function broadcastServerUpdated(
   })
 }
 
+export type CosmeticsUpdatedTarget = "SKINS" | "CAPES" | "ALL"
+
+export async function broadcastCosmeticsUpdated(
+  env: Env,
+  target: CosmeticsUpdatedTarget = "ALL",
+): Promise<void> {
+  if (!env.RELEASE_EVENTS) return
+
+  const payload = JSON.stringify({
+    type: "COSMETICS_UPDATED",
+    target,
+  })
+
+  const id = env.RELEASE_EVENTS.idFromName("global")
+  const stub = env.RELEASE_EVENTS.get(id)
+  await stub.fetch("http://internal/broadcast", {
+    method: "POST",
+    body: payload,
+  })
+}
+

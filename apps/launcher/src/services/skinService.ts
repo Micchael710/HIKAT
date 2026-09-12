@@ -1,7 +1,15 @@
 import { graphqlClient } from "./apiClient"
 import { resolveApiAssetUrl } from "../config/api"
 import { authService } from "./authService"
-import type { GlobalSkin, PlayerSkin, SkinUploadTicket, ActiveSkinSelection } from "../types"
+import type {
+  GlobalSkin,
+  PlayerSkin,
+  SkinUploadTicket,
+  ActiveSkinSelection,
+  GlobalCape,
+  PlayerCape,
+  ActiveCapeSelection,
+} from "../types"
 
 import {
   validateMinecraftSkinTexture,
@@ -345,4 +353,227 @@ export async function uploadPlayerSkin(
   }
 
   return setRes.data
+}
+
+export interface PlayerActiveSkinPreview {
+  type: "GLOBAL" | "CUSTOM"
+  skinId?: string | null
+  imageUrl: string
+  name?: string | null
+}
+
+export interface CosmeticsSnapshot {
+  globalSkins: GlobalSkin[]
+  globalCapes: GlobalCape[]
+  playerSkin: PlayerSkin | null
+  activeSkin: ActiveSkinSelection | null
+  playerCapes: PlayerCape[]
+  activeCape: ActiveCapeSelection | null
+}
+
+/**
+ * Lightweight query to get active skin representation for UserProfileCard upon authenticated startup,
+ * without loading global catalogs or player capes.
+ */
+export async function fetchPlayerActiveSkinPreview(): Promise<PlayerActiveSkinPreview | null> {
+  const token = authService.getAccessToken()
+  if (!token) return null
+
+  const query = /* GraphQL */ `
+    query PlayerActiveSkinPreview {
+      myActiveSkin {
+        type
+        skinId
+        imageUrl
+        name
+      }
+    }
+  `
+  const res = await graphqlClient<{
+    myActiveSkin: {
+      type: "GLOBAL" | "CUSTOM"
+      skinId?: string | null
+      imageUrl: string
+      name?: string | null
+    } | null
+  }>(query)
+
+  if (res.success && res.data?.myActiveSkin) {
+    return {
+      ...res.data.myActiveSkin,
+      imageUrl: resolveApiAssetUrl(res.data.myActiveSkin.imageUrl),
+    }
+  }
+  return null
+}
+
+/**
+ * Single-operation GraphQL query snapshot for the complete cosmetics section.
+ */
+export async function fetchCosmeticsSnapshot(): Promise<CosmeticsSnapshot> {
+  const token = authService.getAccessToken()
+
+  if (!token) {
+    const query = /* GraphQL */ `
+      query PublicCosmeticsCatalog {
+        skins(first: 50) {
+          items {
+            id
+            name
+            imageUrl
+            status
+            createdAt
+            updatedAt
+          }
+          totalCount
+        }
+        capes(first: 50) {
+          items {
+            id
+            name
+            imageUrl
+            status
+            createdAt
+            updatedAt
+          }
+          totalCount
+        }
+      }
+    `
+    const res = await graphqlClient<{
+      skins?: { items: GlobalSkin[]; totalCount: number }
+      capes?: { items: GlobalCape[]; totalCount: number }
+    }>(query)
+
+    return {
+      globalSkins: (res.data?.skins?.items || []).map((item) => ({
+        ...item,
+        imageUrl: resolveApiAssetUrl(item.imageUrl),
+      })),
+      globalCapes: (res.data?.capes?.items || []).map((item) => ({
+        ...item,
+        imageUrl: resolveApiAssetUrl(item.imageUrl),
+      })),
+      playerSkin: null,
+      activeSkin: null,
+      playerCapes: [],
+      activeCape: null,
+    }
+  }
+
+  const query = /* GraphQL */ `
+    query CosmeticsSnapshot {
+      skins(first: 50) {
+        items {
+          id
+          name
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+        totalCount
+      }
+      capes(first: 50) {
+        items {
+          id
+          name
+          imageUrl
+          status
+          createdAt
+          updatedAt
+        }
+        totalCount
+      }
+      myPlayerSkin {
+        id
+        userId
+        imageUrl
+        createdAt
+        updatedAt
+      }
+      myActiveSkin {
+        type
+        skinId
+        imageUrl
+        name
+        skin {
+          id
+          name
+          imageUrl
+        }
+        playerSkin {
+          id
+          imageUrl
+        }
+      }
+      myPlayerCapes {
+        id
+        userId
+        name
+        imageUrl
+        createdAt
+        updatedAt
+      }
+      myActiveCape {
+        type
+        capeId
+        playerCapeId
+      }
+    }
+  `
+
+  const res = await graphqlClient<{
+    skins?: { items: GlobalSkin[]; totalCount: number }
+    capes?: { items: GlobalCape[]; totalCount: number }
+    myPlayerSkin?: PlayerSkin | null
+    myActiveSkin?: ActiveSkinSelection | null
+    myPlayerCapes?: PlayerCape[] | null
+    myActiveCape?: ActiveCapeSelection | null
+  }>(query)
+
+  if (!res.success) {
+    throw new Error(res.error || "Error al obtener snapshot de cosméticos")
+  }
+
+  const globalSkins = (res.data?.skins?.items || []).map((item) => ({
+    ...item,
+    imageUrl: resolveApiAssetUrl(item.imageUrl),
+  }))
+  const globalCapes = (res.data?.capes?.items || []).map((item) => ({
+    ...item,
+    imageUrl: resolveApiAssetUrl(item.imageUrl),
+  }))
+  const playerSkin = res.data?.myPlayerSkin
+    ? {
+        ...res.data.myPlayerSkin,
+        imageUrl: resolveApiAssetUrl(res.data.myPlayerSkin.imageUrl),
+      }
+    : null
+  const activeSkin = res.data?.myActiveSkin
+    ? {
+        ...res.data.myActiveSkin,
+        imageUrl: resolveApiAssetUrl(res.data.myActiveSkin.imageUrl),
+        skin: res.data.myActiveSkin.skin
+          ? {
+              ...res.data.myActiveSkin.skin,
+              imageUrl: resolveApiAssetUrl(res.data.myActiveSkin.skin.imageUrl),
+            }
+          : null,
+      }
+    : null
+  const playerCapes = (res.data?.myPlayerCapes || []).map((item) => ({
+    ...item,
+    imageUrl: resolveApiAssetUrl(item.imageUrl),
+  }))
+  const activeCape = res.data?.myActiveCape || null
+
+  return {
+    globalSkins,
+    globalCapes,
+    playerSkin,
+    activeSkin,
+    playerCapes,
+    activeCape,
+  }
 }

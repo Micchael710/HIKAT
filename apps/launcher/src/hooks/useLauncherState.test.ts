@@ -8,6 +8,7 @@ import { useLauncherState } from "./useLauncherState"
 import * as skinServiceModule from "../services/skinService"
 import * as capeServiceModule from "../services/capeService"
 import { authService } from "../services/authService"
+import { gameService } from "../services/gameService"
 
 function renderCustomHook<T>(hook: () => T) {
   const result: { current: T } = {} as any
@@ -42,6 +43,15 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     vi.clearAllMocks()
     window.localStorage.clear()
 
+    vi.spyOn(skinServiceModule, "fetchPlayerActiveSkinPreview").mockResolvedValue(null)
+    vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot").mockResolvedValue({
+      globalSkins: [],
+      globalCapes: [],
+      playerSkin: null,
+      activeSkin: null,
+      playerCapes: [],
+      activeCape: null,
+    })
     vi.spyOn(skinServiceModule, "fetchGlobalSkins").mockResolvedValue([])
     vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue(null)
     vi.spyOn(skinServiceModule, "fetchMyActiveSkin").mockResolvedValue(null)
@@ -146,9 +156,10 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
    * Shard 8F: Section Refresh-on-entry tests for Skins & Capes
    * ───────────────────────────────────────────────────────────── */
 
-  it("Test 1 — Initial mount loads global public catalog", async () => {
+  it("Test 1 — Initial mount does NOT load global public catalog nor snapshot", async () => {
     const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
     const fetchGlobalCapesSpy = vi.spyOn(capeServiceModule, "fetchGlobalCapes")
+    const fetchSnapshotSpy = vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot")
 
     const { unmount } = renderCustomHook(() => useLauncherState())
 
@@ -156,15 +167,15 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       await Promise.resolve()
     })
 
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1)
-    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(1)
+    expect(fetchGlobalSkinsSpy).not.toHaveBeenCalled()
+    expect(fetchGlobalCapesSpy).not.toHaveBeenCalled()
+    expect(fetchSnapshotSpy).not.toHaveBeenCalled()
 
     unmount()
   })
 
-  it("Test 2 — Transition Home -> setView('skins') triggers a fresh fetch of global catalogs", async () => {
-    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
-    const fetchGlobalCapesSpy = vi.spyOn(capeServiceModule, "fetchGlobalCapes")
+  it("Test 2 — Transition Home -> setView('skins') triggers fetchCosmeticsSnapshot exactly once", async () => {
+    const fetchSnapshotSpy = vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot")
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
 
@@ -172,21 +183,19 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       await Promise.resolve()
     })
 
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1)
-    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSnapshotSpy).not.toHaveBeenCalled()
 
     // Navigate to skins section
     await act(async () => {
       result.current.setView("skins")
     })
 
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
-    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(2)
+    expect(fetchSnapshotSpy).toHaveBeenCalledTimes(1)
 
     unmount()
   })
 
-  it("Test 3 — Authenticated user entering Skins refreshes both public and personal cosmetics", async () => {
+  it("Test 3 — Authenticated user entering Skins obtains cosmetics snapshot with skins and capes in one operation", async () => {
     window.localStorage.setItem("hikat_auth_token", "auth-token-123")
     vi.spyOn(authService, "getStoredToken").mockReturnValue("auth-token-123")
     vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-123")
@@ -206,111 +215,128 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     })
     vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
 
-    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
-    const fetchMyPlayerSkinSpy = vi.spyOn(skinServiceModule, "fetchMyPlayerSkin")
-    const fetchMyActiveSkinSpy = vi.spyOn(skinServiceModule, "fetchMyActiveSkin")
-    const fetchGlobalCapesSpy = vi.spyOn(capeServiceModule, "fetchGlobalCapes")
-    const fetchMyPlayerCapesSpy = vi.spyOn(capeServiceModule, "fetchMyPlayerCapes")
-    const fetchMyActiveCapeSpy = vi.spyOn(capeServiceModule, "fetchMyActiveCape")
+    const fetchSnapshotSpy = vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot").mockResolvedValue({
+      globalSkins: [
+        {
+          id: "skin-1",
+          name: "Knight",
+          imageUrl: "/media/knight.png",
+          status: "AVAILABLE",
+          createdAt: "2026-08-01",
+          updatedAt: "2026-08-01",
+        },
+      ],
+      globalCapes: [],
+      playerSkin: null,
+      activeSkin: {
+        type: "GLOBAL",
+        skinId: "skin-1",
+        imageUrl: "/media/knight.png",
+        name: "Knight",
+        skin: null,
+        playerSkin: null,
+      },
+      playerCapes: [],
+      activeCape: null,
+    })
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
 
     await act(async () => {
       await Promise.resolve()
     })
-
-    // Mount ran 1 round
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1)
-    expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(1)
-    expect(fetchMyActiveSkinSpy).toHaveBeenCalledTimes(1)
-    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(1)
 
     // Enter skins section
     await act(async () => {
       result.current.setView("skins")
     })
 
-    // Second round triggered
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
-    expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(2)
-    expect(fetchMyActiveSkinSpy).toHaveBeenCalledTimes(2)
-    expect(fetchGlobalCapesSpy).toHaveBeenCalledTimes(2)
-    expect(fetchMyPlayerCapesSpy).toHaveBeenCalledTimes(1)
-    expect(fetchMyActiveCapeSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSnapshotSpy).toHaveBeenCalledTimes(1)
+    expect(result.current.allSkins.some((s) => s.id === "skin-1")).toBe(true)
 
     unmount()
   })
 
-  it("Test 4 — Re-entry (Home -> Skins -> Home -> Skins) produces a fresh query on each entry", async () => {
-    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
+  it("Test 4 — Re-entry (Home -> Skins -> Home -> Skins) does NOT repeat GraphQL query", async () => {
+    const fetchSnapshotSpy = vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot")
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
 
     await act(async () => {
       await Promise.resolve()
     })
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1) // Mount
+    expect(fetchSnapshotSpy).not.toHaveBeenCalled()
 
     // 1st entry to Skins
     await act(async () => {
       result.current.setView("skins")
     })
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
+    expect(fetchSnapshotSpy).toHaveBeenCalledTimes(1)
 
     // Back to Home
     await act(async () => {
       result.current.setView("home")
     })
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2) // No new skins fetch on leaving
+    expect(fetchSnapshotSpy).toHaveBeenCalledTimes(1)
 
-    // 2nd entry to Skins
+    // 2nd entry to Skins: data is cached in memory, NO second query
     await act(async () => {
       result.current.setView("skins")
     })
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(3)
+    expect(fetchSnapshotSpy).toHaveBeenCalledTimes(1)
 
     unmount()
   })
 
   it("Test 5 — While remaining on Skins view, re-renders do NOT spam queries", async () => {
-    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
+    const fetchSnapshotSpy = vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot")
 
     const { result, rerender, unmount } = renderCustomHook(() => useLauncherState())
 
     await act(async () => {
       await Promise.resolve()
     })
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSnapshotSpy).not.toHaveBeenCalled()
 
     // Enter skins
     await act(async () => {
       result.current.setView("skins")
     })
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
+    expect(fetchSnapshotSpy).toHaveBeenCalledTimes(1)
 
     // Re-render without changing view
     rerender()
     rerender()
 
-    // Query count remains unchanged (0 additional calls)
-    expect(fetchGlobalSkinsSpy).toHaveBeenCalledTimes(2)
+    expect(fetchSnapshotSpy).toHaveBeenCalledTimes(1)
 
     unmount()
   })
 
-  it("Test 6 — Newly published admin skin appears in allSkins upon re-entering Skins section without restarting", async () => {
-    let currentSkins = [
-      {
-        id: "skin-A",
-        name: "Skin Alpha",
-        imageUrl: "/media/skin-a.png",
-        status: "AVAILABLE" as const,
-        createdAt: "2026-08-29T10:00:00Z",
-        updatedAt: "2026-08-29T10:00:00Z",
-      },
-    ]
+  it("Test 6 — COSMETICS_UPDATED on WebSocket refreshes cosmetics snapshot dynamically", async () => {
+    let releaseEventListener: any = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+      releaseEventListener = cb
+      return () => {}
+    })
 
-    vi.spyOn(skinServiceModule, "fetchGlobalSkins").mockImplementation(async () => currentSkins)
+    const fetchSnapshotSpy = vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot").mockResolvedValue({
+      globalSkins: [
+        {
+          id: "skin-new",
+          name: "New Admin Skin",
+          imageUrl: "/media/new.png",
+          status: "AVAILABLE",
+          createdAt: "2026-08-01",
+          updatedAt: "2026-08-01",
+        },
+      ],
+      globalCapes: [],
+      playerSkin: null,
+      activeSkin: null,
+      playerCapes: [],
+      activeCape: null,
+    })
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
 
@@ -318,57 +344,50 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       await Promise.resolve()
     })
 
-    // Initially contains skin-A
-    expect(result.current.allSkins.some((s) => s.id === "skin-A")).toBe(true)
-    expect(result.current.allSkins.some((s) => s.id === "skin-B")).toBe(false)
-
-    // Admin publishes skin-B on backend
-    currentSkins = [
-      ...currentSkins,
-      {
-        id: "skin-B",
-        name: "Skin Beta (New)",
-        imageUrl: "/media/skin-b.png",
-        status: "AVAILABLE" as const,
-        createdAt: "2026-08-29T14:00:00Z",
-        updatedAt: "2026-08-29T14:00:00Z",
-      },
-    ]
-
-    // User navigates to Skins
+    // Simulate WebSocket event arriving
     await act(async () => {
-      result.current.setView("skins")
+      releaseEventListener?.({
+        type: "COSMETICS_UPDATED",
+        target: "SKINS",
+      })
     })
 
-    await act(async () => {
-      await Promise.resolve()
-    })
-
-    // Now allSkins includes skin-B seamlessly
-    expect(result.current.allSkins.some((s) => s.id === "skin-B")).toBe(true)
+    expect(fetchSnapshotSpy).toHaveBeenCalledTimes(1)
+    expect(result.current.allSkins.some((s) => s.id === "skin-new")).toBe(true)
 
     unmount()
   })
 
-  it("Test 7 — Catalog failure preserves existing catalog items (does not replace with [])", async () => {
+  it("Test 7 — Snapshot failure preserves existing catalog items", async () => {
     let shouldFail = false
-    vi.spyOn(skinServiceModule, "fetchGlobalSkins").mockImplementation(async () => {
+    vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot").mockImplementation(async () => {
       if (shouldFail) {
         throw new Error("Network timeout")
       }
-      return [
-        {
-          id: "skin-A",
-          name: "Skin Alpha",
-          imageUrl: "/media/skin-a.png",
-          status: "AVAILABLE" as const,
-          createdAt: "2026-08-29T10:00:00Z",
-          updatedAt: "2026-08-29T10:00:00Z",
-        },
-      ]
+      return {
+        globalSkins: [
+          {
+            id: "skin-A",
+            name: "Skin Alpha",
+            imageUrl: "/media/skin-a.png",
+            status: "AVAILABLE" as const,
+            createdAt: "2026-08-29T10:00:00Z",
+            updatedAt: "2026-08-29T10:00:00Z",
+          },
+        ],
+        globalCapes: [],
+        playerSkin: null,
+        activeSkin: null,
+        playerCapes: [],
+        activeCape: null,
+      }
     })
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      result.current.setView("skins")
+    })
 
     await act(async () => {
       await Promise.resolve()
@@ -376,14 +395,9 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     expect(result.current.allSkins.some((s) => s.id === "skin-A")).toBe(true)
 
-    // Now simulate network failure on re-entering skins
     shouldFail = true
     await act(async () => {
-      result.current.setView("skins")
-    })
-
-    await act(async () => {
-      await Promise.resolve()
+      await result.current.refreshCosmeticsSnapshot?.()
     })
 
     // Existing skin-A is preserved!
@@ -444,17 +458,11 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     })
     vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
 
-    vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue({
-      id: "pskin-persisted",
-      userId: "u-1",
-      imageUrl: "/media/my_custom_skin.png",
-      createdAt: "2026-08-29T10:00:00Z",
-      updatedAt: "2026-08-29T10:00:00Z",
-    })
-    vi.spyOn(skinServiceModule, "fetchMyActiveSkin").mockResolvedValue({
+    vi.spyOn(skinServiceModule, "fetchPlayerActiveSkinPreview").mockResolvedValue({
       type: "CUSTOM",
-      skinId: null,
-      skin: null,
+      skinId: "pskin-persisted",
+      imageUrl: "/media/my_custom_skin.png",
+      name: "Custom Preview",
     })
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
@@ -463,7 +471,6 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       await Promise.resolve()
     })
 
-    expect(result.current.playerSkin?.id).toBe("pskin-persisted")
     expect(result.current.appliedSkin).toBe("player-custom")
     expect(result.current.activeSkinData?.customImgUrl).toBe("/media/my_custom_skin.png")
 
@@ -487,7 +494,7 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     unmount()
   })
 
-  it("Test 11 — Screen transitioning to 'home' with active auth automatically triggers refreshPlayerSkin without entering Skins view", async () => {
+  it("Test 11 — Screen transitioning to 'home' with active auth automatically triggers fetchPlayerActiveSkinPreview without loading full catalog", async () => {
     let authCallback: any
     vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
       authCallback = cb
@@ -496,18 +503,19 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
     vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
     vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
 
-    const fetchMyPlayerSkinSpy = vi.spyOn(skinServiceModule, "fetchMyPlayerSkin").mockResolvedValue({
-      id: "pskin-auto",
-      userId: "u-1",
+    const fetchSnapshotSpy = vi.spyOn(skinServiceModule, "fetchCosmeticsSnapshot")
+    const fetchGlobalSkinsSpy = vi.spyOn(skinServiceModule, "fetchGlobalSkins")
+    const fetchPreviewSpy = vi.spyOn(skinServiceModule, "fetchPlayerActiveSkinPreview").mockResolvedValue({
+      type: "CUSTOM",
+      skinId: "pskin-auto",
       imageUrl: "/media/auto_skin.png",
-      createdAt: "2026-08-31T10:00:00Z",
-      updatedAt: "2026-08-31T10:00:00Z",
+      name: "Auto Skin",
     })
 
     const { result, unmount } = renderCustomHook(() => useLauncherState())
 
-    // Initial state is screen: "login" -> fetchMyPlayerSkin not called yet
-    expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(0)
+    // Initial state is screen: "login" -> fetchPlayerActiveSkinPreview not called yet
+    expect(fetchPreviewSpy).toHaveBeenCalledTimes(0)
 
     // User logs in / bootstrap finishes -> authCallback emits AUTHENTICATED
     await act(async () => {
@@ -528,9 +536,11 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       await Promise.resolve()
     })
 
-    // Automatically fetched player skin upon screen -> "home"!
-    expect(fetchMyPlayerSkinSpy).toHaveBeenCalledTimes(1)
-    expect(result.current.playerSkin?.id).toBe("pskin-auto")
+    // Automatically fetched player skin preview upon screen -> "home"!
+    expect(fetchPreviewSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSnapshotSpy).not.toHaveBeenCalled()
+    expect(fetchGlobalSkinsSpy).not.toHaveBeenCalled()
+    expect(result.current.activeSkinData?.customImgUrl).toBe("/media/auto_skin.png")
 
     unmount()
   })

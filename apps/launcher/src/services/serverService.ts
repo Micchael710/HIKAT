@@ -1,6 +1,14 @@
 import { graphqlClient } from "./apiClient"
 import type { ServerStatusResponse } from "../types"
 
+export interface LauncherReleaseSummary {
+  version: string
+  minecraftVersion: string
+  modLoader: string
+  modLoaderVersion?: string | null
+  notes?: string | null
+}
+
 export interface LauncherServer {
   id: string
   name: string
@@ -17,6 +25,7 @@ export interface LauncherServer {
   } | null
   accentColor?: string | null
   launcherActiveReleaseId: string
+  activeRelease?: LauncherReleaseSummary | null
   createdAt: string
   updatedAt: string
 }
@@ -48,6 +57,13 @@ export const serverService = {
           }
           accentColor
           launcherActiveReleaseId
+          activeRelease {
+            version
+            minecraftVersion
+            modLoader
+            modLoaderVersion
+            notes
+          }
           createdAt
           updatedAt
         }
