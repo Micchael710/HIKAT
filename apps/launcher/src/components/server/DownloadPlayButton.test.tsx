@@ -5332,6 +5332,76 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(container.textContent).not.toContain("MB/s")
     })
   })
+
+  describe("Defensa contra manifests ligeros y auto-updates desde Settings", () => {
+    it("triggerSync(summary con isFullManifest: false) rechaza la operación y NO llama a startSync", async () => {
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+      const triggerRef = { current: undefined as any }
+
+      await mountButton({
+        serverId: "srv-meliora",
+        gameId: "srv-meliora",
+        gameContext: { gameId: "srv-meliora", gameName: "Meliora" },
+        releaseSummary: {
+          version: "2.0.0",
+          minecraftVersion: "1.20.1",
+          modLoader: "NEOFORGE",
+        },
+        installedVersion: "1.0.0",
+        integrityDirty: false,
+        triggerSyncRef: triggerRef,
+      })
+
+      expect(typeof triggerRef.current).toBe("function")
+
+      // Summary con isFullManifest: false
+      await act(async () => {
+        triggerRef.current?.({
+          version: "2.0.0",
+          minecraftVersion: "1.20.1",
+          modLoader: "NEOFORGE",
+          clientFiles: [],
+          isFullManifest: false,
+        })
+      })
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+    })
+
+    it("DownloadPlayButton en modo multiserver (hasProvidedState) NO dispara sync al recibir SETTINGS_CHANGED_EVENT", async () => {
+      const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+
+      await mountButton({
+        serverId: "srv-meliora",
+        gameId: "srv-meliora",
+        gameContext: { gameId: "srv-meliora", gameName: "Meliora" },
+        releaseSummary: {
+          version: "2.0.0",
+          minecraftVersion: "1.20.1",
+          modLoader: "NEOFORGE",
+        },
+        installedVersion: "1.0.0",
+        integrityDirty: false,
+      })
+
+      expect(startSyncSpy).not.toHaveBeenCalled()
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("hikat:settings-changed", {
+            detail: { key: STORAGE_KEYS.AUTO_UPDATES, value: true },
+          }),
+        )
+      })
+
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // DownloadPlayButton NO debe disparar sync con el summary ligero
+      expect(startSyncSpy).not.toHaveBeenCalled()
+    })
+  })
 })
 
 

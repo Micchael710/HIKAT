@@ -10,7 +10,7 @@ import { serverService } from "../services/serverService"
 import { gameService } from "../services/gameService"
 import * as skinServiceModule from "../services/skinService"
 import { authService } from "../services/authService"
-import { STORAGE_KEYS } from "../utils/settingsStorage"
+import { STORAGE_KEYS, setStoredBoolean } from "../utils/settingsStorage"
 import DownloadPlayButton, { deriveBaseGameButtonState } from "../components/server/DownloadPlayButton"
 import { LanguageProvider } from "../context/LanguageContext"
 import type { LauncherServer } from "../services/serverService"
@@ -1065,6 +1065,177 @@ describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite
 
     expect(launchGameSpy).toHaveBeenCalled()
     expect(getPublishedSpy).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  // 24. Launcher real: useLauncherState + DownloadPlayButton con summary ligero y activar AUTO_UPDATES
+  it("24. Launcher real: useLauncherState + DownloadPlayButton con summary ligero y activar AUTO_UPDATES obtiene full manifest, nunca llama startSync([]) y evita syncs duplicados", async () => {
+    localStorage.setItem(STORAGE_KEYS.AUTO_UPDATES, "false")
+    const fullFiles = [
+      {
+        path: "mods/meliora-full.jar",
+        sha256: "abc12345",
+        sizeBytes: 500,
+        downloadUrl: "/dl/meliora",
+        policy: "NO_MODIFICABLE" as const,
+      },
+    ]
+
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      version: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      clientFiles: fullFiles,
+    })
+
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockImplementation(async () => {
+      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+        status: "idle",
+        runningGameId: null,
+        activeOperationGameId: "srv-meliora",
+        activeOperationState: "SYNCING",
+        activeOperationPhase: "DOWNLOADING",
+      })
+      phaseChangeListener?.("DOWNLOADING", "srv-meliora")
+      return { success: true } as any
+    })
+
+    ;(window as any).electronAPI.getInstalledState = vi.fn().mockImplementation(async ({ gameId }: { gameId: string }) => {
+      if (gameId === "srv-meliora") {
+        return { installedModpackVersion: "1.0.0", integrityDirty: false }
+      }
+      return { installedModpackVersion: null, integrityDirty: false }
+    })
+
+    function LauncherIntegrationHarness() {
+      const { selectedServer, gameStates, updateInstalledVersion, clearIntegrityDirty } = useLauncherState()
+      const serverGameState = selectedServer ? gameStates[selectedServer.id] : undefined
+      if (!selectedServer || !serverGameState) return null
+      return (
+        <LanguageProvider>
+          <DownloadPlayButton
+            left={0}
+            top={0}
+            theme="dark"
+            serverId={selectedServer.id}
+            gameId={selectedServer.id}
+            gameContext={{ gameId: selectedServer.id, gameName: selectedServer.name }}
+            releaseSummary={serverGameState.releaseSummary}
+            publishedModpack={serverGameState.publishedModpack}
+            installedVersion={serverGameState.installedVersion}
+            integrityDirty={serverGameState.integrityDirty}
+            onInstalledVersionChange={(v) => updateInstalledVersion(selectedServer.id, v)}
+            onClearIntegrityDirty={() => clearIntegrityDirty(selectedServer.id)}
+          />
+        </LanguageProvider>
+      )
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(<LauncherIntegrationHarness />)
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Pre-conditions:
+    // No sync has started, no full manifest has been fetched while AUTO_UPDATES is OFF
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    expect(getPublishedSpy).not.toHaveBeenCalled()
+
+    // Dispatch SETTINGS_CHANGED_EVENT toggling AUTO_UPDATES to true
+    await act(async () => {
+      setStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    // 1. Nunca se llama startSync([])
+    for (const call of startSyncSpy.mock.calls) {
+      expect(call[0]).not.toEqual([])
+    }
+
+    // 2. Primero se obtiene getPublishedModpack(serverId)
+    expect(getPublishedSpy).toHaveBeenCalledWith("srv-meliora")
+
+    // 3. startSync recibe los clientFiles del manifest completo
+    expect(startSyncSpy).toHaveBeenCalled()
+    expect(startSyncSpy.mock.calls[0][0]).toEqual(fullFiles)
+
+    // 4. No existen dos intentos de sync para el mismo evento
+    expect(startSyncSpy).toHaveBeenCalledTimes(1)
+
+    // 5. No hay una segunda consulta GraphQL innecesaria para el mismo servidor
+    expect(getPublishedSpy).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  })
+
+  // 25. Defensa unitaria en triggerSync: summary con isFullManifest: false NO debe llamar startSync
+  it("25. Defensa unitaria en triggerSync: summary con isFullManifest: false NO debe llamar startSync", async () => {
+    const startSyncSpy = vi.spyOn(gameService, "startSync").mockResolvedValue({ success: true } as any)
+    const triggerRef = { current: undefined as any }
+
+    const { unmount } = renderButton({
+      serverId: "srv-meliora",
+      gameId: "srv-meliora",
+      gameContext: { gameId: "srv-meliora", gameName: "Meliora" },
+      releaseSummary: mockServers[0].activeRelease,
+      installedVersion: "1.0.0",
+      integrityDirty: false,
+      triggerSyncRef: triggerRef,
+    })
+
+    expect(typeof triggerRef.current).toBe("function")
+
+    // Llamada directa a triggerSync con un manifest que tiene isFullManifest: false
+    await act(async () => {
+      triggerRef.current?.({
+        version: "2.0.0",
+        minecraftVersion: "1.20.1",
+        modLoader: "FORGE",
+        clientFiles: [],
+        isFullManifest: false,
+      })
+    })
+
+    // DEBE ser rechazado por triggerSync y nunca llamar a startSync
+    expect(startSyncSpy).not.toHaveBeenCalled()
+
+    // En contraste, una release legítima con isFullManifest: true (incluso si clientFiles es [])
+    await act(async () => {
+      triggerRef.current?.({
+        version: "2.0.0",
+        minecraftVersion: "1.20.1",
+        modLoader: "FORGE",
+        clientFiles: [],
+        isFullManifest: true,
+      })
+    })
+
+    expect(startSyncSpy).toHaveBeenCalledTimes(1)
+    expect(startSyncSpy).toHaveBeenCalledWith(
+      [],
+      "2.0.0",
+      "1.20.1",
+      "FORGE",
+      undefined,
+      undefined,
+      false,
+      expect.objectContaining({ gameId: "srv-meliora" }),
+    )
+
     unmount()
   })
 })

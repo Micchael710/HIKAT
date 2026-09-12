@@ -44,6 +44,7 @@ interface DownloadPlayButtonProps {
   integrityDirty?: boolean
   onInstalledVersionChange?: (version: string | null) => void
   onClearIntegrityDirty?: () => void
+  triggerSyncRef?: React.MutableRefObject<((manifest?: GameManifest | null) => void) | undefined>
 }
 
 export function buildManifestFromPublished(
@@ -146,6 +147,7 @@ export default function DownloadPlayButton({
   integrityDirty,
   onInstalledVersionChange,
   onClearIntegrityDirty,
+  triggerSyncRef,
 }: DownloadPlayButtonProps) {
   const { t } = useTranslation()
   const activeServerId = gameContext?.gameId || serverId || gameId || undefined
@@ -394,6 +396,7 @@ export default function DownloadPlayButton({
     const currentManifest = targetManifest || manifestRef.current
     if (
       !currentManifest ||
+      !isFullGameManifest(currentManifest) ||
       !Array.isArray(currentManifest.clientFiles) ||
       !currentManifest.version ||
       !currentManifest.minecraftVersion
@@ -513,6 +516,12 @@ export default function DownloadPlayButton({
         }
       })
   }, [isLocalAllowed, markSyncedVersionInstalled, setStatus, showToast, t, gameContext, activeServerId])
+
+  useEffect(() => {
+    if (triggerSyncRef) {
+      triggerSyncRef.current = triggerSync
+    }
+  }, [triggerSync, triggerSyncRef])
 
   // Close options menu on click outside
   useEffect(() => {
@@ -1126,6 +1135,11 @@ export default function DownloadPlayButton({
         return
       }
 
+      // In modern multi-server mode, useLauncherState globally coordinates auto-updates with full manifests
+      if (hasProvidedState) {
+        return
+      }
+
       const currentManifest = manifestRef.current
       if (!currentManifest) return
 
@@ -1157,6 +1171,7 @@ export default function DownloadPlayButton({
       if (
         isLocalAllowed &&
         hasUpdate &&
+        isFullGameManifest(currentManifest) &&
         Array.isArray(currentManifest.clientFiles)
       ) {
         triggerSync(currentManifest)
@@ -1167,7 +1182,7 @@ export default function DownloadPlayButton({
     return () => {
       window.removeEventListener(SETTINGS_CHANGED_EVENT, handleSettingsChange)
     }
-  }, [triggerSync, isLocalAllowed])
+  }, [triggerSync, isLocalAllowed, hasProvidedState])
 
   // Listen to game launch lifecycle status from Electron Main
   useEffect(() => {
