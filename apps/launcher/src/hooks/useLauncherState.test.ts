@@ -9,6 +9,7 @@ import * as skinServiceModule from "../services/skinService"
 import * as capeServiceModule from "../services/capeService"
 import { authService } from "../services/authService"
 import { gameService } from "../services/gameService"
+import { serverService } from "../services/serverService"
 
 function renderCustomHook<T>(hook: () => T) {
   const result: { current: T } = {} as any
@@ -726,6 +727,206 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
     expect(result.current.gameStates["srv-mc-102"]?.serverStatus).toBe("OFFLINE")
+
+    unmount()
+  })
+
+  it("Test 16 — RELEASE_ACTIVATED event preserves existing serverStatus on affected server", async () => {
+    vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([
+      {
+        id: "srv-mc-101",
+        name: "Test Server",
+        activeRelease: { version: "1.0.0", minecraftVersion: "1.21.1", modLoader: "NEOFORGE" } as any,
+      } as any,
+    ])
+
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
+
+    let releaseEventListener: any = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+      releaseEventListener = cb
+      return () => {}
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      authCallback(
+        {
+          user: { id: "u-test", displayName: "TestUser", email: "test@example.com", role: "PLAYER" },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // First, set serverStatus to ONLINE via SERVER_STATUS_CHANGED
+    await act(async () => {
+      releaseEventListener?.({
+        type: "SERVER_STATUS_CHANGED",
+        serverId: "srv-mc-101",
+        status: "ONLINE",
+      })
+    })
+
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
+
+    // Now emit RELEASE_ACTIVATED for srv-mc-101
+    await act(async () => {
+      releaseEventListener?.({
+        type: "RELEASE_ACTIVATED",
+        serverId: "srv-mc-101",
+        version: "2.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        modLoaderVersion: "21.1.65",
+      })
+    })
+
+    // serverStatus must STILL be ONLINE!
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
+    expect(result.current.gameStates["srv-mc-101"]?.releaseSummary?.version).toBe("2.0.0")
+
+    unmount()
+  })
+
+  it("Test 17 — loadServers preserves serverStatus for existing servers", async () => {
+    vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([
+      {
+        id: "srv-mc-101",
+        name: "Test Server",
+        activeRelease: { version: "1.0.0", minecraftVersion: "1.21.1", modLoader: "NEOFORGE" } as any,
+      } as any,
+    ])
+
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
+
+    let releaseEventListener: any = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+      releaseEventListener = cb
+      return () => {}
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      authCallback(
+        {
+          user: { id: "u-test", displayName: "TestUser", email: "test@example.com", role: "PLAYER" },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // Set serverStatus to ONLINE
+    await act(async () => {
+      releaseEventListener?.({
+        type: "SERVER_STATUS_CHANGED",
+        serverId: "srv-mc-101",
+        status: "ONLINE",
+      })
+    })
+
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
+
+    // Trigger SERVER_UPDATED which calls loadServers()
+    await act(async () => {
+      releaseEventListener?.({
+        type: "SERVER_UPDATED",
+        serverId: "srv-mc-101",
+      })
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // serverStatus must STILL be ONLINE!
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
+
+    unmount()
+  })
+
+  it("Test 18 — onPhaseChange to IDLE preserves serverStatus", async () => {
+    let phaseChangeCb: any = null
+    ;(window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      onPhaseChange: vi.fn((cb: any) => {
+        phaseChangeCb = cb
+        return () => {}
+      }),
+      getInstalledState: vi.fn().mockResolvedValue({
+        installedModpackVersion: "1.0.0",
+        integrityDirty: false,
+      }),
+    }
+
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
+
+    let releaseEventListener: any = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+      releaseEventListener = cb
+      return () => {}
+    })
+
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    await act(async () => {
+      authCallback(
+        {
+          user: { id: "u-test", displayName: "TestUser", email: "test@example.com", role: "PLAYER" },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    // Set serverStatus to ONLINE
+    await act(async () => {
+      releaseEventListener?.({
+        type: "SERVER_STATUS_CHANGED",
+        serverId: "srv-mc-101",
+        status: "ONLINE",
+      })
+    })
+
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
+
+    // Trigger IDLE phase change
+    await act(async () => {
+      phaseChangeCb?.("IDLE", "srv-mc-101")
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // serverStatus must STILL be ONLINE!
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
 
     unmount()
   })

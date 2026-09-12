@@ -206,11 +206,13 @@ export function useLauncherState() {
           setGameStates((prev) => {
             const next = { ...prev }
             for (const [id, state] of entries) {
+              const current = prev[id]
               next[id] = {
                 releaseSummary: state.releaseSummary,
-                publishedModpack: prev[id]?.publishedModpack ?? state.publishedModpack,
+                publishedModpack: current?.publishedModpack ?? state.publishedModpack,
                 installedVersion: state.installedVersion,
-                integrityDirty: prev[id]?.integrityDirty ?? state.integrityDirty,
+                integrityDirty: current?.integrityDirty ?? state.integrityDirty,
+                serverStatus: current?.serverStatus ?? null,
               }
             }
             return next
@@ -439,10 +441,12 @@ export function useLauncherState() {
             return {
               ...prev,
               [event.serverId!]: {
+                ...cur,
                 releaseSummary: newSummary,
                 publishedModpack: null,
                 installedVersion: cur?.installedVersion ?? null,
                 integrityDirty: cur?.integrityDirty ?? false,
+                serverStatus: cur?.serverStatus ?? null,
               },
             }
           })
@@ -526,6 +530,7 @@ export function useLauncherState() {
                     publishedModpack: pub ?? null,
                     installedVersion,
                     integrityDirty,
+                    serverStatus: current?.serverStatus ?? null,
                   },
                 }
               })
@@ -551,6 +556,7 @@ export function useLauncherState() {
                 publishedModpack: null,
                 installedVersion: null,
                 integrityDirty: true,
+                serverStatus: null,
               },
             }
           }
@@ -559,6 +565,7 @@ export function useLauncherState() {
             [gId]: {
               ...current,
               integrityDirty: true,
+              serverStatus: current?.serverStatus ?? null,
             },
           }
         })
@@ -577,6 +584,7 @@ export function useLauncherState() {
           ...current,
           installedVersion: version,
           integrityDirty: false,
+          serverStatus: current.serverStatus ?? null,
         },
       }
     })
@@ -591,6 +599,7 @@ export function useLauncherState() {
         [gameId]: {
           ...current,
           integrityDirty: false,
+          serverStatus: current.serverStatus ?? null,
         },
       }
     })

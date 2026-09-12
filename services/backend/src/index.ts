@@ -151,7 +151,7 @@ export default {
 
     const db = env.DB ? createDatabase(env.DB) : undefined
 
-    const context = await createGraphQLContext(request, env, db)
+    const context = await createGraphQLContext(request, env, db, undefined, _ctx)
 
     // Binary Media Upload Route: PUT /media/content/upload
 

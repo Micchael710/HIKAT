@@ -16,7 +16,7 @@ import {
   SERVER_MAX_CPU_PERCENT,
 } from "@hikat/shared"
 import type { Env } from "../types"
-import { broadcastServerUpdated } from "../releaseEvents"
+import { broadcastServerUpdated, notifyDurableObjectUnwatchServer } from "../releaseEvents"
 import { getContentMediaById, formatMediaGql } from "./mediaService"
 import { validateGameEnvironment, getMinecraftJavaMajorVersion } from "./game/gameEnvironmentService"
 import {
@@ -835,6 +835,7 @@ export async function deleteServer(
   // Delete server record in D1 (CASCADE removes server-scoped records: releases, files, news, tasks, tickets, managed content)
   // Does NOT delete: users, auth, skins, capes, global settings, or other servers
   await db.delete(schema.servers).where(eq(schema.servers.id, serverId))
+  void notifyDurableObjectUnwatchServer(env, serverId)
   return true
 }
 

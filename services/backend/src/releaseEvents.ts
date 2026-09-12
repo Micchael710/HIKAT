@@ -1,9 +1,319 @@
 import type { ContentMediaGql } from "@hikat/graphql"
-import type { ServerStatus } from "@hikat/shared"
+import { mapPterodactylStateToHiKAT, type ServerStatus } from "@hikat/shared"
+import { createDatabase, Database } from "@hikat/database"
 import type { Env } from "./types"
+import {
+  getServerStatus,
+  getServerConsoleWebsocketCredentials,
+} from "./services/pterodactyl/serverAdministrationService"
+import type { IPterodactylClient } from "./services/pterodactyl/types"
+
+export interface ServerWatcherState {
+  serverId: string
+  currentStatus: ServerStatus
+  isClosed: boolean
+  ws: WebSocket | null
+  reconnectTimer: any
+  backoffMs: number
+  reconnectAttempts: number
+}
 
 export class ReleaseEventsDurableObject {
-  constructor(private ctx: DurableObjectState) {}
+  private activeWatchers = new Map<string, ServerWatcherState>()
+  private startingWatchers = new Set<string>()
+  private clientOverride?: IPterodactylClient
+  private dbOverride?: Database
+  private db?: Database
+
+  constructor(
+    private ctx: DurableObjectState,
+    private env?: Env,
+  ) {
+    if (this.env?.DB) {
+      try {
+        this.db = createDatabase(this.env.DB)
+      } catch {}
+    }
+
+    if (this.ctx.blockConcurrencyWhile) {
+      this.ctx.blockConcurrencyWhile(async () => {
+        await this.restoreWatchedServers()
+      })
+    }
+  }
+
+  setEnvForTesting(env?: Env): void {
+    this.env = env
+    if (env?.DB) {
+      try {
+        this.db = createDatabase(env.DB)
+      } catch {}
+    }
+  }
+
+  setClientOverrideForTesting(client?: IPterodactylClient): void {
+    this.clientOverride = client
+  }
+
+  setDbOverrideForTesting(db?: Database): void {
+    this.dbOverride = db
+  }
+
+  getWatcherStatus(serverId: string): ServerStatus | undefined {
+    return this.activeWatchers.get(serverId)?.currentStatus
+  }
+
+  getActiveWatchersCount(): number {
+    return this.activeWatchers.size
+  }
+
+  private async restoreWatchedServers(): Promise<void> {
+    try {
+      const watched = await this.ctx.storage.get<string[]>("watchedServerIds")
+      if (Array.isArray(watched)) {
+        for (const serverId of watched) {
+          void this.ensureWatcher(serverId)
+        }
+      }
+    } catch {}
+  }
+
+  async ensureWatcher(serverId: string): Promise<ServerStatus> {
+    const existing = this.activeWatchers.get(serverId)
+    if (existing) {
+      return existing.currentStatus
+    }
+    if (this.startingWatchers.has(serverId)) {
+      return "UNKNOWN"
+    }
+
+    this.startingWatchers.add(serverId)
+
+    const watcher: ServerWatcherState = {
+      serverId,
+      currentStatus: "UNKNOWN",
+      isClosed: false,
+      ws: null,
+      reconnectTimer: null,
+      backoffMs: 5000,
+      reconnectAttempts: 0,
+    }
+    this.activeWatchers.set(serverId, watcher)
+
+    // Persist in watchedServerIds list
+    try {
+      const watched = (await this.ctx.storage.get<string[]>("watchedServerIds")) || []
+      if (!watched.includes(serverId)) {
+        watched.push(serverId)
+        await this.ctx.storage.put("watchedServerIds", watched)
+      }
+    } catch {}
+
+    const db = this.dbOverride ?? this.db ?? (this.env?.DB ? createDatabase(this.env.DB) : undefined)
+
+    try {
+      // 1. Initial status fetch via Pterodactyl REST
+      if (this.env) {
+        try {
+          const statusMetrics = await getServerStatus(this.env, this.clientOverride, serverId, db)
+          if (statusMetrics?.status) {
+            watcher.currentStatus = statusMetrics.status
+          }
+        } catch (err) {
+          console.warn(`[ReleaseEventsDO] Initial status fetch failed for ${serverId}:`, err)
+        }
+      }
+
+      // 2. Broadcast and persist initial status
+      await this.broadcastStatus(serverId, watcher.currentStatus)
+
+      // 3. Connect to Wings WebSocket for live status transitions
+      if (this.env && !watcher.isClosed) {
+        void this.connectWingsWatcher(watcher, db)
+      }
+    } finally {
+      this.startingWatchers.delete(serverId)
+    }
+
+    return watcher.currentStatus
+  }
+
+  private async connectWingsWatcher(
+    watcher: ServerWatcherState,
+    db?: Database,
+  ): Promise<void> {
+    if (watcher.isClosed || !this.env) return
+
+    let wsCreds: { token: string; socket: string }
+    try {
+      wsCreds = await getServerConsoleWebsocketCredentials(
+        this.env,
+        this.clientOverride,
+        watcher.serverId,
+        db,
+      )
+    } catch {
+      // If credentials cannot be fetched (e.g. unconfigured or panel unreachable), schedule reconnect
+      this.scheduleWatcherReconnect(watcher, db)
+      return
+    }
+
+    let fetchUrl = wsCreds.socket
+    try {
+      const parsed = new URL(wsCreds.socket)
+      if (parsed.protocol === "wss:") {
+        parsed.protocol = "https:"
+      } else if (parsed.protocol === "ws:") {
+        parsed.protocol = "http:"
+      }
+      fetchUrl = parsed.toString()
+    } catch {}
+
+    const wingsOrigin = this.env.PTERODACTYL_BASE_URL || "https://panel.example.com"
+
+    if (typeof (globalThis as any).WebSocketPair === "undefined" && !this.clientOverride) {
+      return
+    }
+
+    try {
+      const upstreamRes = await fetch(fetchUrl, {
+        headers: {
+          Upgrade: "websocket",
+          Origin: wingsOrigin,
+        },
+      })
+
+      const upstreamWs = (upstreamRes as unknown as { webSocket?: WebSocket }).webSocket
+      if (upstreamRes.status !== 101 || !upstreamWs) {
+        this.scheduleWatcherReconnect(watcher, db)
+        return
+      }
+
+      watcher.ws = upstreamWs
+      watcher.backoffMs = 5000
+      watcher.reconnectAttempts = 0
+      upstreamWs.accept()
+
+      // Send auth token to Wings
+      try {
+        upstreamWs.send(
+          JSON.stringify({
+            event: "auth",
+            args: [wsCreds.token],
+          }),
+        )
+      } catch {
+        this.scheduleWatcherReconnect(watcher, db)
+        return
+      }
+
+      upstreamWs.addEventListener("message", async (event: any) => {
+        if (watcher.isClosed) return
+        try {
+          const data = JSON.parse(String(event.data))
+          if (!data) return
+
+          if (data.event === "status" && data.args?.[0]) {
+            const rawState = String(data.args[0])
+            const newStatus = mapPterodactylStateToHiKAT(rawState)
+            if (newStatus !== watcher.currentStatus) {
+              watcher.currentStatus = newStatus
+              await this.broadcastStatus(watcher.serverId, newStatus)
+            }
+          } else if (data.event === "token expiring") {
+            try {
+              const refreshed = await getServerConsoleWebsocketCredentials(
+                this.env!,
+                this.clientOverride,
+                watcher.serverId,
+                db,
+              )
+              upstreamWs.send(
+                JSON.stringify({
+                  event: "auth",
+                  args: [refreshed.token],
+                }),
+              )
+            } catch {}
+          }
+        } catch {}
+      })
+
+      upstreamWs.addEventListener("close", () => {
+        watcher.ws = null
+        this.scheduleWatcherReconnect(watcher, db)
+      })
+
+      upstreamWs.addEventListener("error", () => {
+        watcher.ws = null
+        this.scheduleWatcherReconnect(watcher, db)
+      })
+    } catch {
+      this.scheduleWatcherReconnect(watcher, db)
+    }
+  }
+
+  private scheduleWatcherReconnect(
+    watcher: ServerWatcherState,
+    db?: Database,
+  ): void {
+    if (watcher.isClosed || watcher.reconnectTimer) return
+
+    watcher.reconnectAttempts++
+    watcher.reconnectTimer = setTimeout(() => {
+      watcher.reconnectTimer = null
+      void this.connectWingsWatcher(watcher, db)
+    }, watcher.backoffMs)
+
+    watcher.backoffMs = Math.min(watcher.backoffMs * 2, 60000)
+  }
+
+  async broadcastStatus(serverId: string, status: ServerStatus): Promise<void> {
+    const existing = this.activeWatchers.get(serverId)
+    if (existing) {
+      existing.currentStatus = status
+    }
+
+    const message = JSON.stringify({
+      type: "SERVER_STATUS_CHANGED",
+      serverId,
+      status,
+    })
+
+    try {
+      await this.ctx.storage.put(`serverStatus_${serverId}`, message)
+    } catch {}
+
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(message)
+      } catch {}
+    }
+  }
+
+  stopWatcher(serverId: string): void {
+    const watcher = this.activeWatchers.get(serverId)
+    if (watcher) {
+      watcher.isClosed = true
+      if (watcher.reconnectTimer) {
+        clearTimeout(watcher.reconnectTimer)
+        watcher.reconnectTimer = null
+      }
+      if (watcher.ws) {
+        try {
+          watcher.ws.close()
+        } catch {}
+        watcher.ws = null
+      }
+      this.activeWatchers.delete(serverId)
+    }
+  }
+
+  stopAllWatchers(): void {
+    for (const serverId of Array.from(this.activeWatchers.keys())) {
+      this.stopWatcher(serverId)
+    }
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
@@ -17,6 +327,10 @@ export class ReleaseEventsDurableObject {
           await this.ctx.storage.put("latestReleaseEvent", message)
         } else if (parsed?.type === "SERVER_STATUS_CHANGED" && parsed?.serverId) {
           await this.ctx.storage.put(`serverStatus_${parsed.serverId}`, message)
+          const existing = this.activeWatchers.get(parsed.serverId)
+          if (existing && parsed.status) {
+            existing.currentStatus = parsed.status
+          }
         }
       } catch {
         // no persistir mensajes inválidos
@@ -29,6 +343,59 @@ export class ReleaseEventsDurableObject {
       }
 
       return new Response(null, { status: 204 })
+    }
+
+    if (url.pathname === "/watch-servers" && request.method === "POST") {
+      try {
+        const body = (await request.json().catch(() => ({}))) as { serverIds?: string[] }
+        const serverIds = body.serverIds || []
+        const promises = serverIds.map((id) => this.ensureWatcher(id))
+        if (this.ctx.waitUntil) {
+          this.ctx.waitUntil(Promise.all(promises))
+        } else {
+          await Promise.all(promises)
+        }
+        return new Response(
+          JSON.stringify({ ok: true, watchingCount: this.activeWatchers.size }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        )
+      } catch (err: any) {
+        return new Response(JSON.stringify({ ok: false, error: err.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+    }
+
+    if (url.pathname === "/unwatch-server" && request.method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { serverId?: string }
+      if (body.serverId) {
+        this.stopWatcher(body.serverId)
+        try {
+          await this.ctx.storage.delete(`serverStatus_${body.serverId}`)
+          const watched = (await this.ctx.storage.get<string[]>("watchedServerIds")) || []
+          const next = watched.filter((id) => id !== body.serverId)
+          await this.ctx.storage.put("watchedServerIds", next)
+        } catch {}
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
+    if (url.pathname === "/watcher-status" && request.method === "GET") {
+      const statuses: Record<string, ServerStatus> = {}
+      for (const [id, watcher] of this.activeWatchers) {
+        statuses[id] = watcher.currentStatus
+      }
+      return new Response(JSON.stringify({ ok: true, statuses }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
     }
 
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
@@ -166,4 +533,34 @@ export async function broadcastServerStatusChanged(
   })
 }
 
+export async function notifyDurableObjectWatchServers(
+  env: Env,
+  serverIds: string[],
+): Promise<void> {
+  if (!env.RELEASE_EVENTS || serverIds.length === 0) return
 
+  const id = env.RELEASE_EVENTS.idFromName("global")
+  const stub = env.RELEASE_EVENTS.get(id)
+  await stub.fetch("http://internal/watch-servers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ serverIds }),
+  })
+}
+
+export async function notifyDurableObjectUnwatchServer(
+  env: Env,
+  serverId: string,
+): Promise<void> {
+  if (!env.RELEASE_EVENTS) return
+
+  try {
+    const id = env.RELEASE_EVENTS.idFromName("global")
+    const stub = env.RELEASE_EVENTS.get(id)
+    await stub.fetch("http://internal/unwatch-server", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverId }),
+    })
+  } catch {}
+}

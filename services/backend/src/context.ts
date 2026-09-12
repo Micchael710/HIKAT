@@ -22,42 +22,45 @@ export async function createGraphQLContext(
   env: Env,
   db?: Database,
   options?: CreateContextOptions,
+  ctx?: ExecutionContext,
 ): Promise<BackendGraphQLContext> {
   const activeDb = db ?? (env.DB ? createDatabase(env.DB) : undefined)
   const authHeader = request.headers.get("authorization") || request.headers.get("Authorization")
 
+  const baseContext: Pick<BackendGraphQLContext, "env" | "db" | "request" | "waitUntil" | "executionCtx"> = {
+    env,
+    db: activeDb,
+    request,
+    waitUntil: ctx?.waitUntil ? (p) => ctx.waitUntil(p) : undefined,
+    executionCtx: ctx,
+  }
+
   if (!authHeader || authHeader.trim() === "") {
     return {
-      env,
-      db: activeDb,
+      ...baseContext,
       auth: { status: "anonymous" },
-      request,
     }
   }
 
   const bearerMatch = authHeader.match(/^Bearer\s+(\S+)$/i)
   if (!bearerMatch) {
     return {
-      env,
-      db: activeDb,
+      ...baseContext,
       auth: {
         status: "invalid",
         reason: "Invalid authorization header format. Expected Bearer <token>",
       },
-      request,
     }
   }
 
   const token = bearerMatch[1]
   if (!token) {
     return {
-      env,
-      db: activeDb,
+      ...baseContext,
       auth: {
         status: "invalid",
         reason: "Invalid authorization header format. Expected Bearer <token>",
       },
-      request,
     }
   }
 
@@ -67,13 +70,12 @@ export async function createGraphQLContext(
     // Fail closed if database is unavailable for session verification
     if (!activeDb) {
       return {
-        env,
+        ...baseContext,
         db: undefined,
         auth: {
           status: "invalid",
           reason: "Database unavailable for session verification",
         },
-        request,
       }
     }
 
@@ -82,13 +84,11 @@ export async function createGraphQLContext(
       const sessionResult = await validateSessionInDb(activeDb, payload.sub, payload.sid)
       if (!sessionResult.valid) {
         return {
-          env,
-          db: activeDb,
+          ...baseContext,
           auth: {
             status: "invalid",
             reason: sessionResult.reason || "Invalid session",
           },
-          request,
         }
       }
 
@@ -96,19 +96,16 @@ export async function createGraphQLContext(
       const user = await getUserById(activeDb, payload.sub)
       if (!user) {
         return {
-          env,
-          db: activeDb,
+          ...baseContext,
           auth: {
             status: "invalid",
             reason: "User account not found",
           },
-          request,
         }
       }
 
       return {
-        env,
-        db: activeDb,
+        ...baseContext,
         auth: {
           status: "authenticated",
           identity: {
@@ -119,30 +116,25 @@ export async function createGraphQLContext(
             tokenPayload: payload,
           },
         },
-        request,
       }
     } catch {
       // Internal database failure during session or user retrieval
       return {
-        env,
-        db: activeDb,
+        ...baseContext,
         auth: {
           status: "invalid",
           reason: "Internal error during session verification",
         },
-        request,
       }
     }
   } catch (err: unknown) {
     const error = err as Error
     return {
-      env,
-      db: activeDb,
+      ...baseContext,
       auth: {
         status: "invalid",
         reason: error.message || "Failed to authenticate token",
       },
-      request,
     }
   }
 }

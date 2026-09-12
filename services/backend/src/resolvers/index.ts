@@ -118,7 +118,7 @@ import {
   deleteServer,
   getServerNodeCapacity,
 } from "../services/serverService"
-import { ensureServerStatusWatcher } from "../services/pterodactyl/serverStatusWatcher"
+import { notifyDurableObjectWatchServers } from "../releaseEvents"
 import {
   getPublicNewsFeed,
   getPublicNewsById,
@@ -830,8 +830,13 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       const servers = await getLauncherServers(context.db, context.env, context.request)
-      for (const s of servers) {
-        void ensureServerStatusWatcher(context.env, s.id, context.db).catch(() => {})
+      if (servers.length > 0 && context.env.RELEASE_EVENTS) {
+        const serverIds = servers.map((s) => s.id)
+        if (context.waitUntil) {
+          context.waitUntil(notifyDurableObjectWatchServers(context.env, serverIds))
+        } else {
+          await notifyDurableObjectWatchServers(context.env, serverIds).catch(() => {})
+        }
       }
       return servers
     },
@@ -844,7 +849,13 @@ export const resolvers = {
       if (!context.db) {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
-      void ensureServerStatusWatcher(context.env, args.serverId, context.db).catch(() => {})
+      if (context.env.RELEASE_EVENTS) {
+        if (context.waitUntil) {
+          context.waitUntil(notifyDurableObjectWatchServers(context.env, [args.serverId]))
+        } else {
+          await notifyDurableObjectWatchServers(context.env, [args.serverId]).catch(() => {})
+        }
+      }
       return getLauncherServerPing(context.env, context.db, args.serverId)
     },
 

@@ -345,5 +345,174 @@ describe("ReleaseEventsDurableObject & broadcastReleaseActivated", () => {
 
     expect(res.status).toBe(101)
   })
+
+  it("centralized watcher does not depend on global Map; multiple DO instances are completely isolated", async () => {
+    const createMockCtx = () => ({
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => []),
+      storage: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {}),
+        list: vi.fn(async () => new Map()),
+      },
+    })
+
+    const do1 = new ReleaseEventsDurableObject(createMockCtx() as any)
+    const do2 = new ReleaseEventsDurableObject(createMockCtx() as any)
+
+    await do1.ensureWatcher("srv-unique-1")
+
+    expect(do1.getActiveWatchersCount()).toBe(1)
+    expect(do2.getActiveWatchersCount()).toBe(0)
+  })
+
+  it("starting twice for the same serverId does not create duplicate watchers", async () => {
+    const createMockCtx = () => ({
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => []),
+      storage: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {}),
+        list: vi.fn(async () => new Map()),
+      },
+    })
+
+    const doInstance = new ReleaseEventsDurableObject(createMockCtx() as any)
+
+    const res1 = await doInstance.fetch(new Request("http://internal/watch-servers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverIds: ["srv-repeat-1"] }),
+    }))
+    const res2 = await doInstance.fetch(new Request("http://internal/watch-servers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverIds: ["srv-repeat-1"] }),
+    }))
+
+    expect(res1.status).toBe(200)
+    expect(res2.status).toBe(200)
+    expect(doInstance.getActiveWatchersCount()).toBe(1)
+  })
+
+  it("fetches initial status via Pterodactyl REST and publishes SERVER_STATUS_CHANGED", async () => {
+    const storageMap = new Map<string, any>()
+    const sentMessages: string[] = []
+    const mockClientWs = {
+      send: vi.fn((msg) => sentMessages.push(msg)),
+    }
+    const mockCtx: any = {
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => [mockClientWs]),
+      storage: {
+        get: vi.fn(async (k) => storageMap.get(k)),
+        put: vi.fn(async (k, v) => storageMap.set(k, v)),
+        list: vi.fn(async () => new Map()),
+      },
+    }
+
+    const mockPteroClient: any = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: {
+          current_state: "running",
+          is_suspended: false,
+          resources: { cpu_absolute: 10, memory_bytes: 1000, disk_bytes: 2000 },
+        },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: {
+          is_suspended: false,
+          limits: { cpu: 100, memory: 2048 },
+        },
+      }),
+      getWebsocketCredentials: vi.fn().mockRejectedValue(new Error("No wings in unit test")),
+    }
+
+    const env: any = {
+      PTERODACTYL_BASE_URL: "https://panel.test",
+    }
+
+    const doInstance = new ReleaseEventsDurableObject(mockCtx, env)
+    doInstance.setClientOverrideForTesting(mockPteroClient)
+
+    const status = await doInstance.ensureWatcher("srv-initial-online")
+
+    expect(status).toBe("ONLINE")
+    expect(doInstance.getWatcherStatus("srv-initial-online")).toBe("ONLINE")
+
+    // Stored in storage
+    const stored = JSON.parse(storageMap.get("serverStatus_srv-initial-online")!)
+    expect(stored).toEqual({
+      type: "SERVER_STATUS_CHANGED",
+      serverId: "srv-initial-online",
+      status: "ONLINE",
+    })
+
+    // Broadcast to connected client WebSocket
+    expect(sentMessages.length).toBeGreaterThan(0)
+    const broadcasted = JSON.parse(sentMessages[0]!)
+    expect(broadcasted).toEqual({
+      type: "SERVER_STATUS_CHANGED",
+      serverId: "srv-initial-online",
+      status: "ONLINE",
+    })
+  })
+
+  it("multiple servers maintain independent statuses", async () => {
+    const storageMap = new Map<string, any>()
+    const mockCtx: any = {
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => []),
+      storage: {
+        get: vi.fn(async (k) => storageMap.get(k)),
+        put: vi.fn(async (k, v) => storageMap.set(k, v)),
+        list: vi.fn(async () => new Map()),
+      },
+    }
+
+    const doInstance = new ReleaseEventsDurableObject(mockCtx)
+    await doInstance.ensureWatcher("server-alpha")
+    await doInstance.ensureWatcher("server-beta")
+
+    await doInstance.broadcastStatus("server-alpha", "ONLINE")
+    await doInstance.broadcastStatus("server-beta", "OFFLINE")
+
+    expect(doInstance.getWatcherStatus("server-alpha")).toBe("ONLINE")
+    expect(doInstance.getWatcherStatus("server-beta")).toBe("OFFLINE")
+
+    expect(JSON.parse(storageMap.get("serverStatus_server-alpha")!).status).toBe("ONLINE")
+    expect(JSON.parse(storageMap.get("serverStatus_server-beta")!).status).toBe("OFFLINE")
+  })
+
+  it("unwatch server removes status from storage and stops watcher", async () => {
+    const storageMap = new Map<string, any>()
+    const mockCtx: any = {
+      acceptWebSocket: vi.fn(),
+      getWebSockets: vi.fn(() => []),
+      storage: {
+        get: vi.fn(async (k) => storageMap.get(k)),
+        put: vi.fn(async (k, v) => storageMap.set(k, v)),
+        delete: vi.fn(async (k) => storageMap.delete(k)),
+        list: vi.fn(async () => new Map()),
+      },
+    }
+
+    const doInstance = new ReleaseEventsDurableObject(mockCtx)
+    await doInstance.ensureWatcher("server-to-delete")
+    await doInstance.broadcastStatus("server-to-delete", "ONLINE")
+
+    expect(doInstance.getActiveWatchersCount()).toBe(1)
+    expect(storageMap.has("serverStatus_server-to-delete")).toBe(true)
+
+    const res = await doInstance.fetch(new Request("http://internal/unwatch-server", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverId: "server-to-delete" }),
+    }))
+
+    expect(res.status).toBe(200)
+    expect(doInstance.getActiveWatchersCount()).toBe(0)
+    expect(storageMap.has("serverStatus_server-to-delete")).toBe(false)
+  })
 })
 

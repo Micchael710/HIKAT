@@ -1,6 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { graphql } from "graphql"
-import { getBaseSchema } from "@hikat/graphql"
 import { resolvers } from "../resolvers"
 import {
   setPingImplementationForTesting,
@@ -10,17 +8,13 @@ import {
   _clearServerAddressCacheForTesting,
   _setServerAddressOverrideForTesting,
 } from "./serverService"
-import {
-  _resetServerStatusWatchersForTesting,
-  ensureServerStatusWatcher,
-} from "./pterodactyl/serverStatusWatcher"
+import { notifyDurableObjectWatchServers, ReleaseEventsDurableObject } from "../releaseEvents"
 import type { BackendGraphQLContext } from "../types"
 
-describe("launcherServerPing GraphQL query and ServerStatusWatcher", () => {
+describe("launcherServerPing GraphQL query and Durable Object Watcher", () => {
   beforeEach(() => {
     clearPingCacheForTesting()
     _clearServerAddressCacheForTesting()
-    _resetServerStatusWatchersForTesting()
     setPingImplementationForTesting(null)
     vi.restoreAllMocks()
   })
@@ -93,13 +87,14 @@ describe("launcherServerPing GraphQL query and ServerStatusWatcher", () => {
     expect(res).toBeNull()
   })
 
-
-  it("ensureServerStatusWatcher gets initial status and broadcasts SERVER_STATUS_CHANGED via shared DO", async () => {
-    let broadcastPayload: any = null
+  it("launcherServerPing and launcherServers notify Durable Object via notifyDurableObjectWatchServers", async () => {
+    let watchReqUrl = ""
+    let watchReqBody: any = null
     const mockStub: any = {
-      fetch: vi.fn(async (_url: string, opts: any) => {
-        broadcastPayload = JSON.parse(opts.body)
-        return new Response(null, { status: 204 })
+      fetch: vi.fn(async (url: string, opts: any) => {
+        watchReqUrl = url
+        watchReqBody = JSON.parse(opts.body)
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
       }),
     }
 
@@ -112,30 +107,12 @@ describe("launcherServerPing GraphQL query and ServerStatusWatcher", () => {
       RELEASE_EVENTS: mockNamespace,
     }
 
-    const mockClient: any = {
-      getServerResources: vi.fn().mockResolvedValue({
-        attributes: {
-          current_state: "running",
-          is_suspended: false,
-          resources: { cpu_absolute: 15, memory_bytes: 1024, disk_bytes: 2048 },
-        },
-      }),
-      getServerDetails: vi.fn().mockResolvedValue({
-        attributes: {
-          is_suspended: false,
-          limits: { cpu: 200, memory: 4096 },
-        },
-      }),
-      getWebsocketCredentials: vi.fn().mockRejectedValue(new Error("No wings in unit test")),
-    }
+    await notifyDurableObjectWatchServers(env, ["srv-live-1", "srv-live-2"])
 
-    const status = await ensureServerStatusWatcher(env, "srv-live", undefined, mockClient)
-
-    expect(status).toBe("ONLINE")
-    expect(broadcastPayload).toEqual({
-      type: "SERVER_STATUS_CHANGED",
-      serverId: "srv-live",
-      status: "ONLINE",
+    expect(mockNamespace.idFromName).toHaveBeenCalledWith("global")
+    expect(watchReqUrl).toBe("http://internal/watch-servers")
+    expect(watchReqBody).toEqual({
+      serverIds: ["srv-live-1", "srv-live-2"],
     })
   })
 })

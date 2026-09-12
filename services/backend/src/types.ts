@@ -54,4 +54,6 @@ export interface BackendGraphQLContext {
   db?: Database
   auth: AuthState
   request: Request
+  waitUntil?: (promise: Promise<any>) => void
+  executionCtx?: ExecutionContext
 }
