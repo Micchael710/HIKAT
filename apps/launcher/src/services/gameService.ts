@@ -1,6 +1,52 @@
 import { graphqlClient } from "./apiClient"
 import { getApiBaseUrl } from "../config/api"
+import { authService } from "./authService"
 import type { PublishedModpack, ClientFile, SyncPlanCheckResult } from "../vite-env"
+
+let tokenRenewalTimer: any = null
+let currentRenewalContext: { gameId?: string; gameName?: string } | null = null
+
+export async function syncGameToken(gameContext?: { gameId?: string; gameName?: string } | null) {
+  if (!window.electronAPI?.writeGameToken) return
+  try {
+    const res = await authService.getGameToken()
+    if (res && res.token) {
+      await window.electronAPI.writeGameToken({
+        gameId: gameContext?.gameId,
+        gameName: gameContext?.gameName,
+        token: res.token,
+      })
+    }
+  } catch (_) {
+    // Fail silently without logging JWT
+  }
+}
+
+export function startTokenRenewal(gameContext?: { gameId?: string; gameName?: string } | null) {
+  stopTokenRenewal()
+  currentRenewalContext = gameContext || null
+  void syncGameToken(gameContext)
+  tokenRenewalTimer = setInterval(async () => {
+    try {
+      if (window.electronAPI?.getLaunchStatus) {
+        const status = await window.electronAPI.getLaunchStatus((currentRenewalContext || undefined) as any)
+        if (status?.status !== "running") {
+          stopTokenRenewal()
+          return
+        }
+      }
+      await syncGameToken(currentRenewalContext)
+    } catch (_) {}
+  }, 90000)
+}
+
+export function stopTokenRenewal() {
+  if (tokenRenewalTimer) {
+    clearInterval(tokenRenewalTimer)
+    tokenRenewalTimer = null
+  }
+  currentRenewalContext = null
+}
 
 export type GameButtonState =
   | "checking"
@@ -613,14 +659,21 @@ export const gameService = {
     customArgs?: string[]
     gameContext?: { gameId: string; gameName: string }
   }) {
+    await syncGameToken(options.gameContext).catch(() => {})
+
     if (window.electronAPI?.launchGame) {
-      return await window.electronAPI.launchGame({
+      const result = await window.electronAPI.launchGame({
         ...options,
         modLoaderVersion: options.modLoaderVersion ?? undefined,
         neoForgeVersion: options.neoForgeVersion ?? undefined,
         gameId: options.gameContext?.gameId,
         gameName: options.gameContext?.gameName,
       })
+      startTokenRenewal(options.gameContext)
+      return result
     }
   },
+  syncGameToken,
+  startTokenRenewal,
+  stopTokenRenewal,
 }

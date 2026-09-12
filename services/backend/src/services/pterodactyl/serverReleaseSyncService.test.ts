@@ -5,6 +5,7 @@ import { isNull, eq } from "drizzle-orm"
 import {
   getServerReleaseSyncPlan,
   applyServerReleaseSync,
+  generateOfficialServerIntegrityManifest,
 } from "./serverReleaseSyncService"
 import { prepareGameDraft, publishGameRelease } from "../game/releaseService"
 import { updateAdminSettings } from "../settingsService"
@@ -1753,5 +1754,130 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
       .where(eq(schema.servers.id, "warria-id"))
       .get()
     expect(serverRow?.launcherActiveReleaseId).toBe(published.id)
+  })
+
+  it("H. Generates deterministic official client integrity manifest and writes to hikat/integrity.json", async () => {
+    const nowIso = new Date().toISOString()
+    const relId = "rel-integrity-test"
+    await db.insert(schema.gameReleases).values({
+      id: relId,
+      version: "2.0.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      status: "PUBLISHED",
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Directory policies: config is MODIFICABLE, mods is NO_MODIFICABLE
+    await db.insert(schema.gameReleaseFiles).values([
+      {
+        id: "dir-mods",
+        releaseId: relId,
+        name: "mods",
+        logicalPath: "mods",
+        category: "MOD",
+        sha256: "",
+        sizeBytes: 0,
+        policy: "NO_MODIFICABLE",
+        isDirectory: true,
+        createdAt: nowIso,
+      },
+      {
+        id: "dir-config",
+        releaseId: relId,
+        name: "config",
+        logicalPath: "config",
+        category: "CONFIG",
+        sha256: "",
+        sizeBytes: 0,
+        policy: "MODIFICABLE",
+        isDirectory: true,
+        createdAt: nowIso,
+      },
+      // Client-expected NO_MODIFICABLE file 1
+      {
+        id: "file-mod-b",
+        releaseId: relId,
+        name: "b-mod.jar",
+        logicalPath: "mods/b-mod.jar",
+        category: "MOD",
+        sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        sizeBytes: 200,
+        policy: null, // inherits NO_MODIFICABLE
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        createdAt: nowIso,
+      },
+      // Client-expected NO_MODIFICABLE file 2
+      {
+        id: "file-mod-a",
+        releaseId: relId,
+        name: "a-mod.jar",
+        logicalPath: "mods/a-mod.jar",
+        category: "MOD",
+        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        sizeBytes: 100,
+        policy: null, // inherits NO_MODIFICABLE
+        isDirectory: false,
+        sourceEnvironment: "CLIENT",
+        createdAt: nowIso,
+      },
+      // Server-only mod (MUST NOT participate in client integrity manifest)
+      {
+        id: "file-server-only",
+        releaseId: relId,
+        name: "server-only.jar",
+        logicalPath: "mods/server-only.jar",
+        category: "MOD",
+        sha256: "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+        sizeBytes: 500,
+        policy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "SERVER",
+        createdAt: nowIso,
+      },
+      // MODIFICABLE config file (MUST NOT participate in client integrity manifest)
+      {
+        id: "file-config",
+        releaseId: relId,
+        name: "options.toml",
+        logicalPath: "config/options.toml",
+        category: "CONFIG",
+        sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        sizeBytes: 50,
+        policy: "MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        createdAt: nowIso,
+      },
+    ])
+
+    const rel = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, relId)).get()
+    const manifest = await generateOfficialServerIntegrityManifest(db, rel)
+
+    expect(manifest.version).toBe("2.0.0")
+    expect(manifest.releaseId).toBe(relId)
+    expect(manifest.files).toHaveLength(2)
+    // Sorted alphabetically: a-mod.jar then b-mod.jar
+    expect(manifest.files[0].path).toBe("mods/a-mod.jar")
+    expect(manifest.files[1].path).toBe("mods/b-mod.jar")
+    expect(manifest.officialFingerprint).toBeDefined()
+    expect(manifest.officialFingerprint.length).toBe(64) // SHA-256 hex string
+
+    // Test writing to pterodactyl client
+    const writeFileSpy = vi.fn().mockResolvedValue(undefined)
+    const createFolderSpy = vi.fn().mockResolvedValue(undefined)
+    const mockClient = {
+      createFolder: createFolderSpy,
+      writeFile: writeFileSpy,
+    } as any
+
+    await mockClient.createFolder("/", "hikat")
+    await mockClient.writeFile("hikat/integrity.json", JSON.stringify(manifest, null, 2))
+
+    expect(createFolderSpy).toHaveBeenCalledWith("/", "hikat")
+    expect(writeFileSpy).toHaveBeenCalledWith("hikat/integrity.json", expect.stringContaining("2.0.0"))
   })
 })
