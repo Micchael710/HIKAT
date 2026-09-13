@@ -506,6 +506,23 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
               <div style={{ fontSize: "13px", color: tokens.textSecondary }}>
                 Intenta buscar por otro nombre o revisa los filtros de categoría, loader y proveedor.
               </div>
+              {hasMore && Boolean(cursor) && (
+                <div style={{ marginTop: "16px" }}>
+                  <button
+                    type="button"
+                    data-testid="button-load-more"
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="launcher-btn-secondary"
+                    style={{
+                      padding: "10px 24px",
+                      fontSize: "14px",
+                    }}
+                  >
+                    {loadingMore ? "Cargando más..." : "Cargar más"}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div>

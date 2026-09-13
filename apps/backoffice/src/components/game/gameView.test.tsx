@@ -2224,6 +2224,83 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       // "Cargar más" button is NO longer in document because hasMore is false (no loop)
       expect(screen.queryByRole("button", { name: /Cargar más/i })).toBeNull()
     })
+
+    it("ModSearchModal displays 'Cargar más' when first page has 0 items but hasMore is true, and reveals items after loading more", async () => {
+      const searchSpy = vi.spyOn(graphqlClient, "searchMods")
+        .mockResolvedValueOnce({
+          items: [],
+          totalCount: 1,
+          hasMore: true,
+          nextCursor: "cursor-page-1",
+          providersStatus: [{ provider: "MODRINTH", available: true }],
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+        })
+        .mockResolvedValueOnce({
+          items: [
+            {
+              provider: "MODRINTH",
+              projectId: "mod-sparse-1",
+              name: "Sparse Mod 1",
+              summary: "Mod found in next batch",
+              author: "author1",
+              downloads: 150,
+              categories: ["utility"],
+              contentType: "MOD",
+              environment: "BOTH",
+              latestVersion: "1.0.0",
+            },
+          ],
+          totalCount: 1,
+          hasMore: false,
+          nextCursor: null,
+          providersStatus: [{ provider: "MODRINTH", available: true }],
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+        })
+
+      await act(async () => {
+        render(
+          <ModSearchModal
+            serverId="srv-1"
+            onClose={vi.fn()}
+            onSuccess={vi.fn()}
+          />,
+        )
+      })
+
+      // 1. Initial page has 0 items and displays empty state text
+      expect(await screen.findByText("No se encontraron resultados")).toBeDefined()
+
+      // 2. "Cargar más" is visible because hasMore = true and nextCursor is present
+      const loadMoreBtn = await screen.findByRole("button", { name: /Cargar más/i })
+      expect(loadMoreBtn).toBeDefined()
+
+      // 3. Click "Cargar más"
+      await act(async () => {
+        fireEvent.click(loadMoreBtn)
+      })
+
+      // Expect searchMods to have been called with nextCursor
+      expect(searchSpy).toHaveBeenLastCalledWith(
+        "",
+        "MOD",
+        null,
+        20,
+        20,
+        "srv-1",
+        null,
+        null,
+        null,
+        "cursor-page-1",
+      )
+
+      // 4 & 5. The mod item appears and "Cargar más" button disappears
+      expect(await screen.findByText("Sparse Mod 1")).toBeDefined()
+      expect(screen.queryByRole("button", { name: /Cargar más/i })).toBeNull()
+    })
   })
 
   describe("HiKAT Shard 8C: Release Experience & Publication Suite (React & Wizards)", () => {
