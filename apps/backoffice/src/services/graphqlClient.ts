@@ -2292,8 +2292,10 @@ export const gameApi = {
     limit: number | undefined,
     offset: number | undefined,
     serverId: string,
+    loaderOverride?: import("../types").GameModLoader | null,
+    categoryKey?: string | null,
   ): Promise<import("../types").ModSearchPayload> {
-    return modProvidersApi.searchMods(query, contentType, provider, limit, offset, serverId)
+    return modProvidersApi.searchMods(query, contentType, provider, limit, offset, serverId, loaderOverride, categoryKey)
   },
 
   async getModProjectDetail(
@@ -2301,8 +2303,9 @@ export const gameApi = {
     projectId: string,
     contentType: import("../types").ContentType | null | undefined,
     serverId: string,
+    loaderOverride?: import("../types").GameModLoader | null,
   ): Promise<import("../types").ModProjectDetail> {
-    return modProvidersApi.getModProjectDetail(provider, projectId, contentType, serverId)
+    return modProvidersApi.getModProjectDetail(provider, projectId, contentType, serverId, loaderOverride)
   },
 
   async resolveModInstallationPlan(
@@ -2384,6 +2387,21 @@ export const settingsApi = {
 // --- Mod Providers API Facade (Shard 08B) ---
 
 export const modProvidersApi = {
+  async getModCategories(contentType?: import("../types").ContentType): Promise<import("../types").ModCategoryItem[]> {
+    const gqlQuery = /* GraphQL */ `
+      query ModCategories($contentType: ContentType) {
+        modCategories(contentType: $contentType) {
+          key
+          name
+        }
+      }
+    `
+    const data = await executeGraphQL<{ modCategories: import("../types").ModCategoryItem[] }>(gqlQuery, {
+      contentType,
+    })
+    return data.modCategories || []
+  },
+
   async searchMods(
     query: string,
     contentType: import("../types").ContentType | null | undefined,
@@ -2391,6 +2409,8 @@ export const modProvidersApi = {
     limit: number | undefined,
     offset: number | undefined,
     serverId: string,
+    loaderOverride?: import("../types").GameModLoader | null,
+    categoryKey?: string | null,
   ): Promise<import("../types").ModSearchPayload> {
     const gqlQuery = /* GraphQL */ `
       query SearchMods(
@@ -2400,6 +2420,8 @@ export const modProvidersApi = {
         $limit: Int
         $offset: Int
         $serverId: ID
+        $loaderOverride: GameModLoader
+        $categoryKey: String
       ) {
         searchMods(
           query: $query
@@ -2408,6 +2430,8 @@ export const modProvidersApi = {
           limit: $limit
           offset: $offset
           serverId: $serverId
+          loaderOverride: $loaderOverride
+          categoryKey: $categoryKey
         ) {
           items {
             provider
@@ -2447,6 +2471,8 @@ export const modProvidersApi = {
       limit,
       offset,
       serverId,
+      loaderOverride,
+      categoryKey,
     })
     return data.searchMods
   },
@@ -2456,6 +2482,7 @@ export const modProvidersApi = {
     projectId: string,
     contentType: import("../types").ContentType | null | undefined,
     serverId: string,
+    loaderOverride?: import("../types").GameModLoader | null,
   ): Promise<import("../types").ModProjectDetail> {
     const gqlQuery = /* GraphQL */ `
       query GetModProjectDetail(
@@ -2463,12 +2490,14 @@ export const modProvidersApi = {
         $projectId: String!
         $contentType: ContentType
         $serverId: ID
+        $loaderOverride: GameModLoader
       ) {
         getModProjectDetail(
           provider: $provider
           projectId: $projectId
           contentType: $contentType
           serverId: $serverId
+          loaderOverride: $loaderOverride
         ) {
           provider
           projectId
@@ -2517,6 +2546,7 @@ export const modProvidersApi = {
       projectId,
       contentType: contentType || "MOD",
       serverId,
+      loaderOverride,
     })
     return data.getModProjectDetail
   },
@@ -2701,6 +2731,8 @@ export const serverContentApi = {
     offset: number | undefined,
     cursor: string | null | undefined,
     serverId: string,
+    loaderOverride?: import("../types").GameModLoader | null,
+    categoryKey?: string | null,
   ): Promise<import("../types").ServerContentSearchPayload> {
     const gqlQuery = /* GraphQL */ `
       query SearchServerContent(
@@ -2711,6 +2743,8 @@ export const serverContentApi = {
         $offset: Int
         $cursor: String
         $serverId: ID
+        $loaderOverride: GameModLoader
+        $categoryKey: String
       ) {
         searchServerContent(
           query: $query
@@ -2720,6 +2754,8 @@ export const serverContentApi = {
           offset: $offset
           cursor: $cursor
           serverId: $serverId
+          loaderOverride: $loaderOverride
+          categoryKey: $categoryKey
         ) {
           items {
             provider
@@ -2763,6 +2799,8 @@ export const serverContentApi = {
       offset,
       cursor,
       serverId,
+      loaderOverride,
+      categoryKey,
     })
     return data.searchServerContent
   },
@@ -2772,6 +2810,7 @@ export const serverContentApi = {
     projectId: string,
     contentType: import("../types").ContentType | null | undefined,
     serverId: string,
+    loaderOverride?: import("../types").GameModLoader | null,
   ): Promise<import("../types").ModProjectDetail> {
     const gqlQuery = /* GraphQL */ `
       query ServerContentProjectDetail(
@@ -2779,12 +2818,14 @@ export const serverContentApi = {
         $projectId: String!
         $contentType: ContentType
         $serverId: ID
+        $loaderOverride: GameModLoader
       ) {
         serverContentProjectDetail(
           provider: $provider
           projectId: $projectId
           contentType: $contentType
           serverId: $serverId
+          loaderOverride: $loaderOverride
         ) {
           provider
           projectId
@@ -2833,6 +2874,7 @@ export const serverContentApi = {
       projectId,
       contentType: contentType || "MOD",
       serverId,
+      loaderOverride,
     })
     return data.serverContentProjectDetail
   },

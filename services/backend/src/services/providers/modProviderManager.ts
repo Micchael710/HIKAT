@@ -23,6 +23,7 @@ import type {
   ServerContentPlanItemGql,
   ResolveServerContentPlanInputGql,
   GameModLoaderGql,
+  ModCategoryItemGql,
 } from "@hikat/graphql"
 import { createGraphQLError } from "@hikat/graphql"
 
@@ -50,6 +51,14 @@ export interface InternalServerTransferItem {
 export interface ServerContentPlanResolutionResult {
   plan: ServerContentInstallationPlanGql
   transferItems: InternalServerTransferItem[]
+}
+
+export interface NormalizedCategoryInternal {
+  key: string
+  name: string
+  modrinthSlug?: string
+  curseForgeCategoryId?: number
+  contentType: ContentTypeGql
 }
 
 /**
@@ -165,11 +174,89 @@ export interface ScannedFilteredItem {
 export class ModProviderManager {
   private modrinth = new ModrinthAdapter()
   private curseforge = new CurseForgeAdapter()
+  private normalizedCategoryCache = new Map<ContentTypeGql, NormalizedCategoryInternal[]>()
 
   getAdapter(provider: ModProviderGql): ModProviderAdapter {
     if (provider === "MODRINTH") return this.modrinth
     if (provider === "CURSEFORGE") return this.curseforge
     throw new Error(`Proveedor de contenido no soportado: ${provider}`)
+  }
+
+  async getAvailableCategories(
+    env: Env,
+    contentType: ContentTypeGql = "MOD",
+  ): Promise<ModCategoryItemGql[]> {
+    const categories = await this.getInternalCategories(env, contentType)
+    return categories.map((c) => ({ key: c.key, name: c.name }))
+  }
+
+  async getInternalCategories(
+    env: Env,
+    contentType: ContentTypeGql = "MOD",
+  ): Promise<NormalizedCategoryInternal[]> {
+    if (this.normalizedCategoryCache.has(contentType)) {
+      return this.normalizedCategoryCache.get(contentType)!
+    }
+
+    const [mrCategories, cfCategories] = await Promise.all([
+      this.modrinth.getCategories ? this.modrinth.getCategories(env, contentType).catch(() => []) : [],
+      this.curseforge.getCategories ? this.curseforge.getCategories(env, contentType).catch(() => []) : [],
+    ])
+
+    const map = new Map<string, NormalizedCategoryInternal>()
+
+    for (const mr of mrCategories) {
+      const key = (mr.slug || mr.name).toLowerCase().replace(/[^a-z0-9_-]/g, "")
+      map.set(key, {
+        key,
+        name: mr.name,
+        modrinthSlug: mr.slug || mr.name.toLowerCase(),
+        contentType,
+      })
+    }
+
+    for (const cf of cfCategories) {
+      const key = (cf.slug || cf.name).toLowerCase().replace(/[^a-z0-9_-]/g, "")
+      const existing = map.get(key)
+      if (existing) {
+        existing.curseForgeCategoryId = typeof cf.id === "number" ? cf.id : Number(cf.id)
+      } else {
+        map.set(key, {
+          key,
+          name: cf.name,
+          curseForgeCategoryId: typeof cf.id === "number" ? cf.id : Number(cf.id),
+          contentType,
+        })
+      }
+    }
+
+    const list = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
+    this.normalizedCategoryCache.set(contentType, list)
+    return list
+  }
+
+  private resolveCategoryFiltering(
+    categories: NormalizedCategoryInternal[],
+    categoryKey?: string | null,
+  ): { mrCategorySlug?: string; cfCategoryId?: number; skipModrinth: boolean; skipCurseForge: boolean } {
+    if (!categoryKey || !categoryKey.trim() || categoryKey === "ALL" || categoryKey === "Todas") {
+      return { skipModrinth: false, skipCurseForge: false }
+    }
+    const normKey = categoryKey.trim().toLowerCase()
+    const matched = categories.find((c) => c.key === normKey)
+    if (matched) {
+      return {
+        mrCategorySlug: matched.modrinthSlug,
+        cfCategoryId: matched.curseForgeCategoryId,
+        skipModrinth: !matched.modrinthSlug,
+        skipCurseForge: !matched.curseForgeCategoryId,
+      }
+    }
+    return {
+      mrCategorySlug: normKey,
+      skipModrinth: false,
+      skipCurseForge: true,
+    }
   }
 
   async getActiveEnvironment(
@@ -390,13 +477,32 @@ export class ModProviderManager {
     offset: number = 0,
     contentType: ContentTypeGql = "MOD",
     serverId?: string | null,
+    loaderOverride?: GameModLoaderGql | null,
+    categoryKey?: string | null,
   ): Promise<ModSearchPayloadGql> {
     const envData = await this.getActiveEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
-    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+    const effectiveLoader = loaderOverride || modLoader
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
     const providersStatus: ModProviderStatusGql[] = []
 
+    const categories = await this.getInternalCategories(env, contentType)
+    const { mrCategorySlug, cfCategoryId, skipModrinth, skipCurseForge } =
+      this.resolveCategoryFiltering(categories, categoryKey)
+
     if (provider === "MODRINTH") {
+      if (skipModrinth) {
+        providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+        return {
+          items: [],
+          totalCount: 0,
+          providersStatus,
+          minecraftVersion,
+          modLoader,
+          modLoaderVersion,
+          neoForgeVersion,
+        }
+      }
       try {
         const isAllowedInGame = (item: NormalizedModProject) =>
           contentType !== "MOD" || item.environment !== "SERVER"
@@ -412,6 +518,7 @@ export class ModProviderManager {
           isAllowedInGame,
           0,
           50,
+          mrCategorySlug,
         )
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
         const mappedItems = res.items.map((i) => i.item)
@@ -456,6 +563,19 @@ export class ModProviderManager {
         }
       }
 
+      if (skipCurseForge) {
+        providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
+        return {
+          items: [],
+          totalCount: 0,
+          providersStatus,
+          minecraftVersion,
+          modLoader,
+          modLoaderVersion,
+          neoForgeVersion,
+        }
+      }
+
       try {
         const isAllowedInGame = (item: NormalizedModProject) =>
           contentType !== "MOD" || item.environment !== "SERVER"
@@ -471,6 +591,7 @@ export class ModProviderManager {
           isAllowedInGame,
           0,
           50,
+          cfCategoryId ? String(cfCategoryId) : undefined,
         )
         providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
         const mappedItems = res.items.map((i) => i.item)
@@ -503,10 +624,12 @@ export class ModProviderManager {
       contentType !== "MOD" || item.environment !== "SERVER"
 
     const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-      this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50),
-      this.curseforge.isConfigured(env)
-        ? this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50)
-        : Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false }),
+      skipModrinth
+        ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
+        : this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50, mrCategorySlug),
+      !this.curseforge.isConfigured(env) || skipCurseForge
+        ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
+        : this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50, cfCategoryId ? String(cfCategoryId) : undefined),
     ])
 
     const allItems: NormalizedModProject[] = []
@@ -570,6 +693,8 @@ export class ModProviderManager {
     contentType: ContentTypeGql = "MOD",
     cursor?: string | null,
     serverId?: string | null,
+    loaderOverride?: GameModLoaderGql | null,
+    categoryKey?: string | null,
   ): Promise<ServerContentSearchPayloadGql> {
     if (contentType !== "MOD" && contentType !== "DATA_PACK") {
       throw createGraphQLError(
@@ -580,8 +705,13 @@ export class ModProviderManager {
 
     const envData = await this.getPublishedEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion, isPublished } = envData
-    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+    const effectiveLoader = loaderOverride || modLoader
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
     const providersStatus: ModProviderStatusGql[] = []
+
+    const categories = await this.getInternalCategories(env, contentType)
+    const { mrCategorySlug, cfCategoryId, skipModrinth, skipCurseForge } =
+      this.resolveCategoryFiltering(categories, categoryKey)
 
     const isAllowedInServer = (item: NormalizedModProject) => {
       if (contentType !== "MOD") return true
@@ -607,41 +737,47 @@ export class ModProviderManager {
     }
 
     if (provider === "MODRINTH") {
-      const startOffset = decodedCursor?.mrOff ?? (cursor ? 0 : offset)
-      try {
-        const res = await this.fetchFilteredFromProvider(
-          this.modrinth,
-          env,
-          query,
-          minecraftVersion,
-          loader,
-          limit,
-          contentType,
-          isAllowedInServer,
-          startOffset,
-          50,
-        )
+      if (skipModrinth) {
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        const nextCursor = res.hasMore && res.nextRawOffset !== null
-          ? encodeServerSearchCursor({
-              q: normQuery,
-              ct: contentType,
-              mode: "MODRINTH",
-              mrOff: res.nextRawOffset,
-            })
-          : null
-
-        rawResults = {
-          items: res.items.map((i) => i.item),
-          totalCount: res.items.length,
-          hasMore: res.hasMore,
-          nextCursor,
-          providersStatus,
-        }
-      } catch (err: any) {
-        if (err.extensions?.code === "VALIDATION_ERROR") throw err
-        providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
         rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
+      } else {
+        const startOffset = decodedCursor?.mrOff ?? (cursor ? 0 : offset)
+        try {
+          const res = await this.fetchFilteredFromProvider(
+            this.modrinth,
+            env,
+            query,
+            minecraftVersion,
+            loader,
+            limit,
+            contentType,
+            isAllowedInServer,
+            startOffset,
+            50,
+            mrCategorySlug,
+          )
+          providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+          const nextCursor = res.hasMore && res.nextRawOffset !== null
+            ? encodeServerSearchCursor({
+                q: normQuery,
+                ct: contentType,
+                mode: "MODRINTH",
+                mrOff: res.nextRawOffset,
+              })
+            : null
+
+          rawResults = {
+            items: res.items.map((i) => i.item),
+            totalCount: res.items.length,
+            hasMore: res.hasMore,
+            nextCursor,
+            providersStatus,
+          }
+        } catch (err: any) {
+          if (err.extensions?.code === "VALIDATION_ERROR") throw err
+          providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
+          rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
+        }
       }
     } else if (provider === "CURSEFORGE") {
       if (!this.curseforge.isConfigured(env)) {
@@ -650,6 +786,9 @@ export class ModProviderManager {
           available: false,
           error: "CurseForge API Key no está configurada en el servidor.",
         })
+        rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
+      } else if (skipCurseForge) {
+        providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
         rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
       } else {
         const startOffset = decodedCursor?.cfOff ?? (cursor ? 0 : offset)
@@ -665,6 +804,7 @@ export class ModProviderManager {
             isAllowedInServer,
             startOffset,
             50,
+            cfCategoryId ? String(cfCategoryId) : undefined,
           )
           providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
           const nextCursor = res.hasMore && res.nextRawOffset !== null
@@ -695,20 +835,24 @@ export class ModProviderManager {
       const cfStartOffset = decodedCursor?.cfOff ?? (cursor ? 0 : offset)
 
       const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-        this.fetchFilteredFromProvider(
-          this.modrinth,
-          env,
-          query,
-          minecraftVersion,
-          loader,
-          limit,
-          contentType,
-          isAllowedInServer,
-          mrStartOffset,
-          50,
-        ),
-        this.curseforge.isConfigured(env)
-          ? this.fetchFilteredFromProvider(
+        skipModrinth
+          ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
+          : this.fetchFilteredFromProvider(
+              this.modrinth,
+              env,
+              query,
+              minecraftVersion,
+              loader,
+              limit,
+              contentType,
+              isAllowedInServer,
+              mrStartOffset,
+              50,
+              mrCategorySlug,
+            ),
+        !this.curseforge.isConfigured(env) || skipCurseForge
+          ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
+          : this.fetchFilteredFromProvider(
               this.curseforge,
               env,
               query,
@@ -719,8 +863,8 @@ export class ModProviderManager {
               isAllowedInServer,
               cfStartOffset,
               50,
-            )
-          : Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false }),
+              cfCategoryId ? String(cfCategoryId) : undefined,
+            ),
       ])
 
       let mrItems: ScannedFilteredItem[] = []
@@ -851,7 +995,7 @@ export class ModProviderManager {
       nextCursor: rawResults.nextCursor,
       providersStatus: rawResults.providersStatus,
       minecraftVersion,
-      modLoader,
+      modLoader: effectiveLoader,
       modLoaderVersion,
       neoForgeVersion,
       isPublishedEnvironment: isPublished,
@@ -869,6 +1013,7 @@ export class ModProviderManager {
     filterFn: (item: NormalizedModProject) => boolean,
     startRawOffset: number = 0,
     pageSize: number = 50,
+    categoryParam?: string,
   ): Promise<{
     items: ScannedFilteredItem[]
     totalCount: number
@@ -892,6 +1037,7 @@ export class ModProviderManager {
         pageSize,
         currentOffset,
         contentType,
+        categoryParam,
       )
       providerTotalCount = res.totalCount
       if (!res.items || res.items.length === 0) {
@@ -984,10 +1130,12 @@ export class ModProviderManager {
     projectId: string,
     contentType: ContentTypeGql = "MOD",
     serverId?: string | null,
+    loaderOverride?: GameModLoaderGql | null,
   ): Promise<ModProjectDetailGql> {
     const envData = await this.getActiveEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
-    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+    const effectiveLoader = loaderOverride || modLoader
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
 
     const adapter = this.getAdapter(provider)
     if (!adapter.isConfigured(env)) {
@@ -1085,7 +1233,7 @@ export class ModProviderManager {
       installedVersion,
       isInstalled,
       minecraftVersion,
-      modLoader,
+      modLoader: effectiveLoader,
       modLoaderVersion,
       neoForgeVersion,
     }
@@ -1098,10 +1246,12 @@ export class ModProviderManager {
     projectId: string,
     contentType: ContentTypeGql = "MOD",
     serverId?: string | null,
+    loaderOverride?: GameModLoaderGql | null,
   ): Promise<ModProjectDetailGql> {
     const envData = await this.getPublishedEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
-    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+    const effectiveLoader = loaderOverride || modLoader
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
 
     const adapter = this.getAdapter(provider)
     if (!adapter.isConfigured(env)) {
@@ -1184,7 +1334,7 @@ export class ModProviderManager {
       installedVersion,
       isInstalled,
       minecraftVersion,
-      modLoader,
+      modLoader: effectiveLoader,
       modLoaderVersion,
       neoForgeVersion,
     }
@@ -1213,7 +1363,8 @@ export class ModProviderManager {
         "VALIDATION_ERROR",
       )
     }
-    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+    const effectiveLoader = input.loaderOverride || modLoader
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
 
     const adapter = this.getAdapter(input.provider)
     if (!adapter.isConfigured(env)) {
@@ -1624,7 +1775,7 @@ export class ModProviderManager {
         // Fetch compatible versions for the required dependency using its discovered depContentType
         let depCompatibleVersions: NormalizedModVersion[] = []
         let depProject: NormalizedModProject | null = null
-        const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+        const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
         try {
           depProject = await depAdapter.getProject(env, depProjectId, depContentType).catch(() => null)
           depCompatibleVersions = await depAdapter.getCompatibleVersions(
@@ -1675,7 +1826,7 @@ export class ModProviderManager {
                 !pinnedVersionObj.loaders.map((l) => l.toLowerCase()).includes(depLoader.toLowerCase())
               ) {
                 conflicts.push(
-                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con el loader ${formatModLoaderDisplayName(modLoader || depLoader)}.`,
+                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con el loader ${formatModLoaderDisplayName(effectiveLoader || depLoader)}.`,
                 )
               } else {
                 conflicts.push(
@@ -1908,7 +2059,8 @@ export class ModProviderManager {
 
     const { envData, managedRecords, activeWorldName = "world", maxResolvedInstallItems } = context
     const { minecraftVersion, modLoader } = envData
-    const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+    const effectiveLoader = input.loaderOverride || modLoader
+    const loader = contentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
 
     const adapter = this.getAdapter(input.provider)
     if (adapter && typeof adapter.isConfigured === "function" && !adapter.isConfigured(env)) {
@@ -2002,7 +2154,7 @@ export class ModProviderManager {
           )
         }
         const targetLoader = loader.trim().toLowerCase()
-        const displayLoader = formatModLoaderDisplayName(modLoader || loader)
+        const displayLoader = formatModLoaderDisplayName(effectiveLoader || loader)
         if (
           contentType === "MOD" &&
           (!directVersion.loaders ||
@@ -2336,7 +2488,7 @@ export class ModProviderManager {
         let depProject: NormalizedModProject | null = null
         try {
           depProject = await depAdapter.getProject(env, depProjectId, depContentType).catch(() => null)
-          const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
+          const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
           depCompatibleVersions = await depAdapter.getCompatibleVersions(
             env,
             depProjectId,

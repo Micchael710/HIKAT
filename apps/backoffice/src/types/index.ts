@@ -379,6 +379,11 @@ export interface ModProviderStatus {
   error?: string | null
 }
 
+export interface ModCategoryItem {
+  key: string
+  name: string
+}
+
 export interface ModSearchResultItem {
   provider: ModProvider
   projectId: string
@@ -509,6 +514,7 @@ export interface ResolveModPlanInput {
   contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
   environmentOverride?: ModEnvironment | null
+  loaderOverride?: GameModLoader | null
 }
 
 export interface InstallModPlanInput {
@@ -518,6 +524,7 @@ export interface InstallModPlanInput {
   contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
   environmentOverride?: ModEnvironment | null
+  loaderOverride?: GameModLoader | null
 }
 
 export interface InstallModPlansBatchInput {
@@ -533,6 +540,7 @@ export interface QueuedModSelection {
   contentType: ContentType
   manualOverrides?: ModVersionOverrideInput[] | null
   environmentOverride?: ModEnvironment | null
+  loaderOverride?: GameModLoader | null
 }
 
 export interface CreateGameFileBatchUploadItemInput {
@@ -866,6 +874,7 @@ export interface ResolveServerContentPlanInput {
   contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
   environmentOverride?: ModEnvironment | null
+  loaderOverride?: GameModLoader | null
 }
 
 export interface InstallServerContentPlanInput {
@@ -875,10 +884,22 @@ export interface InstallServerContentPlanInput {
   contentType?: ContentType | null
   manualOverrides?: ModVersionOverrideInput[] | null
   environmentOverride?: ModEnvironment | null
+  loaderOverride?: GameModLoader | null
 }
 
 export interface InstallServerContentPlansBatchInput {
   plans: InstallServerContentPlanInput[]
+}
+
+export interface QueuedServerContentSelection {
+  provider: ModProvider
+  projectId: string
+  projectName: string
+  versionId: string
+  versionNumber: string
+  contentType: ContentType
+  environmentOverride?: ModEnvironment | null
+  loaderOverride?: GameModLoader | null
 }
 
 export type ServerReleaseSyncPlanAction = "INSTALL" | "UPDATE" | "REMOVE" | "KEEP"

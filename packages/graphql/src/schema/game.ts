@@ -364,6 +364,14 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
+  Normalized category item for mod content filtering
+  """
+  type ModCategoryItem {
+    key: String!
+    name: String!
+  }
+
+  """
   Declared dependency for a mod version
   """
   type ModDependency {
@@ -526,6 +534,7 @@ export const gameTypeDefs = /* GraphQL */ `
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
     environmentOverride: ModEnvironment
+    loaderOverride: GameModLoader
   }
 
   input InstallModPlanInput {
@@ -535,6 +544,7 @@ export const gameTypeDefs = /* GraphQL */ `
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
     environmentOverride: ModEnvironment
+    loaderOverride: GameModLoader
   }
 
   input InstallModPlansBatchInput {
@@ -594,7 +604,14 @@ export const gameTypeDefs = /* GraphQL */ `
       provider: ModProvider
       limit: Int
       offset: Int
+      loaderOverride: GameModLoader
+      categoryKey: String
     ): ModSearchPayload!
+
+    """
+    Available normalized categories for mod content filtering - requires ADMIN role
+    """
+    modCategories(contentType: ContentType): [ModCategoryItem!]!
 
     """
     Get detailed information and compatible versions of a mod project - requires ADMIN role
@@ -604,6 +621,7 @@ export const gameTypeDefs = /* GraphQL */ `
       provider: ModProvider!
       projectId: String!
       contentType: ContentType
+      loaderOverride: GameModLoader
     ): ModProjectDetail!
 
     """

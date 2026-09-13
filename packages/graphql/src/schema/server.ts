@@ -297,6 +297,7 @@ export const serverTypeDefs = /* GraphQL */ `
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
     environmentOverride: ModEnvironment
+    loaderOverride: GameModLoader
   }
 
   input InstallServerContentPlanInput {
@@ -306,6 +307,7 @@ export const serverTypeDefs = /* GraphQL */ `
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
     environmentOverride: ModEnvironment
+    loaderOverride: GameModLoader
   }
 
   input InstallServerContentPlansBatchInput {
@@ -533,12 +535,28 @@ export const serverTypeDefs = /* GraphQL */ `
     """
     Searches server-only content (SERVER mods and DATA_PACKs) against published environment - requires ADMIN role
     """
-    searchServerContent(serverId: ID, query: String!, provider: ModProvider, limit: Int, offset: Int, cursor: String, contentType: ContentType): ServerContentSearchPayload!
+    searchServerContent(
+      serverId: ID
+      query: String!
+      provider: ModProvider
+      limit: Int
+      offset: Int
+      cursor: String
+      contentType: ContentType
+      loaderOverride: GameModLoader
+      categoryKey: String
+    ): ServerContentSearchPayload!
 
     """
     Retrieves details for a server-side project scoped to the published environment - requires ADMIN role
     """
-    serverContentProjectDetail(serverId: ID, provider: ModProvider!, projectId: String!, contentType: ContentType): ModProjectDetail!
+    serverContentProjectDetail(
+      serverId: ID
+      provider: ModProvider!
+      projectId: String!
+      contentType: ContentType
+      loaderOverride: GameModLoader
+    ): ModProjectDetail!
 
     """
     Resolves dependency plan for installing content directly on the server - requires ADMIN role

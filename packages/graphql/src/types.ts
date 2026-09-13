@@ -914,6 +914,11 @@ export interface ModSearchPayloadGql {
   neoForgeVersion?: string | null
 }
 
+export interface ModCategoryItemGql {
+  key: string
+  name: string
+}
+
 export interface ModDependencyGql {
   projectId?: string | null
   versionId?: string | null
@@ -1006,6 +1011,7 @@ export interface ResolveModPlanInputGql {
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
   environmentOverride?: ModEnvironmentGql | null
+  loaderOverride?: GameModLoaderGql | null
 }
 
 export interface InstallModPlanInputGql {
@@ -1015,6 +1021,7 @@ export interface InstallModPlanInputGql {
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
   environmentOverride?: ModEnvironmentGql | null
+  loaderOverride?: GameModLoaderGql | null
 }
 
 export interface InstallModPlansBatchInputGql {
@@ -1175,6 +1182,7 @@ export interface ResolveServerContentPlanInputGql {
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
   environmentOverride?: ModEnvironmentGql | null
+  loaderOverride?: GameModLoaderGql | null
 }
 
 export interface InstallServerContentPlanInputGql {
@@ -1184,6 +1192,7 @@ export interface InstallServerContentPlanInputGql {
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
   environmentOverride?: ModEnvironmentGql | null
+  loaderOverride?: GameModLoaderGql | null
 }
 
 export interface InstallServerContentPlansBatchInputGql {

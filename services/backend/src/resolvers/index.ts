@@ -77,6 +77,8 @@ import type {
   ActiveCapeSelectionGql,
   SetActiveCapeInputGql,
   ModProviderGql,
+  ModCategoryItemGql,
+  GameModLoaderGql,
   ModSearchPayloadGql,
   ModProjectDetailGql,
   ModInstallationPlanGql,
@@ -538,6 +540,8 @@ export const resolvers = {
         offset?: number | null
         cursor?: string | null
         serverId?: string | null
+        loaderOverride?: GameModLoaderGql | null
+        categoryKey?: string | null
       },
       context: BackendGraphQLContext,
     ): Promise<ServerContentSearchPayloadGql> => {
@@ -555,12 +559,20 @@ export const resolvers = {
         args.contentType || "MOD",
         args.cursor,
         args.serverId,
+        args.loaderOverride,
+        args.categoryKey,
       )
     },
 
     serverContentProjectDetail: async (
       _parent: unknown,
-      args: { provider: ModProviderGql; projectId: string; contentType?: ContentTypeGql | null; serverId?: string | null },
+      args: {
+        provider: ModProviderGql
+        projectId: string
+        contentType?: ContentTypeGql | null
+        serverId?: string | null
+        loaderOverride?: GameModLoaderGql | null
+      },
       context: BackendGraphQLContext,
     ): Promise<ModProjectDetailGql> => {
       requireAdmin(context)
@@ -574,6 +586,7 @@ export const resolvers = {
         args.projectId,
         args.contentType || "MOD",
         args.serverId,
+        args.loaderOverride,
       )
     },
 
@@ -956,6 +969,8 @@ export const resolvers = {
         limit?: number | null
         offset?: number | null
         serverId?: string | null
+        loaderOverride?: GameModLoaderGql | null
+        categoryKey?: string | null
       },
       context: BackendGraphQLContext,
     ): Promise<ModSearchPayloadGql> => {
@@ -972,12 +987,29 @@ export const resolvers = {
         args.offset || 0,
         args.contentType || "MOD",
         args.serverId,
+        args.loaderOverride,
+        args.categoryKey,
       )
+    },
+
+    modCategories: async (
+      _parent: unknown,
+      args: { contentType?: ContentTypeGql | null },
+      context: BackendGraphQLContext,
+    ): Promise<ModCategoryItemGql[]> => {
+      requireAdmin(context)
+      return modProviderManager.getAvailableCategories(context.env, args.contentType || "MOD")
     },
 
     getModProjectDetail: async (
       _parent: unknown,
-      args: { provider: ModProviderGql; projectId: string; contentType?: ContentTypeGql | null; serverId?: string | null },
+      args: {
+        provider: ModProviderGql
+        projectId: string
+        contentType?: ContentTypeGql | null
+        serverId?: string | null
+        loaderOverride?: GameModLoaderGql | null
+      },
       context: BackendGraphQLContext,
     ): Promise<ModProjectDetailGql> => {
       requireAdmin(context)
@@ -991,6 +1023,7 @@ export const resolvers = {
         args.projectId,
         args.contentType || "MOD",
         args.serverId,
+        args.loaderOverride,
       )
     },
 

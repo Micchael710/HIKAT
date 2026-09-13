@@ -4,6 +4,7 @@ import type {
   NormalizedModProject,
   NormalizedModVersion,
   NormalizedModDependency,
+  RawProviderCategory,
 } from "./types"
 import type {
   ModReleaseTypeGql,
@@ -62,6 +63,48 @@ export class ModrinthAdapter implements ModProviderAdapter {
     return env.MODRINTH_API_BASE_URL || DEFAULT_MODRINTH_BASE_URL
   }
 
+  private categoryCache = new Map<ContentTypeGql, RawProviderCategory[]>()
+
+  async getCategories(env: Env, contentType: ContentTypeGql): Promise<RawProviderCategory[]> {
+    if (this.categoryCache.has(contentType)) {
+      return this.categoryCache.get(contentType)!
+    }
+    const baseUrl = this.getBaseUrl(env)
+    const url = `${baseUrl}/tag/category`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+      })
+      if (!res.ok) return []
+      const data = (await res.json()) as Array<{ name: string; project_type: string; header?: string }>
+      const typeMap: Record<ContentTypeGql, string> = {
+        MOD: "mod",
+        RESOURCE_PACK: "resourcepack",
+        DATA_PACK: "datapack",
+        SHADER: "shader",
+      }
+      const targetType = typeMap[contentType] || "mod"
+      const filtered = data
+        .filter((c) => c.project_type === targetType)
+        .map((c) => ({
+          name: c.name.charAt(0).toUpperCase() + c.name.slice(1),
+          slug: c.name.toLowerCase(),
+        }))
+      this.categoryCache.set(contentType, filtered)
+      return filtered
+    } catch {
+      return []
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   async searchMods(
     env: Env,
     query: string,
@@ -70,6 +113,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
     limit: number,
     offset: number,
     contentType: ContentTypeGql = "MOD",
+    categoryParam?: string,
   ): Promise<{ items: NormalizedModProject[]; totalCount: number }> {
     const baseUrl = this.getBaseUrl(env)
 
@@ -79,7 +123,9 @@ export class ModrinthAdapter implements ModProviderAdapter {
     if (contentType === "MOD") {
       facets.push(["project_type:mod"])
       facets.push([`versions:${minecraftVersion}`])
-      facets.push([`categories:${loader.toLowerCase()}`])
+      if (loader) {
+        facets.push([`categories:${loader.toLowerCase()}`])
+      }
     } else if (contentType === "RESOURCE_PACK") {
       facets.push(["project_type:resourcepack"])
       facets.push([`versions:${minecraftVersion}`])
@@ -90,6 +136,10 @@ export class ModrinthAdapter implements ModProviderAdapter {
       // In Modrinth, Data Packs use official facet all_project_types:datapack
       facets.push(["all_project_types:datapack"])
       facets.push([`versions:${minecraftVersion}`])
+    }
+
+    if (categoryParam) {
+      facets.push([`categories:${categoryParam.toLowerCase()}`])
     }
 
     const params = new URLSearchParams()

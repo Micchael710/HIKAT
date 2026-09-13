@@ -4,6 +4,7 @@ import type {
   NormalizedModProject,
   NormalizedModVersion,
   NormalizedModDependency,
+  RawProviderCategory,
 } from "./types"
 import type {
   ModReleaseTypeGql,
@@ -106,6 +107,44 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     return fallbackMap[contentType]
   }
 
+  private categoryCache = new Map<ContentTypeGql, RawProviderCategory[]>()
+
+  async getCategories(env: Env, contentType: ContentTypeGql): Promise<RawProviderCategory[]> {
+    if (!this.isConfigured(env)) return []
+    if (this.categoryCache.has(contentType)) {
+      return this.categoryCache.get(contentType)!
+    }
+    const baseUrl = this.getBaseUrl(env)
+    const classId = await this.resolveClassId(env, contentType)
+    const url = `${baseUrl}/categories?gameId=${MINECRAFT_GAME_ID}&classId=${classId}`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    try {
+      const res = await fetch(url, {
+        headers: this.getHeaders(env),
+        signal: controller.signal,
+      })
+      if (!res.ok) return []
+      const data = (await res.json()) as {
+        data?: Array<{ id: number; name: string; slug: string; classId?: number; parentCategoryId?: number; isClass?: boolean }>
+      }
+      const list = data.data || []
+      const filtered: RawProviderCategory[] = list
+        .filter((c) => !c.isClass && c.id !== classId && (c.classId === classId || c.parentCategoryId === classId || !c.classId))
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+        }))
+      this.categoryCache.set(contentType, filtered)
+      return filtered
+    } catch {
+      return []
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   async searchMods(
     env: Env,
     query: string,
@@ -114,6 +153,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     limit: number,
     offset: number,
     contentType: ContentTypeGql = "MOD",
+    categoryParam?: string,
   ): Promise<{ items: NormalizedModProject[]; totalCount: number }> {
     if (!this.isConfigured(env)) {
       return { items: [], totalCount: 0 }
@@ -132,6 +172,10 @@ export class CurseForgeAdapter implements ModProviderAdapter {
 
     if (contentType === "MOD" && loader && CURSEFORGE_LOADER_TYPE_MAP[loader] !== undefined) {
       paramsRecord.modLoaderType = String(CURSEFORGE_LOADER_TYPE_MAP[loader]!)
+    }
+
+    if (categoryParam) {
+      paramsRecord.categoryId = String(categoryParam)
     }
 
     if (query.trim()) {

@@ -61,6 +61,12 @@ export interface NormalizedModVersion {
   dependencies: NormalizedModDependency[]
 }
 
+export interface RawProviderCategory {
+  id?: number | string
+  name: string
+  slug?: string
+}
+
 export interface ModProviderAdapter {
   provider: ModProviderGql
   isConfigured(env: Env): boolean
@@ -72,7 +78,12 @@ export interface ModProviderAdapter {
     limit: number,
     offset: number,
     contentType?: ContentTypeGql,
+    categoryParam?: string,
   ): Promise<{ items: NormalizedModProject[]; totalCount: number }>
+  getCategories?(
+    env: Env,
+    contentType: ContentTypeGql,
+  ): Promise<RawProviderCategory[]>
   getProject(
     env: Env,
     projectId: string,

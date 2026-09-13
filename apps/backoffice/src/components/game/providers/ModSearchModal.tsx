@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, useCallback } from "react"
 import type {
   ModProvider,
   ModSearchResultItem,
@@ -6,12 +6,16 @@ import type {
   ContentType,
   ThemeMode,
   QueuedModSelection,
+  GameModLoader,
+  ModCategoryItem,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
 import { getThemeTokens } from "../../../theme/tokens"
 import { IconSearch, IconSpinner, IconWarning } from "../../../theme/icons"
 import { ModCard } from "./ModCard"
 import { ModDetailModal } from "./ModDetailModal"
+import { ModSearchFilterBar } from "./ModSearchFilterBar"
+import { QueuedItemsBar } from "./QueuedItemsBar"
 
 interface ModSearchModalProps {
   serverId: string
@@ -38,6 +42,11 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   const [query, setQuery] = useState("")
   const [selectedContentType, setSelectedContentType] = useState<ContentType>("MOD")
   const [selectedProviderTab, setSelectedProviderTab] = useState<ModProvider | "ALL">("ALL")
+  const [selectedLoader, setSelectedLoader] = useState<GameModLoader>("NEOFORGE")
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>("")
+  const [categories, setCategories] = useState<ModCategoryItem[]>([])
+  const [loadingCategories, setLoadingCategories] = useState(false)
+
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [results, setResults] = useState<ModSearchResultItem[]>([])
@@ -47,6 +56,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   const [selectedMod, setSelectedMod] = useState<ModSearchResultItem | null>(null)
   const [queuedSelections, setQueuedSelections] = useState<QueuedModSelection[]>([])
   const [installingBatch, setInstallingBatch] = useState(false)
+  const [batchError, setBatchError] = useState<string | null>(null)
   const [handoffDetail, setHandoffDetail] = useState<{
     provider: ModProvider
     projectId: string
@@ -55,7 +65,11 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     initialEnvironmentOverride?: import("../../../types").ModEnvironment
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [envInfo, setEnvInfo] = useState<{ minecraftVersion: string; modLoader: import("../../../types").GameModLoader; modLoaderVersion: string | null | undefined }>({
+  const [envInfo, setEnvInfo] = useState<{
+    minecraftVersion: string
+    modLoader: GameModLoader
+    modLoaderVersion: string | null | undefined
+  }>({
     minecraftVersion: "1.21.1",
     modLoader: "NEOFORGE",
     modLoaderVersion: null,
@@ -64,12 +78,38 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   const debounceTimer = useRef<NodeJS.Timeout | null>(null)
   const requestIdRef = useRef(0)
 
-  const executeSearch = (
+  // Fetch categories when contentType changes
+  useEffect(() => {
+    let active = true
+    setLoadingCategories(true)
+    setSelectedCategoryKey("")
+
+    graphqlClient
+      .getModCategories(selectedContentType)
+      .then((items) => {
+        if (!active) return
+        setCategories(items)
+        setLoadingCategories(false)
+      })
+      .catch(() => {
+        if (!active) return
+        setCategories([])
+        setLoadingCategories(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [selectedContentType])
+
+  const executeSearch = useCallback((
     searchQuery: string,
     contentType: ContentType,
     providerTab: ModProvider | "ALL",
     currentOffset: number = 0,
     isLoadMore: boolean = false,
+    catKey: string = selectedCategoryKey,
+    loader: GameModLoader = selectedLoader,
   ) => {
     const currentReqId = ++requestIdRef.current
 
@@ -81,9 +121,29 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     }
 
     const providerArg = providerTab === "ALL" ? null : providerTab
+    const isCustomLoader = loader && loader !== envInfo.modLoader
 
-    graphqlClient
-      .searchMods(searchQuery, contentType, providerArg, PAGE_SIZE, currentOffset, serverId)
+    const searchPromise = (catKey || isCustomLoader)
+      ? graphqlClient.searchMods(
+          searchQuery,
+          contentType,
+          providerArg,
+          PAGE_SIZE,
+          currentOffset,
+          serverId,
+          isCustomLoader ? loader : null,
+          catKey || null,
+        )
+      : graphqlClient.searchMods(
+          searchQuery,
+          contentType,
+          providerArg,
+          PAGE_SIZE,
+          currentOffset,
+          serverId,
+        )
+
+    searchPromise
       .then((payload) => {
         if (currentReqId !== requestIdRef.current) return
 
@@ -101,6 +161,9 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
             modLoader: payload.modLoader || "NEOFORGE",
             modLoaderVersion: payload.modLoaderVersion ?? null,
           })
+          if (!selectedLoader && payload.modLoader) {
+            setSelectedLoader(payload.modLoader)
+          }
         }
         setLoading(false)
         setLoadingMore(false)
@@ -111,7 +174,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
         setLoading(false)
         setLoadingMore(false)
       })
-  }
+  }, [serverId, selectedCategoryKey, selectedLoader])
 
   // When handoff is provided from Server View, preselect tab and open ModDetailModal directly
   useEffect(() => {
@@ -133,14 +196,14 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     }
   }, [handoff, onClearHandoff])
 
-  // Clear debounce and trigger search on tab changes
+  // Clear debounce and trigger search on filter changes
   useEffect(() => {
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current)
       debounceTimer.current = null
     }
     setOffset(0)
-    executeSearch(query, selectedContentType, selectedProviderTab, 0, false)
+    executeSearch(query, selectedContentType, selectedProviderTab, 0, false, selectedCategoryKey, selectedLoader)
 
     return () => {
       if (debounceTimer.current) {
@@ -148,7 +211,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
         debounceTimer.current = null
       }
     }
-  }, [selectedContentType, selectedProviderTab])
+  }, [selectedContentType, selectedProviderTab, selectedCategoryKey, selectedLoader, executeSearch])
 
   // Clean up on component unmount
   useEffect(() => {
@@ -161,8 +224,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     }
   }, [])
 
-  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value
+  const handleQueryChange = (val: string) => {
     setQuery(val)
     setOffset(0)
 
@@ -170,21 +232,21 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
       clearTimeout(debounceTimer.current)
     }
     debounceTimer.current = setTimeout(() => {
-      executeSearch(val, selectedContentType, selectedProviderTab, 0, false)
+      executeSearch(val, selectedContentType, selectedProviderTab, 0, false, selectedCategoryKey, selectedLoader)
     }, 350)
   }
 
   const handleLoadMore = () => {
     const nextOffset = offset + PAGE_SIZE
     setOffset(nextOffset)
-    executeSearch(query, selectedContentType, selectedProviderTab, nextOffset, true)
+    executeSearch(query, selectedContentType, selectedProviderTab, nextOffset, true, selectedCategoryKey, selectedLoader)
   }
 
   const handleConfirmBatchInstall = async () => {
     if (queuedSelections.length === 0 || installingBatch) return
     try {
       setInstallingBatch(true)
-      setError(null)
+      setBatchError(null)
 
       await graphqlClient.installModPlansBatch(
         {
@@ -195,6 +257,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
             contentType: sel.contentType,
             manualOverrides: sel.manualOverrides,
             environmentOverride: sel.environmentOverride,
+            loaderOverride: sel.loaderOverride,
           })),
         },
         serverId,
@@ -204,13 +267,12 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
       onSuccess()
       onClose()
     } catch (err: any) {
-      setError(err.message || "Error al instalar los contenidos seleccionados.")
+      setBatchError(err.message || "Error al instalar los contenidos seleccionados.")
     } finally {
       setInstallingBatch(false)
     }
   }
 
-  // Partial provider failure warning check
   const failedProviders = providerStatuses.filter((s) => !s.available && s.error)
   const hasMore = results.length < totalCount
 
@@ -238,7 +300,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           border: `1px solid ${tokens.borderSubtle}`,
           borderRadius: "20px",
           width: "100%",
-          maxWidth: "1000px",
+          maxWidth: "1050px",
           height: "85vh",
           display: "flex",
           flexDirection: "column",
@@ -249,244 +311,107 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
         {/* Top Header */}
         <div
           style={{
-            padding: "20px 24px",
+            padding: "20px 24px 14px",
             borderBottom: `1px solid ${tokens.borderSubtle}`,
             display: "flex",
-            flexDirection: "column",
-            gap: "14px",
+            alignItems: "center",
+            justifyContent: "space-between",
             background: tokens.bgCardInner,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "800", color: tokens.textPrimary }}>
-                Añadir Contenido
-              </h2>
-              <div
-                data-testid="compatible-env-indicator"
-                style={{ fontSize: "13px", color: tokens.textSecondary, marginTop: "2px" }}
-              >
-                Compatible con{" "}
-                <span style={{ color: "#34d399", fontWeight: "700" }}>
-                  Minecraft {envInfo.minecraftVersion}
-                </span>
-                {selectedContentType === "MOD" && envInfo.modLoader !== "VANILLA" && (
-                  <>
-                    {" "}·{" "}
-                    <span style={{ color: "#60a5fa", fontWeight: "700" }}>
-                      {envInfo.modLoader === "NEOFORGE"
-                        ? "NeoForge"
-                        : envInfo.modLoader === "FORGE"
-                        ? "Forge"
-                        : envInfo.modLoader === "FABRIC"
-                        ? "Fabric"
-                        : envInfo.modLoader === "QUILT"
-                        ? "Quilt"
-                        : envInfo.modLoader}
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              data-testid="button-close-search"
-              onClick={onClose}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: tokens.textMuted,
-                fontSize: "20px",
-                cursor: "pointer",
-                padding: "4px 8px",
-                borderRadius: "6px",
-              }}
+          <div>
+            <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "800", color: tokens.textPrimary }}>
+              Añadir Contenido
+            </h2>
+            <div
+              data-testid="compatible-env-indicator"
+              style={{ fontSize: "13px", color: tokens.textSecondary, marginTop: "2px" }}
             >
-              ✕
-            </button>
+              Compatible con{" "}
+              <span style={{ color: "#34d399", fontWeight: "700" }}>
+                Minecraft {envInfo.minecraftVersion}
+              </span>
+              {selectedContentType === "MOD" && (
+                <>
+                  {" "}·{" "}
+                  <span style={{ color: "#60a5fa", fontWeight: "700" }}>
+                    {selectedLoader === "NEOFORGE"
+                      ? "NeoForge"
+                      : selectedLoader === "FORGE"
+                      ? "Forge"
+                      : selectedLoader === "FABRIC"
+                      ? "Fabric"
+                      : selectedLoader === "QUILT"
+                      ? "Quilt"
+                      : selectedLoader}
+                  </span>
+                </>
+              )}
+            </div>
           </div>
 
-          {/* Content Type Selector Tabs */}
-          <div
+          <button
+            type="button"
+            data-testid="button-close-search"
+            onClick={onClose}
             style={{
-              display: "flex",
-              gap: "8px",
-              borderBottom: `1px solid ${tokens.borderSubtle}`,
-              paddingBottom: "8px",
-              flexWrap: "wrap",
+              background: "transparent",
+              border: "none",
+              color: tokens.textMuted,
+              fontSize: "20px",
+              cursor: "pointer",
+              padding: "4px 8px",
+              borderRadius: "6px",
             }}
           >
-            {[
-              { type: "MOD" as ContentType, label: "Mods", testId: "tab-content-mod" },
-              { type: "RESOURCE_PACK" as ContentType, label: "Resource Packs", testId: "tab-content-resource_pack" },
-              { type: "SHADER" as ContentType, label: "Shaders", testId: "tab-content-shader" },
-            ].map((tab) => {
-              const isSelected = selectedContentType === tab.type
-              return (
-                <button
-                  key={tab.type}
-                  type="button"
-                  data-testid={tab.testId}
-                  onClick={() => setSelectedContentType(tab.type)}
-                  style={{
-                    padding: "6px 14px",
-                    background: isSelected ? tokens.bgPillActive : "transparent",
-                    color: isSelected ? tokens.textPrimary : tokens.textSecondary,
-                    border: `1px solid ${isSelected ? tokens.borderMedium : "transparent"}`,
-                    borderRadius: "8px",
-                    fontSize: "13px",
-                    fontWeight: isSelected ? "700" : "500",
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  {tab.label}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Search Input and Provider Tabs */}
-          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-            {/* Search Input */}
-            <div style={{ flex: 1, minWidth: "240px", position: "relative" }}>
-              <input
-                data-testid="input-mod-search"
-                type="text"
-                value={query}
-                onChange={handleQueryChange}
-                placeholder={`Buscar ${
-                  selectedContentType === "MOD"
-                    ? "mods"
-                    : selectedContentType === "RESOURCE_PACK"
-                    ? "resource packs"
-                    : selectedContentType === "DATA_PACK"
-                    ? "data packs"
-                    : "shaders"
-                } en Modrinth y CurseForge...`}
-                style={{
-                  width: "100%",
-                  padding: "10px 16px 10px 38px",
-                  background: isDark ? "rgba(0, 0, 0, 0.4)" : "#ffffff",
-                  border: `1px solid ${tokens.borderSubtle}`,
-                  borderRadius: "10px",
-                  color: tokens.textPrimary,
-                  fontSize: "14px",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-              <IconSearch
-                style={{
-                  position: "absolute",
-                  left: "14px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: tokens.textMuted,
-                  width: 16,
-                  height: 16,
-                }}
-              />
-            </div>
-
-            {/* Provider Filter Tabs */}
-            <div
-              style={{
-                display: "flex",
-                background: tokens.bgPill,
-                padding: "3px",
-                borderRadius: "10px",
-                border: `1px solid ${tokens.borderSubtle}`,
-              }}
-            >
-              <button
-                type="button"
-                data-testid="tab-provider-all"
-                onClick={() => setSelectedProviderTab("ALL")}
-                style={{
-                  padding: "7px 14px",
-                  background: selectedProviderTab === "ALL" ? tokens.bgPillActive : "transparent",
-                  color: selectedProviderTab === "ALL" ? tokens.textPrimary : tokens.textSecondary,
-                  border: "none",
-                  borderRadius: "7px",
-                  fontSize: "13px",
-                  fontWeight: selectedProviderTab === "ALL" ? "700" : "500",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                Todos
-              </button>
-
-              <button
-                type="button"
-                data-testid="tab-provider-modrinth"
-                onClick={() => setSelectedProviderTab("MODRINTH")}
-                style={{
-                  padding: "7px 14px",
-                  background: selectedProviderTab === "MODRINTH" ? "rgba(16, 185, 129, 0.2)" : "transparent",
-                  color: selectedProviderTab === "MODRINTH" ? "#10b981" : tokens.textSecondary,
-                  border: "none",
-                  borderRadius: "7px",
-                  fontSize: "13px",
-                  fontWeight: selectedProviderTab === "MODRINTH" ? "700" : "500",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                Modrinth
-              </button>
-
-              <button
-                type="button"
-                data-testid="tab-provider-curseforge"
-                onClick={() => setSelectedProviderTab("CURSEFORGE")}
-                style={{
-                  padding: "7px 14px",
-                  background: selectedProviderTab === "CURSEFORGE" ? "rgba(249, 115, 22, 0.2)" : "transparent",
-                  color: selectedProviderTab === "CURSEFORGE" ? "#f97316" : tokens.textSecondary,
-                  border: "none",
-                  borderRadius: "7px",
-                  fontSize: "13px",
-                  fontWeight: selectedProviderTab === "CURSEFORGE" ? "700" : "500",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                CurseForge
-              </button>
-            </div>
-          </div>
-
-          {/* Partial degradation notification */}
-          {failedProviders.length > 0 && selectedProviderTab === "ALL" && (
-            <div
-              data-testid="provider-partial-failure-notice"
-              style={{
-                padding: "8px 12px",
-                background: "rgba(234, 179, 8, 0.12)",
-                border: "1px solid rgba(234, 179, 8, 0.25)",
-                borderRadius: "8px",
-                color: isDark ? "#fde047" : "#b45309",
-                fontSize: "12px",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <IconWarning size={16} />
-              <div>
-                {failedProviders.map((p) => (
-                  <span key={p.provider}>
-                    <strong>{p.provider}:</strong> {p.error}{" "}
-                  </span>
-                ))}
-                (Mostrando resultados disponibles de los demás proveedores).
-              </div>
-            </div>
-          )}
+            ✕
+          </button>
         </div>
+
+        {/* Filter Bar */}
+        <ModSearchFilterBar
+          mode="RELEASE"
+          query={query}
+          onQueryChange={handleQueryChange}
+          selectedProvider={selectedProviderTab}
+          onProviderChange={(p) => setSelectedProviderTab(p)}
+          selectedContentType={selectedContentType}
+          onContentTypeChange={(ct) => setSelectedContentType(ct)}
+          selectedLoader={selectedLoader}
+          onLoaderChange={(ldr) => setSelectedLoader(ldr)}
+          selectedCategoryKey={selectedCategoryKey}
+          onCategoryChange={(cat) => setSelectedCategoryKey(cat)}
+          categories={categories}
+          loadingCategories={loadingCategories}
+          theme={theme}
+        />
+
+        {/* Partial degradation notification */}
+        {failedProviders.length > 0 && selectedProviderTab === "ALL" && (
+          <div
+            data-testid="provider-partial-failure-notice"
+            style={{
+              padding: "8px 16px",
+              background: "rgba(234, 179, 8, 0.12)",
+              borderBottom: "1px solid rgba(234, 179, 8, 0.25)",
+              color: isDark ? "#fde047" : "#b45309",
+              fontSize: "12px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <IconWarning size={16} />
+            <div>
+              {failedProviders.map((p) => (
+                <span key={p.provider}>
+                  <strong>{p.provider}:</strong> {p.error}{" "}
+                </span>
+              ))}
+              (Mostrando resultados disponibles de los demás proveedores).
+            </div>
+          </div>
+        )}
 
         {/* Results Grid Container */}
         <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }} className="custom-scroll">
@@ -516,7 +441,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
                 No se encontraron resultados
               </div>
               <div style={{ fontSize: "13px", color: tokens.textSecondary }}>
-                Intenta buscar por otro nombre o revisa los filtros de proveedor y tipo.
+                Intenta buscar por otro nombre o revisa los filtros de categoría, loader y proveedor.
               </div>
             </div>
           ) : (
@@ -560,103 +485,21 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           )}
         </div>
 
-        {/* Bottom Queue Bar */}
-        {queuedSelections.length > 0 && (
-          <div
-            data-testid="queued-mods-bar"
-            style={{
-              padding: "14px 24px",
-              borderTop: `1px solid ${tokens.borderSubtle}`,
-              background: tokens.bgCardInner,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "16px",
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", flex: 1 }}>
-              <span style={{ fontSize: "14px", fontWeight: "700", color: tokens.textPrimary }}>
-                Seleccionados: {queuedSelections.length}
-              </span>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                {queuedSelections.map((sel) => (
-                  <span
-                    key={`${sel.provider}:${sel.projectId}:${sel.contentType}`}
-                    data-testid={`chip-queued-${sel.provider}-${sel.projectId}`}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "4px 10px",
-                      background: tokens.bgPillActive,
-                      borderRadius: "16px",
-                      fontSize: "12px",
-                      color: tokens.textPrimary,
-                      border: `1px solid ${tokens.borderSubtle}`,
-                    }}
-                  >
-                    <span>{sel.projectName}</span>
-                    <button
-                      type="button"
-                      data-testid={`remove-queued-${sel.provider}-${sel.projectId}`}
-                      onClick={() =>
-                        setQueuedSelections((prev) =>
-                          prev.filter(
-                            (x) =>
-                              !(
-                                x.provider === sel.provider &&
-                                x.projectId === sel.projectId &&
-                                x.contentType === sel.contentType
-                              ),
-                          ),
-                        )
-                      }
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: tokens.textMuted,
-                        cursor: "pointer",
-                        padding: "0 2px",
-                        fontSize: "13px",
-                        fontWeight: "700",
-                        lineHeight: 1,
-                      }}
-                      title="Eliminar de la selección"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              data-testid="button-confirm-batch-install"
-              disabled={installingBatch}
-              onClick={handleConfirmBatchInstall}
-              className="launcher-btn-primary"
-              style={{
-                padding: "10px 22px",
-                borderRadius: "12px",
-                fontSize: "14px",
-                fontWeight: "700",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              {installingBatch && <IconSpinner size={16} />}
-              {installingBatch
-                ? "Instalando..."
-                : `Añadir ${queuedSelections.length} al borrador`}
-            </button>
-          </div>
-        )}
+        {/* Queued Items Floating Bar */}
+        <QueuedItemsBar
+          mode="RELEASE"
+          queuedItems={queuedSelections}
+          onRemoveItem={(pid) =>
+            setQueuedSelections((prev) => prev.filter((x) => x.projectId !== pid))
+          }
+          onConfirmInstall={handleConfirmBatchInstall}
+          installing={installingBatch}
+          batchError={batchError}
+          theme={theme}
+        />
       </div>
 
-      {/* Selected Mod Detail Modal (via search selection or handoff) */}
+      {/* Selected Mod Detail Modal */}
       {(selectedMod || handoffDetail) && (
         <ModDetailModal
           serverId={serverId}
@@ -666,6 +509,8 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           initialVersionId={handoffDetail?.initialVersionId}
           initialEnvironmentOverride={handoffDetail?.initialEnvironmentOverride}
           theme={theme}
+          mode="RELEASE"
+          loaderOverride={selectedLoader !== envInfo.modLoader ? selectedLoader : undefined}
           onQueueMod={(item) => {
             setQueuedSelections((prev) => [
               ...prev.filter(
@@ -676,7 +521,10 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
                     x.contentType === item.contentType
                   ),
               ),
-              item,
+              {
+                ...item,
+                loaderOverride: item.loaderOverride || selectedLoader,
+              },
             ])
           }}
           onClose={() => {

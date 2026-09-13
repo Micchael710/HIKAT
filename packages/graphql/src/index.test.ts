@@ -787,5 +787,95 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(fields.modLoader).toBeDefined()
     expect(fields.modLoaderVersion).toBeDefined()
   })
+
+  it("validates modCategories, loaderOverride and categoryKey across queries and mutation inputs", () => {
+    const schema = getBaseSchema()
+
+    const testDoc = /* GraphQL */ `
+      query TestModProviderEnhancements(
+        $serverId: ID
+        $query: String!
+        $contentType: ContentType
+        $loaderOverride: GameModLoader
+        $categoryKey: String
+        $modInput: ResolveModPlanInput!
+        $serverInput: ResolveServerContentPlanInput!
+      ) {
+        modCategories(contentType: $contentType) {
+          key
+          name
+        }
+        searchMods(
+          serverId: $serverId
+          query: $query
+          contentType: $contentType
+          loaderOverride: $loaderOverride
+          categoryKey: $categoryKey
+        ) {
+          items {
+            projectId
+            name
+          }
+        }
+        searchServerContent(
+          serverId: $serverId
+          query: $query
+          contentType: $contentType
+          loaderOverride: $loaderOverride
+          categoryKey: $categoryKey
+        ) {
+          items {
+            projectId
+            name
+          }
+        }
+        getModProjectDetail(
+          serverId: $serverId
+          provider: MODRINTH
+          projectId: "p1"
+          contentType: $contentType
+          loaderOverride: $loaderOverride
+        ) {
+          projectId
+        }
+        serverContentProjectDetail(
+          serverId: $serverId
+          provider: MODRINTH
+          projectId: "p1"
+          contentType: $contentType
+          loaderOverride: $loaderOverride
+        ) {
+          projectId
+        }
+        resolveModInstallationPlan(serverId: $serverId, input: $modInput) {
+          isValid
+        }
+        resolveServerContentPlan(serverId: $serverId, input: $serverInput) {
+          isValid
+        }
+      }
+
+      mutation TestPlanInputsWithLoaderOverride(
+        $serverId: ID
+        $modInstallInput: InstallModPlanInput!
+        $serverInstallInput: InstallServerContentPlanInput!
+      ) {
+        installModPlan(serverId: $serverId, input: $modInstallInput) {
+          id
+        }
+        installServerContentPlan(serverId: $serverId, input: $serverInstallInput) {
+          id
+        }
+      }
+    `
+
+    const errors = validate(schema, parse(testDoc))
+    expect(errors).toHaveLength(0)
+
+    const catType = schema.getType("ModCategoryItem") as GraphQLObjectType
+    expect(catType).toBeDefined()
+    expect(catType.getFields().key).toBeDefined()
+    expect(catType.getFields().name).toBeDefined()
+  })
 })
 

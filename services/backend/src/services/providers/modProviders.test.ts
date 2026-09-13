@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm"
 import type { Env } from "../../types"
 import { ModrinthAdapter } from "./modrinthAdapter"
 import { CurseForgeAdapter } from "./curseforgeAdapter"
-import { ModProviderManager, getLogicalPathForContent } from "./modProviderManager"
+import { ModProviderManager, modProviderManager, getLogicalPathForContent } from "./modProviderManager"
 import { installModPlan, installModPlansBatch, PROVIDER_MIN_PART_SIZE_BYTES, runWithConcurrency } from "./modInstallationService"
 import { prepareGameDraft, getPublishedModpack, publishGameRelease } from "../game/releaseService"
 import { addGameFile } from "../game/gameFileService"
@@ -5335,4 +5335,126 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       }
     })
   })
+
+  describe("9. Unified Provider Enhancements: Categories & Loader Override", () => {
+    it("getAvailableCategories aggregates and returns normalized categories", async () => {
+      const mrAdapter = modProviderManager.getAdapter("MODRINTH")
+      const catSpy = vi.spyOn(mrAdapter, "getCategories" as any).mockResolvedValueOnce([
+        { id: "adventure", name: "Adventure", slug: "adventure", projectType: "mod" },
+      ])
+      try {
+        const cats = await modProviderManager.getAvailableCategories(env, "MOD")
+        expect(Array.isArray(cats)).toBe(true)
+        expect(cats.length).toBeGreaterThan(0)
+        expect(cats[0]).toHaveProperty("key")
+        expect(cats[0]).toHaveProperty("name")
+      } finally {
+        catSpy.mockRestore()
+      }
+    })
+
+    it("searchMods uses loaderOverride when specified", async () => {
+      const mrAdapter = modProviderManager.getAdapter("MODRINTH")
+      const searchSpy = vi.spyOn(mrAdapter, "searchMods").mockResolvedValueOnce({
+        items: [],
+        totalCount: 0,
+      })
+
+      try {
+        await modProviderManager.searchMods(
+          env,
+          db,
+          "test",
+          "MODRINTH",
+          20,
+          0,
+          "MOD",
+          null,
+          "FABRIC",
+        )
+        expect(searchSpy).toHaveBeenCalledWith(
+          env,
+          "test",
+          expect.any(String),
+          "fabric",
+          expect.any(Number),
+          expect.any(Number),
+          "MOD",
+          undefined,
+        )
+      } finally {
+        searchSpy.mockRestore()
+      }
+    })
+
+    it("searchMods skips provider when category does not exist in that provider", async () => {
+      vi.spyOn(modProviderManager, "getInternalCategories").mockResolvedValueOnce([
+        {
+          key: "modrinth-only-cat",
+          name: "Modrinth Only",
+          modrinthSlug: "mr-slug",
+          contentType: "MOD",
+        },
+      ])
+
+      const res = await modProviderManager.searchMods(
+        env,
+        db,
+        "test",
+        "CURSEFORGE",
+        20,
+        0,
+        "MOD",
+        null,
+        null,
+        "modrinth-only-cat",
+      )
+
+      expect(res.items).toEqual([])
+      expect(res.totalCount).toBe(0)
+    })
+
+    it("getProjectDetail uses loaderOverride for compatibleVersions and returns overridden loader", async () => {
+      const mrAdapter = modProviderManager.getAdapter("MODRINTH")
+      const getProjSpy = vi.spyOn(mrAdapter, "getProject").mockResolvedValueOnce({
+        provider: "MODRINTH",
+        projectId: "test-proj",
+        slug: "test-proj",
+        name: "Test Project",
+        summary: "Summary",
+        description: "Desc",
+        author: "Author",
+        iconUrl: null,
+        downloads: 10,
+        contentType: "MOD",
+        environment: "BOTH",
+        categories: [],
+      })
+      const getVersionsSpy = vi.spyOn(mrAdapter, "getCompatibleVersions").mockResolvedValueOnce([])
+
+      try {
+        const detail = await modProviderManager.getProjectDetail(
+          env,
+          db,
+          "MODRINTH",
+          "test-proj",
+          "MOD",
+          null,
+          "FABRIC",
+        )
+        expect(detail.modLoader).toBe("FABRIC")
+        expect(getVersionsSpy).toHaveBeenCalledWith(
+          env,
+          "test-proj",
+          expect.any(String),
+          "fabric",
+          "MOD",
+        )
+      } finally {
+        getProjSpy.mockRestore()
+        getVersionsSpy.mockRestore()
+      }
+    })
+  })
 })
+
