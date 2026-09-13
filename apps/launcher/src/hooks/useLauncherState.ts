@@ -157,87 +157,94 @@ export function useLauncherState() {
       const list = await serverService.getLauncherServers()
       if (list.length > 0) {
         const existingStates = gameStatesRef.current
-        const serversToFetch = list.filter((server) => !existingStates[server.id])
+        const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
+        const entries = await Promise.all(
+          list.map(async (server) => {
+            const installedState = window.electronAPI?.getInstalledState
+              ? await window.electronAPI
+                  .getInstalledState({ gameId: server.id, gameName: server.name })
+                  .catch(() => null)
+              : null
+            const installedVersion = installedState?.installedModpackVersion ?? null
+            const integrityDirty = Boolean(installedState?.integrityDirty)
+            let releaseSummary: LauncherReleaseSummary | null = null
+            let publishedModpack: PublishedModpack | null = null
 
-        if (serversToFetch.length > 0) {
-          const autoUpdatesEnabled = getStoredBoolean(STORAGE_KEYS.AUTO_UPDATES, true)
-          const entries = await Promise.all(
-            serversToFetch.map(async (server) => {
-              const installedState = window.electronAPI?.getInstalledState
-                ? await window.electronAPI
-                    .getInstalledState({ gameId: server.id, gameName: server.name })
-                    .catch(() => null)
-                : null
-              const installedVersion = installedState?.installedModpackVersion ?? null
-              const integrityDirty = Boolean(installedState?.integrityDirty)
-              let releaseSummary: LauncherReleaseSummary | null = null
-              let publishedModpack: PublishedModpack | null = null
-
-              if (server.activeRelease !== undefined) {
-                // Modern lightweight bootstrap: NO getPublishedModpack() call!
-                releaseSummary = server.activeRelease
-              } else {
-                // Legacy mock fallback when activeRelease was not provided in server object
-                const full = await gameService.getPublishedModpack(server.id).catch(() => null)
-                if (full) {
-                  publishedModpack = full
-                  releaseSummary = {
-                    version: full.version,
-                    minecraftVersion: full.minecraftVersion,
-                    modLoader: (full.modLoader as any) || "NEOFORGE",
-                    modLoaderVersion: full.modLoaderVersion ?? null,
-                    notes: full.notes ?? null,
-                  }
-                }
+            if (server.activeRelease !== undefined) {
+              // Modern lightweight bootstrap: NO getPublishedModpack() call!
+              releaseSummary = server.activeRelease
+            } else if (existingStates[server.id]?.publishedModpack) {
+              const prevModpack = existingStates[server.id]!.publishedModpack!
+              publishedModpack = prevModpack
+              releaseSummary = existingStates[server.id]!.releaseSummary ?? {
+                version: prevModpack.version,
+                minecraftVersion: prevModpack.minecraftVersion,
+                modLoader: (prevModpack.modLoader as any) || "NEOFORGE",
+                modLoaderVersion: prevModpack.modLoaderVersion ?? null,
+                notes: prevModpack.notes ?? null,
               }
-
-              return [
-                server.id,
-                {
-                  releaseSummary,
-                  publishedModpack,
-                  installedVersion,
-                  integrityDirty,
-                },
-              ] as const
-            }),
-          )
-
-          setGameStates((prev) => {
-            const next = { ...prev }
-            for (const [id, state] of entries) {
-              const current = prev[id]
-              next[id] = {
-                releaseSummary: state.releaseSummary,
-                publishedModpack: current?.publishedModpack ?? state.publishedModpack,
-                installedVersion: state.installedVersion,
-                integrityDirty: current?.integrityDirty ?? state.integrityDirty,
-                serverStatus: current?.serverStatus ?? null,
+            } else {
+              // Legacy mock fallback when activeRelease was not provided in server object
+              const full = await gameService.getPublishedModpack(server.id).catch(() => null)
+              if (full) {
+                publishedModpack = full
+                releaseSummary = {
+                  version: full.version,
+                  minecraftVersion: full.minecraftVersion,
+                  modLoader: (full.modLoader as any) || "NEOFORGE",
+                  modLoaderVersion: full.modLoaderVersion ?? null,
+                  notes: full.notes ?? null,
+                }
               }
             }
-            return next
-          })
 
-          // Bootstrap auto-update check ONLY for servers with pending update and AUTO_UPDATES is ON
-          if (autoUpdatesEnabled) {
-            for (const server of list) {
-              const state = entries.find(([id]) => id === server.id)?.[1] || existingStates[server.id]
-              const pubVersion = server.activeRelease?.version || state?.releaseSummary?.version || state?.publishedModpack?.version
-              if (pubVersion && state?.installedVersion && pubVersion !== state.installedVersion) {
-                let fullModpack = state?.publishedModpack
-                if (!fullModpack) {
-                  fullModpack = await gameService.getPublishedModpack(server.id).catch(() => null)
-                }
-                if (fullModpack) {
-                  setGameStates((prev) => ({
-                    ...prev,
-                    [server.id]: {
-                      ...prev[server.id],
-                      publishedModpack: fullModpack,
-                    },
-                  }))
-                  void triggerAutoUpdateIfNeeded(server.id, fullModpack, state.installedVersion, server.name)
-                }
+            return [
+              server.id,
+              {
+                releaseSummary,
+                publishedModpack,
+                installedVersion,
+                integrityDirty,
+              },
+            ] as const
+          }),
+        )
+
+        setGameStates((prev) => {
+          const next = { ...prev }
+          for (const [id, state] of entries) {
+            const current = prev[id]
+            next[id] = {
+              ...current,
+              releaseSummary: state.releaseSummary,
+              publishedModpack: current?.publishedModpack ?? state.publishedModpack,
+              installedVersion: state.installedVersion,
+              integrityDirty: state.integrityDirty,
+              serverStatus: current?.serverStatus ?? null,
+            }
+          }
+          return next
+        })
+
+        // Bootstrap auto-update check ONLY for servers with pending update and AUTO_UPDATES is ON
+        if (autoUpdatesEnabled) {
+          for (const server of list) {
+            const state = entries.find(([id]) => id === server.id)?.[1] || existingStates[server.id]
+            const pubVersion = server.activeRelease?.version || state?.releaseSummary?.version || state?.publishedModpack?.version
+            if (pubVersion && state?.installedVersion && pubVersion !== state.installedVersion) {
+              let fullModpack = state?.publishedModpack
+              if (!fullModpack) {
+                fullModpack = await gameService.getPublishedModpack(server.id).catch(() => null)
+              }
+              if (fullModpack) {
+                setGameStates((prev) => ({
+                  ...prev,
+                  [server.id]: {
+                    ...prev[server.id],
+                    publishedModpack: fullModpack,
+                  },
+                }))
+                void triggerAutoUpdateIfNeeded(server.id, fullModpack, state.installedVersion, server.name)
               }
             }
           }

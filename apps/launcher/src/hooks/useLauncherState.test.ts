@@ -10,6 +10,7 @@ import * as capeServiceModule from "../services/capeService"
 import { authService } from "../services/authService"
 import { gameService } from "../services/gameService"
 import { serverService } from "../services/serverService"
+import { deriveBaseGameButtonState } from "../components/server/DownloadPlayButton"
 
 function renderCustomHook<T>(hook: () => T) {
   const result: { current: T } = {} as any
@@ -927,6 +928,103 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     // serverStatus must STILL be ONLINE!
     expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("ONLINE")
+
+    unmount()
+  })
+
+  it("Test 19 — loadServers hydrates installedVersion even when SERVER_STATUS_CHANGED set partial state first", async () => {
+    let getLauncherServersResolve: (val: any) => void
+    const serversPromise = new Promise((resolve) => {
+      getLauncherServersResolve = resolve
+    })
+
+    vi.spyOn(serverService, "getLauncherServers").mockImplementation(() => serversPromise as any)
+
+    const getInstalledStateSpy = vi.fn().mockResolvedValue({
+      installedModpackVersion: "1.0.0",
+      integrityDirty: false,
+    })
+
+    ;(window as any).electronAPI = {
+      ...(window as any).electronAPI,
+      getInstalledState: getInstalledStateSpy,
+    }
+
+    let authCallback: any
+    vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+      authCallback = cb
+      return () => {}
+    })
+    vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+    vi.spyOn(authService, "getAccessToken").mockReturnValue("auth-token-valid")
+
+    let releaseEventListener: any = null
+    vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+      releaseEventListener = cb
+      return () => {}
+    })
+
+    // 1. gameStates initially empty
+    const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+    expect(result.current.gameStates["srv-mc-101"]).toBeUndefined()
+
+    // Authenticate so releaseEventListener is active while loadServers() is still pending
+    await act(async () => {
+      authCallback(
+        {
+          user: { id: "u-test", displayName: "TestUser", email: "test@example.com", role: "PLAYER" },
+        },
+        "AUTHENTICATED",
+      )
+    })
+
+    // 2. Before completing local hydration, SERVER_STATUS_CHANGED arrives
+    await act(async () => {
+      releaseEventListener?.({
+        type: "SERVER_STATUS_CHANGED",
+        serverId: "srv-mc-101",
+        status: "OFFLINE",
+      })
+    })
+
+    // Partial state with serverStatus
+    expect(result.current.gameStates["srv-mc-101"]?.serverStatus).toBe("OFFLINE")
+    expect(result.current.gameStates["srv-mc-101"]?.installedVersion).toBeUndefined()
+
+    // 3. getLauncherServers resolves
+    await act(async () => {
+      getLauncherServersResolve([
+        {
+          id: "srv-mc-101",
+          name: "Test Server",
+          activeRelease: {
+            version: "1.0.0",
+            minecraftVersion: "1.21.1",
+            modLoader: "NEOFORGE",
+          },
+        },
+      ])
+      await Promise.resolve()
+    })
+
+    // 4. Verify getInstalledState was called despite gameStates["srv-mc-101"] already existing
+    expect(getInstalledStateSpy).toHaveBeenCalledWith({
+      gameId: "srv-mc-101",
+      gameName: "Test Server",
+    })
+
+    // 5. Final state must contain installedVersion, integrityDirty, and preserved serverStatus
+    const serverState = result.current.gameStates["srv-mc-101"]
+    expect(serverState).toBeDefined()
+    expect(serverState?.installedVersion).toBe("1.0.0")
+    expect(serverState?.integrityDirty).toBe(false)
+    expect(serverState?.serverStatus).toBe("OFFLINE")
+
+    // 6. If activeRelease.version === "1.0.0", base button state resolves to "play"
+    expect(
+      deriveBaseGameButtonState(serverState?.releaseSummary, serverState?.installedVersion),
+    ).toBe("play")
 
     unmount()
   })
