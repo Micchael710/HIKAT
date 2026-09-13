@@ -122,4 +122,20 @@ describe("R2 Temporary Credentials Local Generation Service", () => {
       }),
     ).rejects.toThrow("Configuración o credenciales temporales R2 no disponibles.")
   })
+
+  it("4. Generates valid temporary credentials scoped by prefixPath", async () => {
+    const prefixPath = "games/srv-1/files/batch-xyz/"
+    const credentials = await generateR2TemporaryCredentials({
+      env: mockEnv,
+      prefixPath,
+    })
+
+    expect(credentials).toBeDefined()
+    const rawJwt = atob(credentials.sessionToken).slice("jwt/".length)
+    const secretBytes = new TextEncoder().encode(mockEnv.R2_PARENT_SECRET_ACCESS_KEY)
+    const { payload } = await jose.jwtVerify(rawJwt, secretBytes)
+
+    expect((payload.paths as any)?.prefixPaths).toEqual([prefixPath])
+    expect((payload.paths as any)?.objectPaths).toEqual([])
+  })
 })

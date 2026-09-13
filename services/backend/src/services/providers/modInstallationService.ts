@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto"
-import { eq, and } from "drizzle-orm"
+import { eq, and, sql, inArray } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
 import type {
   AdminGameFileGql,
   InstallModPlanInputGql,
+  InstallModPlansBatchInputGql,
   GameFileCategoryGql,
   SyncPolicyGql,
   ModInstallationPlanItemGql,
@@ -21,7 +22,7 @@ import {
   formatAdminGameFile,
   resolveReleaseEffectivePolicies,
 } from "../game/releaseService"
-import { deleteR2ObjectIfUnreferenced } from "../game/gameFileService"
+import { deleteR2ObjectIfUnreferenced, deleteR2ObjectsIfUnreferenced } from "../game/gameFileService"
 
 type BatchStatements = Parameters<Database["batch"]>[0]
 type BatchStatement = BatchStatements[number]
@@ -30,7 +31,31 @@ function asBatchTuple(statements: BatchStatement[]): BatchStatements {
   return [statements[0]!, ...statements.slice(1)] as unknown as BatchStatements
 }
 
-const PROVIDER_MIN_PART_SIZE_BYTES = 8 * 1024 * 1024
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let index = 0
+  const worker = async () => {
+    while (index < items.length) {
+      const i = index++
+      const item = items[i]
+      if (item !== undefined) {
+        results[i] = await fn(item)
+      }
+    }
+  }
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => worker(),
+  )
+  await Promise.all(workers)
+  return results
+}
+
+export const PROVIDER_MIN_PART_SIZE_BYTES = 10 * 1024 * 1024
 const PROVIDER_MAX_PARTS = 10_000
 const PROVIDER_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000
 
@@ -502,13 +527,20 @@ async function uploadProviderBinaryToR2(options: {
   }
 }
 
-export async function installModPlan(
+export async function installModPlansBatch(
   db: Database,
   env: Env,
-  input: InstallModPlanInputGql,
+  input: InstallModPlansBatchInputGql,
   userId: string,
   serverId?: string | null,
 ): Promise<AdminGameFileGql[]> {
+  if (!input.plans || input.plans.length === 0) {
+    throw createGraphQLError(
+      "Debe proporcionar al menos un plan para instalar.",
+      "VALIDATION_ERROR",
+    )
+  }
+
   const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
   if (serverId) {
     draftConditions.push(eq(schema.gameReleases.serverId, serverId))
@@ -534,26 +566,53 @@ export async function installModPlan(
     throw createGraphQLError("No se pudo inicializar el borrador de actualización.", "INTERNAL_ERROR")
   }
 
-  // 2. Resolve complete installation plan and validate compatibility
-  const plan = await modProviderManager.resolveInstallationPlan(
-    env,
-    db,
-    input,
-    serverId,
-  )
-
-  if (!plan.isValid || plan.conflicts.length > 0) {
-    throw createGraphQLError(
-      `No se puede instalar el contenido debido a conflictos: ${plan.conflicts.join(". ")}`,
-      "VALIDATION_ERROR",
+  // 2. Resolve complete installation plans and validate compatibility for each
+  const allRawItems: ModInstallationPlanItemGql[] = []
+  for (const planInput of input.plans) {
+    const plan = await modProviderManager.resolveInstallationPlan(
+      env,
+      db,
+      planInput,
+      serverId,
     )
+
+    if (!plan.isValid || plan.conflicts.length > 0) {
+      throw createGraphQLError(
+        `No se puede instalar el contenido debido a conflictos: ${plan.conflicts.join(". ")}`,
+        "VALIDATION_ERROR",
+      )
+    }
+
+    const itemsToProcess = plan.items.filter(
+      (i) => i.action === "INSTALL" || i.action === "UPDATE",
+    )
+    allRawItems.push(...itemsToProcess)
   }
 
-  const itemsToProcess = plan.items.filter(
-    (i) => i.action === "INSTALL" || i.action === "UPDATE",
-  )
+  // 3. Strict identity deduplication and conflict detection
+  // Identity: provider + projectId + contentType
+  // Same version -> deduplicate automatically
+  // Different version -> CONFLICT immediately before any download!
+  const itemsByIdentity = new Map<string, ModInstallationPlanItemGql>()
+  for (const item of allRawItems) {
+    const identityKey = `${item.provider}:${item.projectId}:${item.contentType}`
+    const existing = itemsByIdentity.get(identityKey)
+    if (existing) {
+      if (existing.versionId === item.versionId) {
+        continue // Same version, deduplicate
+      } else {
+        throw createGraphQLError(
+          `Conflicto de versiones para el proyecto "${item.projectName}": se solicitaron las versiones "${existing.versionNumber || existing.versionId}" y "${item.versionNumber || item.versionId}".`,
+          "CONFLICT",
+        )
+      }
+    }
+    itemsByIdentity.set(identityKey, item)
+  }
 
-  for (const item of itemsToProcess) {
+  const deduplicatedItems = Array.from(itemsByIdentity.values())
+
+  for (const item of deduplicatedItems) {
     if (
       item.contentType === "MOD" &&
       item.provider === "CURSEFORGE" &&
@@ -566,7 +625,7 @@ export async function installModPlan(
     }
   }
 
-  if (itemsToProcess.length === 0) {
+  if (deduplicatedItems.length === 0) {
     const allFiles = await db
       .select()
       .from(schema.gameReleaseFiles)
@@ -576,9 +635,9 @@ export async function installModPlan(
     return allFiles.map((f) => formatAdminGameFile(f, effMap.get(f.id)))
   }
 
-  // 3. Preflight check: path collisions & duplicates within plan
+  // 4. Preflight checks: path collisions within batch and against draft files
   const planPaths = new Set<string>()
-  for (const item of itemsToProcess) {
+  for (const item of deduplicatedItems) {
     const targetPath = item.logicalPath || getLogicalPathForContent(item.contentType, item.filename)
     if (planPaths.has(targetPath)) {
       throw createGraphQLError(
@@ -595,7 +654,7 @@ export async function installModPlan(
     .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
     .all()
 
-  for (const item of itemsToProcess) {
+  for (const item of deduplicatedItems) {
     const targetPath = sanitizeGamePath(
       item.logicalPath || getLogicalPathForContent(item.contentType, item.filename),
     )
@@ -626,9 +685,7 @@ export async function installModPlan(
   }
 
   try {
-    // 4. Stream provider binaries directly into R2 multipart.
-    // Process sequentially to avoid holding several large provider/R2
-    // connections simultaneously inside the Worker.
+    // 5. Transfer provider binaries with max concurrency 2 directly into R2 multipart (10 MiB min part size)
     const downloadedItems: Array<{
       item: ModInstallationPlanItemGql
       filename: string
@@ -638,26 +695,17 @@ export async function installModPlan(
       category: GameFileCategoryGql
     }> = []
 
-    for (const item of itemsToProcess) {
-      const adapter =
-        modProviderManager.getAdapter(
-          item.provider,
-        )
+    await runWithConcurrency(deduplicatedItems, 2, async (item) => {
+      const adapter = modProviderManager.getAdapter(item.provider)
+      const versionObj = await adapter.getVersion(
+        env,
+        item.versionId,
+        item.projectId,
+        item.contentType,
+      )
 
-      const versionObj =
-        await adapter.getVersion(
-          env,
-          item.versionId,
-          item.projectId,
-          item.contentType,
-        )
-
-      const downloadUrl =
-        versionObj?.downloadUrl || ""
-
-      const filename =
-        versionObj?.filename ||
-        item.filename
+      const downloadUrl = versionObj?.downloadUrl || ""
+      const filename = versionObj?.filename || item.filename
 
       if (!downloadUrl) {
         throw createGraphQLError(
@@ -666,8 +714,7 @@ export async function installModPlan(
         )
       }
 
-      const validationCategory:
-        GameFileCategoryGql =
+      const validationCategory: GameFileCategoryGql =
         item.contentType === "SHADER"
           ? "SHADER_PACK"
           : item.contentType === "RESOURCE_PACK"
@@ -680,30 +727,19 @@ export async function installModPlan(
         ? `games/${serverId}/files/${crypto.randomUUID()}`
         : `game-files/${crypto.randomUUID()}`
 
-      const controller =
-        new AbortController()
-
-      const timeoutId =
-        setTimeout(
-          () => controller.abort(),
-          PROVIDER_DOWNLOAD_TIMEOUT_MS,
-        )
+      const controller = new AbortController()
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        PROVIDER_DOWNLOAD_TIMEOUT_MS,
+      )
 
       try {
-        // Binary CDN fetch MUST NOT receive
-        // the CurseForge API key.
-        const response =
-          await fetch(
-            downloadUrl,
-            {
-              headers: {
-                "User-Agent":
-                  "HiKAT/0.1.0 (contact@hikat.local)",
-              },
-              signal:
-                controller.signal,
-            },
-          )
+        const response = await fetch(downloadUrl, {
+          headers: {
+            "User-Agent": "HiKAT/0.1.0 (contact@hikat.local)",
+          },
+          signal: controller.signal,
+        })
 
         if (!response.ok) {
           throw createGraphQLError(
@@ -712,51 +748,69 @@ export async function installModPlan(
           )
         }
 
-        const uploaded =
-          await uploadProviderBinaryToR2({
-            bucket: env.ASSETS,
-            response,
-            objectKey,
-            filename,
-            category:
-              validationCategory,
-            provider:
-              item.provider,
-            projectId:
-              item.projectId,
-            versionId:
-              item.versionId,
-            expectedSizeBytes:
-              Number(
-                versionObj?.sizeBytes,
-              ) || 0,
-            hashes:
-              versionObj?.hashes,
-          })
-
-        createdR2Keys.push(
+        const uploaded = await uploadProviderBinaryToR2({
+          bucket: env.ASSETS!,
+          response,
           objectKey,
-        )
+          filename,
+          category: validationCategory,
+          provider: item.provider,
+          projectId: item.projectId,
+          versionId: item.versionId,
+          expectedSizeBytes: Number(versionObj?.sizeBytes) || 0,
+          hashes: versionObj?.hashes,
+        })
 
+        createdR2Keys.push(objectKey)
         downloadedItems.push({
           item,
           filename,
-          sizeBytes:
-            uploaded.sizeBytes,
-          sha256:
-            uploaded.sha256,
+          sizeBytes: uploaded.sizeBytes,
+          sha256: uploaded.sha256,
           objectKey,
-          category:
-            validationCategory,
+          category: validationCategory,
         })
       } finally {
         clearTimeout(timeoutId)
       }
-    }
+    })
 
-    // 5. Construct ALL D1 statements into a single atomic batch
+    // 6. Split into new and updated files, construct statements respecting parameter limits (< 100)
     const now = new Date().toISOString()
-    const statements: BatchStatement[] = []
+    const toInsert: Array<{
+      id: string
+      releaseId: string
+      name: string
+      logicalPath: string
+      category: GameFileCategoryGql
+      sha256: string
+      sizeBytes: number
+      policy: SyncPolicyGql | null
+      isDirectory: number
+      objectKey: string
+      sourceProvider: string
+      sourceProjectId: string
+      sourceVersionId: string
+      sourceFileId: string | null
+      sourceEnvironment: string | null
+      createdAt: string
+    }> = []
+
+    const toUpdate: Array<{
+      existingId: string
+      name: string
+      logicalPath: string
+      category: GameFileCategoryGql
+      sha256: string
+      sizeBytes: number
+      policy: SyncPolicyGql | null
+      objectKey: string
+      sourceProvider: string
+      sourceProjectId: string
+      sourceVersionId: string
+      sourceFileId: string | null
+      sourceEnvironment: string | null
+    }> = []
 
     for (const downloaded of downloadedItems) {
       const { item, filename, sizeBytes, sha256, objectKey, category } = downloaded
@@ -775,67 +829,102 @@ export async function installModPlan(
         category === "DATA_PACK" ? "NO_MODIFICABLE" : null
 
       if (existingByProvider) {
-        // UPDATE existing provider record
         if (existingByProvider.objectKey && existingByProvider.objectKey !== objectKey) {
           oldKeysToClean.push(existingByProvider.objectKey)
         }
-
-        statements.push(
-          db
-            .update(schema.gameReleaseFiles)
-            .set({
-              name: filename,
-              logicalPath,
-              category,
-              sha256,
-              sizeBytes,
-              policy: existingByProvider.policy || defaultPolicy,
-              isDirectory: 0,
-              objectKey,
-              sourceProvider: item.provider,
-              sourceProjectId: item.projectId,
-              sourceVersionId: item.versionId,
-              sourceFileId: item.fileId || null,
-              sourceEnvironment: item.environment || null,
-            })
-            .where(eq(schema.gameReleaseFiles.id, existingByProvider.id)),
-        )
+        toUpdate.push({
+          existingId: existingByProvider.id,
+          name: filename,
+          logicalPath,
+          category,
+          sha256,
+          sizeBytes,
+          policy: (existingByProvider.policy as SyncPolicyGql) || defaultPolicy,
+          objectKey,
+          sourceProvider: item.provider,
+          sourceProjectId: item.projectId,
+          sourceVersionId: item.versionId,
+          sourceFileId: item.fileId || null,
+          sourceEnvironment: item.environment || null,
+        })
       } else {
-        // INSERT new file
-        statements.push(
-          db.insert(schema.gameReleaseFiles).values({
-            id: crypto.randomUUID(),
-            releaseId: draft.id,
-            name: filename,
-            logicalPath,
-            category,
-            sha256,
-            sizeBytes,
-            policy: defaultPolicy,
-            isDirectory: 0,
-            objectKey,
-            sourceProvider: item.provider,
-            sourceProjectId: item.projectId,
-            sourceVersionId: item.versionId,
-            sourceFileId: item.fileId || null,
-            sourceEnvironment: item.environment || null,
-            createdAt: now,
-          }),
-        )
+        toInsert.push({
+          id: crypto.randomUUID(),
+          releaseId: draft.id,
+          name: filename,
+          logicalPath,
+          category,
+          sha256,
+          sizeBytes,
+          policy: defaultPolicy,
+          isDirectory: 0,
+          objectKey,
+          sourceProvider: item.provider,
+          sourceProjectId: item.projectId,
+          sourceVersionId: item.versionId,
+          sourceFileId: item.fileId || null,
+          sourceEnvironment: item.environment || null,
+          createdAt: now,
+        })
       }
     }
 
-    // 6. Execute atomic D1 batch!
+    const statements: BatchStatement[] = []
+
+    // Multi-row INSERTs in chunks of 5 rows (< 100 parameters)
+    const INSERT_CHUNK_SIZE = 5
+    for (let i = 0; i < toInsert.length; i += INSERT_CHUNK_SIZE) {
+      const chunk = toInsert.slice(i, i + INSERT_CHUNK_SIZE)
+      statements.push(db.insert(schema.gameReleaseFiles).values(chunk))
+    }
+
+    // Grouped UPDATEs in chunks of 6 files (< 100 parameters)
+    const UPDATE_CHUNK_SIZE = 6
+    for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK_SIZE) {
+      const chunk = toUpdate.slice(i, i + UPDATE_CHUNK_SIZE)
+      const ids = chunk.map((c) => c.existingId)
+
+      const nameCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.name}`), sql` `)
+      const pathCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.logicalPath}`), sql` `)
+      const catCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.category}`), sql` `)
+      const shaCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.sha256}`), sql` `)
+      const sizeCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.sizeBytes}`), sql` `)
+      const policyCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.policy}`), sql` `)
+      const keyCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.objectKey}`), sql` `)
+      const verCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.sourceVersionId}`), sql` `)
+      const fileCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.sourceFileId}`), sql` `)
+      const envCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingId} THEN ${c.sourceEnvironment}`), sql` `)
+
+      statements.push(
+        db
+          .update(schema.gameReleaseFiles)
+          .set({
+            name: sql`CASE ${nameCases} ELSE ${schema.gameReleaseFiles.name} END`,
+            logicalPath: sql`CASE ${pathCases} ELSE ${schema.gameReleaseFiles.logicalPath} END`,
+            category: sql`CASE ${catCases} ELSE ${schema.gameReleaseFiles.category} END`,
+            sha256: sql`CASE ${shaCases} ELSE ${schema.gameReleaseFiles.sha256} END`,
+            sizeBytes: sql`CASE ${sizeCases} ELSE ${schema.gameReleaseFiles.sizeBytes} END`,
+            policy: sql`CASE ${policyCases} ELSE ${schema.gameReleaseFiles.policy} END`,
+            objectKey: sql`CASE ${keyCases} ELSE ${schema.gameReleaseFiles.objectKey} END`,
+            sourceVersionId: sql`CASE ${verCases} ELSE ${schema.gameReleaseFiles.sourceVersionId} END`,
+            sourceFileId: sql`CASE ${fileCases} ELSE ${schema.gameReleaseFiles.sourceFileId} END`,
+            sourceEnvironment: sql`CASE ${envCases} ELSE ${schema.gameReleaseFiles.sourceEnvironment} END`,
+          })
+          .where(inArray(schema.gameReleaseFiles.id, ids)),
+      )
+    }
+
+    // 7. Execute atomic D1 batch
     if (statements.length > 0) {
       await db.batch(asBatchTuple(statements))
     }
 
-    // 7. Clean up old unreferenced R2 objects ONLY after D1 batch succeeds
-    for (const oldKey of oldKeysToClean) {
-      await deleteR2ObjectIfUnreferenced(env, db, oldKey)
+    // 8. Clean up old unreferenced R2 objects ONLY after D1 batch succeeds
+    if (oldKeysToClean.length > 0) {
+      await deleteR2ObjectsIfUnreferenced(env, db, oldKeysToClean)
     }
 
-    // 8. Return updated draft files with effective policies
+    // 9. Return updated draft files with effective policies
     const updatedFiles = await db
       .select()
       .from(schema.gameReleaseFiles)
@@ -853,4 +942,14 @@ export async function installModPlan(
     }
     throw err
   }
+}
+
+export async function installModPlan(
+  db: Database,
+  env: Env,
+  input: InstallModPlanInputGql,
+  userId: string,
+  serverId?: string | null,
+): Promise<AdminGameFileGql[]> {
+  return installModPlansBatch(db, env, { plans: [input] }, userId, serverId)
 }

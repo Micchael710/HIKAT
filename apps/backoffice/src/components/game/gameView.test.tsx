@@ -481,37 +481,56 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     const onToast = vi.fn()
     const onRefresh = vi.fn()
 
-    const createUploadSpy = vi.spyOn(gameApi, "createGameFileUpload").mockResolvedValue({
-      uploadToken: "tok-1",
+    const createBatchSpy = vi.spyOn(gameApi, "createGameFileBatchUpload").mockResolvedValue({
+      batchId: "batch-1",
+      prefixPath: "game-files/batches/batch-1/",
       expiresAt: new Date().toISOString(),
-      maxSizeBytes: 1000000,
-      expectedCategory: "MOD",
-      objectKey: "game-files/1",
       bucket: "hikat-r2",
       endpoint: "https://r2.test",
       credentials: { accessKeyId: "k", secretAccessKey: "s", sessionToken: "t" },
+      items: [
+        { uploadToken: "tok-1", objectKey: "k-1", expectedCategory: "MOD", originalFilename: "a.jar", logicalPath: "mods/a.jar" },
+        { uploadToken: "tok-2", objectKey: "k-2", expectedCategory: "CONFIG", originalFilename: "a.toml", logicalPath: "config/a.toml" },
+      ],
     })
-    const uploadDirectSpy = vi.spyOn(gameFileUploadService, "uploadGameFileDirect").mockResolvedValue({
-      sha256: "test-sha",
-      sizeBytes: 10,
+    const uploadBatchSpy = vi.spyOn(gameFileUploadService, "uploadGameFilesBatch").mockImplementation(async (items) => {
+      return items.map((i) => ({
+        uploadToken: i.uploadToken,
+        sha256: "test-sha",
+        sizeBytes: 10,
+        name: i.name,
+        logicalPath: i.logicalPath || undefined,
+        category: i.expectedCategory,
+      }))
     })
-    const completeUploadSpy = vi.spyOn(gameApi, "completeGameFileUpload").mockResolvedValue({
-      tokenHash: "hash-tok",
-      sizeBytes: 10,
-    })
-    const addFileSpy = vi.spyOn(gameApi, "addGameFile").mockResolvedValue({
-      id: "f-new",
-      name: "a.jar",
-      logicalPath: "mods/a.jar",
-      category: "MOD",
-      sha256: "h",
-      sizeBytes: 10,
-      policy: "NO_MODIFICABLE",
-      effectivePolicy: "NO_MODIFICABLE",
-      isInherited: true,
-      isDirectory: false,
-      createdAt: new Date().toISOString(),
-    })
+    const completeBatchSpy = vi.spyOn(gameApi, "completeGameFileBatchUpload").mockResolvedValue([
+      {
+        id: "f-1",
+        name: "a.jar",
+        logicalPath: "mods/a.jar",
+        category: "MOD",
+        sha256: "h",
+        sizeBytes: 10,
+        policy: "NO_MODIFICABLE",
+        effectivePolicy: "NO_MODIFICABLE",
+        isInherited: true,
+        isDirectory: false,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "f-2",
+        name: "a.toml",
+        logicalPath: "config/a.toml",
+        category: "CONFIG",
+        sha256: "h",
+        sizeBytes: 10,
+        policy: "MODIFICABLE",
+        effectivePolicy: "MODIFICABLE",
+        isInherited: true,
+        isDirectory: false,
+        createdAt: new Date().toISOString(),
+      },
+    ])
 
     const { container } = render(
       <GameFilesExplorer
@@ -544,22 +563,21 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     })
 
     // Assert that the common root 'MiActualizacion' was stripped!
-    expect(createUploadSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ logicalPath: "mods/a.jar", originalFilename: "a.jar" }),
+    expect(createBatchSpy).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ logicalPath: "mods/a.jar", originalFilename: "a.jar" }),
+        expect.objectContaining({ logicalPath: "config/a.toml", originalFilename: "a.toml" }),
+      ]),
       "srv-1",
     )
-    expect(createUploadSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ logicalPath: "config/a.toml", originalFilename: "a.toml" }),
-      "srv-1",
-    )
-    expect(uploadDirectSpy).toHaveBeenCalledTimes(2)
-    expect(completeUploadSpy).toHaveBeenCalledTimes(2)
-    expect(addFileSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ logicalPath: "mods/a.jar", name: "a.jar" }),
-      "srv-1",
-    )
-    expect(addFileSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ logicalPath: "config/a.toml", name: "a.toml" }),
+    expect(uploadBatchSpy).toHaveBeenCalled()
+    expect(completeBatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: expect.arrayContaining([
+          expect.objectContaining({ logicalPath: "mods/a.jar", name: "a.jar" }),
+          expect.objectContaining({ logicalPath: "config/a.toml", name: "a.toml" }),
+        ]),
+      }),
       "srv-1",
     )
     expect(onToast).toHaveBeenCalledWith("2 archivo(s) subido(s) exitosamente.", "success")
@@ -569,37 +587,32 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     const onToast = vi.fn()
     const onRefresh = vi.fn()
 
-    vi.spyOn(gameApi, "createGameFileUpload").mockResolvedValue({
-      uploadToken: "tok-2",
+    const createBatchSpy = vi.spyOn(gameApi, "createGameFileBatchUpload").mockImplementation(async (items) => ({
+      batchId: "batch-drag",
+      prefixPath: "game-files/batches/batch-drag/",
       expiresAt: new Date().toISOString(),
-      maxSizeBytes: 1000000,
-      expectedCategory: "MOD",
-      objectKey: "game-files/2",
       bucket: "hikat-r2",
       endpoint: "https://r2.test",
       credentials: { accessKeyId: "k", secretAccessKey: "s", sessionToken: "t" },
+      items: items.map((i, idx) => ({
+        uploadToken: `tok-${idx}`,
+        objectKey: `k-${idx}`,
+        expectedCategory: i.category as any,
+        originalFilename: i.originalFilename,
+        logicalPath: i.logicalPath,
+      })),
+    }))
+    vi.spyOn(gameFileUploadService, "uploadGameFilesBatch").mockImplementation(async (items) => {
+      return items.map((i) => ({
+        uploadToken: i.uploadToken,
+        sha256: "test-sha",
+        sizeBytes: 10,
+        name: i.name,
+        logicalPath: i.logicalPath || undefined,
+        category: i.expectedCategory,
+      }))
     })
-    vi.spyOn(gameFileUploadService, "uploadGameFileDirect").mockResolvedValue({
-      sha256: "test-sha",
-      sizeBytes: 10,
-    })
-    vi.spyOn(gameApi, "completeGameFileUpload").mockResolvedValue({
-      tokenHash: "hash-tok",
-      sizeBytes: 10,
-    })
-    const addFileSpy = vi.spyOn(gameApi, "addGameFile").mockResolvedValue({
-      id: "f-drag",
-      name: "a.jar",
-      logicalPath: "mods/a.jar",
-      category: "MOD",
-      sha256: "h",
-      sizeBytes: 10,
-      policy: "NO_MODIFICABLE",
-      effectivePolicy: "NO_MODIFICABLE",
-      isInherited: true,
-      isDirectory: false,
-      createdAt: new Date().toISOString(),
-    })
+    vi.spyOn(gameApi, "completeGameFileBatchUpload").mockResolvedValue([])
 
     const { container } = render(
       <GameFilesExplorer
@@ -727,14 +740,11 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
     // Top folder 'Pack' is stripped; mods/a.jar and config/sub/a.toml are added
     await vi.waitFor(() => {
-      expect(addFileSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ logicalPath: "mods/a.jar" }),
-        "srv-1",
-      )
-    })
-    await vi.waitFor(() => {
-      expect(addFileSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ logicalPath: "config/sub/a.toml" }),
+      expect(createBatchSpy).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ logicalPath: "mods/a.jar" }),
+          expect.objectContaining({ logicalPath: "config/sub/a.toml" }),
+        ]),
         "srv-1",
       )
     })
@@ -751,8 +761,10 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     })
 
     await vi.waitFor(() => {
-      expect(addFileSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ logicalPath: "plain.txt" }),
+      expect(createBatchSpy).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ logicalPath: "plain.txt" }),
+        ]),
         "srv-1",
       )
     })

@@ -465,7 +465,7 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
 
       const updatedDraft = (await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft.id)).get())!
       const files = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft.id)).all()
-      const readiness = await validateDraftReadiness(env, updatedDraft, files, db)
+      const readiness = await validateDraftReadiness(env, updatedDraft, files, db, undefined, undefined, true)
 
       expect(readiness.storageVerified).toBe(false)
       expect(readiness.isReady).toBe(false)
@@ -493,7 +493,7 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
 
       const updatedDraft = (await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, draft.id)).get())!
       const files = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft.id)).all()
-      const readiness = await validateDraftReadiness(env, updatedDraft, files, db)
+      const readiness = await validateDraftReadiness(env, updatedDraft, files, db, undefined, undefined, true)
 
       expect(readiness.storageVerified).toBe(false)
       expect(readiness.isReady).toBe(false)
@@ -753,7 +753,7 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
         ENVIRONMENT: "test",
       }
 
-      const readiness = await validateDraftReadiness(envWithoutAssets, updatedDraft, draftFiles, db)
+      const readiness = await validateDraftReadiness(envWithoutAssets, updatedDraft, draftFiles, db, undefined, undefined, true)
       expect(readiness.storageVerified).toBe(false)
       expect(readiness.isReady).toBe(false)
       expect(readiness.issues.some((i) => i.includes("almacenamiento de archivos no está disponible"))).toBe(true)
@@ -986,6 +986,81 @@ describe("HiKAT Shard 8C: Release Experience Backend Suite & Invariants", () => 
       expect(broadcastBody.type).toBe("RELEASE_ACTIVATED")
       expect(broadcastBody.serverId).toBe(serverId)
       expect(broadcastBody.version).toBe("1.0.0")
+    })
+
+    it("43. getAdminGameOverview is D1-only and does not call ASSETS.head()", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      await updateGameDraftMetadata(db, env, { version: "1.0.0" }, adminId)
+      await mockR2.put("game-files/config.toml", new Uint8Array(15))
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "overview-file-1",
+        releaseId: draft.id,
+        name: "config.toml",
+        logicalPath: "config/config.toml",
+        category: "CONFIG",
+        sha256: "fake-sha",
+        sizeBytes: 15,
+        isDirectory: 0,
+        objectKey: "game-files/config.toml",
+        createdAt: new Date().toISOString(),
+      })
+
+      const headSpy = vi.spyOn(env.ASSETS!, "head")
+      const overview = await getAdminGameOverview(db, env)
+      expect(headSpy).not.toHaveBeenCalled()
+      expect(overview.readiness?.storageVerified).toBe(true)
+      expect(overview.readiness?.isReady).toBe(true)
+      headSpy.mockRestore()
+    })
+
+    it("44. publishGameRelease verifies only ADDED and UPDATED files on subsequent release, skipping UNCHANGED", async () => {
+      // 1. First release: file-a
+      await mockR2.put("game-files/file-a.jar", new Uint8Array(20))
+      const draft1 = await prepareGameDraft(db, adminId)
+      await updateGameDraftMetadata(db, env, { version: "1.0.0" }, adminId)
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "file-a-id",
+        releaseId: draft1.id,
+        name: "file-a.jar",
+        logicalPath: "mods/file-a.jar",
+        category: "MOD",
+        sha256: "sha-a",
+        sizeBytes: 20,
+        isDirectory: 0,
+        objectKey: "game-files/file-a.jar",
+        createdAt: new Date().toISOString(),
+      })
+
+      const headSpy = vi.spyOn(env.ASSETS!, "head")
+      const pub1 = await publishGameRelease(db, env, { version: "1.0.0" }, adminId)
+      expect(pub1.status).toBe("PUBLISHED")
+      expect(headSpy).toHaveBeenCalledWith("game-files/file-a.jar")
+
+      // 2. Second draft: clones file-a as UNCHANGED, and we add file-b (ADDED)
+      const draft2 = await prepareGameDraft(db, adminId)
+      await updateGameDraftMetadata(db, env, { version: "2.0.0" }, adminId)
+      await mockR2.put("game-files/file-b.jar", new Uint8Array(30))
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "file-b-id",
+        releaseId: draft2.id,
+        name: "file-b.jar",
+        logicalPath: "mods/file-b.jar",
+        category: "MOD",
+        sha256: "sha-b",
+        sizeBytes: 30,
+        isDirectory: 0,
+        objectKey: "game-files/file-b.jar",
+        createdAt: new Date().toISOString(),
+      })
+
+      headSpy.mockClear()
+      const pub2 = await publishGameRelease(db, env, { version: "2.0.0" }, adminId)
+      expect(pub2.status).toBe("PUBLISHED")
+      // file-b was ADDED, so it MUST be verified
+      expect(headSpy).toHaveBeenCalledWith("game-files/file-b.jar")
+      // file-a was UNCHANGED, so it MUST NOT be verified
+      expect(headSpy).not.toHaveBeenCalledWith("game-files/file-a.jar")
+      headSpy.mockRestore()
     })
   })
 })

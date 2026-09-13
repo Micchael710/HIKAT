@@ -5,6 +5,11 @@ import type {
   AdminGameFileGql,
   GameFileCategoryGql,
   CreateGameFileUploadInputGql,
+  CreateGameFileBatchUploadItemInputGql,
+  GameFileBatchUploadPayloadGql,
+  GameFileBatchUploadItemPayloadGql,
+  CompleteGameFileBatchUploadInputGql,
+  CompleteGameFileBatchUploadItemInputGql,
   AddGameFileInputGql,
   UpdateGameFileInputGql,
   SaveGameFileContentInputGql,
@@ -416,6 +421,529 @@ export async function completeGameFileUploadToken(
     tokenHash,
     sizeBytes: input.sizeBytes,
   }
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let index = 0
+  const worker = async () => {
+    while (index < items.length) {
+      const i = index++
+      const item = items[i]
+      if (item !== undefined) {
+        results[i] = await fn(item)
+      }
+    }
+  }
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => worker(),
+  )
+  await Promise.all(workers)
+  return results
+}
+
+export async function createGameFileBatchUploadTokens(
+  db: Database,
+  files: CreateGameFileBatchUploadItemInputGql[],
+  userId: string,
+  env?: Env,
+  serverId?: string | null,
+): Promise<GameFileBatchUploadPayloadGql> {
+  if (!files || files.length === 0) {
+    throw createGraphQLError(
+      "Debe proporcionar al menos un archivo para la subida por lotes.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const targetServerId = serverId || null
+  await assertExplicitServerIdIfMultiple(db, targetServerId, "subida por lotes de archivos de juego")
+
+  for (const item of files) {
+    if (item.sizeBytes <= 0) {
+      throw createGraphQLError(
+        "El tamaño del archivo debe ser mayor a 0 bytes.",
+        "VALIDATION_ERROR",
+      )
+    }
+    if (item.sizeBytes > MAX_GAME_FILE_SIZE_BYTES) {
+      throw createGraphQLError(
+        "El tamaño del archivo excede el límite permitido.",
+        "VALIDATION_ERROR",
+      )
+    }
+  }
+
+  const batchId = crypto.randomUUID()
+  const prefixPath = targetServerId
+    ? `games/${targetServerId}/batches/${batchId}/`
+    : `game-files/batches/${batchId}/`
+
+  const accountId = env?.CLOUDFLARE_ACCOUNT_ID
+  const bucketName = env?.R2_BUCKET_NAME || "hikat-r2"
+
+  const credentials = await generateR2TemporaryCredentials({
+    env,
+    prefixPath,
+  })
+
+  const now = new Date()
+  const UPLOAD_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours TTL
+  const expiresAt = new Date(now.getTime() + UPLOAD_TTL_MS).toISOString()
+
+  const tokenRecords: Array<typeof schema.gameFileUploadTokens.$inferInsert> = []
+  const payloadItems: GameFileBatchUploadItemPayloadGql[] = []
+
+  for (const item of files) {
+    const safeFilename = sanitizeGameFileName(item.originalFilename)
+    const category = (item.category || inferGameCategory(item.logicalPath || safeFilename)) as GameFileCategory
+
+    const tokenId = crypto.randomUUID()
+    const objectKey = `${prefixPath}${crypto.randomUUID()}`
+
+    const rawTokenBytes = new Uint8Array(32)
+    crypto.getRandomValues(rawTokenBytes)
+    const tokenHex = Array.from(rawTokenBytes)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    const hashBuffer = await crypto.subtle.digest("SHA-256", rawTokenBytes)
+    const tokenHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    tokenRecords.push({
+      id: tokenId,
+      serverId: targetServerId,
+      tokenHash,
+      category,
+      originalFilename: item.logicalPath ? sanitizeGamePath(item.logicalPath) : safeFilename,
+      expectedSizeBytes: item.sizeBytes,
+      objectKey,
+      createdBy: userId,
+      expiresAt,
+      createdAt: now.toISOString(),
+    })
+
+    payloadItems.push({
+      uploadToken: tokenHex,
+      objectKey,
+      expectedCategory: category as any,
+      originalFilename: safeFilename,
+      logicalPath: item.logicalPath ? sanitizeGamePath(item.logicalPath) : null,
+    })
+  }
+
+  // Insert token records in multi-row batches of 8 rows (< 100 parameters) inside a single db.batch()
+  const TOKEN_CHUNK_SIZE = 8
+  const insertStatements: BatchStatement[] = []
+  for (let i = 0; i < tokenRecords.length; i += TOKEN_CHUNK_SIZE) {
+    const chunk = tokenRecords.slice(i, i + TOKEN_CHUNK_SIZE)
+    insertStatements.push(db.insert(schema.gameFileUploadTokens).values(chunk))
+  }
+
+  if (insertStatements.length > 0) {
+    await db.batch(asBatchTuple(insertStatements))
+  }
+
+  return {
+    batchId,
+    prefixPath,
+    expiresAt,
+    bucket: bucketName,
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials,
+    items: payloadItems,
+  }
+}
+
+export async function completeGameFileBatchUploadTokens(
+  db: Database,
+  input: CompleteGameFileBatchUploadInputGql,
+  userId: string,
+  env: Env,
+  serverId?: string | null,
+): Promise<AdminGameFileGql[]> {
+  if (!env.ASSETS) {
+    throw createGraphQLError("Almacenamiento de archivos no disponible.", "INTERNAL_ERROR")
+  }
+
+  if (!input.items || input.items.length === 0) {
+    throw createGraphQLError(
+      "Debe proporcionar al menos un archivo para completar.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const targetServerId = serverId || null
+  await assertExplicitServerIdIfMultiple(db, targetServerId, "completar subida por lotes de archivos de juego")
+
+  // 1. Hash tokens in memory and validate syntax
+  type ItemWithHash = {
+    item: CompleteGameFileBatchUploadItemInputGql
+    tokenHash: string
+  }
+
+  const itemsWithHash: ItemWithHash[] = []
+  const tokenHashMap = new Map<string, CompleteGameFileBatchUploadItemInputGql>()
+
+  for (const item of input.items) {
+    const rawToken = item.uploadToken?.trim()
+    if (!rawToken) {
+      throw createGraphQLError("Token de subida requerido.", "VALIDATION_ERROR")
+    }
+
+    const tokenBytes = new Uint8Array(
+      rawToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
+    )
+    const hashBuffer = await crypto.subtle.digest("SHA-256", tokenBytes)
+    const tokenHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+
+    const rawSha256 = String(item.sha256 || "").trim()
+    if (!/^[a-f0-9]{64}$/.test(rawSha256)) {
+      throw createGraphQLError("Formato de hash SHA-256 no válido.", "VALIDATION_ERROR")
+    }
+
+    if (item.sizeBytes <= 0) {
+      throw createGraphQLError("El tamaño del archivo debe ser mayor a 0 bytes.", "VALIDATION_ERROR")
+    }
+
+    itemsWithHash.push({ item, tokenHash })
+    tokenHashMap.set(tokenHash, item)
+  }
+
+  // 2. Fetch token records in chunks of 50 to respect SQLite parameter limits
+  const allHashes = Array.from(tokenHashMap.keys())
+  const tokenRecords: schema.GameFileUploadToken[] = []
+  const HASH_CHUNK_SIZE = 50
+
+  for (let i = 0; i < allHashes.length; i += HASH_CHUNK_SIZE) {
+    const chunk = allHashes.slice(i, i + HASH_CHUNK_SIZE)
+    const rows = await db
+      .select()
+      .from(schema.gameFileUploadTokens)
+      .where(inArray(schema.gameFileUploadTokens.tokenHash, chunk))
+      .all()
+    tokenRecords.push(...rows)
+  }
+
+  const recordsByHash = new Map<string, schema.GameFileUploadToken>(
+    tokenRecords.map((r) => [r.tokenHash, r]),
+  )
+
+  // 3. In-memory validations
+  const now = new Date()
+  const validatedItems: Array<{
+    item: CompleteGameFileBatchUploadItemInputGql
+    tokenRecord: schema.GameFileUploadToken
+    tokenHash: string
+  }> = []
+
+  for (const { item, tokenHash } of itemsWithHash) {
+    const record = recordsByHash.get(tokenHash)
+    if (!record || !record.objectKey) {
+      throw createGraphQLError("Token de subida no válido o desconocido.", "VALIDATION_ERROR")
+    }
+
+    if (record.usedAt) {
+      throw createGraphQLError("El token de subida ya fue utilizado por otra operación.", "CONFLICT")
+    }
+
+    if (new Date(record.expiresAt) < now) {
+      throw createGraphQLError("El token de subida ha expirado.", "VALIDATION_ERROR")
+    }
+
+    if (targetServerId && record.serverId && record.serverId !== targetServerId) {
+      throw createGraphQLError("El token de subida no corresponde al servidor especificado.", "VALIDATION_ERROR")
+    }
+
+    if (item.sizeBytes !== record.expectedSizeBytes) {
+      throw createGraphQLError("El tamaño del archivo no coincide con el tamaño esperado.", "VALIDATION_ERROR")
+    }
+
+    validatedItems.push({ item, tokenRecord: record, tokenHash })
+  }
+
+  // 4. Physical R2 verification with max concurrency of 6 (HEAD and GET for magic bytes)
+  await runWithConcurrency(validatedItems, 6, async ({ item, tokenRecord }) => {
+    const objHead = await env.ASSETS!.head(tokenRecord.objectKey!)
+    if (!objHead) {
+      throw createGraphQLError(`El objeto no se encontró en el almacenamiento R2: ${tokenRecord.originalFilename}`, "VALIDATION_ERROR")
+    }
+    if (objHead.size !== tokenRecord.expectedSizeBytes || objHead.size !== item.sizeBytes) {
+      throw createGraphQLError(`El tamaño del objeto en almacenamiento no coincide con el esperado: ${tokenRecord.originalFilename}`, "VALIDATION_ERROR")
+    }
+
+    const category = tokenRecord.category as GameFileCategory
+    if (category === "MOD" || category === "DATA_PACK" || category === "RESOURCE_PACK" || category === "SHADER_PACK") {
+      const headerObj = await env.ASSETS!.get(tokenRecord.objectKey!, {
+        range: { offset: 0, length: 4 },
+      })
+      if (!headerObj || !headerObj.body) {
+        throw createGraphQLError(`No se pudo verificar la cabecera del archivo en almacenamiento: ${tokenRecord.originalFilename}`, "INTERNAL_ERROR")
+      }
+      const headerBytes = new Uint8Array(await headerObj.arrayBuffer())
+      const validation = validateGameFileHeader(headerBytes, tokenRecord.originalFilename, category)
+      if (!validation.valid) {
+        throw createGraphQLError(validation.error || `Formato de archivo inválido: ${tokenRecord.originalFilename}`, "VALIDATION_ERROR")
+      }
+    }
+  })
+
+  // 5. Ensure active DRAFT release
+  const draftConditions = [eq(schema.gameReleases.status, "DRAFT")]
+  if (targetServerId) {
+    draftConditions.push(eq(schema.gameReleases.serverId, targetServerId))
+  }
+
+  let draft = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(and(...draftConditions))
+    .get()
+
+  if (!draft) {
+    await prepareGameDraft(db, userId, null, env, undefined, targetServerId)
+    draft = await db
+      .select()
+      .from(schema.gameReleases)
+      .where(and(...draftConditions))
+      .get()
+  }
+
+  if (!draft) {
+    throw createGraphQLError("No se pudo inicializar el borrador de actualización.", "INTERNAL_ERROR")
+  }
+
+  // Single query for all existing files in draft
+  const draftFiles = await db
+    .select()
+    .from(schema.gameReleaseFiles)
+    .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
+    .all()
+
+  const existingByPath = new Map<string, schema.GameReleaseFile>(
+    draftFiles.map((f) => [f.logicalPath, f]),
+  )
+
+  // 6. Resolve paths, categories, policies and validate tree invariants
+  type PreparedBatchItem = {
+    name: string
+    logicalPath: string
+    category: GameFileCategory
+    sha256: string
+    sizeBytes: number
+    explicitPolicy: SyncPolicyGql | null
+    objectKey: string
+    tokenHash: string
+    existingRecord?: schema.GameReleaseFile
+  }
+
+  const preparedItems: PreparedBatchItem[] = []
+  const batchPathSet = new Set<string>()
+
+  for (const { item, tokenRecord, tokenHash } of validatedItems) {
+    const name = String(item.name || tokenRecord.originalFilename || "").trim()
+    if (!name) {
+      throw createGraphQLError("El nombre del archivo o mod es obligatorio.", "VALIDATION_ERROR")
+    }
+
+    let category: GameFileCategory = (item.category as GameFileCategory) || (tokenRecord.category as GameFileCategory) || "GENERAL"
+
+    const defaultDir =
+      category === "CONFIG"
+        ? "config"
+        : category === "RESOURCE_PACK"
+        ? "resourcepacks"
+        : category === "SHADER_PACK"
+        ? "shaderpacks"
+        : category === "DATA_PACK"
+        ? "datapacks"
+        : category === "KUBEJS"
+        ? "kubejs"
+        : category === "SCRIPT"
+        ? "scripts"
+        : category === "MOD"
+        ? "mods"
+        : ""
+
+    const logicalPath = item.logicalPath
+      ? sanitizeGamePath(item.logicalPath)
+      : tokenRecord.originalFilename && tokenRecord.originalFilename.includes("/")
+      ? sanitizeGamePath(tokenRecord.originalFilename)
+      : tokenRecord.originalFilename
+      ? sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(tokenRecord.originalFilename)}` : sanitizeGameFileName(tokenRecord.originalFilename))
+      : sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(name)}` : sanitizeGameFileName(name))
+
+    if (!item.category && !tokenRecord.category) {
+      category = inferGameCategory(logicalPath)
+    }
+
+    if (batchPathSet.has(logicalPath)) {
+      throw createGraphQLError(`Ruta duplicada en el lote de subida: ${logicalPath}`, "VALIDATION_ERROR")
+    }
+    batchPathSet.add(logicalPath)
+
+    const existingRecord = existingByPath.get(logicalPath)
+    if (existingRecord && existingRecord.isDirectory) {
+      throw createGraphQLError(`No se puede sobrescribir una carpeta existente con un archivo: ${logicalPath}`, "VALIDATION_ERROR")
+    }
+
+    preparedItems.push({
+      name,
+      logicalPath,
+      category,
+      sha256: String(item.sha256).trim(),
+      sizeBytes: item.sizeBytes,
+      explicitPolicy: item.explicitPolicy || null,
+      objectKey: tokenRecord.objectKey!,
+      tokenHash,
+      existingRecord,
+    })
+  }
+
+  // Validate tree invariants
+  const ignoredExisting = new Set(
+    preparedItems.filter((p) => p.existingRecord).map((p) => p.logicalPath),
+  )
+
+  const treeCheck = validateGameTreeInvariants(
+    draftFiles.map((f) => ({ logicalPath: f.logicalPath, isDirectory: Boolean(f.isDirectory) })),
+    preparedItems.map((p) => ({ logicalPath: p.logicalPath, isDirectory: false })),
+    { ignoredExistingPaths: ignoredExisting },
+  )
+
+  if (!treeCheck.valid) {
+    throw createGraphQLError(treeCheck.error || "Estructura de árbol de archivos inválida.", "VALIDATION_ERROR")
+  }
+
+  // 7. Split into INSERTs and UPDATEs, construct statements (< 100 params)
+  const nowIso = new Date().toISOString()
+  const toInsert = preparedItems.filter((p) => !p.existingRecord)
+  const toUpdate = preparedItems.filter((p) => Boolean(p.existingRecord))
+
+  const statements: BatchStatement[] = []
+
+  // 7a. UPDATE tokens marked as used (grouped with SQL CASE in chunks of 15 tokens)
+  const TOKEN_UPDATE_CHUNK_SIZE = 15
+  for (let i = 0; i < preparedItems.length; i += TOKEN_UPDATE_CHUNK_SIZE) {
+    const chunk = preparedItems.slice(i, i + TOKEN_UPDATE_CHUNK_SIZE)
+    const hashes = chunk.map((c) => c.tokenHash)
+    const shaCases = sql.join(
+      chunk.map((c) => sql`WHEN ${schema.gameFileUploadTokens.tokenHash} = ${c.tokenHash} THEN ${c.sha256}`),
+      sql` `,
+    )
+    const sizeCases = sql.join(
+      chunk.map((c) => sql`WHEN ${schema.gameFileUploadTokens.tokenHash} = ${c.tokenHash} THEN ${c.sizeBytes}`),
+      sql` `,
+    )
+
+    statements.push(
+      db
+        .update(schema.gameFileUploadTokens)
+        .set({
+          usedAt: nowIso,
+          sha256: sql`CASE ${shaCases} ELSE ${schema.gameFileUploadTokens.sha256} END`,
+          uploadedSizeBytes: sql`CASE ${sizeCases} ELSE ${schema.gameFileUploadTokens.uploadedSizeBytes} END`,
+        })
+        .where(
+          and(
+            inArray(schema.gameFileUploadTokens.tokenHash, hashes),
+            sql`${schema.gameFileUploadTokens.usedAt} IS NULL`,
+          ),
+        ),
+    )
+  }
+
+  // 7b. Multi-row INSERTs for new files in chunks of 5 rows (5 * 16 = 80 params < 100)
+  const INSERT_CHUNK_SIZE = 5
+  for (let i = 0; i < toInsert.length; i += INSERT_CHUNK_SIZE) {
+    const chunk = toInsert.slice(i, i + INSERT_CHUNK_SIZE).map((item) => ({
+      id: crypto.randomUUID(),
+      releaseId: draft.id,
+      name: item.name,
+      logicalPath: item.logicalPath,
+      category: item.category,
+      sha256: item.sha256,
+      sizeBytes: item.sizeBytes,
+      policy: item.explicitPolicy,
+      isDirectory: 0,
+      objectKey: item.objectKey,
+      sourceProvider: null,
+      sourceProjectId: null,
+      sourceVersionId: null,
+      sourceFileId: null,
+      sourceEnvironment: null,
+      createdAt: nowIso,
+    }))
+    statements.push(db.insert(schema.gameReleaseFiles).values(chunk))
+  }
+
+  // 7c. Grouped UPDATEs for existing files in chunks of 6 files (< 100 params)
+  const UPDATE_CHUNK_SIZE = 6
+  for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK_SIZE) {
+    const chunk = toUpdate.slice(i, i + UPDATE_CHUNK_SIZE)
+    const ids = chunk.map((c) => c.existingRecord!.id)
+
+    const nameCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.name}`), sql` `)
+    const catCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.category}`), sql` `)
+    const shaCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.sha256}`), sql` `)
+    const sizeCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.sizeBytes}`), sql` `)
+    const policyCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.explicitPolicy}`), sql` `)
+    const keyCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.objectKey}`), sql` `)
+
+    statements.push(
+      db
+        .update(schema.gameReleaseFiles)
+        .set({
+          name: sql`CASE ${nameCases} ELSE ${schema.gameReleaseFiles.name} END`,
+          category: sql`CASE ${catCases} ELSE ${schema.gameReleaseFiles.category} END`,
+          sha256: sql`CASE ${shaCases} ELSE ${schema.gameReleaseFiles.sha256} END`,
+          sizeBytes: sql`CASE ${sizeCases} ELSE ${schema.gameReleaseFiles.sizeBytes} END`,
+          policy: sql`CASE ${policyCases} ELSE ${schema.gameReleaseFiles.policy} END`,
+          objectKey: sql`CASE ${keyCases} ELSE ${schema.gameReleaseFiles.objectKey} END`,
+          sourceProvider: null,
+          sourceProjectId: null,
+          sourceVersionId: null,
+          sourceFileId: null,
+          sourceEnvironment: null,
+        })
+        .where(inArray(schema.gameReleaseFiles.id, ids)),
+    )
+  }
+
+  // 8. Execute all statements in single atomic db.batch()
+  if (statements.length > 0) {
+    await db.batch(asBatchTuple(statements))
+  }
+
+  // 9. Clean up replaced R2 objects if unreferenced
+  const oldKeysToClean = toUpdate
+    .filter((u) => u.existingRecord!.objectKey && u.existingRecord!.objectKey !== u.objectKey)
+    .map((u) => u.existingRecord!.objectKey)
+
+  if (oldKeysToClean.length > 0) {
+    await deleteR2ObjectsIfUnreferenced(env, db, oldKeysToClean)
+  }
+
+  // 10. Return updated files with effective policies
+  const allFiles = await db
+    .select()
+    .from(schema.gameReleaseFiles)
+    .where(eq(schema.gameReleaseFiles.releaseId, draft.id))
+    .all()
+
+  const effectiveMap = resolveReleaseEffectivePolicies(allFiles)
+  return allFiles
+    .filter((f) => batchPathSet.has(f.logicalPath))
+    .map((f) => formatAdminGameFile(f, effectiveMap.get(f.id)))
 }
 
 export async function addGameFile(

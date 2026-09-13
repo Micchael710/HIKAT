@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import type { ThemeMode, AdminGameFile, SyncPolicy } from "../../types"
 import { gameApi } from "../../services/graphqlClient"
-import { uploadGameFileDirect } from "../../services/gameFileUploadService"
+import { uploadGameFileDirect, uploadGameFilesBatch } from "../../services/gameFileUploadService"
 import {
   formatBytesToHuman,
   isEditableTextFile,
@@ -545,16 +545,9 @@ export default function GameFilesExplorer({
     }
 
     try {
-      for (let i = 0; i < itemsToUpload.length; i++) {
-        const item = itemsToUpload[i]
+      // 1. Prepare items metadata
+      const preparedItems = itemsToUpload.map((item) => {
         const file = item.file
-        setUploadProgress({
-          current: i + 1,
-          total: itemsToUpload.length,
-          filename: file.name,
-        })
-
-        // Determine destination logical path
         let targetLogicalPath: string
         if (item.relativePath) {
           let cleanRel = item.relativePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
@@ -566,35 +559,68 @@ export default function GameFilesExplorer({
         } else {
           targetLogicalPath = currentPath ? `${currentPath}/${file.name}` : file.name
         }
-
         const category = inferGameCategory(targetLogicalPath)
-
-        // 1. Request upload ticket
-        const ticket = await gameApi.createGameFileUpload({
-          category,
+        return {
+          file,
           originalFilename: file.name,
           logicalPath: targetLogicalPath,
-          sizeBytes: file.size,
-        }, serverId)
-
-        // 2. Upload directly to R2 via S3 multipart + incremental SHA-256
-        const uploaded = await uploadGameFileDirect(file, ticket)
-
-        // 3. Confirm upload on backend
-        const completed = await gameApi.completeGameFileUpload({
-          uploadToken: ticket.uploadToken,
-          sha256: uploaded.sha256,
-          sizeBytes: uploaded.sizeBytes,
-        })
-
-        // 4. Add game file to active draft
-        await gameApi.addGameFile({
-          name: file.name,
           category,
-          logicalPath: targetLogicalPath,
-          tokenHash: completed.tokenHash,
-        }, serverId)
-      }
+          sizeBytes: file.size,
+        }
+      })
+
+      // 2. Request batch upload tickets and scoped temporary credentials in 1 request
+      const batchPayload = await gameApi.createGameFileBatchUpload(
+        preparedItems.map((p) => ({
+          originalFilename: p.originalFilename,
+          logicalPath: p.logicalPath,
+          category: p.category,
+          sizeBytes: p.sizeBytes,
+        })),
+        serverId,
+      )
+
+      // 3. Upload files directly to R2 multipart with concurrency 2
+      const batchItems = preparedItems.map((p, idx) => ({
+        file: p.file,
+        uploadToken: batchPayload.items[idx]!.uploadToken,
+        objectKey: batchPayload.items[idx]!.objectKey,
+        expectedCategory: batchPayload.items[idx]!.expectedCategory as any,
+        name: p.file.name,
+        logicalPath: p.logicalPath,
+      }))
+
+      const uploadedResults = await uploadGameFilesBatch(
+        batchItems,
+        {
+          endpoint: batchPayload.endpoint,
+          credentials: batchPayload.credentials,
+          bucket: batchPayload.bucket,
+        },
+        (progress) => {
+          setUploadProgress({
+            current: progress.completed,
+            total: progress.total,
+            filename: progress.currentFilename,
+          })
+        },
+      )
+
+      // 4. Complete batch on backend in 1 request
+      await gameApi.completeGameFileBatchUpload(
+        {
+          items: uploadedResults.map((u) => ({
+            uploadToken: u.uploadToken,
+            sha256: u.sha256,
+            sizeBytes: u.sizeBytes,
+            name: u.name,
+            logicalPath: u.logicalPath || undefined,
+            category: (u.category as any) || undefined,
+            explicitPolicy: u.explicitPolicy || undefined,
+          })),
+        },
+        serverId,
+      )
 
       onToast(`${itemsToUpload.length} archivo(s) subido(s) exitosamente.`, "success")
       await onRefresh()

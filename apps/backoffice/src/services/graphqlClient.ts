@@ -1818,6 +1818,40 @@ export const gameApi = {
     return data.createGameFileUpload
   },
 
+  async createGameFileBatchUpload(
+    files: import("../types").CreateGameFileBatchUploadItemInput[],
+    serverId: string,
+  ): Promise<import("../types").GameFileBatchUploadPayload> {
+    const mutation = /* GraphQL */ `
+      mutation CreateGameFileBatchUpload($files: [CreateGameFileBatchUploadItemInput!]!, $serverId: ID) {
+        createGameFileBatchUpload(files: $files, serverId: $serverId) {
+          batchId
+          prefixPath
+          expiresAt
+          bucket
+          endpoint
+          credentials {
+            accessKeyId
+            secretAccessKey
+            sessionToken
+          }
+          items {
+            uploadToken
+            objectKey
+            expectedCategory
+            originalFilename
+            logicalPath
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ createGameFileBatchUpload: import("../types").GameFileBatchUploadPayload }>(mutation, {
+      files,
+      serverId,
+    })
+    return data.createGameFileBatchUpload
+  },
+
   async completeGameFileUpload(
     input: CompleteGameFileUploadInputGql,
   ): Promise<GameFileUploadCompletePayloadGql> {
@@ -1831,6 +1865,41 @@ export const gameApi = {
     `
     const data = await executeGraphQL<{ completeGameFileUpload: GameFileUploadCompletePayloadGql }>(mutation, { input })
     return data.completeGameFileUpload
+  },
+
+  async completeGameFileBatchUpload(
+    input: import("../types").CompleteGameFileBatchUploadInput,
+    serverId: string,
+  ): Promise<import("../types").AdminGameFile[]> {
+    const mutation = /* GraphQL */ `
+      mutation CompleteGameFileBatchUpload($input: CompleteGameFileBatchUploadInput!, $serverId: ID) {
+        completeGameFileBatchUpload(input: $input, serverId: $serverId) {
+          id
+          name
+          logicalPath
+          category
+          sha256
+          sizeBytes
+          policy
+          explicitPolicy
+          effectivePolicy
+          isInherited
+          isDirectory
+          changeStatus
+          sourceProvider
+          sourceProjectId
+          sourceVersionId
+          sourceFileId
+          sourceEnvironment
+          createdAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ completeGameFileBatchUpload: import("../types").AdminGameFile[] }>(mutation, {
+      input,
+      serverId,
+    })
+    return data.completeGameFileBatchUpload
   },
 
   async addGameFile(input: {
@@ -2249,6 +2318,13 @@ export const gameApi = {
   ): Promise<import("../types").AdminGameFile[]> {
     return modProvidersApi.installModPlan(input, serverId)
   },
+
+  async installModPlansBatch(
+    input: import("../types").InstallModPlansBatchInput,
+    serverId: string,
+  ): Promise<import("../types").AdminGameFile[]> {
+    return modProvidersApi.installModPlansBatch(input, serverId)
+  },
 }
 
 
@@ -2544,6 +2620,41 @@ export const modProvidersApi = {
       serverId,
     })
     return data.installModPlan
+  },
+
+  async installModPlansBatch(
+    input: import("../types").InstallModPlansBatchInput,
+    serverId: string,
+  ): Promise<import("../types").AdminGameFile[]> {
+    const mutation = /* GraphQL */ `
+      mutation InstallModPlansBatch($input: InstallModPlansBatchInput!, $serverId: ID) {
+        installModPlansBatch(input: $input, serverId: $serverId) {
+          id
+          name
+          logicalPath
+          category
+          sha256
+          sizeBytes
+          policy
+          explicitPolicy
+          effectivePolicy
+          isInherited
+          isDirectory
+          changeStatus
+          sourceProvider
+          sourceProjectId
+          sourceVersionId
+          sourceFileId
+          sourceEnvironment
+          createdAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ installModPlansBatch: import("../types").AdminGameFile[] }>(mutation, {
+      input,
+      serverId,
+    })
+    return data.installModPlansBatch
   },
 }
 

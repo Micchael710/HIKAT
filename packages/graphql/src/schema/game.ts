@@ -259,12 +259,56 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
+  Individual item authorization result in batch upload payload
+  """
+  type GameFileBatchUploadItemPayload {
+    uploadToken: String!
+    objectKey: String!
+    expectedCategory: GameFileCategory!
+    originalFilename: String!
+    logicalPath: String
+  }
+
+  """
+  Payload returned when requesting a batch of game file upload tickets
+  """
+  type GameFileBatchUploadPayload {
+    batchId: String!
+    prefixPath: String!
+    expiresAt: DateTime!
+    bucket: String!
+    endpoint: String!
+    credentials: R2TemporaryCredentials!
+    items: [GameFileBatchUploadItemPayload!]!
+  }
+
+  """
   Input payload to finalize and verify a direct R2 multipart upload
   """
   input CompleteGameFileUploadInput {
     uploadToken: String!
     sha256: String!
     sizeBytes: Float!
+  }
+
+  """
+  Single file completion item in batch upload finalization
+  """
+  input CompleteGameFileBatchUploadItemInput {
+    uploadToken: String!
+    sha256: String!
+    sizeBytes: Float!
+    name: String!
+    logicalPath: String
+    category: GameFileCategory
+    explicitPolicy: SyncPolicy
+  }
+
+  """
+  Input payload to finalize and verify a batch of direct R2 multipart uploads
+  """
+  input CompleteGameFileBatchUploadInput {
+    items: [CompleteGameFileBatchUploadItemInput!]!
   }
 
   """
@@ -418,6 +462,13 @@ export const gameTypeDefs = /* GraphQL */ `
     logicalPath: String
   }
 
+  input CreateGameFileBatchUploadItemInput {
+    category: GameFileCategory
+    originalFilename: String!
+    sizeBytes: Float!
+    logicalPath: String
+  }
+
   input AddGameFileInput {
     name: String!
     category: GameFileCategory
@@ -484,6 +535,10 @@ export const gameTypeDefs = /* GraphQL */ `
     contentType: ContentType
     manualOverrides: [ModVersionOverrideInput!]
     environmentOverride: ModEnvironment
+  }
+
+  input InstallModPlansBatchInput {
+    plans: [InstallModPlanInput!]!
   }
 
   extend type Query {
@@ -577,9 +632,19 @@ export const gameTypeDefs = /* GraphQL */ `
     createGameFileUpload(serverId: ID, input: CreateGameFileUploadInput!): GameFileUploadPayload!
 
     """
+    Request authorization and tokens for a batch of game file uploads under a scoped prefix - requires ADMIN role
+    """
+    createGameFileBatchUpload(serverId: ID, files: [CreateGameFileBatchUploadItemInput!]!): GameFileBatchUploadPayload!
+
+    """
     Finalize and verify a direct R2 multipart upload - requires ADMIN role
     """
     completeGameFileUpload(input: CompleteGameFileUploadInput!): GameFileUploadCompletePayload!
+
+    """
+    Finalize, verify and add a batch of uploaded files to the active draft - requires ADMIN role
+    """
+    completeGameFileBatchUpload(serverId: ID, input: CompleteGameFileBatchUploadInput!): [AdminGameFile!]!
 
     """
     Add an uploaded game file to the active draft - requires ADMIN role
@@ -652,6 +717,14 @@ export const gameTypeDefs = /* GraphQL */ `
     installModPlan(
       serverId: ID
       input: InstallModPlanInput!
+    ): [AdminGameFile!]!
+
+    """
+    Download, validate, and install multiple mods/content plans and their required dependencies into the active draft in a single batch - requires ADMIN role
+    """
+    installModPlansBatch(
+      serverId: ID
+      input: InstallModPlansBatchInput!
     ): [AdminGameFile!]!
   }
 `

@@ -36,6 +36,15 @@ import { validateGameEnvironment } from "./gameEnvironmentService"
 import { assertExplicitServerIdIfMultiple } from "../pterodactyl/serverAdministrationService"
 import type { Env } from "../../types"
 
+type BatchStatements = Parameters<Database["batch"]>[0]
+type BatchStatement = BatchStatements[number]
+
+function asBatchTuple(statements: BatchStatement[]): BatchStatements {
+  if (statements.length === 0) {
+    throw new Error("Batch statements cannot be empty.")
+  }
+  return [statements[0], ...statements.slice(1)] as unknown as BatchStatements
+}
 
 /**
  * Deterministically computes SHA-256 fingerprint representing the current draft state and its files.
@@ -243,6 +252,51 @@ export function computeDraftChanges(
   }
 }
 
+/**
+ * Helper to physically verify files in R2 storage with concurrency pool of max 6.
+ * Used exclusively during publishGameRelease or when physical check is requested.
+ */
+export async function verifyR2FilesPhysicalExistence(
+  env: Env,
+  files: schema.GameReleaseFile[],
+  maxConcurrency = 6,
+): Promise<{ valid: boolean; issues: string[] }> {
+  const issues: string[] = []
+  if (!env.ASSETS) {
+    return { valid: false, issues: ["El almacenamiento de archivos no está disponible."] }
+  }
+  const realFiles = files.filter((f) => !f.isDirectory)
+  if (realFiles.length === 0) {
+    return { valid: true, issues: [] }
+  }
+
+  let index = 0
+  const worker = async () => {
+    while (index < realFiles.length) {
+      const f = realFiles[index++]
+      if (!f) continue
+      try {
+        const head = await env.ASSETS!.head(f.objectKey)
+        if (!head) {
+          issues.push(`El archivo "${f.name}" no se encontró en el almacenamiento.`)
+        } else if (head.size !== f.sizeBytes) {
+          issues.push(`El tamaño en almacenamiento de "${f.name}" no coincide.`)
+        }
+      } catch {
+        issues.push(`Error al verificar almacenamiento de "${f.name}".`)
+      }
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(maxConcurrency, realFiles.length) },
+    () => worker(),
+  )
+  await Promise.all(workers)
+
+  return { valid: issues.length === 0, issues }
+}
+
 export async function validateDraftReadiness(
   env: Env,
   draft: { id?: string; version: string; minecraftVersion?: string | null; neoForgeVersion?: string | null; serverId?: string | null },
@@ -250,6 +304,7 @@ export async function validateDraftReadiness(
   db?: Database,
   targetVersion?: string,
   serverId?: string | null,
+  checkPhysicalStorage = false,
 ): Promise<GameDraftReadinessGql> {
   const issues: string[] = []
   let noConflicts = true
@@ -303,25 +358,21 @@ export async function validateDraftReadiness(
     pathSet.add(f.logicalPath)
   }
 
-  // 3. Verify object existence in R2 strictly for real files (skipping directory records)
+  // 3. Storage verification:
+  // - Fast D1-only check by default (for getAdminGameOverview)
+  // - Physical R2 check with concurrency 6 if checkPhysicalStorage is true
   if (realFiles.length > 0) {
-    if (!env.ASSETS) {
-      storageVerified = false
-      issues.push("El almacenamiento de archivos no está disponible.")
+    if (checkPhysicalStorage) {
+      const physical = await verifyR2FilesPhysicalExistence(env, realFiles, 6)
+      if (!physical.valid) {
+        storageVerified = false
+        issues.push(...physical.issues)
+      }
     } else {
       for (const f of realFiles) {
-        try {
-          const head = await env.ASSETS.head(f.objectKey)
-          if (!head) {
-            storageVerified = false
-            issues.push(`El archivo "${f.name}" no se encontró en el almacenamiento.`)
-          } else if (head.size !== f.sizeBytes) {
-            storageVerified = false
-            issues.push(`El tamaño en almacenamiento de "${f.name}" no coincide.`)
-          }
-        } catch {
+        if (!f.objectKey || f.sizeBytes < 0) {
           storageVerified = false
-          issues.push(`Error al verificar almacenamiento de "${f.name}".`)
+          issues.push(`El archivo "${f.name}" no tiene almacenamiento asociado.`)
         }
       }
     }
@@ -750,28 +801,36 @@ export async function prepareGameDraft(
       .where(eq(schema.gameReleaseFiles.releaseId, baseRelease.id))
       .all()
 
-    for (const bf of baseFiles) {
-      const newFileId = crypto.randomUUID()
-      const newFile = {
-        id: newFileId,
-        releaseId: draftId,
-        name: bf.name,
-        logicalPath: bf.logicalPath,
-        category: bf.category,
-        sha256: bf.sha256,
-        sizeBytes: bf.sizeBytes,
-        policy: bf.policy,
-        isDirectory: bf.isDirectory ?? 0,
-        objectKey: bf.objectKey, // Immutable reference to identical R2 object
-        sourceProvider: bf.sourceProvider || null,
-        sourceProjectId: bf.sourceProjectId || null,
-        sourceVersionId: bf.sourceVersionId || null,
-        sourceFileId: bf.sourceFileId || null,
-        sourceEnvironment: bf.sourceEnvironment || null,
-        createdAt: now,
-      }
-      await db.insert(schema.gameReleaseFiles).values(newFile)
-      clonedFiles.push(newFile)
+    const CLONE_CHUNK_SIZE = 5
+    const insertStatements: BatchStatement[] = []
+    for (let i = 0; i < baseFiles.length; i += CLONE_CHUNK_SIZE) {
+      const chunk = baseFiles.slice(i, i + CLONE_CHUNK_SIZE).map((bf) => {
+        const newFile = {
+          id: crypto.randomUUID(),
+          releaseId: draftId,
+          name: bf.name,
+          logicalPath: bf.logicalPath,
+          category: bf.category,
+          sha256: bf.sha256,
+          sizeBytes: bf.sizeBytes,
+          policy: bf.policy,
+          isDirectory: bf.isDirectory ?? 0,
+          objectKey: bf.objectKey, // Immutable reference to identical R2 object
+          sourceProvider: bf.sourceProvider || null,
+          sourceProjectId: bf.sourceProjectId || null,
+          sourceVersionId: bf.sourceVersionId || null,
+          sourceFileId: bf.sourceFileId || null,
+          sourceEnvironment: bf.sourceEnvironment || null,
+          createdAt: now,
+        }
+        clonedFiles.push(newFile)
+        return newFile
+      })
+      insertStatements.push(db.insert(schema.gameReleaseFiles).values(chunk))
+    }
+
+    if (insertStatements.length > 0) {
+      await db.batch(asBatchTuple(insertStatements))
     }
   }
 
@@ -1131,6 +1190,46 @@ export async function publishGameRelease(
   if (!readiness.isReady) {
     const errorMsg = readiness.issues.length > 0 ? readiness.issues.join(". ") : "El borrador no está listo para publicar."
     throw createGraphQLError(`No se puede publicar la actualización: ${errorMsg}`, "VALIDATION_ERROR")
+  }
+
+  // 6b. Physical R2 Storage Verification (concurrency 6)
+  // - First release: verify all real files physically
+  // - Subsequent releases: verify physically ONLY ADDED and UPDATED files (UNCHANGED skip HEAD)
+  const targetServerIdForCheck = serverId || draft.serverId
+  const pubConditions = [eq(schema.gameReleases.status, "PUBLISHED")]
+  if (targetServerIdForCheck) {
+    pubConditions.push(eq(schema.gameReleases.serverId, targetServerIdForCheck))
+  }
+  const publishedRelease = await db
+    .select()
+    .from(schema.gameReleases)
+    .where(and(...pubConditions))
+    .get()
+
+  let filesToPhysicallyVerify: schema.GameReleaseFile[]
+  if (!publishedRelease) {
+    filesToPhysicallyVerify = draftFiles.filter((f) => !f.isDirectory)
+  } else {
+    const publishedFiles = await db
+      .select()
+      .from(schema.gameReleaseFiles)
+      .where(eq(schema.gameReleaseFiles.releaseId, publishedRelease.id))
+      .all()
+    const changesAnalysis = computeDraftChanges(publishedFiles, draftFiles)
+    const statusMap = new Map(changesAnalysis.taggedFiles.map((t) => [t.id, t.changeStatus]))
+    filesToPhysicallyVerify = draftFiles.filter(
+      (f) => !f.isDirectory && (statusMap.get(f.id) === "ADDED" || statusMap.get(f.id) === "UPDATED"),
+    )
+  }
+
+  if (filesToPhysicallyVerify.length > 0) {
+    const physicalResult = await verifyR2FilesPhysicalExistence(env, filesToPhysicallyVerify, 6)
+    if (!physicalResult.valid) {
+      throw createGraphQLError(
+        `No se puede publicar la actualización: ${physicalResult.issues.join(". ")}`,
+        "VALIDATION_ERROR",
+      )
+    }
   }
 
   // 7. Authoritative Review Fingerprint Validation

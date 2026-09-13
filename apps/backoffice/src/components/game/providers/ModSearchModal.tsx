@@ -5,6 +5,7 @@ import type {
   ModProviderStatus,
   ContentType,
   ThemeMode,
+  QueuedModSelection,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
 import { getThemeTokens } from "../../../theme/tokens"
@@ -44,6 +45,8 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   const [offset, setOffset] = useState(0)
   const [providerStatuses, setProviderStatuses] = useState<ModProviderStatus[]>([])
   const [selectedMod, setSelectedMod] = useState<ModSearchResultItem | null>(null)
+  const [queuedSelections, setQueuedSelections] = useState<QueuedModSelection[]>([])
+  const [installingBatch, setInstallingBatch] = useState(false)
   const [handoffDetail, setHandoffDetail] = useState<{
     provider: ModProvider
     projectId: string
@@ -175,6 +178,36 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     const nextOffset = offset + PAGE_SIZE
     setOffset(nextOffset)
     executeSearch(query, selectedContentType, selectedProviderTab, nextOffset, true)
+  }
+
+  const handleConfirmBatchInstall = async () => {
+    if (queuedSelections.length === 0 || installingBatch) return
+    try {
+      setInstallingBatch(true)
+      setError(null)
+
+      await graphqlClient.installModPlansBatch(
+        {
+          plans: queuedSelections.map((sel) => ({
+            provider: sel.provider,
+            projectId: sel.projectId,
+            versionId: sel.versionId,
+            contentType: sel.contentType,
+            manualOverrides: sel.manualOverrides,
+            environmentOverride: sel.environmentOverride,
+          })),
+        },
+        serverId,
+      )
+
+      setQueuedSelections([])
+      onSuccess()
+      onClose()
+    } catch (err: any) {
+      setError(err.message || "Error al instalar los contenidos seleccionados.")
+    } finally {
+      setInstallingBatch(false)
+    }
   }
 
   // Partial provider failure warning check
@@ -526,6 +559,101 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Bottom Queue Bar */}
+        {queuedSelections.length > 0 && (
+          <div
+            data-testid="queued-mods-bar"
+            style={{
+              padding: "14px 24px",
+              borderTop: `1px solid ${tokens.borderSubtle}`,
+              background: tokens.bgCardInner,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", flex: 1 }}>
+              <span style={{ fontSize: "14px", fontWeight: "700", color: tokens.textPrimary }}>
+                Seleccionados: {queuedSelections.length}
+              </span>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                {queuedSelections.map((sel) => (
+                  <span
+                    key={`${sel.provider}:${sel.projectId}:${sel.contentType}`}
+                    data-testid={`chip-queued-${sel.provider}-${sel.projectId}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "4px 10px",
+                      background: tokens.bgPillActive,
+                      borderRadius: "16px",
+                      fontSize: "12px",
+                      color: tokens.textPrimary,
+                      border: `1px solid ${tokens.borderSubtle}`,
+                    }}
+                  >
+                    <span>{sel.projectName}</span>
+                    <button
+                      type="button"
+                      data-testid={`remove-queued-${sel.provider}-${sel.projectId}`}
+                      onClick={() =>
+                        setQueuedSelections((prev) =>
+                          prev.filter(
+                            (x) =>
+                              !(
+                                x.provider === sel.provider &&
+                                x.projectId === sel.projectId &&
+                                x.contentType === sel.contentType
+                              ),
+                          ),
+                        )
+                      }
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: tokens.textMuted,
+                        cursor: "pointer",
+                        padding: "0 2px",
+                        fontSize: "13px",
+                        fontWeight: "700",
+                        lineHeight: 1,
+                      }}
+                      title="Eliminar de la selección"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              data-testid="button-confirm-batch-install"
+              disabled={installingBatch}
+              onClick={handleConfirmBatchInstall}
+              className="launcher-btn-primary"
+              style={{
+                padding: "10px 22px",
+                borderRadius: "12px",
+                fontSize: "14px",
+                fontWeight: "700",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              {installingBatch && <IconSpinner size={16} />}
+              {installingBatch
+                ? "Instalando..."
+                : `Añadir ${queuedSelections.length} al borrador`}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Selected Mod Detail Modal (via search selection or handoff) */}
@@ -538,6 +666,19 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           initialVersionId={handoffDetail?.initialVersionId}
           initialEnvironmentOverride={handoffDetail?.initialEnvironmentOverride}
           theme={theme}
+          onQueueMod={(item) => {
+            setQueuedSelections((prev) => [
+              ...prev.filter(
+                (x) =>
+                  !(
+                    x.provider === item.provider &&
+                    x.projectId === item.projectId &&
+                    x.contentType === item.contentType
+                  ),
+              ),
+              item,
+            ])
+          }}
           onClose={() => {
             setSelectedMod(null)
             setHandoffDetail(null)

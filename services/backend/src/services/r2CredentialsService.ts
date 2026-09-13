@@ -10,14 +10,15 @@ export interface R2TemporaryCredentials {
 
 export interface GenerateR2TemporaryCredentialsParams {
   env?: Env
-  objectKey: string
+  objectKey?: string
+  prefixPath?: string
   ttlSeconds?: number
 }
 
 /**
  * Generates temporary R2 scoped credentials locally following Cloudflare's official specification:
  * - JWT HS256 signed with R2_PARENT_SECRET_ACCESS_KEY
- * - Claims: bucket, scope: "object-read-write", paths: { prefixPaths: [], objectPaths: [objectKey] }
+ * - Claims: bucket, scope: "object-read-write", paths: { prefixPaths: [...], objectPaths: [...] }
  * - audience: host only (e.g. "<accountId>.r2.cloudflarestorage.com")
  * - secretAccessKey = SHA256 hex digest of the signed JWT
  * - sessionToken = base64("jwt/" + signedJwt)
@@ -39,16 +40,26 @@ export async function generateR2TemporaryCredentials(
     )
   }
 
+  if (!params.objectKey && !params.prefixPath) {
+    throw createGraphQLError(
+      "Se requiere al menos un objectKey o un prefixPath para generar credenciales R2 temporales.",
+      "VALIDATION_ERROR",
+    )
+  }
+
   // Audience must be the host of the R2 endpoint without "https://"
   const audienceHost = `${accountId}.r2.cloudflarestorage.com`
   const secretBytes = new TextEncoder().encode(parentSecretAccessKey)
+
+  const prefixPaths = params.prefixPath ? [params.prefixPath] : []
+  const objectPaths = params.objectKey ? [params.objectKey] : []
 
   const signedJwt = await new jose.SignJWT({
     bucket: bucketName,
     scope: "object-read-write",
     paths: {
-      prefixPaths: [],
-      objectPaths: [params.objectKey],
+      prefixPaths,
+      objectPaths,
     },
   })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })

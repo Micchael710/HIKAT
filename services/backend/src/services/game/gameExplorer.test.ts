@@ -18,6 +18,8 @@ import {
   getAdminGameFiles,
   createGameFileUploadToken,
   completeGameFileUploadToken,
+  createGameFileBatchUploadTokens,
+  completeGameFileBatchUploadTokens,
   addGameFile,
   updateGameFile,
   saveGameFileContent,
@@ -1685,7 +1687,115 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       ).rejects.toThrow(/no coincide con el tamaño esperado/i)
     })
   })
+
+  describe("Batch Upload Flow (createGameFileBatchUploadTokens & completeGameFileBatchUploadTokens)", () => {
+    it("creates batch upload tokens with batchId and prefixPath scoped temporary credentials", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      const res = await createGameFileBatchUploadTokens(
+        db,
+        [
+          { originalFilename: "file1.jar", sizeBytes: 100, category: "MOD" },
+          { originalFilename: "file2.jar", sizeBytes: 200, category: "MOD" },
+        ],
+        adminId,
+        env,
+      )
+
+      expect(res.batchId).toBeDefined()
+      expect(res.items.length).toBe(2)
+      expect(res.prefixPath).toBe(`game-files/batches/${res.batchId}/`)
+      expect(res.credentials?.accessKeyId).toBe("r2-parent-key-id")
+      expect(res.credentials?.sessionToken).toBeDefined()
+      const rawJwt = atob(res.credentials!.sessionToken).slice("jwt/".length)
+      const jwtPayload = JSON.parse(atob(rawJwt.split(".")[1]!))
+      expect(jwtPayload.paths.prefixPaths).toContain(res.prefixPath)
+
+      // Verify tokens are stored in D1
+      const tokensInDb = await db.select().from(schema.gameFileUploadTokens).all()
+      expect(tokensInDb.length).toBe(2)
+    })
+
+    it("completes batch upload successfully with multi-row inserts and single atomic db.batch", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      const res = await createGameFileBatchUploadTokens(
+        db,
+        [
+          { originalFilename: "alpha.jar", sizeBytes: 20, category: "MOD" },
+          { originalFilename: "beta.jar", sizeBytes: 30, category: "MOD" },
+        ],
+        adminId,
+        env,
+      )
+
+      // Put valid .jar binaries in R2 (PK\x03\x04...)
+      const jar1 = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Uint8Array(16)])
+      const jar2 = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Uint8Array(26)])
+      await mockR2.put(res.items[0]!.objectKey, jar1)
+      await mockR2.put(res.items[1]!.objectKey, jar2)
+
+      const validSha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      const completed = await completeGameFileBatchUploadTokens(
+        db,
+        {
+          items: [
+            { uploadToken: res.items[0]!.uploadToken, sha256: validSha, sizeBytes: 20, name: "alpha.jar" },
+            { uploadToken: res.items[1]!.uploadToken, sha256: validSha, sizeBytes: 30, name: "beta.jar" },
+          ],
+        },
+        adminId,
+        env,
+      )
+
+      expect(completed.length).toBe(2)
+      expect(completed.map(f => f.name).sort()).toEqual(["alpha.jar", "beta.jar"])
+
+      // Verify files in D1
+      const filesInDb = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft.id)).all()
+      expect(filesInDb.length).toBe(2)
+
+      // Verify tokens marked USED in D1
+      const tokensInDb = await db.select().from(schema.gameFileUploadTokens).all()
+      expect(tokensInDb.every(t => t.usedAt !== null)).toBe(true)
+    })
+
+    it("rejects batch if any file fails R2 verification or is invalid", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      const res = await createGameFileBatchUploadTokens(
+        db,
+        [
+          { originalFilename: "valid.jar", sizeBytes: 20, category: "MOD" },
+          { originalFilename: "missing.jar", sizeBytes: 20, category: "MOD" },
+        ],
+        adminId,
+        env,
+      )
+
+      // Only put the first file in R2, leave missing.jar missing
+      const jar1 = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Uint8Array(16)])
+      await mockR2.put(res.items[0]!.objectKey, jar1)
+
+      const validSha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      await expect(
+        completeGameFileBatchUploadTokens(
+          db,
+          {
+            items: [
+              { uploadToken: res.items[0]!.uploadToken, sha256: validSha, sizeBytes: 20, name: "valid.jar" },
+              { uploadToken: res.items[1]!.uploadToken, sha256: validSha, sizeBytes: 20, name: "missing.jar" },
+            ],
+          },
+          adminId,
+          env,
+        ),
+      ).rejects.toThrow(/no se encontró en el almacenamiento/i)
+
+      // Verify atomic rollback / no files committed
+      const filesInDb = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft.id)).all()
+      expect(filesInDb.length).toBe(0)
+    })
+  })
 })
+
 
 
 

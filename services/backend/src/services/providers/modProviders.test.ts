@@ -6,7 +6,7 @@ import type { Env } from "../../types"
 import { ModrinthAdapter } from "./modrinthAdapter"
 import { CurseForgeAdapter } from "./curseforgeAdapter"
 import { ModProviderManager, getLogicalPathForContent } from "./modProviderManager"
-import { installModPlan } from "./modInstallationService"
+import { installModPlan, installModPlansBatch, PROVIDER_MIN_PART_SIZE_BYTES } from "./modInstallationService"
 import { prepareGameDraft, getPublishedModpack, publishGameRelease } from "../game/releaseService"
 import { addGameFile } from "../game/gameFileService"
 import { validateGameFileBuffer } from "@hikat/shared"
@@ -4905,6 +4905,139 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(plan.isValid).toBe(true)
       expect(plan.requiresGameUpdate).toBe(false)
       expect(plan.items[0]?.environment).toBe("SERVER")
+    })
+  })
+
+  describe("8. Batch Mod Installation & Deduplication (installModPlansBatch)", () => {
+    it("deduplicates identical mod selections automatically into a single installation", async () => {
+      mockFetch.mockImplementation(async (url: string, opts?: any) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/328085/files/99999")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: {
+                id: 99999,
+                fileName: "secure.jar",
+                downloadUrl: "https://cdn.external-forge-cdn.net/files/secure.jar",
+                gameVersions: ["1.21.1", "NeoForge"],
+                hashes: [],
+                dependencies: [],
+              },
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/328085/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 99999,
+                  fileName: "secure.jar",
+                  downloadUrl: "https://cdn.external-forge-cdn.net/files/secure.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/328085")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 328085, name: "Secure Mod", classId: 6 } }),
+          }
+        }
+        if (u.includes("https://cdn.external-forge-cdn.net/files/secure.jar")) {
+          return createBinaryResponse(createSampleJarBuffer("secure binary"))
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const results = await installModPlansBatch(
+        db,
+        env,
+        {
+          plans: [
+            { provider: "CURSEFORGE", projectId: "328085", versionId: "99999", environmentOverride: "CLIENT" },
+            { provider: "CURSEFORGE", projectId: "328085", versionId: "99999", environmentOverride: "CLIENT" },
+          ],
+        },
+        adminUserId,
+      )
+
+      expect(results.length).toBe(1)
+      expect(results[0]!.name).toBe("secure.jar")
+      expect(r2.createMultipartUpload).toHaveBeenCalled()
+      expect(r2._store.size).toBe(1)
+    })
+
+    it("fails fast with CONFLICT before downloading when different versions of the same project are requested", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/328085/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 99999,
+                  fileName: "secure-1.0.jar",
+                  downloadUrl: "https://cdn.external-forge-cdn.net/files/secure-1.0.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [],
+                  dependencies: [],
+                },
+                {
+                  id: 88888,
+                  fileName: "secure-2.0.jar",
+                  downloadUrl: "https://cdn.external-forge-cdn.net/files/secure-2.0.jar",
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  hashes: [],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/328085")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { id: 328085, name: "Secure Mod", classId: 6 } }),
+          }
+        }
+        if (u.includes("cdn.external-forge-cdn.net")) {
+          throw new Error("Should not attempt download on version conflict!")
+        }
+        return { ok: false, status: 404 }
+      })
+
+      await expect(
+        installModPlansBatch(
+          db,
+          env,
+          {
+            plans: [
+              { provider: "CURSEFORGE", projectId: "328085", versionId: "99999", environmentOverride: "CLIENT" },
+              { provider: "CURSEFORGE", projectId: "328085", versionId: "88888", environmentOverride: "CLIENT" },
+            ],
+          },
+          adminUserId,
+        ),
+      ).rejects.toThrow(/conflicto de versiones/i)
+
+      expect(r2.createMultipartUpload).not.toHaveBeenCalled()
+    })
+
+    it("enforces PROVIDER_MIN_PART_SIZE_BYTES = 10 MiB for provider multipart streaming", () => {
+      expect(PROVIDER_MIN_PART_SIZE_BYTES).toBe(10 * 1024 * 1024)
     })
   })
 })

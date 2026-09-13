@@ -788,6 +788,45 @@ export interface CreateGameFileUploadInputGql {
   logicalPath?: string | null
 }
 
+export interface CreateGameFileBatchUploadItemInputGql {
+  originalFilename: string
+  sizeBytes: number
+  logicalPath?: string | null
+  category?: GameFileCategoryGql | null
+}
+
+export interface GameFileBatchUploadItemPayloadGql {
+  uploadToken: string
+  objectKey: string
+  expectedCategory: GameFileCategoryGql
+  originalFilename: string
+  logicalPath?: string | null
+}
+
+export interface GameFileBatchUploadPayloadGql {
+  batchId: string
+  prefixPath: string
+  expiresAt: string
+  bucket: string
+  endpoint: string
+  credentials: R2TemporaryCredentialsGql
+  items: GameFileBatchUploadItemPayloadGql[]
+}
+
+export interface CompleteGameFileBatchUploadItemInputGql {
+  uploadToken: string
+  sha256: string
+  sizeBytes: number
+  name: string
+  logicalPath?: string | null
+  category?: GameFileCategoryGql | null
+  explicitPolicy?: SyncPolicyGql | null
+}
+
+export interface CompleteGameFileBatchUploadInputGql {
+  items: CompleteGameFileBatchUploadItemInputGql[]
+}
+
 export interface AddGameFileInputGql {
   name: string
   category?: GameFileCategoryGql | null
@@ -976,6 +1015,10 @@ export interface InstallModPlanInputGql {
   contentType?: ContentTypeGql | null
   manualOverrides?: ModVersionOverrideInputGql[] | null
   environmentOverride?: ModEnvironmentGql | null
+}
+
+export interface InstallModPlansBatchInputGql {
+  plans: InstallModPlanInputGql[]
 }
 
 // --- Settings Types (Shard 06.5 & Shard 08F) ---

@@ -520,6 +520,64 @@ export interface InstallModPlanInput {
   environmentOverride?: ModEnvironment | null
 }
 
+export interface InstallModPlansBatchInput {
+  plans: InstallModPlanInput[]
+}
+
+export interface QueuedModSelection {
+  provider: ModProvider
+  projectId: string
+  projectName: string
+  versionId: string
+  versionNumber: string
+  contentType: ContentType
+  manualOverrides?: ModVersionOverrideInput[] | null
+  environmentOverride?: ModEnvironment | null
+}
+
+export interface CreateGameFileBatchUploadItemInput {
+  originalFilename: string
+  sizeBytes: number
+  logicalPath?: string | null
+  category?: GameFileCategory | null
+}
+
+export interface GameFileBatchUploadItemPayload {
+  uploadToken: string
+  objectKey: string
+  expectedCategory: GameFileCategory
+  originalFilename: string
+  logicalPath?: string | null
+}
+
+export interface GameFileBatchUploadPayload {
+  batchId: string
+  prefixPath: string
+  expiresAt: string
+  bucket: string
+  endpoint: string
+  credentials: {
+    accessKeyId: string
+    secretAccessKey: string
+    sessionToken: string
+  }
+  items: GameFileBatchUploadItemPayload[]
+}
+
+export interface CompleteGameFileBatchUploadItemInput {
+  uploadToken: string
+  sha256: string
+  sizeBytes: number
+  name: string
+  logicalPath?: string | null
+  category?: GameFileCategory | null
+  explicitPolicy?: SyncPolicy | null
+}
+
+export interface CompleteGameFileBatchUploadInput {
+  items: CompleteGameFileBatchUploadItemInput[]
+}
+
 export interface UpdateGameDraftMetadataInput {
   version?: string | null
   notes?: string | null

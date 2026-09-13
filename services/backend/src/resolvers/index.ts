@@ -97,6 +97,10 @@ import type {
   LauncherServerPingGql,
   CreateServerInputGql,
   UpdateServerBrandingInputGql,
+  CreateGameFileBatchUploadItemInputGql,
+  GameFileBatchUploadPayloadGql,
+  CompleteGameFileBatchUploadInputGql,
+  InstallModPlansBatchInputGql,
 } from "@hikat/graphql"
 
 import {
@@ -235,7 +239,9 @@ import {
 import {
   getAdminGameFiles,
   createGameFileUploadToken,
+  createGameFileBatchUploadTokens,
   completeGameFileUploadToken,
+  completeGameFileBatchUploadTokens,
   addGameFile,
   updateGameFile,
   removeGameFile,
@@ -263,7 +269,10 @@ import {
 } from "../services/settingsService"
 
 import { modProviderManager } from "../services/providers/modProviderManager"
-import { installModPlan } from "../services/providers/modInstallationService"
+import {
+  installModPlan,
+  installModPlansBatch,
+} from "../services/providers/modInstallationService"
 
 import type { BackendGraphQLContext } from "../types"
 
@@ -1841,6 +1850,18 @@ export const resolvers = {
       return createGameFileUploadToken(context.db, args.input, identity.userId, context.env, args.serverId)
     },
 
+    createGameFileBatchUpload: async (
+      _parent: unknown,
+      args: { serverId?: string | null; files: CreateGameFileBatchUploadItemInputGql[] },
+      context: BackendGraphQLContext,
+    ): Promise<GameFileBatchUploadPayloadGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return createGameFileBatchUploadTokens(context.db, args.files, identity.userId, context.env, args.serverId)
+    },
+
     completeGameFileUpload: async (
       _parent: unknown,
       args: { input: CompleteGameFileUploadInputGql },
@@ -1851,6 +1872,18 @@ export const resolvers = {
         throw createGraphQLError("Database or storage unavailable", "INTERNAL_ERROR")
       }
       return completeGameFileUploadToken(context.db, args.input, context.env)
+    },
+
+    completeGameFileBatchUpload: async (
+      _parent: unknown,
+      args: { serverId?: string | null; input: CompleteGameFileBatchUploadInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql[]> => {
+      const identity = requireAdmin(context)
+      if (!context.db || !context.env.ASSETS) {
+        throw createGraphQLError("Database or storage unavailable", "INTERNAL_ERROR")
+      }
+      return completeGameFileBatchUploadTokens(context.db, args.input, identity.userId, context.env, args.serverId)
     },
 
     addGameFile: async (
@@ -2020,6 +2053,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return installModPlan(context.db, context.env, args.input, identity.userId, args.serverId)
+    },
+
+    installModPlansBatch: async (
+      _parent: unknown,
+      args: { serverId?: string | null; input: InstallModPlansBatchInputGql },
+      context: BackendGraphQLContext,
+    ): Promise<AdminGameFileGql[]> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return installModPlansBatch(context.db, context.env, args.input, identity.userId, args.serverId)
     },
 
     // --- Settings Administrative Mutations (Require ADMIN - Shard 06.5) ---

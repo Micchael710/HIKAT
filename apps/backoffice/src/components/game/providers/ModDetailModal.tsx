@@ -7,6 +7,7 @@ import type {
   ContentType,
   ModEnvironment,
   ThemeMode,
+  QueuedModSelection,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
 import { getThemeTokens } from "../../../theme/tokens"
@@ -22,6 +23,7 @@ interface ModDetailModalProps {
   onClose: () => void
   onSuccess: () => void
   theme?: ThemeMode
+  onQueueMod?: (item: QueuedModSelection) => void
 }
 
 export const ModDetailModal: React.FC<ModDetailModalProps> = ({
@@ -34,6 +36,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   onClose,
   onSuccess,
   theme = "dark",
+  onQueueMod,
 }) => {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
@@ -151,21 +154,21 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   const handleInstall = async () => {
     if (!selectedVersionId || !plan || !plan.isValid) return
 
+    const overridesList: ModVersionOverrideInput[] = Object.entries(manualOverrides).map(
+      ([key, verId]) => {
+        const [p, pid, cType] = key.split(":")
+        return {
+          provider: p as ModProvider,
+          projectId: pid,
+          versionId: verId,
+          contentType: (cType as any) || undefined,
+        }
+      },
+    )
+
     try {
       setInstalling(true)
       setError(null)
-
-      const overridesList: ModVersionOverrideInput[] = Object.entries(manualOverrides).map(
-        ([key, verId]) => {
-          const [p, pid, cType] = key.split(":")
-          return {
-            provider: p as ModProvider,
-            projectId: pid,
-            versionId: verId,
-            contentType: (cType as any) || undefined,
-          }
-        },
-      )
 
       await graphqlClient.installModPlan({
         provider,
@@ -181,6 +184,38 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
       setError(err.message || "Error durante la instalación del contenido")
       setInstalling(false)
     }
+  }
+
+  const handleQueue = () => {
+    if (!selectedVersionId || !plan || !plan.isValid || !onQueueMod) return
+
+    const overridesList: ModVersionOverrideInput[] = Object.entries(manualOverrides).map(
+      ([key, verId]) => {
+        const [p, pid, cType] = key.split(":")
+        return {
+          provider: p as ModProvider,
+          projectId: pid,
+          versionId: verId,
+          contentType: (cType as any) || undefined,
+        }
+      },
+    )
+
+    const selectedVersion = detail?.compatibleVersions.find(
+      (v) => v.id === selectedVersionId || v.fileId === selectedVersionId,
+    )
+    const versionNumber = selectedVersion?.versionNumber || selectedVersionId
+    onQueueMod({
+      provider,
+      projectId,
+      projectName: detail?.name || projectId,
+      versionId: selectedVersionId,
+      versionNumber,
+      contentType,
+      manualOverrides: overridesList.length > 0 ? overridesList : null,
+      environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride || undefined : undefined,
+    })
+    onClose()
   }
 
   const isModrinth = provider === "MODRINTH"
@@ -860,6 +895,31 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
             >
               Cancelar
             </button>
+
+            {onQueueMod && (
+              <button
+                type="button"
+                data-testid="button-queue-mod"
+                onClick={handleQueue}
+                disabled={
+                  installing ||
+                  loading ||
+                  resolvingPlan ||
+                  !plan ||
+                  !plan.isValid ||
+                  Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+                }
+                className="launcher-btn-secondary"
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  fontWeight: "600",
+                }}
+              >
+                + Encolar selección
+              </button>
+            )}
 
             <button
               type="button"
