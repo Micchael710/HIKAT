@@ -403,7 +403,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                 <>
                   {" "}·{" "}
                   <span style={{ color: "#60a5fa", fontWeight: "600" }}>
-                    {selectedLoader || envInfo.modLoader}
+                    {envInfo.modLoader}
                     {envInfo.modLoaderVersion ? ` ${envInfo.modLoaderVersion}` : ""}
                   </span>
                 </>

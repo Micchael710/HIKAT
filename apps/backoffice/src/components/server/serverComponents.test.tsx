@@ -1618,6 +1618,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
       modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
       isPublishedEnvironment: true,
     })
 
@@ -1668,6 +1669,12 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
     await act(async () => {
       fireEvent.change(loaderSelect, { target: { value: "FABRIC" } })
     })
+
+    // Verify selector displays Fabric while published header continues showing NEOFORGE 21.1.65
+    expect(loaderSelect.value).toBe("FABRIC")
+    const envIndicator = screen.getByTestId("server-compatible-env-indicator")
+    expect(envIndicator.textContent).toContain("NEOFORGE 21.1.65")
+    expect(envIndicator.textContent).not.toContain("FABRIC 21.1.65")
 
     const modItem = await screen.findByText("CF Unknown Mod")
     await act(async () => {
