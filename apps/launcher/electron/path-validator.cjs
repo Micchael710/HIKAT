@@ -11,12 +11,18 @@ function resolveSafePath(instanceRoot, relativePath) {
   }
 
   // Strictly reject paths containing parent directory traversal components
-  if (relativePath.includes("..") || relativePath.startsWith("/") || relativePath.startsWith("\\")) {
+  const normalizedSeparators = relativePath.replace(/\\/g, "/")
+  const segments = normalizedSeparators.split("/")
+  if (
+    segments.some((segment) => segment === "..") ||
+    relativePath.startsWith("/") ||
+    relativePath.startsWith("\\")
+  ) {
     throw new Error(`Path traversal attempt detected: "${relativePath}"`)
   }
 
   const normalizedRelative = path.normalize(relativePath).replace(/^(\.\.[/\\])+/, "")
-  if (path.isAbsolute(normalizedRelative)) {
+  if (path.isAbsolute(normalizedRelative) || path.isAbsolute(relativePath) || /^[a-zA-Z]:/.test(relativePath)) {
     throw new Error(`Absolute paths are not permitted in client files: "${relativePath}"`)
   }
 

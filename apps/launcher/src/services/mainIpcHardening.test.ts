@@ -354,6 +354,47 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
         neoForgeVersion: "21.1.65",
       }),
     ).rejects.toThrow(/traversal segments/i)
+
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "../evil.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      }),
+    ).rejects.toThrow(/traversal segments/i)
+
+    await expect(
+      manager.startSync({
+        instanceRoot,
+        clientFiles: [{ path: "mods/../evil.jar", sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "/dl" }],
+        modpackVersion: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+      }),
+    ).rejects.toThrow(/traversal segments/i)
+  })
+
+  it("12b. Permits valid paths with '..' in filenames without traversal violation", () => {
+    for (const validPath of [
+      "mods/file..name.jar",
+      "mods/version..1.jar",
+      "mods/super_resolution-neoforge-1.21..1.21.1-0.9.1-alpha.2+opengl.jar",
+    ]) {
+      expect(() =>
+        validateSyncPayload(
+          {
+            instanceRoot,
+            clientFiles: [{ path: validPath, sha256: "a".repeat(64), sizeBytes: 100, policy: "NO_MODIFICABLE", downloadUrl: "http://127.0.0.1/mock" }],
+            modpackVersion: "1.0.0",
+            minecraftVersion: "1.21.1",
+            neoForgeVersion: "21.1.65",
+          },
+          true
+        )
+      ).not.toThrow()
+    }
   })
 
   it("13. Rejects absolute path", async () => {
@@ -968,7 +1009,7 @@ describe("Shard 8E: GameOperationManager Real Concurrency & State Machine Suite"
       },
     })
 
-    let downloadServerHit = false
+    const downloadServerHit = false
     const customManager = new GameOperationManager({
       coreEngine: {
         checkMinecraftCoreReadiness: vi.fn().mockResolvedValue({

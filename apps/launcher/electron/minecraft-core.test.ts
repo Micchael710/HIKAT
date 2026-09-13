@@ -1020,6 +1020,118 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     ).toThrow(/invalid policy/i)
   })
 
+  it("G2. validateSyncPayload allows '..' in filenames but strictly rejects traversal segments", () => {
+    const basePayload = {
+      instanceRoot,
+      modpackVersion: "1.0.0",
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      clientFiles: [
+        {
+          path: "mods/file..name.jar",
+          sha256: "a".repeat(64),
+          sizeBytes: 100,
+          policy: "NO_MODIFICABLE",
+          downloadUrl: "http://127.0.0.1/mod.jar",
+        },
+      ],
+    }
+
+    // mods/file..name.jar => PERMITIDO
+    expect(() => validateSyncPayload(basePayload, true)).not.toThrow()
+
+    // mods/version..1.jar => PERMITIDO
+    expect(() =>
+      validateSyncPayload(
+        {
+          ...basePayload,
+          clientFiles: [{ ...basePayload.clientFiles[0], path: "mods/version..1.jar" }],
+        },
+        true
+      )
+    ).not.toThrow()
+
+    // Real-world reported filename => PERMITIDO
+    expect(() =>
+      validateSyncPayload(
+        {
+          ...basePayload,
+          clientFiles: [
+            {
+              ...basePayload.clientFiles[0],
+              path: "mods/super_resolution-neoforge-1.21..1.21.1-0.9.1-alpha.2+opengl.jar",
+            },
+          ],
+        },
+        true
+      )
+    ).not.toThrow()
+
+    // ../evil.jar => RECHAZADO
+    expect(() =>
+      validateSyncPayload(
+        {
+          ...basePayload,
+          clientFiles: [{ ...basePayload.clientFiles[0], path: "../evil.jar" }],
+        },
+        true
+      )
+    ).toThrow(/traversal segments/i)
+
+    // mods/../evil.jar => RECHAZADO
+    expect(() =>
+      validateSyncPayload(
+        {
+          ...basePayload,
+          clientFiles: [{ ...basePayload.clientFiles[0], path: "mods/../evil.jar" }],
+        },
+        true
+      )
+    ).toThrow(/traversal segments/i)
+
+    // mods/sub/../../evil.jar => RECHAZADO
+    expect(() =>
+      validateSyncPayload(
+        {
+          ...basePayload,
+          clientFiles: [{ ...basePayload.clientFiles[0], path: "mods/sub/../../evil.jar" }],
+        },
+        true
+      )
+    ).toThrow(/traversal segments/i)
+
+    // Rutas absolutas => RECHAZADO
+    expect(() =>
+      validateSyncPayload(
+        {
+          ...basePayload,
+          clientFiles: [{ ...basePayload.clientFiles[0], path: "/evil.jar" }],
+        },
+        true
+      )
+    ).toThrow(/path cannot be absolute/i)
+
+    expect(() =>
+      validateSyncPayload(
+        {
+          ...basePayload,
+          clientFiles: [{ ...basePayload.clientFiles[0], path: "\\evil.jar" }],
+        },
+        true
+      )
+    ).toThrow(/path cannot be absolute/i)
+
+    expect(() =>
+      validateSyncPayload(
+        {
+          ...basePayload,
+          clientFiles: [{ ...basePayload.clientFiles[0], path: "C:\\evil.jar" }],
+        },
+        true
+      )
+    ).toThrow(/path cannot be absolute/i)
+  })
+
   it("34. Fresh install interrupted during Core does NOT confirm release in installed-manifest", async () => {
     const manager = new GameOperationManager({
       coreChecker: async () => ({ installed: false }),

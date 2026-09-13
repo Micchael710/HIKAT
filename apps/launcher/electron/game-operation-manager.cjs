@@ -83,7 +83,9 @@ function validateSyncPayload(payload = {}, isStartSync = true) {
       if (path.isAbsolute(file.path) || file.path.startsWith("/") || file.path.startsWith("\\") || /^[a-zA-Z]:/.test(file.path)) {
         throw new Error(`Invalid file entry: path cannot be absolute: "${file.path}".`)
       }
-      if (file.path.includes("..") || file.path.split(/[/\\]/).includes("..")) {
+      const normalizedPath = file.path.replace(/\\/g, "/")
+      const segments = normalizedPath.split("/")
+      if (segments.some((segment) => segment === "..")) {
         throw new Error(`Security violation: Path contains traversal segments: "${file.path}".`)
       }
       const norm = file.path.replace(/\\/g, "/").toLowerCase()
