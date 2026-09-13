@@ -404,13 +404,13 @@ function setupInstanceWatcher(gameId = null, targetInstanceRoot = instanceRoot) 
             })
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     })
 
     watcher.on("error", () => {
       try {
         watcher?.close()
-      } catch (_) {}
+      } catch (_) { }
       instanceWatchers.delete(key)
     })
 
@@ -2286,7 +2286,7 @@ async function runGameSync(ctx, payload) {
           if (fresh && fresh.modpackVersion) {
             scheduleBackgroundShaCheck(ctx.gameId, deferred.targetInstanceRoot, fresh)
           }
-        }).catch(() => {})
+        }).catch(() => { })
       }
       resumeProgressFloor = null
       if (activeOperationGameId === ctx.gameId) {
@@ -2465,7 +2465,7 @@ ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
             }
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (!savedPayload && payload.clientFiles && payload.modpackVersion) {
@@ -2688,7 +2688,7 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
           } else {
             await cleanFreshInstall(ctx.instanceRoot)
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       savePersistentDownloadQueue()
@@ -2713,7 +2713,7 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
           } else {
             await cleanFreshInstall(ctx.instanceRoot)
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       if (currentProcessingItem && currentProcessingItem.gameId === ctx.gameId) {
@@ -3078,7 +3078,7 @@ ipcMain.handle("game-write-token", async (_event, options = {}) => {
   const token = typeof options.token === "string" ? options.token.trim() : ""
   if (!token) return { success: false, error: "Missing token" }
 
-  const ctx = resolveGameContextFromPayload(options)
+  const ctx = resolveGameContext(options)
   const metaDir = path.join(ctx.instanceRoot, ".hikat")
   try {
     if (!fs.existsSync(metaDir)) {
@@ -3174,7 +3174,7 @@ ipcMain.handle("game-get-runtime-info", async (_event, payload = {}) => {
     if (state && typeof state.javaMajorVersion === "number") {
       return { javaMajorVersion: state.javaMajorVersion }
     }
-  } catch (_) {}
+  } catch (_) { }
   return { javaMajorVersion: null }
 })
 
@@ -3238,7 +3238,7 @@ function resetDownloadQueueForTesting() {
   for (const [, w] of instanceWatchers) {
     try {
       w?.close()
-    } catch (_) {}
+    } catch (_) { }
   }
   instanceWatchers.clear()
   dirtyGameIds.clear()
