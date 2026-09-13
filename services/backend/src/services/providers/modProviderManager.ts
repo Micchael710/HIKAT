@@ -26,6 +26,32 @@ import type {
 } from "@hikat/graphql"
 import { createGraphQLError } from "@hikat/graphql"
 
+export interface InternalServerTransferItem {
+  provider: ModProviderGql
+  projectId: string
+  projectName: string
+  versionId: string
+  versionNumber?: string
+  fileId?: string | null
+  filename: string
+  contentType: ContentTypeGql
+  environment?: ModEnvironmentGql | null
+  downloadUrl: string
+  sizeBytes: number
+  targetPath: string
+  expectedSha256?: string | null
+  hashes?: {
+    sha1?: string
+    sha512?: string
+    md5?: string
+  }
+}
+
+export interface ServerContentPlanResolutionResult {
+  plan: ServerContentInstallationPlanGql
+  transferItems: InternalServerTransferItem[]
+}
+
 /**
  * Maps HiKAT GameModLoader enum to the loader string used by Modrinth and CurseForge search APIs.
  * Returns empty string when loader filtering is not applicable (e.g. VANILLA or non-MOD content).
@@ -1837,6 +1863,40 @@ export class ModProviderManager {
     activeWorldName: string = "world",
     serverId?: string | null,
   ): Promise<ServerContentInstallationPlanGql> {
+    const envData = await this.getPublishedEnvironment(db, serverId)
+    const conditions = serverId ? [eq(schema.serverManagedContent.serverId, serverId)] : []
+    const managedRecords = await db
+      .select()
+      .from(schema.serverManagedContent)
+      .where(and(...conditions))
+      .all()
+
+    const result = await this.resolveServerInstallationPlanWithContext(env, input, {
+      envData,
+      managedRecords,
+      activeWorldName,
+      serverId,
+    })
+    return result.plan
+  }
+
+  async resolveServerInstallationPlanWithContext(
+    env: Env,
+    input: ResolveServerContentPlanInputGql,
+    context: {
+      envData: {
+        minecraftVersion: string
+        modLoader: GameModLoaderGql
+        modLoaderVersion: string | null
+        neoForgeVersion: string
+        isPublished: boolean
+        releaseId?: string
+      }
+      managedRecords: (typeof schema.serverManagedContent.$inferSelect)[]
+      activeWorldName?: string
+      serverId?: string | null
+    },
+  ): Promise<ServerContentPlanResolutionResult> {
     const contentType = input.contentType || "MOD"
     if (contentType !== "MOD" && contentType !== "DATA_PACK") {
       throw createGraphQLError(
@@ -1845,25 +1905,17 @@ export class ModProviderManager {
       )
     }
 
-    const envData = await this.getPublishedEnvironment(db, serverId)
-    const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
+    const { envData, managedRecords, activeWorldName = "world" } = context
+    const { minecraftVersion, modLoader } = envData
     const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
 
     const adapter = this.getAdapter(input.provider)
-    if (!adapter.isConfigured(env)) {
+    if (adapter && typeof adapter.isConfigured === "function" && !adapter.isConfigured(env)) {
       throw createGraphQLError(
         `El proveedor ${input.provider} no está disponible.`,
         "VALIDATION_ERROR",
       )
     }
-
-    // 1. Fetch server_managed_content records for status comparison
-    const conditions = serverId ? [eq(schema.serverManagedContent.serverId, serverId)] : []
-    const managedRecords = await db
-      .select()
-      .from(schema.serverManagedContent)
-      .where(and(...conditions))
-      .all()
 
     const manualOverridesMap = new Map<string, string>()
     for (const ov of input.manualOverrides || []) {
@@ -1875,6 +1927,7 @@ export class ModProviderManager {
     }
 
     const itemsMap = new Map<string, ServerContentPlanItemGql>()
+    const transferItemsMap = new Map<string, InternalServerTransferItem>()
     const optionalDepsMap = new Map<string, ServerContentPlanItemGql>()
     const conflicts: string[] = []
     const visitedBranches = new Set<string>()
@@ -1985,13 +2038,16 @@ export class ModProviderManager {
       if (input.provider === "CURSEFORGE" && !isKnownEnvironment(rootEnv)) {
         if (input.environmentOverride === "BOTH") {
           return {
-            items: [],
-            totalDownloadSizeBytes: 0,
-            conflicts: ["Este mod también es necesario en los clientes. Debe añadirse desde Juego → Actualizaciones."],
-            optionalDependencies: [],
-            isValid: false,
-            requiresGameUpdate: true,
-            gameUpdateReason: "Este mod también es necesario en los clientes. Añade este mod desde Juego → Actualizaciones.",
+            plan: {
+              items: [],
+              totalDownloadSizeBytes: 0,
+              conflicts: ["Este mod también es necesario en los clientes. Debe añadirse desde Juego → Actualizaciones."],
+              optionalDependencies: [],
+              isValid: false,
+              requiresGameUpdate: true,
+              gameUpdateReason: "Este mod también es necesario en los clientes. Añade este mod desde Juego → Actualizaciones.",
+            },
+            transferItems: [],
           }
         } else if (input.environmentOverride === "SERVER") {
           rootEnv = "SERVER"
@@ -2010,13 +2066,16 @@ export class ModProviderManager {
 
       if (rootEnv === "BOTH") {
         return {
-          items: [],
-          totalDownloadSizeBytes: 0,
-          conflicts: ["Este mod también es necesario en los clientes. Debe añadirse desde Juego → Actualizaciones."],
-          optionalDependencies: [],
-          isValid: false,
-          requiresGameUpdate: true,
-          gameUpdateReason: "Este mod también es necesario en los clientes. Añade este mod desde Juego → Actualizaciones.",
+          plan: {
+            items: [],
+            totalDownloadSizeBytes: 0,
+            conflicts: ["Este mod también es necesario en los clientes. Debe añadirse desde Juego → Actualizaciones."],
+            optionalDependencies: [],
+            isValid: false,
+            requiresGameUpdate: true,
+            gameUpdateReason: "Este mod también es necesario en los clientes. Añade este mod desde Juego → Actualizaciones.",
+          },
+          transferItems: [],
         }
       }
       if (rootEnv === "CLIENT") {
@@ -2086,6 +2145,23 @@ export class ModProviderManager {
       installedManagedId: rootInstalledManagedId,
       installedVersionNumber: rootInstalledVersionNumber,
       availableCompatibleVersions: rootCompatibleVersions as any,
+    })
+
+    transferItemsMap.set(rootKey, {
+      provider: input.provider,
+      projectId: input.projectId,
+      projectName: rootProjectName,
+      versionId: rootVersion.id,
+      versionNumber: rootVersion.versionNumber,
+      fileId: rootVersion.fileId || null,
+      filename: rootVersion.filename,
+      contentType,
+      environment: rootEnv || rootVersion.environment || null,
+      downloadUrl: rootVersion.downloadUrl,
+      sizeBytes: rootVersion.sizeBytes,
+      targetPath: rootTargetPath,
+      expectedSha256: rootVersion.sha256 || null,
+      hashes: rootVersion.hashes,
     })
 
     // 3. Recursive dependency traversal for REQUIRED dependencies
@@ -2381,6 +2457,23 @@ export class ModProviderManager {
           availableCompatibleVersions: depCompatibleVersions as any,
         })
 
+        transferItemsMap.set(depKey, {
+          provider: current.provider,
+          projectId: depProjectId,
+          projectName: depProjectName,
+          versionId: selectedDepVersion.id,
+          versionNumber: selectedDepVersion.versionNumber,
+          fileId: selectedDepVersion.fileId || null,
+          filename: selectedDepVersion.filename,
+          contentType: finalDepContentType,
+          environment: depEnv || selectedDepVersion.environment || null,
+          downloadUrl: selectedDepVersion.downloadUrl,
+          sizeBytes: selectedDepVersion.sizeBytes,
+          targetPath: depTargetPath,
+          expectedSha256: selectedDepVersion.sha256 || null,
+          hashes: selectedDepVersion.hashes,
+        })
+
         queue.push({
           provider: current.provider,
           version: selectedDepVersion,
@@ -2408,13 +2501,16 @@ export class ModProviderManager {
       .reduce((sum, i) => sum + (i.sizeBytes || 0), 0)
 
     return {
-      items,
-      totalDownloadSizeBytes,
-      conflicts,
-      optionalDependencies: Array.from(optionalDepsMap.values()),
-      isValid: conflicts.length === 0,
-      requiresGameUpdate,
-      gameUpdateReason,
+      plan: {
+        items,
+        totalDownloadSizeBytes,
+        conflicts,
+        optionalDependencies: Array.from(optionalDepsMap.values()),
+        isValid: conflicts.length === 0,
+        requiresGameUpdate,
+        gameUpdateReason,
+      },
+      transferItems: Array.from(transferItemsMap.values()),
     }
   }
 }

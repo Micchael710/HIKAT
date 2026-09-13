@@ -1184,6 +1184,10 @@ export interface InstallServerContentPlanInputGql {
   environmentOverride?: ModEnvironmentGql | null
 }
 
+export interface InstallServerContentPlansBatchInputGql {
+  plans: InstallServerContentPlanInputGql[]
+}
+
 export type ServerReleaseSyncPlanActionGql = "INSTALL" | "UPDATE" | "REMOVE" | "KEEP"
 
 export interface ServerReleaseSyncPlanItemGql {

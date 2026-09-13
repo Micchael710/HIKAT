@@ -77,8 +77,20 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   >(null)
   const [plan, setPlan] = useState<ServerContentInstallationPlan | null>(null)
   const [resolvingPlan, setResolvingPlan] = useState(false)
-  const [installing, setInstalling] = useState(false)
   const [installError, setInstallError] = useState<string | null>(null)
+
+  // Queue state for batch installation
+  const [queuedSelections, setQueuedSelections] = useState<{
+    provider: ModProvider
+    projectId: string
+    projectName: string
+    versionId: string
+    versionNumber: string
+    contentType: ContentType
+    environmentOverride?: import("../../../types").ModEnvironment | null
+  }[]>([])
+  const [batchInstalling, setBatchInstalling] = useState(false)
+  const [batchError, setBatchError] = useState<string | null>(null)
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null)
   const requestIdRef = useRef(0)
@@ -297,25 +309,65 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     }
   }
 
-  const handleInstall = async () => {
-    if (!selectedMod || !selectedVersionId || !plan?.isValid) return
-    setInstalling(true)
-    setInstallError(null)
+  const handleAddToQueue = () => {
+    if (!selectedMod || !selectedVersionId || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0) return
+    const currentVersion = modDetail?.compatibleVersions?.find((v) => v.id === selectedVersionId)
+    const versionNum = currentVersion?.versionNumber || selectedVersionId
 
-    try {
-      await graphqlClient.installServerContentPlan({
+    setQueuedSelections((prev) => {
+      const existingIndex = prev.findIndex(
+        (item) => item.provider === selectedMod.provider && item.projectId === selectedMod.projectId,
+      )
+      const newEntry = {
         provider: selectedMod.provider,
         projectId: selectedMod.projectId,
+        projectName: selectedMod.name,
         versionId: selectedVersionId,
+        versionNumber: versionNum,
         contentType: selectedMod.contentType || selectedContentType,
         environmentOverride: selectedEnvironmentOverride || undefined,
-      }, serverId)
+      }
+      if (existingIndex >= 0) {
+        const updated = [...prev]
+        updated[existingIndex] = newEntry
+        return updated
+      }
+      return [...prev, newEntry]
+    })
+
+    setSelectedMod(null)
+    setModDetail(null)
+    setPlan(null)
+    setSelectedEnvironmentOverride(null)
+    setInstallError(null)
+  }
+
+  const handleRemoveFromQueue = (provider: ModProvider, projectId: string) => {
+    setQueuedSelections((prev) => prev.filter((item) => !(item.provider === provider && item.projectId === projectId)))
+  }
+
+  const handleConfirmBatch = async () => {
+    if (queuedSelections.length === 0 || batchInstalling) return
+    setBatchInstalling(true)
+    setBatchError(null)
+
+    try {
+      const plansInput = queuedSelections.map((item) => ({
+        provider: item.provider,
+        projectId: item.projectId,
+        versionId: item.versionId,
+        contentType: item.contentType,
+        environmentOverride: item.environmentOverride || undefined,
+      }))
+
+      await graphqlClient.installServerContentPlansBatch({ plans: plansInput }, serverId)
+      setQueuedSelections([])
       onSuccess()
       onClose()
     } catch (err: any) {
-      setInstallError(err.message || "Error al instalar el contenido en el servidor.")
+      setBatchError(err.message || "Error al instalar el contenido en el servidor.")
     } finally {
-      setInstalling(false)
+      setBatchInstalling(false)
     }
   }
 
@@ -625,6 +677,9 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                     const isSelected =
                       selectedMod?.provider === item.provider &&
                       selectedMod?.projectId === item.projectId
+                    const isQueued = queuedSelections.some(
+                      (q) => q.provider === item.provider && q.projectId === item.projectId,
+                    )
 
                     return (
                       <div
@@ -634,7 +689,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                           padding: "14px",
                           borderRadius: "12px",
                           background: isSelected ? (isDark ? "rgba(62, 196, 192, 0.12)" : "#e6fffa") : tokens.bgCardInner,
-                          border: `1px solid ${isSelected ? (isDark ? "rgba(62, 196, 192, 0.4)" : "#b2f5ea") : tokens.borderSubtle}`,
+                          border: `1px solid ${isSelected ? (isDark ? "rgba(62, 196, 192, 0.4)" : "#b2f5ea") : isQueued ? (isDark ? "rgba(62, 196, 192, 0.3)" : "#b2f5ea") : tokens.borderSubtle}`,
                           cursor: "pointer",
                           display: "flex",
                           gap: "12px",
@@ -669,19 +724,36 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                             <span style={{ fontSize: "14px", fontWeight: "700", color: "#f9fafb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {item.name}
                             </span>
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                padding: "2px 6px",
-                                borderRadius: "4px",
-                                background: item.provider === "MODRINTH" ? "rgba(16, 185, 129, 0.2)" : "rgba(249, 115, 22, 0.2)",
-                                color: item.provider === "MODRINTH" ? "#34d399" : "#fb923c",
-                                fontWeight: "600",
-                                flexShrink: 0,
-                              }}
-                            >
-                              {item.provider === "MODRINTH" ? "Modrinth" : "CurseForge"}
-                            </span>
+                            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                              {isQueued && (
+                                <span
+                                  data-testid={`badge-queued-${item.projectId}`}
+                                  style={{
+                                    fontSize: "10px",
+                                    padding: "2px 5px",
+                                    borderRadius: "4px",
+                                    background: "rgba(62, 196, 192, 0.2)",
+                                    color: "#3ec4c0",
+                                    fontWeight: "600",
+                                  }}
+                                >
+                                  En cola
+                                </span>
+                              )}
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  background: item.provider === "MODRINTH" ? "rgba(16, 185, 129, 0.2)" : "rgba(249, 115, 22, 0.2)",
+                                  color: item.provider === "MODRINTH" ? "#34d399" : "#fb923c",
+                                  fontWeight: "600",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {item.provider === "MODRINTH" ? "Modrinth" : "CurseForge"}
+                              </span>
+                            </div>
                           </div>
 
                           <div style={{ fontSize: "12px", color: "#9ca3af", margin: "4px 0", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
@@ -820,7 +892,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                             value="SERVER"
                             checked={selectedEnvironmentOverride === "SERVER"}
                             onChange={() => handleEnvironmentOverrideChange("SERVER")}
-                            disabled={installing}
+                            disabled={batchInstalling}
                             style={{ marginTop: "3px", accentColor: "#3ec4c0" }}
                           />
                           <div style={{ flex: 1 }}>
@@ -863,7 +935,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                             value="BOTH"
                             checked={selectedEnvironmentOverride === "BOTH"}
                             onChange={() => handleEnvironmentOverrideChange("BOTH")}
-                            disabled={installing}
+                            disabled={batchInstalling}
                             style={{ marginTop: "3px", accentColor: "#3ec4c0" }}
                           />
                           <div style={{ flex: 1 }}>
@@ -1059,19 +1131,19 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
 
                         <button
                           type="button"
-                          data-testid="button-install-server-content"
-                          onClick={handleInstall}
-                          disabled={installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0}
+                          data-testid="button-add-to-queue"
+                          onClick={handleAddToQueue}
+                          disabled={resolvingPlan || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0}
                           className="launcher-btn-primary"
                           style={{
                             padding: "10px 22px",
                             borderRadius: 12,
                             fontSize: "14px",
-                            opacity: installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0 ? 0.5 : 1,
-                            cursor: installing || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0 ? "not-allowed" : "pointer",
+                            opacity: resolvingPlan || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0 ? 0.5 : 1,
+                            cursor: resolvingPlan || !plan?.isValid || (plan?.conflicts?.length ?? 0) > 0 ? "not-allowed" : "pointer",
                           }}
                         >
-                          {installing ? "Instalando en servidor..." : "Instalar en servidor"}
+                          Añadir
                         </button>
                       </div>
                     </>
@@ -1081,6 +1153,120 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Bottom Queue Summary Bar */}
+        {queuedSelections.length > 0 && (
+          <div
+            data-testid="server-queue-bar"
+            style={{
+              padding: "12px 24px",
+              borderTop: `1px solid ${tokens.borderSubtle}`,
+              background: isDark ? "rgba(15, 23, 42, 0.95)" : "rgba(241, 245, 249, 0.95)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              zIndex: 10,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", overflowX: "auto", flex: 1 }}>
+              <div
+                data-testid="server-queue-count"
+                style={{
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  color: tokens.textPrimary,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Seleccionados: {queuedSelections.length}
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                {queuedSelections.map((item) => (
+                  <div
+                    key={`${item.provider}:${item.projectId}`}
+                    data-testid={`queue-chip-${item.projectId}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "4px 10px",
+                      borderRadius: "16px",
+                      background: isDark ? "rgba(62, 196, 192, 0.15)" : "#e6fffa",
+                      border: `1px solid ${isDark ? "rgba(62, 196, 192, 0.3)" : "#b2f5ea"}`,
+                      fontSize: "12px",
+                      color: isDark ? "#3ec4c0" : "#0c6e6b",
+                    }}
+                  >
+                    <span style={{ fontWeight: "600", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {item.projectName}
+                    </span>
+                    <span style={{ fontSize: "11px", opacity: 0.8 }}>({item.versionNumber})</span>
+                    <button
+                      type="button"
+                      data-testid={`button-remove-queue-${item.projectId}`}
+                      onClick={() => handleRemoveFromQueue(item.provider, item.projectId)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "inherit",
+                        padding: "0 2px",
+                        display: "flex",
+                        alignItems: "center",
+                        lineHeight: 1,
+                      }}
+                      title="Eliminar de la lista"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
+              {batchError && (
+                <span
+                  data-testid="server-queue-error"
+                  style={{ color: "#f87171", fontSize: "12px", maxWidth: "260px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={batchError}
+                >
+                  {batchError}
+                </span>
+              )}
+
+              <button
+                type="button"
+                data-testid="button-confirm-server-batch"
+                onClick={handleConfirmBatch}
+                disabled={batchInstalling || queuedSelections.length === 0}
+                className="launcher-btn-primary"
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: batchInstalling ? "not-allowed" : "pointer",
+                  opacity: batchInstalling ? 0.7 : 1,
+                }}
+              >
+                {batchInstalling ? (
+                  <>
+                    <IconSpinner size={16} />
+                    <span>Instalando...</span>
+                  </>
+                ) : (
+                  <span>Añadir {queuedSelections.length} al servidor</span>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

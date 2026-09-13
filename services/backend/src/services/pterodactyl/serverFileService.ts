@@ -4,6 +4,7 @@
  * with robust path traversal protection, size limits, and text editing allowlist.
  */
 
+import { createHash } from "node:crypto"
 import {
   sanitizeVirtualPath,
   isAllowlistedTextFile,
@@ -398,13 +399,17 @@ export async function getPhysicalFileSha256(
     const signedUrlRes = await client.getFileDownload(cleanPath)
     if (!signedUrlRes?.attributes?.url) return null
     const response = await fetch(signedUrlRes.attributes.url)
-    if (!response.ok) return null
-    const buffer = await response.arrayBuffer()
-    const hashBuf = await crypto.subtle.digest("SHA-256", buffer)
-    return Array.from(new Uint8Array(hashBuf))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-      .toLowerCase()
+    if (!response.ok || !response.body) return null
+    const reader = response.body.getReader()
+    const hasher = createHash("sha256")
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value && value.byteLength > 0) {
+        hasher.update(value instanceof Uint8Array ? value : new Uint8Array(value))
+      }
+    }
+    return hasher.digest("hex").toLowerCase()
   } catch {
     return null
   }

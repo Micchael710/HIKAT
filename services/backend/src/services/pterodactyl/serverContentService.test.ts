@@ -108,7 +108,10 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
     const hashArray = Array.from(new Uint8Array(hashBuffer))
     const realSha256 = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
 
-    const writeFileSpy = vi.fn().mockResolvedValue(undefined)
+    const pullFileSpy = vi.fn().mockResolvedValue(undefined)
+    const renameFileSpy = vi.fn().mockResolvedValue(undefined)
+    let pulledTempFile = ""
+
     const mockClient = {
       getServerResources: vi.fn().mockResolvedValue({
         attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
@@ -117,9 +120,29 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
         attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
       }),
       getFileContents: vi.fn().mockResolvedValue("level-name=survival_2026"),
-      listDirectory: vi.fn().mockResolvedValue({ data: [] }),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (pulledTempFile) {
+          return Promise.resolve({
+            data: [
+              {
+                attributes: {
+                  name: pulledTempFile,
+                  size: jarBytes.length,
+                  is_file: true,
+                },
+              },
+            ],
+          })
+        }
+        return Promise.resolve({ data: [] })
+      }),
       createFolder: vi.fn().mockResolvedValue(undefined),
-      writeFile: writeFileSpy,
+      pullFile: pullFileSpy.mockImplementation((params: any) => {
+        pulledTempFile = params.filename
+        return Promise.resolve(undefined)
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({ attributes: { url: "https://signed.wings.download/file" } }),
+      renameFile: renameFileSpy,
       deleteFiles: vi.fn().mockResolvedValue(undefined),
     }
 
@@ -163,7 +186,7 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
     }
     vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
 
-    // Global fetch mock for provider download
+    // Global fetch mock for signed download URL verification
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(jarBytes, {
         status: 200,
@@ -188,8 +211,18 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
     expect(result[0]?.name).toBe("spark-1.10.53-neoforge.jar")
     expect(result[0]?.managementSource).toBe("SERVER_DIRECT")
 
-    // Check that writeFile was called with binary bytes to /mods/spark-1.10.53-neoforge.jar
-    expect(writeFileSpy).toHaveBeenCalledWith("/mods/spark-1.10.53-neoforge.jar", expect.any(Uint8Array))
+    // Check that pullFile was called with remote URL to temp filename, and renameFile was called
+    expect(pullFileSpy).toHaveBeenCalledWith({
+      url: "https://cdn.modrinth.com/data/spark/spark.jar",
+      directory: "/mods",
+      filename: expect.stringMatching(/^\.hikat-[a-f0-9-]+-spark-1\.10\.53-neoforge\.jar$/),
+      foreground: false,
+    })
+    expect(renameFileSpy).toHaveBeenCalledWith(
+      "/mods",
+      expect.stringMatching(/^\.hikat-[a-f0-9-]+-spark-1\.10\.53-neoforge\.jar$/),
+      "spark-1.10.53-neoforge.jar",
+    )
 
     // Verify D1 tracking
     const tracked = await db.select().from(schema.serverManagedContent)
@@ -483,6 +516,7 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
 
     const deleteFilesSpy = vi.fn()
     const physicalFiles = new Set<string>()
+    let pulledCompTempFile = ""
     const mockClient = {
       getServerResources: vi.fn().mockResolvedValue({
         attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
@@ -491,17 +525,24 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
         attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
       }),
       getFileContents: vi.fn().mockResolvedValue("level-name=world"),
-      listDirectory: vi.fn().mockImplementation((dir: string) => {
-        if (dir.includes("mods")) {
-          return Promise.resolve({
-            data: Array.from(physicalFiles).map((name) => ({ attributes: { name, is_file: true } })),
-          })
-        }
-        return Promise.resolve({ data: [] })
+      pullFile: vi.fn().mockImplementation((params: any) => {
+        pulledCompTempFile = params.filename
+        return Promise.resolve(undefined)
       }),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        const files: Array<{ attributes: { name: string; size: number; is_file: boolean } }> = []
+        if (pulledCompTempFile) {
+          files.push({ attributes: { name: pulledCompTempFile, size: jarBytes.length, is_file: true } })
+        }
+        for (const f of physicalFiles) {
+          files.push({ attributes: { name: f, size: jarBytes.length, is_file: true } })
+        }
+        return Promise.resolve({ data: files })
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({ attributes: { url: "https://signed.wings.download/file" } }),
       createFolder: vi.fn().mockResolvedValue(undefined),
-      writeFile: vi.fn().mockImplementation((path: string) => {
-        physicalFiles.add(path.split("/").pop()!)
+      renameFile: vi.fn().mockImplementation((_dir: string, from: string, to: string) => {
+        physicalFiles.add(to)
         return Promise.resolve(undefined)
       }),
       deleteFiles: deleteFilesSpy.mockImplementation((_dir: string, files: string[]) => {
@@ -554,18 +595,8 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
       new Response(jarBytes, { status: 200, headers: { "Content-Type": "application/java-archive" } }),
     )
 
-    // Force D1 insert to fail only for serverManagedContent
-    const originalInsert = db.insert.bind(db)
-    vi.spyOn(db, "insert").mockImplementation((table: any) => {
-      if (table === schema.serverManagedContent) {
-        return {
-          values: () => {
-            throw new Error("D1 constraint violation or network timeout")
-          },
-        } as any
-      }
-      return originalInsert(table)
-    })
+    // Force D1 batch commit to fail
+    vi.spyOn(db, "batch").mockRejectedValue(new Error("D1 constraint violation or network timeout"))
 
     await expect(
       installServerContentPlan(

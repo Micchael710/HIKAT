@@ -29,6 +29,10 @@ export function createTestD1(): D1Database & { _sqlite: DatabaseSync } {
       let boundParams: any[] = []
       return {
         _query: query,
+        _sql: query,
+        get _params() {
+          return boundParams
+        },
         bind(...params: any[]) {
           boundParams = params.map((p) => {
             if (p === undefined) return null

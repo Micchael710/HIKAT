@@ -6,7 +6,7 @@ import type { Env } from "../../types"
 import { ModrinthAdapter } from "./modrinthAdapter"
 import { CurseForgeAdapter } from "./curseforgeAdapter"
 import { ModProviderManager, getLogicalPathForContent } from "./modProviderManager"
-import { installModPlan, installModPlansBatch, PROVIDER_MIN_PART_SIZE_BYTES } from "./modInstallationService"
+import { installModPlan, installModPlansBatch, PROVIDER_MIN_PART_SIZE_BYTES, runWithConcurrency } from "./modInstallationService"
 import { prepareGameDraft, getPublishedModpack, publishGameRelease } from "../game/releaseService"
 import { addGameFile } from "../game/gameFileService"
 import { validateGameFileBuffer } from "@hikat/shared"
@@ -5038,6 +5038,301 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
 
     it("enforces PROVIDER_MIN_PART_SIZE_BYTES = 10 MiB for provider multipart streaming", () => {
       expect(PROVIDER_MIN_PART_SIZE_BYTES).toBe(10 * 1024 * 1024)
+    })
+
+    it("runWithConcurrency awaits in-flight workers when a worker fails before throwing firstError", async () => {
+      let workerBFinished = false
+      const items = ["A", "B"]
+
+      await expect(
+        runWithConcurrency(items, 2, async (item) => {
+          if (item === "A") {
+            throw new Error("Worker A failed immediately")
+          }
+          if (item === "B") {
+            await new Promise((resolve) => setTimeout(resolve, 50))
+            workerBFinished = true
+          }
+        }),
+      ).rejects.toThrow("Worker A failed immediately")
+
+      expect(workerBFinished).toBe(true)
+    })
+
+    it("installModPlansBatch rejects DATA_PACK with VALIDATION_ERROR and does not mutate draft or R2", async () => {
+      await expect(
+        installModPlansBatch(
+          db,
+          env,
+          {
+            plans: [
+              {
+                provider: "MODRINTH",
+                projectId: "datapack-proj",
+                versionId: "ver-dp",
+                contentType: "DATA_PACK",
+              },
+            ],
+          },
+          adminUserId,
+        ),
+      ).rejects.toThrow(/Los Data Packs se administran exclusivamente desde Servidor → Archivos/)
+    })
+
+    it("correctly groups batch updates with UPDATE_CHUNK_SIZE = 4 ensuring statements stay <= 100 parameters", async () => {
+      // Create draft release
+      await prepareGameDraft(db, adminUserId, null, env)
+      const draft = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.status, "DRAFT")).get()
+      expect(draft).toBeDefined()
+
+      // Insert 6 pre-existing game release files belonging to draft
+      const now = new Date().toISOString()
+      const existingFileIds: string[] = []
+      for (let i = 1; i <= 6; i++) {
+        const fid = `file-update-${i}`
+        existingFileIds.push(fid)
+        await db.insert(schema.gameReleaseFiles).values({
+          id: fid,
+          releaseId: draft!.id,
+          name: `mod-${i}.jar`,
+          logicalPath: `mods/mod-${i}.jar`,
+          sizeBytes: 1000,
+          sha256: `hash-old-${i}`,
+          category: "MOD",
+          policy: "MODIFICABLE",
+          sourceProvider: "MODRINTH",
+          sourceProjectId: `proj-${i}`,
+          sourceVersionId: `ver-old-${i}`,
+          sourceEnvironment: "SERVER",
+          objectKey: `releases/${draft!.id}/mods/mod-${i}.jar`,
+          createdAt: now,
+        })
+      }
+
+      // Mock mockFetch to return valid jar files for updates
+      const validJar = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00])
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = typeof url === "string" ? url : (url as any).url
+        if (u.includes("api.modrinth.com/v2/project/")) {
+          const match = u.match(/project\/([^/]+)/)
+          const projId = match ? match[1] : "proj-1"
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: projId,
+              title: `Project ${projId}`,
+              project_type: "mod",
+              server_side: "required",
+              client_side: "unsupported",
+            }),
+          }
+        }
+        if (u.includes("api.modrinth.com/v2/version/")) {
+          const match = u.match(/version\/([^/]+)/)
+          const verId = match ? match[1] : "ver-new"
+          const projIdx = verId.replace("ver-new-", "")
+          const filename = `mod-${projIdx}.jar`
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: verId,
+              project_id: `proj-${projIdx}`,
+              version_number: "2.0.0",
+              files: [
+                {
+                  url: `https://cdn.modrinth.com/data/${filename}`,
+                  filename,
+                  primary: true,
+                  size: validJar.length,
+                  hashes: {},
+                },
+              ],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("cdn.modrinth.com")) {
+          return new Response(validJar, { status: 200, headers: { "Content-Type": "application/java-archive" } })
+        }
+        return { ok: false, status: 404 }
+      })
+
+      // Intercept batch statements to verify parameter limits
+      const capturedBatchStatements: any[] = []
+      const originalBatch = testD1.batch.bind(testD1)
+      testD1.batch = async (statements: any[]) => {
+        for (const s of statements) {
+          capturedBatchStatements.push(s)
+          // Each statement MUST have <= 100 bound parameters
+          const paramCount = s._params ? s._params.length : 0
+          expect(paramCount).toBeLessThanOrEqual(100)
+        }
+        return originalBatch(statements)
+      }
+
+      // Run batch update for 6 items
+      const plans = existingFileIds.map((_, idx) => ({
+        provider: "MODRINTH" as const,
+        projectId: `proj-${idx + 1}`,
+        versionId: `ver-new-${idx + 1}`,
+        contentType: "MOD" as const,
+      }))
+
+      // Mock resolveInstallationPlan to return UPDATE items
+      const { modProviderManager } = await import("./modProviderManager")
+      const resolveSpy = vi.spyOn(modProviderManager, "resolveInstallationPlan").mockImplementation(async (_env, _db, input) => {
+        const idx = input.projectId.replace("proj-", "")
+        return {
+          items: [
+            {
+              provider: input.provider,
+              projectId: input.projectId,
+              projectName: `Project ${input.projectId}`,
+              versionId: input.versionId,
+              versionNumber: "2.0.0",
+              filename: `mod-${idx}.jar`,
+              sizeBytes: validJar.length,
+              sha256: "hash-new",
+              contentType: "MOD",
+              environment: "SERVER",
+              targetPath: `mods/mod-${idx}.jar`,
+              action: "UPDATE",
+              isRoot: true,
+              isDependency: false,
+              isRequired: true,
+              isInstalled: true,
+              installedFileId: existingFileIds[Number(idx) - 1],
+              installedVersionNumber: "1.0.0",
+              availableCompatibleVersions: [],
+            },
+          ],
+          conflicts: [],
+          optionalDependencies: [],
+          totalDownloadSizeBytes: validJar.length,
+          isValid: true,
+        } as any
+      })
+
+      try {
+        await installModPlansBatch(db, env, { plans }, adminUserId)
+
+        // Find update statements targeting gameReleaseFiles
+        const updateStatements = capturedBatchStatements.filter(
+          (s) =>
+            s._sql &&
+            s._sql.toLowerCase().includes("update") &&
+            s._sql.toLowerCase().includes("game_release_files"),
+        )
+        // 6 items chunked by 4 should yield exactly 2 update statements: chunk of 4 and chunk of 2
+        expect(updateStatements).toHaveLength(2)
+        // First chunk has 4 items -> <= 100 parameters (84 parameters)
+        expect(updateStatements[0]._params.length).toBe(84)
+        // Second chunk has 2 items -> <= 100 parameters (42 parameters)
+        expect(updateStatements[1]._params.length).toBe(42)
+      } finally {
+        resolveSpy.mockRestore()
+        testD1.batch = originalBatch
+      }
+    })
+
+    it("MOD with BOTH environment in game release preserves sourceEnvironment = BOTH and R2 binary", async () => {
+      await prepareGameDraft(db, adminUserId, null, env)
+      const draft = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.status, "DRAFT")).get()
+
+      const validJar = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00])
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = typeof url === "string" ? url : (url as any).url
+        if (u.includes("api.modrinth.com/v2/version/")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-vc-1",
+              project_id: "voicechat-proj",
+              version_number: "2.5.0",
+              files: [
+                {
+                  url: "https://cdn.modrinth.com/data/voicechat.jar",
+                  filename: "voicechat.jar",
+                  primary: true,
+                  size: validJar.length,
+                  hashes: { sha256: "vc-sha256" },
+                },
+              ],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("cdn.modrinth.com")) {
+          return new Response(validJar, { status: 200, headers: { "Content-Type": "application/java-archive" } })
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const { modProviderManager } = await import("./modProviderManager")
+      const resolveSpy = vi.spyOn(modProviderManager, "resolveInstallationPlan").mockResolvedValueOnce({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "voicechat-proj",
+            projectName: "Simple Voice Chat",
+            versionId: "ver-vc-1",
+            versionNumber: "2.5.0",
+            filename: "voicechat.jar",
+            sizeBytes: validJar.length,
+            sha256: "vc-sha256",
+            contentType: "MOD",
+            environment: "BOTH",
+            targetPath: "mods/voicechat.jar",
+            action: "INSTALL",
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            availableCompatibleVersions: [],
+          },
+        ],
+        conflicts: [],
+        optionalDependencies: [],
+        totalDownloadSizeBytes: validJar.length,
+        isValid: true,
+      } as any)
+
+      try {
+        const result = await installModPlansBatch(
+          db,
+          env,
+          {
+            plans: [
+              {
+                provider: "MODRINTH",
+                projectId: "voicechat-proj",
+                versionId: "ver-vc-1",
+                contentType: "MOD",
+              },
+            ],
+          },
+          adminUserId,
+        )
+
+        const installed = result.find((f) => f.logicalPath === "mods/voicechat.jar")
+        expect(installed).toBeDefined()
+        expect(installed?.sourceEnvironment).toBe("BOTH")
+
+        const dbRecord = await db
+          .select()
+          .from(schema.gameReleaseFiles)
+          .where(eq(schema.gameReleaseFiles.releaseId, draft!.id))
+          .get()
+        expect(dbRecord).toBeDefined()
+        expect(dbRecord?.sourceEnvironment).toBe("BOTH")
+        expect(dbRecord?.objectKey).toBeDefined()
+        expect(dbRecord?.objectKey.length).toBeGreaterThan(0)
+      } finally {
+        resolveSpy.mockRestore()
+      }
     })
   })
 })

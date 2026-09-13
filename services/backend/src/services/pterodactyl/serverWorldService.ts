@@ -40,7 +40,7 @@ export async function detectActiveWorldName(
 ): Promise<string> {
   let clientOverride: IPterodactylClient | undefined
   let serverId: string | null = null
-  let db: Database | undefined = arg3
+  const db: Database | undefined = arg3
 
   if (arg1 && typeof arg1 === "object") {
     clientOverride = arg1 as IPterodactylClient

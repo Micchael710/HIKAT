@@ -231,6 +231,12 @@ export interface IPterodactylClient {
   deleteFiles(root: string, files: string[]): Promise<void>
   compressFiles(root: string, files: string[]): Promise<PterodactylFileResponse>
   decompressFile(root: string, file: string): Promise<void>
+  pullFile(params: {
+    url: string
+    directory?: string
+    filename?: string
+    foreground?: boolean
+  }): Promise<void>
 
   // Schedules
   listSchedules(): Promise<PterodactylScheduleListResponse>

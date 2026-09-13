@@ -1558,6 +1558,175 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       environmentOverride: "BOTH",
     })
   })
+
+  it("11. ServerModSearchModal queues content selections, renders chips, supports removal, and installs batch with installServerContentPlansBatch", async () => {
+    const { ServerModSearchModal } = await import("./providers/ServerModSearchModal")
+    const { graphqlClient } = await import("../../services/graphqlClient")
+
+    const onCloseMock = vi.fn()
+    const onSuccessMock = vi.fn()
+
+    vi.spyOn(graphqlClient, "searchServerContent").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "mr-mod-1",
+          name: "Queue Mod One",
+          summary: "First mod to queue",
+          author: "authorMR",
+          downloads: 500,
+          categories: ["technology"],
+          contentType: "MOD",
+          environment: "SERVER",
+        },
+      ],
+      totalCount: 1,
+      hasMore: false,
+      nextCursor: null,
+      providersStatus: [{ provider: "MODRINTH", available: true, error: null }],
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
+      isPublishedEnvironment: true,
+    })
+
+    vi.spyOn(graphqlClient, "getServerContentProjectDetail").mockResolvedValue({
+      provider: "MODRINTH",
+      projectId: "mr-mod-1",
+      name: "Queue Mod One",
+      summary: "First mod to queue",
+      description: "Description",
+      author: "authorMR",
+      downloads: 500,
+      contentType: "MOD",
+      environment: "SERVER",
+      compatibleVersions: [
+        {
+          id: "mr-ver-1",
+          name: "1.0.0",
+          versionNumber: "1.0.0",
+          releaseType: "RELEASE",
+          gameVersions: ["1.21.1"],
+          loaders: ["neoforge"],
+          publishedAt: new Date().toISOString(),
+          downloads: 500,
+          filename: "queue-mod-1.jar",
+          sizeBytes: 30000,
+          dependencies: [],
+        },
+      ],
+      isInstalled: false,
+      minecraftVersion: "1.21.1",
+      neoForgeVersion: "21.1.65",
+      modLoader: "NEOFORGE",
+    })
+
+    vi.spyOn(graphqlClient, "resolveServerContentPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "mr-mod-1",
+          projectName: "Queue Mod One",
+          versionId: "mr-ver-1",
+          versionNumber: "1.0.0",
+          filename: "queue-mod-1.jar",
+          sizeBytes: 30000,
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: "mods/queue-mod-1.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      conflicts: [],
+      optionalDependencies: [],
+      totalDownloadSizeBytes: 30000,
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const batchSpy = vi.spyOn(graphqlClient, "installServerContentPlansBatch").mockResolvedValue([
+      {
+        id: "inst-1",
+        name: "queue-mod-1.jar",
+        targetPath: "mods/queue-mod-1.jar",
+        sha256: "sha256-test",
+        sizeBytes: 30000,
+        contentType: "MOD",
+        managementSource: "SERVER_DIRECT",
+        status: "INSTALLED",
+        provider: "MODRINTH",
+        projectId: "mr-mod-1",
+        versionId: "mr-ver-1",
+        gameReleaseFileId: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+
+    await act(async () => {
+      render(
+        <ServerModSearchModal
+          serverId="srv-1"
+          onClose={onCloseMock}
+          onSuccess={onSuccessMock}
+        />,
+      )
+    })
+
+    // Click on the mod card
+    const modCard = await screen.findByText("Queue Mod One")
+    await act(async () => {
+      fireEvent.click(modCard)
+    })
+
+    // Wait for "Añadir" button to be enabled
+    const addBtn = await screen.findByTestId("button-add-to-queue")
+    expect(addBtn).toBeDefined()
+    expect((addBtn as HTMLButtonElement).disabled).toBe(false)
+
+    // Click "Añadir" to add to queue
+    await act(async () => {
+      fireEvent.click(addBtn)
+    })
+
+    // Check bottom queue bar appears
+    expect(screen.getByTestId("server-queue-bar")).toBeDefined()
+    expect(screen.getByTestId("server-queue-count").textContent).toContain("Seleccionados: 1")
+    expect(screen.getByTestId("queue-chip-mr-mod-1")).toBeDefined()
+
+    // Confirm batch installation
+    const confirmBatchBtn = screen.getByTestId("button-confirm-server-batch")
+    expect(confirmBatchBtn.textContent).toContain("Añadir 1 al servidor")
+
+    await act(async () => {
+      fireEvent.click(confirmBatchBtn)
+    })
+
+    // Verify batch mutation called with queued plans
+    expect(batchSpy).toHaveBeenCalledWith(
+      {
+        plans: [
+          {
+            provider: "MODRINTH",
+            projectId: "mr-mod-1",
+            versionId: "mr-ver-1",
+            contentType: "MOD",
+            environmentOverride: undefined,
+          },
+        ],
+      },
+      "srv-1",
+    )
+
+    // Verify success and close callbacks
+    expect(onSuccessMock).toHaveBeenCalled()
+    expect(onCloseMock).toHaveBeenCalled()
+  })
 })
 
 describe("Multiserver Isolation & Console Ticket Verification", () => {

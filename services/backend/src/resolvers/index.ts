@@ -89,6 +89,7 @@ import type {
   ServerContentInstallationPlanGql,
   ResolveServerContentPlanInputGql,
   InstallServerContentPlanInputGql,
+  InstallServerContentPlansBatchInputGql,
   ServerReleaseSyncPlanGql,
   ServerReleaseSyncStatusGql,
   ServerReleaseSyncResultGql,
@@ -180,6 +181,7 @@ import {
 import {
   getServerManagedContent,
   installServerContentPlan,
+  installServerContentPlansBatch,
   removeServerManagedContent,
 } from "../services/pterodactyl/serverContentService"
 import {
@@ -1347,6 +1349,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return installServerContentPlan(context.db, context.env, args.input, identity.userId, args.serverId)
+    },
+
+    installServerContentPlansBatch: async (
+      _parent: unknown,
+      args: { input: InstallServerContentPlansBatchInputGql; serverId?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<ServerManagedContentItemGql[]> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return installServerContentPlansBatch(context.db, context.env, args.input, identity.userId, args.serverId)
     },
 
     removeServerManagedContent: async (

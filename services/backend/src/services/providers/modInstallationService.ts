@@ -31,27 +31,42 @@ function asBatchTuple(statements: BatchStatement[]): BatchStatements {
   return [statements[0]!, ...statements.slice(1)] as unknown as BatchStatements
 }
 
-async function runWithConcurrency<T, R>(
+export async function runWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
   const results = new Array<R>(items.length)
   let index = 0
+  let firstError: unknown = null
+  let hasError = false
+
   const worker = async () => {
-    while (index < items.length) {
+    while (!hasError && index < items.length) {
       const i = index++
       const item = items[i]
       if (item !== undefined) {
-        results[i] = await fn(item)
+        try {
+          results[i] = await fn(item)
+        } catch (err) {
+          if (!hasError) {
+            hasError = true
+            firstError = err
+          }
+          return
+        }
       }
     }
   }
+
   const workers = Array.from(
     { length: Math.min(concurrency, items.length) },
     () => worker(),
   )
   await Promise.all(workers)
+  if (hasError) {
+    throw firstError
+  }
   return results
 }
 
@@ -566,7 +581,16 @@ export async function installModPlansBatch(
     throw createGraphQLError("No se pudo inicializar el borrador de actualización.", "INTERNAL_ERROR")
   }
 
-  // 2. Resolve complete installation plans and validate compatibility for each
+  // 2. Reject DATA_PACK and resolve complete installation plans
+  for (const planInput of input.plans) {
+    if (planInput.contentType === "DATA_PACK") {
+      throw createGraphQLError(
+        "Los Data Packs se administran exclusivamente desde Servidor → Archivos.",
+        "VALIDATION_ERROR",
+      )
+    }
+  }
+
   const allRawItems: ModInstallationPlanItemGql[] = []
   for (const planInput of input.plans) {
     const plan = await modProviderManager.resolveInstallationPlan(
@@ -581,6 +605,15 @@ export async function installModPlansBatch(
         `No se puede instalar el contenido debido a conflictos: ${plan.conflicts.join(". ")}`,
         "VALIDATION_ERROR",
       )
+    }
+
+    for (const item of plan.items) {
+      if (item.contentType === "DATA_PACK") {
+        throw createGraphQLError(
+          "Los Data Packs se administran exclusivamente desde Servidor → Archivos.",
+          "VALIDATION_ERROR",
+        )
+      }
     }
 
     const itemsToProcess = plan.items.filter(
@@ -878,8 +911,8 @@ export async function installModPlansBatch(
       statements.push(db.insert(schema.gameReleaseFiles).values(chunk))
     }
 
-    // Grouped UPDATEs in chunks of 6 files (< 100 parameters)
-    const UPDATE_CHUNK_SIZE = 6
+    // Grouped UPDATEs in chunks of 4 files (< 100 parameters)
+    const UPDATE_CHUNK_SIZE = 4
     for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK_SIZE) {
       const chunk = toUpdate.slice(i, i + UPDATE_CHUNK_SIZE)
       const ids = chunk.map((c) => c.existingId)

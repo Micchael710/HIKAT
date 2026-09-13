@@ -2937,6 +2937,40 @@ export const serverContentApi = {
     return data.installServerContentPlan
   },
 
+  async installServerContentPlansBatch(
+    input: import("../types").InstallServerContentPlansBatchInput,
+    serverId: string,
+  ): Promise<import("../types").ServerManagedContentItem[]> {
+    const mutation = /* GraphQL */ `
+      mutation InstallServerContentPlansBatch($input: InstallServerContentPlansBatchInput!, $serverId: ID) {
+        installServerContentPlansBatch(input: $input, serverId: $serverId) {
+          id
+          managementSource
+          provider
+          projectId
+          versionId
+          fileId
+          contentType
+          environment
+          targetPath
+          sha256
+          sizeBytes
+          gameReleaseId
+          gameReleaseFileId
+          status
+          name
+          createdAt
+          updatedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ installServerContentPlansBatch: import("../types").ServerManagedContentItem[] }>(mutation, {
+      input,
+      serverId,
+    })
+    return data.installServerContentPlansBatch
+  },
+
   async removeServerManagedContent(id: string, serverId: string): Promise<boolean> {
     const mutation = /* GraphQL */ `
       mutation RemoveServerManagedContent($id: ID!, $serverId: ID) {

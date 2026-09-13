@@ -875,6 +875,10 @@ export interface InstallServerContentPlanInput {
   environmentOverride?: ModEnvironment | null
 }
 
+export interface InstallServerContentPlansBatchInput {
+  plans: InstallServerContentPlanInput[]
+}
+
 export type ServerReleaseSyncPlanAction = "INSTALL" | "UPDATE" | "REMOVE" | "KEEP"
 
 export interface ServerReleaseSyncPlanItem {

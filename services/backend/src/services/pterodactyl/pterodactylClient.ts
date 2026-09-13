@@ -560,6 +560,26 @@ export class PterodactylHttpClient implements IPterodactylClient {
     )
   }
 
+  async pullFile(params: {
+    url: string
+    directory?: string
+    filename?: string
+    foreground?: boolean
+  }): Promise<void> {
+    await this.request<void>(
+      `/api/client/servers/${encodeURIComponent(this.serverId)}/files/pull`,
+      {
+        method: "POST",
+        body: {
+          url: params.url,
+          directory: params.directory || "/",
+          filename: params.filename,
+          foreground: params.foreground ?? false,
+        },
+      },
+    )
+  }
+
   // --- Schedules API ---
 
   async listSchedules(): Promise<PterodactylScheduleListResponse> {

@@ -304,6 +304,10 @@ export const serverTypeDefs = /* GraphQL */ `
     environmentOverride: ModEnvironment
   }
 
+  input InstallServerContentPlansBatchInput {
+    plans: [InstallServerContentPlanInput!]!
+  }
+
   enum ServerReleaseSyncPlanAction {
     INSTALL
     UPDATE
@@ -710,6 +714,11 @@ export const serverTypeDefs = /* GraphQL */ `
     Installs server content (SERVER mod or DATA_PACK) directly on the physical server - requires ADMIN role
     """
     installServerContentPlan(serverId: ID, input: InstallServerContentPlanInput!): [ServerManagedContentItem!]!
+
+    """
+    Installs multiple server contents (SERVER mod or DATA_PACK) directly on the physical server in batch - requires ADMIN role
+    """
+    installServerContentPlansBatch(serverId: ID, input: InstallServerContentPlansBatchInput!): [ServerManagedContentItem!]!
 
     """
     Removes server-direct managed content physically and from tracking - requires ADMIN role
