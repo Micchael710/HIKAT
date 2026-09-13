@@ -69,6 +69,23 @@ export const ModSearchFilterBar: React.FC<ModSearchFilterBarProps> = ({
           { key: "DATA_PACK", label: "Data Packs", testId: "server-tab-content-datapack" },
         ]
 
+  const modrinthOnlyCategories = React.useMemo(
+    () => categories.filter((c) => c.providers?.includes("MODRINTH") && !c.providers?.includes("CURSEFORGE")),
+    [categories],
+  )
+  const sharedCategories = React.useMemo(
+    () => categories.filter((c) => c.providers?.includes("MODRINTH") && c.providers?.includes("CURSEFORGE")),
+    [categories],
+  )
+  const curseforgeOnlyCategories = React.useMemo(
+    () => categories.filter((c) => !c.providers?.includes("MODRINTH") && c.providers?.includes("CURSEFORGE")),
+    [categories],
+  )
+  const otherCategories = React.useMemo(
+    () => categories.filter((c) => !c.providers?.includes("MODRINTH") && !c.providers?.includes("CURSEFORGE")),
+    [categories],
+  )
+
   return (
     <div
       style={{
@@ -237,11 +254,57 @@ export const ModSearchFilterBar: React.FC<ModSearchFilterBarProps> = ({
             {loadingCategories ? (
               <option disabled>Cargando categorías...</option>
             ) : (
-              categories.map((cat) => (
-                <option key={cat.key} value={cat.key}>
-                  {cat.name}
-                </option>
-              ))
+              <>
+                {modrinthOnlyCategories.length > 0 && (
+                  <optgroup label="Modrinth" style={{ color: "#10b981", fontWeight: "700" }}>
+                    {modrinthOnlyCategories.map((cat) => (
+                      <option
+                        key={cat.key}
+                        value={cat.key}
+                        style={{ color: tokens.textPrimary, background: tokens.bgInput, fontWeight: "400" }}
+                      >
+                        {cat.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {sharedCategories.length > 0 && (
+                  <optgroup label="Modrinth + CurseForge" style={{ color: tokens.textPrimary, fontWeight: "700" }}>
+                    {sharedCategories.map((cat) => (
+                      <option
+                        key={cat.key}
+                        value={cat.key}
+                        style={{ color: tokens.textPrimary, background: tokens.bgInput, fontWeight: "400" }}
+                      >
+                        {cat.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {curseforgeOnlyCategories.length > 0 && (
+                  <optgroup label="CurseForge" style={{ color: "#f97316", fontWeight: "700" }}>
+                    {curseforgeOnlyCategories.map((cat) => (
+                      <option
+                        key={cat.key}
+                        value={cat.key}
+                        style={{ color: tokens.textPrimary, background: tokens.bgInput, fontWeight: "400" }}
+                      >
+                        {cat.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {otherCategories.length > 0 &&
+                  otherCategories.map((cat) => (
+                    <option
+                      key={cat.key}
+                      value={cat.key}
+                      style={{ color: tokens.textPrimary, background: tokens.bgInput }}
+                    >
+                      {cat.name}
+                    </option>
+                  ))}
+              </>
             )}
           </select>
         </div>

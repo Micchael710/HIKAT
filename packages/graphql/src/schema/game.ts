@@ -371,6 +371,7 @@ export const gameTypeDefs = /* GraphQL */ `
   type ModCategoryItem {
     key: String!
     name: String!
+    providers: [ModProvider!]!
   }
 
   """

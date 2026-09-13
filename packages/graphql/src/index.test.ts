@@ -805,6 +805,7 @@ describe("@hikat/graphql foundation & contracts", () => {
         modCategories(contentType: $contentType) {
           key
           name
+          providers
         }
         searchMods(
           serverId: $serverId
@@ -879,6 +880,7 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(catType).toBeDefined()
     expect(catType.getFields().key).toBeDefined()
     expect(catType.getFields().name).toBeDefined()
+    expect(catType.getFields().providers).toBeDefined()
   })
 })
 

@@ -2395,6 +2395,7 @@ export const modProvidersApi = {
         modCategories(contentType: $contentType) {
           key
           name
+          providers
         }
       }
     `

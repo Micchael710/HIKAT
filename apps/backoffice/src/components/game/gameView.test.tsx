@@ -2301,6 +2301,89 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(await screen.findByText("Sparse Mod 1")).toBeDefined()
       expect(screen.queryByRole("button", { name: /Cargar más/i })).toBeNull()
     })
+
+    it("organizes categories in optgroups (Modrinth, Modrinth + CurseForge, CurseForge) and preserves categoryKey on selection", async () => {
+      const mockCategories: import("../../types").ModCategoryItem[] = [
+        { key: "technology", name: "Tecnología", providers: ["MODRINTH"] },
+        { key: "magic", name: "Magia", providers: ["MODRINTH", "CURSEFORGE"] },
+        { key: "worldgen", name: "Generación de Mundo", providers: ["CURSEFORGE"] },
+      ]
+
+      vi.spyOn(graphqlClient, "getModCategories").mockResolvedValue(mockCategories)
+      const searchSpy = vi.spyOn(graphqlClient, "searchMods").mockResolvedValue({
+        items: [],
+        totalCount: 0,
+        hasMore: false,
+        nextCursor: null,
+        providersStatus: [],
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+      })
+
+      await act(async () => {
+        render(
+          <ModSearchModal
+            serverId="srv-1"
+            onClose={vi.fn()}
+            onSuccess={vi.fn()}
+          />,
+        )
+      })
+
+      // Wait for category selector to be rendered
+      const categorySelect = (await screen.findByTestId("mod-category-selector")) as HTMLSelectElement
+      expect(categorySelect).toBeDefined()
+
+      // Verify optgroups exist
+      const optgroups = categorySelect.querySelectorAll("optgroup")
+      expect(optgroups).toHaveLength(3)
+
+      // 1. Modrinth optgroup
+      const mrOptgroup = categorySelect.querySelector('optgroup[label="Modrinth"]')
+      expect(mrOptgroup).not.toBeNull()
+      const mrOptions = Array.from(mrOptgroup!.querySelectorAll("option")).map((o) => ({
+        value: o.value,
+        text: o.textContent,
+      }))
+      expect(mrOptions).toEqual([{ value: "technology", text: "Tecnología" }])
+
+      // 2. Shared optgroup
+      const sharedOptgroup = categorySelect.querySelector('optgroup[label="Modrinth + CurseForge"]')
+      expect(sharedOptgroup).not.toBeNull()
+      const sharedOptions = Array.from(sharedOptgroup!.querySelectorAll("option")).map((o) => ({
+        value: o.value,
+        text: o.textContent,
+      }))
+      expect(sharedOptions).toEqual([{ value: "magic", text: "Magia" }])
+
+      // 3. CurseForge optgroup
+      const cfOptgroup = categorySelect.querySelector('optgroup[label="CurseForge"]')
+      expect(cfOptgroup).not.toBeNull()
+      const cfOptions = Array.from(cfOptgroup!.querySelectorAll("option")).map((o) => ({
+        value: o.value,
+        text: o.textContent,
+      }))
+      expect(cfOptions).toEqual([{ value: "worldgen", text: "Generación de Mundo" }])
+
+      // 4. Selecting a category sends the exact categoryKey to searchMods
+      await act(async () => {
+        fireEvent.change(categorySelect, { target: { value: "magic" } })
+      })
+
+      expect(searchSpy).toHaveBeenLastCalledWith(
+        "",
+        "MOD",
+        null,
+        20,
+        0,
+        "srv-1",
+        null,
+        "magic",
+        null,
+        null,
+      )
+    })
   })
 
   describe("HiKAT Shard 8C: Release Experience & Publication Suite (React & Wizards)", () => {

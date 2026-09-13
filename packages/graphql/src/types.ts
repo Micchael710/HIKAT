@@ -919,6 +919,7 @@ export interface ModSearchPayloadGql {
 export interface ModCategoryItemGql {
   key: string
   name: string
+  providers: ModProviderGql[]
 }
 
 export interface ModDependencyGql {

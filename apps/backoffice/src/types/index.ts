@@ -382,6 +382,7 @@ export interface ModProviderStatus {
 export interface ModCategoryItem {
   key: string
   name: string
+  providers: ModProvider[]
 }
 
 export interface ModSearchResultItem {

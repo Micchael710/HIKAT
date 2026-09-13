@@ -216,7 +216,20 @@ export class ModProviderManager {
     contentType: ContentTypeGql = "MOD",
   ): Promise<ModCategoryItemGql[]> {
     const categories = await this.getInternalCategories(env, contentType)
-    return categories.map((c) => ({ key: c.key, name: c.name }))
+    return categories.map((c) => {
+      const providers: ModProviderGql[] = []
+      if (c.modrinthSlug) {
+        providers.push("MODRINTH")
+      }
+      if (c.curseForgeCategoryId !== undefined && c.curseForgeCategoryId !== null) {
+        providers.push("CURSEFORGE")
+      }
+      return {
+        key: c.key,
+        name: c.name,
+        providers,
+      }
+    })
   }
 
   async getInternalCategories(
