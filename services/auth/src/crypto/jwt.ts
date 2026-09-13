@@ -7,9 +7,7 @@ import * as jose from "jose"
 import {
   AppRole,
   AccessTokenPayload,
-  GameTokenPayload,
   AUTH_AUDIENCE_API,
-  AUTH_AUDIENCE_GAME,
   DEFAULT_AUTH_ISSUER,
 } from "@hikat/shared"
 
@@ -148,45 +146,6 @@ export async function signAccessToken(
   return { token, expiresIn }
 }
 
-/**
- * Sign a Game JWT for Minecraft (ES256 JWT, 3m short expiry)
- */
-export async function signGameToken(
-  params: {
-    userId: string
-    sessionId: string
-    role: AppRole
-    displayName?: string | null
-  },
-  keyManager: JwtKeyManager,
-  options?: {
-    issuer?: string
-    expiresInSeconds?: number
-  },
-): Promise<{ token: string; expiresIn: number }> {
-  const issuer = options?.issuer || DEFAULT_AUTH_ISSUER
-  const audience = AUTH_AUDIENCE_GAME
-  const expiresIn = options?.expiresInSeconds || 3 * 60 // 3 minutes
-
-  const jti = crypto.randomUUID()
-  const now = Math.floor(Date.now() / 1000)
-
-  const token = await new jose.SignJWT({
-    role: params.role,
-    displayName: params.displayName ?? null,
-    sid: params.sessionId,
-  })
-    .setProtectedHeader({ alg: "ES256", typ: "JWT", kid: keyManager.kid })
-    .setSubject(params.userId)
-    .setIssuer(issuer)
-    .setAudience(audience)
-    .setJti(jti)
-    .setIssuedAt(now)
-    .setExpirationTime(now + expiresIn)
-    .sign(keyManager.privateKey)
-
-  return { token, expiresIn }
-}
 
 /**
  * Verify an Access JWT using public key or JWKS
@@ -226,54 +185,6 @@ export async function verifyAccessToken(
   return {
     iss: payload.iss as string,
     aud: payload.aud as string,
-    sub: payload.sub,
-    sid: payload.sid,
-    role: payload.role as AppRole,
-    displayName: (payload.displayName as string) ?? null,
-    iat: payload.iat as number,
-    exp: payload.exp as number,
-    jti: payload.jti as string,
-  }
-}
-
-/**
- * Verify a Game JWT using public key or JWKS
- */
-export async function verifyGameToken(
-  token: string,
-  keyManagerOrPublicKey: JwtKeyManager | jose.CryptoKey | Uint8Array,
-  options?: {
-    issuer?: string
-    audience?: string
-  },
-): Promise<GameTokenPayload> {
-  const publicKey =
-    "publicKey" in keyManagerOrPublicKey
-      ? keyManagerOrPublicKey.publicKey
-      : keyManagerOrPublicKey
-
-  const issuer = options?.issuer || DEFAULT_AUTH_ISSUER
-  const audience = options?.audience || AUTH_AUDIENCE_GAME
-
-  const { payload } = await jose.jwtVerify(token, publicKey, {
-    issuer,
-    audience,
-    algorithms: ["ES256"],
-  })
-
-  if (!payload.sub || typeof payload.sub !== "string") {
-    throw new Error("Invalid Game JWT: missing subject (sub)")
-  }
-  if (!payload.sid || typeof payload.sid !== "string") {
-    throw new Error("Invalid Game JWT: missing session ID (sid)")
-  }
-  if (!payload.role || (payload.role !== "PLAYER" && payload.role !== "ADMIN")) {
-    throw new Error("Invalid Game JWT: invalid or missing role")
-  }
-
-  return {
-    iss: payload.iss as string,
-    aud: AUTH_AUDIENCE_GAME,
     sub: payload.sub,
     sid: payload.sid,
     role: payload.role as AppRole,

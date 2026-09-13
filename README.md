@@ -1,6 +1,6 @@
 # HiKAT
 
-HiKAT is a unified Minecraft ecosystem platform featuring an Electron client launcher, an administrative backoffice, Cloudflare Workers backend and authentication services, and NeoForge/Velocity Minecraft server components.
+HiKAT is a unified Minecraft ecosystem platform featuring an Electron client launcher, an administrative backoffice, and Cloudflare Workers backend and authentication services.
 
 ## Workspace Architecture
 
@@ -11,17 +11,14 @@ HiKAT/
 ├── services/
 │   ├── backend/              # GraphQL Yoga API Service (Cloudflare Worker)
 │   └── auth/                 # Authentication Provider (Cloudflare Worker)
-├── minecraft/
-│   ├── client-mod/           # Client-side Auth & Integration Mod (NeoForge 1.21.1)
-│   ├── server-mod/           # Server-side Auth & Management Mod (NeoForge 1.21.1)
-│   └── gateway/              # Velocity Proxy Gateway for Fly.io
+├── minecraft/                # Minecraft Subsystem
 ├── packages/
 │   ├── shared/               # Shared constants, types, and foundation utilities
 │   ├── graphql/              # Authoritative GraphQL schema definitions
 │   └── config/               # Shared TypeScript and tooling configs
 ├── infrastructure/
 │   ├── cloudflare/           # Cloudflare Worker, D1, and R2 templates
-│   └── fly/                  # Fly.io Velocity Gateway deployment configurations
+│   └── fly/                  # Fly.io deployment configurations
 └── docs/                     # Complete Architecture & System Specifications
 ```
 
@@ -29,7 +26,6 @@ HiKAT/
 
 - **Node.js**: >= 20.x
 - **pnpm**: >= 9.x
-- **JDK**: Java 21 (for Minecraft subprojects)
 
 ## Installation & Setup
 

@@ -3074,36 +3074,6 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
   })
 })
 
-ipcMain.handle("game-write-token", async (_event, options = {}) => {
-  const token = typeof options.token === "string" ? options.token.trim() : ""
-  if (!token) return { success: false, error: "Missing token" }
-
-  const ctx = resolveGameContext(options)
-  const metaDir = path.join(ctx.instanceRoot, ".hikat")
-  try {
-    if (!fs.existsSync(metaDir)) {
-      fs.mkdirSync(metaDir, { recursive: true })
-    }
-    const targetFile = path.join(metaDir, "game-token.json")
-    const tempFile = path.join(
-      metaDir,
-      `game-token.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`
-    )
-    fs.writeFileSync(tempFile, JSON.stringify({ token, updatedAt: new Date().toISOString() }), "utf8")
-    try {
-      fs.renameSync(tempFile, targetFile)
-    } catch (_) {
-      if (fs.existsSync(targetFile)) {
-        fs.unlinkSync(targetFile)
-      }
-      fs.renameSync(tempFile, targetFile)
-    }
-    return { success: true }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-})
-
 ipcMain.handle("game-get-status", async (_event, payload = {}) => {
   const launchStatus = gameLauncher.getLaunchStatus()
   const runningGameId = launchStatus.gameId || null

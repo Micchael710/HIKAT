@@ -31,7 +31,6 @@ import {
   getOrCreateOAuthUser,
   resolveOAuthUser,
   getAuthMethods,
-  issueGameToken,
   getEmailActionStatus,
 } from "./services/auth"
 import {
@@ -1167,18 +1166,6 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
 
       // Rejection: Arbitrary unauthenticated session ID is never accepted!
       return errorResponse(AuthErrorCode.UNAUTHORIZED, "Authentication (Bearer token or valid refreshToken) is required to logout", 401)
-    }
-
-    // 11. Game JWT for Minecraft
-    if (pathname === "/auth/game-token" && method === "POST") {
-      const session = await extractAuthenticatedSession(request, keyManager)
-      const gameToken = await issueGameToken(db, session.userId, session.sessionId, keyManager)
-      return jsonResponse({
-        token: gameToken.token,
-        expiresIn: gameToken.expiresIn,
-        audience: "hikat-minecraft",
-        tokenType: "Bearer",
-      })
     }
 
     // 12. Get Auth Methods (authenticated read-only)

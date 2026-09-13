@@ -14,7 +14,6 @@ import {
   AuthClientCore,
   AuthErrorCode,
   AUTH_AUDIENCE_API,
-  AUTH_AUDIENCE_GAME,
   DEFAULT_AUTH_ISSUER,
 } from "@hikat/shared"
 import {
@@ -32,9 +31,7 @@ import {
 import {
   createDevKeyManager,
   signAccessToken,
-  signGameToken,
   verifyAccessToken,
-  verifyGameToken,
   getJwksResponse,
 } from "./crypto/jwt"
 import { MockEmailService, ResendEmailService, renderHikatEmail, EMAIL_TRANSLATIONS } from "./services/email"
@@ -59,7 +56,6 @@ import {
   getOrCreateOAuthUser,
   resolveOAuthUser,
   getAuthMethods,
-  issueGameToken,
   setInitialUsername,
 } from "./services/auth"
 import {
@@ -999,84 +995,6 @@ describe("HiKAT Authentication System (Shard 02)", () => {
     })
   })
 
-  // ==========================================
-  // 8. GAME JWT (MINECRAFT CREDENTIAL)
-  // ==========================================
-  describe("Game JWT for Minecraft", () => {
-    it("issues a valid short Game JWT for verified player with active session", async () => {
-      const reg = await registerWithPassword(
-        db,
-        { email: "minecraft@hikat.org", password: "password123", displayName: "Crafter" },
-        emailService,
-      )
-
-      // Verify email
-      const verifyEmail = emailService.getLastEmailFor("minecraft@hikat.org")
-      await verifyEmailToken(db, verifyEmail!.token)
-
-      // Log in
-      const session = await loginWithPassword(
-        db,
-        { email: "minecraft@hikat.org", password: "password123" },
-        keyManager,
-      )
-
-      const gameJwt = await issueGameToken(db, session.user.id, session.sessionId, keyManager)
-      expect(gameJwt.token).toBeDefined()
-      expect(gameJwt.expiresIn).toBe(3 * 60)
-
-      // Validate Game JWT claims
-      const verified = await verifyGameToken(gameJwt.token, keyManager)
-      expect(verified.sub).toBe(session.user.id)
-      expect(verified.sid).toBe(session.sessionId)
-      expect(verified.role).toBe("PLAYER")
-      expect(verified.displayName).toBe("Crafter")
-      expect(verified.aud).toBe(AUTH_AUDIENCE_GAME)
-    })
-
-    it("REJECTS Game JWT issuance if email is not verified for password accounts", async () => {
-      const reg = await registerWithPassword(
-        db,
-        { email: "unverified@hikat.org", password: "password123", displayName: "Unverified" },
-        emailService,
-      )
-
-      const rawSession = await createSession(
-        db,
-        { id: reg.user.id, role: "PLAYER", displayName: "Unverified" },
-        keyManager,
-      )
-
-      // Attempt to get Game JWT without verified email -> MUST FAIL
-      await expect(
-        issueGameToken(db, reg.user.id, rawSession.sessionId, keyManager),
-      ).rejects.toThrow(AuthErrorCode.EMAIL_NOT_VERIFIED)
-    })
-
-    it("REJECTS Game JWT issuance if session was revoked", async () => {
-      const reg = await registerWithPassword(
-        db,
-        { email: "game.revoked@hikat.org", password: "password123", displayName: "GameRevoked" },
-        emailService,
-      )
-      const verifyEmail = emailService.getLastEmailFor("game.revoked@hikat.org")
-      await verifyEmailToken(db, verifyEmail!.token)
-
-      const session = await loginWithPassword(
-        db,
-        { email: "game.revoked@hikat.org", password: "password123" },
-        keyManager,
-      )
-
-      // Revoke session
-      await revokeSession(db, session.sessionId)
-
-      // Attempt to issue Game JWT -> MUST FAIL
-      await expect(
-        issueGameToken(db, session.user.id, session.sessionId, keyManager),
-      ).rejects.toThrow(AuthErrorCode.UNAUTHORIZED)
-    })
-  })
 
   // ==========================================
   // 9. HTTP ENDPOINTS & WORKER INTEGRATION
@@ -1162,7 +1080,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(credAfter?.emailVerifiedAt).not.toBeNull()
     })
 
-    it("handles full HTTP registration, login, game-token, and logout flow", async () => {
+    it("handles full HTTP registration, login, and logout flow", async () => {
       // 1. POST /auth/register
       const regReq = new Request("http://localhost:8788/auth/register", {
         method: "POST",
@@ -1203,17 +1121,6 @@ describe("HiKAT Authentication System (Shard 02)", () => {
       expect(loginData.refreshToken).toBeDefined()
       expect(loginData.user.createdAt).toBeDefined()
       expect(typeof loginData.user.createdAt).toBe("string")
-
-      // 4. POST /auth/game-token
-      const gameReq = new Request("http://localhost:8788/auth/game-token", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${loginData.accessToken}` },
-      })
-      const gameRes = await handleRequest({ request: gameReq, env: {}, db, keyManager, emailService })
-      expect(gameRes.status).toBe(200)
-      const gameData = (await gameRes.json()) as { token: string; audience: string }
-      expect(gameData.token).toBeDefined()
-      expect(gameData.audience).toBe("hikat-minecraft")
 
       // 5. POST /auth/refresh
       const refreshReq = new Request("http://localhost:8788/auth/refresh", {
@@ -4400,24 +4307,7 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         const session = await createSession(db, oauthUser, keyManager)
         expect(session.user.displayName).toBeNull()
 
-        // 3. Game JWT must be rejected because display_name is NULL
-        await expect(
-          issueGameToken(db, oauthUser.id, session.sessionId, keyManager),
-        ).rejects.toThrow(AuthErrorCode.INVALID_USERNAME)
-
-        const gameReq = new Request("https://auth.hikat.org/auth/game-token", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.accessToken}`,
-          },
-        })
-        const gameRes = await handleRequest({ request: gameReq, env: {}, db, keyManager, emailService })
-        expect(gameRes.status).toBe(400)
-        const gameBody = (await gameRes.json()) as any
-        expect(gameBody.code).toBe(AuthErrorCode.INVALID_USERNAME)
-
-        // 4. Complete onboarding via setInitialUsername (from NULL to chosen username)
+        // 3. Complete onboarding via setInitialUsername (from NULL to chosen username)
         const chosenUsername = "BrayanMateo"
         const updated = await setInitialUsername(db, oauthUser.id, session.sessionId, chosenUsername)
         expect(updated.user.displayName).toBe("BrayanMateo")
@@ -4427,12 +4317,6 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         await expect(
           setInitialUsername(db, oauthUser.id, session.sessionId, "OtherName"),
         ).rejects.toThrow(AuthErrorCode.FORBIDDEN)
-
-        // 5. Now Game JWT succeeds and contains chosen username
-        const gameToken = await issueGameToken(db, oauthUser.id, session.sessionId, keyManager)
-        const gameClaims = await verifyGameToken(gameToken.token, keyManager)
-        expect(gameClaims.displayName).toBe("BrayanMateo")
-        expect(gameClaims.sub).toBe(oauthUser.id)
 
         // 6. Refresh session picks up updated username
         const refreshed = await rotateRefreshToken(db, session.refreshToken, keyManager)

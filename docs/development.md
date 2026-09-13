@@ -51,6 +51,6 @@
 - `packages/graphql/`: Authoritative modular GraphQL schema, scalars, error codes, and contracts.
 - `packages/shared/`: Shared utilities, constants, and types.
 - `packages/config/`: Shared TypeScript and build configs.
-- `minecraft/`: Gradle multi-project for NeoForge 1.21.1 mods and Velocity gateway.
+- `minecraft/`: Minecraft workspace module.
 - `infrastructure/`: Architecture and infrastructure deployment specs.
 - `docs/`: Technical and design specifications.

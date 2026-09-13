@@ -198,12 +198,6 @@ interface ElectronAPI {
     gameId?: string
     gameName?: string
   }) => Promise<{ success: boolean; pid?: number }>
-  writeGameToken?: (options: {
-    instanceRoot?: string
-    gameId?: string
-    serverId?: string
-    token: string
-  }) => Promise<{ success: boolean; error?: string }>
 
   getLaunchStatus?: (gameContext?: GameContext) => Promise<{
     status: string

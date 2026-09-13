@@ -33,12 +33,10 @@ HiKATbackoffice ──────┘
    - Capa central de aplicación que aplica autorización, reglas de negocio y conecta con Cloudflare D1, R2 y servicios de soporte.
 
 4. **Authentication Worker (`services/auth/`)**:
-   - Cloudflare Worker dedicado para autenticación OAuth (Google, Discord) y emisión de tokens asimétricos para sesiones y juego.
+   - Cloudflare Worker dedicado para autenticación OAuth (Google, Discord) y emisión de Access y Refresh JWTs para sesiones.
 
-5. **Minecraft / Velocity Gateway (`minecraft/`)**:
-   - `client-mod`: Mod ligero (NeoForge 1.21.1) para presentar la credencial de juego entregada por el Launcher.
-   - `server-mod`: Mod/componente de servidor (NeoForge 1.21.1) para validar la firma y vigencia del Game JWT.
-   - `gateway`: Velocity Proxy en Fly.io para recepción en `mc.hikat...`, gestión de sala de espera, encendido bajo demanda (WoL / backend start) y transferencia transparente a `play.hikat...`.
+5. **Minecraft Subsystem (`minecraft/`)**:
+   - Módulo reservado para futuras implementaciones de Minecraft.
 
 ## Almacenamiento y Persistencia
 

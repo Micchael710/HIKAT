@@ -1,69 +1,6 @@
 import { graphqlClient } from "./apiClient"
 import { getApiBaseUrl } from "../config/api"
-import { authService } from "./authService"
 import type { PublishedModpack, ClientFile, SyncPlanCheckResult } from "../vite-env"
-
-let tokenRenewalTimer: any = null
-let currentRenewalContext: { gameId?: string; gameName?: string } | null = null
-
-export async function syncGameToken(gameContext?: { gameId?: string; gameName?: string } | null) {
-  if (!window.electronAPI?.writeGameToken) return
-  try {
-    const res = await authService.getGameToken()
-    if (res && res.token) {
-      await window.electronAPI.writeGameToken({
-        gameId: gameContext?.gameId,
-        gameName: gameContext?.gameName,
-        token: res.token,
-      })
-    }
-  } catch (_) {
-    // Fail silently without logging JWT
-  }
-}
-
-export function startTokenRenewal(gameContext?: { gameId?: string; gameName?: string } | null) {
-  stopTokenRenewal()
-  currentRenewalContext = gameContext || null
-  void syncGameToken(gameContext)
-  tokenRenewalTimer = setInterval(async () => {
-    try {
-      if (window.electronAPI?.getLaunchStatus) {
-        const status = await window.electronAPI.getLaunchStatus((currentRenewalContext || undefined) as any)
-        if (status?.status !== "running") {
-          stopTokenRenewal()
-          return
-        }
-      }
-      await syncGameToken(currentRenewalContext)
-    } catch (_) {}
-  }, 90000)
-}
-
-export function stopTokenRenewal() {
-  if (tokenRenewalTimer) {
-    clearInterval(tokenRenewalTimer)
-    tokenRenewalTimer = null
-  }
-  currentRenewalContext = null
-}
-
-export async function recoverActiveGameSession(): Promise<boolean> {
-  if (!window.electronAPI?.getLaunchStatus) return false
-  try {
-    const status = await window.electronAPI.getLaunchStatus()
-    if (status?.status === "running") {
-      const runningGameId = status.runningGameId || status.gameId
-      const gameContext = runningGameId ? {
-        gameId: runningGameId,
-        gameName: (status as any).gameName,
-      } : null
-      startTokenRenewal(gameContext)
-      return true
-    }
-  } catch (_) {}
-  return false
-}
 
 export type GameButtonState =
   | "checking"
@@ -676,31 +613,14 @@ export const gameService = {
     customArgs?: string[]
     gameContext?: { gameId: string; gameName: string }
   }) {
-    await syncGameToken(options.gameContext).catch(() => {})
-
     if (window.electronAPI?.launchGame) {
-      try {
-        const result = await window.electronAPI.launchGame({
-          ...options,
-          modLoaderVersion: options.modLoaderVersion ?? undefined,
-          neoForgeVersion: options.neoForgeVersion ?? undefined,
-          gameId: options.gameContext?.gameId,
-          gameName: options.gameContext?.gameName,
-        })
-        if (result && result.success !== false) {
-          startTokenRenewal(options.gameContext)
-        } else {
-          stopTokenRenewal()
-        }
-        return result
-      } catch (err) {
-        stopTokenRenewal()
-        throw err
-      }
+      return await window.electronAPI.launchGame({
+        ...options,
+        modLoaderVersion: options.modLoaderVersion ?? undefined,
+        neoForgeVersion: options.neoForgeVersion ?? undefined,
+        gameId: options.gameContext?.gameId,
+        gameName: options.gameContext?.gameName,
+      })
     }
   },
-  syncGameToken,
-  startTokenRenewal,
-  stopTokenRenewal,
-  recoverActiveGameSession,
 }

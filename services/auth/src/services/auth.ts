@@ -12,7 +12,7 @@ import {
 } from "@hikat/shared"
 import { hashPassword, verifyPassword } from "../crypto/password"
 import { generateSecureToken, hashToken } from "../crypto/tokens"
-import { JwtKeyManager, signGameToken } from "../crypto/jwt"
+import { JwtKeyManager } from "../crypto/jwt"
 import {
   createSession,
   revokeAllUserSessions,
@@ -1003,61 +1003,6 @@ export async function getAuthMethods(
   }
 
   return methods
-}
-
-/**
- * Issue a Game JWT for Minecraft (aud: hikat-minecraft)
- * Requires valid active session AND verified email (if registered via password)
- */
-export async function issueGameToken(
-  db: Database,
-  userId: string,
-  sessionId: string,
-  keyManager: JwtKeyManager,
-): Promise<{ token: string; expiresIn: number }> {
-  // 1. Verify active session in D1
-  const isSessionActive = await validateActiveSession(db, sessionId, userId)
-  if (!isSessionActive) {
-    throw new Error(AuthErrorCode.UNAUTHORIZED)
-  }
-
-  // 2. Fetch user
-  const user = await db
-    .select()
-    .from(schema.users)
-    .where(eq(schema.users.id, userId))
-    .get()
-
-  if (!user) {
-    throw new Error(AuthErrorCode.UNAUTHORIZED)
-  }
-
-  // 3. Email verification gate for password credentials
-  const passwordCred = await db
-    .select()
-    .from(schema.passwordCredentials)
-    .where(eq(schema.passwordCredentials.userId, userId))
-    .get()
-
-  if (passwordCred && passwordCred.emailVerifiedAt === null) {
-    throw new Error(AuthErrorCode.EMAIL_NOT_VERIFIED)
-  }
-
-  // 4. Complete username gate: user must have selected a valid username
-  if (!user.displayName || user.displayName.trim() === "") {
-    throw new Error(AuthErrorCode.INVALID_USERNAME)
-  }
-
-  // 5. Sign and return Game JWT
-  return signGameToken(
-    {
-      userId: user.id,
-      sessionId,
-      role: user.role as AppRole,
-      displayName: user.displayName,
-    },
-    keyManager,
-  )
 }
 
 /**

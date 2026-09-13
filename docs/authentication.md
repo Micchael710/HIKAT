@@ -10,11 +10,11 @@ HiKAT cuenta con un sistema propio y unificado de cuentas internas bajo el princ
 - **`username` / `displayName` (Nombre visible modificable)**: Es el identificador visible del usuario en el Launcher, perfiles y servidores. Puede ser modificado por el usuario autenticado desde el Launcher.
 
 > [!IMPORTANT]
-> **Arquitectura de Identidad en Minecraft (Client-Mod / Server-Mod)**:
-> El objetivo arquitectónico de HiKAT es que el futuro mod cliente y servidor (`client-mod` / `server-mod`) enlace el GameProfile del jugador y su UUID de servidor directamente al `users.id` permanente de HiKAT, garantizando persistencia absoluta de inventarios y datos de jugador (`playerdata`) ante cambios de nombre visible.
+> **Arquitectura de Identidad en Minecraft**:
+> El objetivo arquitectónico de HiKAT es que la futura integración de Minecraft enlace el GameProfile del jugador y su UUID de servidor directamente al `users.id` permanente de HiKAT, garantizando persistencia absoluta de inventarios y datos de jugador (`playerdata`) ante cambios de nombre visible.
 >
 > **Advertencia sobre servidores tradicionales en `online-mode=false`**:
-> Hasta que el sistema `client-mod`/`server-mod` esté desplegado en los servidores, un servidor de Minecraft vanilla o estándar en modo offline (`online-mode=false`) genera su UUID determinístico a partir del string del username (`UUID.nameUUIDFromBytes("OfflinePlayer:" + username)`). En consecuencia, cambiar el username en este tipo de servidores tradicionales puede separar el progreso del jugador hasta la llegada del mod de identidad.
+> Hasta que la integración de identidad esté desplegada en los servidores, un servidor de Minecraft vanilla o estándar en modo offline (`online-mode=false`) genera su UUID determinístico a partir del string del username (`UUID.nameUUIDFromBytes("OfflinePlayer:" + username)`). En consecuencia, cambiar el username en este tipo de servidores tradicionales puede separar el progreso del jugador hasta la llegada de la integración de identidad.
 
 ### Reglas para Cambio de Nombre de Usuario
 - **Autoservicio autenticado**: El usuario autenticado puede cambiar su propio nombre de usuario desde su perfil en el Launcher.
@@ -25,7 +25,6 @@ HiKAT cuenta con un sistema propio y unificado de cuentas internas bajo el princ
 - **Propagación en Sesiones y JWTs**:
   - Al completar el cambio, la sesión local del Launcher actualiza reactivamente el usuario en memoria y en almacenamiento seguro.
   - La rotación de refresh tokens (`/auth/refresh`) consulta la fuente autoritativa en D1 y emite nuevos Access JWTs con el nombre actualizado.
-  - Los futuros Game JWTs (`/auth/game-token`) contienen inmediatamente el nombre actualizado en sus claims. No es necesario revocar otras sesiones activas del usuario.
 
 Los métodos de autenticación soportados son mutuamente excluyentes por cuenta:
 1. **Email + Contraseña**: Registrado en `password_credentials` (`userId`, `email`, `passwordHash`, `isEmailVerified`, `verifiedAt`).
@@ -62,10 +61,6 @@ No se utiliza RBAC complejo ni permisos adicionales.
 - **Access JWT**:
   - Duración: 15 minutos (`exp`).
   - Claims: `sub` (userId), `sid` (sessionId), `role`, `displayName`, `iss` (`https://auth.hikat.org`), `aud` (`hikat-api`).
-- **Game JWT (Minecraft)**:
-  - Duración: 3 minutos (`exp`).
-  - Claims: `sub` (userId), `sid` (sessionId), `role`, `displayName`, `iss` (`https://auth.hikat.org`), `aud` (`hikat-minecraft`).
-  - Requisito estricto: La sesión `sid` debe estar activa en D1 y la cuenta debe tener el correo verificado si utiliza email/contraseña.
 
 ---
 
@@ -139,7 +134,6 @@ Launcher (Electron)             HiKAT Auth Service            External Provider 
 | `POST` | `/auth/set-username` | Asignación inicial de nombre de usuario para cuentas OAuth (display_name IS NULL, permanente) | Bearer JWT + D1 sid check |
 | `POST` | `/auth/refresh` | Rotación de refresh token | Refresh Token |
 | `POST` | `/auth/logout` | Revocación de sesión en D1 | Bearer JWT |
-| `POST` | `/auth/game-token` | Emisión de Game JWT de corta duración (3 min) | Bearer JWT + D1 sid check |
 | `GET` | `/auth/me/methods` | Consulta de método de autenticación activo (read-only) | Bearer JWT + D1 sid check |
 | `GET` | `/oauth/authorize` | Inicio de flujo PKCE OAuth para clientes | Pública |
 | `GET` | `/oauth/google/callback` | Callback de Google OAuth2/OIDC | Pública |

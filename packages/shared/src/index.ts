@@ -18,7 +18,6 @@ export const ALLOWED_AUTH_METHODS = ["PASSWORD", "GOOGLE", "DISCORD"] as const
 export type AuthMethodType = typeof ALLOWED_AUTH_METHODS[number]
 
 export const AUTH_AUDIENCE_API = "hikat-api"
-export const AUTH_AUDIENCE_GAME = "hikat-minecraft"
 export const DEFAULT_AUTH_ISSUER = "https://auth.hikat.org"
 
 export const ALLOWED_REDIRECT_URIS = [
@@ -39,18 +38,6 @@ export * from "./auth/authClientCore"
 export interface AccessTokenPayload {
   iss: string
   aud: string
-  sub: string
-  sid: string
-  role: AppRole
-  displayName?: string | null
-  iat: number
-  exp: number
-  jti: string
-}
-
-export interface GameTokenPayload {
-  iss: string
-  aud: "hikat-minecraft"
   sub: string
   sid: string
   role: AppRole

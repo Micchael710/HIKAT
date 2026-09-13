@@ -860,10 +860,6 @@ class LauncherAuthService {
     }
   }
 
-  public async getGameToken(): Promise<{ token: string; expiresIn: number }> {
-    return await this.client.getGameToken()
-  }
-
   public async setUsername(username: string): Promise<{
     success: boolean
     user?: UserProfile

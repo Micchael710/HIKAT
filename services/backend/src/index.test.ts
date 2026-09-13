@@ -29,7 +29,6 @@ import { createTestD1 } from "@hikat/database/testUtils"
 
 import {
   AUTH_AUDIENCE_API,
-  AUTH_AUDIENCE_GAME,
   DEFAULT_AUTH_ISSUER,
   HIKAT_VERSION,
   AppRole,
@@ -957,21 +956,21 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       expect(result.errors?.[0]?.extensions?.code).toBe("UNAUTHENTICATED")
     })
 
-    it("rejects Game JWT (aud=hikat-minecraft) used against Backend API", async () => {
-      const userId = "usr_game_jwt"
+    it("rejects token with invalid audience used against Backend API", async () => {
+      const userId = "usr_invalid_aud"
 
-      const sessionId = "ses_game_jwt"
+      const sessionId = "ses_invalid_aud"
 
       await seedUserAndSession({ userId, sessionId })
 
-      const gameToken = await createTestAccessToken({
+      const invalidToken = await createTestAccessToken({
         userId,
 
         sessionId,
 
         role: "PLAYER",
 
-        audience: AUTH_AUDIENCE_GAME,
+        audience: "invalid-audience",
       })
 
       const request = new Request("http://localhost/graphql", {
@@ -980,7 +979,7 @@ describe("HiKAT Backend Core (Shard 03)", () => {
         headers: {
           "Content-Type": "application/json",
 
-          Authorization: `Bearer ${gameToken}`,
+          Authorization: `Bearer ${invalidToken}`,
         },
 
         body: JSON.stringify({ query: "{ me { id } }" }),

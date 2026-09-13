@@ -558,31 +558,6 @@ export class AuthClientCore {
     return outcome.kind === "READY" ? outcome.accessToken : null
   }
 
-  /**
-   * Requests a fresh short-lived Game Token for Minecraft authentication.
-   */
-  public async getGameToken(): Promise<{ token: string; expiresIn: number }> {
-    const outcome = await this.getValidAccessTokenOutcome(30)
-    if (outcome.kind !== "READY") {
-      throw new Error("No active session available to obtain Game Token")
-    }
-    const res = await this.fetcher(`${this.authServiceUrl}/auth/game-token`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${outcome.accessToken}`,
-        "Content-Type": "application/json",
-      },
-    })
-    const data = (await res.json().catch(() => ({}))) as Record<string, any>
-    if (!res.ok || !data.token) {
-      throw new Error(data.message || data.error || `Failed to obtain game token (${res.status})`)
-    }
-    return {
-      token: String(data.token),
-      expiresIn: typeof data.expiresIn === "number" ? data.expiresIn : 180,
-    }
-  }
-
   public async logout(): Promise<void> {
     const access = this.session?.accessToken || null
     const refresh = this.session?.refreshToken || null

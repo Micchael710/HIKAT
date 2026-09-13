@@ -1,7 +1,7 @@
 import { eq, and, desc, isNull } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
-import { validateGameFileBuffer, resolveEffectiveGamePolicy } from "@hikat/shared"
+import { validateGameFileBuffer } from "@hikat/shared"
 import type {
   ServerReleaseSyncPlanGql,
   ServerReleaseSyncStatusGql,
@@ -821,18 +821,6 @@ export async function applyServerReleaseSync(
           })
           .where(eq(schema.projectSettings.id, "main"))
 
-    // Generate official client integrity manifest and write to server root at hikat/integrity.json BEFORE activating
-    try {
-      const integrityManifest = await generateOfficialServerIntegrityManifest(db, published)
-      await client.createFolder("/", "hikat").catch(() => {})
-      await client.writeFile("hikat/integrity.json", JSON.stringify(integrityManifest, null, 2))
-    } catch (integrityErr) {
-      console.error("[ServerReleaseSync] Failed to write hikat/integrity.json:", integrityErr)
-      throw createGraphQLError(
-        "No se pudo generar el archivo de integridad oficial (hikat/integrity.json) en el servidor.",
-        "INTERNAL_ERROR",
-      )
-    }
 
     // ONLY IF writing the manifest succeeded: mark APPLIED and activate release
     await db.batch([
@@ -897,77 +885,5 @@ export async function applyServerReleaseSync(
     // 9. Release distributed operation lock and stop heartbeat
     heartbeat.stop()
     await releaseServerOperationLock(db, lockHandle)
-  }
-}
-
-export interface OfficialServerIntegrityManifest {
-  version: string
-  releaseId: string
-  officialFingerprint: string
-  files: Array<{
-    path: string
-    sha256: string
-    sizeBytes: number
-  }>
-  generatedAt: string
-}
-
-export async function generateOfficialServerIntegrityManifest(
-  db: Database,
-  publishedRelease: schema.GameRelease,
-): Promise<OfficialServerIntegrityManifest> {
-  const allFiles = await db
-    .select()
-    .from(schema.gameReleaseFiles)
-    .where(eq(schema.gameReleaseFiles.releaseId, publishedRelease.id))
-    .all()
-
-  const directoryPolicies = new Map<string, string | null>()
-  for (const f of allFiles) {
-    if (f.isDirectory) {
-      const normalizedDir = f.logicalPath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-      directoryPolicies.set(normalizedDir, f.policy)
-    }
-  }
-
-  // Filter client-expected non-directory files
-  const clientFiles = allFiles.filter(
-    (f) => !f.isDirectory && f.sourceEnvironment !== "SERVER",
-  )
-
-  const protectedItems: Array<{ path: string; sha256: string; sizeBytes: number }> = []
-
-  for (const file of clientFiles) {
-    const effective = resolveEffectiveGamePolicy(file.logicalPath, file.policy, directoryPolicies)
-    if (effective === "NO_MODIFICABLE") {
-      const normalizedPath = file.logicalPath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-      protectedItems.push({
-        path: normalizedPath,
-        sha256: file.sha256.toLowerCase().trim(),
-        sizeBytes: file.sizeBytes,
-      })
-    }
-  }
-
-  // Deterministic lexicographical sorting by Unicode code units (identical to Java String.compareTo)
-  protectedItems.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-
-  // Construct deterministic canonical string: `${path}:${sha256}\n`
-  let canonical = ""
-  for (const item of protectedItems) {
-    canonical += `${item.path}:${item.sha256}\n`
-  }
-
-  const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical))
-  const officialFingerprint = Array.from(new Uint8Array(hashBuf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-
-  return {
-    version: publishedRelease.version,
-    releaseId: publishedRelease.id,
-    officialFingerprint,
-    files: protectedItems,
-    generatedAt: new Date().toISOString(),
   }
 }
