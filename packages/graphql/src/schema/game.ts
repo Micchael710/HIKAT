@@ -356,6 +356,8 @@ export const gameTypeDefs = /* GraphQL */ `
   type ModSearchPayload {
     items: [ModSearchResultItem!]!
     totalCount: Int!
+    hasMore: Boolean!
+    nextCursor: String
     providersStatus: [ModProviderStatus!]!
     minecraftVersion: String!
     modLoader: GameModLoader!
@@ -607,6 +609,7 @@ export const gameTypeDefs = /* GraphQL */ `
       loaderOverride: GameModLoader
       categoryKey: String
       environmentFilter: ModEnvironment
+      cursor: String
     ): ModSearchPayload!
 
     """

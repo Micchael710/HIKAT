@@ -406,6 +406,8 @@ export interface ModSearchResultItem {
 export interface ModSearchPayload {
   items: ModSearchResultItem[]
   totalCount: number
+  hasMore: boolean
+  nextCursor?: string | null
   providersStatus: ModProviderStatus[]
   minecraftVersion: string
   modLoader: GameModLoader

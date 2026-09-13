@@ -974,6 +974,7 @@ export const resolvers = {
         loaderOverride?: GameModLoaderGql | null
         categoryKey?: string | null
         environmentFilter?: ModEnvironmentGql | null
+        cursor?: string | null
       },
       context: BackendGraphQLContext,
     ): Promise<ModSearchPayloadGql> => {
@@ -993,6 +994,7 @@ export const resolvers = {
         args.loaderOverride,
         args.categoryKey,
         args.environmentFilter,
+        args.cursor,
       )
     },
 

@@ -56,6 +56,8 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   const [results, setResults] = useState<ModSearchResultItem[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [cursor, setCursor] = useState<string | null>(null)
   const [providerStatuses, setProviderStatuses] = useState<ModProviderStatus[]>([])
   const [selectedMod, setSelectedMod] = useState<ModSearchResultItem | null>(null)
   const [queuedSelections, setQueuedSelections] = useState<QueuedModSelection[]>([])
@@ -114,6 +116,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     contentType: ContentType,
     providerTab: ModProvider | "ALL",
     currentOffset: number = 0,
+    searchCursor: string | null = null,
     isLoadMore: boolean = false,
     catKey: string = selectedCategoryKey,
     loader: GameModLoader = selectedLoader,
@@ -132,7 +135,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     const isCustomLoader = loader && loader !== envInfo.modLoader
     const activeEnvFilter = contentType === "MOD" ? envFilter : null
 
-    const searchPromise = (catKey || isCustomLoader || activeEnvFilter)
+    const searchPromise = (catKey || isCustomLoader || activeEnvFilter || searchCursor)
       ? graphqlClient.searchMods(
           searchQuery,
           contentType,
@@ -143,6 +146,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           isCustomLoader ? loader : null,
           catKey || null,
           activeEnvFilter,
+          searchCursor,
         )
       : graphqlClient.searchMods(
           searchQuery,
@@ -164,6 +168,8 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
         }
 
         setTotalCount(payload.totalCount || 0)
+        setHasMore(Boolean(payload.hasMore && payload.nextCursor))
+        setCursor(payload.nextCursor || null)
         setProviderStatuses(payload.providersStatus || [])
         if (payload.minecraftVersion) {
           setEnvInfo({
@@ -214,11 +220,13 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
       debounceTimer.current = null
     }
     setOffset(0)
+    setCursor(null)
     executeSearch(
       query,
       selectedContentType,
       selectedProviderTab,
       0,
+      null,
       false,
       selectedCategoryKey,
       selectedLoader,
@@ -254,6 +262,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   const handleQueryChange = (val: string) => {
     setQuery(val)
     setOffset(0)
+    setCursor(null)
 
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current)
@@ -264,6 +273,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
         selectedContentType,
         selectedProviderTab,
         0,
+        null,
         false,
         selectedCategoryKey,
         selectedLoader,
@@ -273,6 +283,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   }
 
   const handleLoadMore = () => {
+    if (!cursor || !hasMore || loadingMore) return
     const nextOffset = offset + PAGE_SIZE
     setOffset(nextOffset)
     executeSearch(
@@ -280,6 +291,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
       selectedContentType,
       selectedProviderTab,
       nextOffset,
+      cursor,
       true,
       selectedCategoryKey,
       selectedLoader,
@@ -319,7 +331,6 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   }
 
   const failedProviders = providerStatuses.filter((s) => !s.available && s.error)
-  const hasMore = results.length < totalCount
 
   return (
     <div
@@ -516,7 +527,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
                 ))}
               </div>
 
-              {hasMore && (
+              {hasMore && Boolean(cursor) && (
                 <div style={{ textAlign: "center", padding: "16px 0" }}>
                   <button
                     type="button"
@@ -529,7 +540,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
                       fontSize: "14px",
                     }}
                   >
-                    {loadingMore ? "Cargando más..." : `Cargar más (${results.length} de ${totalCount})`}
+                    {loadingMore ? "Cargando más..." : "Cargar más"}
                   </button>
                 </div>
               )}

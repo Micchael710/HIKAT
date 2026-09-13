@@ -906,6 +906,8 @@ export interface ModSearchResultItemGql {
 export interface ModSearchPayloadGql {
   items: ModSearchResultItemGql[]
   totalCount: number
+  hasMore: boolean
+  nextCursor?: string | null
   providersStatus: ModProviderStatusGql[]
   minecraftVersion: string
   modLoader: GameModLoaderGql

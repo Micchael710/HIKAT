@@ -1447,4 +1447,164 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     expect(res.items[0]?.projectId).toBe("dp-both-1")
     expect(res.items[1]?.projectId).toBe("dp-server-1")
   })
+
+  // Test 24: searchMods with environmentFilter ("BOTH") across > 300 raw results with sparse matches
+  it("searchMods paginates with cursor across > 300 raw results, sparse matches in early batches, and no repetition or loop", async () => {
+    // 500 items in total:
+    // Raw indices 40, 110: BOTH
+    // Raw indices 320, 350, 420: BOTH
+    // All other raw items: CLIENT
+    const allProviderItems = Array.from({ length: 500 }, (_, i) => ({
+      projectId: `mod-${i}`,
+      name: `Mod ${i}`,
+      environment: i === 40 || i === 110 || i === 320 || i === 350 || i === 420 ? "BOTH" : "CLIENT",
+      contentType: "MOD",
+      provider: "MODRINTH",
+    }))
+
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async (_env, _query, _mc, _l, limit, offset) => {
+        const slice = allProviderItems.slice(offset, offset + limit)
+        return { items: slice, totalCount: allProviderItems.length }
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockMrAdapter as any)
+    ;(manager as any).modrinth = mockMrAdapter
+
+    // Page 1: request limit 5 with environmentFilter: "BOTH"
+    // Scanning 6 batches (300 raw items) finds only mod-40 and mod-110 (< limit 5)
+    const page1 = await manager.searchMods(
+      mockEnv,
+      db,
+      "test",
+      "MODRINTH",
+      5,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      "BOTH",
+      null,
+    )
+
+    expect(page1.items).toHaveLength(2)
+    expect(page1.items.map((m) => m.projectId)).toEqual(["mod-40", "mod-110"])
+    expect(page1.hasMore).toBe(true)
+    expect(page1.nextCursor).not.toBeNull()
+
+    // Page 2: continue using page1.nextCursor
+    // Resumes at raw offset 300, scanning batches 300..500 and finding mod-320, mod-350, mod-420
+    const page2 = await manager.searchMods(
+      mockEnv,
+      db,
+      "test",
+      "MODRINTH",
+      5,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      "BOTH",
+      page1.nextCursor,
+    )
+
+    expect(page2.items).toHaveLength(3)
+    expect(page2.items.map((m) => m.projectId)).toEqual(["mod-320", "mod-350", "mod-420"])
+    expect(page2.hasMore).toBe(false)
+    expect(page2.nextCursor).toBeNull()
+
+    // Verify 0 duplicates across pages
+    const page1Ids = page1.items.map((m) => m.projectId)
+    const page2Ids = page2.items.map((m) => m.projectId)
+    const intersection = page1Ids.filter((id) => page2Ids.includes(id))
+    expect(intersection).toHaveLength(0)
+    expect(new Set([...page1Ids, ...page2Ids]).size).toBe(5)
+  })
+
+  // Test 25: searchMods cursor invalidation when query, category, loader, or environmentFilter changes
+  it("searchMods cursor throws VALIDATION_ERROR when reused with changed query, category, loader, or environmentFilter", async () => {
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockResolvedValue({
+        items: [{ projectId: "mod-1", name: "Mod 1", environment: "BOTH", contentType: "MOD" }],
+        totalCount: 10,
+      }),
+    }
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockMrAdapter as any)
+    ;(manager as any).modrinth = mockMrAdapter
+
+    const page1 = await manager.searchMods(
+      mockEnv,
+      db,
+      "query-a",
+      "MODRINTH",
+      1,
+      0,
+      "MOD",
+      null,
+      "NEOFORGE",
+      "tech",
+      "BOTH",
+      null,
+    )
+    expect(page1.nextCursor).not.toBeNull()
+
+    // Change environmentFilter
+    await expect(
+      manager.searchMods(
+        mockEnv,
+        db,
+        "query-a",
+        "MODRINTH",
+        1,
+        0,
+        "MOD",
+        null,
+        "NEOFORGE",
+        "tech",
+        "CLIENT",
+        page1.nextCursor,
+      ),
+    ).rejects.toThrow("El cursor de paginación no coincide con la consulta, tipo de contenido o proveedor solicitados.")
+
+    // Change loader
+    await expect(
+      manager.searchMods(
+        mockEnv,
+        db,
+        "query-a",
+        "MODRINTH",
+        1,
+        0,
+        "MOD",
+        null,
+        "FABRIC",
+        "tech",
+        "BOTH",
+        page1.nextCursor,
+      ),
+    ).rejects.toThrow("El cursor de paginación no coincide con la consulta, tipo de contenido o proveedor solicitados.")
+
+    // Change category
+    await expect(
+      manager.searchMods(
+        mockEnv,
+        db,
+        "query-a",
+        "MODRINTH",
+        1,
+        0,
+        "MOD",
+        null,
+        "NEOFORGE",
+        "magic",
+        "BOTH",
+        page1.nextCursor,
+      ),
+    ).rejects.toThrow("El cursor de paginación no coincide con la consulta, tipo de contenido o proveedor solicitados.")
+  })
 })

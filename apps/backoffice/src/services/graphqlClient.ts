@@ -2295,8 +2295,9 @@ export const gameApi = {
     loaderOverride?: import("../types").GameModLoader | null,
     categoryKey?: string | null,
     environmentFilter?: import("../types").ModEnvironment | null,
+    cursor?: string | null,
   ): Promise<import("../types").ModSearchPayload> {
-    return modProvidersApi.searchMods(query, contentType, provider, limit, offset, serverId, loaderOverride, categoryKey, environmentFilter)
+    return modProvidersApi.searchMods(query, contentType, provider, limit, offset, serverId, loaderOverride, categoryKey, environmentFilter, cursor)
   },
 
   async getModProjectDetail(
@@ -2413,6 +2414,7 @@ export const modProvidersApi = {
     loaderOverride?: import("../types").GameModLoader | null,
     categoryKey?: string | null,
     environmentFilter?: import("../types").ModEnvironment | null,
+    cursor?: string | null,
   ): Promise<import("../types").ModSearchPayload> {
     const gqlQuery = /* GraphQL */ `
       query SearchMods(
@@ -2425,6 +2427,7 @@ export const modProvidersApi = {
         $loaderOverride: GameModLoader
         $categoryKey: String
         $environmentFilter: ModEnvironment
+        $cursor: String
       ) {
         searchMods(
           query: $query
@@ -2436,6 +2439,7 @@ export const modProvidersApi = {
           loaderOverride: $loaderOverride
           categoryKey: $categoryKey
           environmentFilter: $environmentFilter
+          cursor: $cursor
         ) {
           items {
             provider
@@ -2456,6 +2460,8 @@ export const modProvidersApi = {
             updatedAt
           }
           totalCount
+          hasMore
+          nextCursor
           providersStatus {
             provider
             available
@@ -2478,6 +2484,7 @@ export const modProvidersApi = {
       loaderOverride,
       categoryKey,
       environmentFilter: environmentFilter || undefined,
+      cursor: cursor || undefined,
     })
     return data.searchMods
   },

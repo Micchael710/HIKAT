@@ -880,6 +880,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
           },
         ],
         totalCount: 2,
+        hasMore: false,
+        nextCursor: null,
         providersStatus: [
           { provider: "MODRINTH", available: true, error: null },
           { provider: "CURSEFORGE", available: true, error: null },
@@ -954,6 +956,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
           },
         ],
         totalCount: 1,
+        hasMore: false,
+        nextCursor: null,
         providersStatus: [{ provider: "MODRINTH", available: true }],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
@@ -1151,6 +1155,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         return {
           items: [],
           totalCount: 0,
+          hasMore: false,
+          nextCursor: null,
           minecraftVersion: "1.21.1",
           neoForgeVersion: "21.1.65",
           modLoader: "NEOFORGE",
@@ -1205,6 +1211,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
           },
         ],
         totalCount: 1,
+        hasMore: false,
+        nextCursor: null,
         providersStatus: [{ provider: "MODRINTH", available: true }],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
@@ -1343,6 +1351,8 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
           },
         ],
         totalCount: 1,
+        hasMore: false,
+        nextCursor: null,
         providersStatus: [{ provider: "CURSEFORGE", available: true, error: null }],
         minecraftVersion: "1.21.1",
         neoForgeVersion: "21.1.65",
@@ -2120,6 +2130,99 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       // Install button is disabled
       const installBtn = screen.getByTestId("button-confirm-install")
       expect(installBtn.hasAttribute("disabled")).toBe(true)
+    })
+
+    it("ModSearchModal performs cursor pagination on 'Cargar más', appends results without duplicates, and hides button when exhausted", async () => {
+      const searchSpy = vi.spyOn(graphqlClient, "searchMods")
+        .mockResolvedValueOnce({
+          items: [
+            {
+              provider: "MODRINTH",
+              projectId: "mod-p1",
+              name: "Mod Page 1",
+              summary: "First batch mod",
+              author: "author1",
+              downloads: 100,
+              categories: ["utility"],
+              contentType: "MOD",
+              environment: "BOTH",
+              latestVersion: "1.0.0",
+            },
+          ],
+          totalCount: 2,
+          hasMore: true,
+          nextCursor: "cursor-token-page-1",
+          providersStatus: [{ provider: "MODRINTH", available: true }],
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+        })
+        .mockResolvedValueOnce({
+          items: [
+            {
+              provider: "MODRINTH",
+              projectId: "mod-p2",
+              name: "Mod Page 2",
+              summary: "Second batch mod",
+              author: "author2",
+              downloads: 200,
+              categories: ["utility"],
+              contentType: "MOD",
+              environment: "BOTH",
+              latestVersion: "1.0.0",
+            },
+          ],
+          totalCount: 2,
+          hasMore: false,
+          nextCursor: null,
+          providersStatus: [{ provider: "MODRINTH", available: true }],
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+        })
+
+      await act(async () => {
+        render(
+          <ModSearchModal
+            serverId="srv-1"
+            onClose={vi.fn()}
+            onSuccess={vi.fn()}
+          />,
+        )
+      })
+
+      // Initial item from page 1 is visible
+      expect(await screen.findByText("Mod Page 1")).toBeDefined()
+
+      // "Cargar más" button is visible because hasMore = true and nextCursor is present
+      const loadMoreBtn = await screen.findByRole("button", { name: /Cargar más/i })
+      expect(loadMoreBtn).toBeDefined()
+
+      // Click "Cargar más"
+      await act(async () => {
+        fireEvent.click(loadMoreBtn)
+      })
+
+      // Expect searchMods to have been called with nextCursor
+      expect(searchSpy).toHaveBeenLastCalledWith(
+        "",
+        "MOD",
+        null,
+        20,
+        20,
+        "srv-1",
+        null,
+        null,
+        null,
+        "cursor-token-page-1",
+      )
+
+      // Both page 1 and page 2 items are visible
+      expect(await screen.findByText("Mod Page 1")).toBeDefined()
+      expect(await screen.findByText("Mod Page 2")).toBeDefined()
+
+      // "Cargar más" button is NO longer in document because hasMore is false (no loop)
+      expect(screen.queryByRole("button", { name: /Cargar más/i })).toBeNull()
     })
   })
 

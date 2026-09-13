@@ -118,30 +118,40 @@ export function getLogicalPathForServerContent(
   return `mods/${cleanFilename}`
 }
 
-interface ServerSearchCursorData {
+interface ModSearchCursorData {
   q: string
   ct: string
   mode: "MODRINTH" | "CURSEFORGE" | "ALL"
+  cat?: string | null
+  ldr?: string | null
+  env?: string | null
   mrOff?: number
   cfOff?: number
 }
 
-function encodeServerSearchCursor(data: ServerSearchCursorData): string {
+type ServerSearchCursorData = ModSearchCursorData
+
+function encodeSearchCursor(data: ModSearchCursorData): string {
   const json = JSON.stringify(data)
   return Buffer.from(json, "utf-8").toString("base64url")
 }
 
-function decodeServerSearchCursor(
+const encodeServerSearchCursor = encodeSearchCursor
+
+function decodeSearchCursor(
   cursorStr: string | null | undefined,
   expectedQuery: string,
   expectedContentType: string,
   expectedMode: "MODRINTH" | "CURSEFORGE" | "ALL",
-): ServerSearchCursorData | null {
+  expectedCategory?: string | null,
+  expectedLoader?: string | null,
+  expectedEnv?: string | null,
+): ModSearchCursorData | null {
   if (!cursorStr || typeof cursorStr !== "string" || !cursorStr.trim()) return null
-  let parsed: ServerSearchCursorData
+  let parsed: ModSearchCursorData
   try {
     const json = Buffer.from(cursorStr, "base64url").toString("utf-8")
-    parsed = JSON.parse(json) as ServerSearchCursorData
+    parsed = JSON.parse(json) as ModSearchCursorData
   } catch {
     throw createGraphQLError(
       "Cursor de paginación inválido o corrupto.",
@@ -150,12 +160,29 @@ function decodeServerSearchCursor(
   }
 
   const normExpectedQuery = expectedQuery.trim().toLowerCase()
+  const normExpectedCat =
+    expectedCategory && expectedCategory.trim() && expectedCategory !== "ALL" && expectedCategory !== "Todas"
+      ? expectedCategory.trim().toLowerCase()
+      : null
+  const normExpectedLdr = expectedLoader ? expectedLoader.trim().toLowerCase() : null
+  const normExpectedEnv = expectedEnv ? expectedEnv.trim() : null
+
+  const parsedCat =
+    parsed.cat && parsed.cat.trim() && parsed.cat !== "ALL" && parsed.cat !== "Todas"
+      ? parsed.cat.trim().toLowerCase()
+      : null
+  const parsedLdr = parsed.ldr ? parsed.ldr.trim().toLowerCase() : null
+  const parsedEnv = parsed.env ? parsed.env.trim() : null
+
   if (
     !parsed ||
     typeof parsed !== "object" ||
     parsed.q !== normExpectedQuery ||
     parsed.ct !== expectedContentType ||
-    parsed.mode !== expectedMode
+    parsed.mode !== expectedMode ||
+    parsedCat !== normExpectedCat ||
+    parsedLdr !== normExpectedLdr ||
+    parsedEnv !== normExpectedEnv
   ) {
     throw createGraphQLError(
       "El cursor de paginación no coincide con la consulta, tipo de contenido o proveedor solicitados.",
@@ -165,6 +192,8 @@ function decodeServerSearchCursor(
 
   return parsed
 }
+
+const decodeServerSearchCursor = decodeSearchCursor
 
 export interface ScannedFilteredItem {
   item: NormalizedModProject
@@ -480,6 +509,7 @@ export class ModProviderManager {
     loaderOverride?: GameModLoaderGql | null,
     categoryKey?: string | null,
     environmentFilter?: ModEnvironmentGql | null,
+    cursor?: string | null,
   ): Promise<ModSearchPayloadGql> {
     const envData = await this.getActiveEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
@@ -499,186 +529,495 @@ export class ModProviderManager {
       return item.environment !== "SERVER"
     }
 
-    if (provider === "MODRINTH") {
-      if (skipModrinth) {
-        providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        return {
-          items: [],
-          totalCount: 0,
-          providersStatus,
-          minecraftVersion,
-          modLoader,
-          modLoaderVersion,
-          neoForgeVersion,
+    // Preserve legacy offset behavior ONLY when offset > 0, no cursor was passed, and no environmentFilter
+    const isLegacyOffset = !cursor && offset > 0 && !environmentFilter
+    if (isLegacyOffset) {
+      if (provider === "MODRINTH") {
+        if (skipModrinth) {
+          providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+          return {
+            items: [],
+            totalCount: 0,
+            hasMore: false,
+            nextCursor: null,
+            providersStatus,
+            minecraftVersion,
+            modLoader,
+            modLoaderVersion,
+            neoForgeVersion,
+          }
+        }
+        try {
+          const res = await this.fetchFilteredFromProvider(
+            this.modrinth,
+            env,
+            query,
+            minecraftVersion,
+            loader,
+            offset + limit,
+            contentType,
+            isAllowedInGame,
+            0,
+            50,
+            mrCategorySlug,
+          )
+          providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+          const mappedItems = res.items.map((i) => i.item)
+          return {
+            items: mappedItems.slice(offset, offset + limit),
+            totalCount: res.providerTotalCount || res.totalCount,
+            hasMore: res.hasMore,
+            nextCursor: null,
+            providersStatus,
+            minecraftVersion,
+            modLoader,
+            modLoaderVersion,
+            neoForgeVersion,
+          }
+        } catch (err: any) {
+          providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
+          return {
+            items: [],
+            totalCount: 0,
+            hasMore: false,
+            nextCursor: null,
+            providersStatus,
+            minecraftVersion,
+            modLoader,
+            modLoaderVersion,
+            neoForgeVersion,
+          }
         }
       }
-      try {
 
-        const res = await this.fetchFilteredFromProvider(
-          this.modrinth,
-          env,
-          query,
-          minecraftVersion,
-          loader,
-          offset + limit,
-          contentType,
-          isAllowedInGame,
-          0,
-          50,
-          mrCategorySlug,
-        )
+      if (provider === "CURSEFORGE") {
+        if (!this.curseforge.isConfigured(env)) {
+          providersStatus.push({
+            provider: "CURSEFORGE",
+            available: false,
+            error: "CurseForge API Key no está configurada en el servidor.",
+          })
+          return {
+            items: [],
+            totalCount: 0,
+            hasMore: false,
+            nextCursor: null,
+            providersStatus,
+            minecraftVersion,
+            modLoader,
+            modLoaderVersion,
+            neoForgeVersion,
+          }
+        }
+
+        if (skipCurseForge) {
+          providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
+          return {
+            items: [],
+            totalCount: 0,
+            hasMore: false,
+            nextCursor: null,
+            providersStatus,
+            minecraftVersion,
+            modLoader,
+            modLoaderVersion,
+            neoForgeVersion,
+          }
+        }
+
+        try {
+          const res = await this.fetchFilteredFromProvider(
+            this.curseforge,
+            env,
+            query,
+            minecraftVersion,
+            loader,
+            offset + limit,
+            contentType,
+            isAllowedInGame,
+            0,
+            50,
+            cfCategoryId ? String(cfCategoryId) : undefined,
+          )
+          providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
+          const mappedItems = res.items.map((i) => i.item)
+          return {
+            items: mappedItems.slice(offset, offset + limit),
+            totalCount: res.providerTotalCount || res.totalCount,
+            hasMore: res.hasMore,
+            nextCursor: null,
+            providersStatus,
+            minecraftVersion,
+            modLoader,
+            modLoaderVersion,
+            neoForgeVersion,
+          }
+        } catch (err: any) {
+          providersStatus.push({ provider: "CURSEFORGE", available: false, error: err.message })
+          return {
+            items: [],
+            totalCount: 0,
+            hasMore: false,
+            nextCursor: null,
+            providersStatus,
+            minecraftVersion,
+            modLoader,
+            modLoaderVersion,
+            neoForgeVersion,
+          }
+        }
+      }
+
+      // "Todos" legacy offset
+      const fetchLimit = offset + limit
+      const [modrinthResult, curseforgeResult] = await Promise.allSettled([
+        skipModrinth
+          ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
+          : this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50, mrCategorySlug),
+        !this.curseforge.isConfigured(env) || skipCurseForge
+          ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
+          : this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50, cfCategoryId ? String(cfCategoryId) : undefined),
+      ])
+
+      const allItems: NormalizedModProject[] = []
+      let totalCount = 0
+
+      if (modrinthResult.status === "fulfilled") {
         providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-        const mappedItems = res.items.map((i) => i.item)
-        return {
-          items: mappedItems.slice(offset, offset + limit),
-          totalCount: res.providerTotalCount || res.totalCount,
-          providersStatus,
-          minecraftVersion,
-          modLoader,
-          modLoaderVersion,
-          neoForgeVersion,
-        }
-      } catch (err: any) {
-        providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
-        return {
-          items: [],
-          totalCount: 0,
-          providersStatus,
-          minecraftVersion,
-          modLoader,
-          modLoaderVersion,
-          neoForgeVersion,
-        }
+        totalCount += modrinthResult.value.providerTotalCount || modrinthResult.value.totalCount
+      } else {
+        providersStatus.push({
+          provider: "MODRINTH",
+          available: false,
+          error: modrinthResult.reason?.message || "Error al conectar con Modrinth",
+        })
+      }
+
+      if (curseforgeResult.status === "fulfilled") {
+        const isConf = this.curseforge.isConfigured(env)
+        providersStatus.push({
+          provider: "CURSEFORGE",
+          available: isConf,
+          error: isConf ? null : "CurseForge API Key no está configurada.",
+        })
+        totalCount += curseforgeResult.value.providerTotalCount || curseforgeResult.value.totalCount
+      } else {
+        providersStatus.push({
+          provider: "CURSEFORGE",
+          available: false,
+          error: curseforgeResult.reason?.message || "Error al conectar con CurseForge",
+        })
+      }
+
+      const modrinthItems = modrinthResult.status === "fulfilled" ? modrinthResult.value.items.map((i) => i.item) : []
+      const curseforgeItems = curseforgeResult.status === "fulfilled" ? curseforgeResult.value.items.map((i) => i.item) : []
+
+      const maxLength = Math.max(modrinthItems.length, curseforgeItems.length)
+      for (let i = 0; i < maxLength; i++) {
+        if (i < modrinthItems.length) allItems.push(modrinthItems[i]!)
+        if (i < curseforgeItems.length) allItems.push(curseforgeItems[i]!)
+      }
+
+      return {
+        items: allItems.slice(offset, offset + limit),
+        totalCount: totalCount || allItems.length,
+        hasMore: false,
+        nextCursor: null,
+        providersStatus,
+        minecraftVersion,
+        modLoader,
+        modLoaderVersion,
+        neoForgeVersion,
       }
     }
 
-    if (provider === "CURSEFORGE") {
+    const normQuery = query.trim().toLowerCase()
+    const mode: "MODRINTH" | "CURSEFORGE" | "ALL" = provider ? provider : "ALL"
+    const decodedCursor = decodeSearchCursor(
+      cursor,
+      query,
+      contentType,
+      mode,
+      categoryKey,
+      effectiveLoader,
+      environmentFilter,
+    )
+
+    let rawResults: {
+      items: NormalizedModProject[]
+      totalCount: number
+      hasMore: boolean
+      nextCursor: string | null
+      providersStatus: ModProviderStatusGql[]
+    }
+
+    if (provider === "MODRINTH") {
+      if (skipModrinth) {
+        providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+        rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
+      } else {
+        const startOffset = decodedCursor?.mrOff ?? (cursor ? 0 : offset)
+        try {
+          const res = await this.fetchFilteredFromProvider(
+            this.modrinth,
+            env,
+            query,
+            minecraftVersion,
+            loader,
+            limit,
+            contentType,
+            isAllowedInGame,
+            startOffset,
+            50,
+            mrCategorySlug,
+          )
+          providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+          const nextCursor = res.hasMore && res.nextRawOffset !== null
+            ? encodeSearchCursor({
+                q: normQuery,
+                ct: contentType,
+                mode: "MODRINTH",
+                cat: categoryKey || null,
+                ldr: effectiveLoader || null,
+                env: environmentFilter || null,
+                mrOff: res.nextRawOffset,
+              })
+            : null
+
+          rawResults = {
+            items: res.items.map((i) => i.item),
+            totalCount: res.providerTotalCount || res.totalCount,
+            hasMore: res.hasMore,
+            nextCursor,
+            providersStatus,
+          }
+        } catch (err: any) {
+          if (err.extensions?.code === "VALIDATION_ERROR") throw err
+          providersStatus.push({ provider: "MODRINTH", available: false, error: err.message })
+          rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
+        }
+      }
+    } else if (provider === "CURSEFORGE") {
       if (!this.curseforge.isConfigured(env)) {
         providersStatus.push({
           provider: "CURSEFORGE",
           available: false,
           error: "CurseForge API Key no está configurada en el servidor.",
         })
-        return {
-          items: [],
-          totalCount: 0,
-          providersStatus,
-          minecraftVersion,
-          modLoader,
-          modLoaderVersion,
-          neoForgeVersion,
-        }
-      }
-
-      if (skipCurseForge) {
+        rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
+      } else if (skipCurseForge) {
         providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
-        return {
-          items: [],
-          totalCount: 0,
-          providersStatus,
-          minecraftVersion,
-          modLoader,
-          modLoaderVersion,
-          neoForgeVersion,
+        rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
+      } else {
+        const startOffset = decodedCursor?.cfOff ?? (cursor ? 0 : offset)
+        try {
+          const res = await this.fetchFilteredFromProvider(
+            this.curseforge,
+            env,
+            query,
+            minecraftVersion,
+            loader,
+            limit,
+            contentType,
+            isAllowedInGame,
+            startOffset,
+            50,
+            cfCategoryId ? String(cfCategoryId) : undefined,
+          )
+          providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
+          const nextCursor = res.hasMore && res.nextRawOffset !== null
+            ? encodeSearchCursor({
+                q: normQuery,
+                ct: contentType,
+                mode: "CURSEFORGE",
+                cat: categoryKey || null,
+                ldr: effectiveLoader || null,
+                env: environmentFilter || null,
+                cfOff: res.nextRawOffset,
+              })
+            : null
+
+          rawResults = {
+            items: res.items.map((i) => i.item),
+            totalCount: res.providerTotalCount || res.totalCount,
+            hasMore: res.hasMore,
+            nextCursor,
+            providersStatus,
+          }
+        } catch (err: any) {
+          if (err.extensions?.code === "VALIDATION_ERROR") throw err
+          providersStatus.push({ provider: "CURSEFORGE", available: false, error: err.message })
+          rawResults = { items: [], totalCount: 0, hasMore: false, nextCursor: null, providersStatus }
+        }
+      }
+    } else {
+      // ALL providers
+      const mrStartOffset = decodedCursor?.mrOff ?? (cursor ? 0 : offset)
+      const cfStartOffset = decodedCursor?.cfOff ?? (cursor ? 0 : offset)
+
+      const [modrinthResult, curseforgeResult] = await Promise.allSettled([
+        skipModrinth
+          ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
+          : this.fetchFilteredFromProvider(
+              this.modrinth,
+              env,
+              query,
+              minecraftVersion,
+              loader,
+              limit,
+              contentType,
+              isAllowedInGame,
+              mrStartOffset,
+              50,
+              mrCategorySlug,
+            ),
+        !this.curseforge.isConfigured(env) || skipCurseForge
+          ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
+          : this.fetchFilteredFromProvider(
+              this.curseforge,
+              env,
+              query,
+              minecraftVersion,
+              loader,
+              limit,
+              contentType,
+              isAllowedInGame,
+              cfStartOffset,
+              50,
+              cfCategoryId ? String(cfCategoryId) : undefined,
+            ),
+      ])
+
+      let mrItems: ScannedFilteredItem[] = []
+      let cfItems: ScannedFilteredItem[] = []
+      let mrHasMore = false
+      let cfHasMore = false
+      let mrTotalCount = 0
+      let cfTotalCount = 0
+
+      if (modrinthResult.status === "fulfilled") {
+        providersStatus.push({ provider: "MODRINTH", available: true, error: null })
+        mrItems = modrinthResult.value.items
+        mrHasMore = modrinthResult.value.hasMore
+        mrTotalCount = modrinthResult.value.providerTotalCount
+      } else {
+        providersStatus.push({
+          provider: "MODRINTH",
+          available: false,
+          error: modrinthResult.reason?.message || "Error al conectar con Modrinth",
+        })
+      }
+
+      if (curseforgeResult.status === "fulfilled") {
+        const isConf = this.curseforge.isConfigured(env)
+        providersStatus.push({
+          provider: "CURSEFORGE",
+          available: isConf,
+          error: isConf ? null : "CurseForge API Key no está configurada.",
+        })
+        cfItems = curseforgeResult.value.items
+        cfHasMore = curseforgeResult.value.hasMore
+        cfTotalCount = curseforgeResult.value.providerTotalCount
+      } else {
+        providersStatus.push({
+          provider: "CURSEFORGE",
+          available: false,
+          error: curseforgeResult.reason?.message || "Error al conectar con CurseForge",
+        })
+      }
+
+      const pageItems: NormalizedModProject[] = []
+      const seenIds = new Set<string>()
+      let mrConsumed = 0
+      let cfConsumed = 0
+
+      const maxLen = Math.max(mrItems.length, cfItems.length)
+      for (let i = 0; i < maxLen; i++) {
+        if (i < mrItems.length && pageItems.length < limit) {
+          const entry = mrItems[i]
+          if (entry && !seenIds.has(`MODRINTH:${entry.item.projectId}`)) {
+            seenIds.add(`MODRINTH:${entry.item.projectId}`)
+            pageItems.push(entry.item)
+            mrConsumed = i + 1
+          }
+        }
+        if (i < cfItems.length && pageItems.length < limit) {
+          const entry = cfItems[i]
+          if (entry && !seenIds.has(`CURSEFORGE:${entry.item.projectId}`)) {
+            seenIds.add(`CURSEFORGE:${entry.item.projectId}`)
+            pageItems.push(entry.item)
+            cfConsumed = i + 1
+          }
+        }
+        if (pageItems.length >= limit) {
+          break
         }
       }
 
-      try {
+      let nextMrOff: number | undefined
+      let nextCfOff: number | undefined
 
-        const res = await this.fetchFilteredFromProvider(
-          this.curseforge,
-          env,
-          query,
-          minecraftVersion,
-          loader,
-          offset + limit,
-          contentType,
-          isAllowedInGame,
-          0,
-          50,
-          cfCategoryId ? String(cfCategoryId) : undefined,
-        )
-        providersStatus.push({ provider: "CURSEFORGE", available: true, error: null })
-        const mappedItems = res.items.map((i) => i.item)
-        return {
-          items: mappedItems.slice(offset, offset + limit),
-          totalCount: res.providerTotalCount || res.totalCount,
-          providersStatus,
-          minecraftVersion,
-          modLoader,
-          modLoaderVersion,
-          neoForgeVersion,
-        }
-      } catch (err: any) {
-        providersStatus.push({ provider: "CURSEFORGE", available: false, error: err.message })
-        return {
-          items: [],
-          totalCount: 0,
-          providersStatus,
-          minecraftVersion,
-          modLoader,
-          modLoaderVersion,
-          neoForgeVersion,
+      if (modrinthResult.status === "fulfilled") {
+        if (mrConsumed > 0) {
+          const lastConsumed = mrItems[mrConsumed - 1]
+          if (lastConsumed) {
+            const nextOffset = lastConsumed.rawIndex + 1
+            if (nextOffset < mrTotalCount || mrHasMore) {
+              nextMrOff = nextOffset
+            }
+          }
+        } else if (mrItems.length > 0) {
+          nextMrOff = mrStartOffset
+        } else if (mrHasMore) {
+          nextMrOff = modrinthResult.value.nextRawOffset ?? mrStartOffset
         }
       }
-    }
 
-    // "Todos" (ALL providers in parallel with deterministic gap-free chunked pagination)
-    const fetchLimit = offset + limit
+      if (curseforgeResult.status === "fulfilled" && this.curseforge.isConfigured(env)) {
+        if (cfConsumed > 0) {
+          const lastConsumed = cfItems[cfConsumed - 1]
+          if (lastConsumed) {
+            const nextOffset = lastConsumed.rawIndex + 1
+            if (nextOffset < cfTotalCount || cfHasMore) {
+              nextCfOff = nextOffset
+            }
+          }
+        } else if (cfItems.length > 0) {
+          nextCfOff = cfStartOffset
+        } else if (cfHasMore) {
+          nextCfOff = curseforgeResult.value.nextRawOffset ?? cfStartOffset
+        }
+      }
 
-    const [modrinthResult, curseforgeResult] = await Promise.allSettled([
-      skipModrinth
-        ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
-        : this.fetchFilteredFromProvider(this.modrinth, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50, mrCategorySlug),
-      !this.curseforge.isConfigured(env) || skipCurseForge
-        ? Promise.resolve({ items: [], totalCount: 0, providerTotalCount: 0, nextRawOffset: null, hasMore: false })
-        : this.fetchFilteredFromProvider(this.curseforge, env, query, minecraftVersion, loader, fetchLimit, contentType, isAllowedInGame, 0, 50, cfCategoryId ? String(cfCategoryId) : undefined),
-    ])
+      const hasMore = Boolean(nextMrOff !== undefined || nextCfOff !== undefined)
+      const nextCursor = hasMore
+        ? encodeSearchCursor({
+            q: normQuery,
+            ct: contentType,
+            mode: "ALL",
+            cat: categoryKey || null,
+            ldr: effectiveLoader || null,
+            env: environmentFilter || null,
+            mrOff: nextMrOff ?? (modrinthResult.status === "fulfilled" ? mrTotalCount : mrStartOffset),
+            cfOff: nextCfOff ?? (curseforgeResult.status === "fulfilled" ? cfTotalCount : cfStartOffset),
+          })
+        : null
 
-    const allItems: NormalizedModProject[] = []
-    let totalCount = 0
-
-    if (modrinthResult.status === "fulfilled") {
-      providersStatus.push({ provider: "MODRINTH", available: true, error: null })
-      totalCount += modrinthResult.value.providerTotalCount || modrinthResult.value.totalCount
-    } else {
-      providersStatus.push({
-        provider: "MODRINTH",
-        available: false,
-        error: modrinthResult.reason?.message || "Error al conectar con Modrinth",
-      })
-    }
-
-    if (curseforgeResult.status === "fulfilled") {
-      const isConf = this.curseforge.isConfigured(env)
-      providersStatus.push({
-        provider: "CURSEFORGE",
-        available: isConf,
-        error: isConf ? null : "CurseForge API Key no está configurada.",
-      })
-      totalCount += curseforgeResult.value.providerTotalCount || curseforgeResult.value.totalCount
-    } else {
-      providersStatus.push({
-        provider: "CURSEFORGE",
-        available: false,
-        error: curseforgeResult.reason?.message || "Error al conectar con CurseForge",
-      })
-    }
-
-    const modrinthItems = modrinthResult.status === "fulfilled" ? modrinthResult.value.items.map((i) => i.item) : []
-    const curseforgeItems = curseforgeResult.status === "fulfilled" ? curseforgeResult.value.items.map((i) => i.item) : []
-
-    // Interleave results preserving relevance ranking deterministically
-    const maxLength = Math.max(modrinthItems.length, curseforgeItems.length)
-    for (let i = 0; i < maxLength; i++) {
-      if (i < modrinthItems.length) allItems.push(modrinthItems[i]!)
-      if (i < curseforgeItems.length) allItems.push(curseforgeItems[i]!)
+      rawResults = {
+        items: pageItems,
+        totalCount: mrTotalCount + cfTotalCount || pageItems.length,
+        hasMore,
+        nextCursor,
+        providersStatus,
+      }
     }
 
     return {
-      items: allItems.slice(offset, offset + limit),
-      totalCount: totalCount || allItems.length,
-      providersStatus,
+      items: rawResults.items,
+      totalCount: rawResults.totalCount,
+      hasMore: rawResults.hasMore,
+      nextCursor: rawResults.nextCursor,
+      providersStatus: rawResults.providersStatus,
       minecraftVersion,
       modLoader,
       modLoaderVersion,
@@ -733,7 +1072,15 @@ export class ModProviderManager {
 
     const normQuery = query.trim().toLowerCase()
     const mode: "MODRINTH" | "CURSEFORGE" | "ALL" = provider ? provider : "ALL"
-    const decodedCursor = decodeServerSearchCursor(cursor, query, contentType, mode)
+    const decodedCursor = decodeServerSearchCursor(
+      cursor,
+      query,
+      contentType,
+      mode,
+      categoryKey,
+      effectiveLoader,
+      environmentFilter,
+    )
 
     let rawResults: {
       items: NormalizedModProject[]
@@ -769,6 +1116,9 @@ export class ModProviderManager {
                 q: normQuery,
                 ct: contentType,
                 mode: "MODRINTH",
+                cat: categoryKey || null,
+                ldr: effectiveLoader || null,
+                env: environmentFilter || null,
                 mrOff: res.nextRawOffset,
               })
             : null
@@ -819,6 +1169,9 @@ export class ModProviderManager {
                 q: normQuery,
                 ct: contentType,
                 mode: "CURSEFORGE",
+                cat: categoryKey || null,
+                ldr: effectiveLoader || null,
+                env: environmentFilter || null,
                 cfOff: res.nextRawOffset,
               })
             : null
@@ -981,6 +1334,9 @@ export class ModProviderManager {
             q: normQuery,
             ct: contentType,
             mode: "ALL",
+            cat: categoryKey || null,
+            ldr: effectiveLoader || null,
+            env: environmentFilter || null,
             mrOff: nextMrOff ?? (modrinthResult.status === "fulfilled" ? mrTotalCount : mrStartOffset),
             cfOff: nextCfOff ?? (curseforgeResult.status === "fulfilled" ? cfTotalCount : cfStartOffset),
           })
