@@ -543,7 +543,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
           border: `1px solid ${tokens.borderSubtle}`,
           borderRadius: "18px",
           width: "100%",
-          maxWidth: "680px",
+          maxWidth: "840px",
           maxHeight: "90vh",
           display: "flex",
           flexDirection: "column",
@@ -1444,7 +1444,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
             )}
           </div>
 
-          <div style={{ display: "flex", gap: "10px" }}>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
             <button
               type="button"
               onClick={onClose}
@@ -1455,6 +1455,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                 borderRadius: "12px",
                 fontSize: "14px",
                 fontWeight: "600",
+                whiteSpace: "nowrap",
               }}
             >
               Cancelar
@@ -1482,6 +1483,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   borderRadius: "12px",
                   fontSize: "14px",
                   fontWeight: "700",
+                  whiteSpace: "nowrap",
                   opacity:
                     loading ||
                     resolvingPlan ||
@@ -1529,6 +1531,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                       borderRadius: "12px",
                       fontSize: "14px",
                       fontWeight: "600",
+                      whiteSpace: "nowrap",
                     }}
                   >
                     + Encolar selección
@@ -1553,6 +1556,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     borderRadius: "12px",
                     fontSize: "14px",
                     fontWeight: "700",
+                    whiteSpace: "nowrap",
                     opacity:
                       installing ||
                       loading ||

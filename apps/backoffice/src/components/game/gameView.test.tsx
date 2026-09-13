@@ -1717,13 +1717,15 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       expect(onClearHandoff).toHaveBeenCalled()
 
-      expect(getDetailSpy).toHaveBeenCalledWith(
-        "CURSEFORGE",
-        "cf-mod-both",
-        "MOD",
-        "srv-1",
-        "FABRIC",
-      )
+      await waitFor(() => {
+        expect(getDetailSpy).toHaveBeenCalledWith(
+          "CURSEFORGE",
+          "cf-mod-both",
+          "MOD",
+          "srv-1",
+          "FABRIC",
+        )
+      })
 
       await waitFor(() => {
         expect(resolvePlanSpy).toHaveBeenCalledWith(
