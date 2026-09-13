@@ -137,6 +137,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
       body?: Record<string, unknown> | string | Uint8Array | ArrayBuffer
       rawBody?: boolean
       isTextResponse?: boolean
+      timeoutMs?: number
     } = {},
   ): Promise<T> {
     if (!this.apiKey || !this.serverId) {
@@ -148,7 +149,8 @@ export class PterodactylHttpClient implements IPterodactylClient {
     }
     const url = `${this.baseUrl}${endpoint}`
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs)
+    const effectiveTimeoutMs = options.timeoutMs ?? this.timeoutMs
+    const timeoutId = setTimeout(() => controller.abort(), effectiveTimeoutMs)
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
@@ -566,6 +568,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
     filename?: string
     foreground?: boolean
   }): Promise<void> {
+    const timeoutMs = params.foreground ? 30 * 60 * 1000 : undefined
     await this.request<void>(
       `/api/client/servers/${encodeURIComponent(this.serverId)}/files/pull`,
       {
@@ -576,6 +579,7 @@ export class PterodactylHttpClient implements IPterodactylClient {
           filename: params.filename,
           foreground: params.foreground ?? false,
         },
+        timeoutMs,
       },
     )
   }

@@ -800,7 +800,9 @@ export interface ServerManagedContentItem {
   contentType: ContentType
   environment?: ModEnvironment | null
   targetPath: string
-  sha256: string
+  sha256?: string | null
+  providerHashAlgorithm?: string | null
+  providerHash?: string | null
   sizeBytes: number
   gameReleaseId?: string | null
   gameReleaseFileId?: string | null

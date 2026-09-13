@@ -2675,6 +2675,8 @@ export const serverContentApi = {
           environment
           targetPath
           sha256
+          providerHashAlgorithm
+          providerHash
           sizeBytes
           gameReleaseId
           gameReleaseFileId
@@ -2920,6 +2922,8 @@ export const serverContentApi = {
           environment
           targetPath
           sha256
+          providerHashAlgorithm
+          providerHash
           sizeBytes
           gameReleaseId
           gameReleaseFileId
@@ -2954,6 +2958,8 @@ export const serverContentApi = {
           environment
           targetPath
           sha256
+          providerHashAlgorithm
+          providerHash
           sizeBytes
           gameReleaseId
           gameReleaseFileId

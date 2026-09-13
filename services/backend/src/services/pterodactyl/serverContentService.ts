@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto"
 import { eq, and, sql, inArray } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
@@ -9,7 +8,6 @@ import type {
   ServerContentInstallationPlanGql,
 } from "@hikat/graphql"
 import {
-  MAX_GAME_FILE_SIZE_BYTES,
   validateGameFileHeader,
 } from "@hikat/shared"
 import type { Env } from "../../types"
@@ -29,7 +27,10 @@ import {
   type InternalServerTransferItem,
 } from "../providers/modProviderManager"
 import { runWithConcurrency } from "../providers/modInstallationService"
-import { safeDeleteServerFilePhysical, getPhysicalFileSha256 } from "./serverFileService"
+import { safeDeleteServerFilePhysical } from "./serverFileService"
+
+export const MAX_ROOT_PLANS_PER_FREE_INVOCATION = 1
+export const MAX_SERVER_DIRECT_RESOLVED_FILES_FREE = 5
 
 type BatchStatements = Parameters<Database["batch"]>[0]
 type BatchStatement = BatchStatements[number]
@@ -38,26 +39,99 @@ function asBatchTuple(statements: BatchStatement[]): BatchStatements {
   return [statements[0]!, ...statements.slice(1)] as unknown as BatchStatements
 }
 
-interface StreamVerifyWingsFileOptions {
-  client: IPterodactylClient
-  filePath: string
-  filename: string
-  contentType: "MOD" | "DATA_PACK"
-  expectedSizeBytes?: number
-  expectedSha256?: string
-  hashes?: {
-    sha1?: string
-    sha512?: string
-    md5?: string
-  }
+export interface ResolvedProviderChecksum {
+  algorithm: "SHA-256" | "SHA-512" | "SHA-1" | "MD5"
+  hash: string
+  sha256: string | null
 }
 
-async function streamVerifyWingsFile(
-  options: StreamVerifyWingsFileOptions,
-): Promise<{ sha256: string; sizeBytes: number }> {
-  const { client, filePath, filename, contentType, expectedSizeBytes, expectedSha256, hashes } = options
-  const cleanPath = filePath.startsWith("/") ? filePath : `/${filePath}`
-  const signed = await client.getFileDownload(cleanPath)
+export function resolveProviderChecksum(
+  hashes?: {
+    sha256?: string | null
+    sha512?: string | null
+    sha1?: string | null
+    md5?: string | null
+  } | null,
+  expectedSha256?: string | null,
+): ResolvedProviderChecksum {
+  const sha256Candidate = hashes?.sha256 || expectedSha256
+  if (sha256Candidate && sha256Candidate.trim().length > 0) {
+    const clean = sha256Candidate.trim().toLowerCase()
+    return {
+      algorithm: "SHA-256",
+      hash: clean,
+      sha256: clean,
+    }
+  }
+
+  if (hashes?.sha512 && hashes.sha512.trim().length > 0) {
+    return {
+      algorithm: "SHA-512",
+      hash: hashes.sha512.trim().toLowerCase(),
+      sha256: null,
+    }
+  }
+
+  if (hashes?.sha1 && hashes.sha1.trim().length > 0) {
+    return {
+      algorithm: "SHA-1",
+      hash: hashes.sha1.trim().toLowerCase(),
+      sha256: null,
+    }
+  }
+
+  if (hashes?.md5 && hashes.md5.trim().length > 0) {
+    return {
+      algorithm: "MD5",
+      hash: hashes.md5.trim().toLowerCase(),
+      sha256: null,
+    }
+  }
+
+  throw createGraphQLError(
+    "El proveedor no suministra ningún checksum para el archivo. HiKAT requiere un checksum confiable para la instalación.",
+    "VALIDATION_ERROR",
+  )
+}
+
+interface VerifyWingsFileHeaderOptions {
+  client: IPterodactylClient
+  directory: string
+  filename: string
+  tempFilename: string
+  contentType: "MOD" | "DATA_PACK"
+  expectedSizeBytes?: number
+}
+
+async function verifyWingsFileHeader(
+  options: VerifyWingsFileHeaderOptions,
+): Promise<{ sizeBytes: number }> {
+  const { client, directory, filename, tempFilename, contentType, expectedSizeBytes } = options
+
+  // 1. Single listDirectory call to check file existence and exact size
+  const listRes = await client.listDirectory(directory)
+  const fileEntry = listRes?.data?.find((f) => f.attributes.name === tempFilename)
+
+  if (!fileEntry) {
+    throw createGraphQLError(
+      `El archivo temporal "${tempFilename}" no se encontró en el servidor tras la descarga.`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const actualSize = fileEntry.attributes.size
+  if (expectedSizeBytes !== undefined && expectedSizeBytes > 0 && actualSize !== expectedSizeBytes) {
+    throw createGraphQLError(
+      `El tamaño descargado para "${filename}" (${actualSize} B) no coincide con el esperado (${expectedSizeBytes} B).`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  // 2. Magic bytes verification: fetch Range bytes=0-3 from signed download URL
+  const cleanParent = directory.startsWith("/") ? directory : `/${directory}`
+  const cleanTempPath = cleanParent === "/" ? `/${tempFilename}` : `${cleanParent}/${tempFilename}`
+
+  const signed = await client.getFileDownload(cleanTempPath)
   if (!signed?.attributes?.url) {
     throw createGraphQLError(
       `No se pudo obtener URL de descarga para verificar "${filename}".`,
@@ -65,103 +139,37 @@ async function streamVerifyWingsFile(
     )
   }
 
-  const response = await fetch(signed.attributes.url)
+  const response = await fetch(signed.attributes.url, {
+    headers: { Range: "bytes=0-3" },
+  })
+
   if (!response.ok || !response.body) {
     throw createGraphQLError(
-      `Fallo al descargar el archivo temporal "${filename}" para verificación (${response.status} ${response.statusText}).`,
+      `Fallo al verificar la cabecera del archivo "${filename}" (${response.status} ${response.statusText}).`,
       "INTERNAL_ERROR",
     )
   }
 
-  const sha256Hasher = createHash("sha256")
-
-  type ProviderChecksum = {
-    algorithm: "sha512" | "sha1" | "md5"
-    expected: string
-    label: "SHA-512" | "SHA-1" | "MD5"
-  }
-
-  let providerChecksum: ProviderChecksum | null = null
-  if (hashes?.sha512) {
-    providerChecksum = { algorithm: "sha512", expected: hashes.sha512.toLowerCase(), label: "SHA-512" }
-  } else if (hashes?.sha1) {
-    providerChecksum = { algorithm: "sha1", expected: hashes.sha1.toLowerCase(), label: "SHA-1" }
-  } else if (hashes?.md5) {
-    providerChecksum = { algorithm: "md5", expected: hashes.md5.toLowerCase(), label: "MD5" }
-  }
-
-  const providerHasher = providerChecksum ? createHash(providerChecksum.algorithm) : null
-
+  // Read only 4 bytes. If upstream ignores Range and returns full file, read 4 bytes and immediately cancel reader.
   const reader = response.body.getReader()
-  let totalBytes = 0
-  let headerBytes: Uint8Array | null = null
-  const HEADER_SIZE = 4
+  const headerBytes = new Uint8Array(4)
+  let bytesRead = 0
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value || value.byteLength === 0) continue
-
-    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value)
-    totalBytes += chunk.byteLength
-
-    if (totalBytes > MAX_GAME_FILE_SIZE_BYTES) {
-      throw createGraphQLError(
-        `El archivo "${filename}" supera el tamaño máximo permitido.`,
-        "VALIDATION_ERROR",
-      )
+  try {
+    while (bytesRead < 4) {
+      const { done, value } = await reader.read()
+      if (done || !value) break
+      const needed = Math.min(value.byteLength, 4 - bytesRead)
+      headerBytes.set(value.subarray(0, needed), bytesRead)
+      bytesRead += needed
     }
-
-    if (!headerBytes) {
-      headerBytes = chunk.subarray(0, Math.min(chunk.byteLength, HEADER_SIZE))
-    } else if (headerBytes.byteLength < HEADER_SIZE) {
-      const needed = HEADER_SIZE - headerBytes.byteLength
-      const toTake = chunk.subarray(0, Math.min(chunk.byteLength, needed))
-      const combined: Uint8Array = new Uint8Array(headerBytes.byteLength + toTake.byteLength)
-      combined.set(headerBytes, 0)
-      combined.set(toTake, headerBytes.byteLength)
-      headerBytes = combined
-    }
-
-    sha256Hasher.update(chunk)
-    providerHasher?.update(chunk)
-  }
-
-  if (totalBytes === 0) {
-    throw createGraphQLError(
-      `El archivo descargado "${filename}" está vacío.`,
-      "VALIDATION_ERROR",
-    )
-  }
-
-  if (expectedSizeBytes !== undefined && expectedSizeBytes > 0 && totalBytes !== expectedSizeBytes) {
-    throw createGraphQLError(
-      `El tamaño descargado para "${filename}" (${totalBytes} B) no coincide con el esperado (${expectedSizeBytes} B).`,
-      "VALIDATION_ERROR",
-    )
-  }
-
-  const canonicalSha256 = sha256Hasher.digest("hex").toLowerCase()
-
-  if (expectedSha256 && canonicalSha256 !== expectedSha256.toLowerCase()) {
-    throw createGraphQLError(
-      `Fallo de verificación de integridad (SHA-256) para "${filename}": esperado ${expectedSha256}, calculado ${canonicalSha256}.`,
-      "VALIDATION_ERROR",
-    )
-  }
-
-  if (providerChecksum && providerHasher) {
-    const providerDigest = providerHasher.digest("hex").toLowerCase()
-    if (providerDigest !== providerChecksum.expected) {
-      throw createGraphQLError(
-        `Fallo de verificación de integridad (${providerChecksum.label}) para "${filename}": esperado ${providerChecksum.expected}, calculado ${providerDigest}.`,
-        "VALIDATION_ERROR",
-      )
-    }
+  } finally {
+    // Immediately cancel the stream to prevent fetching the full binary
+    await reader.cancel().catch(() => {})
   }
 
   const validation = validateGameFileHeader(
-    headerBytes || new Uint8Array(),
+    headerBytes.subarray(0, bytesRead),
     filename,
     contentType === "MOD" ? "MOD" : "DATA_PACK",
   )
@@ -173,10 +181,7 @@ async function streamVerifyWingsFile(
     )
   }
 
-  return {
-    sha256: canonicalSha256,
-    sizeBytes: totalBytes,
-  }
+  return { sizeBytes: actualSize }
 }
 
 /**
@@ -317,6 +322,8 @@ export async function getServerManagedContent(
       environment: record.environment as any,
       targetPath: record.targetPath,
       sha256: record.sha256,
+      providerHashAlgorithm: record.providerHashAlgorithm,
+      providerHash: record.providerHash,
       sizeBytes: record.sizeBytes,
       status: isPhysical ? "INSTALLED" : "MISSING",
       gameReleaseId: record.gameReleaseId,
@@ -342,6 +349,13 @@ export async function installServerContentPlansBatch(
 ): Promise<ServerManagedContentItemGql[]> {
   const { serverId, clientOverride } = parseContentServiceArgs(arg1, arg2)
   await assertExplicitServerIdIfMultiple(db, serverId, "instalación de contenido del servidor")
+
+  if (input.plans.length > MAX_ROOT_PLANS_PER_FREE_INVOCATION) {
+    throw createGraphQLError(
+      `Solo se permite procesar una raíz por invocación en el plan gratuito de Workers. Se enviaron ${input.plans.length} planes.`,
+      "VALIDATION_ERROR",
+    )
+  }
 
   // 1. Preload context for resolution (ZERO repeated D1 queries per plan)
   const envData = await modProviderManager.getPublishedEnvironment(db, serverId)
@@ -474,6 +488,19 @@ export async function installServerContentPlansBatch(
     return getServerManagedContent(db, env, serverId, clientOverride)
   }
 
+  // Pre-flight check: maximum 5 resolved files (root + dependencies) per Workers Free invocation
+  if (deduplicatedItems.length > MAX_SERVER_DIRECT_RESOLVED_FILES_FREE) {
+    throw createGraphQLError(
+      `El contenido solicitado y sus dependencias suman ${deduplicatedItems.length} archivos, superando el límite de ${MAX_SERVER_DIRECT_RESOLVED_FILES_FREE} archivos por invocación en el plan gratuito de Workers.`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  // Pre-validate that all resolved items have a usable provider checksum BEFORE touching Wings or acquiring locks
+  for (const item of deduplicatedItems) {
+    resolveProviderChecksum(item.hashes, item.expectedSha256)
+  }
+
   // 4. Acquire distributed operation lock and start heartbeat
   // TTL = 300s, heartbeat = 120s with 300s renewal
   const lockHandle = await acquireServerOperationLock(db, "SERVER_CONTENT_CHANGE", userId, 300, serverId)
@@ -505,6 +532,11 @@ export async function installServerContentPlansBatch(
 
     const worldName = await detectActiveWorldName(env, client, serverId, db)
 
+    // Recalculate authoritative targetPath for all items using detected worldName
+    for (const item of deduplicatedItems) {
+      item.targetPath = getLogicalPathForServerContent(item.contentType, item.filename, worldName)
+    }
+
     // Ensure target directories exist
     if (hasMod) {
       try {
@@ -522,7 +554,7 @@ export async function installServerContentPlansBatch(
       }
     }
 
-    const { physicalPaths, physicalFilesMap } = await getPhysicalServerFilesSet(env, client, true, serverId, db)
+    const { physicalPaths } = await getPhysicalServerFilesSet(env, client, true, serverId, db)
 
     // Re-read managed records authoritatively once under lock
     const managedRecords = await db
@@ -534,7 +566,7 @@ export async function installServerContentPlansBatch(
     // Intra-batch collision check
     const batchTargetPaths = new Set<string>()
     for (const item of deduplicatedItems) {
-      const targetPath = item.targetPath || getLogicalPathForServerContent(item.contentType, item.filename, worldName)
+      const targetPath = item.targetPath
       if (batchTargetPaths.has(targetPath)) {
         throw createGraphQLError(
           `Conflicto en el plan: múltiples elementos intentan instalarse en "${targetPath}".`,
@@ -544,7 +576,7 @@ export async function installServerContentPlansBatch(
       batchTargetPaths.add(targetPath)
     }
 
-    // Ownership, physical collisions & adoption check
+    // Ownership and physical collisions check (No auto-adoption in SERVER_DIRECT)
     const itemsToDownload: Array<{
       item: InternalServerTransferItem
       targetPath: string
@@ -554,16 +586,8 @@ export async function installServerContentPlansBatch(
       existing: (typeof schema.serverManagedContent.$inferSelect) | undefined
     }> = []
 
-    const itemsToAdopt: Array<{
-      item: InternalServerTransferItem
-      targetPath: string
-      sha256: string
-      sizeBytes: number
-      existing: (typeof schema.serverManagedContent.$inferSelect) | undefined
-    }> = []
-
     for (const item of deduplicatedItems) {
-      const targetPath = item.targetPath || getLogicalPathForServerContent(item.contentType, item.filename, worldName)
+      const targetPath = item.targetPath
       const cleanTarget = targetPath.replace(/^\/+/, "")
       const segments = cleanTarget.split("/")
       const wingsFileName = segments.pop() || item.filename
@@ -571,6 +595,7 @@ export async function installServerContentPlansBatch(
 
       const isPhysical =
         physicalPaths.has(targetPath) ||
+        physicalPaths.has(cleanTarget) ||
         physicalPaths.has(`mods/${wingsFileName}`) ||
         physicalPaths.has(`${worldName}/datapacks/${wingsFileName}`) ||
         physicalPaths.has(`datapacks/${wingsFileName}`)
@@ -578,6 +603,7 @@ export async function installServerContentPlansBatch(
       const trackedAtTarget = managedRecords.find(
         (m) =>
           m.targetPath === targetPath ||
+          m.targetPath === cleanTarget ||
           m.targetPath === `mods/${wingsFileName}` ||
           m.targetPath === `${worldName}/datapacks/${wingsFileName}`,
       )
@@ -611,30 +637,11 @@ export async function installServerContentPlansBatch(
             )
           }
         } else {
-          // Physically exists in Wings, but NO record in D1 owns it -> Check Adoption
-          const cleanTargetPath = targetPath.startsWith("/") ? targetPath : `/${targetPath}`
-          const physicalSha256 = await getPhysicalFileSha256(client, cleanTargetPath)
-          if (
-            physicalSha256 &&
-            item.expectedSha256 &&
-            physicalSha256.toLowerCase() === item.expectedSha256.toLowerCase()
-          ) {
-            // Adopt!
-            const size = physicalFilesMap.get(cleanTargetPath)?.size || item.sizeBytes || 0
-            itemsToAdopt.push({
-              item,
-              targetPath,
-              sha256: physicalSha256,
-              sizeBytes: size,
-              existing: existingRecordByProject,
-            })
-            continue
-          } else {
-            throw createGraphQLError(
-              `Ya existe un archivo manual en esta ruta (${targetPath}). HiKAT no lo reemplazará automáticamente.`,
-              "CONFLICT",
-            )
-          }
+          // Physically exists in Wings, but NO record in D1 owns it -> fail-closed CONFLICT (no auto-adoption, no hashing)
+          throw createGraphQLError(
+            `Ya existe un archivo manual en esta ruta (${targetPath}). HiKAT no lo reemplazará ni adoptará automáticamente.`,
+            "CONFLICT",
+          )
         }
       }
 
@@ -649,14 +656,16 @@ export async function installServerContentPlansBatch(
       })
     }
 
-    // 6. Concurrency Real = 2: Download & Stream-Verify Temp Files
+    // 6. Concurrency Real = 2: Download & Header-Verify Temp Files
     const verifiedDownloads: Array<{
       item: InternalServerTransferItem
       targetPath: string
       wingsParentDir: string
       wingsFileName: string
       tempFileName: string
-      sha256: string
+      sha256: string | null
+      providerHashAlgorithm: string
+      providerHash: string
       sizeBytes: number
       existing: (typeof schema.serverManagedContent.$inferSelect) | undefined
     }> = []
@@ -668,69 +677,33 @@ export async function installServerContentPlansBatch(
         heartbeat.assertLeaseOwned()
         const { item, wingsParentDir, wingsFileName, tempFileName } = entry
 
-        // 6a. Pull file to temporary name
+        // 6a. Pull file to temporary name with foreground: true (Wings will hold until download finishes; 30m timeout)
         await client.pullFile({
           url: item.downloadUrl,
           directory: wingsParentDir,
           filename: tempFileName,
-          foreground: false,
+          foreground: true,
         })
         createdTempFiles.push({ directory: wingsParentDir, filename: tempFileName })
 
-        // 6b. Poll listDirectory every 1000ms until size === expectedSizeBytes
-        const pollIntervalMs = 1000
-        const timeoutMs = 30 * 60 * 1000
-        const startTime = Date.now()
-        let downloadFinished = false
-
-        while (!downloadFinished) {
-          heartbeat.assertLeaseOwned()
-          if (Date.now() - startTime > timeoutMs) {
-            throw createGraphQLError(
-              `Tiempo de espera agotado al descargar "${item.filename}" en el servidor.`,
-              "VALIDATION_ERROR",
-            )
-          }
-
-          await new Promise((r) => setTimeout(r, pollIntervalMs))
-
-          const listRes = await client.listDirectory(wingsParentDir)
-          const fileEntry = listRes?.data?.find(
-            (f) => f.attributes.name === tempFileName,
-          )
-
-          if (fileEntry) {
-            const currentSize = fileEntry.attributes.size
-            if (item.sizeBytes > 0) {
-              if (currentSize === item.sizeBytes) {
-                downloadFinished = true
-              } else if (currentSize > item.sizeBytes) {
-                throw createGraphQLError(
-                  `La descarga de "${item.filename}" superó el tamaño esperado.`,
-                  "VALIDATION_ERROR",
-                )
-              }
-            } else if (currentSize > 0) {
-              downloadFinished = true
-            }
-          }
-        }
-
-        // 6c. Stream verify temp file
-        const tempPath = `${wingsParentDir}/${tempFileName}`
-        const verified = await streamVerifyWingsFile({
+        // 6b. Free-safe verification: 1 listDirectory for existence & exact size, 4-byte Range header read for magic bytes
+        heartbeat.assertLeaseOwned()
+        const verified = await verifyWingsFileHeader({
           client,
-          filePath: tempPath,
+          directory: wingsParentDir,
           filename: item.filename,
+          tempFilename: tempFileName,
           contentType: item.contentType as any,
           expectedSizeBytes: item.sizeBytes,
-          expectedSha256: item.expectedSha256 || undefined,
-          hashes: item.hashes,
         })
+
+        const checksumInfo = resolveProviderChecksum(item.hashes, item.expectedSha256)
 
         verifiedDownloads.push({
           ...entry,
-          sha256: verified.sha256,
+          sha256: checksumInfo.sha256,
+          providerHashAlgorithm: checksumInfo.algorithm,
+          providerHash: checksumInfo.hash,
           sizeBytes: verified.sizeBytes,
         })
       })
@@ -802,22 +775,15 @@ export async function installServerContentPlansBatch(
       // 8. Atomic D1 Commit (< 50 queries in whole invocation, < 100 params per statement)
       heartbeat.assertLeaseOwned()
       const now = new Date().toISOString()
-      const allToPersist = [
-        ...verifiedDownloads.map((v) => ({
-          item: v.item,
-          targetPath: v.targetPath,
-          sha256: v.sha256,
-          sizeBytes: v.sizeBytes,
-          existing: v.existing,
-        })),
-        ...itemsToAdopt.map((a) => ({
-          item: a.item,
-          targetPath: a.targetPath,
-          sha256: a.sha256,
-          sizeBytes: a.sizeBytes,
-          existing: a.existing,
-        })),
-      ]
+      const allToPersist = verifiedDownloads.map((v) => ({
+        item: v.item,
+        targetPath: v.targetPath,
+        sha256: v.sha256,
+        providerHashAlgorithm: v.providerHashAlgorithm,
+        providerHash: v.providerHash,
+        sizeBytes: v.sizeBytes,
+        existing: v.existing,
+      }))
 
       const toInsert: (typeof schema.serverManagedContent.$inferInsert)[] = []
       const toUpdate: Array<{
@@ -825,7 +791,9 @@ export async function installServerContentPlansBatch(
         versionId: string
         fileId: string | null
         targetPath: string
-        sha256: string
+        sha256: string | null
+        providerHashAlgorithm: string
+        providerHash: string
         sizeBytes: number
         updatedAt: string
       }> = []
@@ -838,6 +806,8 @@ export async function installServerContentPlansBatch(
             fileId: entry.item.fileId || null,
             targetPath: entry.targetPath,
             sha256: entry.sha256,
+            providerHashAlgorithm: entry.providerHashAlgorithm,
+            providerHash: entry.providerHash,
             sizeBytes: entry.sizeBytes,
             updatedAt: now,
           })
@@ -854,6 +824,8 @@ export async function installServerContentPlansBatch(
             environment: entry.item.environment || "SERVER",
             targetPath: entry.targetPath,
             sha256: entry.sha256,
+            providerHashAlgorithm: entry.providerHashAlgorithm,
+            providerHash: entry.providerHash,
             sizeBytes: entry.sizeBytes,
             createdAt: now,
             updatedAt: now,
@@ -880,6 +852,8 @@ export async function installServerContentPlansBatch(
         const fileCases = sql.join(chunk.map((c) => sql`WHEN ${schema.serverManagedContent.id} = ${c.existingId} THEN ${c.fileId}`), sql` `)
         const pathCases = sql.join(chunk.map((c) => sql`WHEN ${schema.serverManagedContent.id} = ${c.existingId} THEN ${c.targetPath}`), sql` `)
         const shaCases = sql.join(chunk.map((c) => sql`WHEN ${schema.serverManagedContent.id} = ${c.existingId} THEN ${c.sha256}`), sql` `)
+        const algoCases = sql.join(chunk.map((c) => sql`WHEN ${schema.serverManagedContent.id} = ${c.existingId} THEN ${c.providerHashAlgorithm}`), sql` `)
+        const hashCases = sql.join(chunk.map((c) => sql`WHEN ${schema.serverManagedContent.id} = ${c.existingId} THEN ${c.providerHash}`), sql` `)
         const sizeCases = sql.join(chunk.map((c) => sql`WHEN ${schema.serverManagedContent.id} = ${c.existingId} THEN ${c.sizeBytes}`), sql` `)
         const dateCases = sql.join(chunk.map((c) => sql`WHEN ${schema.serverManagedContent.id} = ${c.existingId} THEN ${c.updatedAt}`), sql` `)
 
@@ -891,6 +865,8 @@ export async function installServerContentPlansBatch(
               fileId: sql`CASE ${fileCases} ELSE ${schema.serverManagedContent.fileId} END`,
               targetPath: sql`CASE ${pathCases} ELSE ${schema.serverManagedContent.targetPath} END`,
               sha256: sql`CASE ${shaCases} ELSE ${schema.serverManagedContent.sha256} END`,
+              providerHashAlgorithm: sql`CASE ${algoCases} ELSE ${schema.serverManagedContent.providerHashAlgorithm} END`,
+              providerHash: sql`CASE ${hashCases} ELSE ${schema.serverManagedContent.providerHash} END`,
               sizeBytes: sql`CASE ${sizeCases} ELSE ${schema.serverManagedContent.sizeBytes} END`,
               updatedAt: sql`CASE ${dateCases} ELSE ${schema.serverManagedContent.updatedAt} END`,
             })

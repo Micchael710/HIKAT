@@ -4,7 +4,11 @@ import { createTestD1 } from "@hikat/database/testUtils"
 import {
   getServerManagedContent,
   installServerContentPlan,
+  installServerContentPlansBatch,
   removeServerManagedContent,
+  MAX_ROOT_PLANS_PER_FREE_INVOCATION,
+  MAX_SERVER_DIRECT_RESOLVED_FILES_FREE,
+  resolveProviderChecksum,
 } from "./serverContentService"
 
 function createMockD1() {
@@ -216,7 +220,7 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
       url: "https://cdn.modrinth.com/data/spark/spark.jar",
       directory: "/mods",
       filename: expect.stringMatching(/^\.hikat-[a-f0-9-]+-spark-1\.10\.53-neoforge\.jar$/),
-      foreground: false,
+      foreground: true,
     })
     expect(renameFileSpy).toHaveBeenCalledWith(
       "/mods",
@@ -229,6 +233,9 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
     expect(tracked).toHaveLength(1)
     expect(tracked[0]?.projectId).toBe("spark-id")
     expect(tracked[0]?.targetPath).toBe("mods/spark-1.10.53-neoforge.jar")
+    expect(tracked[0]?.sha256).toBe(realSha256)
+    expect(tracked[0]?.providerHashAlgorithm).toBe("SHA-256")
+    expect(tracked[0]?.providerHash).toBe(realSha256)
 
     fetchSpy.mockRestore()
   })
@@ -703,14 +710,14 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
         "admin-1",
         mockClient as any,
       ),
-    ).rejects.toThrow("Ya existe un archivo manual en esta ruta (mods/manual-mod.jar). HiKAT no lo reemplazará automáticamente.")
+    ).rejects.toThrow("Ya existe un archivo manual en esta ruta (mods/manual-mod.jar). HiKAT no lo reemplazará ni adoptará automáticamente.")
 
     fetchSpy.mockRestore()
     vi.restoreAllMocks()
   })
 
-  // Test 9: installServerContentPlan allows adoption when unmanaged physical file matches exact SHA-256
-  it("Shard 8D: installServerContentPlan adopts unmanaged file when exact SHA-256 matches", async () => {
+  // Test 9: installServerContentPlan rejects with CONFLICT even when unmanaged physical file matches exact SHA-256 (No auto-adoption)
+  it("Shard 8D: installServerContentPlan rejects with CONFLICT even when unmanaged physical file matches exact SHA-256 (No auto-adoption)", async () => {
     const jarBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x33, 0x44])
     const hashBuffer = await crypto.subtle.digest("SHA-256", jarBytes)
     const realSha256 = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("")
@@ -783,20 +790,516 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
       return new Response(jarBytes.slice(0), { status: 200, headers: { "Content-Type": "application/java-archive" } })
     })
 
+    await expect(
+      installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "matching-mod-id", versionId: "ver-match-1", contentType: "MOD" },
+        "admin-1",
+        mockClient as any,
+      ),
+    ).rejects.toThrow("Ya existe un archivo manual en esta ruta (mods/matching-mod.jar). HiKAT no lo reemplazará ni adoptará automáticamente.")
+
+    const tracked = await db.select().from(schema.serverManagedContent)
+    expect(tracked).toHaveLength(0)
+
+    fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // Test 10: resolveProviderChecksum prioritizes hashes correctly and throws if none
+  describe("resolveProviderChecksum", () => {
+    it("prioritizes SHA-256 and sets sha256 to the real hash", () => {
+      const res = resolveProviderChecksum({
+        sha256: "RealSha256Hash",
+        sha512: "sha512hash",
+        sha1: "sha1hash",
+        md5: "md5hash",
+      })
+      expect(res.algorithm).toBe("SHA-256")
+      expect(res.hash).toBe("realsha256hash")
+      expect(res.sha256).toBe("realsha256hash")
+    })
+
+    it("falls back to SHA-512 and sets sha256 to null", () => {
+      const res = resolveProviderChecksum({
+        sha512: "SHA512HASH",
+        sha1: "sha1hash",
+      })
+      expect(res.algorithm).toBe("SHA-512")
+      expect(res.hash).toBe("sha512hash")
+      expect(res.sha256).toBeNull()
+    })
+
+    it("falls back to SHA-1 and sets sha256 to null", () => {
+      const res = resolveProviderChecksum({
+        sha1: "SHA1HASH",
+        md5: "md5hash",
+      })
+      expect(res.algorithm).toBe("SHA-1")
+      expect(res.hash).toBe("sha1hash")
+      expect(res.sha256).toBeNull()
+    })
+
+    it("falls back to MD5 and sets sha256 to null", () => {
+      const res = resolveProviderChecksum({
+        md5: "MD5HASH",
+      })
+      expect(res.algorithm).toBe("MD5")
+      expect(res.hash).toBe("md5hash")
+      expect(res.sha256).toBeNull()
+    })
+
+    it("throws VALIDATION_ERROR when no checksum is provided", () => {
+      expect(() => resolveProviderChecksum({}, null)).toThrow(
+        "El proveedor no suministra ningún checksum para el archivo.",
+      )
+    })
+  })
+
+  // Test 11: Free limit: batch with > 1 root throws VALIDATION_ERROR
+  it("installServerContentPlansBatch rejects input with > 1 root plan in Workers Free", async () => {
+    await expect(
+      installServerContentPlansBatch(
+        db,
+        env,
+        {
+          plans: [
+            { provider: "MODRINTH", projectId: "mod-1", versionId: "v1", contentType: "MOD" },
+            { provider: "MODRINTH", projectId: "mod-2", versionId: "v2", contentType: "MOD" },
+          ],
+        },
+        "admin-1",
+      ),
+    ).rejects.toThrow("Solo se permite procesar una raíz por invocación en el plan gratuito de Workers. Se enviaron 2 planes.")
+  })
+
+  // Test 12: Free limit: root with > 5 resolved files throws VALIDATION_ERROR
+  it("installServerContentPlansBatch rejects plan when resolved items exceed MAX_SERVER_DIRECT_RESOLVED_FILES_FREE (5)", async () => {
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    const mockPlanItems = Array.from({ length: 6 }, (_, i) => ({
+      provider: "MODRINTH" as const,
+      projectId: `mod-${i}`,
+      projectName: `mod-${i}`,
+      versionId: `ver-${i}`,
+      versionNumber: "1.0.0",
+      filename: `mod-${i}.jar`,
+      sizeBytes: 1000,
+      sha256: `hash-${i}`,
+      contentType: "MOD" as const,
+      environment: "SERVER" as const,
+      targetPath: `mods/mod-${i}.jar`,
+      action: "INSTALL" as const,
+      isRoot: i === 0,
+      isDependency: i > 0,
+      isRequired: true,
+      isInstalled: false,
+      availableCompatibleVersions: [],
+    }))
+
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: mockPlanItems,
+      totalDownloadSizeBytes: 6000,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const mockAdapter = {
+      getVersion: vi.fn().mockImplementation((_env, projectId, versionId) => Promise.resolve({
+        id: versionId,
+        filename: `${projectId}.jar`,
+        downloadUrl: `https://cdn.example.com/${projectId}.jar`,
+        hashes: { sha256: `hash-${projectId}` },
+      })),
+    }
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    await expect(
+      installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "mod-0", versionId: "ver-0", contentType: "MOD" },
+        "admin-1",
+      ),
+    ).rejects.toThrow("superando el límite de 5 archivos por invocación en el plan gratuito de Workers.")
+
+    vi.restoreAllMocks()
+  })
+
+  // Test 13: Data Pack recalculates authoritative targetPath with real worldName
+  it("installServerContentPlan recalculates targetPath with real level-name for Data Packs", async () => {
+    const zipBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00])
+    const hashBuffer = await crypto.subtle.digest("SHA-256", zipBytes)
+    const realSha256 = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("")
+
+    const pullFileSpy = vi.fn().mockResolvedValue(undefined)
+    const renameFileSpy = vi.fn().mockResolvedValue(undefined)
+    const createFolderSpy = vi.fn().mockResolvedValue(undefined)
+    let pulledTemp = ""
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=survival_2026\nmotd=A Minecraft Server"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (pulledTemp && dir.includes("survival_2026/datapacks")) {
+          return Promise.resolve({
+            data: [{ attributes: { name: pulledTemp, size: zipBytes.length, is_file: true } }],
+          })
+        }
+        return Promise.resolve({ data: [] })
+      }),
+      createFolder: createFolderSpy,
+      pullFile: pullFileSpy.mockImplementation((p: any) => {
+        pulledTemp = p.filename
+        return Promise.resolve(undefined)
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({ attributes: { url: "https://wings.download/datapack" } }),
+      renameFile: renameFileSpy,
+    }
+
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "terralith-id",
+          projectName: "terralith",
+          versionId: "ver-t-1",
+          versionNumber: "2.5.4",
+          filename: "terralith.zip",
+          sizeBytes: zipBytes.length,
+          sha256: realSha256,
+          contentType: "DATA_PACK",
+          environment: "SERVER",
+          // Plan originally resolved with default "world/datapacks/terralith.zip"
+          targetPath: "world/datapacks/terralith.zip",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: zipBytes.length,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const mockAdapter = {
+      getVersion: vi.fn().mockResolvedValue({
+        id: "ver-t-1",
+        filename: "terralith.zip",
+        downloadUrl: "https://cdn.example.com/terralith.zip",
+        hashes: { sha256: realSha256 },
+      }),
+    }
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      // Verify Range: bytes=0-3 is requested
+      expect(init?.headers).toEqual({ Range: "bytes=0-3" })
+      return new Response(zipBytes.slice(0, 4), { status: 200 })
+    })
+
     const result = await installServerContentPlan(
       db,
       env,
-      { provider: "MODRINTH", projectId: "matching-mod-id", versionId: "ver-match-1", contentType: "MOD" },
+      { provider: "MODRINTH", projectId: "terralith-id", versionId: "ver-t-1", contentType: "DATA_PACK" },
       "admin-1",
       mockClient as any,
     )
 
-    expect(result).toBeDefined()
+    // Verify folder created for survival_2026/datapacks (never world/datapacks)
+    expect(createFolderSpy).toHaveBeenCalledWith("/survival_2026", "datapacks")
+
+    // Verify pullFile used /survival_2026/datapacks with foreground: true
+    expect(pullFileSpy).toHaveBeenCalledWith({
+      url: "https://cdn.example.com/terralith.zip",
+      directory: "/survival_2026/datapacks",
+      filename: expect.stringMatching(/^\.hikat-[a-f0-9-]+-terralith\.zip$/),
+      foreground: true,
+    })
+
+    // Verify renameFile in /survival_2026/datapacks
+    expect(renameFileSpy).toHaveBeenCalledWith(
+      "/survival_2026/datapacks",
+      expect.stringMatching(/^\.hikat-[a-f0-9-]+-terralith\.zip$/),
+      "terralith.zip",
+    )
+
+    // Verify D1 record has survival_2026/datapacks/terralith.zip
     const tracked = await db.select().from(schema.serverManagedContent)
     expect(tracked).toHaveLength(1)
-    expect(tracked[0]?.targetPath).toBe("mods/matching-mod.jar")
+    expect(tracked[0]?.targetPath).toBe("survival_2026/datapacks/terralith.zip")
+    expect(tracked[0]?.targetPath).not.toContain("world/datapacks")
 
     fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // Test 14: Provider with SHA-512 only results in sha256 = null, providerHashAlgorithm = SHA-512, providerHash persisted
+  it("installServerContentPlan persists provider SHA-512 and sets sha256 to null when provider has no SHA-256", async () => {
+    const jarBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x12, 0x34])
+    const sha512Hash = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+
+    const pullFileSpy = vi.fn().mockResolvedValue(undefined)
+    let pulledTemp = ""
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (pulledTemp && dir.includes("mods")) {
+          return Promise.resolve({
+            data: [{ attributes: { name: pulledTemp, size: jarBytes.length, is_file: true } }],
+          })
+        }
+        return Promise.resolve({ data: [] })
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      pullFile: pullFileSpy.mockImplementation((p: any) => {
+        pulledTemp = p.filename
+        return Promise.resolve(undefined)
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({ attributes: { url: "https://wings.download/sha512mod" } }),
+      renameFile: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "sha512-mod",
+          projectName: "sha512-mod",
+          versionId: "ver-512",
+          versionNumber: "1.0",
+          filename: "sha512-mod.jar",
+          sizeBytes: jarBytes.length,
+          sha256: null,
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: "mods/sha512-mod.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: jarBytes.length,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const mockAdapter = {
+      getVersion: vi.fn().mockResolvedValue({
+        id: "ver-512",
+        filename: "sha512-mod.jar",
+        downloadUrl: "https://cdn.example.com/sha512-mod.jar",
+        hashes: { sha512: sha512Hash },
+      }),
+    }
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(jarBytes.slice(0, 4), { status: 200 }),
+    )
+
+    const result = await installServerContentPlan(
+      db,
+      env,
+      { provider: "MODRINTH", projectId: "sha512-mod", versionId: "ver-512", contentType: "MOD" },
+      "admin-1",
+      mockClient as any,
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.sha256).toBeNull()
+    expect(result[0]?.providerHashAlgorithm).toBe("SHA-512")
+    expect(result[0]?.providerHash).toBe(sha512Hash)
+
+    // Verify persisted record in D1
+    const tracked = await db.select().from(schema.serverManagedContent)
+    expect(tracked).toHaveLength(1)
+    expect(tracked[0]?.sha256).toBeNull()
+    expect(tracked[0]?.providerHashAlgorithm).toBe("SHA-512")
+    expect(tracked[0]?.providerHash).toBe(sha512Hash)
+
+    fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // Test 15: Single listDirectory check and cancel reader immediately on header verification
+  it("installServerContentPlan calls listDirectory only once after pull (no polling) and cancels stream reader after reading 4 bytes", async () => {
+    const jarBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x55, 0x66, 0x77, 0x88])
+    let pulledTemp = ""
+    let callsBetweenPullAndRename = 0
+    let isBetweenPullAndRename = false
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockImplementation((dir: string) => {
+        if (isBetweenPullAndRename) {
+          callsBetweenPullAndRename++
+        }
+        if (pulledTemp && dir.includes("mods")) {
+          return Promise.resolve({
+            data: [{ attributes: { name: pulledTemp, size: jarBytes.length, is_file: true } }],
+          })
+        }
+        return Promise.resolve({ data: [] })
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      pullFile: vi.fn().mockImplementation((p: any) => {
+        pulledTemp = p.filename
+        isBetweenPullAndRename = true
+        return Promise.resolve(undefined)
+      }),
+      getFileDownload: vi.fn().mockResolvedValue({ attributes: { url: "https://wings.download/mod" } }),
+      renameFile: vi.fn().mockImplementation(() => {
+        isBetweenPullAndRename = false
+        return Promise.resolve(undefined)
+      }),
+    }
+
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "single-list-mod",
+          projectName: "single-list-mod",
+          versionId: "ver-single",
+          versionNumber: "1.0",
+          filename: "single-mod.jar",
+          sizeBytes: jarBytes.length,
+          sha256: null,
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: "mods/single-mod.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: jarBytes.length,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const mockAdapter = {
+      getVersion: vi.fn().mockResolvedValue({
+        id: "ver-single",
+        filename: "single-mod.jar",
+        downloadUrl: "https://cdn.example.com/single-mod.jar",
+        hashes: { md5: "abcdef0123456789abcdef0123456789" },
+      }),
+    }
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    let streamCancelled = false
+    const mockStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(jarBytes)
+        // Stream remains open with remaining data so reader.cancel() actively cancels the stream
+      },
+      cancel() {
+        streamCancelled = true
+      },
+    })
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(mockStream, { status: 200 }),
+    )
+
+    await installServerContentPlan(
+      db,
+      env,
+      { provider: "MODRINTH", projectId: "single-list-mod", versionId: "ver-single", contentType: "MOD" },
+      "admin-1",
+      mockClient as any,
+    )
+
+    // Exactly 1 listDirectory call for verifying the downloaded temp file (no polling loop!)
+    expect(callsBetweenPullAndRename).toBe(1)
+    // Stream cancel was called to avoid downloading the remaining binary
+    expect(streamCancelled).toBe(true)
+
+    fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // Test 16: MOD with environment BOTH is rejected and instructed to use Juego → Actualizaciones
+  it("installServerContentPlan rejects MOD with environment BOTH", async () => {
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "voicechat",
+          projectName: "Simple Voice Chat",
+          versionId: "ver-vc",
+          versionNumber: "1.0",
+          filename: "voicechat.jar",
+          sizeBytes: 1000,
+          sha256: "hashvc",
+          contentType: "MOD",
+          environment: "BOTH",
+          targetPath: "mods/voicechat.jar",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: 1000,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    await expect(
+      installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "voicechat", versionId: "ver-vc", contentType: "MOD" },
+        "admin-1",
+      ),
+    ).rejects.toThrow("es de entorno BOTH y no puede instalarse directamente en el servidor. Añádelo desde Juego → Actualizaciones.")
+
     vi.restoreAllMocks()
   })
 })

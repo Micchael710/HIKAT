@@ -232,7 +232,9 @@ export const serverTypeDefs = /* GraphQL */ `
     contentType: ContentType!
     environment: String
     targetPath: String!
-    sha256: String!
+    sha256: String
+    providerHashAlgorithm: String
+    providerHash: String
     sizeBytes: Float!
     gameReleaseId: String
     gameReleaseFileId: String

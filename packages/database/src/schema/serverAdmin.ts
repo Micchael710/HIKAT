@@ -127,7 +127,9 @@ export const serverManagedContent = sqliteTable(
     contentType: text("content_type").notNull().default("MOD"), // 'MOD' | 'DATA_PACK'
     environment: text("environment"), // 'SERVER' | 'BOTH'
     targetPath: text("target_path").notNull(), // 'mods/filename.jar' | '<world>/datapacks/filename.zip'
-    sha256: text("sha256").notNull(),
+    sha256: text("sha256"),
+    providerHashAlgorithm: text("provider_hash_algorithm"),
+    providerHash: text("provider_hash"),
     sizeBytes: integer("size_bytes").notNull().default(0),
     gameReleaseId: text("game_release_id").references(() => gameReleases.id, {
       onDelete: "set null",

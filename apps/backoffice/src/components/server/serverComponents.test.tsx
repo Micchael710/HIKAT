@@ -1649,7 +1649,7 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       requiresGameUpdate: false,
     })
 
-    const batchSpy = vi.spyOn(graphqlClient, "installServerContentPlansBatch").mockResolvedValue([
+    const planSpy = vi.spyOn(graphqlClient, "installServerContentPlan").mockResolvedValue([
       {
         id: "inst-1",
         name: "queue-mod-1.jar",
@@ -1707,18 +1707,14 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
       fireEvent.click(confirmBatchBtn)
     })
 
-    // Verify batch mutation called with queued plans
-    expect(batchSpy).toHaveBeenCalledWith(
+    // Verify sequential single-root plan mutation called
+    expect(planSpy).toHaveBeenCalledWith(
       {
-        plans: [
-          {
-            provider: "MODRINTH",
-            projectId: "mr-mod-1",
-            versionId: "mr-ver-1",
-            contentType: "MOD",
-            environmentOverride: undefined,
-          },
-        ],
+        provider: "MODRINTH",
+        projectId: "mr-mod-1",
+        versionId: "mr-ver-1",
+        contentType: "MOD",
+        environmentOverride: undefined,
       },
       "srv-1",
     )
@@ -1726,6 +1722,193 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
     // Verify success and close callbacks
     expect(onSuccessMock).toHaveBeenCalled()
     expect(onCloseMock).toHaveBeenCalled()
+  })
+
+  it("12. ServerModSearchModal processes queued items sequentially, displays progress, and leaves failed items in queue on error", async () => {
+    const { ServerModSearchModal } = await import("./providers/ServerModSearchModal")
+    const { graphqlClient } = await import("../../services/graphqlClient")
+
+    const onCloseMock = vi.fn()
+    const onSuccessMock = vi.fn()
+
+    vi.spyOn(graphqlClient, "searchServerContent").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "mr-mod-1",
+          name: "Queue Mod One",
+          summary: "Mod 1",
+          author: "Author1",
+          downloads: 100,
+          categories: ["technology"],
+          contentType: "MOD",
+          environment: "SERVER",
+        },
+        {
+          provider: "MODRINTH",
+          projectId: "mr-mod-2",
+          name: "Queue Mod Two",
+          summary: "Mod 2",
+          author: "Author2",
+          downloads: 200,
+          categories: ["technology"],
+          contentType: "MOD",
+          environment: "SERVER",
+        },
+      ],
+      totalCount: 2,
+      hasMore: false,
+      nextCursor: null,
+      providersStatus: [{ provider: "MODRINTH", available: true }],
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: null,
+      neoForgeVersion: "21.1.65",
+      isPublishedEnvironment: true,
+    })
+
+    vi.spyOn(graphqlClient, "getServerContentProjectDetail").mockImplementation(async (_prov, projId) => {
+      const verId = projId === "mr-mod-1" ? "mr-ver-1" : "mr-ver-2"
+      const name = projId === "mr-mod-1" ? "Queue Mod One" : "Queue Mod Two"
+      return {
+        provider: "MODRINTH",
+        projectId: projId,
+        name,
+        summary: "Summary",
+        description: "Desc",
+        author: "Author",
+        iconUrl: null,
+        downloads: 500,
+        contentType: "MOD",
+        environment: "SERVER",
+        compatibleVersions: [
+          {
+            id: verId,
+            name: "1.0.0",
+            versionNumber: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: new Date().toISOString(),
+            downloads: 500,
+            filename: `${projId}.jar`,
+            sizeBytes: 30000,
+            dependencies: [],
+          },
+        ],
+        isInstalled: false,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+      }
+    })
+
+    vi.spyOn(graphqlClient, "resolveServerContentPlan").mockImplementation(async (input) => ({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: input.projectId,
+          projectName: input.projectId,
+          versionId: input.versionId,
+          versionNumber: "1.0.0",
+          filename: `${input.projectId}.jar`,
+          sizeBytes: 30000,
+          contentType: "MOD",
+          environment: "SERVER",
+          targetPath: `mods/${input.projectId}.jar`,
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      conflicts: [],
+      optionalDependencies: [],
+      totalDownloadSizeBytes: 30000,
+      isValid: true,
+      requiresGameUpdate: false,
+    }))
+
+    // Plan 1 succeeds, Plan 2 fails with network error
+    const planSpy = vi.spyOn(graphqlClient, "installServerContentPlan")
+      .mockResolvedValueOnce([
+        {
+          id: "inst-1",
+          name: "mr-mod-1.jar",
+          targetPath: "mods/mr-mod-1.jar",
+          sha256: "hash1",
+          sizeBytes: 30000,
+          contentType: "MOD",
+          managementSource: "SERVER_DIRECT",
+          status: "INSTALLED",
+          provider: "MODRINTH",
+          projectId: "mr-mod-1",
+          versionId: "mr-ver-1",
+          gameReleaseFileId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ])
+      .mockRejectedValueOnce(new Error("Timeout al descargar Queue Mod Two en Wings"))
+
+    await act(async () => {
+      render(
+        <ServerModSearchModal
+          serverId="srv-1"
+          onClose={onCloseMock}
+          onSuccess={onSuccessMock}
+        />,
+      )
+    })
+
+    // 1. Select Mod One and add to queue
+    const mod1Card = await screen.findByText("Queue Mod One")
+    await act(async () => {
+      fireEvent.click(mod1Card)
+    })
+    const addBtn = await screen.findByTestId("button-add-to-queue")
+    await act(async () => {
+      fireEvent.click(addBtn)
+    })
+
+    // 2. Select Mod Two and add to queue
+    const mod2Card = await screen.findByText("Queue Mod Two")
+    await act(async () => {
+      fireEvent.click(mod2Card)
+    })
+    const addBtn2 = await screen.findByTestId("button-add-to-queue")
+    await act(async () => {
+      fireEvent.click(addBtn2)
+    })
+
+    // Verify 2 items in queue
+    expect(screen.getByTestId("server-queue-count").textContent).toContain("Seleccionados: 2")
+
+    // 3. Confirm batch installation
+    const confirmBatchBtn = screen.getByTestId("button-confirm-server-batch")
+    expect(confirmBatchBtn.textContent).toContain("Añadir 2 al servidor")
+
+    await act(async () => {
+      fireEvent.click(confirmBatchBtn)
+    })
+
+    // Verify both plans were called sequentially
+    expect(planSpy).toHaveBeenCalledTimes(2)
+
+    // Verify error displayed for failed mod
+    const errorElem = screen.getByTestId("server-queue-error")
+    expect(errorElem.textContent).toContain("Timeout al descargar Queue Mod Two en Wings")
+
+    // Verify Modal did NOT close because of error
+    expect(onCloseMock).not.toHaveBeenCalled()
+    expect(onSuccessMock).not.toHaveBeenCalled()
+
+    // Verify Mod Two remains in queue, while Mod One was removed because it succeeded
+    expect(screen.queryByTestId("queue-chip-mr-mod-1")).toBeNull()
+    expect(screen.getByTestId("queue-chip-mr-mod-2")).toBeDefined()
+    expect(screen.getByTestId("server-queue-count").textContent).toContain("Seleccionados: 1")
   })
 })
 

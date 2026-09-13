@@ -91,6 +91,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   }[]>([])
   const [batchInstalling, setBatchInstalling] = useState(false)
   const [batchError, setBatchError] = useState<string | null>(null)
+  const [installProgress, setInstallProgress] = useState<{ current: number; total: number } | null>(null)
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null)
   const requestIdRef = useRef(0)
@@ -351,24 +352,45 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     setBatchInstalling(true)
     setBatchError(null)
 
-    try {
-      const plansInput = queuedSelections.map((item) => ({
-        provider: item.provider,
-        projectId: item.projectId,
-        versionId: item.versionId,
-        contentType: item.contentType,
-        environmentOverride: item.environmentOverride || undefined,
-      }))
+    const items = [...queuedSelections]
+    const total = items.length
 
-      await graphqlClient.installServerContentPlansBatch({ plans: plansInput }, serverId)
-      setQueuedSelections([])
-      onSuccess()
-      onClose()
-    } catch (err: any) {
-      setBatchError(err.message || "Error al instalar el contenido en el servidor.")
-    } finally {
-      setBatchInstalling(false)
+    for (let i = 0; i < total; i++) {
+      const item = items[i]!
+      setInstallProgress({ current: i + 1, total })
+
+      try {
+        await graphqlClient.installServerContentPlan(
+          {
+            provider: item.provider,
+            projectId: item.projectId,
+            versionId: item.versionId,
+            contentType: item.contentType,
+            environmentOverride: item.environmentOverride || undefined,
+          },
+          serverId,
+        )
+
+        // Successfully installed item i; remove it from queue so completed items don't remain
+        setQueuedSelections((prev) =>
+          prev.filter(
+            (q) => !(q.provider === item.provider && q.projectId === item.projectId),
+          ),
+        )
+      } catch (err: any) {
+        // 1 and 2 remain installed, 3 failed -> stop, remaining items (3, 4, 5) stay in queue
+        setBatchError(err.message || `Error al instalar ${item.projectName}.`)
+        setBatchInstalling(false)
+        setInstallProgress(null)
+        return
+      }
     }
+
+    setBatchInstalling(false)
+    setInstallProgress(null)
+    setQueuedSelections([])
+    onSuccess()
+    onClose()
   }
 
   const failedProviders = providerStatuses.filter((s) => !s.available && s.error)
@@ -1258,7 +1280,11 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
                 {batchInstalling ? (
                   <>
                     <IconSpinner size={16} />
-                    <span>Instalando...</span>
+                    <span data-testid="server-install-progress">
+                      {installProgress
+                        ? `Instalando ${installProgress.current} de ${installProgress.total}...`
+                        : "Instalando..."}
+                    </span>
                   </>
                 ) : (
                   <span>Añadir {queuedSelections.length} al servidor</span>

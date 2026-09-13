@@ -251,7 +251,7 @@ export async function getServerReleaseSyncPlan(
         filename: currentFileName,
         targetPath: current.targetPath,
         sizeBytes: current.sizeBytes,
-        sha256: current.sha256,
+        sha256: current.sha256 || current.providerHash || "",
         sourceProvider: (current.provider as any) || null,
         sourceProjectId: current.projectId || null,
         sourceVersionId: current.versionId || null,
