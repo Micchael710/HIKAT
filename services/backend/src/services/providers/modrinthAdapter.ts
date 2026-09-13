@@ -86,7 +86,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
       const typeMap: Record<ContentTypeGql, string> = {
         MOD: "mod",
         RESOURCE_PACK: "resourcepack",
-        DATA_PACK: "datapack",
+        DATA_PACK: "mod",
         SHADER: "shader",
       }
       const targetType = typeMap[contentType] || "mod"

@@ -41,7 +41,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   const [query, setQuery] = useState("")
   const [selectedContentType, setSelectedContentType] = useState<ContentType>("MOD")
   const [selectedProviderTab, setSelectedProviderTab] = useState<ModProvider | "ALL">("ALL")
-  const [selectedLoader, setSelectedLoader] = useState<GameModLoader>("NEOFORGE")
+  const [userSelectedLoader, setUserSelectedLoader] = useState<GameModLoader | null>(null)
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>("")
   const [categories, setCategories] = useState<ModCategoryItem[]>([])
   const [loadingCategories, setLoadingCategories] = useState(false)
@@ -68,6 +68,8 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     neoForgeVersion: null,
     isPublishedEnvironment: true,
   })
+
+  const selectedLoader: GameModLoader = userSelectedLoader || envInfo.modLoader
 
   // Selected item detail state (opens ModDetailModal)
   const [selectedMod, setSelectedMod] = useState<ModSearchResultItem | null>(null)
@@ -125,10 +127,11 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     }
 
     const providerArg = providerTab === "ALL" ? null : providerTab
+    const isCustomLoader = Boolean(loader && loader !== envInfo.modLoader)
 
     // Call searchServerContent. If categoryKey or custom loader override, pass them.
     const searchPromise =
-      catKey || loader !== envInfo.modLoader
+      catKey || isCustomLoader
         ? graphqlClient.searchServerContent(
             searchQuery,
             contentType,
@@ -137,7 +140,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
             currentOffset,
             searchCursor,
             serverId,
-            loader,
+            isCustomLoader ? loader : null,
             catKey || null,
           )
         : graphqlClient.searchServerContent(
@@ -172,9 +175,6 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
             neoForgeVersion: payload.neoForgeVersion ?? null,
             isPublishedEnvironment: payload.isPublishedEnvironment,
           })
-          if (!selectedLoader && payload.modLoader) {
-            setSelectedLoader(payload.modLoader)
-          }
         }
         setLoading(false)
         setLoadingMore(false)
@@ -443,7 +443,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
           selectedContentType={selectedContentType}
           onContentTypeChange={(ct) => setSelectedContentType(ct)}
           selectedLoader={selectedLoader}
-          onLoaderChange={(ldr) => setSelectedLoader(ldr)}
+          onLoaderChange={(ldr) => setUserSelectedLoader(ldr)}
           selectedCategoryKey={selectedCategoryKey}
           onCategoryChange={(cat) => setSelectedCategoryKey(cat)}
           categories={categories}

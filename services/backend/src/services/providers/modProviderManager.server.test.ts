@@ -1083,4 +1083,59 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
       ),
     ).rejects.toThrow("Cursor de paginación inválido o corrupto.")
   })
+
+  // Test 18: servidor NEOFORGE + selector FABRIC mantiene payload.modLoader = NEOFORGE
+  it("server NEOFORGE with selector/loaderOverride FABRIC maintains payload.modLoader = NEOFORGE", async () => {
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.servers).values({
+      id: "srv-neoforge-1",
+      name: "NeoForge Server",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      modLoaderVersion: "21.1.65",
+      cpu: 200,
+      memoryMb: 4096,
+      diskMb: 10240,
+      provisioningStatus: "READY",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockResolvedValue({
+        items: [{ projectId: "mr-1", name: "MR 1", environment: "SERVER", contentType: "MOD" }],
+        totalCount: 1,
+      }),
+    }
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockMrAdapter as any)
+    ;(manager as any).modrinth = mockMrAdapter
+
+    const res = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "test-query",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+      null,
+      "srv-neoforge-1",
+      "FABRIC",
+    )
+
+    // Adapter search was called with effective loader "fabric"
+    expect(mockMrAdapter.searchMods).toHaveBeenCalledWith(
+      mockEnv,
+      "test-query",
+      "1.21.1",
+      "fabric",
+      expect.any(Number),
+      0,
+      "MOD",
+      undefined,
+    )
+    // But payload.modLoader MUST remain the real server loader "NEOFORGE"
+    expect(res.modLoader).toBe("NEOFORGE")
+  })
 })

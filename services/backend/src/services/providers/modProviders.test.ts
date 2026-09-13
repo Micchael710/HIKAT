@@ -5455,6 +5455,84 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         getVersionsSpy.mockRestore()
       }
     })
+
+    it("Modrinth getCategories maps DATA_PACK to mod categories correctly", async () => {
+      const adapter = modProviderManager.getAdapter("MODRINTH") as ModrinthAdapter
+      const mockCategories = [
+        { name: "worldgen", project_type: "mod" },
+        { name: "technology", project_type: "mod" },
+        { name: "faithful", project_type: "resourcepack" },
+      ]
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify(mockCategories), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+
+      const cats = await adapter.getCategories(env, "DATA_PACK")
+      expect(cats).toEqual([
+        { name: "Worldgen", slug: "worldgen" },
+        { name: "Technology", slug: "technology" },
+      ])
+    })
+
+    it("loaderOverride = FABRIC propagates to detail, resolution, and installation", async () => {
+      const mrAdapter = modProviderManager.getAdapter("MODRINTH")
+      const getProjSpy = vi.spyOn(mrAdapter, "getProject").mockResolvedValueOnce({
+        provider: "MODRINTH",
+        projectId: "test-proj",
+        slug: "test-proj",
+        name: "Test Project",
+        summary: "Summary",
+        description: "Desc",
+        author: "Author",
+        iconUrl: null,
+        downloads: 10,
+        contentType: "MOD",
+        environment: "BOTH",
+        categories: [],
+      })
+      const mockVer = {
+        id: "ver-fab-1",
+        versionNumber: "1.0.0",
+        releaseType: "RELEASE",
+        gameVersions: ["1.21.1"],
+        loaders: ["fabric"],
+        publishedAt: new Date().toISOString(),
+        downloads: 100,
+        filename: "fab-mod.jar",
+        sizeBytes: 1000,
+        dependencies: [],
+        downloadUrl: "https://example.com/fab-mod.jar",
+        hashes: { sha256: "hash123" },
+      }
+      const getVersionsSpy = vi.spyOn(mrAdapter, "getCompatibleVersions").mockResolvedValueOnce([mockVer as any])
+      const getVersionSpy = vi.spyOn(mrAdapter, "getVersion").mockResolvedValueOnce(mockVer as any)
+
+      try {
+        const plan = await modProviderManager.resolveInstallationPlan(env, db, {
+          provider: "MODRINTH",
+          projectId: "test-proj",
+          versionId: "ver-fab-1",
+          contentType: "MOD",
+          loaderOverride: "FABRIC",
+        })
+        expect(plan.isValid).toBe(true)
+        expect(plan.items[0]?.versionId).toBe("ver-fab-1")
+        expect(getVersionsSpy).toHaveBeenCalledWith(
+          env,
+          "test-proj",
+          expect.any(String),
+          "fabric",
+          "MOD",
+        )
+      } finally {
+        getProjSpy.mockRestore()
+        getVersionsSpy.mockRestore()
+        getVersionSpy.mockRestore()
+      }
+    })
   })
 })
 

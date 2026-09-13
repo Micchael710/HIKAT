@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import type {
   ModProvider,
   ModProjectDetail,
@@ -21,6 +21,9 @@ interface NavStackItem {
   provider: ModProvider
   projectId: string
   contentType?: ContentType
+  selectedVersionId: string
+  manualOverrides: Record<string, string>
+  selectedEnvironmentOverride: ModEnvironment | null
 }
 
 interface ModDetailModalProps {
@@ -62,11 +65,25 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
 
   // Navigation Stack for clickable dependencies
   const [navStack, setNavStack] = useState<NavStackItem[]>([])
-  const currentTarget: NavStackItem =
-    navStack.length > 0 ? navStack[navStack.length - 1]! : { provider, projectId, contentType }
-  const currentProvider = currentTarget.provider
-  const currentProjectId = currentTarget.projectId
-  const currentContentType = currentTarget.contentType || "MOD"
+  const [activeItem, setActiveItem] = useState<{
+    provider: ModProvider
+    projectId: string
+    contentType: ContentType
+  }>({
+    provider,
+    projectId,
+    contentType,
+  })
+
+  useEffect(() => {
+    if (navStack.length === 0) {
+      setActiveItem({ provider, projectId, contentType })
+    }
+  }, [provider, projectId, contentType, navStack.length])
+
+  const currentProvider = activeItem.provider
+  const currentProjectId = activeItem.projectId
+  const currentContentType = activeItem.contentType || "MOD"
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -134,8 +151,20 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         if (!active) return
         setDetail(data)
 
-        // If at root and initialVersionId is provided, attempt matching
-        if (navStack.length === 0 && initialVersionId) {
+        // If restoring from navStack, restore parent's selected version and overrides
+        if (pendingRestoreRef.current) {
+          const restore = pendingRestoreRef.current
+          pendingRestoreRef.current = null
+          if (restore.versionId) {
+            setSelectedVersionId(restore.versionId)
+          } else {
+            const stable = data.compatibleVersions.find((v) => v.releaseType === "RELEASE")
+            const initialVer = stable || data.compatibleVersions[0]
+            setSelectedVersionId(initialVer?.id || initialVer?.fileId || "")
+          }
+          setManualOverrides(restore.manualOverrides || {})
+          setSelectedEnvironmentOverride(restore.environmentOverride)
+        } else if (navStack.length === 0 && initialVersionId) {
           const matched = data.compatibleVersions.find(
             (v) => v.id === initialVersionId || v.fileId === initialVersionId,
           )
@@ -380,6 +409,12 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     }
   }
 
+  const pendingRestoreRef = useRef<{
+    versionId: string
+    manualOverrides: Record<string, string>
+    environmentOverride: ModEnvironment | null
+  } | null>(null)
+
   const handleQueueOptional = (opt: {
     provider: ModProvider
     projectId: string
@@ -388,6 +423,11 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     versionNumber?: string
     contentType?: ContentType
   }) => {
+    if (!opt.versionId) {
+      handleNavigateToDependency(opt.provider, opt.projectId, opt.contentType)
+      return
+    }
+
     if (isServer) {
       if (onQueueServerMod) {
         onQueueServerMod({
@@ -433,12 +473,39 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   ) => {
     setNavStack((prev) => [
       ...prev,
-      { provider: depProvider, projectId: depProjectId, contentType: depContentType || "MOD" },
+      {
+        provider: currentProvider,
+        projectId: currentProjectId,
+        contentType: currentContentType,
+        selectedVersionId,
+        manualOverrides,
+        selectedEnvironmentOverride,
+      },
     ])
+    setSelectedVersionId("")
+    setManualOverrides({})
+    setSelectedEnvironmentOverride(null)
+    setActiveItem({
+      provider: depProvider,
+      projectId: depProjectId,
+      contentType: depContentType || "MOD",
+    })
   }
 
   const handleNavBack = () => {
+    if (navStack.length === 0) return
+    const parent = navStack[navStack.length - 1]!
     setNavStack((prev) => prev.slice(0, -1))
+    pendingRestoreRef.current = {
+      versionId: parent.selectedVersionId,
+      manualOverrides: parent.manualOverrides,
+      environmentOverride: parent.selectedEnvironmentOverride,
+    }
+    setActiveItem({
+      provider: parent.provider,
+      projectId: parent.projectId,
+      contentType: parent.contentType || "MOD",
+    })
   }
 
   const isModrinth = currentProvider === "MODRINTH"
@@ -884,6 +951,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                           versionId: selectedVersionId,
                           contentType: "MOD",
                           environmentOverride: "BOTH",
+                          loaderOverride: loaderOverride || undefined,
                         })
                       }}
                       className="launcher-btn-primary"
@@ -1322,7 +1390,13 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                                   <button
                                     type="button"
                                     data-testid={`button-queue-optional-${opt.projectId}`}
-                                    onClick={() => handleQueueOptional(opt)}
+                                    onClick={() => {
+                                      if (opt.versionId) {
+                                        handleQueueOptional(opt)
+                                      } else {
+                                        handleNavigateToDependency(opt.provider, opt.projectId, opt.contentType)
+                                      }
+                                    }}
                                     disabled={isQueued}
                                     style={{
                                       background: isQueued ? "rgba(16, 185, 129, 0.2)" : tokens.bgCardInner,
@@ -1335,7 +1409,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                                       cursor: isQueued ? "default" : "pointer",
                                     }}
                                   >
-                                    {isQueued ? "Añadida" : "+ Añadir a la selección"}
+                                    {isQueued ? "Añadida" : opt.versionId ? "+ Añadir a la selección" : "Ver versiones"}
                                   </button>
                                 )}
                               </div>

@@ -1601,6 +1601,429 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       })
     })
 
+    it("GameView processes server handoff with loaderOverride and passes it to ModDetailModal and resolution", async () => {
+      const onClearHandoff = vi.fn()
+
+      vi.spyOn(gameApi, "getAdminGameOverview").mockResolvedValue({
+        draftRelease: {
+          id: "draft-test",
+          version: "draft-123",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          status: "DRAFT",
+          notes: null,
+          publishedAt: null,
+          coverMediaId: null,
+          cover: null,
+          files: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        publishedRelease: null,
+        pendingChangesCount: 0,
+        readiness: {
+          isReady: true,
+          validVersion: true,
+          uniqueVersion: true,
+          hasFiles: true,
+          noConflicts: true,
+          storageVerified: true,
+          issues: [],
+        },
+      })
+
+      const getDetailSpy = vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "CURSEFORGE",
+        projectId: "cf-mod-both",
+        name: "CF Both Mod",
+        summary: "Both environment mod",
+        description: "Description",
+        author: "authorCF",
+        downloads: 50000,
+        contentType: "MOD",
+        environment: "UNKNOWN",
+        compatibleVersions: [
+          {
+            id: "ver-both-99",
+            name: "1.0.0",
+            versionNumber: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["fabric"],
+            publishedAt: new Date().toISOString(),
+            downloads: 50000,
+            filename: "cf-both.jar",
+            sizeBytes: 60000,
+            dependencies: [],
+          },
+        ],
+        isInstalled: false,
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+      })
+
+      const resolvePlanSpy = vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
+        items: [
+          {
+            provider: "CURSEFORGE",
+            projectId: "cf-mod-both",
+            projectName: "CF Both Mod",
+            versionId: "ver-both-99",
+            fileId: "ver-both-99",
+            versionNumber: "1.0.0",
+            filename: "cf-both.jar",
+            sizeBytes: 60000,
+            sha256: "hash99",
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/cf-both.jar",
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            installedFileId: null,
+            installedVersionNumber: null,
+            availableCompatibleVersions: [],
+          },
+        ],
+        totalDownloadSizeBytes: 60000,
+        conflicts: [],
+        optionalDependencies: [],
+        isValid: true,
+      })
+
+      render(
+        <GameView
+          serverId="srv-1"
+          theme="dark"
+          handoff={{
+            provider: "CURSEFORGE",
+            projectId: "cf-mod-both",
+            versionId: "ver-both-99",
+            contentType: "MOD",
+            environmentOverride: "BOTH",
+            loaderOverride: "FABRIC",
+          }}
+          onClearHandoff={onClearHandoff}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
+      })
+
+      expect(onClearHandoff).toHaveBeenCalled()
+
+      expect(getDetailSpy).toHaveBeenCalledWith(
+        "CURSEFORGE",
+        "cf-mod-both",
+        "MOD",
+        "srv-1",
+        "FABRIC",
+      )
+
+      await waitFor(() => {
+        expect(resolvePlanSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            provider: "CURSEFORGE",
+            projectId: "cf-mod-both",
+            versionId: "ver-both-99",
+            environmentOverride: "BOTH",
+            loaderOverride: "FABRIC",
+          }),
+          "srv-1",
+        )
+      })
+    })
+
+    it("navigating into a dependency and clicking Volver restores parent selectedVersionId", async () => {
+      vi.spyOn(graphqlClient, "getModProjectDetail").mockImplementation(
+        async (_provider, projectId) => {
+          if (projectId === "parent-mod") {
+            return {
+              provider: "MODRINTH",
+              projectId: "parent-mod",
+              name: "Parent Mod",
+              summary: "Parent Mod Summary",
+              description: "Parent Description",
+              author: "Author",
+              downloads: 100,
+              contentType: "MOD",
+              environment: "BOTH",
+              compatibleVersions: [
+                {
+                  id: "ver-parent-v1",
+                  name: "v1.0",
+                  versionNumber: "1.0.0",
+                  releaseType: "RELEASE",
+                  gameVersions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  publishedAt: new Date().toISOString(),
+                  downloads: 50,
+                  filename: "parent-1.0.jar",
+                  sizeBytes: 1000,
+                  dependencies: [],
+                },
+                {
+                  id: "ver-parent-v2",
+                  name: "v2.0",
+                  versionNumber: "2.0.0",
+                  releaseType: "BETA",
+                  gameVersions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  publishedAt: new Date().toISOString(),
+                  downloads: 50,
+                  filename: "parent-2.0.jar",
+                  sizeBytes: 1000,
+                  dependencies: [],
+                },
+              ],
+              isInstalled: false,
+              minecraftVersion: "1.21.1",
+              modLoader: "NEOFORGE",
+            }
+          }
+          return {
+            provider: "MODRINTH",
+            projectId: "child-dep",
+            name: "Child Dependency",
+            summary: "Child Summary",
+            description: "Child Description",
+            author: "Author",
+            downloads: 100,
+            contentType: "MOD",
+            environment: "BOTH",
+            compatibleVersions: [
+              {
+                id: "ver-child-v1",
+                name: "v1.0",
+                versionNumber: "1.0.0",
+                releaseType: "RELEASE",
+                gameVersions: ["1.21.1"],
+                loaders: ["neoforge"],
+                publishedAt: new Date().toISOString(),
+                downloads: 50,
+                filename: "child-1.0.jar",
+                sizeBytes: 1000,
+                dependencies: [],
+              },
+            ],
+            isInstalled: false,
+            minecraftVersion: "1.21.1",
+            modLoader: "NEOFORGE",
+          }
+        },
+      )
+
+      vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "parent-mod",
+            projectName: "Parent Mod",
+            versionId: "ver-parent-v1",
+            fileId: "ver-parent-v1",
+            versionNumber: "1.0.0",
+            filename: "parent-1.0.jar",
+            sizeBytes: 1000,
+            sha256: "hash1",
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/parent-1.0.jar",
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            installedFileId: null,
+            installedVersionNumber: null,
+            availableCompatibleVersions: [],
+          },
+          {
+            provider: "MODRINTH",
+            projectId: "child-dep",
+            projectName: "Child Dependency",
+            versionId: "ver-child-v1",
+            fileId: "ver-child-v1",
+            versionNumber: "1.0.0",
+            filename: "child-1.0.jar",
+            sizeBytes: 1000,
+            sha256: "hash2",
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/child-1.0.jar",
+            isRoot: false,
+            isDependency: true,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            installedFileId: null,
+            installedVersionNumber: null,
+            availableCompatibleVersions: [],
+          },
+        ],
+        totalDownloadSizeBytes: 2000,
+        conflicts: [],
+        optionalDependencies: [],
+        isValid: true,
+      })
+
+      const { ModDetailModal } = await import("./providers/ModDetailModal")
+
+      render(
+        <ModDetailModal
+          serverId="srv-1"
+          provider="MODRINTH"
+          projectId="parent-mod"
+          contentType="MOD"
+          mode="RELEASE"
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText("Parent Mod")).toBeDefined()
+      })
+
+      const versionSelect = (await screen.findByTestId("select-mod-version")) as HTMLSelectElement
+      fireEvent.change(versionSelect, { target: { value: "ver-parent-v2" } })
+      expect(versionSelect.value).toBe("ver-parent-v2")
+
+      const depItem = await screen.findByTestId("dependency-item-child-dep")
+      const depButton = depItem.querySelector("button")!
+      fireEvent.click(depButton)
+
+      await waitFor(() => {
+        expect(screen.getByText("Child Dependency")).toBeDefined()
+      })
+
+      const backButton = await screen.findByTestId("button-nav-back")
+      fireEvent.click(backButton)
+
+      await waitFor(() => {
+        expect(screen.getByText("Parent Mod")).toBeDefined()
+      })
+
+      const restoredSelect = (await screen.findByTestId("select-mod-version")) as HTMLSelectElement
+      expect(restoredSelect.value).toBe("ver-parent-v2")
+    })
+
+    it("optional dependency without versionId displays Ver versiones and never queues empty versionId", async () => {
+      vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "MODRINTH",
+        projectId: "parent-mod",
+        name: "Parent Mod",
+        summary: "Parent Mod Summary",
+        description: "Parent Description",
+        author: "Author",
+        downloads: 100,
+        contentType: "MOD",
+        environment: "BOTH",
+        compatibleVersions: [
+          {
+            id: "ver-parent-v1",
+            name: "v1.0",
+            versionNumber: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: new Date().toISOString(),
+            downloads: 50,
+            filename: "parent-1.0.jar",
+            sizeBytes: 1000,
+            dependencies: [],
+          },
+        ],
+        isInstalled: false,
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+      })
+
+      vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "parent-mod",
+            projectName: "Parent Mod",
+            versionId: "ver-parent-v1",
+            fileId: "ver-parent-v1",
+            versionNumber: "1.0.0",
+            filename: "parent-1.0.jar",
+            sizeBytes: 1000,
+            sha256: "hash1",
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/parent-1.0.jar",
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            installedFileId: null,
+            installedVersionNumber: null,
+            availableCompatibleVersions: [],
+          },
+        ],
+        totalDownloadSizeBytes: 1000,
+        conflicts: [],
+        optionalDependencies: [
+          {
+            provider: "MODRINTH",
+            projectId: "opt-mod-no-ver",
+            projectName: "Optional Mod No Ver",
+            versionId: "",
+            fileId: "",
+            versionNumber: "",
+            filename: "",
+            sizeBytes: 0,
+            sha256: "",
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "",
+            isRoot: false,
+            isDependency: false,
+            isRequired: false,
+            isInstalled: false,
+            action: "INSTALL",
+            installedFileId: null,
+            installedVersionNumber: null,
+            availableCompatibleVersions: [],
+          },
+        ],
+        isValid: true,
+      })
+
+      const onQueueModMock = vi.fn()
+      const { ModDetailModal } = await import("./providers/ModDetailModal")
+
+      render(
+        <ModDetailModal
+          serverId="srv-1"
+          provider="MODRINTH"
+          projectId="parent-mod"
+          contentType="MOD"
+          mode="RELEASE"
+          onQueueMod={onQueueModMock}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByTestId("optional-dependencies-section")).toBeDefined()
+      })
+
+      const queueBtn = screen.getByTestId("button-queue-optional-opt-mod-no-ver")
+      expect(queueBtn.textContent).toBe("Ver versiones")
+
+      fireEvent.click(queueBtn)
+      expect(onQueueModMock).not.toHaveBeenCalled()
+    })
+
     it("GameView with non-existent initialVersionId in handoff does not silently switch versions and blocks install", async () => {
       const onClearHandoff = vi.fn()
 

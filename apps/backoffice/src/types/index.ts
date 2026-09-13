@@ -505,6 +505,7 @@ export interface GameHandoffPayload {
   versionId?: string
   contentType?: ContentType
   environmentOverride?: ModEnvironment
+  loaderOverride?: GameModLoader | null
 }
 
 export interface ResolveModPlanInput {

@@ -42,7 +42,9 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   const [query, setQuery] = useState("")
   const [selectedContentType, setSelectedContentType] = useState<ContentType>("MOD")
   const [selectedProviderTab, setSelectedProviderTab] = useState<ModProvider | "ALL">("ALL")
-  const [selectedLoader, setSelectedLoader] = useState<GameModLoader>("NEOFORGE")
+  const [userSelectedLoader, setUserSelectedLoader] = useState<GameModLoader | null>(
+    () => handoff?.loaderOverride || null,
+  )
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>("")
   const [categories, setCategories] = useState<ModCategoryItem[]>([])
   const [loadingCategories, setLoadingCategories] = useState(false)
@@ -63,6 +65,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     contentType: ContentType
     initialVersionId?: string
     initialEnvironmentOverride?: import("../../../types").ModEnvironment
+    loaderOverride?: GameModLoader | null
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [envInfo, setEnvInfo] = useState<{
@@ -74,6 +77,8 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     modLoader: "NEOFORGE",
     modLoaderVersion: null,
   })
+
+  const selectedLoader: GameModLoader = userSelectedLoader || envInfo.modLoader
 
   const debounceTimer = useRef<NodeJS.Timeout | null>(null)
   const requestIdRef = useRef(0)
@@ -161,9 +166,6 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
             modLoader: payload.modLoader || "NEOFORGE",
             modLoaderVersion: payload.modLoaderVersion ?? null,
           })
-          if (!selectedLoader && payload.modLoader) {
-            setSelectedLoader(payload.modLoader)
-          }
         }
         setLoading(false)
         setLoadingMore(false)
@@ -174,7 +176,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
         setLoading(false)
         setLoadingMore(false)
       })
-  }, [serverId, selectedCategoryKey, selectedLoader])
+  }, [serverId, selectedCategoryKey, selectedLoader, envInfo.modLoader])
 
   // When handoff is provided from Server View, preselect tab and open ModDetailModal directly
   useEffect(() => {
@@ -185,12 +187,16 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
       if (handoff.provider) {
         setSelectedProviderTab(handoff.provider)
       }
+      if (handoff.loaderOverride) {
+        setUserSelectedLoader(handoff.loaderOverride)
+      }
       setHandoffDetail({
         provider: handoff.provider,
         projectId: handoff.projectId,
         contentType: handoff.contentType || "MOD",
         initialVersionId: handoff.versionId,
         initialEnvironmentOverride: handoff.environmentOverride,
+        loaderOverride: handoff.loaderOverride,
       })
       onClearHandoff?.()
     }
@@ -378,7 +384,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           selectedContentType={selectedContentType}
           onContentTypeChange={(ct) => setSelectedContentType(ct)}
           selectedLoader={selectedLoader}
-          onLoaderChange={(ldr) => setSelectedLoader(ldr)}
+          onLoaderChange={(ldr) => setUserSelectedLoader(ldr)}
           selectedCategoryKey={selectedCategoryKey}
           onCategoryChange={(cat) => setSelectedCategoryKey(cat)}
           categories={categories}
@@ -510,7 +516,10 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           initialEnvironmentOverride={handoffDetail?.initialEnvironmentOverride}
           theme={theme}
           mode="RELEASE"
-          loaderOverride={selectedLoader !== envInfo.modLoader ? selectedLoader : undefined}
+          loaderOverride={
+            handoffDetail?.loaderOverride ||
+            (selectedLoader !== envInfo.modLoader ? selectedLoader : undefined)
+          }
           onQueueMod={(item) => {
             setQueuedSelections((prev) => [
               ...prev.filter(
@@ -523,7 +532,10 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
               ),
               {
                 ...item,
-                loaderOverride: item.loaderOverride || selectedLoader,
+                loaderOverride:
+                  item.loaderOverride ||
+                  handoffDetail?.loaderOverride ||
+                  (selectedLoader !== envInfo.modLoader ? selectedLoader : undefined),
               },
             ])
           }}

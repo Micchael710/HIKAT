@@ -995,7 +995,7 @@ export class ModProviderManager {
       nextCursor: rawResults.nextCursor,
       providersStatus: rawResults.providersStatus,
       minecraftVersion,
-      modLoader: effectiveLoader,
+      modLoader,
       modLoaderVersion,
       neoForgeVersion,
       isPublishedEnvironment: isPublished,
