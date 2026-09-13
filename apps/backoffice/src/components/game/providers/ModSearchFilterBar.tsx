@@ -1,5 +1,5 @@
 import React from "react"
-import type { ModProvider, ContentType, GameModLoader, ModCategoryItem, ThemeMode } from "../../../types"
+import type { ModProvider, ContentType, GameModLoader, ModCategoryItem, ModEnvironment, ThemeMode } from "../../../types"
 import { getThemeTokens } from "../../../theme/tokens"
 import { IconSearch } from "../../../theme/icons"
 
@@ -17,6 +17,8 @@ export interface ModSearchFilterBarProps {
   onCategoryChange: (key: string) => void
   categories: ModCategoryItem[]
   loadingCategories?: boolean
+  environmentFilter?: ModEnvironment | null
+  onEnvironmentFilterChange?: (env: ModEnvironment | null) => void
   theme?: ThemeMode
 }
 
@@ -41,6 +43,8 @@ export const ModSearchFilterBar: React.FC<ModSearchFilterBarProps> = ({
   onCategoryChange,
   categories,
   loadingCategories,
+  environmentFilter,
+  onEnvironmentFilterChange,
   theme = "dark",
 }) => {
   const tokens = getThemeTokens(theme)
@@ -161,6 +165,48 @@ export const ModSearchFilterBar: React.FC<ModSearchFilterBarProps> = ({
                   {opt.label}
                 </option>
               ))}
+            </select>
+          </div>
+        )}
+
+        {/* Environment Filter (only visible for MOD content) */}
+        {selectedContentType === "MOD" && (
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "12px", fontWeight: "600", color: tokens.textSecondary, whiteSpace: "nowrap" }}>
+              Entorno:
+            </span>
+            <select
+              data-testid={isServer ? "server-mod-environment-selector" : "mod-environment-selector"}
+              data-selector="environment-filter"
+              value={environmentFilter || ""}
+              onChange={(e) => {
+                const val = e.target.value as ModEnvironment | ""
+                onEnvironmentFilterChange?.(val ? val : null)
+              }}
+              style={{
+                background: tokens.bgInput,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: "8px",
+                color: tokens.textPrimary,
+                padding: "8px 12px",
+                fontSize: "13px",
+                fontWeight: "600",
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              <option value="">Todos compatibles</option>
+              {isServer ? (
+                <>
+                  <option value="SERVER">Solo servidor</option>
+                  <option value="BOTH">Cliente y servidor</option>
+                </>
+              ) : (
+                <>
+                  <option value="CLIENT">Solo cliente</option>
+                  <option value="BOTH">Cliente y servidor</option>
+                </>
+              )}
             </select>
           </div>
         )}

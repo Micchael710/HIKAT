@@ -1138,4 +1138,313 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     // But payload.modLoader MUST remain the real server loader "NEOFORGE"
     expect(res.modLoader).toBe("NEOFORGE")
   })
+
+  // Test 19: DATA_PACK with environment BOTH resolves directly in Server Files without requiring game update
+  it("DATA_PACK with environment BOTH resolves directly in Server Files without requiring game update", async () => {
+    const mockDataPackBothProject = {
+      provider: "MODRINTH" as const,
+      projectId: "dp-both-id",
+      name: "Terralith Both",
+      summary: "Worldgen pack",
+      description: "Pack description",
+      author: "Starmute",
+      downloads: 99999,
+      contentType: "DATA_PACK" as const,
+      environment: "BOTH" as const,
+    }
+
+    const mockDataPackBothVersion = {
+      id: "ver-dp-both-1",
+      versionNumber: "2.5.5",
+      name: "Terralith Both v2.5.5",
+      releaseType: "RELEASE" as const,
+      gameVersions: ["1.21.1"],
+      loaders: ["datapack"],
+      publishedAt: new Date().toISOString(),
+      downloads: 5000,
+      filename: "Terralith_Both_v2.5.5.zip",
+      sizeBytes: 600000,
+      sha256: "terralithbothsha",
+      contentType: "DATA_PACK" as const,
+      environment: "BOTH" as const,
+      dependencies: [],
+    }
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      getSupportedContentTypes: vi.fn().mockResolvedValue(["DATA_PACK"]),
+      getProject: vi.fn().mockResolvedValue(mockDataPackBothProject),
+      getCompatibleVersions: vi.fn().mockResolvedValue([mockDataPackBothVersion]),
+      getVersion: vi.fn().mockResolvedValue(mockDataPackBothVersion),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    const result = await manager.resolveServerInstallationPlan(
+      mockEnv,
+      db,
+      {
+        provider: "MODRINTH",
+        projectId: "dp-both-id",
+        versionId: "ver-dp-both-1",
+        contentType: "DATA_PACK",
+      },
+      "custom_world",
+    )
+
+    expect(result.isValid).toBe(true)
+    expect(result.requiresGameUpdate).toBe(false)
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]?.contentType).toBe("DATA_PACK")
+    expect(result.items[0]?.environment).toBe("BOTH")
+    expect(result.items[0]?.targetPath).toBe("custom_world/datapacks/Terralith_Both_v2.5.5.zip")
+  })
+
+  // Test 20: MOD with environment BOTH continues to be blocked in Server Files and requires game update
+  it("MOD with environment BOTH continues to be blocked in Server Files and requires game update", async () => {
+    const mockModBothProject = {
+      provider: "MODRINTH" as const,
+      projectId: "mod-both-id",
+      name: "Simple Voice Chat",
+      summary: "Voice chat mod",
+      description: "Mod description",
+      author: "Henkelmax",
+      downloads: 123456,
+      contentType: "MOD" as const,
+      environment: "BOTH" as const,
+    }
+
+    const mockModBothVersion = {
+      id: "ver-mod-both-1",
+      versionNumber: "1.2.3",
+      name: "Voice Chat v1.2.3",
+      releaseType: "RELEASE" as const,
+      gameVersions: ["1.21.1"],
+      loaders: ["neoforge"],
+      publishedAt: new Date().toISOString(),
+      downloads: 5000,
+      filename: "voicechat-1.2.3.jar",
+      sizeBytes: 300000,
+      sha256: "vcsha",
+      contentType: "MOD" as const,
+      environment: "BOTH" as const,
+      dependencies: [],
+    }
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      getSupportedContentTypes: vi.fn().mockResolvedValue(["MOD"]),
+      getProject: vi.fn().mockResolvedValue(mockModBothProject),
+      getCompatibleVersions: vi.fn().mockResolvedValue([mockModBothVersion]),
+      getVersion: vi.fn().mockResolvedValue(mockModBothVersion),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    const result = await manager.resolveServerInstallationPlan(
+      mockEnv,
+      db,
+      {
+        provider: "MODRINTH",
+        projectId: "mod-both-id",
+        versionId: "ver-mod-both-1",
+        contentType: "MOD",
+      },
+    )
+
+    expect(result.isValid).toBe(false)
+    expect(result.requiresGameUpdate).toBe(true)
+    expect(result.gameUpdateReason).toContain("Juego → Actualizaciones")
+  })
+
+  // Test 21: searchServerMods with environmentFilter ("SERVER", "BOTH", and unconstrained)
+  it("searchServerMods filters correctly by environmentFilter and pagination", async () => {
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async (_env, _q, _v, _l, limit, offset) => {
+        const allItems = [
+          { projectId: "mr-server-1", name: "MR Server 1", environment: "SERVER", contentType: "MOD" },
+          { projectId: "mr-both-1", name: "MR Both 1", environment: "BOTH", contentType: "MOD" },
+          { projectId: "mr-server-2", name: "MR Server 2", environment: "SERVER", contentType: "MOD" },
+          { projectId: "mr-both-2", name: "MR Both 2", environment: "BOTH", contentType: "MOD" },
+          { projectId: "mr-client-1", name: "MR Client 1", environment: "CLIENT", contentType: "MOD" },
+        ]
+        const sliced = allItems.slice(offset, offset + limit)
+        return { items: sliced, totalCount: allItems.length }
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockMrAdapter as any)
+    ;(manager as any).modrinth = mockMrAdapter
+
+    // 1. Filter SERVER: returns only SERVER, excludes BOTH, CLIENT, UNKNOWN
+    const serverOnlyRes = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      null,
+      "SERVER",
+    )
+    expect(serverOnlyRes.items.every((i) => i.environment === "SERVER")).toBe(true)
+    expect(serverOnlyRes.items.map((i) => i.projectId)).toEqual(["mr-server-1", "mr-server-2"])
+
+    // 2. Filter BOTH: returns only BOTH, excludes SERVER, CLIENT, UNKNOWN
+    const bothOnlyRes = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      null,
+      "BOTH",
+    )
+    expect(bothOnlyRes.items.every((i) => i.environment === "BOTH")).toBe(true)
+    expect(bothOnlyRes.items.map((i) => i.projectId)).toEqual(["mr-both-1", "mr-both-2"])
+
+    // 3. No filter: returns both SERVER and BOTH (default compatible server behavior)
+    const noFilterRes = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      null,
+      null,
+    )
+    expect(noFilterRes.items.map((i) => i.projectId)).toEqual([
+      "mr-server-1",
+      "mr-both-1",
+      "mr-server-2",
+      "mr-both-2",
+    ])
+  })
+
+  // Test 22: searchMods with environmentFilter ("CLIENT", "BOTH", and unconstrained)
+  it("searchMods in Release filters correctly by environmentFilter (CLIENT, BOTH)", async () => {
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async (_env, _q, _v, _l, limit, offset) => {
+        const allItems = [
+          { projectId: "mr-client-1", name: "MR Client 1", environment: "CLIENT", contentType: "MOD" },
+          { projectId: "mr-both-1", name: "MR Both 1", environment: "BOTH", contentType: "MOD" },
+          { projectId: "mr-server-1", name: "MR Server 1", environment: "SERVER", contentType: "MOD" },
+          { projectId: "mr-client-2", name: "MR Client 2", environment: "CLIENT", contentType: "MOD" },
+        ]
+        const sliced = allItems.slice(offset, offset + limit)
+        return { items: sliced, totalCount: allItems.length }
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockMrAdapter as any)
+    ;(manager as any).modrinth = mockMrAdapter
+
+    // 1. Filter CLIENT: returns only CLIENT, excludes BOTH and SERVER
+    const clientOnlyRes = await manager.searchMods(
+      mockEnv,
+      db,
+      "",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      "CLIENT",
+    )
+    expect(clientOnlyRes.items.every((i) => i.environment === "CLIENT")).toBe(true)
+    expect(clientOnlyRes.items.map((i) => i.projectId)).toEqual(["mr-client-1", "mr-client-2"])
+
+    // 2. Filter BOTH: returns only BOTH, excludes CLIENT and SERVER
+    const bothOnlyRes = await manager.searchMods(
+      mockEnv,
+      db,
+      "",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      "BOTH",
+    )
+    expect(bothOnlyRes.items.every((i) => i.environment === "BOTH")).toBe(true)
+    expect(bothOnlyRes.items.map((i) => i.projectId)).toEqual(["mr-both-1"])
+
+    // 3. No filter: returns CLIENT and BOTH (excludes SERVER)
+    const noFilterRes = await manager.searchMods(
+      mockEnv,
+      db,
+      "",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      null,
+    )
+    expect(noFilterRes.items.map((i) => i.projectId)).toEqual([
+      "mr-client-1",
+      "mr-both-1",
+      "mr-client-2",
+    ])
+  })
+
+  // Test 23: DATA_PACK ignores environmentFilter in searchServerMods
+  it("DATA_PACK ignores environmentFilter in searchServerMods and allows BOTH", async () => {
+    const mockMrAdapter = {
+      isConfigured: () => true,
+      searchMods: vi.fn().mockImplementation(async () => {
+        return {
+          items: [
+            { projectId: "dp-both-1", name: "Data Pack Both", environment: "BOTH", contentType: "DATA_PACK" },
+            { projectId: "dp-server-1", name: "Data Pack Server", environment: "SERVER", contentType: "DATA_PACK" },
+          ],
+          totalCount: 2,
+        }
+      }),
+    }
+
+    vi.spyOn(manager, "getAdapter").mockReturnValue(mockMrAdapter as any)
+    ;(manager as any).modrinth = mockMrAdapter
+
+    const res = await manager.searchServerMods(
+      mockEnv,
+      db,
+      "",
+      "MODRINTH",
+      10,
+      0,
+      "DATA_PACK",
+      null,
+      null,
+      null,
+      null,
+      "SERVER", // even if environmentFilter is passed, DATA_PACK ignores it
+    )
+
+    expect(res.items).toHaveLength(2)
+    expect(res.items[0]?.projectId).toBe("dp-both-1")
+    expect(res.items[1]?.projectId).toBe("dp-server-1")
+  })
 })

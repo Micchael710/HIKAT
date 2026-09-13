@@ -606,6 +606,7 @@ export const gameTypeDefs = /* GraphQL */ `
       offset: Int
       loaderOverride: GameModLoader
       categoryKey: String
+      environmentFilter: ModEnvironment
     ): ModSearchPayload!
 
     """

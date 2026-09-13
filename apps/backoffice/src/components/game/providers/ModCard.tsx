@@ -128,8 +128,9 @@ export const ModCard: React.FC<ModCardProps> = ({ mod, onSelect, theme = "dark" 
                 </span>
               )}
 
-              {mod.environment && (
+              {mod.contentType === "MOD" && mod.environment && (
                 <span
+                  data-testid={`badge-environment-${mod.environment.toLowerCase()}`}
                   style={{
                     fontSize: "10px",
                     fontWeight: "600",

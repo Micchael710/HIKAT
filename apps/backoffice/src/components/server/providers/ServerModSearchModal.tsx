@@ -9,6 +9,7 @@ import type {
   ModCategoryItem,
   QueuedServerContentSelection,
   GameHandoffPayload,
+  ModEnvironment,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
 import { getThemeTokens } from "../../../theme/tokens"
@@ -42,6 +43,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
   const [selectedContentType, setSelectedContentType] = useState<ContentType>("MOD")
   const [selectedProviderTab, setSelectedProviderTab] = useState<ModProvider | "ALL">("ALL")
   const [userSelectedLoader, setUserSelectedLoader] = useState<GameModLoader | null>(null)
+  const [selectedEnvironmentFilter, setSelectedEnvironmentFilter] = useState<ModEnvironment | null>(null)
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>("")
   const [categories, setCategories] = useState<ModCategoryItem[]>([])
   const [loadingCategories, setLoadingCategories] = useState(false)
@@ -116,6 +118,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     isLoadMore: boolean = false,
     catKey: string = selectedCategoryKey,
     loader: GameModLoader = selectedLoader,
+    envFilter: ModEnvironment | null = selectedEnvironmentFilter,
   ) => {
     const currentReqId = ++requestIdRef.current
 
@@ -128,10 +131,10 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
 
     const providerArg = providerTab === "ALL" ? null : providerTab
     const isCustomLoader = Boolean(loader && loader !== envInfo.modLoader)
+    const activeEnvFilter = contentType === "MOD" ? envFilter : null
 
-    // Call searchServerContent. If categoryKey or custom loader override, pass them.
     const searchPromise =
-      catKey || isCustomLoader
+      catKey || isCustomLoader || activeEnvFilter
         ? graphqlClient.searchServerContent(
             searchQuery,
             contentType,
@@ -142,6 +145,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
             serverId,
             isCustomLoader ? loader : null,
             catKey || null,
+            activeEnvFilter,
           )
         : graphqlClient.searchServerContent(
             searchQuery,
@@ -204,6 +208,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
       false,
       selectedCategoryKey,
       selectedLoader,
+      selectedEnvironmentFilter,
     )
 
     return () => {
@@ -217,6 +222,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
     selectedProviderTab,
     selectedCategoryKey,
     selectedLoader,
+    selectedEnvironmentFilter,
     serverId,
     executeSearch,
   ])
@@ -250,6 +256,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         false,
         selectedCategoryKey,
         selectedLoader,
+        selectedEnvironmentFilter,
       )
     }, 350)
   }
@@ -267,6 +274,7 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
       true,
       selectedCategoryKey,
       selectedLoader,
+      selectedEnvironmentFilter,
     )
   }
 
@@ -441,13 +449,20 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
           selectedProvider={selectedProviderTab}
           onProviderChange={(p) => setSelectedProviderTab(p)}
           selectedContentType={selectedContentType}
-          onContentTypeChange={(ct) => setSelectedContentType(ct)}
+          onContentTypeChange={(ct) => {
+            setSelectedContentType(ct)
+            if (ct !== "MOD") {
+              setSelectedEnvironmentFilter(null)
+            }
+          }}
           selectedLoader={selectedLoader}
           onLoaderChange={(ldr) => setUserSelectedLoader(ldr)}
           selectedCategoryKey={selectedCategoryKey}
           onCategoryChange={(cat) => setSelectedCategoryKey(cat)}
           categories={categories}
           loadingCategories={loadingCategories}
+          environmentFilter={selectedEnvironmentFilter}
+          onEnvironmentFilterChange={(env) => setSelectedEnvironmentFilter(env)}
           theme={theme}
         />
 

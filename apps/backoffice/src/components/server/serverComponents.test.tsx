@@ -2136,4 +2136,226 @@ describe("Multiserver Isolation & Console Ticket Verification", () => {
     expect(statusSpy).toHaveBeenCalledWith("srv-2")
     unmount2()
   })
+
+  // Test: ModCard shows environment badge only for MOD and hides for DATA_PACK / RESOURCE_PACK / SHADER
+  it("ModCard displays environment badge only for MOD content and hides it for DATA_PACK", async () => {
+    const { ModCard } = await import("../game/providers/ModCard")
+
+    const modItem = {
+      provider: "MODRINTH" as const,
+      projectId: "mod-1",
+      name: "Test Mod",
+      summary: "A test mod",
+      author: "author1",
+      downloads: 100,
+      categories: ["fabric"],
+      contentType: "MOD" as const,
+      environment: "BOTH" as const,
+    }
+
+    const { unmount: unmount1 } = render(<ModCard mod={modItem} onSelect={vi.fn()} theme="dark" />)
+    expect(screen.getByTestId("badge-environment-both")).toBeDefined()
+    expect(screen.getByText("BOTH")).toBeDefined()
+    unmount1()
+
+    const dataPackItem = {
+      provider: "MODRINTH" as const,
+      projectId: "dp-1",
+      name: "Test DataPack",
+      summary: "A test data pack",
+      author: "author2",
+      downloads: 200,
+      categories: [],
+      contentType: "DATA_PACK" as const,
+      environment: "BOTH" as const,
+    }
+
+    const { unmount: unmount2 } = render(<ModCard mod={dataPackItem} onSelect={vi.fn()} theme="dark" />)
+    expect(screen.queryByTestId("badge-environment-both")).toBeNull()
+    expect(screen.queryByText("BOTH")).toBeNull()
+    expect(screen.getByText("Data Pack")).toBeDefined()
+    unmount2()
+  })
+
+  // Test: ModDetailModal allows DATA_PACK BOTH to resolve and install, while MOD BOTH is blocked
+  it("ModDetailModal resolves and installs DATA_PACK BOTH in Server mode without redirecting to Game", async () => {
+    const { ModDetailModal } = await import("../game/providers/ModDetailModal")
+    const { graphqlClient } = await import("../../services/graphqlClient")
+
+    vi.spyOn(graphqlClient, "getServerContentProjectDetail").mockResolvedValue({
+      provider: "MODRINTH",
+      projectId: "dp-both-proj",
+      name: "Terralith Both",
+      summary: "Worldgen",
+      description: "Description",
+      author: "Starmute",
+      downloads: 50000,
+      contentType: "DATA_PACK",
+      environment: "BOTH",
+      compatibleVersions: [
+        {
+          id: "ver-dp-1",
+          name: "1.0",
+          versionNumber: "1.0",
+          releaseType: "RELEASE",
+          gameVersions: ["1.21.1"],
+          loaders: ["datapack"],
+          publishedAt: new Date().toISOString(),
+          downloads: 1000,
+          filename: "terralith.zip",
+          sizeBytes: 40000,
+          dependencies: [],
+        },
+      ],
+      isInstalled: false,
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+    })
+
+    const resolveSpy = vi.spyOn(graphqlClient, "resolveServerContentPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "dp-both-proj",
+          projectName: "Terralith Both",
+          versionId: "ver-dp-1",
+          versionNumber: "1.0",
+          filename: "terralith.zip",
+          sizeBytes: 40000,
+          contentType: "DATA_PACK",
+          environment: "BOTH",
+          targetPath: "world/datapacks/terralith.zip",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      conflicts: [],
+      optionalDependencies: [],
+      totalDownloadSizeBytes: 4000,
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const onNavigateToGameMock = vi.fn()
+
+    const { unmount } = render(
+      <ModDetailModal
+        serverId="srv-1"
+        provider="MODRINTH"
+        projectId="dp-both-proj"
+        contentType="DATA_PACK"
+        mode="SERVER"
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        onNavigateToGame={onNavigateToGameMock}
+      />,
+    )
+
+    // Data pack BOTH must NOT show the redirection card
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100))
+    })
+    expect(screen.queryByTestId("button-redirect-to-game")).toBeNull()
+    expect(resolveSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "MODRINTH",
+        projectId: "dp-both-proj",
+        versionId: "ver-dp-1",
+        contentType: "DATA_PACK",
+      }),
+      "srv-1",
+    )
+
+    unmount()
+  })
+
+  // Test: ServerModSearchModal renders environment selector for MOD, propagates environmentFilter, and hides it for DATA_PACK
+  it("ServerModSearchModal renders environment selector for MOD and passes environmentFilter to searchServerContent", async () => {
+    const { ServerModSearchModal } = await import("./providers/ServerModSearchModal")
+    const { graphqlClient } = await import("../../services/graphqlClient")
+
+    const searchSpy = vi.spyOn(graphqlClient, "searchServerContent").mockResolvedValue({
+      items: [],
+      totalCount: 0,
+      hasMore: false,
+      nextCursor: null,
+      providersStatus: [{ provider: "MODRINTH", available: true, error: null }],
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      isPublishedEnvironment: true,
+    })
+
+    const { unmount } = render(
+      <ServerModSearchModal
+        serverId="srv-1"
+        theme="dark"
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    )
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100))
+    })
+
+    // Environment selector must be visible for MOD content
+    const envSelector = screen.getByTestId("server-mod-environment-selector") as HTMLSelectElement
+    expect(envSelector).toBeDefined()
+
+    // Options must match Server requirements: Todos compatibles, Solo servidor, Cliente y servidor
+    const options = Array.from(envSelector.options).map((o) => o.text)
+    expect(options).toContain("Todos compatibles")
+    expect(options).toContain("Solo servidor")
+    expect(options).toContain("Cliente y servidor")
+
+    // Select "Solo servidor"
+    await act(async () => {
+      fireEvent.change(envSelector, { target: { value: "SERVER" } })
+    })
+
+    expect(searchSpy).toHaveBeenLastCalledWith(
+      expect.any(String),
+      "MOD",
+      null,
+      20,
+      0,
+      null,
+      "srv-1",
+      null,
+      null,
+      "SERVER",
+    )
+
+    // Select "Cliente y servidor"
+    await act(async () => {
+      fireEvent.change(envSelector, { target: { value: "BOTH" } })
+    })
+
+    expect(searchSpy).toHaveBeenLastCalledWith(
+      expect.any(String),
+      "MOD",
+      null,
+      20,
+      0,
+      null,
+      "srv-1",
+      null,
+      null,
+      "BOTH",
+    )
+
+    // Switch to DATA_PACK tab: environment selector must disappear
+    const dataPackTab = screen.getByTestId("server-tab-content-datapack")
+    await act(async () => {
+      fireEvent.click(dataPackTab)
+    })
+
+    expect(screen.queryByTestId("server-mod-environment-selector")).toBeNull()
+
+    unmount()
+  })
 })

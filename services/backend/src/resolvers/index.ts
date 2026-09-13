@@ -542,6 +542,7 @@ export const resolvers = {
         serverId?: string | null
         loaderOverride?: GameModLoaderGql | null
         categoryKey?: string | null
+        environmentFilter?: ModEnvironmentGql | null
       },
       context: BackendGraphQLContext,
     ): Promise<ServerContentSearchPayloadGql> => {
@@ -561,6 +562,7 @@ export const resolvers = {
         args.serverId,
         args.loaderOverride,
         args.categoryKey,
+        args.environmentFilter,
       )
     },
 
@@ -971,6 +973,7 @@ export const resolvers = {
         serverId?: string | null
         loaderOverride?: GameModLoaderGql | null
         categoryKey?: string | null
+        environmentFilter?: ModEnvironmentGql | null
       },
       context: BackendGraphQLContext,
     ): Promise<ModSearchPayloadGql> => {
@@ -989,6 +992,7 @@ export const resolvers = {
         args.serverId,
         args.loaderOverride,
         args.categoryKey,
+        args.environmentFilter,
       )
     },
 

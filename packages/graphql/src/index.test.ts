@@ -798,6 +798,7 @@ describe("@hikat/graphql foundation & contracts", () => {
         $contentType: ContentType
         $loaderOverride: GameModLoader
         $categoryKey: String
+        $environmentFilter: ModEnvironment
         $modInput: ResolveModPlanInput!
         $serverInput: ResolveServerContentPlanInput!
       ) {
@@ -811,6 +812,7 @@ describe("@hikat/graphql foundation & contracts", () => {
           contentType: $contentType
           loaderOverride: $loaderOverride
           categoryKey: $categoryKey
+          environmentFilter: $environmentFilter
         ) {
           items {
             projectId
@@ -823,6 +825,7 @@ describe("@hikat/graphql foundation & contracts", () => {
           contentType: $contentType
           loaderOverride: $loaderOverride
           categoryKey: $categoryKey
+          environmentFilter: $environmentFilter
         ) {
           items {
             projectId

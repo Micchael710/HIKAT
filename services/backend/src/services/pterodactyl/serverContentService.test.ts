@@ -1303,6 +1303,69 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
     vi.restoreAllMocks()
   })
 
+  // Test 16B: DATA_PACK with environment BOTH is NOT rejected by serverContentService
+  it("installServerContentPlan does NOT reject DATA_PACK with environment BOTH", async () => {
+    const { modProviderManager } = await import("../providers/modProviderManager")
+    vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
+      items: [
+        {
+          provider: "MODRINTH",
+          projectId: "terralith-dp",
+          projectName: "Terralith",
+          versionId: "ver-dp",
+          versionNumber: "2.5",
+          filename: "terralith.zip",
+          sizeBytes: 2000,
+          sha256: "hashdp",
+          contentType: "DATA_PACK",
+          environment: "BOTH",
+          targetPath: "world/datapacks/terralith.zip",
+          action: "INSTALL",
+          isRoot: true,
+          isDependency: false,
+          isRequired: true,
+          isInstalled: false,
+          availableCompatibleVersions: [],
+        },
+      ],
+      totalDownloadSizeBytes: 2000,
+      conflicts: [],
+      optionalDependencies: [],
+      isValid: true,
+      requiresGameUpdate: false,
+    })
+
+    const mockOfflineClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: vi.fn().mockResolvedValue([]),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      pullFile: vi.fn().mockResolvedValue(undefined),
+      renameFile: vi.fn().mockResolvedValue(undefined),
+    }
+
+    // It should proceed past the BOTH validation check without throwing VALIDATION_ERROR for BOTH
+    try {
+      await installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "terralith-dp", versionId: "ver-dp", contentType: "DATA_PACK" },
+        "admin-1",
+        mockOfflineClient as any,
+      )
+    } catch (err: any) {
+      // Must NOT fail with the BOTH validation error
+      expect(err.message).not.toContain("es de entorno BOTH y no puede instalarse directamente en el servidor")
+    }
+
+    vi.restoreAllMocks()
+  })
+
   // Test 17: Real dependency resolution aborts at limit 3, stops querying provider for further dependencies, never touches Wings, never writes D1
   it("aborts dependency resolution at limit 3, stops provider queries for further dependencies, never touches Wings, and writes no D1 records", async () => {
     const { modProviderManager } = await import("../providers/modProviderManager")

@@ -545,6 +545,7 @@ export const serverTypeDefs = /* GraphQL */ `
       contentType: ContentType
       loaderOverride: GameModLoader
       categoryKey: String
+      environmentFilter: ModEnvironment
     ): ServerContentSearchPayload!
 
     """

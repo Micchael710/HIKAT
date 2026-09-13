@@ -448,7 +448,7 @@ export async function installServerContentPlansBatch(
     )
 
     for (const item of itemsToProcess) {
-      if (item.environment === "BOTH") {
+      if (item.contentType === "MOD" && item.environment === "BOTH") {
         throw createGraphQLError(
           `El mod "${item.projectName}" es de entorno BOTH y no puede instalarse directamente en el servidor. Añádelo desde Juego → Actualizaciones.`,
           "VALIDATION_ERROR",

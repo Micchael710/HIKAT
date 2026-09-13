@@ -8,6 +8,7 @@ import type {
   QueuedModSelection,
   GameModLoader,
   ModCategoryItem,
+  ModEnvironment,
 } from "../../../types"
 import { graphqlClient } from "../../../services/graphqlClient"
 import { getThemeTokens } from "../../../theme/tokens"
@@ -45,6 +46,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
   const [userSelectedLoader, setUserSelectedLoader] = useState<GameModLoader | null>(
     () => handoff?.loaderOverride || null,
   )
+  const [selectedEnvironmentFilter, setSelectedEnvironmentFilter] = useState<ModEnvironment | null>(null)
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string>("")
   const [categories, setCategories] = useState<ModCategoryItem[]>([])
   const [loadingCategories, setLoadingCategories] = useState(false)
@@ -115,6 +117,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
     isLoadMore: boolean = false,
     catKey: string = selectedCategoryKey,
     loader: GameModLoader = selectedLoader,
+    envFilter: ModEnvironment | null = selectedEnvironmentFilter,
   ) => {
     const currentReqId = ++requestIdRef.current
 
@@ -127,8 +130,9 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
 
     const providerArg = providerTab === "ALL" ? null : providerTab
     const isCustomLoader = loader && loader !== envInfo.modLoader
+    const activeEnvFilter = contentType === "MOD" ? envFilter : null
 
-    const searchPromise = (catKey || isCustomLoader)
+    const searchPromise = (catKey || isCustomLoader || activeEnvFilter)
       ? graphqlClient.searchMods(
           searchQuery,
           contentType,
@@ -138,6 +142,7 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           serverId,
           isCustomLoader ? loader : null,
           catKey || null,
+          activeEnvFilter,
         )
       : graphqlClient.searchMods(
           searchQuery,
@@ -209,7 +214,16 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
       debounceTimer.current = null
     }
     setOffset(0)
-    executeSearch(query, selectedContentType, selectedProviderTab, 0, false, selectedCategoryKey, selectedLoader)
+    executeSearch(
+      query,
+      selectedContentType,
+      selectedProviderTab,
+      0,
+      false,
+      selectedCategoryKey,
+      selectedLoader,
+      selectedEnvironmentFilter,
+    )
 
     return () => {
       if (debounceTimer.current) {
@@ -217,7 +231,14 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
         debounceTimer.current = null
       }
     }
-  }, [selectedContentType, selectedProviderTab, selectedCategoryKey, selectedLoader, executeSearch])
+  }, [
+    selectedContentType,
+    selectedProviderTab,
+    selectedCategoryKey,
+    selectedLoader,
+    selectedEnvironmentFilter,
+    executeSearch,
+  ])
 
   // Clean up on component unmount
   useEffect(() => {
@@ -238,14 +259,32 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
       clearTimeout(debounceTimer.current)
     }
     debounceTimer.current = setTimeout(() => {
-      executeSearch(val, selectedContentType, selectedProviderTab, 0, false, selectedCategoryKey, selectedLoader)
+      executeSearch(
+        val,
+        selectedContentType,
+        selectedProviderTab,
+        0,
+        false,
+        selectedCategoryKey,
+        selectedLoader,
+        selectedEnvironmentFilter,
+      )
     }, 350)
   }
 
   const handleLoadMore = () => {
     const nextOffset = offset + PAGE_SIZE
     setOffset(nextOffset)
-    executeSearch(query, selectedContentType, selectedProviderTab, nextOffset, true, selectedCategoryKey, selectedLoader)
+    executeSearch(
+      query,
+      selectedContentType,
+      selectedProviderTab,
+      nextOffset,
+      true,
+      selectedCategoryKey,
+      selectedLoader,
+      selectedEnvironmentFilter,
+    )
   }
 
   const handleConfirmBatchInstall = async () => {
@@ -382,13 +421,20 @@ export const ModSearchModal: React.FC<ModSearchModalProps> = ({
           selectedProvider={selectedProviderTab}
           onProviderChange={(p) => setSelectedProviderTab(p)}
           selectedContentType={selectedContentType}
-          onContentTypeChange={(ct) => setSelectedContentType(ct)}
+          onContentTypeChange={(ct) => {
+            setSelectedContentType(ct)
+            if (ct !== "MOD") {
+              setSelectedEnvironmentFilter(null)
+            }
+          }}
           selectedLoader={selectedLoader}
           onLoaderChange={(ldr) => setUserSelectedLoader(ldr)}
           selectedCategoryKey={selectedCategoryKey}
           onCategoryChange={(cat) => setSelectedCategoryKey(cat)}
           categories={categories}
           loadingCategories={loadingCategories}
+          environmentFilter={selectedEnvironmentFilter}
+          onEnvironmentFilterChange={(env) => setSelectedEnvironmentFilter(env)}
           theme={theme}
         />
 

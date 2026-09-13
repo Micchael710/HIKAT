@@ -106,7 +106,9 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     (detail?.environment === "UNKNOWN" || !detail?.environment)
 
   const isBothEnvironment =
-    isServer && (detail?.environment === "BOTH" || selectedEnvironmentOverride === "BOTH")
+    isServer &&
+    currentContentType === "MOD" &&
+    (detail?.environment === "BOTH" || selectedEnvironmentOverride === "BOTH")
 
   // 1. Fetch project details whenever active target or loaderOverride changes
   useEffect(() => {

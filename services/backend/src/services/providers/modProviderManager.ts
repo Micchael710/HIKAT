@@ -479,6 +479,7 @@ export class ModProviderManager {
     serverId?: string | null,
     loaderOverride?: GameModLoaderGql | null,
     categoryKey?: string | null,
+    environmentFilter?: ModEnvironmentGql | null,
   ): Promise<ModSearchPayloadGql> {
     const envData = await this.getActiveEnvironment(db, serverId)
     const { minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion } = envData
@@ -489,6 +490,14 @@ export class ModProviderManager {
     const categories = await this.getInternalCategories(env, contentType)
     const { mrCategorySlug, cfCategoryId, skipModrinth, skipCurseForge } =
       this.resolveCategoryFiltering(categories, categoryKey)
+
+    const isAllowedInGame = (item: NormalizedModProject) => {
+      if (contentType !== "MOD") return true
+      if (environmentFilter) {
+        return item.environment === environmentFilter
+      }
+      return item.environment !== "SERVER"
+    }
 
     if (provider === "MODRINTH") {
       if (skipModrinth) {
@@ -504,8 +513,6 @@ export class ModProviderManager {
         }
       }
       try {
-        const isAllowedInGame = (item: NormalizedModProject) =>
-          contentType !== "MOD" || item.environment !== "SERVER"
 
         const res = await this.fetchFilteredFromProvider(
           this.modrinth,
@@ -577,8 +584,6 @@ export class ModProviderManager {
       }
 
       try {
-        const isAllowedInGame = (item: NormalizedModProject) =>
-          contentType !== "MOD" || item.environment !== "SERVER"
 
         const res = await this.fetchFilteredFromProvider(
           this.curseforge,
@@ -620,8 +625,6 @@ export class ModProviderManager {
 
     // "Todos" (ALL providers in parallel with deterministic gap-free chunked pagination)
     const fetchLimit = offset + limit
-    const isAllowedInGame = (item: NormalizedModProject) =>
-      contentType !== "MOD" || item.environment !== "SERVER"
 
     const [modrinthResult, curseforgeResult] = await Promise.allSettled([
       skipModrinth
@@ -695,6 +698,7 @@ export class ModProviderManager {
     serverId?: string | null,
     loaderOverride?: GameModLoaderGql | null,
     categoryKey?: string | null,
+    environmentFilter?: ModEnvironmentGql | null,
   ): Promise<ServerContentSearchPayloadGql> {
     if (contentType !== "MOD" && contentType !== "DATA_PACK") {
       throw createGraphQLError(
@@ -715,6 +719,9 @@ export class ModProviderManager {
 
     const isAllowedInServer = (item: NormalizedModProject) => {
       if (contentType !== "MOD") return true
+      if (environmentFilter) {
+        return item.environment === environmentFilter
+      }
       if (item.provider === "MODRINTH") {
         return item.environment === "SERVER" || item.environment === "BOTH"
       }

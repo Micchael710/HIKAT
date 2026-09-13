@@ -2294,8 +2294,9 @@ export const gameApi = {
     serverId: string,
     loaderOverride?: import("../types").GameModLoader | null,
     categoryKey?: string | null,
+    environmentFilter?: import("../types").ModEnvironment | null,
   ): Promise<import("../types").ModSearchPayload> {
-    return modProvidersApi.searchMods(query, contentType, provider, limit, offset, serverId, loaderOverride, categoryKey)
+    return modProvidersApi.searchMods(query, contentType, provider, limit, offset, serverId, loaderOverride, categoryKey, environmentFilter)
   },
 
   async getModProjectDetail(
@@ -2411,6 +2412,7 @@ export const modProvidersApi = {
     serverId: string,
     loaderOverride?: import("../types").GameModLoader | null,
     categoryKey?: string | null,
+    environmentFilter?: import("../types").ModEnvironment | null,
   ): Promise<import("../types").ModSearchPayload> {
     const gqlQuery = /* GraphQL */ `
       query SearchMods(
@@ -2422,6 +2424,7 @@ export const modProvidersApi = {
         $serverId: ID
         $loaderOverride: GameModLoader
         $categoryKey: String
+        $environmentFilter: ModEnvironment
       ) {
         searchMods(
           query: $query
@@ -2432,6 +2435,7 @@ export const modProvidersApi = {
           serverId: $serverId
           loaderOverride: $loaderOverride
           categoryKey: $categoryKey
+          environmentFilter: $environmentFilter
         ) {
           items {
             provider
@@ -2473,6 +2477,7 @@ export const modProvidersApi = {
       serverId,
       loaderOverride,
       categoryKey,
+      environmentFilter: environmentFilter || undefined,
     })
     return data.searchMods
   },
@@ -2733,6 +2738,7 @@ export const serverContentApi = {
     serverId: string,
     loaderOverride?: import("../types").GameModLoader | null,
     categoryKey?: string | null,
+    environmentFilter?: import("../types").ModEnvironment | null,
   ): Promise<import("../types").ServerContentSearchPayload> {
     const gqlQuery = /* GraphQL */ `
       query SearchServerContent(
@@ -2745,6 +2751,7 @@ export const serverContentApi = {
         $serverId: ID
         $loaderOverride: GameModLoader
         $categoryKey: String
+        $environmentFilter: ModEnvironment
       ) {
         searchServerContent(
           query: $query
@@ -2756,6 +2763,7 @@ export const serverContentApi = {
           serverId: $serverId
           loaderOverride: $loaderOverride
           categoryKey: $categoryKey
+          environmentFilter: $environmentFilter
         ) {
           items {
             provider
@@ -2801,6 +2809,7 @@ export const serverContentApi = {
       serverId,
       loaderOverride,
       categoryKey,
+      environmentFilter: environmentFilter || undefined,
     })
     return data.searchServerContent
   },
