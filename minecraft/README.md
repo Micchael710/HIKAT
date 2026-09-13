@@ -2,8 +2,7 @@
 
 Minecraft components for the HiKAT ecosystem:
 
-- `client-mod/`: Client-side Minecraft mod (NeoForge 1.21.1) for secure session validation and game integration.
-- `server-mod/`: Server-side Minecraft mod/plugin (NeoForge 1.21.1) for player verification.
+- `hikat-mod/`: Universal Minecraft mod (NeoForge 1.21.1) for client and dedicated server. Provides secure session validation, dynamic client integrity checking, and server verification.
 - `gateway/`: Velocity Proxy Gateway intended for Fly.io deployment and dynamic routing.
 
 ## Requirements
@@ -18,7 +17,6 @@ Minecraft components for the HiKAT ecosystem:
 ./gradlew build
 
 # Build individual subprojects
-./gradlew :client-mod:build
-./gradlew :server-mod:build
+./gradlew :hikat-mod:build
 ./gradlew :gateway:build
 ```

@@ -15,6 +15,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
@@ -32,6 +33,7 @@ public class ClientIntegrityService {
 
     private final Path gameDir;
     private final AtomicReference<IntegrityState> state = new AtomicReference<>(IntegrityState.INVALID);
+    private final AtomicBoolean watcherFailed = new AtomicBoolean(false);
     private final AtomicInteger pendingTransitions = new AtomicInteger(0);
     private String releaseVersion = "0.0.0";
     private String integrityFingerprint = "INIT";
@@ -86,23 +88,25 @@ public class ClientIntegrityService {
     }
 
     public synchronized void loadAndInitialize() {
+        watcherFailed.set(false);
         currentHashMap.clear();
         expectedProtectedPaths.clear();
         protectedDirectories.clear();
         explicitDirectoryPolicies.clear();
         explicitFilePolicies.clear();
 
-        Path manifestFile = gameDir.resolve("installed-manifest.json");
-        if (!Files.exists(manifestFile)) {
-            Path hikatManifest = gameDir.resolve(".hikat").resolve("installed-manifest.json");
-            if (Files.exists(hikatManifest)) {
-                manifestFile = hikatManifest;
-            } else {
-                LOGGER.warn("[HiKAT] installed-manifest.json not found in {}", gameDir);
-                state.set(IntegrityState.INVALID);
-                integrityFingerprint = "MANIFEST_NOT_FOUND";
-                return;
-            }
+        Path hikatManifest = gameDir.resolve(".hikat").resolve("installed-manifest.json");
+        Path rootManifest = gameDir.resolve("installed-manifest.json");
+        Path manifestFile;
+        if (Files.exists(hikatManifest)) {
+            manifestFile = hikatManifest;
+        } else if (Files.exists(rootManifest)) {
+            manifestFile = rootManifest;
+        } else {
+            LOGGER.warn("[HiKAT] installed-manifest.json not found in .hikat/ or root of {}", gameDir);
+            state.set(IntegrityState.INVALID);
+            integrityFingerprint = "MANIFEST_NOT_FOUND";
+            return;
         }
 
         try {
@@ -257,6 +261,7 @@ public class ClientIntegrityService {
 
             if (!allRegistered) {
                 LOGGER.error("[HiKAT] Fail-closed: Could not register all protected directories for dynamic integrity");
+                watcherFailed.set(true);
                 state.set(IntegrityState.INVALID);
             }
 
@@ -265,12 +270,18 @@ public class ClientIntegrityService {
             watcherThread.start();
         } catch (Exception e) {
             LOGGER.error("[HiKAT] Fail-closed: Could not start WatchService: {}", e.getMessage());
+            watcherFailed.set(true);
             state.set(IntegrityState.INVALID);
         }
     }
 
-    private boolean registerTree(Path startDir) {
+    public boolean registerTree(Path startDir) {
         if (!Files.isDirectory(startDir)) return true;
+        if (watchService == null) {
+            watcherFailed.set(true);
+            state.set(IntegrityState.INVALID);
+            return false;
+        }
         final boolean[] success = {true};
         try {
             Files.walkFileTree(startDir, new SimpleFileVisitor<Path>() {
@@ -294,6 +305,10 @@ public class ClientIntegrityService {
         } catch (Exception e) {
             LOGGER.warn("[HiKAT] Error walking directory tree {}: {}", startDir, e.getMessage());
             success[0] = false;
+        }
+        if (!success[0]) {
+            watcherFailed.set(true);
+            state.set(IntegrityState.INVALID);
         }
         return success[0];
     }
@@ -321,7 +336,11 @@ public class ClientIntegrityService {
                 // Handle OVERFLOW: reconcile protected tree
                 if (kind == StandardWatchEventKinds.OVERFLOW) {
                     markPending();
-                    reconcileTree(parentDir);
+                    boolean ok = reconcileTree(parentDir);
+                    if (!ok) {
+                        watcherFailed.set(true);
+                        state.set(IntegrityState.INVALID);
+                    }
                     integrityAffected = true;
                     continue;
                 }
@@ -337,7 +356,7 @@ public class ClientIntegrityService {
                     continue;
                 }
 
-                // 1. Mark immediately as PENDING during rehash/mutation
+                // 1. Mark immediately as PENDING during rehash/mutation (unless already permanently INVALID)
                 markPending();
                 integrityAffected = true;
 
@@ -370,7 +389,11 @@ public class ClientIntegrityService {
                     if (Files.isDirectory(fullPath)) {
                         // Recursively register the new directory tree and hash files
                         LOGGER.info("[HiKAT] Integrity change: Protected subdirectory created: {}", relPath);
-                        registerTree(fullPath);
+                        boolean ok = registerTree(fullPath);
+                        if (!ok) {
+                            watcherFailed.set(true);
+                            state.set(IntegrityState.INVALID);
+                        }
                         try (Stream<Path> s = Files.walk(fullPath)) {
                             s.filter(Files::isRegularFile).forEach(subFile -> {
                                 String subRel = normalizePath(gameDir.relativize(subFile).toString());
@@ -406,8 +429,12 @@ public class ClientIntegrityService {
 
             if (integrityAffected) {
                 recalculateFingerprint();
-                // Return to VALID only after rehash finishes
-                state.set(IntegrityState.VALID);
+                // Return to VALID only after rehash finishes AND watcher has not failed
+                if (!watcherFailed.get()) {
+                    state.set(IntegrityState.VALID);
+                } else {
+                    state.set(IntegrityState.INVALID);
+                }
             }
 
             boolean valid = key.reset();
@@ -417,7 +444,7 @@ public class ClientIntegrityService {
         }
     }
 
-    private void reconcileTree(Path rootDir) {
+    private boolean reconcileTree(Path rootDir) {
         if (!Files.exists(rootDir)) {
             String dirRel = normalizePath(gameDir.relativize(rootDir).toString());
             String dirPrefix = dirRel + "/";
@@ -426,7 +453,7 @@ public class ClientIntegrityService {
                     currentHashMap.put(k, "MISSING");
                 }
             }
-            return;
+            return true;
         }
 
         try (Stream<Path> stream = Files.walk(rootDir)) {
@@ -453,14 +480,29 @@ public class ClientIntegrityService {
                     }
                 }
             }
+            return true;
         } catch (Exception e) {
             LOGGER.warn("[HiKAT] Failed to reconcile tree {}: {}", rootDir, e.getMessage());
+            watcherFailed.set(true);
+            state.set(IntegrityState.INVALID);
+            return false;
         }
     }
 
     private void markPending() {
-        state.set(IntegrityState.PENDING);
+        if (!watcherFailed.get()) {
+            state.set(IntegrityState.PENDING);
+        }
         pendingTransitions.incrementAndGet();
+    }
+
+    public boolean isWatcherFailed() {
+        return watcherFailed.get();
+    }
+
+    public void triggerWatcherFailureForTesting() {
+        watcherFailed.set(true);
+        state.set(IntegrityState.INVALID);
     }
 
     private void waitForFileReady(Path file) {

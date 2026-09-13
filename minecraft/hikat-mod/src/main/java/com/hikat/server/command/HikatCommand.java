@@ -7,7 +7,10 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 public class HikatCommand {
 
@@ -34,11 +37,20 @@ public class HikatCommand {
                                         .executes(ctx -> {
                                             HikatWhitelist wl = HikatWhitelist.getInstance();
                                             boolean on = wl.isEnabled();
-                                            Set<String> list = wl.getAllowedUsernames();
+                                            Set<UUID> list = wl.getAllowedUuids();
+                                            List<String> formatted = new ArrayList<>();
+                                            for (UUID u : list) {
+                                                String name = wl.getDisplayName(u);
+                                                if (name != null) {
+                                                    formatted.add(name + " (" + u + ")");
+                                                } else {
+                                                    formatted.add(u.toString());
+                                                }
+                                            }
                                             ctx.getSource().sendSuccess(() -> Component.literal(
                                                     "§6[HiKAT] Whitelist status: " + (on ? "§aON" : "§cOFF")
                                                             + " §7(" + list.size() + " players)§r\n"
-                                                            + (list.isEmpty() ? "§7(empty)" : "§f" + String.join(", ", list))
+                                                            + (formatted.isEmpty() ? "§7(empty)" : "§f" + String.join(", ", formatted))
                                             ), false);
                                             return 1;
                                         })
@@ -47,11 +59,19 @@ public class HikatCommand {
                                         .then(Commands.argument("username", StringArgumentType.word())
                                                 .executes(ctx -> {
                                                     String user = StringArgumentType.getString(ctx, "username");
-                                                    boolean added = HikatWhitelist.getInstance().add(user);
+                                                    HikatWhitelist wl = HikatWhitelist.getInstance();
+                                                    UUID uuid = wl.findKnownUuid(user);
+                                                    if (uuid == null) {
+                                                        ctx.getSource().sendFailure(Component.literal("§c[HiKAT] Player '" + user + "' is not known. Player must authenticate with HiKAT first."));
+                                                        return 0;
+                                                    }
+                                                    boolean added = wl.add(uuid);
+                                                    String display = wl.getDisplayName(uuid);
+                                                    String label = display != null ? display + " (" + uuid + ")" : uuid.toString();
                                                     if (added) {
-                                                        ctx.getSource().sendSuccess(() -> Component.literal("§a[HiKAT] Added '" + user + "' to HiKAT whitelist."), true);
+                                                        ctx.getSource().sendSuccess(() -> Component.literal("§a[HiKAT] Added '" + label + "' to HiKAT whitelist."), true);
                                                     } else {
-                                                        ctx.getSource().sendFailure(Component.literal("§c[HiKAT] User '" + user + "' is already on the whitelist."));
+                                                        ctx.getSource().sendFailure(Component.literal("§c[HiKAT] Player '" + label + "' is already on the whitelist."));
                                                     }
                                                     return added ? 1 : 0;
                                                 })
@@ -61,11 +81,19 @@ public class HikatCommand {
                                         .then(Commands.argument("username", StringArgumentType.word())
                                                 .executes(ctx -> {
                                                     String user = StringArgumentType.getString(ctx, "username");
-                                                    boolean removed = HikatWhitelist.getInstance().remove(user);
+                                                    HikatWhitelist wl = HikatWhitelist.getInstance();
+                                                    UUID uuid = wl.findKnownUuid(user);
+                                                    if (uuid == null) {
+                                                        ctx.getSource().sendFailure(Component.literal("§c[HiKAT] Player '" + user + "' was not found or is not known."));
+                                                        return 0;
+                                                    }
+                                                    boolean removed = wl.remove(uuid);
+                                                    String display = wl.getDisplayName(uuid);
+                                                    String label = display != null ? display + " (" + uuid + ")" : uuid.toString();
                                                     if (removed) {
-                                                        ctx.getSource().sendSuccess(() -> Component.literal("§e[HiKAT] Removed '" + user + "' from HiKAT whitelist."), true);
+                                                        ctx.getSource().sendSuccess(() -> Component.literal("§e[HiKAT] Removed '" + label + "' from HiKAT whitelist."), true);
                                                     } else {
-                                                        ctx.getSource().sendFailure(Component.literal("§c[HiKAT] User '" + user + "' was not found on the whitelist."));
+                                                        ctx.getSource().sendFailure(Component.literal("§c[HiKAT] Player '" + label + "' was not on the whitelist."));
                                                     }
                                                     return removed ? 1 : 0;
                                                 })

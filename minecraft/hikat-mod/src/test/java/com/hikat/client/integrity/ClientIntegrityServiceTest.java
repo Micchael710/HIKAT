@@ -214,4 +214,72 @@ public class ClientIntegrityServiceTest {
                 "Missing manifest must initialize to INVALID fail-closed");
         assertEquals("MANIFEST_NOT_FOUND", missingService.getFingerprint());
     }
+
+    @Test
+    void testHikatManifestPriorityOverRootManifest(@TempDir Path priorityDir) throws Exception {
+        Path hikatFolder = priorityDir.resolve(".hikat");
+        Files.createDirectories(hikatFolder);
+
+        // Manifest inside .hikat has version 3.0.0
+        String hikatManifestJson = """
+                {
+                  "modpackVersion": "3.0.0",
+                  "directoryPolicies": [],
+                  "files": {}
+                }
+                """;
+        Files.writeString(hikatFolder.resolve("installed-manifest.json"), hikatManifestJson);
+
+        // Manifest in root has version 1.0.0
+        String rootManifestJson = """
+                {
+                  "modpackVersion": "1.0.0",
+                  "directoryPolicies": [],
+                  "files": {}
+                }
+                """;
+        Files.writeString(priorityDir.resolve("installed-manifest.json"), rootManifestJson);
+
+        ClientIntegrityService priorityService = new ClientIntegrityService(priorityDir);
+        try {
+            assertEquals("3.0.0", priorityService.getReleaseVersion(),
+                    ".hikat/installed-manifest.json must take precedence over root installed-manifest.json");
+        } finally {
+            priorityService.stopWatcher();
+        }
+
+        // Test fallback: when .hikat manifest is absent, root is used
+        Files.delete(hikatFolder.resolve("installed-manifest.json"));
+        ClientIntegrityService fallbackService = new ClientIntegrityService(priorityDir);
+        try {
+            assertEquals("1.0.0", fallbackService.getReleaseVersion(),
+                    "Root installed-manifest.json must be used as fallback when .hikat does not exist");
+        } finally {
+            fallbackService.stopWatcher();
+        }
+    }
+
+    @Test
+    void testWatcherFailurePersistsInvalidState() throws Exception {
+        // Initially valid
+        assertEquals(ClientIntegrityService.IntegrityState.VALID, service.getState());
+
+        // Simulate a watcher failure (e.g. directory registration failed or WatchService broke)
+        service.triggerWatcherFailureForTesting();
+        assertTrue(service.isWatcherFailed());
+        assertEquals(ClientIntegrityService.IntegrityState.INVALID, service.getState());
+
+        // Modify a protected file: watcher processes event but must NOT transition back to VALID
+        Files.writeString(officialMod, "official-mod-v2-corrupted");
+        Thread.sleep(500);
+
+        // Must remain strictly INVALID
+        assertEquals(ClientIntegrityService.IntegrityState.INVALID, service.getState(),
+                "State must permanently remain INVALID while watcher has failed");
+
+        // Attempting to register an invalid directory also enforces fail-closed
+        boolean regOk = service.registerTree(tempDir.resolve("non_existent_folder_abc"));
+        assertTrue(service.isWatcherFailed());
+        assertEquals(ClientIntegrityService.IntegrityState.INVALID, service.getState());
+    }
 }

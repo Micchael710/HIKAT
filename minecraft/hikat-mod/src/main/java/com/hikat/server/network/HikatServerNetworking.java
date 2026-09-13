@@ -61,12 +61,17 @@ public class HikatServerNetworking {
 
             String hikatUsername = claims.displayName();
 
-            // 4: HiKAT Whitelist check
+            // Record known player identity for administrative convenience
             HikatWhitelist whitelist = HikatWhitelist.getInstance();
-            if (whitelist != null && !whitelist.isAllowed(hikatUsername)) {
-                LOGGER.warn("[HiKAT] Rejected: User '{}' is not on the HiKAT whitelist", hikatUsername);
-                context.disconnect(HikatMessages.getWhitelistRejectedMessage(locale));
-                return;
+            if (whitelist != null) {
+                whitelist.recordKnownPlayer(hikatUsername, hikatUuid);
+
+                // 4: HiKAT Whitelist check using sub UUID
+                if (!whitelist.isAllowed(hikatUuid)) {
+                    LOGGER.warn("[HiKAT] Rejected: User '{}' (uuid: {}) is not on the HiKAT whitelist", hikatUsername, hikatUuid);
+                    context.disconnect(HikatMessages.getWhitelistRejectedMessage(locale));
+                    return;
+                }
             }
 
             // 5: Official integrity manifest presence check (fail-closed)

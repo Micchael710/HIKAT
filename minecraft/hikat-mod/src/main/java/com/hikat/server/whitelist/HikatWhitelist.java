@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentSkipListSet;
 
 public class HikatWhitelist {
@@ -23,7 +24,9 @@ public class HikatWhitelist {
 
     private final Path configFile;
     private volatile boolean enabled = false;
-    private final Set<String> allowedUsernames = new ConcurrentSkipListSet<>(String.CASE_INSENSITIVE_ORDER);
+    private final Set<UUID> allowedUuids = new ConcurrentSkipListSet<>();
+    private final java.util.Map<String, UUID> knownPlayersByName = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<UUID, String> knownNamesByUuid = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static synchronized HikatWhitelist getInstance(Path configDir) {
         if (INSTANCE == null) {
@@ -55,19 +58,18 @@ public class HikatWhitelist {
                 this.enabled = json.get("enabled").getAsBoolean();
             }
 
-            allowedUsernames.clear();
-            if (json.has("allowedUsernames") && json.get("allowedUsernames").isJsonArray()) {
-                JsonArray arr = json.getAsJsonArray("allowedUsernames");
+            allowedUuids.clear();
+            if (json.has("allowedUuids") && json.get("allowedUuids").isJsonArray()) {
+                JsonArray arr = json.getAsJsonArray("allowedUuids");
                 for (JsonElement el : arr) {
                     if (el.isJsonPrimitive()) {
-                        String name = el.getAsString().trim();
-                        if (!name.isEmpty()) {
-                            allowedUsernames.add(name);
-                        }
+                        try {
+                            allowedUuids.add(java.util.UUID.fromString(el.getAsString().trim()));
+                        } catch (IllegalArgumentException ignored) {}
                     }
                 }
             }
-            LOGGER.info("[HiKAT] Whitelist loaded. Enabled: {}, Entries: {}", enabled, allowedUsernames.size());
+            LOGGER.info("[HiKAT] Whitelist loaded. Enabled: {}, Entries: {}", enabled, allowedUuids.size());
         } catch (Exception e) {
             LOGGER.error("[HiKAT] Failed to read whitelist file: {}", e.getMessage());
         }
@@ -84,10 +86,10 @@ public class HikatWhitelist {
             json.addProperty("enabled", enabled);
 
             JsonArray arr = new JsonArray();
-            for (String username : allowedUsernames) {
-                arr.add(username);
+            for (UUID uuid : allowedUuids) {
+                arr.add(uuid.toString());
             }
-            json.add("allowedUsernames", arr);
+            json.add("allowedUuids", arr);
 
             Files.writeString(configFile, GSON.toJson(json), StandardCharsets.UTF_8);
         } catch (Exception e) {
@@ -95,32 +97,77 @@ public class HikatWhitelist {
         }
     }
 
-    public boolean isAllowed(String username) {
+    public void recordKnownPlayer(String username, UUID uuid) {
+        if (username != null && !username.isBlank() && uuid != null) {
+            String clean = username.trim();
+            knownPlayersByName.put(clean.toLowerCase(java.util.Locale.ROOT), uuid);
+            knownNamesByUuid.put(uuid, clean);
+        }
+    }
+
+    public UUID findKnownUuid(String usernameOrUuid) {
+        if (usernameOrUuid == null || usernameOrUuid.isBlank()) return null;
+        String clean = usernameOrUuid.trim();
+        UUID fromKnown = knownPlayersByName.get(clean.toLowerCase(java.util.Locale.ROOT));
+        if (fromKnown != null) {
+            return fromKnown;
+        }
+        try {
+            return UUID.fromString(clean);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    public String getDisplayName(UUID uuid) {
+        if (uuid == null) return null;
+        return knownNamesByUuid.get(uuid);
+    }
+
+    public boolean isAllowed(UUID uuid) {
         if (!enabled) {
             return true;
         }
-        if (username == null || username.isBlank()) {
+        if (uuid == null) {
             return false;
         }
-        return allowedUsernames.contains(username.trim());
+        return allowedUuids.contains(uuid);
     }
 
-    public synchronized boolean add(String username) {
-        if (username == null || username.isBlank()) return false;
-        boolean added = allowedUsernames.add(username.trim());
+    public boolean isAllowed(String usernameOrUuid) {
+        if (!enabled) return true;
+        UUID uuid = findKnownUuid(usernameOrUuid);
+        return isAllowed(uuid);
+    }
+
+    public synchronized boolean add(UUID uuid) {
+        if (uuid == null) return false;
+        boolean added = allowedUuids.add(uuid);
         if (added) {
             save();
         }
         return added;
     }
 
-    public synchronized boolean remove(String username) {
-        if (username == null || username.isBlank()) return false;
-        boolean removed = allowedUsernames.remove(username.trim());
+    public synchronized boolean add(String usernameOrUuid) {
+        UUID uuid = findKnownUuid(usernameOrUuid);
+        if (uuid == null) return false;
+        return add(uuid);
+    }
+
+    public synchronized boolean remove(UUID uuid) {
+        if (uuid == null) return false;
+        boolean removed = allowedUuids.remove(uuid);
         if (removed) {
             save();
         }
         return removed;
+    }
+
+    public synchronized boolean remove(String usernameOrUuid) {
+        UUID uuid = findKnownUuid(usernameOrUuid);
+        if (uuid == null) return false;
+        return remove(uuid);
     }
 
     public synchronized void setEnabled(boolean enabled) {
@@ -132,7 +179,7 @@ public class HikatWhitelist {
         return enabled;
     }
 
-    public Set<String> getAllowedUsernames() {
-        return Collections.unmodifiableSet(allowedUsernames);
+    public Set<UUID> getAllowedUuids() {
+        return Collections.unmodifiableSet(allowedUuids);
     }
 }
