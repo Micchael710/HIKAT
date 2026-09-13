@@ -15,6 +15,4 @@ pluginManagement {
 
 rootProject.name = "hikat-minecraft"
 
-include("client-mod")
-include("server-mod")
-include("gateway")
+include("hikat-mod")
