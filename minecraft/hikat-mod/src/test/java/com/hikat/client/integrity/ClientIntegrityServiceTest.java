@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.WatchKey;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -260,26 +261,35 @@ public class ClientIntegrityServiceTest {
     }
 
     @Test
-    void testWatcherFailurePersistsInvalidState() throws Exception {
+    void testWatchKeyInvalidationFailsClosed() throws Exception {
         // Initially valid
         assertEquals(ClientIntegrityService.IntegrityState.VALID, service.getState());
+        assertFalse(service.isWatcherFailed());
+        assertFalse(service.getWatchKeyPaths().isEmpty());
 
-        // Simulate a watcher failure (e.g. directory registration failed or WatchService broke)
-        service.triggerWatcherFailureForTesting();
+        // Get an active WatchKey for one of the protected directories (e.g. mods)
+        WatchKey key = service.getWatchKeyPaths().keySet().iterator().next();
+        assertNotNull(key);
+        assertTrue(key.isValid());
+
+        // Invalidate/cancel the WatchKey
+        key.cancel();
+        assertFalse(key.isValid());
+
+        // Process the key through handleWatchKey (as happens in watcher loop on event)
+        service.handleWatchKey(key);
+
+        // Verify key was removed from watchKeyPaths
+        assertFalse(service.getWatchKeyPaths().containsKey(key));
+
+        // Verify watcher is marked failed and state is set to INVALID fail-closed
         assertTrue(service.isWatcherFailed());
         assertEquals(ClientIntegrityService.IntegrityState.INVALID, service.getState());
 
-        // Modify a protected file: watcher processes event but must NOT transition back to VALID
-        Files.writeString(officialMod, "official-mod-v2-corrupted");
-        Thread.sleep(500);
-
-        // Must remain strictly INVALID
+        // Subsequent file changes must NEVER return state to VALID
+        Files.writeString(officialMod, "official-mod-corrupted-after-cancel");
+        Thread.sleep(300);
         assertEquals(ClientIntegrityService.IntegrityState.INVALID, service.getState(),
-                "State must permanently remain INVALID while watcher has failed");
-
-        // Attempting to register an invalid directory also enforces fail-closed
-        boolean regOk = service.registerTree(tempDir.resolve("non_existent_folder_abc"));
-        assertTrue(service.isWatcherFailed());
-        assertEquals(ClientIntegrityService.IntegrityState.INVALID, service.getState());
+                "State must permanently remain INVALID after WatchKey invalidation");
     }
 }

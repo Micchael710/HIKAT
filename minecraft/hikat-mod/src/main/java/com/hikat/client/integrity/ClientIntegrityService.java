@@ -322,125 +322,136 @@ public class ClientIntegrityService {
                 break;
             }
 
-            Path parentDir = watchKeyPaths.get(key);
-            if (parentDir == null) {
-                key.reset();
+            handleWatchKey(key);
+        }
+    }
+
+    void handleWatchKey(WatchKey key) {
+        Path parentDir = watchKeyPaths.get(key);
+        if (parentDir == null) {
+            boolean valid = key.reset();
+            if (!valid) {
+                watcherFailed.set(true);
+                state.set(IntegrityState.INVALID);
+            }
+            return;
+        }
+
+        boolean integrityAffected = false;
+
+        for (WatchEvent<?> event : key.pollEvents()) {
+            WatchEvent.Kind<?> kind = event.kind();
+
+            // Handle OVERFLOW: reconcile protected tree
+            if (kind == StandardWatchEventKinds.OVERFLOW) {
+                markPending();
+                boolean ok = reconcileTree(parentDir);
+                if (!ok) {
+                    watcherFailed.set(true);
+                    state.set(IntegrityState.INVALID);
+                }
+                integrityAffected = true;
                 continue;
             }
 
-            boolean integrityAffected = false;
+            @SuppressWarnings("unchecked")
+            WatchEvent<Path> ev = (WatchEvent<Path>) event;
+            Path filename = ev.context();
+            Path fullPath = parentDir.resolve(filename);
+            String relPath = normalizePath(gameDir.relativize(fullPath).toString());
 
-            for (WatchEvent<?> event : key.pollEvents()) {
-                WatchEvent.Kind<?> kind = event.kind();
+            String effective = resolveEffectivePolicy(relPath, null);
+            if (!"NO_MODIFICABLE".equalsIgnoreCase(effective)) {
+                continue;
+            }
 
-                // Handle OVERFLOW: reconcile protected tree
-                if (kind == StandardWatchEventKinds.OVERFLOW) {
-                    markPending();
-                    boolean ok = reconcileTree(parentDir);
+            // 1. Mark immediately as PENDING during rehash/mutation (unless already permanently INVALID)
+            markPending();
+            integrityAffected = true;
+
+            if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
+                // Check if a directory was deleted
+                boolean wasDir = false;
+                String dirPrefix = relPath + "/";
+                List<String> removedPaths = new ArrayList<>();
+                for (String existing : currentHashMap.keySet()) {
+                    if (existing.startsWith(dirPrefix)) {
+                        removedPaths.add(existing);
+                        wasDir = true;
+                    }
+                }
+
+                if (wasDir) {
+                    for (String r : removedPaths) {
+                        currentHashMap.put(r, "DELETED_DIR");
+                    }
+                    LOGGER.info("[HiKAT] Integrity change: Protected directory deleted: {}", relPath);
+                } else {
+                    if (expectedProtectedPaths.contains(relPath)) {
+                        currentHashMap.put(relPath, "MISSING");
+                    } else {
+                        currentHashMap.remove(relPath);
+                    }
+                    LOGGER.info("[HiKAT] Integrity change: Deleted protected file: {}", relPath);
+                }
+            } else if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
+                if (Files.isDirectory(fullPath)) {
+                    // Recursively register the new directory tree and hash files
+                    LOGGER.info("[HiKAT] Integrity change: Protected subdirectory created: {}", relPath);
+                    boolean ok = registerTree(fullPath);
                     if (!ok) {
                         watcherFailed.set(true);
                         state.set(IntegrityState.INVALID);
                     }
-                    integrityAffected = true;
-                    continue;
-                }
-
-                @SuppressWarnings("unchecked")
-                WatchEvent<Path> ev = (WatchEvent<Path>) event;
-                Path filename = ev.context();
-                Path fullPath = parentDir.resolve(filename);
-                String relPath = normalizePath(gameDir.relativize(fullPath).toString());
-
-                String effective = resolveEffectivePolicy(relPath, null);
-                if (!"NO_MODIFICABLE".equalsIgnoreCase(effective)) {
-                    continue;
-                }
-
-                // 1. Mark immediately as PENDING during rehash/mutation (unless already permanently INVALID)
-                markPending();
-                integrityAffected = true;
-
-                if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
-                    // Check if a directory was deleted
-                    boolean wasDir = false;
-                    String dirPrefix = relPath + "/";
-                    List<String> removedPaths = new ArrayList<>();
-                    for (String existing : currentHashMap.keySet()) {
-                        if (existing.startsWith(dirPrefix)) {
-                            removedPaths.add(existing);
-                            wasDir = true;
-                        }
-                    }
-
-                    if (wasDir) {
-                        for (String r : removedPaths) {
-                            currentHashMap.put(r, "DELETED_DIR");
-                        }
-                        LOGGER.info("[HiKAT] Integrity change: Protected directory deleted: {}", relPath);
-                    } else {
-                        if (expectedProtectedPaths.contains(relPath)) {
-                            currentHashMap.put(relPath, "MISSING");
-                        } else {
-                            currentHashMap.remove(relPath);
-                        }
-                        LOGGER.info("[HiKAT] Integrity change: Deleted protected file: {}", relPath);
-                    }
-                } else if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
-                    if (Files.isDirectory(fullPath)) {
-                        // Recursively register the new directory tree and hash files
-                        LOGGER.info("[HiKAT] Integrity change: Protected subdirectory created: {}", relPath);
-                        boolean ok = registerTree(fullPath);
-                        if (!ok) {
-                            watcherFailed.set(true);
-                            state.set(IntegrityState.INVALID);
-                        }
-                        try (Stream<Path> s = Files.walk(fullPath)) {
-                            s.filter(Files::isRegularFile).forEach(subFile -> {
-                                String subRel = normalizePath(gameDir.relativize(subFile).toString());
-                                if ("NO_MODIFICABLE".equalsIgnoreCase(resolveEffectivePolicy(subRel, null))) {
-                                    String sha = computeFileSha256(subFile);
-                                    if (sha != null) {
-                                        currentHashMap.put(subRel, sha.toLowerCase());
-                                    }
+                    try (Stream<Path> s = Files.walk(fullPath)) {
+                        s.filter(Files::isRegularFile).forEach(subFile -> {
+                            String subRel = normalizePath(gameDir.relativize(subFile).toString());
+                            if ("NO_MODIFICABLE".equalsIgnoreCase(resolveEffectivePolicy(subRel, null))) {
+                                String sha = computeFileSha256(subFile);
+                                if (sha != null) {
+                                    currentHashMap.put(subRel, sha.toLowerCase());
                                 }
-                            });
-                        } catch (Exception e) {
-                            LOGGER.warn("[HiKAT] Error walking newly created directory: {}", e.getMessage());
-                        }
-                    } else if (Files.isRegularFile(fullPath)) {
-                        waitForFileReady(fullPath);
-                        String sha = computeFileSha256(fullPath);
-                        if (sha != null) {
-                            currentHashMap.put(relPath, sha.toLowerCase());
-                            LOGGER.info("[HiKAT] Integrity change: Created protected file: {}", relPath);
-                        }
+                            }
+                        });
+                    } catch (Exception e) {
+                        LOGGER.warn("[HiKAT] Error walking newly created directory: {}", e.getMessage());
                     }
-                } else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
-                    if (Files.isRegularFile(fullPath)) {
-                        waitForFileReady(fullPath);
-                        String sha = computeFileSha256(fullPath);
-                        if (sha != null) {
-                            currentHashMap.put(relPath, sha.toLowerCase());
-                            LOGGER.info("[HiKAT] Integrity change: Modified protected file: {}", relPath);
-                        }
+                } else if (Files.isRegularFile(fullPath)) {
+                    waitForFileReady(fullPath);
+                    String sha = computeFileSha256(fullPath);
+                    if (sha != null) {
+                        currentHashMap.put(relPath, sha.toLowerCase());
+                        LOGGER.info("[HiKAT] Integrity change: Created protected file: {}", relPath);
+                    }
+                }
+            } else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
+                if (Files.isRegularFile(fullPath)) {
+                    waitForFileReady(fullPath);
+                    String sha = computeFileSha256(fullPath);
+                    if (sha != null) {
+                        currentHashMap.put(relPath, sha.toLowerCase());
+                        LOGGER.info("[HiKAT] Integrity change: Modified protected file: {}", relPath);
                     }
                 }
             }
+        }
 
-            if (integrityAffected) {
-                recalculateFingerprint();
-                // Return to VALID only after rehash finishes AND watcher has not failed
-                if (!watcherFailed.get()) {
-                    state.set(IntegrityState.VALID);
-                } else {
-                    state.set(IntegrityState.INVALID);
-                }
+        if (integrityAffected) {
+            recalculateFingerprint();
+            // Return to VALID only after rehash finishes AND watcher has not failed
+            if (!watcherFailed.get()) {
+                state.set(IntegrityState.VALID);
+            } else {
+                state.set(IntegrityState.INVALID);
             }
+        }
 
-            boolean valid = key.reset();
-            if (!valid) {
-                watchKeyPaths.remove(key);
-            }
+        boolean valid = key.reset();
+        if (!valid) {
+            watchKeyPaths.remove(key);
+            watcherFailed.set(true);
+            state.set(IntegrityState.INVALID);
+            LOGGER.warn("[HiKAT] Fail-closed: WatchKey became invalid for directory: {}", parentDir);
         }
     }
 
@@ -500,9 +511,8 @@ public class ClientIntegrityService {
         return watcherFailed.get();
     }
 
-    public void triggerWatcherFailureForTesting() {
-        watcherFailed.set(true);
-        state.set(IntegrityState.INVALID);
+    Map<WatchKey, Path> getWatchKeyPaths() {
+        return Collections.unmodifiableMap(watchKeyPaths);
     }
 
     private void waitForFileReady(Path file) {
