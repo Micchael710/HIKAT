@@ -1895,6 +1895,7 @@ export class ModProviderManager {
       managedRecords: (typeof schema.serverManagedContent.$inferSelect)[]
       activeWorldName?: string
       serverId?: string | null
+      maxResolvedInstallItems?: number
     },
   ): Promise<ServerContentPlanResolutionResult> {
     const contentType = input.contentType || "MOD"
@@ -1905,7 +1906,7 @@ export class ModProviderManager {
       )
     }
 
-    const { envData, managedRecords, activeWorldName = "world" } = context
+    const { envData, managedRecords, activeWorldName = "world", maxResolvedInstallItems } = context
     const { minecraftVersion, modLoader } = envData
     const loader = contentType === "MOD" ? mapModLoaderToProviderName(modLoader) : ""
 
@@ -2124,6 +2125,8 @@ export class ModProviderManager {
       }
     }
 
+    let resolvedInstallCount = rootAction === "INSTALL" || rootAction === "UPDATE" ? 1 : 0
+
     itemsMap.set(rootKey, {
       provider: input.provider,
       projectId: input.projectId,
@@ -2198,6 +2201,19 @@ export class ModProviderManager {
             targetFileId: dep.fileId || null,
           })
           continue
+        }
+
+        if (dep.dependencyType !== "OPTIONAL" && dep.dependencyType !== "EMBEDDED") {
+          const isAlreadyHandled =
+            (dep.projectId && Array.from(visitedBranches).some((k) => k.startsWith(`${current.provider}:${dep.projectId}:`))) ||
+            (dep.versionId && Array.from(itemsMap.values()).some((item) => item.versionId === dep.versionId || (dep.fileId && item.fileId === dep.fileId)))
+
+          if (!isAlreadyHandled && maxResolvedInstallItems !== undefined && resolvedInstallCount >= maxResolvedInstallItems) {
+            throw createGraphQLError(
+              "El contenido solicitado requiere demasiadas dependencias para el plan gratuito de Workers (máximo 3 archivos).",
+              "VALIDATION_ERROR",
+            )
+          }
         }
 
         const depAdapter = this.getAdapter(current.provider)
@@ -2308,6 +2324,13 @@ export class ModProviderManager {
         if (itemsMap.has(depKey)) continue
         if (visitedBranches.has(depKey)) continue
         visitedBranches.add(depKey)
+
+        if (maxResolvedInstallItems !== undefined && resolvedInstallCount >= maxResolvedInstallItems) {
+          throw createGraphQLError(
+            "El contenido solicitado requiere demasiadas dependencias para el plan gratuito de Workers (máximo 3 archivos).",
+            "VALIDATION_ERROR",
+          )
+        }
 
         let depCompatibleVersions: NormalizedModVersion[] = []
         let depProject: NormalizedModProject | null = null
@@ -2432,6 +2455,10 @@ export class ModProviderManager {
           } else {
             depAction = "UPDATE"
           }
+        }
+
+        if (depAction === "INSTALL" || depAction === "UPDATE") {
+          resolvedInstallCount++
         }
 
         itemsMap.set(depKey, {

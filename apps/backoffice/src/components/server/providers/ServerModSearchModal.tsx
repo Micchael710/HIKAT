@@ -379,7 +379,12 @@ export const ServerModSearchModal: React.FC<ServerModSearchModalProps> = ({
         )
       } catch (err: any) {
         // 1 and 2 remain installed, 3 failed -> stop, remaining items (3, 4, 5) stay in queue
-        setBatchError(err.message || `Error al instalar ${item.projectName}.`)
+        const baseMsg = err.message || `Error al instalar ${item.projectName}.`
+        const message =
+          i > 0
+            ? `${i} de ${total} elementos se instalaron correctamente antes del error. ${baseMsg}`
+            : baseMsg
+        setBatchError(message)
         setBatchInstalling(false)
         setInstallProgress(null)
         return

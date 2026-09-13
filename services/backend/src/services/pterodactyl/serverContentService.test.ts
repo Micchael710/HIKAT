@@ -874,10 +874,10 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
     ).rejects.toThrow("Solo se permite procesar una raíz por invocación en el plan gratuito de Workers. Se enviaron 2 planes.")
   })
 
-  // Test 12: Free limit: root with > 5 resolved files throws VALIDATION_ERROR
-  it("installServerContentPlansBatch rejects plan when resolved items exceed MAX_SERVER_DIRECT_RESOLVED_FILES_FREE (5)", async () => {
+  // Test 12: Free limit: root with > 3 resolved files throws VALIDATION_ERROR
+  it("installServerContentPlansBatch rejects plan when resolved items exceed MAX_SERVER_DIRECT_RESOLVED_FILES_FREE (3)", async () => {
     const { modProviderManager } = await import("../providers/modProviderManager")
-    const mockPlanItems = Array.from({ length: 6 }, (_, i) => ({
+    const mockPlanItems = Array.from({ length: 4 }, (_, i) => ({
       provider: "MODRINTH" as const,
       projectId: `mod-${i}`,
       projectName: `mod-${i}`,
@@ -899,7 +899,7 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
 
     vi.spyOn(modProviderManager, "resolveServerInstallationPlan").mockResolvedValue({
       items: mockPlanItems,
-      totalDownloadSizeBytes: 6000,
+      totalDownloadSizeBytes: 4000,
       conflicts: [],
       optionalDependencies: [],
       isValid: true,
@@ -923,7 +923,7 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
         { provider: "MODRINTH", projectId: "mod-0", versionId: "ver-0", contentType: "MOD" },
         "admin-1",
       ),
-    ).rejects.toThrow("superando el límite de 5 archivos por invocación en el plan gratuito de Workers.")
+    ).rejects.toThrow("superando el límite de 3 archivos por invocación en el plan gratuito de Workers.")
 
     vi.restoreAllMocks()
   })
@@ -1299,6 +1299,167 @@ describe("Shard 08D: Server Content Service & Direct Content Management Tests", 
         "admin-1",
       ),
     ).rejects.toThrow("es de entorno BOTH y no puede instalarse directamente en el servidor. Añádelo desde Juego → Actualizaciones.")
+
+    vi.restoreAllMocks()
+  })
+
+  // Test 17: Real dependency resolution aborts at limit 3, stops querying provider for further dependencies, never touches Wings, never writes D1
+  it("aborts dependency resolution at limit 3, stops provider queries for further dependencies, never touches Wings, and writes no D1 records", async () => {
+    const { modProviderManager } = await import("../providers/modProviderManager")
+
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.gameReleases).values({
+      id: "rel-pub-test17",
+      version: "1.0.0-test17",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      neoForgeVersion: "21.1.65",
+      status: "PUBLISHED",
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const rootProject: any = {
+      id: "root-mod",
+      name: "Root Mod",
+      environment: "SERVER",
+      contentType: "MOD",
+    }
+    const rootVersion: any = {
+      id: "ver-root",
+      projectId: "root-mod",
+      versionNumber: "1.0.0",
+      name: "Root Mod 1.0.0",
+      releaseType: "RELEASE",
+      gameVersions: ["1.21.1"],
+      loaders: ["neoforge"],
+      publishedAt: nowIso,
+      downloads: 100,
+      filename: "root-mod.jar",
+      sizeBytes: 1000,
+      downloadUrl: "https://example.com/root.jar",
+      contentType: "MOD",
+      environment: "SERVER",
+      dependencies: [
+        { projectId: "dep-1", dependencyType: "REQUIRED" },
+        { projectId: "dep-2", dependencyType: "REQUIRED" },
+        { projectId: "dep-3", dependencyType: "REQUIRED" },
+        { projectId: "dep-4", dependencyType: "REQUIRED" },
+      ],
+    }
+
+    const dep1Project: any = { id: "dep-1", name: "Dep One", environment: "SERVER", contentType: "MOD" }
+    const dep1Version: any = {
+      id: "ver-dep-1",
+      projectId: "dep-1",
+      versionNumber: "1.0.0",
+      name: "Dep One 1.0.0",
+      releaseType: "RELEASE",
+      gameVersions: ["1.21.1"],
+      loaders: ["neoforge"],
+      publishedAt: nowIso,
+      downloads: 50,
+      filename: "dep-1.jar",
+      sizeBytes: 1000,
+      downloadUrl: "https://example.com/dep-1.jar",
+      contentType: "MOD",
+      environment: "SERVER",
+      dependencies: [],
+    }
+
+    const dep2Project: any = { id: "dep-2", name: "Dep Two", environment: "SERVER", contentType: "MOD" }
+    const dep2Version: any = {
+      id: "ver-dep-2",
+      projectId: "dep-2",
+      versionNumber: "1.0.0",
+      name: "Dep Two 1.0.0",
+      releaseType: "RELEASE",
+      gameVersions: ["1.21.1"],
+      loaders: ["neoforge"],
+      publishedAt: nowIso,
+      downloads: 50,
+      filename: "dep-2.jar",
+      sizeBytes: 1000,
+      downloadUrl: "https://example.com/dep-2.jar",
+      contentType: "MOD",
+      environment: "SERVER",
+      dependencies: [],
+    }
+
+    const getProjectSpy = vi.fn().mockImplementation((_env, projectId) => {
+      if (projectId === "root-mod") return Promise.resolve(rootProject)
+      if (projectId === "dep-1") return Promise.resolve(dep1Project)
+      if (projectId === "dep-2") return Promise.resolve(dep2Project)
+      return Promise.resolve(null)
+    })
+
+    const getCompatibleVersionsSpy = vi.fn().mockImplementation((_env, projectId) => {
+      if (projectId === "root-mod") return Promise.resolve([rootVersion])
+      if (projectId === "dep-1") return Promise.resolve([dep1Version])
+      if (projectId === "dep-2") return Promise.resolve([dep2Version])
+      return Promise.resolve([])
+    })
+
+    const getVersionSpy = vi.fn().mockImplementation((_env, versionId, projectId) => {
+      if (projectId === "root-mod" || versionId === "ver-root") return Promise.resolve(rootVersion)
+      if (projectId === "dep-1" || versionId === "ver-dep-1") return Promise.resolve(dep1Version)
+      if (projectId === "dep-2" || versionId === "ver-dep-2") return Promise.resolve(dep2Version)
+      return Promise.resolve(null)
+    })
+
+    const mockAdapter = {
+      isConfigured: () => true,
+      getProject: getProjectSpy,
+      getCompatibleVersions: getCompatibleVersionsSpy,
+      getVersion: getVersionSpy,
+      getSupportedContentTypes: () => Promise.resolve(["MOD"]),
+    }
+
+    vi.spyOn(modProviderManager, "getAdapter").mockReturnValue(mockAdapter as any)
+
+    const pullFileSpy = vi.fn().mockResolvedValue(undefined)
+    const listDirectorySpy = vi.fn().mockResolvedValue({ data: [] })
+    const mockWingsClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      getFileContents: vi.fn().mockResolvedValue("level-name=world"),
+      listDirectory: listDirectorySpy,
+      pullFile: pullFileSpy,
+    }
+
+    await expect(
+      installServerContentPlan(
+        db,
+        env,
+        { provider: "MODRINTH", projectId: "root-mod", versionId: "ver-root", contentType: "MOD" },
+        "admin-1",
+        mockWingsClient as any,
+      ),
+    ).rejects.toThrow("El contenido solicitado requiere demasiadas dependencias para el plan gratuito de Workers (máximo 3 archivos).")
+
+    // 1. Verify root, dep-1, dep-2 were resolved
+    expect(getProjectSpy).toHaveBeenCalledWith(expect.anything(), "root-mod", "MOD")
+    expect(getProjectSpy).toHaveBeenCalledWith(expect.anything(), "dep-1", "MOD")
+    expect(getProjectSpy).toHaveBeenCalledWith(expect.anything(), "dep-2", "MOD")
+
+    // 2. CRITICAL: Verify dep-3 and dep-4 were NEVER queried from provider
+    expect(getProjectSpy).not.toHaveBeenCalledWith(expect.anything(), "dep-3", expect.anything())
+    expect(getProjectSpy).not.toHaveBeenCalledWith(expect.anything(), "dep-4", expect.anything())
+    expect(getCompatibleVersionsSpy).not.toHaveBeenCalledWith(expect.anything(), "dep-3", expect.anything(), expect.anything(), expect.anything())
+    expect(getCompatibleVersionsSpy).not.toHaveBeenCalledWith(expect.anything(), "dep-4", expect.anything(), expect.anything(), expect.anything())
+
+    // 3. CRITICAL: Verify Wings was NEVER touched
+    expect(pullFileSpy).not.toHaveBeenCalled()
+    expect(listDirectorySpy).not.toHaveBeenCalled()
+
+    // 4. CRITICAL: Verify D1 was NEVER written (0 records in serverManagedContent)
+    const records = await db.select().from(schema.serverManagedContent).all()
+    expect(records).toHaveLength(0)
 
     vi.restoreAllMocks()
   })

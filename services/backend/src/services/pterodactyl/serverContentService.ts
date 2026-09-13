@@ -30,7 +30,7 @@ import { runWithConcurrency } from "../providers/modInstallationService"
 import { safeDeleteServerFilePhysical } from "./serverFileService"
 
 export const MAX_ROOT_PLANS_PER_FREE_INVOCATION = 1
-export const MAX_SERVER_DIRECT_RESOLVED_FILES_FREE = 5
+export const MAX_SERVER_DIRECT_RESOLVED_FILES_FREE = 3
 
 type BatchStatements = Parameters<Database["batch"]>[0]
 type BatchStatement = BatchStatements[number]
@@ -421,6 +421,7 @@ export async function installServerContentPlansBatch(
         managedRecords: initialManagedRecords,
         activeWorldName: "world",
         serverId,
+        maxResolvedInstallItems: MAX_SERVER_DIRECT_RESOLVED_FILES_FREE,
       })
       plan = res.plan
       transferItems = res.transferItems
@@ -488,7 +489,7 @@ export async function installServerContentPlansBatch(
     return getServerManagedContent(db, env, serverId, clientOverride)
   }
 
-  // Pre-flight check: maximum 5 resolved files (root + dependencies) per Workers Free invocation
+  // Pre-flight check: maximum 3 resolved files (root + dependencies) per Workers Free invocation
   if (deduplicatedItems.length > MAX_SERVER_DIRECT_RESOLVED_FILES_FREE) {
     throw createGraphQLError(
       `El contenido solicitado y sus dependencias suman ${deduplicatedItems.length} archivos, superando el límite de ${MAX_SERVER_DIRECT_RESOLVED_FILES_FREE} archivos por invocación en el plan gratuito de Workers.`,

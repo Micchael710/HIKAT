@@ -1897,8 +1897,9 @@ describe("ServerOverviewView Pending Server Changes Banner (Shard 08D UX)", () =
     // Verify both plans were called sequentially
     expect(planSpy).toHaveBeenCalledTimes(2)
 
-    // Verify error displayed for failed mod
+    // Verify error displayed for failed mod with count of successfully installed items
     const errorElem = screen.getByTestId("server-queue-error")
+    expect(errorElem.textContent).toContain("1 de 2 elementos se instalaron correctamente antes del error.")
     expect(errorElem.textContent).toContain("Timeout al descargar Queue Mod Two en Wings")
 
     // Verify Modal did NOT close because of error
