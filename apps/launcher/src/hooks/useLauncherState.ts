@@ -272,6 +272,7 @@ export function useLauncherState() {
 
   useEffect(() => {
     loadServers()
+    gameService.recoverActiveGameSession().catch(() => {})
   }, [loadServers])
 
   /* Skins Domain State */
@@ -675,6 +676,7 @@ export function useLauncherState() {
             setScreen("home")
           }
           setUsername(session.user.displayName!.trim())
+          gameService.recoverActiveGameSession().catch(() => {})
         } else {
           // Incomplete OAuth account without chosen username must complete onboarding
           setScreen("login")

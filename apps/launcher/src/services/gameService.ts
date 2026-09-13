@@ -48,6 +48,23 @@ export function stopTokenRenewal() {
   currentRenewalContext = null
 }
 
+export async function recoverActiveGameSession(): Promise<boolean> {
+  if (!window.electronAPI?.getLaunchStatus) return false
+  try {
+    const status = await window.electronAPI.getLaunchStatus()
+    if (status?.status === "running") {
+      const runningGameId = status.runningGameId || status.gameId
+      const gameContext = runningGameId ? {
+        gameId: runningGameId,
+        gameName: (status as any).gameName,
+      } : null
+      startTokenRenewal(gameContext)
+      return true
+    }
+  } catch (_) {}
+  return false
+}
+
 export type GameButtonState =
   | "checking"
   | "unavailable"
@@ -662,18 +679,28 @@ export const gameService = {
     await syncGameToken(options.gameContext).catch(() => {})
 
     if (window.electronAPI?.launchGame) {
-      const result = await window.electronAPI.launchGame({
-        ...options,
-        modLoaderVersion: options.modLoaderVersion ?? undefined,
-        neoForgeVersion: options.neoForgeVersion ?? undefined,
-        gameId: options.gameContext?.gameId,
-        gameName: options.gameContext?.gameName,
-      })
-      startTokenRenewal(options.gameContext)
-      return result
+      try {
+        const result = await window.electronAPI.launchGame({
+          ...options,
+          modLoaderVersion: options.modLoaderVersion ?? undefined,
+          neoForgeVersion: options.neoForgeVersion ?? undefined,
+          gameId: options.gameContext?.gameId,
+          gameName: options.gameContext?.gameName,
+        })
+        if (result && result.success !== false) {
+          startTokenRenewal(options.gameContext)
+        } else {
+          stopTokenRenewal()
+        }
+        return result
+      } catch (err) {
+        stopTokenRenewal()
+        throw err
+      }
     }
   },
   syncGameToken,
   startTokenRenewal,
   stopTokenRenewal,
+  recoverActiveGameSession,
 }

@@ -127,6 +127,47 @@ public class TokenValidatorTest {
     }
 
     @Test
+    void testIssuerValidationExactMatch() throws Exception {
+        long now = System.currentTimeMillis() / 1000L;
+        String validToken = createJwt(
+                UUID.randomUUID().toString(),
+                "HiKATPlayer",
+                "https://auth.hikat.org",
+                "hikat-minecraft",
+                now + 300,
+                keyPair
+        );
+        TokenValidator.Result validRes = validator.validate(validToken);
+        assertTrue(validRes.isValid());
+
+        // Lookalike issuer
+        String fakeToken = createJwt(
+                UUID.randomUUID().toString(),
+                "HiKATPlayer",
+                "https://fake-hikat.org",
+                "hikat-minecraft",
+                now + 300,
+                keyPair
+        );
+        TokenValidator.Result fakeRes = validator.validate(fakeToken);
+        assertFalse(fakeRes.isValid());
+        assertEquals(TokenValidator.Status.INVALID_CLAIMS, fakeRes.status());
+
+        // Subdomain / path lookalike
+        String evilToken = createJwt(
+                UUID.randomUUID().toString(),
+                "HiKATPlayer",
+                "https://auth.hikat.org.attacker.com",
+                "hikat-minecraft",
+                now + 300,
+                keyPair
+        );
+        TokenValidator.Result evilRes = validator.validate(evilToken);
+        assertFalse(evilRes.isValid());
+        assertEquals(TokenValidator.Status.INVALID_CLAIMS, evilRes.status());
+    }
+
+    @Test
     void testInvalidSubUuid() throws Exception {
         long now = System.currentTimeMillis() / 1000L;
         String token = createJwt(

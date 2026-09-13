@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class TokenValidator {
     private static final Logger LOGGER = LoggerFactory.getLogger(TokenValidator.class);
+    public static final String EXPECTED_ISSUER = "https://auth.hikat.org";
     public static final String EXPECTED_AUDIENCE = "hikat-minecraft";
 
     public enum Status {
@@ -204,9 +205,9 @@ public class TokenValidator {
                 return Result.error(Status.INVALID_CLAIMS, "Missing or empty displayName claim");
             }
 
-            String iss = payload.has("iss") ? payload.get("iss").getAsString() : "";
-            if (!iss.contains("hikat")) {
-                return Result.error(Status.INVALID_CLAIMS, "Invalid issuer: " + iss);
+            String iss = payload.has("iss") ? payload.get("iss").getAsString().trim() : "";
+            if (!EXPECTED_ISSUER.equals(iss)) {
+                return Result.error(Status.INVALID_CLAIMS, "Invalid issuer: " + iss + " (expected " + EXPECTED_ISSUER + ")");
             }
 
             String aud = payload.has("aud") ? payload.get("aud").getAsString() : "";

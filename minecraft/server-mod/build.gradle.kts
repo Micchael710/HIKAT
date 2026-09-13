@@ -5,6 +5,17 @@ plugins {
 
 neoForge {
     version = property("neoforge_version").toString()
+    mods {
+        create("hikat_server") {
+            sourceSet(sourceSets["main"])
+        }
+    }
+    runs {
+        create("server") {
+            server()
+            programArgument("--nogui")
+        }
+    }
 }
 
 dependencies {

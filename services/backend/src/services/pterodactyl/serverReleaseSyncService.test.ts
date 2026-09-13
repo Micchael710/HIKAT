@@ -1861,8 +1861,8 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
     expect(manifest.releaseId).toBe(relId)
     expect(manifest.files).toHaveLength(2)
     // Sorted alphabetically: a-mod.jar then b-mod.jar
-    expect(manifest.files[0].path).toBe("mods/a-mod.jar")
-    expect(manifest.files[1].path).toBe("mods/b-mod.jar")
+    expect(manifest.files[0]?.path).toBe("mods/a-mod.jar")
+    expect(manifest.files[1]?.path).toBe("mods/b-mod.jar")
     expect(manifest.officialFingerprint).toBeDefined()
     expect(manifest.officialFingerprint.length).toBe(64) // SHA-256 hex string
 
@@ -1879,5 +1879,138 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
 
     expect(createFolderSpy).toHaveBeenCalledWith("/", "hikat")
     expect(writeFileSpy).toHaveBeenCalledWith("hikat/integrity.json", expect.stringContaining("2.0.0"))
+  })
+
+  it("generateOfficialServerIntegrityManifest uses strict Unicode code-unit ordering identical to Java String.compareTo", async () => {
+    const relId = "rel-sorting-test"
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.gameReleases).values({
+      id: relId,
+      version: "2.1.0",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      status: "PUBLISHED",
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    // Insert files with uppercase, lowercase, numbers, underscores, and dashes
+    const testPaths = [
+      "mods/z-mod.jar",
+      "mods/A_Mod.jar",
+      "mods/10_mod.jar",
+      "mods/a-mod.jar",
+      "mods/a_mod.jar",
+    ]
+
+    for (let i = 0; i < testPaths.length; i++) {
+      await db.insert(schema.gameReleaseFiles).values({
+        id: `file-${i}`,
+        releaseId: relId,
+        name: `mod-${i}.jar`,
+        logicalPath: testPaths[i],
+        category: "MOD",
+        sha256: `hash${i}`.padEnd(64, "0"),
+        sizeBytes: 100,
+        policy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        createdAt: nowIso,
+      })
+    }
+
+    const rel = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.id, relId)).get()
+    const manifest = await generateOfficialServerIntegrityManifest(db, rel)
+
+    // Expected code-unit order: '1' (49) < 'A' (65) < 'a-mod' ('-' is 45 vs '_' is 95) < 'a_mod' < 'z-mod'
+    // 'mods/10_mod.jar'
+    // 'mods/A_Mod.jar'
+    // 'mods/a-mod.jar'
+    // 'mods/a_mod.jar'
+    // 'mods/z-mod.jar'
+    const resultPaths = manifest.files.map((f) => f.path)
+    expect(resultPaths).toEqual([
+      "mods/10_mod.jar",
+      "mods/A_Mod.jar",
+      "mods/a-mod.jar",
+      "mods/a_mod.jar",
+      "mods/z-mod.jar",
+    ])
+  })
+
+  it("applyServerReleaseSync fails and does NOT activate release if writing hikat/integrity.json fails", async () => {
+    const relId = "rel-fail-manifest"
+    const nowIso = new Date().toISOString()
+    await db.insert(schema.gameReleases).values({
+      id: relId,
+      version: "9.9.9",
+      minecraftVersion: "1.21.1",
+      modLoader: "NEOFORGE",
+      status: "PUBLISHED",
+      createdBy: "admin-1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+
+    const testBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x05, 0x06])
+    const hashBuf = await crypto.subtle.digest("SHA-256", testBytes)
+    const testHash = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("")
+
+    await db.insert(schema.gameReleaseFiles).values({
+      id: "file-dummy",
+      releaseId: relId,
+      name: "dummy.jar",
+      logicalPath: "mods/dummy.jar",
+      category: "MOD",
+      sha256: testHash,
+      sizeBytes: testBytes.length,
+      policy: "NO_MODIFICABLE",
+      isDirectory: false,
+      sourceEnvironment: "BOTH",
+      objectKey: "releases/rel-fail-manifest/mods/dummy.jar",
+      createdAt: nowIso,
+    })
+
+    env.ASSETS.get = vi.fn().mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(testBytes.buffer),
+    })
+
+    const mockClient = {
+      getServerResources: vi.fn().mockResolvedValue({
+        attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+      }),
+      getServerDetails: vi.fn().mockResolvedValue({
+        attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+      }),
+      createBackup: vi.fn().mockResolvedValue({ id: "bk-1", attributes: { uuid: "bk-1" } }),
+      getBackup: vi.fn().mockResolvedValue({
+        object: "backup",
+        attributes: { uuid: "bk-1", completed_at: nowIso, is_successful: true },
+      }),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+      listDirectory: vi.fn().mockResolvedValue({ data: [] }),
+      writeFile: vi.fn().mockImplementation(async (path: string) => {
+        if (path === "hikat/integrity.json") {
+          throw new Error("Pterodactyl disk write failed for integrity manifest")
+        }
+        return undefined
+      }),
+    }
+
+    await expect(
+      applyServerReleaseSync(db, env, "admin-1", false, mockClient as any),
+    ).rejects.toThrow(/No se pudo generar el archivo de integridad oficial/)
+
+    // Verify sync was marked FAILED, NOT APPLIED
+    const syncLogs = await db.select().from(schema.serverReleaseSyncs).where(eq(schema.serverReleaseSyncs.releaseId, relId))
+    if (syncLogs.length > 0) {
+      expect(syncLogs[0].status).toBe("FAILED")
+    }
+
+    // Verify launcherActiveReleaseId was NOT set to relId
+    const settings = await db.select().from(schema.projectSettings).where(eq(schema.projectSettings.id, "main")).get()
+    expect(settings?.launcherActiveReleaseId).not.toBe(relId)
   })
 })

@@ -74,6 +74,7 @@ class GameLauncher {
     this.javaStorageRoot = options.javaStorageRoot || null
     this.processStateRoot = options.processStateRoot || null
     this.runningGameId = null
+    this.runningGameName = null
     this.runningInstanceRoot = null
     this.activeChildProcess = null
     this.launchStatus = "idle" // 'idle' | 'preparing' | 'running'
@@ -109,6 +110,7 @@ class GameLauncher {
         fs.mkdirSync(dir, { recursive: true })
       }
       this.runningGameId = metadata.gameId || null
+      this.runningGameName = metadata.gameName || null
       this.runningInstanceRoot = metadata.instanceRoot || null
       fs.writeFileSync(
         filePath,
@@ -116,6 +118,7 @@ class GameLauncher {
           pid,
           launchedAt: metadata.launchedAt || new Date().toISOString(),
           gameId: metadata.gameId || null,
+          gameName: metadata.gameName || null,
           instanceRoot: metadata.instanceRoot || null,
           ...metadata,
         }),
@@ -144,6 +147,7 @@ class GameLauncher {
       console.error("[GameLauncher] Failed to clear PID file:", e)
     }
     this.runningGameId = null
+    this.runningGameName = null
     this.runningInstanceRoot = null
   }
 
@@ -238,6 +242,7 @@ class GameLauncher {
         this.launchStatus = "running"
         this.trackedPid = pid
         this.runningGameId = savedRecord.gameId || null
+        this.runningGameName = savedRecord.gameName || null
         this.runningInstanceRoot = savedRecord.instanceRoot || null
         this.startProcessPoll(pid)
       } else {
@@ -246,6 +251,7 @@ class GameLauncher {
         this.launchStatus = "idle"
         this.trackedPid = null
         this.runningGameId = null
+        this.runningGameName = null
         this.runningInstanceRoot = null
       }
     }
@@ -292,6 +298,9 @@ class GameLauncher {
     if (this.runningGameId) {
       res.gameId = this.runningGameId
     }
+    if (this.runningGameName) {
+      res.gameName = this.runningGameName
+    }
     return res
   }
 
@@ -302,6 +311,7 @@ class GameLauncher {
    */
   async launch({
     gameId,
+    gameName,
     instanceRoot,
     playerName = "Player",
     ramGB = DEFAULT_RAM_GB,
@@ -332,6 +342,7 @@ class GameLauncher {
     }
 
     this.runningGameId = gameId || null
+    this.runningGameName = gameName || null
     this.runningInstanceRoot = effectiveInstanceRoot
     this.setStatus("preparing", gameId ? { gameId } : null)
 
@@ -440,6 +451,7 @@ class GameLauncher {
       this.activeChildProcess = child
       this.saveProcessPid(child.pid, {
         gameId: gameId || null,
+        gameName: gameName || null,
         instanceRoot: effectiveInstanceRoot,
         minecraftVersion: cleanMc,
         modLoader: resolvedLoader,

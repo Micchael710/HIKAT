@@ -821,6 +821,20 @@ export async function applyServerReleaseSync(
           })
           .where(eq(schema.projectSettings.id, "main"))
 
+    // Generate official client integrity manifest and write to server root at hikat/integrity.json BEFORE activating
+    try {
+      const integrityManifest = await generateOfficialServerIntegrityManifest(db, published)
+      await client.createFolder("/", "hikat").catch(() => {})
+      await client.writeFile("hikat/integrity.json", JSON.stringify(integrityManifest, null, 2))
+    } catch (integrityErr) {
+      console.error("[ServerReleaseSync] Failed to write hikat/integrity.json:", integrityErr)
+      throw createGraphQLError(
+        "No se pudo generar el archivo de integridad oficial (hikat/integrity.json) en el servidor.",
+        "INTERNAL_ERROR",
+      )
+    }
+
+    // ONLY IF writing the manifest succeeded: mark APPLIED and activate release
     await db.batch([
       db
         .update(schema.serverReleaseSyncs)
@@ -833,19 +847,6 @@ export async function applyServerReleaseSync(
         .where(eq(schema.serverReleaseSyncs.id, syncId)),
       activateQuery,
     ])
-
-    // Generate official client integrity manifest and write to server root at hikat/integrity.json
-    try {
-      const integrityManifest = await generateOfficialServerIntegrityManifest(db, published)
-      await client.createFolder("/", "hikat").catch(() => {})
-      await client.writeFile("hikat/integrity.json", JSON.stringify(integrityManifest, null, 2))
-    } catch (integrityErr) {
-      console.error("[ServerReleaseSync] Failed to write hikat/integrity.json:", integrityErr)
-      throw createGraphQLError(
-        "No se pudo generar el archivo de integridad oficial (hikat/integrity.json) en el servidor.",
-        "INTERNAL_ERROR",
-      )
-    }
 
     let cover = null
     if (published.coverMediaId) {
@@ -948,8 +949,8 @@ export async function generateOfficialServerIntegrityManifest(
     }
   }
 
-  // Sort alphabetically by canonical path
-  protectedItems.sort((a, b) => a.path.localeCompare(b.path))
+  // Deterministic lexicographical sorting by Unicode code units (identical to Java String.compareTo)
+  protectedItems.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 
   // Construct deterministic canonical string: `${path}:${sha256}\n`
   let canonical = ""

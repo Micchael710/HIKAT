@@ -3059,6 +3059,7 @@ ipcMain.handle("game-launch", async (_event, options = {}) => {
 
   return await operationManager.launchGame(gameLauncher, {
     gameId: ctx.gameId,
+    gameName: ctx.gameName || options.gameName || null,
     instanceRoot: ctx.instanceRoot,
     playerName: options.playerName || "Player",
     ramGB: effectiveRamGB,
@@ -3141,6 +3142,7 @@ ipcMain.handle("game-get-status", async (_event, payload = {}) => {
       status,
       pid,
       gameId: requestedGameId,
+      gameName: isThisGameRunning ? (launchStatus.gameName || null) : null,
       runningGameId,
       operationState,
       activeOperationGameId: effectiveActiveGameId,

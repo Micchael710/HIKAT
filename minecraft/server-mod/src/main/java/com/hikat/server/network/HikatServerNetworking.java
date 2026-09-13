@@ -86,9 +86,16 @@ public class HikatServerNetworking {
                 return;
             }
 
-            // 5: Release version check
+            // 5: Official integrity manifest presence check (fail-closed)
             ServerIntegrityService integrityService = ServerIntegrityService.getInstance();
-            if (integrityService != null && !integrityService.isVersionMatch(payload.releaseVersion())) {
+            if (integrityService == null || !integrityService.isLoaded()) {
+                LOGGER.error("[HiKAT] Rejected connection: Official integrity manifest is missing or invalid on server");
+                context.disconnect(HikatMessages.getIntegrityManifestMissingMessage(locale));
+                return;
+            }
+
+            // 5b: Release version check
+            if (!integrityService.isVersionMatch(payload.releaseVersion())) {
                 LOGGER.warn("[HiKAT] Rejected: Release version mismatch (server: '{}', client: '{}')",
                         integrityService.getOfficialReleaseVersion(), payload.releaseVersion());
                 context.disconnect(HikatMessages.getVersionMismatchMessage(
@@ -100,7 +107,7 @@ public class HikatServerNetworking {
             }
 
             // 6: Integrity fingerprint check
-            if (integrityService != null && !integrityService.isFingerprintMatch(payload.integrityFingerprint())) {
+            if (!integrityService.isFingerprintMatch(payload.integrityFingerprint())) {
                 LOGGER.warn("[HiKAT] Rejected: Fingerprint mismatch (server: '{}', client: '{}')",
                         integrityService.getOfficialFingerprint(), payload.integrityFingerprint());
                 context.disconnect(HikatMessages.getModifiedFilesMessage(locale));
@@ -120,7 +127,7 @@ public class HikatServerNetworking {
                 return;
             }
 
-            // Impose permanent HiKAT UUID and username onto GameProfile
+            // Impose permanent HiKAT UUID and username onto GameProfile (FAIL-CLOSED)
             if (context.listener() instanceof ServerConfigurationPacketListenerImpl listenerImpl) {
                 GameProfile currentProfile = GameProfileHelper.getGameProfile(listenerImpl);
                 GameProfile hikatProfile = new GameProfile(hikatUuid, hikatUsername);
@@ -129,15 +136,24 @@ public class HikatServerNetworking {
                 }
 
                 boolean setOk = GameProfileHelper.setGameProfile(listenerImpl, hikatProfile);
-                if (setOk) {
-                    LOGGER.info("[HiKAT] Successfully authenticated player: '{}' with permanent UUID: {}",
+                GameProfile verified = GameProfileHelper.getGameProfile(listenerImpl);
+
+                if (!setOk || verified == null || !hikatUuid.equals(verified.getId()) || !hikatUsername.equals(verified.getName())) {
+                    LOGGER.error("[HiKAT] CRITICAL: Failed to impose HiKAT GameProfile for user '{}' (uuid: {}). Rejecting login fail-closed.",
                             hikatUsername, hikatUuid);
-                } else {
-                    LOGGER.warn("[HiKAT] Could not mutate GameProfile directly on listener");
+                    context.disconnect(HikatMessages.getProfileImposeFailedMessage(locale));
+                    return; // DO NOT FINISH TASK! FAIL CLOSED!
                 }
+
+                LOGGER.info("[HiKAT] Successfully authenticated and verified player: '{}' with permanent UUID: {}",
+                        hikatUsername, hikatUuid);
+            } else {
+                LOGGER.error("[HiKAT] CRITICAL: Listener is not ServerConfigurationPacketListenerImpl. Rejecting login fail-closed.");
+                context.disconnect(HikatMessages.getProfileImposeFailedMessage(locale));
+                return; // DO NOT FINISH TASK! FAIL CLOSED!
             }
 
-            // Finish configuration task to proceed with player join
+            // Finish configuration task to proceed with player join ONLY if GameProfile was verified!
             context.finishCurrentTask(HikatConfigurationTask.TYPE);
         });
     }

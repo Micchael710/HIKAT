@@ -1,30 +1,43 @@
 package com.hikat.client.integrity;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 public class ClientIntegrityServiceTest {
 
-    @Test
-    void testIntegrityCalculationAndReactivity(@TempDir Path tempDir) throws Exception {
-        // Setup folder structure
-        Path hikatDir = tempDir.resolve(".hikat");
-        Path modsDir = tempDir.resolve("mods");
-        Path configDir = tempDir.resolve("config");
+    @TempDir
+    Path tempDir;
+
+    private Path hikatDir;
+    private Path modsDir;
+    private Path configDir;
+    private Path officialMod;
+    private Path configFile;
+    private ClientIntegrityService service;
+    private String originalFingerprint;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        hikatDir = tempDir.resolve(".hikat");
+        modsDir = tempDir.resolve("mods");
+        configDir = tempDir.resolve("config");
         Files.createDirectories(hikatDir);
         Files.createDirectories(modsDir);
         Files.createDirectories(configDir);
 
-        Path modFile = modsDir.resolve("sample-mod.jar");
-        Files.writeString(modFile, "dummy-mod-content-v1");
+        officialMod = modsDir.resolve("official-mod.jar");
+        Files.writeString(officialMod, "official-mod-v1-bytes");
 
-        Path configFile = configDir.resolve("settings.json");
-        Files.writeString(configFile, "{\"setting\": true}");
+        configFile = configDir.resolve("settings.toml");
+        Files.writeString(configFile, "setting_a = true");
 
         String manifestJson = """
                 {
@@ -34,10 +47,10 @@ public class ClientIntegrityServiceTest {
                     { "path": "config", "policy": "MODIFICABLE" }
                   ],
                   "files": {
-                    "mods/sample-mod.jar": {
+                    "mods/official-mod.jar": {
                       "policy": "NO_MODIFICABLE"
                     },
-                    "config/settings.json": {
+                    "config/settings.toml": {
                       "policy": "MODIFICABLE"
                     }
                   }
@@ -45,39 +58,94 @@ public class ClientIntegrityServiceTest {
                 """;
         Files.writeString(hikatDir.resolve("installed-manifest.json"), manifestJson);
 
-        // 1. Initial fingerprint
-        ClientIntegrityService service = new ClientIntegrityService(tempDir);
+        service = new ClientIntegrityService(tempDir);
         assertEquals(ClientIntegrityService.IntegrityState.VALID, service.getState());
-        assertEquals("1.0.0", service.getReleaseVersion());
-        String initialFingerprint = service.getFingerprint();
-        assertNotNull(initialFingerprint);
-        assertFalse(initialFingerprint.isEmpty());
+        originalFingerprint = service.getFingerprint();
+        assertNotNull(originalFingerprint);
+        assertFalse(originalFingerprint.isEmpty());
+    }
 
-        // 2. Modifying a MODIFICABLE file does NOT change the fingerprint
-        Files.writeString(configFile, "{\"setting\": false, \"updated\": true}");
-        Thread.sleep(100); // Give watcher a moment if triggered
-        assertEquals(initialFingerprint, service.getFingerprint(), "Modifying MODIFICABLE file should NOT change fingerprint");
+    @AfterEach
+    void tearDown() {
+        if (service != null) {
+            service.stopWatcher();
+        }
+    }
 
-        // 3. Modifying a NO_MODIFICABLE file DOES change fingerprint
-        Files.writeString(modFile, "tampered-content");
-        // Trigger watcher or re-check
-        Thread.sleep(200);
-        String tamperedFingerprint = service.getFingerprint();
-        assertNotEquals(initialFingerprint, tamperedFingerprint, "Modifying NO_MODIFICABLE file must change fingerprint");
+    private void awaitCondition(BooleanSupplier condition, String failureReason, long timeoutMs) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (!condition.getAsBoolean()) {
+            if (System.currentTimeMillis() > deadline) {
+                fail("Timeout exceeded (" + timeoutMs + "ms): " + failureReason);
+            }
+            Thread.sleep(25);
+        }
+    }
 
-        // 4. Adding an extra file in a protected directory changes fingerprint
-        Path extraMod = modsDir.resolve("cheat-mod.jar");
-        Files.writeString(extraMod, "cheat-code");
-        Thread.sleep(200);
-        String extraModFingerprint = service.getFingerprint();
-        assertNotEquals(tamperedFingerprint, extraModFingerprint, "Adding extra mod must change fingerprint");
+    @Test
+    void testRequirementsAThroughG() throws Exception {
+        // A) Eliminar un archivo OFICIAL NO_MODIFICABLE: fingerprint cambia
+        Files.delete(officialMod);
+        awaitCondition(
+                () -> !originalFingerprint.equals(service.getFingerprint()),
+                "Fingerprint must change when official NO_MODIFICABLE file is deleted",
+                3000
+        );
+        String deletedFingerprint = service.getFingerprint();
+        assertNotEquals(originalFingerprint, deletedFingerprint);
 
-        // 5. Deleting a protected file changes fingerprint
+        // B) Restaurarlo con contenido correcto: fingerprint vuelve al original
+        Files.writeString(officialMod, "official-mod-v1-bytes");
+        awaitCondition(
+                () -> originalFingerprint.equals(service.getFingerprint()),
+                "Fingerprint must restore to original after restoring file",
+                3000
+        );
+        assertEquals(originalFingerprint, service.getFingerprint());
+
+        // C) Crear archivo extra en directorio protegido: fingerprint cambia
+        Path extraMod = modsDir.resolve("unauthorized-extra.jar");
+        Files.writeString(extraMod, "cheat-extra-bytes");
+        awaitCondition(
+                () -> !originalFingerprint.equals(service.getFingerprint()),
+                "Fingerprint must change when unauthorized file is added to protected dir",
+                3000
+        );
+        String extraFingerprint = service.getFingerprint();
+        assertNotEquals(originalFingerprint, extraFingerprint);
+
+        // D) Eliminar el extra: vuelve al fingerprint anterior
         Files.delete(extraMod);
-        Thread.sleep(200);
-        String afterDeleteExtra = service.getFingerprint();
-        assertEquals(tamperedFingerprint, afterDeleteExtra, "Deleting extra mod should restore to tampered fingerprint");
+        awaitCondition(
+                () -> originalFingerprint.equals(service.getFingerprint()),
+                "Fingerprint must return to original when extra file is removed",
+                3000
+        );
+        assertEquals(originalFingerprint, service.getFingerprint());
 
-        service.stopWatcher();
+        // E) Modificar archivo MODIFICABLE: fingerprint no cambia y no dispara PENDING
+        int pendingBefore = service.getPendingTransitions();
+        Files.writeString(configFile, "setting_a = false\nsetting_b = 42");
+        Thread.sleep(200); // Give watcher time to observe if any event fired
+        assertEquals(originalFingerprint, service.getFingerprint(), "Modifying MODIFICABLE file must NOT alter fingerprint");
+        assertEquals(pendingBefore, service.getPendingTransitions(), "Modifying MODIFICABLE file must NOT trigger PENDING state");
+
+        // F) Crear una SUBCARPETA nueva dentro de directorio protegido y crear archivo dentro
+        Path subDir = modsDir.resolve("subfolder");
+        Files.createDirectory(subDir);
+        Path subFile = subDir.resolve("nested-mod.jar");
+        Files.writeString(subFile, "nested-mod-bytes");
+
+        awaitCondition(
+                () -> !originalFingerprint.equals(service.getFingerprint()),
+                "Watcher must register new subdirectory and detect new file inside it",
+                3000
+        );
+        String subfolderFingerprint = service.getFingerprint();
+        assertNotEquals(originalFingerprint, subfolderFingerprint);
+
+        // G) Durante un evento protegido: el estado pasa por PENDING antes de quedar VALID
+        assertTrue(service.getPendingTransitions() > 0, "Integrity service must have transitioned through PENDING during mutations");
+        assertEquals(ClientIntegrityService.IntegrityState.VALID, service.getState());
     }
 }

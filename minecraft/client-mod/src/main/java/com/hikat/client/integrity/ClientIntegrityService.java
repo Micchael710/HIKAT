@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,6 +31,7 @@ public class ClientIntegrityService {
 
     private final Path gameDir;
     private final AtomicReference<IntegrityState> state = new AtomicReference<>(IntegrityState.PENDING);
+    private final java.util.concurrent.atomic.AtomicInteger pendingTransitions = new java.util.concurrent.atomic.AtomicInteger(0);
     private final ConcurrentHashMap<String, String> currentHashMap = new ConcurrentHashMap<>();
     private final Set<String> expectedProtectedPaths = new ConcurrentSkipListSet<>();
     private final Set<String> protectedDirectories = new ConcurrentSkipListSet<>();
@@ -62,7 +64,6 @@ public class ClientIntegrityService {
 
         Path manifestPath = gameDir.resolve(".hikat").resolve("installed-manifest.json");
         if (!Files.exists(manifestPath)) {
-            // Check fallback
             manifestPath = gameDir.resolve("installed-manifest.json");
         }
 
@@ -120,7 +121,6 @@ public class ClientIntegrityService {
                         String effective = resolveEffectivePolicy(normPath, explicitPol);
                         if ("NO_MODIFICABLE".equalsIgnoreCase(effective)) {
                             expectedProtectedPaths.add(normPath);
-                            // Track parent directory as protected
                             int slashIdx = normPath.lastIndexOf('/');
                             if (slashIdx > 0) {
                                 protectedDirectories.add(normPath.substring(0, slashIdx));
@@ -145,7 +145,7 @@ public class ClientIntegrityService {
                 }
             }
 
-            // 4. Detect extra files in protected directories (e.g. unauthorized mods)
+            // 4. Detect extra files in protected directories (recursive walk)
             for (String dirRel : protectedDirectories) {
                 Path dirPath = gameDir.resolve(dirRel);
                 if (Files.isDirectory(dirPath)) {
@@ -172,7 +172,7 @@ public class ClientIntegrityService {
             recalculateFingerprint();
             state.set(IntegrityState.VALID);
 
-            // 6. Setup dynamic filesystem watcher
+            // 6. Setup dynamic filesystem watcher (recursive)
             startWatcher();
         } catch (Exception e) {
             LOGGER.error("[HiKAT] Failed to initialize client integrity service: {}", e.getMessage(), e);
@@ -184,7 +184,7 @@ public class ClientIntegrityService {
     private void recalculateFingerprint() {
         try {
             List<String> sortedPaths = new ArrayList<>(currentHashMap.keySet());
-            Collections.sort(sortedPaths);
+            Collections.sort(sortedPaths); // Unicode code-unit lexicographical ordering
 
             StringBuilder canonical = new StringBuilder();
             for (String path : sortedPaths) {
@@ -213,13 +213,7 @@ public class ClientIntegrityService {
             for (String dirRel : protectedDirectories) {
                 Path dirPath = gameDir.resolve(dirRel);
                 if (Files.isDirectory(dirPath)) {
-                    WatchKey key = dirPath.register(
-                            watchService,
-                            StandardWatchEventKinds.ENTRY_CREATE,
-                            StandardWatchEventKinds.ENTRY_DELETE,
-                            StandardWatchEventKinds.ENTRY_MODIFY
-                    );
-                    watchKeyPaths.put(key, dirPath);
+                    registerTree(dirPath);
                 }
             }
 
@@ -228,6 +222,32 @@ public class ClientIntegrityService {
             watcherThread.start();
         } catch (Exception e) {
             LOGGER.warn("[HiKAT] Could not start WatchService: {}", e.getMessage());
+        }
+    }
+
+    private void registerTree(Path startDir) {
+        if (!Files.isDirectory(startDir)) return;
+        try {
+            Files.walkFileTree(startDir, new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    try {
+                        WatchKey key = dir.register(
+                                watchService,
+                                StandardWatchEventKinds.ENTRY_CREATE,
+                                StandardWatchEventKinds.ENTRY_DELETE,
+                                StandardWatchEventKinds.ENTRY_MODIFY,
+                                StandardWatchEventKinds.OVERFLOW
+                        );
+                        watchKeyPaths.put(key, dir);
+                    } catch (Exception e) {
+                        LOGGER.warn("[HiKAT] Could not register directory {}: {}", dir, e.getMessage());
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (Exception e) {
+            LOGGER.warn("[HiKAT] Error walking directory tree {}: {}", startDir, e.getMessage());
         }
     }
 
@@ -250,7 +270,13 @@ public class ClientIntegrityService {
 
             for (WatchEvent<?> event : key.pollEvents()) {
                 WatchEvent.Kind<?> kind = event.kind();
+
+                // Handle OVERFLOW: reconcile protected tree
+                // Handle OVERFLOW: reconcile protected tree
                 if (kind == StandardWatchEventKinds.OVERFLOW) {
+                    markPending();
+                    reconcileTree(parentDir);
+                    integrityAffected = true;
                     continue;
                 }
 
@@ -262,45 +288,87 @@ public class ClientIntegrityService {
 
                 String effective = resolveEffectivePolicy(relPath, null);
                 if (!"NO_MODIFICABLE".equalsIgnoreCase(effective)) {
-                    // MODIFICABLE files do NOT alter fingerprint or trigger PENDING
                     continue;
                 }
 
-                // 1. Mark immediately as PENDING during rehash
-                state.set(IntegrityState.PENDING);
+                // 1. Mark immediately as PENDING during rehash/mutation
+                markPending();
                 integrityAffected = true;
 
                 if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
-                    if (expectedProtectedPaths.contains(relPath)) {
-                        currentHashMap.put(relPath, "MISSING");
-                    } else {
-                        currentHashMap.remove(relPath);
-                    }
-                } else {
-                    // ENTRY_CREATE or ENTRY_MODIFY: rehash only affected file
-                    try {
-                        Thread.sleep(10); // Allow OS write flush
-                    } catch (InterruptedException ignored) {}
-
-                    if (Files.isRegularFile(fullPath)) {
-                        String newSha = computeFileSha256(fullPath);
-                        if (newSha != null) {
-                            currentHashMap.put(relPath, newSha.toLowerCase());
-                        } else {
-                            currentHashMap.put(relPath, "READ_ERROR");
+                    // Check if a directory was deleted
+                    boolean wasDir = false;
+                    for (Map.Entry<WatchKey, Path> entry : watchKeyPaths.entrySet()) {
+                        if (entry.getValue().startsWith(fullPath)) {
+                            entry.getKey().cancel();
+                            watchKeyPaths.remove(entry.getKey());
+                            wasDir = true;
                         }
-                    } else if (!Files.exists(fullPath)) {
+                    }
+
+                    if (wasDir) {
+                        // All files under that deleted dir
+                        String dirPrefix = relPath + "/";
+                        for (String k : new ArrayList<>(currentHashMap.keySet())) {
+                            if (k.startsWith(dirPrefix) || k.equals(relPath)) {
+                                if (expectedProtectedPaths.contains(k)) {
+                                    currentHashMap.put(k, "MISSING");
+                                } else {
+                                    currentHashMap.remove(k);
+                                }
+                            }
+                        }
+                    } else {
                         if (expectedProtectedPaths.contains(relPath)) {
                             currentHashMap.put(relPath, "MISSING");
                         } else {
                             currentHashMap.remove(relPath);
                         }
                     }
+                } else if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
+                    try {
+                        Thread.sleep(15); // Allow OS write flush
+                    } catch (InterruptedException ignored) {}
+
+                    if (Files.isDirectory(fullPath)) {
+                        // Register new directory and its subdirectories recursively
+                        registerTree(fullPath);
+                        try (Stream<Path> stream = Files.walk(fullPath)) {
+                            stream.filter(Files::isRegularFile).forEach(f -> {
+                                String r = normalizePath(gameDir.relativize(f).toString());
+                                if ("NO_MODIFICABLE".equalsIgnoreCase(resolveEffectivePolicy(r, null))) {
+                                    String s = computeFileSha256(f);
+                                    if (s != null) {
+                                        currentHashMap.put(r, s.toLowerCase());
+                                    }
+                                }
+                            });
+                        } catch (Exception ignored) {}
+                    } else if (Files.isRegularFile(fullPath)) {
+                        String newSha = computeFileSha256(fullPath);
+                        if (newSha != null) {
+                            currentHashMap.put(relPath, newSha.toLowerCase());
+                        } else {
+                            currentHashMap.put(relPath, "READ_ERROR");
+                        }
+                    }
+                } else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
+                    if (Files.isRegularFile(fullPath)) {
+                        try {
+                            Thread.sleep(15); // Allow OS write flush
+                        } catch (InterruptedException ignored) {}
+
+                        String newSha = computeFileSha256(fullPath);
+                        if (newSha != null) {
+                            currentHashMap.put(relPath, newSha.toLowerCase());
+                        } else {
+                            currentHashMap.put(relPath, "READ_ERROR");
+                        }
+                    }
                 }
             }
 
             if (integrityAffected) {
-                // Recompute global fingerprint from updated in-memory map
                 recalculateFingerprint();
                 state.set(IntegrityState.VALID);
             }
@@ -308,6 +376,43 @@ public class ClientIntegrityService {
             boolean valid = key.reset();
             if (!valid) {
                 watchKeyPaths.remove(key);
+            }
+        }
+    }
+
+    private void reconcileTree(Path targetDir) {
+        if (targetDir == null) return;
+        String dirRelPrefix = normalizePath(gameDir.relativize(targetDir).toString());
+
+        if (Files.isDirectory(targetDir)) {
+            registerTree(targetDir);
+            try (Stream<Path> stream = Files.walk(targetDir)) {
+                stream.filter(Files::isRegularFile).forEach(file -> {
+                    String rel = normalizePath(gameDir.relativize(file).toString());
+                    String effective = resolveEffectivePolicy(rel, null);
+                    if ("NO_MODIFICABLE".equalsIgnoreCase(effective)) {
+                        String sha = computeFileSha256(file);
+                        if (sha != null) {
+                            currentHashMap.put(rel, sha.toLowerCase());
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                LOGGER.warn("[HiKAT] Error reconciling tree {}: {}", targetDir, e.getMessage());
+            }
+        }
+
+        String prefixWithSlash = dirRelPrefix.isEmpty() ? "" : dirRelPrefix + "/";
+        for (String existingPath : new ArrayList<>(currentHashMap.keySet())) {
+            if (existingPath.startsWith(prefixWithSlash) || existingPath.equals(dirRelPrefix)) {
+                Path p = gameDir.resolve(existingPath);
+                if (!Files.exists(p)) {
+                    if (expectedProtectedPaths.contains(existingPath)) {
+                        currentHashMap.put(existingPath, "MISSING");
+                    } else {
+                        currentHashMap.remove(existingPath);
+                    }
+                }
             }
         }
     }
@@ -396,6 +501,15 @@ public class ClientIntegrityService {
 
     public String getReleaseVersion() {
         return releaseVersion;
+    }
+
+    public int getPendingTransitions() {
+        return pendingTransitions.get();
+    }
+
+    private void markPending() {
+        pendingTransitions.incrementAndGet();
+        state.set(IntegrityState.PENDING);
     }
 
     public Map<String, String> getCurrentHashMap() {

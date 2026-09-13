@@ -94,4 +94,26 @@ public class HikatMessages {
         };
         return Component.literal(text);
     }
+
+    public static Component getIntegrityManifestMissingMessage(String rawLocale) {
+        Lang lang = Lang.fromLocaleString(rawLocale);
+        String text = switch (lang) {
+            case ES -> "El servidor no tiene un manifiesto de integridad oficial válido configurado.";
+            case EN -> "The server does not have a valid official integrity manifest configured.";
+            case FR -> "Le serveur n'a pas de manifeste d'intégrité officiel valide configuré.";
+            case PT -> "O servidor não possui um manifesto de integridade oficial válido configurado.";
+        };
+        return Component.literal(text);
+    }
+
+    public static Component getProfileImposeFailedMessage(String rawLocale) {
+        Lang lang = Lang.fromLocaleString(rawLocale);
+        String text = switch (lang) {
+            case ES -> "Error interno al asignar el perfil permanente de HiKAT. Contacta a un administrador.";
+            case EN -> "Internal error assigning permanent HiKAT profile. Contact an administrator.";
+            case FR -> "Erreur interne lors de l'attribution du profil permanent HiKAT. Contactez un administrateur.";
+            case PT -> "Erro interno ao atribuir o perfil permanente do HiKAT. Entre em contato com um administrador.";
+        };
+        return Component.literal(text);
+    }
 }

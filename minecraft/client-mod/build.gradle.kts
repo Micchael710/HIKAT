@@ -5,6 +5,16 @@ plugins {
 
 neoForge {
     version = property("neoforge_version").toString()
+    mods {
+        create("hikat_client") {
+            sourceSet(sourceSets["main"])
+        }
+    }
+    runs {
+        create("client") {
+            client()
+        }
+    }
 }
 
 dependencies {

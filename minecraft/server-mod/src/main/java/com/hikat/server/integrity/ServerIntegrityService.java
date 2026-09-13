@@ -79,14 +79,14 @@ public class ServerIntegrityService {
 
     public boolean isVersionMatch(String clientVersion) {
         if (!loaded || officialReleaseVersion.isEmpty()) {
-            return true;
+            return false;
         }
         return officialReleaseVersion.equalsIgnoreCase(clientVersion != null ? clientVersion.trim() : "");
     }
 
     public boolean isFingerprintMatch(String clientFingerprint) {
         if (!loaded || officialFingerprint.isEmpty()) {
-            return true;
+            return false;
         }
         return officialFingerprint.equalsIgnoreCase(clientFingerprint != null ? clientFingerprint.trim() : "");
     }

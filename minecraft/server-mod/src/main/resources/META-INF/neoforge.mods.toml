@@ -8,3 +8,6 @@ version="0.1.0"
 displayName="HiKAT Server Mod"
 description="HiKAT Server-side Minecraft Integration and Verification"
 authors="HiKAT Team"
+
+[[mixins]]
+config="hikat_server.mixins.json"
