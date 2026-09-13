@@ -739,4 +739,53 @@ describe("@hikat/graphql foundation & contracts", () => {
     `
     expect(validate(schema, parse(queryDoc))).toHaveLength(0)
   })
+
+  it("validates searchServerContent query requesting modLoader and modLoaderVersion against schema", () => {
+    const schema = getBaseSchema()
+
+    const searchDoc = /* GraphQL */ `
+      query SearchServerContent(
+        $query: String!
+        $contentType: ContentType
+        $provider: ModProvider
+        $limit: Int
+        $offset: Int
+        $cursor: String
+        $serverId: ID
+      ) {
+        searchServerContent(
+          query: $query
+          contentType: $contentType
+          provider: $provider
+          limit: $limit
+          offset: $offset
+          cursor: $cursor
+          serverId: $serverId
+        ) {
+          items {
+            provider
+            projectId
+            name
+          }
+          totalCount
+          hasMore
+          nextCursor
+          minecraftVersion
+          modLoader
+          modLoaderVersion
+          neoForgeVersion
+          isPublishedEnvironment
+        }
+      }
+    `
+    const errors = validate(schema, parse(searchDoc))
+    expect(errors).toHaveLength(0)
+
+    const serverContentSearchPayload = schema.getType("ServerContentSearchPayload") as GraphQLObjectType
+    expect(serverContentSearchPayload).toBeDefined()
+    const fields = serverContentSearchPayload.getFields()
+    expect(fields.modLoader).toBeDefined()
+    expect(fields.modLoaderVersion).toBeDefined()
+  })
 })
+

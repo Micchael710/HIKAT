@@ -251,6 +251,8 @@ export const serverTypeDefs = /* GraphQL */ `
     nextCursor: String
     providersStatus: [ModProviderStatus!]!
     minecraftVersion: String!
+    modLoader: GameModLoader!
+    modLoaderVersion: String
     neoForgeVersion: String!
     isPublishedEnvironment: Boolean!
   }
