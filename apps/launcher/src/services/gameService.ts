@@ -203,6 +203,7 @@ export function _resetReleaseEventsSubscriptionForTesting() {
 export const GET_PUBLISHED_MODPACK_QUERY = `
   query GetPublishedModpack($serverId: ID) {
     publishedModpack(serverId: $serverId) {
+      releaseId
       version
       minecraftVersion
       modLoader
