@@ -27,6 +27,7 @@ export interface ContentMedia {
 }
 
 export interface PublishedModpack {
+  releaseId?: string | null
   version: string
   minecraftVersion: string
   modLoader: GameModLoader
@@ -186,6 +187,13 @@ interface ElectronAPI {
   promoteQueuedSync?: (gameContext?: GameContext) => Promise<{ success: boolean; promoted?: boolean; error?: string }>
   uninstallGame?: (gameContext?: GameContext) => Promise<{ success: boolean }>
   getInstalledState?: (gameContext?: GameContext) => Promise<{ installedModpackVersion: string | null; integrityDirty?: boolean }>
+  writeGameSession?: (payload: {
+    gameId?: string
+    gameName?: string
+    gameToken: string
+    releaseId: string
+    protectedFiles: string[]
+  }) => Promise<{ success: boolean }>
   launchGame?: (options: {
     playerName?: string
     ramGB?: number

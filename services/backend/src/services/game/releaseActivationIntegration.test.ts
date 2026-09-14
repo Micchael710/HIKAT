@@ -109,6 +109,22 @@ function createMockPterodactylClient(options: {
       return { data: items }
     },
     async createFolder() {},
+    async getFileContents(path: string) {
+      const normalized = path.replace(/^\/+/, "")
+      const content = fileStore.get(normalized)
+      if (!content) throw new Error("File not found")
+      return typeof content === "string" ? content : new TextDecoder().decode(content)
+    },
+    async renameFile(root: string, from: string, to: string) {
+      const rootNorm = root.replace(/^\/+/, "").replace(/\/+$/, "")
+      const oldPath = rootNorm ? `${rootNorm}/${from}` : from
+      const newPath = rootNorm ? `${rootNorm}/${to}` : to
+      const data = fileStore.get(oldPath)
+      if (data) {
+        fileStore.delete(oldPath)
+        fileStore.set(newPath, data)
+      }
+    },
     async writeFile(path: string, content: Uint8Array | string) {
       if (options.failWrite) throw new Error("Disk write error on Wings")
       const normalized = path.replace(/^\/+/, "")
@@ -181,6 +197,7 @@ describe("Shard 8F: Final Integration & Release Activation Test Suite", () => {
       PTERODACTYL_BASE_URL: "https://panel.test.hikat.org",
       PTERODACTYL_API_KEY: "ptla_test_key",
       PTERODACTYL_SERVER_ID: "srv_test_id",
+      pterodactylClient: createMockPterodactylClient({ status: "offline" }),
     } as unknown as Env
 
     adminId = crypto.randomUUID()

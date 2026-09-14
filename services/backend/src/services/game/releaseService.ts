@@ -33,6 +33,8 @@ import {
 import { ensureSettingsRecord } from "../settingsService"
 import { broadcastReleaseActivated } from "../../releaseEvents"
 import { validateGameEnvironment } from "./gameEnvironmentService"
+import type { IPterodactylClient } from "../pterodactyl/types"
+import { syncServerIntegrityJson } from "../pterodactyl/serverReleaseSyncService"
 import { assertExplicitServerIdIfMultiple } from "../pterodactyl/serverAdministrationService"
 import type { Env } from "../../types"
 
@@ -556,6 +558,7 @@ export async function getPublishedModpack(
   }
 
   return {
+    releaseId: activeRelease.id,
     version: activeRelease.version,
     minecraftVersion: activeRelease.minecraftVersion,
     modLoader: (activeRelease.modLoader || "NEOFORGE") as GameModLoaderGql,
@@ -1115,6 +1118,7 @@ export async function publishGameRelease(
   _userId: string,
   request?: Request,
   serverId?: string | null,
+  clientOverride?: IPterodactylClient,
 ): Promise<GameReleaseGql> {
   await assertExplicitServerIdIfMultiple(db, serverId, "publicación de release de juego")
 
@@ -1316,26 +1320,40 @@ export async function publishGameRelease(
     )
 
   if (shouldActivate) {
-    if (targetServerId) {
-      const activateQuery = db
-        .update(schema.servers)
-        .set({
-          launcherActiveReleaseId: draft.id,
-          updatedAt: now,
-        })
-        .where(eq(schema.servers.id, targetServerId))
+    let integritySync: { rollback: () => Promise<void> } | null = null
+    const isPterodactylConfigured = Boolean(
+      clientOverride ||
+      env.PTERODACTYL_BASE_URL ||
+      (targetServerId && (await db.select().from(schema.servers).where(eq(schema.servers.id, targetServerId)).get())?.pterodactylIdentifier)
+    )
 
-      await db.batch([archiveQuery, publishQuery, activateQuery])
-    } else {
-      const activateQuery = db
-        .update(schema.projectSettings)
-        .set({
-          launcherActiveReleaseId: draft.id,
-          updatedAt: now,
-        })
-        .where(eq(schema.projectSettings.id, "main"))
+    if (isPterodactylConfigured) {
+      integritySync = await syncServerIntegrityJson(db, env, draft.id, targetServerId, clientOverride)
+    }
 
+    const activateQuery = targetServerId
+      ? db
+          .update(schema.servers)
+          .set({
+            launcherActiveReleaseId: draft.id,
+            updatedAt: now,
+          })
+          .where(eq(schema.servers.id, targetServerId))
+      : db
+          .update(schema.projectSettings)
+          .set({
+            launcherActiveReleaseId: draft.id,
+            updatedAt: now,
+          })
+          .where(eq(schema.projectSettings.id, "main"))
+
+    try {
       await db.batch([archiveQuery, publishQuery, activateQuery])
+    } catch (dbErr) {
+      if (integritySync) {
+        await integritySync.rollback()
+      }
+      throw dbErr
     }
   } else {
     await db.batch([archiveQuery, publishQuery])

@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   promoteQueuedSync: (gameContext) => ipcRenderer.invoke("game-promote-queued-sync", gameContext),
   uninstallGame: (gameContext) => ipcRenderer.invoke("game-uninstall", gameContext),
   getInstalledState: (gameContext) => ipcRenderer.invoke("game-get-installed-state", gameContext),
+  writeGameSession: (payload) => ipcRenderer.invoke("game-write-session", payload),
   launchGame: (options) => ipcRenderer.invoke("game-launch", options),
   getLaunchStatus: (gameContext) => ipcRenderer.invoke("game-get-status", gameContext),
   getGameRuntimeInfo: (gameContext) => ipcRenderer.invoke("game-get-runtime-info", gameContext),

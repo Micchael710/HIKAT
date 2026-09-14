@@ -922,6 +922,26 @@ class LauncherAuthService {
       }
     }
   }
+
+  public async getGameToken(): Promise<string> {
+    const token = this.client.getAccessToken()
+    if (!token) {
+      throw new Error("No active session to obtain game token")
+    }
+
+    const res = await fetch(`${AUTH_URL}/auth/game-token`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || "Failed to obtain game token")
+    }
+    const data = await res.json()
+    return data.gameToken
+  }
 }
 
 export const authService = new LauncherAuthService()

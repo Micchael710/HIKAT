@@ -5,6 +5,7 @@ import { isNull, eq } from "drizzle-orm"
 import {
   getServerReleaseSyncPlan,
   applyServerReleaseSync,
+  syncServerIntegrityJson,
 } from "./serverReleaseSyncService"
 import { prepareGameDraft, publishGameRelease } from "../game/releaseService"
 import { updateAdminSettings } from "../settingsService"
@@ -1204,9 +1205,26 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
           attributes: { uuid: "bk-1", completed_at: new Date().toISOString(), is_successful: true },
         }),
         createFolder: vi.fn().mockResolvedValue(undefined),
-        writeFile: vi.fn().mockImplementation(async (path: string, content: Uint8Array) => {
+        getFileContents: vi.fn().mockImplementation(async (path: string) => {
           const normalized = path.replace(/^\/+/, "")
-          fileStore.set(normalized, new Uint8Array(content))
+          const data = fileStore.get(normalized)
+          if (!data) throw new Error("File not found")
+          return new TextDecoder().decode(data)
+        }),
+        renameFile: vi.fn().mockImplementation(async (root: string, from: string, to: string) => {
+          const rootNorm = root.replace(/^\/+/, "").replace(/\/+$/, "")
+          const oldPath = rootNorm ? `${rootNorm}/${from}` : from
+          const newPath = rootNorm ? `${rootNorm}/${to}` : to
+          const data = fileStore.get(oldPath)
+          if (data) {
+            fileStore.delete(oldPath)
+            fileStore.set(newPath, data)
+          }
+        }),
+        writeFile: vi.fn().mockImplementation(async (path: string, content: string | Uint8Array) => {
+          const normalized = path.replace(/^\/+/, "")
+          const bytes = typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content)
+          fileStore.set(normalized, bytes)
         }),
         deleteFiles: vi.fn().mockImplementation(async (path: string, files: string[]) => {
           for (const f of files) {
@@ -1626,7 +1644,8 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
     })
 
     // 2. Publish release
-    const published = await publishGameRelease(db, env, { version: "1.1.0" }, "admin-1", undefined, "warria-id")
+    const { client } = createMockWingsClient()
+    const published = await publishGameRelease(db, env, { version: "1.1.0" }, "admin-1", undefined, "warria-id", client)
     expect(published.status).toBe("PUBLISHED")
 
     // 3. Under PLAYERS_FIRST, launcherActiveReleaseId is set immediately BEFORE server apply
@@ -1638,7 +1657,6 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
     expect(serverRow?.launcherActiveReleaseId).toBe(published.id)
 
     // 4. Server changes remain pending without blocking launcher visibility
-    const { client } = createMockWingsClient()
     const plan = await getServerReleaseSyncPlan(db, env, "warria-id", client)
     expect(plan.isPending).toBe(true)
   })
@@ -1743,7 +1761,8 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
     })
 
     // 2. Publish release
-    const published = await publishGameRelease(db, env, { version: "1.3.0" }, "admin-1", undefined, "warria-id")
+    const { client } = createMockWingsClient()
+    const published = await publishGameRelease(db, env, { version: "1.3.0" }, "admin-1", undefined, "warria-id", client)
     expect(published.status).toBe("PUBLISHED")
 
     // Verify: launcherActiveReleaseId is activated IMMEDIATELY because 0 server changes required
@@ -1753,5 +1772,128 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
       .where(eq(schema.servers.id, "warria-id"))
       .get()
     expect(serverRow?.launcherActiveReleaseId).toBe(published.id)
+  })
+
+  describe("Phase 12: Server Integrity JSON & Fail-Safe Rollback", () => {
+    it("syncServerIntegrityJson writes integrity.json with expectedFingerprint from client NO_MODIFICABLE files", async () => {
+      const draft = await prepareGameDraft(db, "admin-1", null, env)
+      const nowIso = new Date().toISOString()
+
+      // Insert client files: 1 NO_MODIFICABLE mod, 1 MODIFICABLE config, 1 SERVER mod
+      await db.insert(schema.gameReleaseFiles).values([
+        {
+          id: "grf-1",
+          releaseId: draft.id,
+          name: "create.jar",
+          logicalPath: "mods/create.jar",
+          category: "MOD",
+          sha256: "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
+          sizeBytes: 1000,
+          policy: "NO_MODIFICABLE",
+          isDirectory: false,
+          sourceEnvironment: "BOTH",
+          createdAt: nowIso,
+        },
+        {
+          id: "grf-2",
+          releaseId: draft.id,
+          name: "create.toml",
+          logicalPath: "config/create.toml",
+          category: "CONFIG",
+          sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0",
+          sizeBytes: 500,
+          policy: "NO_MODIFICABLE", // explicitly locked
+          isDirectory: false,
+          createdAt: nowIso,
+        },
+        {
+          id: "grf-3",
+          releaseId: draft.id,
+          name: "server-only.jar",
+          logicalPath: "mods/server-only.jar",
+          category: "MOD",
+          sha256: "99887766554433221100aabbccddeeff99887766554433221100aabbccddeeff",
+          sizeBytes: 500,
+          policy: "NO_MODIFICABLE",
+          isDirectory: false,
+          sourceEnvironment: "SERVER", // Excluded from client manifest!
+          createdAt: nowIso,
+        },
+      ])
+
+      const filesOnWings = new Map<string, string>()
+      const mockClient = {
+        createFolder: vi.fn().mockResolvedValue(undefined),
+        writeFile: vi.fn().mockImplementation(async (path: string, content: string) => {
+          filesOnWings.set(path, content)
+        }),
+        renameFile: vi.fn().mockImplementation(async (root: string, from: string, to: string) => {
+          const fromPath = `${root}/${from}`.replace("//", "/")
+          const toPath = `${root}/${to}`.replace("//", "/")
+          const data = filesOnWings.get(fromPath)
+          if (data) {
+            filesOnWings.delete(fromPath)
+            filesOnWings.set(toPath, data)
+          }
+        }),
+        getFileContents: vi.fn().mockImplementation(async (path: string) => {
+          const val = filesOnWings.get(path)
+          if (!val) throw new Error("404")
+          return val
+        }),
+      }
+
+      const { rollback } = await syncServerIntegrityJson(db, env, draft.id, null, mockClient as any)
+      expect(typeof rollback).toBe("function")
+
+      // Verify integrity.json was written to Wings
+      const writtenJson = filesOnWings.get("/hikat/integrity.json")
+      expect(writtenJson).toBeDefined()
+      const parsed = JSON.parse(writtenJson!)
+      expect(parsed.releaseId).toBe(draft.id)
+      expect(typeof parsed.expectedFingerprint).toBe("string")
+      expect(parsed.expectedFingerprint.length).toBe(64)
+    })
+
+    it("restores previous integrity.json on fail-safe rollback if activation fails", async () => {
+      const filesOnWings = new Map<string, string>()
+      filesOnWings.set("/hikat/integrity.json", JSON.stringify({ releaseId: "rel-old", expectedFingerprint: "old-fingerprint" }))
+
+      const mockClient = {
+        createFolder: vi.fn().mockResolvedValue(undefined),
+        writeFile: vi.fn().mockImplementation(async (path: string, content: string) => {
+          filesOnWings.set(path, content)
+        }),
+        renameFile: vi.fn().mockImplementation(async (root: string, from: string, to: string) => {
+          const fromPath = `${root}/${from}`.replace("//", "/")
+          const toPath = `${root}/${to}`.replace("//", "/")
+          const data = filesOnWings.get(fromPath)
+          if (data) {
+            filesOnWings.delete(fromPath)
+            filesOnWings.set(toPath, data)
+          }
+        }),
+        getFileContents: vi.fn().mockImplementation(async (path: string) => {
+          const val = filesOnWings.get(path)
+          if (!val) throw new Error("404")
+          return val
+        }),
+      }
+
+      const draft = await prepareGameDraft(db, "admin-1", null, env)
+      const { rollback } = await syncServerIntegrityJson(db, env, draft.id, null, mockClient as any)
+
+      // Verify new integrity.json is written
+      const newlyWritten = JSON.parse(filesOnWings.get("/hikat/integrity.json")!)
+      expect(newlyWritten.releaseId).toBe(draft.id)
+
+      // Trigger fail-safe rollback
+      await rollback()
+
+      // Verify old integrity.json is restored
+      const restored = JSON.parse(filesOnWings.get("/hikat/integrity.json")!)
+      expect(restored.releaseId).toBe("rel-old")
+      expect(restored.expectedFingerprint).toBe("old-fingerprint")
+    })
   })
 })

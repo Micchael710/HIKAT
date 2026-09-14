@@ -117,6 +117,10 @@ export async function resolvePterodactylClient(
     return { client: effectiveClientOverride }
   }
 
+  if ((env as any)?.pterodactylClient) {
+    return { client: (env as any).pterodactylClient }
+  }
+
   // Legacy fallback ONLY when NO serverId was received.
   if (!effectiveServerId) {
     return { client: createPterodactylClient(env) }

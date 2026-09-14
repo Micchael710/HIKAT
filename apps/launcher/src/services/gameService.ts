@@ -1,5 +1,6 @@
 import { graphqlClient } from "./apiClient"
 import { getApiBaseUrl } from "../config/api"
+import { authService } from "./authService"
 import type { PublishedModpack, ClientFile, SyncPlanCheckResult } from "../vite-env"
 
 export type GameButtonState =
@@ -17,6 +18,7 @@ export type GameButtonState =
   | "running"
 
 export interface GameManifest {
+  releaseId?: string | null
   version: string
   minecraftVersion: string
   modLoader: import("../vite-env").GameModLoader
@@ -623,4 +625,75 @@ export const gameService = {
       })
     }
   },
+
+  async writeGameSession(options: {
+    gameToken: string
+    releaseId: string
+    protectedFiles: string[]
+    gameContext?: { gameId: string; gameName: string }
+  }) {
+    if (window.electronAPI?.writeGameSession) {
+      return await window.electronAPI.writeGameSession({
+        gameToken: options.gameToken,
+        releaseId: options.releaseId,
+        protectedFiles: options.protectedFiles,
+        gameId: options.gameContext?.gameId,
+        gameName: options.gameContext?.gameName,
+      })
+    }
+  },
+
+  startSessionRenewal(payload: {
+    releaseId: string
+    protectedFiles: string[]
+    gameContext?: { gameId: string; gameName: string }
+  }) {
+    this.stopSessionRenewal()
+    const activePayload = {
+      gameId: payload.gameContext?.gameId,
+      gameName: payload.gameContext?.gameName,
+      releaseId: payload.releaseId,
+      protectedFiles: payload.protectedFiles,
+    }
+
+    sessionRenewalTimer = setInterval(async () => {
+      try {
+        if (!activePayload) {
+          gameService.stopSessionRenewal()
+          return
+        }
+        if (window.electronAPI?.getLaunchStatus) {
+          const status = await window.electronAPI.getLaunchStatus({
+            gameId: activePayload.gameId,
+            gameName: activePayload.gameName,
+          })
+          if (status?.status === "idle") {
+            gameService.stopSessionRenewal()
+            return
+          }
+        }
+        const gameToken = await authService.getGameToken()
+        if (window.electronAPI?.writeGameSession) {
+          await window.electronAPI.writeGameSession({
+            gameToken,
+            releaseId: activePayload.releaseId,
+            protectedFiles: activePayload.protectedFiles,
+            gameId: activePayload.gameId,
+            gameName: activePayload.gameName,
+          })
+        }
+      } catch (err) {
+        console.warn("[Session Renewal] Failed to renew game session:", err)
+      }
+    }, 60000)
+  },
+
+  stopSessionRenewal() {
+    if (sessionRenewalTimer) {
+      clearInterval(sessionRenewalTimer)
+      sessionRenewalTimer = null
+    }
+  },
 }
+
+let sessionRenewalTimer: any = null

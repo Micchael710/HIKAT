@@ -596,11 +596,23 @@ describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
     expect(isValidHexColor("#12345")).toBe(false)
     expect(isValidHexColor("#1234567")).toBe(false)
   })
+
+  it("computes canonical fingerprint matching exact shared test vector", async () => {
+    const { computeCanonicalFingerprint, buildCanonicalFingerprintString } = await import("./index")
+    const items = [
+      { logicalPath: "mods/jei.jar", sha256: "ffeeddccbbaa00998877665544332211ffeeddccbbaa00998877665544332211" },
+      { logicalPath: "config/create.toml", sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0" },
+      { logicalPath: "mods/create.jar", sha256: "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff" },
+    ]
+
+    const canonicalString = buildCanonicalFingerprintString(items)
+    expect(canonicalString).toBe(
+      "config/create.toml\u0000a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0\n" +
+      "mods/create.jar\u000011223344556677889900aabbccddeeff11223344556677889900aabbccddeeff\n" +
+      "mods/jei.jar\u0000ffeeddccbbaa00998877665544332211ffeeddccbbaa00998877665544332211\n"
+    )
+
+    const fingerprint = await computeCanonicalFingerprint(items)
+    expect(fingerprint).toBe("4fac370ba18fb419bdef32b87c01b28f3051a55f0a60a9d8a337fdd36f5d5c50")
+  })
 })
-
-
-
-
-
-
-

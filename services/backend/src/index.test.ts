@@ -59,6 +59,7 @@ import worker, {
 } from "./index"
 
 import { createTestR2Bucket } from "./testUtils/mockR2"
+import { PterodactylHttpClient } from "./services/pterodactyl/pterodactylClient"
 
 describe("HiKAT Backend Core (Shard 03)", () => {
   let testD1: ReturnType<typeof createTestD1>
@@ -5748,6 +5749,31 @@ describe("HiKAT Backend Core (Shard 03)", () => {
 
     let mockR2: ReturnType<typeof createTestR2Bucket>
 
+    const mockCorePterodactylClient = {
+      getFileContents: vi.fn().mockRejectedValue(new Error("File not found")),
+      createFolder: vi.fn().mockResolvedValue(undefined),
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      deleteFiles: vi.fn().mockResolvedValue(undefined),
+      listDirectory: vi.fn().mockResolvedValue({ data: [] }),
+      getServerResources: vi.fn().mockImplementation(async () => {
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.test",
+          apiKey: "ptlc_test_key",
+          serverId: "srv_test_uuid",
+        })
+        return client.getServerResources()
+      }),
+      getServerDetails: vi.fn().mockImplementation(async () => {
+        const client = new PterodactylHttpClient({
+          baseUrl: "https://panel.test",
+          apiKey: "ptlc_test_key",
+          serverId: "srv_test_uuid",
+        })
+        return client.getServerDetails()
+      }),
+    }
+
     const createCoreEnv = (): Env => ({
       DB: testD1 as unknown as D1Database,
 
@@ -5772,7 +5798,9 @@ describe("HiKAT Backend Core (Shard 03)", () => {
       R2_PARENT_SECRET_ACCESS_KEY: "parent-secret-123456789",
 
       R2_BUCKET_NAME: "hikat-r2",
-    })
+
+      pterodactylClient: mockCorePterodactylClient as any,
+    } as unknown as Env)
 
     beforeEach(async () => {
       mockR2 = createTestR2Bucket()

@@ -163,6 +163,7 @@ export const gameTypeDefs = /* GraphQL */ `
   Published modpack release contract consumed by the HiKAT Launcher
   """
   type PublishedModpack {
+    releaseId: String
     version: String!
     minecraftVersion: String!
 

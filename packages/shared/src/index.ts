@@ -1815,11 +1815,65 @@ export function isValidHexColor(color: unknown): boolean {
   }
 }
 
+export const AUTH_AUDIENCE_GAME = "hikat-minecraft"
 
+export interface GameTokenPayload {
+  iss: string
+  aud: string
+  sub: string
+  displayName: string
+  iat: number
+  exp: number
+  jti: string
+}
 
+export interface CanonicalFingerprintItem {
+  logicalPath: string
+  sha256: string
+}
 
+export function normalizeFingerprintPath(rawPath: string): string {
+  return rawPath
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+/g, "/")
+    .trim()
+}
 
+export function buildCanonicalFingerprintString(
+  items: CanonicalFingerprintItem[],
+): string {
+  const sorted = [...items].sort((a, b) => {
+    const normA = normalizeFingerprintPath(a.logicalPath)
+    const normB = normalizeFingerprintPath(b.logicalPath)
+    if (normA < normB) return -1
+    if (normA > normB) return 1
+    return 0
+  })
 
+  let canonicalString = ""
+  for (const item of sorted) {
+    const normPath = normalizeFingerprintPath(item.logicalPath)
+    const normHash = item.sha256.toLowerCase().trim()
+    canonicalString += `${normPath}\u0000${normHash}\n`
+  }
+  return canonicalString
+}
 
+export async function sha256Hex(data: string | Uint8Array): Promise<string> {
+  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data
+  if (typeof crypto !== "undefined" && crypto.subtle?.digest) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes as any)
+    const hashArray = Array.from(new Uint8Array(digest))
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
+  }
+  throw new Error("Web Crypto API (crypto.subtle.digest) is not available in current environment")
+}
 
+export async function computeCanonicalFingerprint(
+  items: CanonicalFingerprintItem[],
+): Promise<string> {
+  const canonicalString = buildCanonicalFingerprintString(items)
+  return sha256Hex(canonicalString)
+}
 

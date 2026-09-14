@@ -1,7 +1,8 @@
 import { eq, and, desc, isNull } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
-import { validateGameFileBuffer } from "@hikat/shared"
+import { validateGameFileBuffer, computeCanonicalFingerprint } from "@hikat/shared"
+import { isClientGameReleaseFile, resolveReleaseEffectivePolicies } from "../game/releaseService"
 import type {
   ServerReleaseSyncPlanGql,
   ServerReleaseSyncStatusGql,
@@ -340,6 +341,83 @@ export async function getServerReleaseSyncStatus(
     status: latest.status as ServerReleaseSyncStatusEnumGql,
     appliedAt: latest.appliedAt,
     details: latest.details,
+  }
+}
+
+export interface IntegritySyncRollback {
+  rollback: () => Promise<void>
+}
+
+/**
+ * Synchronizes hikat/integrity.json to the server via Pterodactyl.
+ * Always corresponds to the full client manifest for NO_MODIFICABLE files.
+ * Provides a fail-safe rollback closure in case subsequent D1 activation fails.
+ */
+export async function syncServerIntegrityJson(
+  db: Database,
+  env: Env,
+  releaseId: string,
+  serverId?: string | null,
+  clientOverride?: IPterodactylClient,
+): Promise<IntegritySyncRollback> {
+  const { client } = await resolvePterodactylClient(db, env, serverId, clientOverride)
+
+  const allReleaseFiles = await db
+    .select()
+    .from(schema.gameReleaseFiles)
+    .where(eq(schema.gameReleaseFiles.releaseId, releaseId))
+    .all()
+
+  const clientFiles = allReleaseFiles.filter(isClientGameReleaseFile)
+  const effectiveMap = resolveReleaseEffectivePolicies(allReleaseFiles)
+  const protectedFiles = clientFiles.filter((f) => effectiveMap.get(f.id) === "NO_MODIFICABLE")
+
+  const items = protectedFiles.map((f) => ({
+    logicalPath: f.logicalPath,
+    sha256: f.sha256,
+  }))
+  const expectedFingerprint = await computeCanonicalFingerprint(items)
+
+  let previousIntegrityContent: string | null = null
+  if (typeof client.getFileContents === "function") {
+    try {
+      previousIntegrityContent = await client.getFileContents("/hikat/integrity.json")
+    } catch {
+      previousIntegrityContent = null
+    }
+  }
+
+  const integrityPayload = JSON.stringify(
+    {
+      releaseId,
+      expectedFingerprint,
+    },
+    null,
+    2,
+  )
+
+  if (typeof client.createFolder === "function") {
+    await client.createFolder("/", "hikat").catch(() => {})
+  }
+  if (typeof client.renameFile === "function") {
+    await client.writeFile("/hikat/integrity.tmp", integrityPayload)
+    await client.renameFile("/hikat", "integrity.tmp", "integrity.json")
+  } else if (typeof client.writeFile === "function") {
+    await client.writeFile("/hikat/integrity.json", integrityPayload)
+  }
+
+  return {
+    rollback: async () => {
+      try {
+        if (previousIntegrityContent !== null) {
+          await client.writeFile("/hikat/integrity.json", previousIntegrityContent)
+        } else {
+          await safeDeleteServerFilePhysical(client, "/hikat", "integrity.json").catch(() => {})
+        }
+      } catch (err) {
+        console.error("[IntegritySync] Failed to rollback integrity.json:", err)
+      }
+    },
   }
 }
 
@@ -822,19 +900,27 @@ export async function applyServerReleaseSync(
           .where(eq(schema.projectSettings.id, "main"))
 
 
-    // ONLY IF writing the manifest succeeded: mark APPLIED and activate release
-    await db.batch([
-      db
-        .update(schema.serverReleaseSyncs)
-        .set({
-          status: "APPLIED",
-          appliedAt: nowEnd,
-          details: JSON.stringify(finalSummary),
-          updatedAt: nowEnd,
-        })
-        .where(eq(schema.serverReleaseSyncs.id, syncId)),
-      activateQuery,
-    ])
+    // 8. Write integrity.json to server before activating release
+    const integritySync = await syncServerIntegrityJson(db, env, published.id, targetServerId, client)
+
+    try {
+      // ONLY IF writing the manifest succeeded: mark APPLIED and activate release
+      await db.batch([
+        db
+          .update(schema.serverReleaseSyncs)
+          .set({
+            status: "APPLIED",
+            appliedAt: nowEnd,
+            details: JSON.stringify(finalSummary),
+            updatedAt: nowEnd,
+          })
+          .where(eq(schema.serverReleaseSyncs.id, syncId)),
+        activateQuery,
+      ])
+    } catch (d1Err) {
+      await integritySync.rollback()
+      throw d1Err
+    }
 
     let cover = null
     if (published.coverMediaId) {

@@ -692,6 +692,7 @@ export interface DirectoryPolicyGql {
 }
 
 export interface PublishedModpackGql {
+  releaseId?: string | null
   version: string
   minecraftVersion: string
   modLoader: GameModLoaderGql

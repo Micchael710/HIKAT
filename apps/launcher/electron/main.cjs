@@ -2978,6 +2978,25 @@ ipcMain.handle("game-uninstall", async (_event, payload = {}) => {
   return res
 })
 
+ipcMain.handle("game-write-session", async (_event, payload = {}) => {
+  const ctx = resolveGameContext(payload)
+  const hikatDir = path.join(ctx.instanceRoot, ".hikat")
+  if (!fs.existsSync(hikatDir)) {
+    fs.mkdirSync(hikatDir, { recursive: true })
+  }
+  const sessionPath = path.join(hikatDir, "session.json")
+  const tmpPath = path.join(hikatDir, "session.tmp")
+  const data = JSON.stringify({
+    schemaVersion: 1,
+    releaseId: payload.releaseId || "",
+    gameToken: payload.gameToken || "",
+    protectedFiles: Array.isArray(payload.protectedFiles) ? payload.protectedFiles : [],
+  }, null, 2)
+  fs.writeFileSync(tmpPath, data, "utf8")
+  fs.renameSync(tmpPath, sessionPath)
+  return { success: true }
+})
+
 ipcMain.handle("game-launch", async (_event, options = {}) => {
   const ctx = resolveGameContext(options)
 

@@ -507,6 +507,7 @@ describe("@hikat/graphql foundation & contracts", () => {
     expect(publishedModpackType).toBeDefined()
     const modpackFields = Object.keys(publishedModpackType.getFields())
     expect(modpackFields).toEqual([
+      "releaseId",
       "version",
       "minecraftVersion",
       "modLoader",

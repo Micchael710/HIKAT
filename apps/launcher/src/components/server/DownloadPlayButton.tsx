@@ -16,6 +16,7 @@ import {
   ReleaseActivatedEvent,
   isFullGameManifest,
 } from "../../services/gameService"
+import { authService } from "../../services/authService"
 import {
   STORAGE_KEYS,
   SETTINGS_CHANGED_EVENT,
@@ -60,6 +61,7 @@ export function buildManifestFromPublished(
   const hasUpdate = Boolean(isInstalled && installedVersion !== published.version)
 
   return {
+    releaseId: published.releaseId || null,
     version: published.version,
     minecraftVersion: published.minecraftVersion || "",
     modLoader: (published.modLoader as any) || "NEOFORGE",
@@ -1789,6 +1791,29 @@ export default function DownloadPlayButton({
         }
       } catch (_) { }
 
+      if (manifest) {
+        try {
+          const gameToken = await authService.getGameToken()
+          const protectedFiles = (manifest.clientFiles || [])
+            .filter((f) => f.policy === "NO_MODIFICABLE")
+            .map((f) => f.path)
+          const releaseId = manifest.releaseId || manifest.version || ""
+          await gameService.writeGameSession({
+            gameToken,
+            releaseId,
+            protectedFiles,
+            gameContext: effectiveGameContext,
+          })
+          gameService.startSessionRenewal({
+            releaseId,
+            protectedFiles,
+            gameContext: effectiveGameContext,
+          })
+        } catch (authErr) {
+          console.warn("Could not prepare game session:", authErr)
+        }
+      }
+
       try {
         await gameService.launchGame({
           playerName,
@@ -1800,6 +1825,7 @@ export default function DownloadPlayButton({
         })
         if (onPlay) onPlay()
       } catch (err: any) {
+        gameService.stopSessionRenewal()
         console.error("Launch error:", err)
         showToast(t("playButton.launchVerifyHint"), "error")
       }

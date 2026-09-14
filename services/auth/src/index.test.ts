@@ -32,6 +32,8 @@ import {
   createDevKeyManager,
   signAccessToken,
   verifyAccessToken,
+  signGameToken,
+  verifyGameToken,
   getJwksResponse,
 } from "./crypto/jwt"
 import { MockEmailService, ResendEmailService, renderHikatEmail, EMAIL_TRANSLATIONS } from "./services/email"
@@ -4326,6 +4328,92 @@ describe("HiKAT Authentication System (Shard 02)", () => {
         const subsequentUser = await getOrCreateOAuthUser(db, googleProfile)
         expect(subsequentUser.displayName).toBe("BrayanMateo")
       })
+    })
+  })
+
+  describe("Minecraft Game Token (Phase 12)", () => {
+    it("signs and verifies a valid Game Token with ES256 and hikat-minecraft audience", async () => {
+      const { token, expiresIn } = await signGameToken(
+        { userId: "usr-test-1", displayName: "PlayerSteve" },
+        keyManager,
+      )
+      expect(typeof token).toBe("string")
+      expect(expiresIn).toBe(180)
+
+      const payload = await verifyGameToken(token, keyManager)
+      expect(payload.sub).toBe("usr-test-1")
+      expect(payload.displayName).toBe("PlayerSteve")
+      expect(payload.aud).toBe("hikat-minecraft")
+      expect(payload.iss).toBe(DEFAULT_AUTH_ISSUER)
+    })
+
+    it("rejects game token with wrong audience", async () => {
+      const { token } = await signAccessToken(
+        { userId: "usr-test-1", sessionId: "sess-1", role: "PLAYER", displayName: "PlayerSteve" },
+        keyManager,
+      )
+      // Access token has aud: "hikat-api", verifyGameToken expects "hikat-minecraft"
+      await expect(verifyGameToken(token, keyManager)).rejects.toThrow()
+    })
+
+    it("POST /auth/game-token issues token for authenticated user with displayName", async () => {
+      await registerAndVerify({
+        email: "steve@hikat.org",
+        password: "ValidPassword123!",
+        displayName: "SteveCraft",
+      })
+
+      const loginRes = await handleRequest({
+        request: new Request("http://127.0.0.1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: "steve@hikat.org", password: "ValidPassword123!" }),
+        }),
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      const loginBody = (await loginRes.json()) as { accessToken: string }
+      const accessToken = loginBody.accessToken
+
+      const gameTokenRes = await handleRequest({
+        request: new Request("http://127.0.0.1/auth/game-token", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }),
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(gameTokenRes.status).toBe(200)
+      const gameTokenBody = (await gameTokenRes.json()) as {
+        gameToken: string
+        expiresIn: number
+        user: { id: string; displayName: string }
+      }
+      expect(typeof gameTokenBody.gameToken).toBe("string")
+      expect(gameTokenBody.expiresIn).toBe(180)
+      expect(gameTokenBody.user.displayName).toBe("SteveCraft")
+
+      // Verify returned token
+      const verified = await verifyGameToken(gameTokenBody.gameToken, keyManager)
+      expect(verified.sub).toBe(gameTokenBody.user.id)
+      expect(verified.displayName).toBe("SteveCraft")
+    })
+
+    it("POST /auth/game-token rejects unauthenticated request", async () => {
+      const res = await handleRequest({
+        request: new Request("http://127.0.0.1/auth/game-token", {
+          method: "POST",
+        }),
+        env: {},
+        db,
+        keyManager,
+        emailService,
+      })
+      expect(res.status).toBe(401)
     })
   })
 })

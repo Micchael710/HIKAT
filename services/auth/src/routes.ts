@@ -15,6 +15,7 @@ import {
   JwtKeyManager,
   getJwksResponse,
   verifyAccessToken,
+  signGameToken,
 } from "./crypto/jwt"
 import { hashToken } from "./crypto/tokens"
 import { EmailService, EmailLocale, sanitizeEmailLocale } from "./services/email"
@@ -1458,6 +1459,47 @@ export async function handleRequest(ctx: RouteContext): Promise<Response> {
           suggestedUsername,
         },
         suggestedUsername,
+      })
+    }
+
+    // 19. Minecraft Game Token: POST /auth/game-token
+    if (pathname === "/auth/game-token" && method === "POST") {
+      const { userId, sessionId } = await extractAuthenticatedSession(request, keyManager)
+      const isActive = await validateActiveSession(db, sessionId, userId)
+      if (!isActive) {
+        return errorResponse(AuthErrorCode.UNAUTHORIZED, "Session expired or revoked", 401)
+      }
+
+      const user = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .get()
+
+      if (!user) {
+        return errorResponse(AuthErrorCode.UNAUTHORIZED, "User not found", 401)
+      }
+
+      if (!user.displayName) {
+        return errorResponse("DISPLAY_NAME_REQUIRED", "User must set a displayName before joining the game", 400)
+      }
+
+      const { token, expiresIn } = await signGameToken(
+        {
+          userId: user.id,
+          displayName: user.displayName,
+        },
+        keyManager,
+      )
+
+      return jsonResponse({
+        gameToken: token,
+        expiresIn,
+        tokenType: "Bearer",
+        user: {
+          id: user.id,
+          displayName: user.displayName,
+        },
       })
     }
 
