@@ -168,7 +168,7 @@ func BuildLoginDisconnect(protocolVersion int, message string) []byte {
 	var body []byte
 
 	if protocolVersion <= 764 {
-		// Protocol <= 764: JSON Component String
+		// Protocol <= 764: JSON Component String ({"text":"<mensaje>"})
 		jsonPayload := fmt.Sprintf(`{"text":%q}`, message)
 		jsonBytes := []byte(jsonPayload)
 		lenVarInt := EncodeVarInt(int32(len(jsonBytes)))
