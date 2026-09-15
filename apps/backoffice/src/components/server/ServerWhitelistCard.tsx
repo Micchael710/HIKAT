@@ -25,6 +25,7 @@ export default function ServerWhitelistCard({
   const [adding, setAdding] = useState<boolean>(false)
   const [removingName, setRemovingName] = useState<string | null>(null)
   const [playerNameInput, setPlayerNameInput] = useState<string>("")
+  const [selectedPlayers, setSelectedPlayers] = useState<string[]>([])
   const [showDropdown, setShowDropdown] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -69,19 +70,84 @@ export default function ServerWhitelistCard({
     }
   }
 
-  const handleAddPlayer = async (e?: React.FormEvent) => {
+  const handleSelectCandidate = (name: string) => {
+    setSelectedPlayers((prev) => {
+      if (prev.some((p) => p.toLowerCase() === name.toLowerCase())) return prev
+      return [...prev, name]
+    })
+    setPlayerNameInput("")
+    setShowDropdown(true)
+    inputRef.current?.focus()
+  }
+
+  const handleRemoveSelectedPlayer = (name: string) => {
+    setSelectedPlayers((prev) => prev.filter((p) => p.toLowerCase() !== name.toLowerCase()))
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace") {
+      if (playerNameInput === "" && selectedPlayers.length > 0) {
+        setSelectedPlayers((prev) => prev.slice(0, -1))
+      }
+    } else if (e.key === "Escape") {
+      setShowDropdown(false)
+    } else if (e.key === "Enter") {
+      e.preventDefault()
+      const clean = playerNameInput.trim()
+      if (clean) {
+        const match = filteredCandidates.find(
+          (c) => c.displayName.toLowerCase() === clean.toLowerCase(),
+        )
+        if (match) {
+          handleSelectCandidate(match.displayName)
+        }
+      } else if (selectedPlayers.length > 0) {
+        handleAddPlayers()
+      }
+    }
+  }
+
+  const handleAddPlayers = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
-    const clean = playerNameInput.trim()
-    if (!clean || adding) return
+    const pending = playerNameInput.trim()
+    const playersToAdd = [...selectedPlayers]
+    if (
+      pending &&
+      !playersToAdd.some((p) => p.toLowerCase() === pending.toLowerCase()) &&
+      !(whitelist?.entries || []).some((entry) => entry.name.toLowerCase() === pending.toLowerCase())
+    ) {
+      playersToAdd.push(pending)
+    }
+
+    if (playersToAdd.length === 0 || loading || adding) return
 
     setAdding(true)
+    setPlayerNameInput("")
     setShowDropdown(false)
+
+    const added: string[] = []
+    let lastUpdatedWhitelist: ServerWhitelist | null = null
+
     try {
-      const updated = await serverWhitelistApi.addServerWhitelistPlayer(serverId, clean)
-      setWhitelist(updated)
-      setPlayerNameInput("")
-      onToast?.(`Jugador "${clean}" añadido a la whitelist`, "success")
+      for (const name of playersToAdd) {
+        lastUpdatedWhitelist = await serverWhitelistApi.addServerWhitelistPlayer(serverId, name)
+        added.push(name)
+      }
+      if (lastUpdatedWhitelist) {
+        setWhitelist(lastUpdatedWhitelist)
+      }
+      setSelectedPlayers((prev) => prev.filter((p) => !added.includes(p)))
+
+      if (added.length === 1) {
+        onToast?.(`Jugador "${added[0]}" añadido a la whitelist`, "success")
+      } else {
+        onToast?.(`${added.length} jugadores añadidos a la whitelist`, "success")
+      }
     } catch (err: any) {
+      if (lastUpdatedWhitelist) {
+        setWhitelist(lastUpdatedWhitelist)
+      }
+      setSelectedPlayers((prev) => prev.filter((p) => !added.includes(p)))
       const msg = err.message || "Error al añadir jugador"
       onToast?.(msg, "error")
     } finally {
@@ -117,7 +183,10 @@ export default function ServerWhitelistCard({
           const alreadyInWhitelist = whitelist.entries.some(
             (e) => e.name.toLowerCase() === c.displayName.toLowerCase(),
           )
-          return matchesSearch && !alreadyInWhitelist
+          const alreadySelected = selectedPlayers.some(
+            (p) => p.toLowerCase() === c.displayName.toLowerCase(),
+          )
+          return matchesSearch && !alreadyInWhitelist && !alreadySelected
         })
       : []
 
@@ -133,6 +202,7 @@ export default function ServerWhitelistCard({
         gap: 14,
         boxShadow: tokens.cardShadow,
         boxSizing: "border-box",
+        minHeight: 360,
       }}
     >
       {/* Header */}
@@ -241,40 +311,121 @@ export default function ServerWhitelistCard({
         </div>
       )}
 
-      {/* Add Player Input Form with Autocomplete */}
+      {/* Add Player Multi-Chip Input Form with Autocomplete */}
       <form
-        onSubmit={handleAddPlayer}
+        onSubmit={handleAddPlayers}
         style={{
           display: "flex",
           gap: 8,
           position: "relative",
+          alignItems: "flex-start",
         }}
       >
         <div style={{ position: "relative", flex: 1 }}>
-          <input
-            ref={inputRef}
-            type="text"
-            value={playerNameInput}
-            onChange={(e) => {
-              setPlayerNameInput(e.target.value)
-              setShowDropdown(true)
+          <div
+            onClick={() => inputRef.current?.focus()}
+            onMouseDown={(e) => {
+              if (e.target !== inputRef.current) {
+                e.preventDefault()
+                inputRef.current?.focus()
+                setShowDropdown(true)
+              }
             }}
-            onFocus={() => setShowDropdown(true)}
-            onBlur={() => setShowDropdown(false)}
-            placeholder="Nombre del jugador..."
-            disabled={loading || adding}
             style={{
-              width: "100%",
-              boxSizing: "border-box",
-              padding: "8px 12px",
-              fontSize: "0.85rem",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 6,
+              padding: "5px 8px",
               backgroundColor: tokens.bgInput,
-              color: tokens.textPrimary,
               border: `1px solid ${tokens.borderSubtle}`,
               borderRadius: 10,
-              outline: "none",
+              minHeight: 38,
+              boxSizing: "border-box",
+              cursor: "text",
             }}
-          />
+          >
+            {selectedPlayers.map((player) => (
+              <div
+                key={player}
+                data-testid={`chip-${player}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                  backgroundColor: isDark ? "rgba(62, 196, 192, 0.15)" : "#e0f2fe",
+                  border: `1px solid ${isDark ? "rgba(62, 196, 192, 0.3)" : "#bae6fd"}`,
+                  color: isDark ? "#3ec4c0" : "#0284c7",
+                  fontSize: "0.8rem",
+                  fontWeight: 500,
+                  lineHeight: 1.4,
+                  userSelect: "none",
+                }}
+              >
+                <span>{player}</span>
+                <button
+                  type="button"
+                  data-testid={`remove-chip-${player}`}
+                  aria-label={`Quitar ${player}`}
+                  title={`Quitar ${player}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleRemoveSelectedPlayer(player)
+                    inputRef.current?.focus()
+                  }}
+                  style={{
+                    border: "none",
+                    background: "none",
+                    color: "inherit",
+                    cursor: "pointer",
+                    padding: "0 2px",
+                    fontSize: "14px",
+                    lineHeight: 1,
+                    fontWeight: 700,
+                    opacity: 0.75,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.75")}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+
+            <input
+              ref={inputRef}
+              type="text"
+              value={playerNameInput}
+              onChange={(e) => {
+                setPlayerNameInput(e.target.value)
+                setShowDropdown(true)
+              }}
+              onFocus={() => setShowDropdown(true)}
+              onBlur={() => setShowDropdown(false)}
+              onKeyDown={handleKeyDown}
+              placeholder="Nombre del jugador..."
+              disabled={loading || adding}
+              style={{
+                flex: "1 1 120px",
+                minWidth: 90,
+                border: "none",
+                outline: "none",
+                backgroundColor: "transparent",
+                color: tokens.textPrimary,
+                fontSize: "0.85rem",
+                padding: "3px 4px",
+              }}
+            />
+          </div>
 
           {/* Autocomplete Dropdown */}
           {showDropdown && filteredCandidates.length > 0 && (
@@ -307,16 +458,18 @@ export default function ServerWhitelistCard({
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    setPlayerNameInput(c.displayName)
-                    setShowDropdown(false)
+                    handleSelectCandidate(c.displayName)
+                  }}
+                  onClick={() => {
+                    handleSelectCandidate(c.displayName)
                   }}
                   style={{
                     display: "flex",
                     alignItems: "center",
                     gap: 10,
                     padding: "6px 10px",
-                    borderRadius: 6,
                     border: "none",
+                    borderRadius: 8,
                     backgroundColor: "transparent",
                     color: tokens.textPrimary,
                     cursor: "pointer",
@@ -344,7 +497,7 @@ export default function ServerWhitelistCard({
 
         <button
           type="submit"
-          disabled={loading || adding || !playerNameInput.trim()}
+          disabled={loading || adding || (selectedPlayers.length === 0 && !playerNameInput.trim())}
           className="launcher-btn-primary"
           style={{
             padding: "8px 16px",
@@ -352,19 +505,21 @@ export default function ServerWhitelistCard({
             fontWeight: 600,
             borderRadius: 10,
             cursor:
-              loading || adding || !playerNameInput.trim()
+              loading || adding || (selectedPlayers.length === 0 && !playerNameInput.trim())
                 ? "not-allowed"
                 : "pointer",
-            opacity: !playerNameInput.trim() ? 0.6 : 1,
+            opacity: selectedPlayers.length === 0 && !playerNameInput.trim() ? 0.6 : 1,
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
             height: "fit-content",
             alignSelf: "flex-start",
+            marginTop: 2,
           }}
         >
           {adding && <IconSpinner size={13} />}
-          Añadir
+          <span>Añadir</span>
+          {selectedPlayers.length > 1 && <span> ({selectedPlayers.length})</span>}
         </button>
       </form>
 
@@ -374,9 +529,10 @@ export default function ServerWhitelistCard({
           display: "flex",
           flexDirection: "column",
           gap: 6,
-          maxHeight: 180,
+          maxHeight: 200,
           overflowY: "auto",
           paddingRight: 2,
+          flex: 1,
         }}
         className="custom-scroll"
       >

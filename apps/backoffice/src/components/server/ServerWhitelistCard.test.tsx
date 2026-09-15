@@ -154,7 +154,8 @@ describe("ServerWhitelistCard Component", () => {
     const candidateBtn = screen.getByText("vBrayan06")
     fireEvent.mouseDown(candidateBtn)
 
-    expect((input as HTMLInputElement).value).toBe("vBrayan06")
+    expect(screen.getByTestId("chip-vBrayan06")).toBeDefined()
+    expect((input as HTMLInputElement).value).toBe("")
   })
 
   it("limits autocomplete suggestions to a maximum of 8 candidates", async () => {
