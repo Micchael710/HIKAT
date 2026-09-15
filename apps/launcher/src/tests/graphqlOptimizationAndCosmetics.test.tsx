@@ -1041,10 +1041,18 @@ describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite
     unmount()
   })
 
-  // 23. Play normal: si ya está instalado y saludable, Play no solicita full manifest
-  it("23. Play normal: si ya está instalado y saludable, Play no solicita full manifest", async () => {
-    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack")
+  // 23. Play con releaseSummary ligero: obtiene full manifest para session.json y lanza Minecraft
+  it("23. Play con releaseSummary ligero: obtiene full manifest para session.json y lanza Minecraft", async () => {
+    const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+      releaseId: "rel-meliora-full",
+      version: "2.0.0",
+      minecraftVersion: "1.20.1",
+      modLoader: "FORGE",
+      clientFiles: [],
+    } as any)
     const launchGameSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue(undefined as any)
+    vi.spyOn(authService, "getGameToken").mockResolvedValue("mock-token")
+    vi.spyOn(gameService, "writeGameSession").mockResolvedValue({ success: true } as any)
 
     const { container, unmount } = renderButton({
       serverId: "srv-meliora",
@@ -1055,7 +1063,6 @@ describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite
       integrityDirty: false,
     })
 
-    expect(getPublishedSpy).not.toHaveBeenCalled()
     const btn = container.querySelector("button")!
     expect(btn.textContent).toMatch(/play|jugar/i)
 
@@ -1063,8 +1070,8 @@ describe("HiKAT Launcher GraphQL Optimization & Shared WebSocket Cosmetics Suite
       btn.click()
     })
 
+    expect(getPublishedSpy).toHaveBeenCalledWith("srv-meliora")
     expect(launchGameSpy).toHaveBeenCalled()
-    expect(getPublishedSpy).not.toHaveBeenCalled()
     unmount()
   })
 

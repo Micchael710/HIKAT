@@ -13,6 +13,7 @@ import { serverService, type LauncherServer } from "../services/serverService"
 import { useLauncherState } from "../hooks/useLauncherState"
 import HomeView from "../views/HomeView"
 import type { DownloadQueueSnapshot, PublishedModpack } from "../vite-env"
+import { authService } from "../services/authService"
 
 const serverA: LauncherServer = {
   id: "server-a",
@@ -1586,6 +1587,9 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
       hasIntegrityErrors: true,
       filesToDownload: [{ path: "mods/test.jar", reason: "TAMPERED" }],
     })
+
+    vi.spyOn(authService, "getGameToken").mockResolvedValue("mock-token")
+    vi.spyOn(gameService, "writeGameSession").mockResolvedValue({ success: true } as any)
 
     await act(async () => {
       root.render(

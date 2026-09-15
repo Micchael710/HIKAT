@@ -2008,6 +2008,89 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       expect(toast?.textContent).toContain("Disk full")
     })
 
+    it("4d. When manifest is incomplete, obtains full manifest via ensureFullManifest, writes session.json, and launches game", async () => {
+      const getPublishedSpy = vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue({
+        releaseId: "rel-full-xyz",
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+        neoForgeVersion: "21.1.250",
+        clientFiles: [
+          {
+            path: "mods/required.jar",
+            sha256: "d".repeat(64),
+            sizeBytes: 1024,
+            downloadUrl: "/dl/required",
+            policy: "NO_MODIFICABLE",
+          },
+        ],
+      })
+      const writeSessionSpy = vi.spyOn(gameService, "writeGameSession").mockResolvedValue({ success: true } as any)
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton({
+        serverId: "server-alpha",
+        gameContext: { gameId: "server-alpha", gameName: "Alpha" },
+        installedVersion: "1.0.0",
+        releaseSummary: {
+          releaseId: "rel-summary",
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.250",
+        },
+      })
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      await act(async () => {
+        btn.click()
+      })
+
+      expect(getPublishedSpy).toHaveBeenCalledWith("server-alpha")
+      expect(writeSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          releaseId: "rel-full-xyz",
+          protectedFiles: ["mods/required.jar"],
+        }),
+      )
+      expect(launchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.250",
+        }),
+      )
+    })
+
+    it("4e. When manifest is incomplete and cannot obtain full manifest, shows error toast and does NOT launch game", async () => {
+      vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue(null)
+      const writeSessionSpy = vi.spyOn(gameService, "writeGameSession").mockResolvedValue({ success: true } as any)
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton({
+        serverId: "server-beta",
+        gameContext: { gameId: "server-beta", gameName: "Beta" },
+        installedVersion: "1.0.0",
+        releaseSummary: {
+          releaseId: "rel-summary",
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.250",
+        },
+      })
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      await act(async () => {
+        btn.click()
+      })
+
+      expect(writeSessionSpy).not.toHaveBeenCalled()
+      expect(launchSpy).not.toHaveBeenCalled()
+      const toast = container.querySelector(".play-button-toast, .settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.textContent).toContain("No se pudo iniciar el juego, verifica los archivos e inténtalo de nuevo")
+    })
+
     it("5. Filesystem integrity watcher event sets integrity lock silently without toast or changing button text", async () => {
       let watcherCallback: any = null
       window.electronAPI!.onGameFileIntegrityChanged = vi.fn((cb) => {

@@ -371,6 +371,8 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
   describe("H. Launch Does Not Rely on Global RAM", () => {
     it("DownloadPlayButton passes launch parameters without injecting global RAM", async () => {
       localStorage.setItem("hikat_ram_gb", "24")
+      vi.spyOn(authService, "getGameToken").mockResolvedValue("mock-token")
+      vi.spyOn(gameService, "writeGameSession").mockResolvedValue({ success: true } as any)
       const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
       vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
         version: "1.0.0",

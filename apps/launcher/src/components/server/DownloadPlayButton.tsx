@@ -1743,13 +1743,19 @@ export default function DownloadPlayButton({
       if (isLaunchBlockedByOtherGame) {
         return
       }
+
+      let playManifest = manifest
+      if (!isFullGameManifest(playManifest) && activeServerId) {
+        playManifest = await ensureFullManifest(activeServerId)
+      }
+      if (!isFullGameManifest(playManifest)) {
+        showToast(t("playButton.launchVerifyHint"), "error")
+        return
+      }
+
       const isDirty = Boolean(integrityDirty || isIntegrityBlockedRef.current)
       if (isDirty) {
-        let playManifest = manifest
-        if (!isFullGameManifest(playManifest) && activeServerId) {
-          playManifest = await ensureFullManifest(activeServerId)
-        }
-        if (window.electronAPI?.checkSyncPlan && playManifest?.clientFiles) {
+        if (window.electronAPI?.checkSyncPlan && playManifest.clientFiles) {
           try {
             const planPayload: any = {
               clientFiles: playManifest.clientFiles,
@@ -1791,41 +1797,39 @@ export default function DownloadPlayButton({
         }
       } catch (_) { }
 
-      if (manifest) {
-        try {
-          const gameToken = await authService.getGameToken()
-          const protectedFiles = (manifest.clientFiles || [])
-            .filter((f) => f.policy === "NO_MODIFICABLE")
-            .map((f) => f.path)
-          const releaseId = manifest.releaseId || manifest.version || ""
-          const writeRes = await gameService.writeGameSession({
-            gameToken,
-            releaseId,
-            protectedFiles,
-            gameContext: effectiveGameContext,
-          })
-          if (writeRes && (writeRes as any).success === false) {
-            throw new Error((writeRes as any).error || "No se pudo escribir la sesión de juego")
-          }
-          gameService.startSessionRenewal({
-            releaseId,
-            protectedFiles,
-            gameContext: effectiveGameContext,
-          })
-        } catch (authErr: any) {
-          console.error("Could not prepare game session:", authErr)
-          showToast(authErr?.message || t("playButton.launchVerifyHint"), "error")
-          return
+      try {
+        const gameToken = await authService.getGameToken()
+        const protectedFiles = (playManifest.clientFiles || [])
+          .filter((f) => f.policy === "NO_MODIFICABLE")
+          .map((f) => f.path)
+        const releaseId = playManifest.releaseId || playManifest.version || ""
+        const writeRes = await gameService.writeGameSession({
+          gameToken,
+          releaseId,
+          protectedFiles,
+          gameContext: effectiveGameContext,
+        })
+        if (writeRes && (writeRes as any).success === false) {
+          throw new Error((writeRes as any).error || "No se pudo escribir la sesión de juego")
         }
+        gameService.startSessionRenewal({
+          releaseId,
+          protectedFiles,
+          gameContext: effectiveGameContext,
+        })
+      } catch (authErr: any) {
+        console.error("Could not prepare game session:", authErr)
+        showToast(authErr?.message || t("playButton.launchVerifyHint"), "error")
+        return
       }
 
       try {
         await gameService.launchGame({
           playerName,
-          minecraftVersion: manifest?.minecraftVersion,
-          modLoader: manifest?.modLoader,
-          modLoaderVersion: manifest?.modLoaderVersion,
-          neoForgeVersion: manifest?.neoForgeVersion,
+          minecraftVersion: playManifest.minecraftVersion,
+          modLoader: playManifest.modLoader,
+          modLoaderVersion: playManifest.modLoaderVersion,
+          neoForgeVersion: playManifest.neoForgeVersion,
           gameContext: effectiveGameContext,
         })
         if (onPlay) onPlay()
