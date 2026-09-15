@@ -221,14 +221,13 @@ public class IntegrityWatcher {
                     currentHashes.put(rel, "MISSING");
                 }
             } else {
-                if (!FingerprintUtil.isSafePath(gameRoot, rel)) {
-                    return;
-                }
                 // Unknown / Extra file
                 String policy = sessionData != null ? sessionData.resolveEffectivePolicy(rel) : null;
                 if ("NO_MODIFICABLE".equalsIgnoreCase(policy)) {
-                    if (Files.isRegularFile(file)) {
+                    if (Files.isRegularFile(file) && FingerprintUtil.isSafePath(gameRoot, rel)) {
                         currentHashes.put(rel, FingerprintUtil.sha256Hex(file));
+                    } else if (!FingerprintUtil.isSafePath(gameRoot, rel)) {
+                        currentHashes.put(rel, "ERROR");
                     } else {
                         currentHashes.remove(rel);
                     }
@@ -237,8 +236,15 @@ public class IntegrityWatcher {
                 }
             }
         } catch (Exception e) {
-            if (rel != null && officialProtected.contains(rel)) {
-                currentHashes.put(rel, "ERROR");
+            if (rel != null) {
+                if (officialProtected.contains(rel)) {
+                    currentHashes.put(rel, "ERROR");
+                } else {
+                    String policy = sessionData != null ? sessionData.resolveEffectivePolicy(rel) : null;
+                    if ("NO_MODIFICABLE".equalsIgnoreCase(policy)) {
+                        currentHashes.put(rel, "ERROR");
+                    }
+                }
             }
         }
     }

@@ -376,4 +376,56 @@ public class IntegrityWatcherTest {
             watcher.stop();
         }
     }
+
+    @Test
+    public void testNewSymlinkInNoModificableDirectoryDetectedByWatcher(@TempDir Path tempDir) throws Exception {
+        Path modsDir = tempDir.resolve("mods");
+        Files.createDirectories(modsDir);
+        Path officialMod = modsDir.resolve("official.jar");
+        Files.writeString(officialMod, "official-binary-content");
+
+        Path externalDir = tempDir.resolve("external");
+        Files.createDirectories(externalDir);
+        Path externalTarget = externalDir.resolve("cheat_payload.jar");
+        Files.writeString(externalTarget, "cheat-payload-content");
+
+        String initHash = FingerprintUtil.sha256Hex(officialMod);
+        Map<String, String> initialHashes = new HashMap<>();
+        initialHashes.put("mods/official.jar", initHash);
+        String initFingerprint = FingerprintUtil.computeCanonicalFingerprint(initialHashes);
+
+        SessionData sessionData = new SessionData(
+            1, "rel-v1", "token-xyz",
+            List.of("mods/official.jar"),
+            List.of(new SessionData.PolicyEntry("mods/official.jar", "NO_MODIFICABLE")),
+            List.of(new SessionData.PolicyEntry("mods", "NO_MODIFICABLE"))
+        );
+
+        AtomicReference<String> updatedFingerprint = new AtomicReference<>();
+        IntegrityWatcher watcher = new IntegrityWatcher(
+            tempDir,
+            sessionData,
+            initialHashes,
+            initFingerprint,
+            updatedFingerprint::set
+        );
+
+        watcher.start();
+        try {
+            Path newSymlink = modsDir.resolve("cheat.jar");
+            try {
+                Files.createSymbolicLink(newSymlink, externalTarget);
+            } catch (UnsupportedOperationException | java.nio.file.FileSystemException | SecurityException e) {
+                Assumptions.abort("Symlinks not supported in this environment: " + e.getMessage());
+            }
+
+            awaitCondition(() -> updatedFingerprint.get() != null, 2500);
+            assertNotNull(updatedFingerprint.get(), "Watcher must detect new symlink in NO_MODIFICABLE directory");
+            assertNotEquals(initFingerprint, updatedFingerprint.get(), "Fingerprint must change when new symlink is created in NO_MODIFICABLE directory");
+            assertTrue(watcher.getCurrentHashes().containsKey("mods/cheat.jar"));
+            assertEquals("ERROR", watcher.getCurrentHashes().get("mods/cheat.jar"));
+        } finally {
+            watcher.stop();
+        }
+    }
 }
