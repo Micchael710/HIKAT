@@ -33,6 +33,7 @@ export interface Env {
   R2_PARENT_ACCESS_KEY_ID?: string
   R2_PARENT_SECRET_ACCESS_KEY?: string
   R2_BUCKET_NAME?: string
+  INTERNAL_PROXY_SECRET?: string
 }
 
 

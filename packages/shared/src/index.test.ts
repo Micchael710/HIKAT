@@ -582,6 +582,25 @@ describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
     expect(isValidWindowsFolderName("CON.dir")).toBe(false)
   })
 
+  it("normalizes server names to proxy slugs with max 58 characters", async () => {
+    const { serverNameToProxySlug, MAX_SERVER_PROXY_SLUG_LENGTH } = await import("./index")
+    expect(MAX_SERVER_PROXY_SLUG_LENGTH).toBe(58)
+    expect(serverNameToProxySlug("Meliora")).toBe("meliora")
+    expect(serverNameToProxySlug("Mi Servidor")).toBe("mi-servidor")
+    expect(serverNameToProxySlug("Servidor Épico")).toBe("servidor-epico")
+    expect(serverNameToProxySlug("   ---Espacios   y   Guiones---   ")).toBe("espacios-y-guiones")
+    expect(serverNameToProxySlug("Servidor_Especial_2026")).toBe("servidor-especial-2026")
+    expect(serverNameToProxySlug("Invalid !@#$%^&*() Chars")).toBe("invalid-chars")
+    expect(serverNameToProxySlug("")).toBe("")
+    expect(serverNameToProxySlug(null)).toBe("")
+    expect(serverNameToProxySlug(undefined)).toBe("")
+
+    const veryLongName = "A".repeat(80)
+    const slug = serverNameToProxySlug(veryLongName)
+    expect(slug.length).toBeLessThanOrEqual(58)
+    expect(slug).toBe("a".repeat(58))
+  })
+
   it("validates and normalizes HEX colors correctly", async () => {
     const { normalizeHexColor, isValidHexColor } = await import("./index")
     expect(normalizeHexColor(null)).toBeNull()

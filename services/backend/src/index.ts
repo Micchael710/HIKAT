@@ -33,6 +33,11 @@ import {
   handleGameFileDownload,
 } from "./services/game/gameStorageService"
 
+import {
+  handleProxyConnect,
+  handleProxyRoutes,
+} from "./services/proxyService"
+
 export * from "./types"
 
 export * from "./auth/verifier"
@@ -72,6 +77,8 @@ export * from "./media/transport"
 export * from "./resolvers"
 
 export * from "./releaseEvents"
+
+export * from "./services/proxyService"
 
 const KNOWN_SAFE_CODES = [
   "UNAUTHENTICATED",
@@ -269,6 +276,27 @@ export default {
 
       const id = env.RELEASE_EVENTS!.idFromName("global")
       return env.RELEASE_EVENTS!.get(id).fetch(request)
+    }
+
+    // Internal OCI Minecraft Proxy Endpoints (Phase 1)
+    if (url.pathname === "/internal/proxy/connect") {
+      if (request.method === "POST") {
+        return handleProxyConnect(request, env, db)
+      }
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
+    if (url.pathname === "/internal/proxy/routes") {
+      if (request.method === "GET") {
+        return handleProxyRoutes(request, env, db)
+      }
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+        headers: { "Content-Type": "application/json" },
+      })
     }
 
     // GraphQL Endpoint

@@ -12,6 +12,7 @@ import type {
 } from "@hikat/graphql"
 import {
   validateWindowsFolderName,
+  serverNameToProxySlug,
   normalizeHexColor,
   SERVER_MAX_CPU_PERCENT,
 } from "@hikat/shared"
@@ -403,6 +404,30 @@ export async function createServer(
   if (existing) {
     throw createGraphQLError(
       `Ya existe un servidor con el nombre "${cleanName}".`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  // 2b. Check proxy connection slug uniqueness and validity
+  const candidateSlug = serverNameToProxySlug(cleanName)
+  if (!candidateSlug) {
+    throw createGraphQLError(
+      "El nombre del servidor no genera un identificador de conexión válido.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const existingServers = await db
+    .select({ id: schema.servers.id, name: schema.servers.name })
+    .from(schema.servers)
+    .all()
+
+  const slugConflict = existingServers.find(
+    (s) => serverNameToProxySlug(s.name) === candidateSlug,
+  )
+  if (slugConflict) {
+    throw createGraphQLError(
+      `El nombre genera un identificador de conexión en conflicto ("${candidateSlug}") con otro servidor existente.`,
       "VALIDATION_ERROR",
     )
   }

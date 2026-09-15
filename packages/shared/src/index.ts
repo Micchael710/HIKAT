@@ -1804,6 +1804,27 @@ export function isValidWindowsFolderName(name: unknown): boolean {
   }
 }
 
+export const MAX_SERVER_PROXY_SLUG_LENGTH = 58
+
+export function serverNameToProxySlug(name: unknown): string {
+  if (typeof name !== "string") {
+    return ""
+  }
+  const normalized = name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
+  if (normalized.length > MAX_SERVER_PROXY_SLUG_LENGTH) {
+    return normalized.slice(0, MAX_SERVER_PROXY_SLUG_LENGTH).replace(/-+$/, "")
+  }
+  return normalized
+}
+
 const HEX_COLOR_REGEX = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/
 
 export function normalizeHexColor(color: unknown): string | null {
