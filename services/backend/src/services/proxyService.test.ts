@@ -326,6 +326,34 @@ describe("Proxy Service & Internal Endpoints Suite (Phase 1)", () => {
       expect(data.status).toBe("UNAVAILABLE")
     })
 
+    it("returns UNAVAILABLE if server lacks pterodactylIdentifier when resolving client", async () => {
+      const { db } = createMockD1()
+      const env = createMockEnv()
+
+      // Server is READY and has pterodactylServerId, but pterodactylIdentifier is missing
+      await db.insert(schema.servers).values({
+        id: "server-ready-no-ident",
+        name: "Meliora",
+        provisioningStatus: "READY",
+        pterodactylServerId: "10",
+        pterodactylIdentifier: null,
+      })
+
+      const req = new Request("http://localhost/internal/proxy/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer super-secure-proxy-secret-123",
+        },
+        body: JSON.stringify({ hostname: "play-meliora.hikat.org", intent: "LOGIN" }),
+      })
+
+      const res = await handleProxyConnect(req, env, db, undefined)
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.status).toBe("UNAVAILABLE")
+    })
+
     it("returns UNAVAILABLE if primary allocation is missing in Pterodactyl response", async () => {
       const { db } = createMockD1()
       const env = createMockEnv()
@@ -516,10 +544,22 @@ describe("Proxy Service & Internal Endpoints Suite (Phase 1)", () => {
         pterodactylIdentifier: "ptero-ident",
       })
 
+      let currentState = "offline"
+      ;(mockClient.getServerResources as any).mockImplementation(async () => ({
+        object: "stats",
+        attributes: {
+          current_state: currentState,
+          is_suspended: false,
+          resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 0 },
+        },
+      }))
+
       let callCount = 0
       ;(mockClient.sendPowerAction as any).mockImplementation(async () => {
         callCount++
-        if (callCount > 1) {
+        if (callCount === 1) {
+          currentState = "starting"
+        } else {
           // Simulate upstream conflict on second call
           throw new Error("Server already in state starting")
         }
@@ -550,6 +590,179 @@ describe("Proxy Service & Internal Endpoints Suite (Phase 1)", () => {
       // Both requests resolve cleanly without failing or crashing
       expect(["STARTED", "STARTING"]).toContain(d1.status)
       expect(["STARTED", "STARTING"]).toContain(d2.status)
+    })
+
+    it("handles wake failure: recheck sees STARTING and returns STARTING (race condition)", async () => {
+      const { db } = createMockD1()
+      const env = createMockEnv()
+
+      await db.insert(schema.servers).values({
+        id: "server-meliora",
+        name: "Meliora",
+        provisioningStatus: "READY",
+        pterodactylServerId: "10",
+        pterodactylIdentifier: "ptero-ident",
+      })
+
+      // Initially offline, then during recheck it is starting
+      let checkCount = 0
+      ;(mockClient.getServerResources as any).mockImplementation(async () => {
+        checkCount++
+        return {
+          object: "stats",
+          attributes: {
+            current_state: checkCount === 1 ? "offline" : "starting",
+            is_suspended: false,
+            resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 0 },
+          },
+        }
+      })
+
+      ;(mockClient.sendPowerAction as any).mockRejectedValueOnce(new Error("Pterodactyl conflict: server already transitioning"))
+
+      const req = new Request("http://localhost/internal/proxy/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer super-secure-proxy-secret-123",
+        },
+        body: JSON.stringify({ hostname: "play-meliora.hikat.org", intent: "LOGIN" }),
+      })
+
+      const res = await handleProxyConnect(req, env, db, mockClient)
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.status).toBe("STARTING")
+    })
+
+    it("handles wake failure: recheck sees ONLINE and returns ONLINE with targetHost and targetPort", async () => {
+      const { db } = createMockD1()
+      const env = createMockEnv()
+
+      await db.insert(schema.servers).values({
+        id: "server-meliora",
+        name: "Meliora",
+        provisioningStatus: "READY",
+        pterodactylServerId: "10",
+        pterodactylIdentifier: "ptero-ident",
+      })
+
+      // Initially offline, then during recheck it is already online
+      let checkCount = 0
+      ;(mockClient.getServerResources as any).mockImplementation(async () => {
+        checkCount++
+        return {
+          object: "stats",
+          attributes: {
+            current_state: checkCount === 1 ? "offline" : "running",
+            is_suspended: false,
+            resources: { memory_bytes: 1000, cpu_absolute: 50, disk_bytes: 100, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 100 },
+          },
+        }
+      })
+
+      ;(mockClient.sendPowerAction as any).mockRejectedValueOnce(new Error("Pterodactyl error: server already online"))
+
+      const req = new Request("http://localhost/internal/proxy/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer super-secure-proxy-secret-123",
+        },
+        body: JSON.stringify({ hostname: "play-meliora.hikat.org", intent: "LOGIN" }),
+      })
+
+      const res = await handleProxyConnect(req, env, db, mockClient)
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.status).toBe("ONLINE")
+      expect(data.targetHost).toBe("node.hikat.org")
+      expect(data.targetPort).toBe(25565)
+    })
+
+    it("handles wake failure: recheck sees OFFLINE and returns UNAVAILABLE (real failure)", async () => {
+      const { db } = createMockD1()
+      const env = createMockEnv()
+
+      await db.insert(schema.servers).values({
+        id: "server-meliora",
+        name: "Meliora",
+        provisioningStatus: "READY",
+        pterodactylServerId: "10",
+        pterodactylIdentifier: "ptero-ident",
+      })
+
+      // Stays offline on both checks
+      ;(mockClient.getServerResources as any).mockResolvedValue({
+        object: "stats",
+        attributes: {
+          current_state: "offline",
+          is_suspended: false,
+          resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 0 },
+        },
+      })
+
+      ;(mockClient.sendPowerAction as any).mockRejectedValueOnce(new Error("Node out of memory: container cannot start"))
+
+      const req = new Request("http://localhost/internal/proxy/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer super-secure-proxy-secret-123",
+        },
+        body: JSON.stringify({ hostname: "play-meliora.hikat.org", intent: "LOGIN" }),
+      })
+
+      const res = await handleProxyConnect(req, env, db, mockClient)
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.status).toBe("UNAVAILABLE")
+    })
+
+    it("handles wake failure: recheck itself throws error and returns UNAVAILABLE", async () => {
+      const { db } = createMockD1()
+      const env = createMockEnv()
+
+      await db.insert(schema.servers).values({
+        id: "server-meliora",
+        name: "Meliora",
+        provisioningStatus: "READY",
+        pterodactylServerId: "10",
+        pterodactylIdentifier: "ptero-ident",
+      })
+
+      // Initial check offline, recheck throws network error
+      let checkCount = 0
+      ;(mockClient.getServerResources as any).mockImplementation(async () => {
+        checkCount++
+        if (checkCount === 1) {
+          return {
+            object: "stats",
+            attributes: {
+              current_state: "offline",
+              is_suspended: false,
+              resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 0 },
+            },
+          }
+        }
+        throw new Error("Network unreachable to Pterodactyl daemon")
+      })
+
+      ;(mockClient.sendPowerAction as any).mockRejectedValueOnce(new Error("Pterodactyl socket closed"))
+
+      const req = new Request("http://localhost/internal/proxy/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer super-secure-proxy-secret-123",
+        },
+        body: JSON.stringify({ hostname: "play-meliora.hikat.org", intent: "LOGIN" }),
+      })
+
+      const res = await handleProxyConnect(req, env, db, mockClient)
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.status).toBe("UNAVAILABLE")
     })
   })
 

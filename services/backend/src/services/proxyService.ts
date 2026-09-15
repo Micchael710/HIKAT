@@ -180,13 +180,32 @@ export async function handleProxyConnect(
 
   const targetPort = matchedAlloc.attributes.port
 
-  // Query real server status
-  let currentStatus: string
+  // 1. Resolve the specific Pterodactyl client for this server (avoids legacy fallback)
+  let pteroClient: IPterodactylClient
   try {
-    const statusData = await getServerStatus(env, clientOverride, server.id, db)
-    currentStatus = statusData.status
+    const resolved = await resolvePterodactylClient(db, env, server.id, clientOverride)
+    pteroClient = resolved.client
   } catch (err) {
-    console.warn("[ProxyService] Failed checking server power status:", err)
+    console.warn("[ProxyService] Failed resolving Pterodactyl client for server:", err)
+    return new Response(JSON.stringify({ status: "UNAVAILABLE" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })
+  }
+
+  const queryStatus = async (): Promise<string | null> => {
+    try {
+      const statusData = await getServerStatus(env, pteroClient)
+      return statusData.status
+    } catch (err) {
+      console.warn("[ProxyService] Failed checking server power status:", err)
+      return null
+    }
+  }
+
+  // 2. Query real server status using resolved client
+  const currentStatus = await queryStatus()
+  if (!currentStatus) {
     return new Response(JSON.stringify({ status: "UNAVAILABLE" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -234,19 +253,34 @@ export async function handleProxyConnect(
   }
 
   if (currentStatus === "OFFLINE") {
-    // Best-effort idempotent wake without user locks or fake users
     try {
-      const { client } = await resolvePterodactylClient(db, env, server.id, clientOverride)
-      await client.sendPowerAction("start")
-    } catch (err) {
-      // Best-effort: concurrent starts or already-starting errors are caught gracefully
-      console.info("[ProxyService] Concurrent or handled wake note:", err)
+      await pteroClient.sendPowerAction("start")
+      return new Response(JSON.stringify({ status: "STARTED" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    } catch (wakeErr) {
+      console.info("[ProxyService] Power action failed, rechecking server status:", wakeErr)
+      // Re-query status exactly once to handle race condition where another request started the server
+      const recheckedStatus = await queryStatus()
+      if (recheckedStatus === "STARTING") {
+        return new Response(JSON.stringify({ status: "STARTING" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      if (recheckedStatus === "ONLINE") {
+        return new Response(JSON.stringify({ status: "ONLINE", targetHost, targetPort }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      // If still OFFLINE or recheck failed, return UNAVAILABLE
+      return new Response(JSON.stringify({ status: "UNAVAILABLE" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
     }
-
-    return new Response(JSON.stringify({ status: "STARTED" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })
   }
 
   return new Response(JSON.stringify({ status: "UNAVAILABLE" }), {
